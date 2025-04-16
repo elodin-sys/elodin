@@ -160,7 +160,7 @@ test_steps = [
     step(
         label=":nix: aleph-os",
         key="aleph-os",
-        command="cd images/aleph; nix build --accept-flake-config .#toplevel",
+        command="cd images/aleph; nix build --accept-flake-config .#nixosConfigurations.default.config.system.build.toplevel",
         agents={"queue": "nixos-arm"},
     ),
 ]
