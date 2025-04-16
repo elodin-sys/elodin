@@ -1,12 +1,19 @@
 {
   pkgs,
   crane,
+  lib,
   ...
 }: let
   rustToolchain = p: p.rust-bin.stable."1.85.0".default;
   craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
   crateName = craneLib.crateNameFromCargoToml {cargoToml = ../../../fsw/mekf/Cargo.toml;};
-  src = pkgs.nix-gitignore.gitignoreSource [] ../../../.;
+  regexesSrcFilter = regexes: path: _type: lib.any (re: builtins.match re path != null) regexes;
+  filterSrcRegexes = regexes: src:
+    lib.cleanSourceWith {
+      inherit src;
+      filter = path: type: (regexesSrcFilter regexes path type) || (craneLib.filterCargoSources path type);
+    };
+  src = filterSrcRegexes [".*toml$" ".*rs$" ".*jinja$" ".*h$" ".*hpp$" ".*c$" ".*cpp$"] ../../../.;
   commonArgs = {
     inherit (crateName) pname;
     inherit src;
