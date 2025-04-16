@@ -431,13 +431,14 @@ impl Plot {
         }
         let visible_time_range = self.visible_time_range();
         let start = self.tick_range.start;
-        let end = self.tick_range.end.max(visible_time_range.end);
-        let step_count = (end.0 - start.0) / step_size_micro as i64 + 1;
+        let end = visible_time_range.end;
+        let start_count = (visible_time_range.start.0 - start.0) / step_size_micro as i64 - 1;
+        let end_count = (end.0 - start.0) / step_size_micro as i64 + 1;
 
-        for i in 0..=step_count {
+        for i in start_count..=end_count {
             let offset_float = step_size_float * i as f64;
             let offset = hifitime::Duration::from_microseconds(offset_float);
-            let x_pos = self.x_pos_from_timestamp(start + offset.into());
+            let x_pos = self.x_pos_from_timestamp(Timestamp(start.0 + offset_float as i64));
 
             ui.painter().line_segment(
                 [
