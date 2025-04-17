@@ -63,9 +63,6 @@ in {
     git
     uv
     ripgrep
-    tcpdump
-    ethtool
-    iperf3
     rsync
     gnumake
     pciutils
@@ -74,7 +71,6 @@ in {
     vim
     htop
     dtc
-    wget
     btop
     dpkg
     opencv
@@ -86,6 +82,12 @@ in {
     nvidia-jetpack.samples.cudnn-test
     (python311.withPackages pythonPackages)
     (v4l-utils.override {withGUI = false;})
+    # Networking
+    tcpdump
+    ethtool
+    wget
+    iperf3
+    # Utilities for interfacing with the MCU
     (writeShellScriptBin "reset-mcu" (builtins.readFile ../scripts/reset-mcu.sh))
     (writeShellScriptBin "flash-mcu" (builtins.readFile ../scripts/flash-mcu.sh))
   ];

@@ -84,24 +84,28 @@
       services.openssh.settings.PasswordAuthentication = true;
       services.openssh.enable = true;
       services.openssh.settings.PermitRootLogin = "yes";
-      services.nvpmodel.enable = false;
-      services.nvfancontrol.enable = false;
-      systemd.services."wifi-powersave@wlP1p1s0" = {
-        description = "Disables power-save on WiFi interface wlP1p1s0";
-        bindsTo = ["sys-subsystem-net-devices-wlP1p1s0.device"];
-        after = ["sys-subsystem-net-devices-wlP1p1s0.device"];
-        wantedBy = ["multi-user.target"];
-        serviceConfig = {
-          Type = "oneshot";
-          ExecStart = "/run/current-system/sw/bin/iw wlP1p1s0 set power_save off";
-          RemainAfterExit = true;
-        };
-      };
+      # services.nvpmodel.enable = false;
+      # services.nvfancontrol.enable = false;
+      # Disable all the power saving features. They all negatively impact reliability.
+      boot.extraModprobeConfig = ''
+        options iwlwifi power_save=0 uapsd_disable=1 d0i3_disable=1
+        options iwlmvm power_scheme=1
+      '';
       security.sudo.wheelNeedsPassword = false;
       users.users.root.password = "root";
       networking.hostName = "aleph";
-      networking.wireless.enable = true;
       networking.dhcpcd.enable = true;
+      networking.wireless.iwd = {
+        enable = true;
+        settings = {
+          IPv6 = {
+            Enabled = true;
+          };
+          Settings = {
+            AutoConnect = true;
+          };
+        };
+      };
       nix.settings.trusted-users = ["root" "@wheel"];
       nix.settings.experimental-features = ["nix-command" "flakes"];
       nix.settings.trusted-public-keys = [

@@ -9,6 +9,27 @@
         USB_GADGET = lib.mkForce yes;
         USB_G_NCM = lib.mkForce yes;
         INET = yes;
+
+        # Add these crypto modules needed by iwd
+        CRYPTO = yes;
+        CRYPTO_USER = yes;
+        CRYPTO_USER_API = yes;
+        CRYPTO_USER_API_HASH = yes;
+        CRYPTO_USER_API_SKCIPHER = yes;
+        CRYPTO_MD5 = yes;
+        CRYPTO_SHA1 = yes;
+        CRYPTO_SHA256 = yes;
+        CRYPTO_SHA512 = yes;
+        CRYPTO_AES = yes;
+        CRYPTO_CMAC = yes;
+        CRYPTO_HMAC = yes;
+
+        # ARM-specific optimized implementations for Orin
+        CRYPTO_SHA1_ARM64_CE = yes;
+        CRYPTO_SHA2_ARM64_CE = yes;
+        CRYPTO_SHA512_ARM64_CE = yes;
+        CRYPTO_AES_ARM64_CE = yes;
+        CRYPTO_GHASH_ARM64_CE = yes;
       };
       l4t-xusb-firmware = prev.nvidia-jetpack.l4t-xusb-firmware;
       kernelPatches = [];
