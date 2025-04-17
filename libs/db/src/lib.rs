@@ -5,7 +5,6 @@ use impeller2::vtable::builder::{
 use impeller2::vtable::{RealizedField, builder};
 use impeller2::{
     com_de::Decomponentize,
-    component::Component as _,
     registry,
     schema::Schema,
     types::{
@@ -102,7 +101,7 @@ impl DB {
             assets: open_assets(&path)?,
             ..Default::default()
         };
-        let mut db = DB {
+        let db = DB {
             state: RwLock::new(state),
             recording_cell: PlayingCell::new(true),
             path,
@@ -112,7 +111,6 @@ impl DB {
             last_updated: AtomicCell::new(Timestamp(i64::MIN)),
             earliest_timestamp: Timestamp::now(),
         };
-        db.init_globals()?;
         db.save_db_state()?;
         Ok(db)
     }
@@ -125,45 +123,6 @@ impl DB {
     pub fn with_state_mut<O, F: FnOnce(&mut State) -> O>(&self, f: F) -> O {
         let mut state = self.state.write().unwrap();
         f(&mut state)
-    }
-
-    fn init_globals(&mut self) -> Result<(), Error> {
-        let arr: nox::Array<u64, ()> = 0.into();
-        let globals_id = EntityId(0);
-        let globals_metadata = EntityMetadata {
-            entity_id: globals_id,
-            name: "Globals".to_string(),
-            metadata: Default::default(),
-        };
-        let tick_component_id = impeller2_wkt::Tick::COMPONENT_ID;
-        let tick_component_view = ComponentView::U64(arr.view());
-        let tick_component_schema =
-            ComponentSchema::new(tick_component_view.prim_type(), tick_component_view.shape());
-        let tick_component_metadata = ComponentMetadata {
-            component_id: tick_component_id,
-            name: impeller2_wkt::Tick::NAME.to_string(),
-            metadata: [("element_names".to_string(), "tick".to_string())]
-                .into_iter()
-                .collect(),
-            asset: false,
-        };
-
-        self.with_state_mut(|state| {
-            state.set_entity_metadata(globals_metadata, &self.path)?;
-            state.set_component_metadata(tick_component_metadata, &self.path)?;
-            state.insert_component(
-                tick_component_id,
-                tick_component_schema,
-                globals_id,
-                &self.path,
-            )?;
-            let mut sink = DBSink {
-                components: &state.components,
-                last_updated: &self.last_updated,
-                sunk_new_time_series: false,
-            };
-            sink.apply_value(tick_component_id, globals_id, tick_component_view, None)
-        })
     }
 
     fn db_settings(&self) -> DbSettings {

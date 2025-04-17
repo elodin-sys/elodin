@@ -944,7 +944,7 @@ impl Core {
 
         if tick.polled > 0 {
             // log scheduler metrics.
-            debug!(
+            trace!(
                 tick.polled,
                 tick.completed,
                 tick.spawned,

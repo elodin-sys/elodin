@@ -58,6 +58,7 @@ miette.features = ["fancy"]
 # logs
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "chrono"] }
+hifitime.version = "4.0"
 
 # rand
 fastrand = "2.2.0"
@@ -70,7 +71,7 @@ directories = "5.0.1"
 
 # arrow
 arrow.version = "54.2.0"
-arrow.features = ["canonical_extension_types"]
+arrow.features = ["canonical_extension_types", "csv"]
 arrow-schema.version = "54.2.0"
 arrow-schema.features = ["canonical_extension_types"]
 datafusion.version = "45.0.0"

@@ -114,7 +114,7 @@ impl Core {
 
             let mut fired_this_turn = 0;
             let entries = self.wheels[deadline.wheel].take(deadline.slot);
-            debug!(
+            trace!(
                 now = self.now,
                 deadline.ticks,
                 entries = entries.len(),
@@ -158,7 +158,7 @@ impl Core {
         let any = !pending_reschedule.is_empty();
 
         if any || fired > 0 {
-            debug!(
+            trace!(
                 now = self.now,
                 fired,
                 rescheduled = pending_reschedule.len(),

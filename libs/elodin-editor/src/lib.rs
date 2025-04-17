@@ -938,7 +938,7 @@ impl std::fmt::Display for Offset {
                 write!(f, "-{d}")
             }
             Offset::Fixed(timestamp) => {
-                let timestamp: hifitime::Epoch = (*timestamp).into();
+                let timestamp = hifitime::Epoch::from(*timestamp);
                 write!(f, "{timestamp}")
             }
         }

@@ -69,7 +69,7 @@ impl<'timer> Sleep<'timer> {
     pub(super) fn new(timer: &'timer Timer, ticks: Ticks) -> Self {
         let now = timer.clock().now_ticks();
         let deadline = now + ticks;
-        debug!(
+        trace!(
             target: "maitake::time::sleep",
             now,
             sleep.ticks = ticks,

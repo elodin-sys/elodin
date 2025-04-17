@@ -18,7 +18,7 @@ rsofa.version = "0.5.0"
 rsofa.optional = true
 
 # time
-hifitime.version = "3.9"
+hifitime.version = "4.0"
 hifitime.optional = true
 
 [dev-dependencies]

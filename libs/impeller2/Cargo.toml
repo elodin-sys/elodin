@@ -58,5 +58,5 @@ replace_with.version = "0.1.7"
 replace_with.optional = true
 
 # integrations
-hifitime.version = "4.0.2"
+hifitime.version = "4.0"
 hifitime.optional = true
