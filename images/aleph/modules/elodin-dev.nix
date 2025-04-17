@@ -24,7 +24,7 @@ in
     };
     users.users.akhilles = dev_user {
       username = "akhilles";
-      sha256 = "0jqwly2draw3xa4xz5abmq44rmq63dzgzhkmdkgrqifz483ydsmx";
+      sha256 = "0r6bjy033a94kqr5pzzckfxxly4n2zdx6jdds0y04dvppdisqw38";
       inherit lib;
     };
     users.users.msvandad = dev_user {
