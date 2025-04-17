@@ -18,11 +18,6 @@
     crane = {
       url = "github:ipetkov/crane";
     };
-    deploy-rs = {
-      url = "github:serokell/deploy-rs";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.utils.follows = "flake-utils";
-    };
   };
   outputs = {
     self,
@@ -32,22 +27,9 @@
     jetpack,
     crane,
     rust-overlay,
-    deploy-rs,
   }: let
     system = "aarch64-linux";
     pkgs = import nixpkgs {inherit system;};
-    deployPkgs = import nixpkgs {
-      inherit system;
-      overlays = [
-        deploy-rs.overlays.default
-        (self: super: {
-          deploy-rs = {
-            inherit (pkgs) deploy-rs;
-            lib = super.deploy-rs.lib;
-          };
-        })
-      ];
-    };
     defaultModule = {
       pkgs,
       config,
@@ -160,7 +142,6 @@
           default = pkgs.mkShell {
             buildInputs = with pkgs; [
               just
-              deploy-rs.packages.${system}.deploy-rs
             ];
           };
         };
@@ -175,13 +156,6 @@
       nixosConfigurations = {
         default = defaultNixosConfig;
         installer = installerNixosConfig;
-      };
-      deploy.nodes.aleph = {
-        hostname = "aleph.local";
-        profiles.system = {
-          user = "root";
-          path = deployPkgs.deploy-rs.lib.activate.nixos self.nixosConfigurations.default;
-        };
       };
       packages.aarch64-linux = {
         default = nixosConfigurations.default.config.system.build.sdImage;
