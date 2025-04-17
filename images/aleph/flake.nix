@@ -18,6 +18,10 @@
     crane = {
       url = "github:ipetkov/crane";
     };
+    user-module = {
+      url = "path:./modules/users";
+      flake = false;
+    };
   };
   outputs = {
     self,
@@ -27,6 +31,7 @@
     jetpack,
     crane,
     rust-overlay,
+    user-module,
   }: let
     system = "aarch64-linux";
     pkgs = import nixpkgs {inherit system;};
@@ -36,22 +41,19 @@
       lib,
       ...
     }: {
-      imports =
-        [
-          "${nixpkgs}/nixos/modules/profiles/minimal.nix"
-          jetpack.nixosModules.default
-          ./modules/usb-eth.nix
-          ./modules/hardware.nix
-          ./modules/minimal.nix
-          ./modules/sd-image.nix
-          ./modules/systemd-boot-dtb.nix
-          ./modules/aleph-dev.nix
-          ./modules/elodin-db.nix
-          ./modules/aleph-serial-bridge.nix
-          ./modules/mekf.nix
-          ./modules/dev.nix
-        ]
-        ++ lib.optional (builtins.pathExists ./modules/elodin-dev.nix) ./modules/elodin-dev.nix;
+      imports = [
+        "${nixpkgs}/nixos/modules/profiles/minimal.nix"
+        jetpack.nixosModules.default
+        ./modules/usb-eth.nix
+        ./modules/hardware.nix
+        ./modules/minimal.nix
+        ./modules/sd-image.nix
+        ./modules/systemd-boot-dtb.nix
+        ./modules/aleph-dev.nix
+        ./modules/elodin-db.nix
+        ./modules/aleph-serial-bridge.nix
+        ./modules/mekf.nix
+      ];
 
       nixpkgs.overlays = [
         jetpack.overlays.default
@@ -115,7 +117,10 @@
       ];
     };
     appModule = {lib, ...}: {
-      imports = [defaultModule];
+      imports = [
+        defaultModule
+        "${user-module}/default.nix"
+      ];
       fileSystems."/".device = lib.mkForce "/dev/disk/by-label/APP";
       fileSystems."/boot".device = lib.mkForce "/dev/disk/by-label/BOOT";
     };
