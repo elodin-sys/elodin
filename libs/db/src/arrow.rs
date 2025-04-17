@@ -225,6 +225,13 @@ impl DB {
                         writer.write(&record_batch)?;
                         writer.close()?;
                     }
+                    ArchiveFormat::Csv => {
+                        let file_name = format!("{column_name}.csv");
+                        let file_path = path.join(file_name);
+                        let mut file = File::create(file_path)?;
+                        let mut writer = arrow::csv::Writer::new(&mut file);
+                        writer.write(&record_batch)?;
+                    }
                     #[allow(unreachable_patterns)]
                     _ => return Err(Error::UnsupportedArchiveFormat),
                 }

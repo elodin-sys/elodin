@@ -144,42 +144,25 @@ mod tests {
         response.entity_metadata.sort_by_key(|e| e.entity_id);
         assert_eq!(
             response.entity_metadata,
-            &[
-                EntityMetadata {
-                    entity_id: EntityId(0),
-                    name: "Globals".to_string(),
-                    metadata: Default::default()
-                },
-                EntityMetadata {
-                    entity_id,
-                    name: "test_entity".to_string(),
-                    metadata: [("foo".to_string(), "bar".to_string())]
-                        .into_iter()
-                        .collect(),
-                },
-            ]
+            &[EntityMetadata {
+                entity_id,
+                name: "test_entity".to_string(),
+                metadata: [("foo".to_string(), "bar".to_string())]
+                    .into_iter()
+                    .collect(),
+            },]
         );
         response.component_metadata.sort_by_key(|c| c.component_id);
         assert_eq!(
             response.component_metadata,
-            &[
-                ComponentMetadata {
-                    component_id,
-                    name: "Test Component".to_string(),
-                    metadata: [("baz".to_string(), "bang".to_string())]
-                        .into_iter()
-                        .collect(),
-                    asset: false,
-                },
-                ComponentMetadata {
-                    component_id: ComponentId::new("tick"),
-                    name: "tick".to_string(),
-                    metadata: [("element_names".to_string(), "tick".to_string())]
-                        .into_iter()
-                        .collect(),
-                    asset: false,
-                }
-            ]
+            &[ComponentMetadata {
+                component_id,
+                name: "Test Component".to_string(),
+                metadata: [("baz".to_string(), "bang".to_string())]
+                    .into_iter()
+                    .collect(),
+                asset: false,
+            },]
         )
     }
 

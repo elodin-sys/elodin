@@ -574,6 +574,7 @@ impl Request for SaveArchive {
 pub enum ArchiveFormat {
     ArrowIpc,
     Parquet,
+    Csv,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, postcard_schema::Schema)]

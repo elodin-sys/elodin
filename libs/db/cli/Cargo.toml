@@ -36,7 +36,7 @@ futures-lite = "2.5.0"
 
 # ser-de
 impeller2.path = "../../impeller2"
-impeller2.features = ["std", "mlua"]
+impeller2.features = ["std", "mlua", "hifitime"]
 impeller2-wkt.path = "../../impeller2/wkt"
 impeller2-wkt.features = ["std", "mlua"]
 serde.version = "1.0"
@@ -59,7 +59,7 @@ clap.features = ["derive"]
 nox.path = "../../nox"
 
 # time
-hifitime.version = "3.9"
+hifitime.version = "4.0"
 
 # arrow
 arrow.version = "54.2.0"

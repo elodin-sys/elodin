@@ -1,4 +1,4 @@
-use hifitime::{Duration, Epoch, MJD_OFFSET, Unit};
+use hifitime::{Duration, Epoch, MJD_OFFSET};
 use nox::{Array, ArrayRepr, Matrix, Vector};
 
 use crate::{DCM, Frame, iers::IERS};
@@ -28,7 +28,7 @@ impl Frame for NED {}
 fn epoch_to_mjd_ut1(time: Epoch, iers: &IERS) -> f64 {
     let mjd_utc = time.to_mjd_utc_days();
     let ut1_utc = iers.get_ut1_utc(mjd_utc).unwrap_or_default();
-    let ut1_utc = Duration::from_f64(ut1_utc, Unit::Second);
+    let ut1_utc = Duration::from_seconds(ut1_utc);
     (time + ut1_utc).to_mjd_utc_days()
 }
 

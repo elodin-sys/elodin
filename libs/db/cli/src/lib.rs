@@ -123,7 +123,7 @@ impl Client {
                 .zip(time_series.timestamps().unwrap().iter())
             {
                 let view = nox::ArrayView::from_buf_shape_unchecked(chunk, schema.shape());
-                let epoch = hifitime::Epoch::from_unix_milliseconds(timestamp.0 as f64 / 1000.0);
+                let epoch = hifitime::Epoch::from(*timestamp);
                 builder.push_record([epoch.to_string(), view.to_string()])
             }
             println!(
@@ -388,7 +388,7 @@ impl Client {
             let data = postcard_dyn::from_slice_dyn(&metadata.schema, &msg[..])
                 .map_err(|e| anyhow!("failed to deserialize msg: {:?}", e))?;
 
-            let epoch = hifitime::Epoch::from_unix_milliseconds(timestamp.0 as f64 / 1000.0);
+            let epoch = hifitime::Epoch::from(timestamp);
             builder.push_record([epoch.to_string(), data.to_string()]);
         }
         println!(
@@ -1024,8 +1024,7 @@ impl Decomponentize for DebugSink {
         value: impeller2::types::ComponentView<'_>,
         timestamp: Option<Timestamp>,
     ) -> Result<(), Self::Error> {
-        let epoch = timestamp
-            .map(|timestamp| hifitime::Epoch::from_unix_milliseconds(timestamp.0 as f64 / 1000.0));
+        let epoch = timestamp.map(hifitime::Epoch::from);
         println!("({component_id:?},{entity_id:?}) @ {epoch:?} = {value:?}");
         Ok(())
     }

@@ -16,8 +16,13 @@
   ```lua
   client:vtable_stream({field(0, 4, mean(10, schema("f32", {}, pair(1, "temp"))))})
   ```
+- Add CSV as an archive data format. From `elodin-db lua`: `client:save_archive("path/to/dir", "csv")`.
+- Don't add "Globals" entity + "Tick" component on `elodin-db` initialization. This entity and component are only required for simulation purposes, not HITL.
 
 ## v0.13
+
+### v0.13.3
+- **(fix)** Fix a bug where the db/editor's time window would be smaller than the actual data's time window.
 
 ### v0.13.2
 - **(fix)** Fix a bug where the dump schema and dump metadata responses didn't include the request id.

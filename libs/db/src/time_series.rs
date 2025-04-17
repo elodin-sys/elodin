@@ -47,7 +47,11 @@ impl TimeSeries {
     }
 
     pub fn start_timestamp(&self) -> Timestamp {
-        *self.index.extra()
+        let index_ts = *self.index.extra();
+        match self.timestamps().first() {
+            Some(first_ts) => index_ts.min(*first_ts),
+            None => index_ts,
+        }
     }
 
     fn timestamps(&self) -> &[Timestamp] {

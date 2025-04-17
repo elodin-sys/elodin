@@ -8,7 +8,7 @@ publish = false
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-hifitime = "3.9"
+hifitime = "4.0"
 
 [dev-dependencies]
 approx = "0.5"

@@ -15,6 +15,9 @@ order = 1
 
 ## v0.13
 
+### v0.13.3
+- **(fix)** Fix a bug where the db/editor's time window would be smaller than the actual data's time window.
+
 ### v0.13.2
 - **(fix)** Fix a bug where the dump schema and dump metadata responses didn't include the request id.
 
