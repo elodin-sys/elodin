@@ -46,6 +46,8 @@ in {
       pkgs.nvidia-jetpack.l4t-camera
     ];
   };
+  environment.etc."elodin-version".text = "0.13.3";
+  environment.etc."elodin-version".enable = true;
   virtualisation.podman = {
     enable = true;
     # TODO: replace with `hardware.nvidia-container-toolkit.enable` when it works (https://github.com/nixos/nixpkgs/issues/344729).
@@ -90,6 +92,7 @@ in {
     # Utilities for interfacing with the MCU
     (writeShellScriptBin "reset-mcu" (builtins.readFile ../scripts/reset-mcu.sh))
     (writeShellScriptBin "flash-mcu" (builtins.readFile ../scripts/flash-mcu.sh))
+    aleph-status
   ];
   programs.fish.enable = true;
 }

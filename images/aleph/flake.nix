@@ -52,6 +52,7 @@
         ./modules/aleph-dev.nix
         ./modules/elodin-db.nix
         ./modules/aleph-serial-bridge.nix
+        ./modules/tegrastats-bridge.nix
         ./modules/mekf.nix
       ];
 
@@ -62,6 +63,8 @@
           serial-bridge = final.callPackage ./pkgs/aleph-serial-bridge.nix {inherit crane;};
           elodin-db = final.callPackage ./pkgs/elodin-db.nix {inherit crane;};
           mekf = final.callPackage ./pkgs/mekf.nix {inherit crane;};
+          aleph-status = final.callPackage ./pkgs/aleph-status.nix {inherit crane;};
+          tegrastats-bridge = final.callPackage ./pkgs/tegrastats-bridge.nix {inherit crane;};
         })
       ];
       system.stateVersion = "24.05";
