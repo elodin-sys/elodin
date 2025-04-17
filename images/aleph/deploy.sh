@@ -49,7 +49,7 @@ else
   build_cmd="nix build --accept-flake-config $target --print-out-paths"
   log_info "Running: $build_cmd"
   out_path=$(${build_cmd})
-  copy_cmd="nix copy --to ssh-ng://$user@$host $out_path"
+  copy_cmd="nix copy --no-check-sigs --to ssh-ng://$user@$host $out_path"
   log_info "Running: $copy_cmd"
   $(${copy_cmd})
 fi

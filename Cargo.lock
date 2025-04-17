@@ -7090,22 +7090,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "msg-test"
-version = "0.13.2"
-dependencies = [
- "anyhow",
- "fastrand 2.2.0",
- "impeller2",
- "impeller2-stellar",
- "impeller2-wkt",
- "postcard-schema",
- "roci",
- "serde",
- "stellarator",
- "zerocopy 0.8.14",
-]
-
-[[package]]
 name = "mutex-traits"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9318,6 +9302,7 @@ dependencies = [
 name = "roci"
 version = "0.13.2"
 dependencies = [
+ "anyhow",
  "bbq2",
  "csv",
  "fastrand 2.2.0",

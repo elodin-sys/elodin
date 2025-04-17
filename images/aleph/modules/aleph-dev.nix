@@ -79,6 +79,7 @@ in {
     dpkg
     opencv
     cudainfo
+    lsof
     gst_all_1.gstreamer
     gst_all_1.gst-plugins-base
     nvidia-jetpack.samples.cuda-test

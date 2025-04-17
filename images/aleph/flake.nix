@@ -112,6 +112,20 @@
         "https://cache.nixos.org"
         "http://ci-arm1.elodin.dev:5000"
       ];
+      security.pam.loginLimits = [
+        {
+          domain = "*";
+          type = "soft";
+          item = "nofile";
+          value = "65536";
+        }
+        {
+          domain = "*";
+          type = "hard";
+          item = "nofile";
+          value = "524288";
+        }
+      ];
     };
     appModule = {lib, ...}: {
       imports = [defaultModule];
