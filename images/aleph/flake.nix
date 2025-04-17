@@ -49,6 +49,7 @@
           ./modules/elodin-db.nix
           ./modules/aleph-serial-bridge.nix
           ./modules/mekf.nix
+          ./modules/dev.nix
         ]
         ++ lib.optional (builtins.pathExists ./modules/elodin-dev.nix) ./modules/elodin-dev.nix;
 

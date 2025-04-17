@@ -49,6 +49,17 @@ After connecting to WiFi, Aleph will store your network credentials and reconnec
 
 Once connected to WiFi, you'll be able to SSH directly to Aleph over your wireless network, which is more convenient for ongoing development. The USB Ethernet connection will remain available as a fallback access method.
 
+### Add user
+
+1. Update the [./modules/dev.nix](modules/dev.nix) file with the desired user configuration.
+2. Run `./deploy.sh`.
+
+### Setup Remote Builder (Optional)
+
+Using a remote builder can significantly speed up the build process.
+
+TODO
+
 ## System Update
 
 This is the recommended development workflow for iterating on the NixOS configuration. It's significantly faster than the fresh install method (described below) and easier to revert in case of mistakes.
