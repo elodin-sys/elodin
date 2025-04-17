@@ -17,14 +17,6 @@ let
   };
 in
   {lib, ...}: {
-    networking.wireless.networks = {
-      elodin = {
-        psk = "kvothe123";
-      };
-      aoraki = {
-        psk = "idclimbthat";
-      };
-    };
     users.users.sphw = dev_user {
       username = "sphw";
       sha256 = "0951ac78df9d1febbbf5a69c8bfbb536dcb1c1174e956a48f2af72402fe246f7";

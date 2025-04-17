@@ -21,6 +21,34 @@ sudo launchctl kickstart -k system/systems.determinate.nix-daemon
 sudo systemctl restart nix-daemon.service
 ```
 
+## Initial Setup
+
+When you receive Aleph, it comes with NixOS pre-installed. Setting up network connectivity will make development more convenient, though you can also work directly via USB or Ethernet.
+
+### Connect Aleph to WiFi
+
+1. **Establish Connection**: Connect to Aleph via the right-most USB-C port (which has the Ethernet gadget enabled). This sets up a local network connection between your computer and Aleph over USB.
+
+2. **SSH to Aleph**: Log in to Aleph using SSH. The default root password is `root`.
+   ```bash
+   ssh root@aleph.local
+   ```
+
+   If mDNS resolution fails (common on some networks or operating systems), use the static IPv6 address instead:
+   ```bash
+   ssh root@fde1:2240:a1ef::1
+   ```
+   This IPv6 address is configured in the [modules/usb-eth.nix](modules/usb-eth.nix) file.
+
+3. **Connect to WiFi**: Use [`iwctl`](https://wiki.archlinux.org/title/Iwd#Connect_to_a_network) to connect to your wireless network. The following command will prompt you for your WiFi password:
+   ```bash
+   iwctl station wlan0 connect "YourNetworkName"
+   ```
+
+After connecting to WiFi, Aleph will store your network credentials and reconnect automatically on subsequent boots. You can verify the connection with `ping google.com` or by checking the assigned IP address with `ip addr show wlan0`.
+
+Once connected to WiFi, you'll be able to SSH directly to Aleph over your wireless network, which is more convenient for ongoing development. The USB Ethernet connection will remain available as a fallback access method.
+
 ## System Update
 
 This is the recommended development workflow for iterating on the NixOS configuration. It's significantly faster than the fresh install method (described below) and easier to revert in case of mistakes.
