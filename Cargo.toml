@@ -32,7 +32,6 @@ members = [
     "fsw/serial-bridge",
     "fsw/mekf",
     "fsw/lqr",
-    "examples/msg-test",
     "libs/postcard-c/codegen",
 ]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]

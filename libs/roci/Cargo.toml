@@ -70,4 +70,5 @@ postcard-schema.version = "0.2"
 postcard-schema.features = ["use-std"]
 
 [dev-dependencies]
+anyhow = "1.0"
 roci-macros.workspace = true
