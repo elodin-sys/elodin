@@ -1,13 +1,17 @@
 {
   pkgs,
   crane,
+  lib,
   ...
 }: let
   rustToolchain = p: p.rust-bin.stable."1.85.0".default;
   craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
   crateName = craneLib.crateNameFromCargoToml {cargoToml = ../../../fsw/aleph-status/Cargo.toml;};
   version = (craneLib.crateNameFromCargoToml {cargoToml = ../../../Cargo.toml;}).version;
-  src = pkgs.nix-gitignore.gitignoreSource [] ../../../.;
+
+  common = import ./common.nix {inherit lib;};
+  src = common.src;
+
   commonArgs = {
     inherit (crateName) pname;
     inherit src version;
