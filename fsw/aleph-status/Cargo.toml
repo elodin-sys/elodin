@@ -1,0 +1,25 @@
+[package]
+name = "aleph-status"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+nu-ansi-term = "0.49"
+viuer = "0.9.1"
+image = "0.25"
+sysinfo = "0.34"
+anyhow = "1"
+
+# elodin-db
+stellarator.path = "../../libs/stellarator"
+stellarator.features = ["miette"]
+impeller2-stellar.path = "../../libs/impeller2/stellar"
+roci.path = "../../libs/roci"
+roci-adcs.path = "../../libs/roci/adcs"
+impeller2.path = "../../libs/impeller2"
+impeller2.features = ["std"]
+impeller2-wkt.path = "../../libs/impeller2/wkt"
+impeller2-wkt.features = ["gui", "std"]
+zerocopy.version = "0.8.2"
