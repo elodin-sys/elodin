@@ -3,11 +3,9 @@ set -eu
 
 # Default values
 default_user="${USER}"
-default_host="aleph.local"
+default_host="fde1:2240:a1ef::1"
 target=".#nixosConfigurations.default.config.system.build.toplevel"
 no_aleph_builder=false
-
-USER_MODULE_DIR="$HOME/.config/aleph/user-module"
 
 log_info() { echo -e "\033[1;36m[INFO]\033[0m  $*" >&2; }
 log_warn() { echo -e "\033[1;33m[WARN]\033[0m  $*" >&2; }
@@ -56,113 +54,151 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-log_info "Using host: $host"
-log_info "Using user: $user"
+log_info "Using host: $host, user: $user"
 if [ "$no_aleph_builder" = true ]; then
   log_info "Not using Aleph as a remote builder"
 fi
 
-_ssh_execute() {
+ssh_execute() {
   local ssh_user="$1"
   local ssh_host="$2"
   local ssh_command="$3"
-  local ssh_key="${4:-}"
+  local silent="${4:-false}"
   local timeout="${5:-5}"
+  local output
+
   local ssh_opts="-o BatchMode=yes -o ConnectTimeout=$timeout -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=publickey -o PasswordAuthentication=no"
-  if [ -n "$ssh_key" ]; then
-    ssh_opts="$ssh_opts -i $ssh_key"
+
+  if [ "$silent" = "true" ]; then
+    output=$(ssh -q $ssh_opts "$ssh_user@$ssh_host" "$ssh_command" 2>/dev/null) || return $?
+  else
+    output=$(ssh $ssh_opts "$ssh_user@$ssh_host" "$ssh_command") || return $?
   fi
-  ssh -q $ssh_opts "$ssh_user@$ssh_host" "$ssh_command" 2>/dev/null
-  return $?
+
+  echo "$output"
+  return 0
 }
 
-attempt_ssh() {
-  local test_user="$1"
-  local test_host="$2"
-  log_info "Attempting to SSH to $test_host as $test_user (nopass)"
-  local active_store_path
-  if ! active_store_path=$(_ssh_execute "$test_user" "$test_host" "readlink -f /run/current-system"); then
-    return 1
-  fi
-  log_info "SSH connectivity test to $test_host was successful"
-  log_info "Active store path: $active_store_path"
-}
-
-find_working_ssh_key() {
-  local test_user="$1"
-  local test_host="$2"
-  local key_found=""
-  for key_file in ~/.ssh/id_ed25519 ~/.ssh/id_rsa; do
+get_user_pubkey() {
+  for key_file in ~/.ssh/id_ed25519.pub ~/.ssh/id_rsa.pub; do
     if [ -f "$key_file" ]; then
-      if _ssh_execute "$test_user" "$test_host" "echo success > /dev/null" "$key_file"; then
-        key_found=$(realpath "$key_file")
-        echo "$key_found"
-        return 0
-      fi
+      cat "$key_file"
+      return 0
     fi
   done
-  log_error "No working SSH key found"
+
+  log_error "No SSH public key found. Please create one with: ssh-keygen -t ed25519"
   exit 1
 }
 
-# Check for user module and prepare override if needed
-if [ -d "$USER_MODULE_DIR" ] && [ -f "$USER_MODULE_DIR/default.nix" ]; then
-  log_info "Found user module at $USER_MODULE_DIR"
-  override_arg="--override-input user-module path:$USER_MODULE_DIR"
-else
-  log_info "No user module found at $USER_MODULE_DIR"
-  log_info "Using default configuration"
-  log_info "Run ./create_user_module.sh to create your user module"
-  override_arg=""
-fi
+create_remote_user() {
+  local new_user="$1"
+  local ssh_host="$2"
 
-if ! attempt_ssh $user $host; then
+  # Get the public key
+  local pub_key=$(get_user_pubkey)
+
+  log_info "Creating user $new_user on $ssh_host..."
+
+  # Create user and add to appropriate groups
+  ssh "root@$ssh_host" "
+      if ! id $new_user &>/dev/null; then
+        useradd -m -G wheel,video,dialout $new_user
+        mkdir -p /home/$new_user/.ssh
+        echo '$pub_key' > /home/$new_user/.ssh/authorized_keys
+        chmod 700 /home/$new_user/.ssh
+        chmod 600 /home/$new_user/.ssh/authorized_keys
+        user_group=\$(id -gn $new_user)
+        chown -R $new_user:\$user_group /home/$new_user/.ssh
+        echo 'User $new_user created successfully'
+      else
+        echo 'User $new_user already exists, adding SSH key'
+        mkdir -p /home/$new_user/.ssh
+        echo '$pub_key' >> /home/$new_user/.ssh/authorized_keys
+      fi
+    "
+
+  log_info "User $new_user set up successfully on $ssh_host"
+
+  # Test connection with the new user
+  if ! ssh_execute "$new_user" "$ssh_host" "echo SSH connection successful" true; then
+    log_error "Failed to connect as user $new_user"
+    exit 1
+  fi
+}
+
+# Try connecting as the specified user
+if ! ssh_execute "$user" "$host" "readlink -f /run/current-system" true; then
   log_warn "Failed to SSH to $host as $user"
-  user="root"
-  if ! attempt_ssh $user $host; then
-    log_info "Attempting to add SSH key to $host's root authorized keys (NOTE: The default password is 'root')"
-    ssh-copy-id $user@$host >/dev/null
-    if ! attempt_ssh $user $host; then
-      log_error "Failed to SSH to $host"
+
+  # Try root instead
+  if ssh_execute "root" "$host" "readlink -f /run/current-system" true; then
+    log_info "Connected as root. Checking if user $user exists..."
+
+    # Check if the user exists on the remote system
+    if ! ssh "root@$host" "id $user &>/dev/null"; then
+      log_info "User $user does not exist on $host"
+      read -p "Would you like to create the user $user on $host? [Y/n] " create_user
+      create_user=${create_user:-Y}
+
+      if [[ $create_user =~ ^[Yy]$ ]]; then
+        create_remote_user "$user" "$host"
+      else
+        log_error "Cannot proceed without creating user $user"
+        exit 1
+      fi
+    else
+      log_info "User $user exists but SSH authentication failed"
+      log_info "Setting up SSH key for $user"
+      create_remote_user "$user" "$host"
+    fi
+  else
+    log_info "Attempting to add SSH key to $host's root account (NOTE: The default password is 'root')"
+    ssh-copy-id "root@$host" >/dev/null || true
+
+    if ssh_execute "root" "$host" "echo SSH connection successful" true; then
+      log_info "Connected as root. Checking if user $user exists..."
+
+      # Now check and create user if needed
+      if ! ssh "root@$host" "id $user &>/dev/null"; then
+        log_info "User $user does not exist on $host"
+        read -p "Would you like to create the user $user on $host? [Y/n] " create_user
+        create_user=${create_user:-Y}
+
+        if [[ $create_user =~ ^[Yy]$ ]]; then
+          create_remote_user "$user" "$host"
+        else
+          log_error "Cannot proceed without creating user $user"
+          exit 1
+        fi
+      else
+        log_info "User $user exists but SSH authentication failed"
+        log_info "Setting up SSH key for $user"
+        create_remote_user "$user" "$host"
+      fi
+    else
+      log_error "Failed to SSH to $host as root or $user"
       exit 1
     fi
   fi
+else
+  log_info "$user@$host SSH connectivity verified"
 fi
 
-remote_arg=""
-if [ "$no_aleph_builder" = false ]; then
-  if ! ( ([ "$(uname -m)" = "aarch64" ] && [ "$(uname)" = "Linux" ]) ||
-    ([ -f /etc/nix/machines ] && grep -q 'aarch64-linux' /etc/nix/machines)); then
-    log_warn "No aarch64-linux builder found, falling back to building on Aleph (slow)"
-    ssh_key=$(find_working_ssh_key $user $host)
-    remote_arg="--builders 'ssh://$user@$host aarch64-linux $ssh_key' --option builders-use-substitutes false --max-jobs 0"
-  fi
+if [ "$no_aleph_builder" = false ] && ! ( ([ "$(uname -m)" = "aarch64" ] && [ "$(uname)" = "Linux" ]) ||
+  ([ -f /etc/nix/machines ] && grep -q 'aarch64-linux' /etc/nix/machines)); then
+  log_warn "No aarch64-linux builder found, falling back to building on Aleph (slow)"
+  build_cmd="nix build --accept-flake-config --eval-store auto --store ssh-ng://$user@$host $target --print-out-paths"
+  log_info "Running: $build_cmd"
+  out_path=$(eval "$build_cmd")
+else
+  build_cmd="nix build --accept-flake-config $target --print-out-paths"
+  log_info "Running: $build_cmd"
+  out_path=$(eval "$build_cmd")
+  copy_cmd="nix copy --no-check-sigs --to ssh-ng://$user@$host $out_path"
+  log_info "Running: $copy_cmd"
+  eval "$copy_cmd"
 fi
-
-build_cmd="nix build --accept-flake-config $override_arg $remote_arg $target -v --print-out-paths"
-log_info "Running: $build_cmd"
-log_file=$(mktemp)
-log_info "Streaming build logs to: $log_file"
-set +e
-out_path=$(eval "$build_cmd" 2>"$log_file")
-build_status=$?
-set -e
-
-if [ $build_status -ne 0 ]; then
-  if grep -q "Host key verification failed" "$log_file"; then
-    log_error "Build failed due to host key verification issues."
-    log_info "To resolve this, please run SSH into Aleph as root and accept the host key:"
-    log_info "    sudo ssh -o StrictHostKeyChecking=ask $user@$host exit"
-    log_info "After that, run this script again."
-  else
-    log_error "Build failed"
-  fi
-  exit 1
-fi
-
-copy_cmd="nix copy --no-check-sigs --to ssh-ng://$user@$host $out_path"
-log_info "Running: $copy_cmd"
-eval "$copy_cmd"
 
 log_info "Activating $out_path on $user@$host"
 ssh "$user@$host" "sudo nix-env -p /nix/var/nix/profiles/system --set ${out_path} \

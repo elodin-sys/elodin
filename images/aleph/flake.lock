@@ -93,8 +93,7 @@
         "jetpack": "jetpack",
         "nixpkgs": "nixpkgs",
         "nixpkgs-unstable": "nixpkgs-unstable",
-        "rust-overlay": "rust-overlay",
-        "user-module": "user-module"
+        "rust-overlay": "rust-overlay"
       }
     },
     "rust-overlay": {
@@ -131,18 +130,6 @@
         "repo": "default",
         "type": "github"
       }
-    },
-    "user-module": {
-      "flake": false,
-      "locked": {
-        "path": "./modules/users",
-        "type": "path"
-      },
-      "original": {
-        "path": "./modules/users",
-        "type": "path"
-      },
-      "parent": []
     }
   },
   "root": "root",
