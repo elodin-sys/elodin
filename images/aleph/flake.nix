@@ -18,10 +18,6 @@
     crane = {
       url = "github:ipetkov/crane";
     };
-    user-module = {
-      url = "path:./modules/users";
-      flake = false;
-    };
   };
   outputs = {
     self,
@@ -31,7 +27,6 @@
     jetpack,
     crane,
     rust-overlay,
-    user-module,
   }: let
     system = "aarch64-linux";
     pkgs = import nixpkgs {inherit system;};
@@ -127,10 +122,7 @@
       };
     };
     appModule = {lib, ...}: {
-      imports = [
-        defaultModule
-        "${user-module}/default.nix"
-      ];
+      imports = [defaultModule];
       fileSystems."/".device = lib.mkForce "/dev/disk/by-label/APP";
       fileSystems."/boot".device = lib.mkForce "/dev/disk/by-label/BOOT";
     };
