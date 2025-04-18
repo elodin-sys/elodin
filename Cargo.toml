@@ -33,6 +33,8 @@ members = [
     "fsw/mekf",
     "fsw/lqr",
     "libs/postcard-c/codegen",
+    "fsw/aleph-status",
+    "fsw/tegrastats-bridge",
 ]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 

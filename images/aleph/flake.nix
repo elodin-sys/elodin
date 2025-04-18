@@ -52,6 +52,7 @@
         ./modules/aleph-dev.nix
         ./modules/elodin-db.nix
         ./modules/aleph-serial-bridge.nix
+        ./modules/tegrastats-bridge.nix
         ./modules/mekf.nix
       ];
 
@@ -62,6 +63,8 @@
           serial-bridge = final.callPackage ./pkgs/aleph-serial-bridge.nix {inherit crane;};
           elodin-db = final.callPackage ./pkgs/elodin-db.nix {inherit crane;};
           mekf = final.callPackage ./pkgs/mekf.nix {inherit crane;};
+          aleph-status = final.callPackage ./pkgs/aleph-status.nix {inherit crane;};
+          tegrastats-bridge = final.callPackage ./pkgs/tegrastats-bridge.nix {inherit crane;};
         })
       ];
       system.stateVersion = "24.05";
@@ -115,6 +118,13 @@
           value = "524288";
         }
       ];
+      environment.etc."elodin-version" = let
+        rustToolchain = p: p.rust-bin.stable."1.85.0".default;
+        craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
+      in {
+        text = (craneLib.crateNameFromCargoToml {cargoToml = ../../Cargo.toml;}).version;
+        enable = true;
+      };
     };
     appModule = {lib, ...}: {
       imports = [

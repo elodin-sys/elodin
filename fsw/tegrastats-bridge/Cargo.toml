@@ -1,0 +1,30 @@
+[package]
+name = "tegrastats-bridge"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# async
+stellarator.path = "../../libs/stellarator"
+stellarator.features = ["miette"]
+impeller2-stellar.path = "../../libs/impeller2/stellar"
+futures-concurrency = "7.6"
+
+# ser-de
+impeller2.path = "../../libs/impeller2"
+impeller2.features = ["std"]
+impeller2-wkt.path = "../../libs/impeller2/wkt"
+impeller2-wkt.features = ["gui", "std"]
+zerocopy.version = "0.8.2"
+roci.path = "../../libs/roci"
+
+# errors
+anyhow = "1"
+
+# rand
+fastrand = "2.2.0"
+
+# os
+sysinfo = "0.34"
