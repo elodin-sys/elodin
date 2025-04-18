@@ -1,15 +1,66 @@
 #!/usr/bin/env bash
 set -eu
 
-user="${USER}"
-host="aleph.local"
+# Default values
+default_user="${USER}"
+default_host="aleph.local"
 target=".#nixosConfigurations.default.config.system.build.toplevel"
+no_aleph_builder=false
 
 USER_MODULE_DIR="$HOME/.config/aleph/user-module"
 
 log_info() { echo -e "\033[1;36m[INFO]\033[0m  $*" >&2; }
 log_warn() { echo -e "\033[1;33m[WARN]\033[0m  $*" >&2; }
 log_error() { echo -e "\033[1;31m[ERROR]\033[0m $*" >&2; }
+
+show_usage() {
+  echo "Usage: $0 [options]"
+  echo
+  echo "Options:"
+  echo "  -h, --host HOST       Specify the hostname or IP address (default: $default_host)"
+  echo "  -u, --user USER       Specify the SSH username (default: $default_user)"
+  echo "  --no-aleph-builder    Don't use Aleph as a remote builder (use local machine or"
+  echo "                         configured remote builders instead)"
+  echo "  --help                Show this help message"
+  echo
+  echo "Example:"
+  echo "  $0 -h fde1:2240:a1ef::1 -u myuser"
+  exit 1
+}
+
+# Parse command line arguments
+user="$default_user"
+host="$default_host"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--host)
+      host="$2"
+      shift 2
+      ;;
+    -u|--user)
+      user="$2"
+      shift 2
+      ;;
+    --no-aleph-builder)
+      no_aleph_builder=true
+      shift
+      ;;
+    --help)
+      show_usage
+      ;;
+    *)
+      log_error "Unknown option: $1"
+      show_usage
+      ;;
+  esac
+done
+
+log_info "Using host: $host"
+log_info "Using user: $user"
+if [ "$no_aleph_builder" = true ]; then
+  log_info "Not using Aleph as a remote builder"
+fi
 
 _ssh_execute() {
   local ssh_user="$1"
@@ -79,11 +130,13 @@ if ! attempt_ssh $user $host; then
 fi
 
 remote_arg=""
-if ! ( ([ "$(uname -m)" = "aarch64" ] && [ "$(uname)" = "Linux" ]) ||
-  ([ -f /etc/nix/machines ] && grep -q 'aarch64-linux' /etc/nix/machines)); then
-  log_warn "No aarch64-linux builder found, falling back to building on Aleph (slow)"
-  ssh_key=$(find_working_ssh_key $user $host)
-  remote_arg="--builders 'ssh://$user@$host aarch64-linux $ssh_key' --option builders-use-substitutes false --max-jobs 0"
+if [ "$no_aleph_builder" = false ]; then
+  if ! ( ([ "$(uname -m)" = "aarch64" ] && [ "$(uname)" = "Linux" ]) ||
+    ([ -f /etc/nix/machines ] && grep -q 'aarch64-linux' /etc/nix/machines)); then
+    log_warn "No aarch64-linux builder found, falling back to building on Aleph (slow)"
+    ssh_key=$(find_working_ssh_key $user $host)
+    remote_arg="--builders 'ssh://$user@$host aarch64-linux $ssh_key' --option builders-use-substitutes false --max-jobs 0"
+  fi
 fi
 
 build_cmd="nix build --accept-flake-config $override_arg $remote_arg $target -v --print-out-paths"
