@@ -116,9 +116,9 @@ Aleph comes with a variety of sensors pre-installed. The simplest way to access 
 # stream accel data
 curl localhost:2248/component/stream/accel/1
 #
-curl localhost:2248/component/gyro/accel/1
+curl localhost:2248/component/stream/gyro/1
 # terminal 3
-curl localhost:2248/component/mag/accel/1
+curl localhost:2248/component/stream/mag/1
 ```
 
 ### Connecting via SSH / Ethernet USB
