@@ -63,6 +63,7 @@ fn divider_line(color: Color) -> &'static String {
             static DIVIDER_LINE: OnceLock<String> = OnceLock::new();
             DIVIDER_LINE.get_or_init(|| Color::Blue.paint("│").to_string())
         }
+
         _ => unimplemented!("unsupported divider color"),
     }
 }
