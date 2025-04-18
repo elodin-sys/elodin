@@ -1,4 +1,4 @@
-use futures_concurrency::future::{Join, TryJoin};
+use futures_concurrency::future::Join;
 use impeller2::types::{LenPacket, PacketId};
 use impeller2_stellar::Client;
 use roci::{AsVTable, Metadatatize, tcp::SinkExt};
@@ -25,24 +25,27 @@ async fn connect() -> anyhow::Result<()> {
     let mut table = LenPacket::table(id, mem::size_of::<Output>());
     let thermal_zone = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
         .map(|i| File::open(format!("/sys/devices/virtual/thermal/thermal_zone{i}/temp")))
-        .try_join()
-        .await?;
+        .join()
+        .await
+        .map(|res| res.ok());
     let cpu_freq = [0, 1, 2, 3, 4, 5, 6, 7]
         .map(|i| {
             File::open(format!(
                 "/sys/devices/system/cpu/cpu{i}/cpufreq/scaling_cur_freq"
             ))
         })
-        .try_join()
-        .await?;
+        .join()
+        .await
+        .map(|res| res.ok());
+
     let gpu_load = File::open("/sys/devices/platform/gpu.0/load").await?;
     let mut system = sysinfo::System::new_all();
     system.refresh_cpu_specifics(CpuRefreshKind::everything());
 
     loop {
         table.clear();
-        let thermal_zones = thermal_zone.each_ref().map(read_to_float).join();
-        let cpu_freq = cpu_freq.each_ref().map(read_to_float).join();
+        let thermal_zones = thermal_zone.each_ref().map(maybe_read_to_float).join();
+        let cpu_freq = cpu_freq.each_ref().map(maybe_read_to_float).join();
         let gpu_load = read_to_float(&gpu_load);
         let (thermal_zones, cpu_freq, gpu_load) = (thermal_zones, cpu_freq, gpu_load).join().await;
         let thermal_zones = thermal_zones.map(|res| res.unwrap_or(f32::NAN) / 1000.0);
@@ -66,6 +69,13 @@ async fn connect() -> anyhow::Result<()> {
     }
 }
 
+async fn maybe_read_to_float(file: &Option<File>) -> anyhow::Result<f32> {
+    if let Some(file) = file {
+        read_to_float(file).await
+    } else {
+        Ok(f32::NAN)
+    }
+}
 async fn read_to_float(file: &File) -> anyhow::Result<f32> {
     let mut buf = vec![0u8; 32];
     let n = rent!(file.read_at(buf, 0).await, buf)?;
