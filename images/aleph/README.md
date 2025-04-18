@@ -81,12 +81,20 @@ TODO
 This is the recommended development workflow for iterating on the NixOS configuration. It's significantly faster than the fresh install method (described below) and easier to revert in case of mistakes.
 
 1. Ensure you can SSH into Aleph over WiFi (recommended) or via the USB-C port with the Ethernet gadget enabled (right-most USB-C port).
+
 2. Modify the NixOS configuration in `flake.nix`, `kernel/`, or `modules/`.
-3. Run `./deploy.sh`. This copies all necessary store paths to Aleph, activates the new configuration, and creates a new bootloader entry.
 
-If you have a local user module (created with `create_user_module.sh`), the deploy script will automatically use it alongside the repository configuration.
+3. Run `./deploy.sh` to deploy with default settings (current username and "aleph.local"), or specify a custom host/user:
+   ```bash
+   # Deploy using custom host and username
+   ./deploy.sh --host fde1:2240:a1ef::1 --user myuser
+   # Don't use Aleph as a remote builder (uses local machine or configured builders instead)
+   ./deploy.sh --no-aleph-builder
+   # Show all available options
+   ./deploy.sh --help
+   ```
 
-To revert to the previous configuration, reboot and select the previous bootloader entry from the boot menu.
+This copies all necessary store paths to Aleph, activates the new configuration, and creates a new bootloader entry. If you have a local user module (created with `create_user_module.sh`), the deploy script will automatically use it alongside the repository configuration. To revert to the previous configuration, reboot and select the previous bootloader entry from the boot menu.
 
 NOTE: The bootloader can only be accessed via the serial console. So, you'll need to switch the USB-C cable to the debugger port (left-most USB-C port).
 

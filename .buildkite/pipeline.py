@@ -157,11 +157,23 @@ test_steps = [
         key="elodin-cli",
         command="nix build .#elodin-cli",
     ),
-    step(
-        label=":nix: aleph-os",
-        key="aleph-os",
-        command="cd images/aleph; nix build --accept-flake-config .#nixosConfigurations.default.config.system.build.toplevel",
-        agents={"queue": "nixos-arm"},
+    group(
+        name=":nix: aleph-os",
+        steps=[
+            step(
+                label=":nix: toplevel",
+                key="toplevel",
+                command="cd images/aleph; nix build --accept-flake-config .#toplevel",
+                agents={"queue": "nixos-arm"},
+            ),
+            step(
+                label=":nix: sdimage",
+                key="sdimage",
+                command="cd images/aleph; nix build --accept-flake-config .#sdimage",
+                depends_on="toplevel",
+                agents={"queue": "nixos-arm"},
+            ),
+        ],
     ),
 ]
 
