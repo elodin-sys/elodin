@@ -15,46 +15,6 @@
         "type": "github"
       }
     },
-    "deploy-rs": {
-      "inputs": {
-        "flake-compat": "flake-compat",
-        "nixpkgs": [
-          "nixpkgs"
-        ],
-        "utils": [
-          "flake-utils"
-        ]
-      },
-      "locked": {
-        "lastModified": 1727447169,
-        "narHash": "sha256-3KyjMPUKHkiWhwR91J1YchF6zb6gvckCAY1jOE+ne0U=",
-        "owner": "serokell",
-        "repo": "deploy-rs",
-        "rev": "aa07eb05537d4cd025e2310397a6adcedfe72c76",
-        "type": "github"
-      },
-      "original": {
-        "owner": "serokell",
-        "repo": "deploy-rs",
-        "type": "github"
-      }
-    },
-    "flake-compat": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1696426674,
-        "narHash": "sha256-kvjfFW7WAETZlt09AgDn1MrtKzP7t90Vf7vypd3OL1U=",
-        "owner": "edolstra",
-        "repo": "flake-compat",
-        "rev": "0f9255e01c2351cc7d116c072cb317785dd33b33",
-        "type": "github"
-      },
-      "original": {
-        "owner": "edolstra",
-        "repo": "flake-compat",
-        "type": "github"
-      }
-    },
     "flake-utils": {
       "inputs": {
         "systems": "systems"
@@ -129,12 +89,12 @@
     "root": {
       "inputs": {
         "crane": "crane",
-        "deploy-rs": "deploy-rs",
         "flake-utils": "flake-utils",
         "jetpack": "jetpack",
         "nixpkgs": "nixpkgs",
         "nixpkgs-unstable": "nixpkgs-unstable",
-        "rust-overlay": "rust-overlay"
+        "rust-overlay": "rust-overlay",
+        "user-module": "user-module"
       }
     },
     "rust-overlay": {
@@ -171,6 +131,18 @@
         "repo": "default",
         "type": "github"
       }
+    },
+    "user-module": {
+      "flake": false,
+      "locked": {
+        "path": "./modules/users",
+        "type": "path"
+      },
+      "original": {
+        "path": "./modules/users",
+        "type": "path"
+      },
+      "parent": []
     }
   },
   "root": "root",

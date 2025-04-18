@@ -49,6 +49,33 @@ After connecting to WiFi, Aleph will store your network credentials and reconnec
 
 Once connected to WiFi, you'll be able to SSH directly to Aleph over your wireless network, which is more convenient for ongoing development. The USB Ethernet connection will remain available as a fallback access method.
 
+### Add User (For Local Development)
+
+If you want to add your personal user account without tracking it in the repository configuration (recommended for individual development), you can use the user module approach:
+
+1. Run the user module creation script:
+   ```bash
+   ./create_user_module.sh
+   ```
+
+   This script will:
+   - Create a user configuration with your current username
+   - Use your SSH public key from `~/.ssh/id_ed25519.pub` (or `~/.ssh/id_rsa.pub`)
+   - Store it in `~/.config/aleph/user-module/` (outside the repo)
+   - Prompt you to edit the configuration if needed
+
+2. Run `./deploy.sh` to deploy this configuration to Aleph.
+
+   The deploy script will automatically detect and add your user module to the configuration.
+
+Note: This approach is ideal for local development as it keeps your personal user configuration separate from the repository. For users or configurations that should be tracked in the repository, modify the NixOS modules directly.
+
+### Setup Remote Builder (Optional)
+
+Using a remote builder can significantly speed up the build process.
+
+TODO
+
 ## System Update
 
 This is the recommended development workflow for iterating on the NixOS configuration. It's significantly faster than the fresh install method (described below) and easier to revert in case of mistakes.
@@ -56,6 +83,8 @@ This is the recommended development workflow for iterating on the NixOS configur
 1. Ensure you can SSH into Aleph over WiFi (recommended) or via the USB-C port with the Ethernet gadget enabled (right-most USB-C port).
 2. Modify the NixOS configuration in `flake.nix`, `kernel/`, or `modules/`.
 3. Run `./deploy.sh`. This copies all necessary store paths to Aleph, activates the new configuration, and creates a new bootloader entry.
+
+If you have a local user module (created with `create_user_module.sh`), the deploy script will automatically use it alongside the repository configuration.
 
 To revert to the previous configuration, reboot and select the previous bootloader entry from the boot menu.
 

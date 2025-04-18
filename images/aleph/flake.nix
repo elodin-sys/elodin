@@ -18,10 +18,9 @@
     crane = {
       url = "github:ipetkov/crane";
     };
-    deploy-rs = {
-      url = "github:serokell/deploy-rs";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.utils.follows = "flake-utils";
+    user-module = {
+      url = "path:./modules/users";
+      flake = false;
     };
   };
   outputs = {
@@ -32,43 +31,29 @@
     jetpack,
     crane,
     rust-overlay,
-    deploy-rs,
+    user-module,
   }: let
     system = "aarch64-linux";
     pkgs = import nixpkgs {inherit system;};
-    deployPkgs = import nixpkgs {
-      inherit system;
-      overlays = [
-        deploy-rs.overlays.default
-        (self: super: {
-          deploy-rs = {
-            inherit (pkgs) deploy-rs;
-            lib = super.deploy-rs.lib;
-          };
-        })
-      ];
-    };
     defaultModule = {
       pkgs,
       config,
       lib,
       ...
     }: {
-      imports =
-        [
-          "${nixpkgs}/nixos/modules/profiles/minimal.nix"
-          jetpack.nixosModules.default
-          ./modules/usb-eth.nix
-          ./modules/hardware.nix
-          ./modules/minimal.nix
-          ./modules/sd-image.nix
-          ./modules/systemd-boot-dtb.nix
-          ./modules/aleph-dev.nix
-          ./modules/elodin-db.nix
-          ./modules/aleph-serial-bridge.nix
-          ./modules/mekf.nix
-        ]
-        ++ lib.optional (builtins.pathExists ./modules/elodin-dev.nix) ./modules/elodin-dev.nix;
+      imports = [
+        "${nixpkgs}/nixos/modules/profiles/minimal.nix"
+        jetpack.nixosModules.default
+        ./modules/usb-eth.nix
+        ./modules/hardware.nix
+        ./modules/minimal.nix
+        ./modules/sd-image.nix
+        ./modules/systemd-boot-dtb.nix
+        ./modules/aleph-dev.nix
+        ./modules/elodin-db.nix
+        ./modules/aleph-serial-bridge.nix
+        ./modules/mekf.nix
+      ];
 
       nixpkgs.overlays = [
         jetpack.overlays.default
@@ -132,7 +117,10 @@
       ];
     };
     appModule = {lib, ...}: {
-      imports = [defaultModule];
+      imports = [
+        defaultModule
+        "${user-module}/default.nix"
+      ];
       fileSystems."/".device = lib.mkForce "/dev/disk/by-label/APP";
       fileSystems."/boot".device = lib.mkForce "/dev/disk/by-label/BOOT";
     };
@@ -160,7 +148,6 @@
           default = pkgs.mkShell {
             buildInputs = with pkgs; [
               just
-              deploy-rs.packages.${system}.deploy-rs
             ];
           };
         };
@@ -175,13 +162,6 @@
       nixosConfigurations = {
         default = defaultNixosConfig;
         installer = installerNixosConfig;
-      };
-      deploy.nodes.aleph = {
-        hostname = "aleph.local";
-        profiles.system = {
-          user = "root";
-          path = deployPkgs.deploy-rs.lib.activate.nixos self.nixosConfigurations.default;
-        };
       };
       packages.aarch64-linux = {
         default = nixosConfigurations.default.config.system.build.sdImage;
