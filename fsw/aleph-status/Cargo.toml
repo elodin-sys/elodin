@@ -3,6 +3,7 @@ name = "aleph-status"
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
+publish = false
 
 [dependencies]
 nu-ansi-term = "0.49"

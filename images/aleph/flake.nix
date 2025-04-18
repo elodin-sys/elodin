@@ -118,6 +118,13 @@
           value = "524288";
         }
       ];
+      environment.etc."elodin-version" = let
+        rustToolchain = p: p.rust-bin.stable."1.85.0".default;
+        craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
+      in {
+        text = (craneLib.crateNameFromCargoToml {cargoToml = ../../Cargo.toml;}).version;
+        enable = true;
+      };
     };
     appModule = {lib, ...}: {
       imports = [
