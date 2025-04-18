@@ -150,17 +150,21 @@ async fn create_user() -> anyhow::Result<String> {
     let mut username_prompt = Readline::default().title("Enter username").prompt()?;
     let username = username_prompt.run()?;
 
-    let mut password;
+    let mut password = None;
     loop {
         let mut password_prompt = Password::default()
             .title("Enter password for the new account")
             .prompt()?;
-        password = password_prompt.run()?;
+        let pass = password.insert(password_prompt.run()?);
+        if pass.is_empty() {
+            password = None;
+            break;
+        }
 
         let mut confirm_password_prompt = Password::default().title("Confirm password").prompt()?;
         let confirm_password = confirm_password_prompt.run()?;
 
-        if password == confirm_password {
+        if pass == &confirm_password {
             break;
         }
         print_header("Passwords do not match", Color::Red);
@@ -184,29 +188,31 @@ async fn create_user() -> anyhow::Result<String> {
         return Err(anyhow!("useradd command failed"));
     }
 
-    let mut passwd_process = Command::new("chpasswd")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::null())
-        .spawn()?;
+    if let Some(password) = password {
+        let mut passwd_process = Command::new("chpasswd")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .spawn()?;
 
-    if let Some(stdin) = &mut passwd_process.stdin {
-        use tokio::io::AsyncWriteExt;
-        stdin
-            .write_all(format!("{}:{}", username, password).as_bytes())
-            .await?;
-        stdin.flush().await?;
-    }
+        if let Some(stdin) = &mut passwd_process.stdin {
+            use tokio::io::AsyncWriteExt;
+            stdin
+                .write_all(format!("{}:{}", username, password).as_bytes())
+                .await?;
+            stdin.flush().await?;
+        }
 
-    let passwd_result = passwd_process.wait_with_output().await?;
+        let passwd_result = passwd_process.wait_with_output().await?;
 
-    if passwd_result.status.success() {
-        print_header(
-            format!("User '{}' created successfully", username),
-            Color::Green,
-        );
-    } else {
-        print_header("Failed to set password", Color::Red);
-        return Err(anyhow!("chpasswd command failed"));
+        if passwd_result.status.success() {
+            print_header(
+                format!("User '{}' created successfully", username),
+                Color::Green,
+            );
+        } else {
+            print_header("Failed to set password", Color::Red);
+            return Err(anyhow!("chpasswd command failed"));
+        }
     }
 
     Ok(username)
