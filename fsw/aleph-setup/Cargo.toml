@@ -6,16 +6,27 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+# errors
 anyhow = "1"
+
+# async
+tokio = { version = "1", features = ["full"] }
+
+# search
+fuzzy-matcher = "0.3.7"
+
+# rand
+fastrand = "1.1.0"
+
+# terminal
+promkit.version = "0.9.1"
+promkit.features = ["query-selector", "password", "confirm", "readline", "listbox"]
+nu-ansi-term = "0.49"
+
+# protocols
+reqwest.version = "0.12"
+reqwest.default-features = false
+reqwest.features = ["rustls-tls"]
 zbus.version = "5.5.0"
 zbus.default-features = false
 zbus.features = ["tokio"]
-promkit.version = "0.9.1"
-promkit.features = ["query-selector", "password", "confirm", "readline", "listbox"]
-tokio = { version = "1", features = ["full"] }
-fuzzy-matcher = "0.3.7"
-fastrand = "1.1.0"
-nu-ansi-term = "0.49"
-reqwest.version = "0.11"
-reqwest.default-features = false
-reqwest.features = ["rustls-tls"]
