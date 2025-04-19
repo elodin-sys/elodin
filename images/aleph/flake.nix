@@ -49,6 +49,7 @@
         ./modules/aleph-serial-bridge.nix
         ./modules/tegrastats-bridge.nix
         ./modules/mekf.nix
+        ./modules/aleph-setup.nix
       ];
 
       nixpkgs.overlays = [
@@ -59,6 +60,7 @@
           elodin-db = final.callPackage ./pkgs/elodin-db.nix {inherit crane;};
           mekf = final.callPackage ./pkgs/mekf.nix {inherit crane;};
           aleph-status = final.callPackage ./pkgs/aleph-status.nix {inherit crane;};
+          aleph-setup = final.callPackage ./pkgs/aleph-setup.nix {inherit crane;};
           tegrastats-bridge = final.callPackage ./pkgs/tegrastats-bridge.nix {inherit crane;};
         })
       ];
