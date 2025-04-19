@@ -25,12 +25,20 @@ sudo systemctl restart nix-daemon.service
 
 When you receive Aleph, it comes with NixOS pre-installed. Setting up network connectivity will make development more convenient, though you can also work directly via USB or Ethernet.
 
+### Finding Your Aleph Device
+
+Each Aleph has a unique hostname based on a random suffix (e.g., `aleph-99a2.local`). You can find your device on the network using the included scan script:
+```bash
+./scripts/aleph-scan.sh
+```
+
 ### Connect Aleph to WiFi
 
 1. **Establish Connection**: Connect to Aleph via the right-most USB-C port (which has the Ethernet gadget enabled). This sets up a local network connection between your computer and Aleph over USB.
 
 2. **SSH to Aleph**: Log in to Aleph using SSH. The default root password is `root`.
    ```bash
+   # Access via USB Ethernet (always works regardless of hostname)
    ssh root@aleph.local
    ```
 
@@ -47,7 +55,7 @@ When you receive Aleph, it comes with NixOS pre-installed. Setting up network co
 
 After connecting to WiFi, Aleph will store your network credentials and reconnect automatically on subsequent boots. You can verify the connection with `ping google.com` or by checking the assigned IP address with `ip addr show wlan0`.
 
-Once connected to WiFi, you'll be able to SSH directly to Aleph over your wireless network, which is more convenient for ongoing development. The USB Ethernet connection will remain available as a fallback access method.
+Once connected to WiFi, you'll be able to SSH directly to Aleph over your wireless network using its unique hostname (which you can find with the `scripts/aleph-scan.sh` script). The USB Ethernet connection will remain available as a fallback access method with the consistent name `aleph.local`.
 
 ### User Setup
 
@@ -68,12 +76,14 @@ This is the recommended development workflow for iterating on the NixOS configur
 
 2. Modify the NixOS configuration in `flake.nix`, `kernel/`, or `modules/`.
 
-3. Run `./deploy.sh` to deploy with default settings (current username and "aleph.local"), or specify a custom host/user:
+3. Run `./deploy.sh` to deploy with default settings, or specify a custom host/user:
    ```bash
-   # Deploy using default settings
+   # Deploy using default settings ($USER@aleph.local)
    ./deploy.sh
    # Deploy using custom host and username
-   ./deploy.sh --host fde1:2240:a1ef::1 --user myuser
+   ./deploy.sh --host aleph-99a2.local --user myuser
+   # Deploy using IPv6 address
+   ./deploy.sh --host fde1:2240:a1ef::1
    # Don't use Aleph as a remote builder (uses local machine or configured builders instead)
    ./deploy.sh --no-aleph-builder
    # Show all available options

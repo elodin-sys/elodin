@@ -5,6 +5,7 @@
   ];
   networking.firewall.enable = false;
   networking.interfaces.usb0.useDHCP = false;
+  networking.interfaces.dummy0.useDHCP = false;
   networking.interfaces.usb0.ipv4.addresses = [
     {
       address = "10.224.0.1";
@@ -33,12 +34,19 @@
     '';
   };
   boot.kernel.sysctl = {"net.ipv6.conf.all.forwarding" = true;};
+  environment.etc."avahi/hosts".text = ''
+    fde1:2240:a1ef::1 aleph.local
+  '';
   services.avahi = {
     enable = true;
+    nssmdns4 = true;
+    denyInterfaces = ["dummy0" "lo" "usb0"];
     publish = {
       enable = true;
       userServices = true;
       addresses = true;
+      workstation = true;
+      hinfo = true;
     };
   };
 }
