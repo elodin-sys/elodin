@@ -90,6 +90,7 @@ in {
     # Utilities for interfacing with the MCU
     (writeShellScriptBin "reset-mcu" (builtins.readFile ../scripts/reset-mcu.sh))
     (writeShellScriptBin "flash-mcu" (builtins.readFile ../scripts/flash-mcu.sh))
+    (writeShellScriptBin "aleph-scan" (builtins.readFile ../scripts/aleph-scan.sh))
     aleph-status
   ];
   programs.fish.enable = true;

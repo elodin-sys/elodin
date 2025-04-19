@@ -3,7 +3,7 @@ set -eu
 
 # Default values
 default_user="${USER}"
-default_host="aleph.local"
+default_host="aleph-99a2.local"
 target=".#nixosConfigurations.default.config.system.build.toplevel"
 no_aleph_builder=false
 
