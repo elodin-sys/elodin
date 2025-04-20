@@ -1,5 +1,3 @@
-use std::{fmt::Display, fs, path::Path, sync::OnceLock};
-
 use anyhow::anyhow;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use iwd::{Agent, AgentManagerProxy, StationExt};
@@ -9,6 +7,7 @@ use promkit::preset::listbox::Listbox;
 use promkit::preset::password::Password;
 use promkit::preset::query_selector::QuerySelector;
 use promkit::preset::readline::Readline;
+use std::{fmt::Display, fs, path::Path, sync::OnceLock, time::Duration};
 use tokio::{fs::File, io::AsyncWriteExt, process::Command};
 use zbus::zvariant::OwnedObjectPath;
 mod iwd;
@@ -16,7 +15,7 @@ mod iwd;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     println!();
-    print_header("Welcome to Aleph!", Color::Purple);
+    print_header("Welcome to ℵ Aleph!", Color::Purple);
     println!();
     let should_connect = Confirm::new("Do you want to connect to WiFi?")
         .prompt()?
@@ -42,24 +41,24 @@ fn divider_line(color: Color) -> &'static String {
     match color {
         Color::Green => {
             static DIVIDER_LINE: OnceLock<String> = OnceLock::new();
-            DIVIDER_LINE.get_or_init(|| Color::Green.paint("│").to_string())
+            DIVIDER_LINE.get_or_init(|| Color::Green.paint("▌").to_string())
         }
         Color::Yellow => {
             static DIVIDER_LINE: OnceLock<String> = OnceLock::new();
-            DIVIDER_LINE.get_or_init(|| Color::Yellow.paint("│").to_string())
+            DIVIDER_LINE.get_or_init(|| Color::Yellow.paint("▌").to_string())
         }
 
         Color::Purple => {
             static DIVIDER_LINE: OnceLock<String> = OnceLock::new();
-            DIVIDER_LINE.get_or_init(|| Color::Purple.paint("│").to_string())
+            DIVIDER_LINE.get_or_init(|| Color::Purple.paint("▌").to_string())
         }
         Color::Blue => {
             static DIVIDER_LINE: OnceLock<String> = OnceLock::new();
-            DIVIDER_LINE.get_or_init(|| Color::Blue.paint("│").to_string())
+            DIVIDER_LINE.get_or_init(|| Color::Blue.paint("▌").to_string())
         }
         Color::Red => {
             static DIVIDER_LINE: OnceLock<String> = OnceLock::new();
-            DIVIDER_LINE.get_or_init(|| Color::Red.paint("│").to_string())
+            DIVIDER_LINE.get_or_init(|| Color::Red.paint("▌").to_string())
         }
 
         _ => unimplemented!("unsupported divider color"),
@@ -218,6 +217,19 @@ async fn create_user() -> anyhow::Result<String> {
     Ok(username)
 }
 
+async fn wait_for_internet() -> anyhow::Result<()> {
+    print_header("Waiting for Internet Connection ...", Color::Blue);
+    for _ in 0..256 {
+        if reqwest::get("https://github.com").await.is_ok() {
+            return Ok(());
+        };
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+
+    print_header("Failed to connect to internet", Color::Red);
+    return Err(anyhow!("Failed to connect to internet"));
+}
+
 async fn add_user_public_key(username: &str) -> anyhow::Result<()> {
     print_header("SSH Public Key Setup", Color::Blue);
 
@@ -230,6 +242,8 @@ async fn add_user_public_key(username: &str) -> anyhow::Result<()> {
 
     match selection.as_str() {
         "Download from GitHub" => {
+            wait_for_internet().await?;
+
             let mut github_username_prompt = Readline::default()
                 .title("Enter your GitHub username")
                 .prompt()?;
@@ -237,30 +251,31 @@ async fn add_user_public_key(username: &str) -> anyhow::Result<()> {
 
             print_header("Downloading public keys from GitHub...", Color::Blue);
             println!();
+            for _ in 0..32 {
+                let url = format!("https://github.com/{}.keys", github_username);
+                let Ok(response) = reqwest::get(&url).await else {
+                    print_header("Failed to fetch keys from GitHub. Retrying ...", Color::Red);
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    continue;
+                };
 
-            let url = format!("https://github.com/{}.keys", github_username);
-            let response = reqwest::get(&url).await?;
+                if !response.status().is_success() {
+                    print_header("Failed to fetch keys from GitHub. Retrying ...", Color::Red);
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
 
-            if !response.status().is_success() {
-                print_header(
-                    format!(
-                        "Failed to fetch keys from GitHub for user '{}'",
-                        github_username
-                    ),
-                    Color::Red,
-                );
-                return Err(anyhow!("GitHub API request failed"));
+                let public_keys = response.text().await?;
+
+                if public_keys.trim().is_empty() {
+                    print_header("No public keys found on GitHub", Color::Yellow);
+                    return Ok(());
+                }
+
+                save_public_keys(username, &public_keys).await?;
+                print_header("Public keys from GitHub added successfully", Color::Green);
+                break;
             }
-
-            let public_keys = response.text().await?;
-
-            if public_keys.trim().is_empty() {
-                print_header("No public keys found on GitHub", Color::Yellow);
-                return Ok(());
-            }
-
-            save_public_keys(username, &public_keys).await?;
-            print_header("Public keys from GitHub added successfully", Color::Green);
         }
         "Enter manually" => {
             let mut public_key_prompt = Readline::default()

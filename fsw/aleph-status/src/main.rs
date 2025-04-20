@@ -28,7 +28,7 @@ async fn main() {
 
 fn print_logo() {
     if viuer::get_kitty_support() == KittySupport::None {
-        println!("{}", Color::Rgb(0xE4, 0xD9, 0xC3).paint(LOGO));
+        print_header("ℵ Aleph", Color::Purple);
     } else {
         let img = image::load_from_memory(LOGO_PNG).expect("Data from stdin could not be decoded.");
         let _ = viuer::print(
@@ -48,20 +48,20 @@ fn divider_line(color: Color) -> &'static String {
     match color {
         Color::Green => {
             static DIVIDER_LINE: OnceLock<String> = OnceLock::new();
-            DIVIDER_LINE.get_or_init(|| Color::Green.paint("│").to_string())
+            DIVIDER_LINE.get_or_init(|| Color::Green.paint("▌").to_string())
         }
         Color::Yellow => {
             static DIVIDER_LINE: OnceLock<String> = OnceLock::new();
-            DIVIDER_LINE.get_or_init(|| Color::Yellow.paint("│").to_string())
+            DIVIDER_LINE.get_or_init(|| Color::Yellow.paint("▌").to_string())
         }
 
         Color::Purple => {
             static DIVIDER_LINE: OnceLock<String> = OnceLock::new();
-            DIVIDER_LINE.get_or_init(|| Color::Purple.paint("│").to_string())
+            DIVIDER_LINE.get_or_init(|| Color::Purple.paint("▌").to_string())
         }
         Color::Blue => {
             static DIVIDER_LINE: OnceLock<String> = OnceLock::new();
-            DIVIDER_LINE.get_or_init(|| Color::Blue.paint("│").to_string())
+            DIVIDER_LINE.get_or_init(|| Color::Blue.paint("▌").to_string())
         }
 
         _ => unimplemented!("unsupported divider color"),
