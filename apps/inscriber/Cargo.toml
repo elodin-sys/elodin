@@ -3,6 +3,7 @@ name = "inscriber"
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
+publish = false
 
 [dependencies]
 # errors

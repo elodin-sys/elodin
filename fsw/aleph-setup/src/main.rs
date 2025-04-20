@@ -227,7 +227,7 @@ async fn wait_for_internet() -> anyhow::Result<()> {
     }
 
     print_header("Failed to connect to internet", Color::Red);
-    return Err(anyhow!("Failed to connect to internet"));
+    Err(anyhow!("Failed to connect to internet"))
 }
 
 async fn add_user_public_key(username: &str) -> anyhow::Result<()> {

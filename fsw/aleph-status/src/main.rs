@@ -9,7 +9,6 @@ use roci::{
 
 use viuer::KittySupport;
 
-static LOGO: &str = include_str!("./logo.txt");
 static LOGO_PNG: &[u8] = include_bytes!("./logo.png");
 
 #[stellarator::main]
