@@ -63,7 +63,16 @@
           aleph-setup = final.callPackage ./pkgs/aleph-setup.nix {inherit crane;};
           tegrastats-bridge = final.callPackage ./pkgs/tegrastats-bridge.nix {inherit crane;};
         })
+        (final: prev: {
+          inherit (final.nvidia-jetpack) cudaPackages;
+          opencv4 = prev.opencv4.override {inherit (final) cudaPackages;};
+        })
       ];
+      nixpkgs.config = {
+        allowUnfree = true;
+        cudaSupport = true;
+        cudaCapabilities = ["7.2" "8.7"];
+      };
       system.stateVersion = "24.05";
       i18n.supportedLocales = [(config.i18n.defaultLocale + "/UTF-8")];
       services.openssh.settings.PasswordAuthentication = true;
