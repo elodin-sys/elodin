@@ -109,13 +109,18 @@ impl<R: Reactor> Executor<R> {
         let mut main_task = pin!(main_task);
         let waker = self.reactor.borrow_mut().waker();
         let mut cx = Context::from_waker(&waker);
+        let mut output = None;
         let out = loop {
             self.timer.try_turn();
             self.reactor.borrow_mut().process_io()?;
             let tick = self.scheduler.tick();
-            if let Poll::Ready(output) = main_task.as_mut().poll(&mut cx) {
-                self.reactor.borrow_mut().finalize_io()?;
-                break Ok(output.unwrap());
+            if let Poll::Ready(o) = main_task.as_mut().poll(&mut cx) {
+                output = Some(o.unwrap());
+            }
+            if !tick.has_remaining {
+                if let Some(output) = output {
+                    break output;
+                }
             }
             let turn = self.timer.try_turn();
             if !tick.has_remaining && turn.as_ref().map(|t| t.expired == 0).unwrap_or(true) {
@@ -127,19 +132,38 @@ impl<R: Reactor> Executor<R> {
         unsafe {
             EXEC.with(|exec| {
                 let exec = &mut *exec.get();
+                if let Some(exec) = &exec {
+                    exec.scheduler.cancel_all();
+                }
+            });
+            let mut io_states = self.reactor.borrow_mut().drain_io();
+            io_states.cancel();
+            EXEC.with(|exec| {
+                let exec = &mut *exec.get();
                 drop(exec.take().expect("missing reactor"));
             })
         }
-        out
+        Ok(out)
     }
 }
 
 pub trait Reactor {
     fn wait_for_io(&mut self, timeout: Option<Duration>) -> Result<(), Error>;
     fn process_io(&mut self) -> Result<(), Error>;
-    fn finalize_io(&mut self) -> Result<(), Error>;
+
+    type RemainingIo: IoStates;
+
+    fn drain_io(&mut self) -> Self::RemainingIo;
     fn waker(&self) -> Waker;
     fn external_waker(&self) -> impl ExternalWaker;
+}
+
+pub trait IoStates {
+    fn cancel(&mut self);
+}
+
+impl IoStates for () {
+    fn cancel(&mut self) {}
 }
 
 pub fn run<R, F>(func: impl FnOnce() -> F) -> R
