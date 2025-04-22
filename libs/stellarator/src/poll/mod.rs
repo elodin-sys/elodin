@@ -61,9 +61,8 @@ impl Reactor for PollingReactor {
         Ok(())
     }
 
-    fn finalize_io(&mut self) -> Result<(), crate::Error> {
-        Ok(())
-    }
+    type RemainingIo = ();
+    fn drain_io(&mut self) -> Self::RemainingIo {}
 
     fn waker(&self) -> Waker {
         let poller = self.poller.clone();

@@ -1,6 +1,4 @@
-use crate::Error;
-use crate::Executor;
-use crate::Reactor;
+use crate::{Error, Executor, IoStates, Reactor};
 use io_uring::{cqueue, squeue};
 use maitake::scheduler::ExternalWaker as _;
 use maitake::time::Timer;
@@ -91,6 +89,15 @@ impl UringReactor {
             return;
         };
 
+        if matches!(state, OpState::Waiting(_)) {
+            self.uring.with_submission(|mut s| {
+                let sqe = io_uring::opcode::AsyncCancel::new(completion.id.0 as u64).build();
+                unsafe {
+                    let _ = s.push(&sqe);
+                }
+            });
+        }
+
         *state = OpState::Ignored(value)
     }
 }
@@ -165,9 +172,10 @@ impl Reactor for UringReactor {
         })
     }
 
-    fn finalize_io(&mut self) -> Result<(), Error> {
-        self.uring.submitter().submit_and_wait(self.states.len())?;
-        Ok(())
+    type RemainingIo = Slab<OpState>;
+
+    fn drain_io(&mut self) -> Self::RemainingIo {
+        std::mem::take(&mut self.states)
     }
 
     fn waker(&self) -> Waker {
@@ -181,6 +189,25 @@ impl Reactor for UringReactor {
         ExternalWaker {
             ring: self.uring.clone(),
         }
+    }
+}
+
+impl IoStates for Slab<OpState> {
+    fn cancel(&mut self) {
+        let mut count = 0;
+        self.retain(|id, state| {
+            if matches!(state, OpState::Waiting(_)) {
+                let sqe = io_uring::opcode::AsyncCancel::new(id as u64).build();
+                count += 1;
+                Executor::with_reactor(|reactor| {
+                    reactor
+                        .uring
+                        .with_submission(|mut s| unsafe { s.push(&sqe).unwrap() })
+                });
+            }
+            false
+        });
+        Executor::with_reactor(|r| r.uring.submitter().submit_and_wait(count).unwrap());
     }
 }
 
