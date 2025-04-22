@@ -23,18 +23,14 @@ sudo systemctl restart nix-daemon.service
 
 ## Initial Setup
 
-When you receive Aleph, it comes with NixOS pre-installed. Setting up network connectivity will make development more convenient, though you can also work directly via USB or Ethernet.
+When you receive Aleph, it comes with NixOS pre-installed. On first login you will be prompted to connect the device to WiFi and create a new user account.
 
-### Finding Your Aleph Device
 
-Each Aleph has a unique hostname based on a random suffix (e.g., `aleph-99a2.local`). You can find your device on the network using the included scan script:
-```bash
-./scripts/aleph-scan.sh
-```
 
 ### Connect Aleph to WiFi
+First connect to Aleph with right-most USB-C port. This port has an Ethernet gadget enabled that will allow you to SSH into Aleph.
 
-1. **Establish Connection**: Connect to Aleph via the right-most USB-C port (which has the Ethernet gadget enabled). This sets up a local network connection between your computer and Aleph over USB.
+Run `ssh root@aleph.local`. The default password is `root`. Once logged in you will be guided through the setup. If the setup does not start, you can manually start it by running `aleph-setup`.
 
 2. **SSH to Aleph**: Log in to Aleph using SSH. The default root password is `root`.
    ```bash
@@ -57,16 +53,14 @@ After connecting to WiFi, Aleph will store your network credentials and reconnec
 
 Once connected to WiFi, you'll be able to SSH directly to Aleph over your wireless network using its unique hostname (which you can find with the `scripts/aleph-scan.sh` script). The USB Ethernet connection will remain available as a fallback access method with the consistent name `aleph.local`.
 
-### User Setup
+[![asciicast](https://asciinema.org/a/716409.svg)](https://asciinema.org/a/716409)
 
-When you deploy Aleph for the first time, the `deploy.sh` script will automatically prompt you to create your user account if it doesn't already exist on the device.
+### Finding Your Aleph Device
 
-The script will:
-1. Attempt to connect using your current username
-2. If that fails, it will offer to create your user account
-3. Set up your SSH key for passwordless authentication
-4. Add you to the appropriate groups (wheel, video, dialout)
-5. Configure sudo access without password
+Each Aleph has a unique hostname based on a random suffix (e.g., `aleph-99a2.local`). You can find your device on the network using the included scan script:
+```bash
+./scripts/aleph-scan.sh
+```
 
 ## System Update
 
@@ -114,3 +108,28 @@ This method requires a USB flash drive or SD card with at least 8GB of space. Th
 4. Connect to Aleph via serial console and boot from the flash drive. This requires pressing ESC during the boot process, then selecting the flash drive from the boot menu.
 5. Log in using `root:root` and run `aleph-installer`.
 6. Remove flash drive and reboot Aleph.
+
+
+## Manual WiFi Setup
+
+1. **Establish Connection**: Connect to Aleph via the right-most USB-C port (which has the Ethernet gadget enabled). This sets up a local network connection between your computer and Aleph over USB.
+
+2. **SSH to Aleph**: Log in to Aleph using SSH. The default root password is `root`.
+   ```bash
+   ssh root@aleph.local
+   ```
+
+   If mDNS resolution fails (common on some networks or operating systems), use the static IPv6 address instead:
+   ```bash
+   ssh root@fde1:2240:a1ef::1
+   ```
+   This IPv6 address is configured in the [modules/usb-eth.nix](modules/usb-eth.nix) file.
+
+3. **Connect to WiFi**: Use [`iwctl`](https://wiki.archlinux.org/title/Iwd#Connect_to_a_network) to connect to your wireless network. The following command will prompt you for your WiFi password:
+   ```bash
+   iwctl station wlan0 connect "YourNetworkName"
+   ```
+
+After connecting to WiFi, Aleph will store your network credentials and reconnect automatically on subsequent boots. You can verify the connection with `ping google.com` or by checking the assigned IP address with `ip addr show wlan0`.
+
+Once connected to WiFi, you'll be able to SSH directly to Aleph over your wireless network, which is more convenient for ongoing development. The USB Ethernet connection will remain available as a fallback access method.
