@@ -13,6 +13,25 @@ order = 1
 +++
 
 
+## v0.14
+
+- **(breaking)** Switch vtables to use a new bytecode based format. This changes makes vtables simpler and more flexible. This change also effects the Lua format. You can now formulate a vtable with the `vtable_msg` function:
+
+  ```lua
+  vtable =  vtable_msg(1, {
+      field(0, 12, schema("f32", {3}, pair(1, "accel"))), # field
+      field(12, 12, schema("f32", {3}, pair(1, "gyro"))),
+  })
+
+  ```
+- **(feat)** Add VTableStream to elodin-db. VTableStream lets you specify a vtable for the database to populate, and have data streamed directly into it. You can also specify aggreator operations like `mean`. For example to setup a stream that calculates the mean of every 10 values:
+
+  ```lua
+  client:vtable_stream({field(0, 4, mean(10, schema("f32", {}, pair(1, "temp"))))})
+  ```
+- Add CSV as an archive data format. From `elodin-db lua`: `client:save_archive("path/to/dir", "csv")`.
+- Don't add "Globals" entity + "Tick" component on `elodin-db` initialization. This entity and component are only required for simulation purposes, not HITL.
+
 ## v0.13
 
 ### v0.13.3
