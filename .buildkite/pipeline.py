@@ -173,6 +173,11 @@ test_steps = [
                 depends_on="toplevel",
                 agents={"queue": "nixos-arm"},
             ),
+            step(
+                label=":nix: flash-uefi",
+                key="flash-uefi",
+                command="cd images/aleph; nix build --accept-flake-config .#flash-uefi",
+            ),
         ],
     ),
 ]
