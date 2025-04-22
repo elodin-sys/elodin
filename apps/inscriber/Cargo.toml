@@ -1,0 +1,24 @@
+[package]
+name = "inscriber"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# errors
+anyhow = "1"
+
+# async
+stellarator.path = "../../libs/stellarator"
+
+# terminal
+promkit.version = "0.9.1"
+promkit.features = ["query-selector", "password", "confirm", "readline", "listbox"]
+nu-ansi-term = "0.49"
+kdam.version = "0.6.2"
+kdam.features = ["gradient", "template", "unicode"]
+
+# args
+clap.version = "4.4"
+clap.features = ["derive"]

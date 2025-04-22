@@ -35,6 +35,7 @@ members = [
     "libs/postcard-c/codegen",
     "fsw/aleph-status",
     "fsw/tegrastats-bridge",
+    "fsw/aleph-setup", "apps/inscriber",
 ]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 
