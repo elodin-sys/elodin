@@ -1621,6 +1621,15 @@ feature! {
         pub fn spawner(&self) -> LocalSpawner {
             LocalSpawner(Arc::downgrade(&self.core), Arc::downgrade(&self.waker))
         }
+
+        /// Drains the run queue of all existing tasks
+        pub fn cancel_all(&self) {
+            let run_queue = self.core.run_queue.consume();
+            while let Some(t) = run_queue.dequeue() {
+               drop(t);
+            }
+
+        }
     }
 
     impl Schedule for LocalScheduler{
