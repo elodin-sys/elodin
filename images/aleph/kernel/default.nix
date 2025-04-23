@@ -24,10 +24,8 @@ buildLinux (args
       src = fetchFromGitHub {
         owner = "elodin-sys";
         repo = "aleph-orin-baseboard-kernel-5-10";
-        rev = "9e01df1bdb56f48acb3e9334a00258abafd5ae60";
-        hash = "sha256-1MS0jckLgtbCPBzdxlyUnO6BAFL/8H6pdy3i8bTMG7c=";
-        #hash = "sha256-RUAmvgnwXimL00rO1TyiF/ALV/rMtfldHAedqcmaHxs=";
-        #YCOEGQ943EbrApdVFKs+l+g2XWZ8TvdqRxcK8F9ebo8=";
+        rev = "4a1f9e19416ee5b70375e94889fe0398932320e1";
+        hash = "sha256-a9v4Wecio+flFLmJHtFusPl0f8h7ojTz35aPHVn+/xM=";
       };
       # Remove device tree overlays with some incorrect "remote-endpoint" nodes.
       # They are strings, but should be phandles. Otherwise, it fails to compile

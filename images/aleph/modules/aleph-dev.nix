@@ -33,17 +33,18 @@
       (onnxruntime-gpu-wheel ps)
     ];
 in {
-  environment.variables = {
-    LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
-      pkgs.stdenv.cc.cc.lib
-      pkgs.nvidia-jetpack.cudaPackages.cudatoolkit
-      pkgs.nvidia-jetpack.cudaPackages.cudnn
-      pkgs.nvidia-jetpack.cudaPackages.tensorrt
-      pkgs.nvidia-jetpack.cudaPackages.vpi2
-      pkgs.nvidia-jetpack.l4t-cuda
-      pkgs.nvidia-jetpack.l4t-gstreamer
-      pkgs.nvidia-jetpack.l4t-multimedia
-      pkgs.nvidia-jetpack.l4t-camera
+  environment.variables = with pkgs; {
+    LD_LIBRARY_PATH = lib.makeLibraryPath [
+      stdenv.cc.cc.lib
+      cudaPackages.cudatoolkit
+      cudaPackages.cudatoolkit
+      cudaPackages.cudnn
+      cudaPackages.tensorrt
+      cudaPackages.vpi2
+      nvidia-jetpack.l4t-cuda
+      nvidia-jetpack.l4t-gstreamer
+      nvidia-jetpack.l4t-multimedia
+      nvidia-jetpack.l4t-camera
     ];
   };
   virtualisation.podman = {
