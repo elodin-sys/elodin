@@ -1,4 +1,5 @@
 use assets::open_assets;
+use impeller2::types::{PacketHeader, PacketTy};
 use impeller2::vtable::builder::{
     OpBuilder, pair, raw_field, raw_table, schema, timestamp, vtable,
 };
@@ -723,43 +724,120 @@ pub async fn handle_conn(stream: TcpStream, db: Arc<DB>) {
 }
 
 async fn handle_conn_inner<A: AsyncRead + AsyncWrite + 'static>(
-    tx: Arc<Mutex<PacketSink<OwnedWriter<A>>>>,
+    mut tx: Arc<Mutex<PacketSink<OwnedWriter<A>>>>,
     mut rx: PacketStream<OwnedReader<A>>,
     db: Arc<DB>,
 ) -> Result<(), Error> {
     let mut buf = vec![0u8; 1024 * 64];
+    let mut resp_pkt = LenPacket::new(PacketTy::Msg, [0, 0], 1024 * 64);
     loop {
         let pkt = rx.next(buf).await?;
         let req_id = pkt.req_id();
-        match handle_packet(&pkt, &db, &tx).await {
+        let mut pkt_tx = PacketTx {
+            req_id,
+            tx,
+            pkt: Some(resp_pkt),
+        };
+        let result = handle_packet(&pkt, &db, &mut pkt_tx).await;
+        buf = pkt.into_buf().into_inner();
+        match result {
             Ok(_) => {}
             Err(err) if err.is_stream_closed() => {}
             Err(err) => {
                 warn!(?err, "error handling packet");
-                let tx = tx.lock().await;
-                if let Err(err) = tx
-                    .send(
-                        ErrorResponse {
-                            description: err.to_string(),
-                        }
-                        .with_request_id(req_id),
-                    )
+                if let Err(err) = pkt_tx
+                    .send_msg(&ErrorResponse {
+                        description: err.to_string(),
+                    })
                     .await
-                    .0
                 {
                     warn!(?err, "error sending err resp");
                 }
-                trace!(?err, "error handling packet");
             }
         }
-        buf = pkt.into_buf().into_inner();
+        resp_pkt = pkt_tx.pkt.expect("len pkt taken and not given back");
+        tx = pkt_tx.tx;
+    }
+}
+
+pub struct PacketTx<A: AsyncWrite + 'static> {
+    req_id: RequestId,
+    tx: Arc<Mutex<PacketSink<OwnedWriter<A>>>>,
+    pkt: Option<LenPacket>,
+}
+
+impl<A: AsyncWrite + 'static> Clone for PacketTx<A> {
+    fn clone(&self) -> Self {
+        Self {
+            req_id: self.req_id,
+            tx: self.tx.clone(),
+            pkt: self.pkt.clone(),
+        }
+    }
+}
+
+impl<A: AsyncWrite + 'static> PacketTx<A> {
+    pub async fn send_msg<M: Msg>(&mut self, msg: &M) -> Result<(), Error> {
+        let req_id = self.req_id;
+        self.send_with_builder(|pkt| {
+            let header = PacketHeader {
+                packet_ty: impeller2::types::PacketTy::Msg,
+                id: M::ID,
+                req_id,
+            };
+            pkt.as_mut_packet().header = header;
+            pkt.clear();
+            postcard::serialize_with_flavor(&msg, pkt).map_err(Error::from)
+        })
+        .await
+    }
+
+    pub async fn send_with_builder(
+        &mut self,
+        builder: impl FnOnce(&mut LenPacket) -> Result<(), Error> + '_,
+    ) -> Result<(), Error> {
+        let mut pkt = self.pkt.take().expect("missing len pkt");
+        pkt.clear();
+        if let Err(err) = builder(&mut pkt) {
+            self.pkt = Some(pkt);
+            return Err(err);
+        }
+        pkt.as_mut_packet().header.req_id = self.req_id;
+        println!("Sending packet with {:?}", pkt.as_packet());
+        let tx = self.tx.lock().await;
+        let res = rent!(tx.send(pkt).await, pkt);
+        self.pkt = Some(pkt);
+        res.map_err(Error::from)
+    }
+
+    pub async fn send_time_series(
+        &mut self,
+        id: PacketId,
+        timestamps: &[Timestamp],
+        data: &[u8],
+    ) -> Result<(), Error> {
+        let req_id = self.req_id;
+        self.send_with_builder(|pkt| {
+            let header = PacketHeader {
+                packet_ty: impeller2::types::PacketTy::TimeSeries,
+                id,
+                req_id,
+            };
+            pkt.as_mut_packet().header = header;
+            pkt.clear();
+            pkt.extend_from_slice(&(timestamps.len() as u64).to_le_bytes());
+            pkt.extend_from_slice(timestamps.as_bytes());
+            pkt.extend_from_slice(data);
+            Ok(())
+        })
+        .await
     }
 }
 
 async fn handle_packet<A: AsyncWrite + 'static>(
     pkt: &Packet<Slice<Vec<u8>>>,
     db: &Arc<DB>,
-    tx: &Arc<Mutex<PacketSink<OwnedWriter<A>>>>,
+    tx: &mut PacketTx<A>,
 ) -> Result<(), Error> {
     trace!(?pkt, "handling pkt");
     match &pkt {
@@ -774,7 +852,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         }
         Packet::Msg(m) if m.id == Stream::ID => {
             let stream = m.parse::<Stream>()?;
-            let tx = tx.clone();
+            let tx = tx.tx.clone();
             let db = db.clone();
             handle_stream(tx, stream, db, m.req_id);
         }
@@ -812,67 +890,40 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     .next()
                     .ok_or(Error::ComponentNotFound(get_schema.component_id))
             })?;
-            let tx = tx.lock().await;
-            tx.send(SchemaMsg(schema).with_request_id(m.req_id))
-                .await
-                .0?;
+            tx.send_msg(&SchemaMsg(schema)).await?;
         }
         Packet::Msg(m) if m.id == GetTimeSeries::ID => {
             let get_time_series = m.parse::<GetTimeSeries>()?;
             debug!(msg = ?get_time_series, "get time series");
-
-            let tx = tx.clone();
             let db = db.clone();
-            let req_id = m.req_id;
-            let result = (|| {
-                let GetTimeSeries {
-                    component_id,
-                    entity_id,
-                    range,
-                    limit,
-                    id,
-                } = get_time_series;
-                let entity = db.with_state(|state| {
-                    let Some(component) = state.components.get(&(entity_id, component_id)) else {
-                        if state.component_metadata.contains_key(&component_id) {
-                            return Err(Error::EntityNotFound(entity_id));
-                        } else {
-                            return Err(Error::ComponentNotFound(component_id));
-                        }
-                    };
-                    Ok(component.clone())
-                })?;
-                let Some((timestamps, data)) = entity.get_range(range) else {
-                    return Err(Error::TimeRangeOutOfBounds);
-                };
-                let size = entity.schema.size();
-                let (timestamps, data) = if let Some(limit) = limit {
-                    let len = timestamps.len().min(limit);
-                    (&timestamps[..len], &data[..len * size])
-                } else {
-                    (timestamps, data)
-                };
-                let mut pkt =
-                    LenPacket::time_series(id, data.len() + timestamps.as_bytes().len() + 8);
-                pkt.extend_from_slice(&(timestamps.len() as u64).to_le_bytes());
-                pkt.extend_from_slice(timestamps.as_bytes());
-                pkt.extend_from_slice(data);
-                Ok(pkt)
-            })();
-            stellarator::spawn(async move {
-                let tx = tx.lock().await;
-                match result {
-                    Ok(pkt) => {
-                        tx.send(pkt.with_request_id(req_id)).await.0?;
+            let GetTimeSeries {
+                component_id,
+                entity_id,
+                range,
+                limit,
+                id,
+            } = get_time_series;
+            let entity = db.with_state(|state| {
+                let Some(component) = state.components.get(&(entity_id, component_id)) else {
+                    if state.component_metadata.contains_key(&component_id) {
+                        return Err(Error::EntityNotFound(entity_id));
+                    } else {
+                        return Err(Error::ComponentNotFound(component_id));
                     }
-                    Err(err) => {
-                        tx.send(ErrorResponse::from(err).with_request_id(req_id))
-                            .await
-                            .0?
-                    }
-                }
-                Ok::<_, Error>(())
-            });
+                };
+                Ok(component.clone())
+            })?;
+            let Some((timestamps, data)) = entity.get_range(range) else {
+                return Err(Error::TimeRangeOutOfBounds);
+            };
+            let size = entity.schema.size();
+            let (timestamps, data) = if let Some(limit) = limit {
+                let len = timestamps.len().min(limit);
+                (&timestamps[..len], &data[..len * size])
+            } else {
+                (timestamps, data)
+            };
+            tx.send_time_series(id, timestamps, data).await?;
         }
         Packet::Msg(m) if m.id == SetComponentMetadata::ID => {
             let SetComponentMetadata(metadata) = m.parse::<SetComponentMetadata>()?;
@@ -880,14 +931,23 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         }
         Packet::Msg(m) if m.id == GetComponentMetadata::ID => {
             let GetComponentMetadata { component_id } = m.parse::<GetComponentMetadata>()?;
-            let metadata = db.with_state(|state| {
-                let Some(metadata) = state.component_metadata.get(&component_id) else {
-                    return Err(Error::ComponentNotFound(component_id));
+
+            tx.send_with_builder(|pkt| {
+                let header = PacketHeader {
+                    packet_ty: impeller2::types::PacketTy::Msg,
+                    id: ComponentMetadata::ID,
+                    req_id: m.req_id,
                 };
-                Ok(metadata.with_request_id(m.req_id))
-            })?;
-            let tx = tx.lock().await;
-            tx.send(metadata).await.0?;
+                pkt.as_mut_packet().header = header;
+                pkt.clear();
+                db.with_state(|state| {
+                    let Some(metadata) = state.component_metadata.get(&component_id) else {
+                        return Err(Error::ComponentNotFound(component_id));
+                    };
+                    postcard::serialize_with_flavor(&metadata, pkt).map_err(Error::from)
+                })
+            })
+            .await?;
         }
 
         Packet::Msg(m) if m.id == SetEntityMetadata::ID => {
@@ -897,14 +957,23 @@ async fn handle_packet<A: AsyncWrite + 'static>(
 
         Packet::Msg(m) if m.id == GetEntityMetadata::ID => {
             let GetEntityMetadata { entity_id } = m.parse::<GetEntityMetadata>()?;
-            let msg = db.with_state(|state| {
-                let Some(metadata) = state.entity_metadata.get(&entity_id) else {
-                    return Err(Error::EntityNotFound(entity_id));
+
+            tx.send_with_builder(|pkt| {
+                let header = PacketHeader {
+                    packet_ty: impeller2::types::PacketTy::Msg,
+                    id: EntityMetadata::ID,
+                    req_id: m.req_id,
                 };
-                Ok(metadata.with_request_id(m.req_id))
-            })?;
-            let tx = tx.lock().await;
-            tx.send(msg).await.0?;
+                pkt.as_mut_packet().header = header;
+                pkt.clear();
+                db.with_state(|state| {
+                    let Some(metadata) = state.entity_metadata.get(&entity_id) else {
+                        return Err(Error::EntityNotFound(entity_id));
+                    };
+                    postcard::serialize_with_flavor(&metadata, pkt).map_err(Error::from)
+                })
+            })
+            .await?;
         }
 
         Packet::Msg(m) if m.id == SetAsset::ID => {
@@ -913,18 +982,27 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         }
         Packet::Msg(m) if m.id == GetAsset::ID => {
             let GetAsset { id } = m.parse::<GetAsset>()?;
-            let packet = db.with_state(|state| {
-                let Some(mmap) = state.assets.get(&id) else {
-                    return Err(Error::AssetNotFound(id));
+
+            tx.send_with_builder(|pkt| {
+                let header = PacketHeader {
+                    packet_ty: impeller2::types::PacketTy::Msg,
+                    id: Asset::ID,
+                    req_id: m.req_id,
                 };
-                let asset = Asset {
-                    id,
-                    buf: Cow::Borrowed(&mmap[..]),
-                };
-                Ok(asset.into_len_packet().with_request_id(m.req_id))
-            })?;
-            let tx = tx.lock().await;
-            tx.send(packet).await.0?;
+                pkt.as_mut_packet().header = header;
+                pkt.clear();
+                db.with_state(|state| {
+                    let Some(mmap) = state.assets.get(&id) else {
+                        return Err(Error::AssetNotFound(id));
+                    };
+                    let asset = Asset {
+                        id,
+                        buf: Cow::Borrowed(&mmap[..]),
+                    };
+                    postcard::serialize_with_flavor(&asset, pkt).map_err(Error::from)
+                })
+            })
+            .await?;
         }
         Packet::Msg(m) if m.id == DumpMetadata::ID => {
             let msg = db.with_state(|state| {
@@ -941,10 +1019,8 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     entity_metadata,
                     msg_metadata,
                 }
-                .with_request_id(m.req_id)
             });
-            let tx = tx.lock().await;
-            tx.send(msg).await.0?;
+            tx.send_msg(&msg).await?;
         }
         Packet::Msg(m) if m.id == DumpSchema::ID => {
             let msg = db.with_state(|state| {
@@ -953,46 +1029,37 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     .values()
                     .map(|c| (c.component_id, c.schema.to_schema()))
                     .collect();
-                DumpSchemaResp { schemas }.with_request_id(m.req_id)
+                DumpSchemaResp { schemas }
             });
 
-            let tx = tx.lock().await;
-            tx.send(msg.with_request_id(m.req_id)).await.0?;
+            tx.send_msg(&msg).await?;
         }
 
         Packet::Msg(m) if m.id == DumpAssets::ID => {
+            // TODO(sphw): Implement dump assets in a no-alloc fashion
             let packets = db.with_state(|state| {
                 state
                     .assets
                     .iter()
                     .map(|(id, mmap)| Asset {
                         id: *id,
-                        buf: Cow::Borrowed(&mmap[..]),
+                        buf: Cow::Owned(mmap[..].to_vec()),
                     })
-                    .map(|asset| asset.into_len_packet())
                     .collect::<Vec<_>>()
             });
 
-            let tx = tx.lock().await;
             for packet in packets {
-                tx.send(packet).await.0?;
+                tx.send_msg(&packet).await?;
             }
         }
         Packet::Msg(m) if m.id == SubscribeLastUpdated::ID => {
-            let tx = tx.clone();
+            let mut tx = tx.clone();
             let db = db.clone();
-            let req_id = m.req_id;
             stellarator::spawn(async move {
                 loop {
                     let last_updated = db.last_updated.latest();
                     {
-                        let tx = tx.lock().await;
-                        match tx
-                            .send(LastUpdated(last_updated).with_request_id(req_id))
-                            .await
-                            .0
-                            .map_err(Error::from)
-                        {
+                        match tx.send_msg(&LastUpdated(last_updated)).await {
                             Err(err) if err.is_stream_closed() => {}
                             Err(err) => {
                                 warn!(?err, "failed to send packet");
@@ -1018,17 +1085,15 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     .store(time_step.as_nanos() as u64, atomic::Ordering::Release);
             }
             db.save_db_state()?;
-            let tx = tx.lock().await;
-            tx.send(&db.db_settings()).await.0?;
+            tx.send_msg(&db.db_settings()).await?;
         }
         Packet::Msg(m) if m.id == GetEarliestTimestamp::ID => {
-            let tx = tx.lock().await;
-            tx.send(&EarliestTimestamp(db.earliest_timestamp)).await.0?;
+            tx.send_msg(&EarliestTimestamp(db.earliest_timestamp))
+                .await?;
         }
         Packet::Msg(m) if m.id == GetDbSettings::ID => {
-            let tx = tx.lock().await;
             let settings = db.db_settings();
-            tx.send(&settings).await.0?;
+            tx.send_msg(&settings).await?;
         }
         Packet::Table(table) => {
             trace!(table.len = table.buf.len(), "sinking table");
@@ -1051,16 +1116,13 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         }
 
         Packet::Msg(m) if m.id == GetDbSettings::ID => {
-            let tx = tx.lock().await;
             let settings = db.db_settings();
-            tx.send(settings.with_request_id(m.req_id)).await.0?;
+            tx.send_msg(&settings).await?;
         }
         Packet::Msg(m) if m.id == SQLQuery::ID => {
             let SQLQuery(query) = m.parse::<SQLQuery>()?;
-            let inner_tx = tx.clone();
             let db = db.clone();
-            let req_id = m.req_id;
-            let (tx, rx) = thingbuf::mpsc::channel::<Vec<u8>>(4);
+            let (tokio_tx, rx) = thingbuf::mpsc::channel::<Vec<u8>>(4);
             let res = stellarator::struc_con::tokio(move |_| async move {
                 let mut ctx = db.as_session_context()?;
                 db.insert_views(&mut ctx).await?;
@@ -1072,27 +1134,19 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                         ::arrow::ipc::writer::StreamWriter::try_new(&mut buf, batch.schema_ref())?;
                     writer.write(&batch)?;
                     writer.finish()?;
-                    let _ = tx.send(buf).await;
+                    let _ = tokio_tx.send(buf).await;
                 }
                 Ok::<_, Error>(())
             })
             .join();
             while let Some(batch) = rx.recv().await {
-                let tx = inner_tx.lock().await;
-                tx.send(
-                    ArrowIPC {
-                        batch: Some(Cow::Owned(batch)),
-                    }
-                    .with_request_id(req_id),
-                )
-                .await
-                .0?;
+                tx.send_msg(&ArrowIPC {
+                    batch: Some(Cow::Owned(batch)),
+                })
+                .await?;
             }
             res.await??;
-            let tx = inner_tx.lock().await;
-            tx.send(ArrowIPC { batch: None }.with_request_id(req_id))
-                .await
-                .0?;
+            tx.send_msg(&ArrowIPC { batch: None }).await?;
         }
         Packet::Msg(m) if m.id == SetMsgMetadata::ID => {
             let SetMsgMetadata { id, metadata } = m.parse::<SetMsgMetadata>()?;
@@ -1103,8 +1157,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             let msg_log =
                 db.with_state_mut(|s| s.get_or_insert_msg_log(msg_id, &db.path).cloned())?;
             let req_id = m.req_id;
-            let tx = tx.clone();
-            stellarator::spawn(handle_msg_stream(msg_id, req_id, msg_log, tx));
+            stellarator::spawn(handle_msg_stream(msg_id, req_id, msg_log, tx.tx.clone()));
         }
         Packet::Msg(m) if m.id == GetMsgMetadata::ID => {
             let GetMsgMetadata { msg_id } = m.parse::<GetMsgMetadata>()?;
@@ -1113,8 +1166,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             else {
                 return Err(Error::MsgNotFound(msg_id));
             };
-            let tx = tx.lock().await;
-            tx.send(metadata.with_request_id(m.req_id)).await.0?;
+            tx.send_msg(&metadata).await?;
         }
         Packet::Msg(m) if m.id == GetMsgs::ID => {
             let GetMsgs {
@@ -1134,25 +1186,19 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             } else {
                 iter.collect()
             };
-            let tx = tx.lock().await;
-            tx.send(MsgBatch { data }.with_request_id(m.req_id))
-                .await
-                .0?;
+            tx.send_msg(&MsgBatch { data }).await?;
         }
         Packet::Msg(m) if m.id == SaveArchive::ID => {
             let SaveArchive { path, format } = m.parse()?;
             db.save_archive(&path, format)?;
-            let tx = tx.lock().await;
-            tx.send(ArchiveSaved { path }.with_request_id(m.req_id))
-                .await
-                .0?;
+            tx.send_msg(&ArchiveSaved { path }).await?;
         }
         Packet::Msg(m) if m.id == VTableStream::ID => {
             let vtable_stream = m.parse::<VTableStream>()?;
             stellarator::spawn(handle_vtable_stream(
                 vtable_stream,
                 db.clone(),
-                tx.clone(),
+                tx.tx.clone(),
                 m.req_id,
             ));
         }

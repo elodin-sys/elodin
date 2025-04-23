@@ -517,10 +517,16 @@ pub const PACKET_HEADER_LEN: usize = 4;
 
 #[derive(TryFromBytes, Unaligned, Immutable, KnownLayout, Debug)]
 #[repr(C)]
-pub struct Packet {
+pub struct PacketHeader {
     pub packet_ty: PacketTy,
     pub id: PacketId,
     pub req_id: RequestId,
+}
+
+#[derive(TryFromBytes, Unaligned, Immutable, KnownLayout, Debug)]
+#[repr(C)]
+pub struct Packet {
+    pub header: PacketHeader,
     pub body: [u8],
 }
 
@@ -571,8 +577,9 @@ pub trait IntoLenPacket {
 #[cfg(feature = "alloc")]
 impl<M: Msg> IntoLenPacket for &'_ M {
     fn into_len_packet(self) -> LenPacket {
-        let msg = LenPacket::msg(M::ID, 0);
-        postcard::serialize_with_flavor(&self, msg).expect("postcard failed")
+        let mut msg = LenPacket::msg(M::ID, 0);
+        postcard::serialize_with_flavor(&self, &mut msg).expect("postcard failed");
+        msg
     }
 }
 
@@ -613,11 +620,11 @@ impl LenPacket {
     }
 
     pub fn set_request_id(&mut self, request_id: u8) {
-        self.inner[core::mem::offset_of!(Packet, req_id) + 4] = request_id;
+        self.inner[core::mem::offset_of!(Packet, header.req_id) + 4] = request_id;
     }
 
     pub fn with_request_id(mut self, request_id: u8) -> Self {
-        self.inner[core::mem::offset_of!(Packet, req_id) + 4] = request_id;
+        self.inner[core::mem::offset_of!(Packet, header.req_id) + 4] = request_id;
         self
     }
 
@@ -660,16 +667,24 @@ impl LenPacket {
         self.inner[..4].copy_from_slice(&len.to_le_bytes());
     }
 
+    #[inline]
     pub fn as_packet(&self) -> &Packet {
         let len = self.pkt_len() as usize;
-        Packet::try_ref_from_bytes_with_elems(&self.inner[4..], len)
-            .expect("len packet was not a valid `Packet`")
+        Packet::try_ref_from_bytes_with_elems(
+            &self.inner[4..],
+            len.saturating_sub(PACKET_HEADER_LEN),
+        )
+        .expect("len packet was not a valid `Packet`")
     }
 
+    #[inline]
     pub fn as_mut_packet(&mut self) -> &mut Packet {
         let len = self.pkt_len() as usize;
-        Packet::try_mut_from_bytes_with_elems(&mut self.inner[4..], len)
-            .expect("len packet was not a valid `Packet`")
+        Packet::try_mut_from_bytes_with_elems(
+            &mut self.inner[4..],
+            len.saturating_sub(PACKET_HEADER_LEN),
+        )
+        .expect("len packet was not a valid `Packet`")
     }
 
     pub fn clear(&mut self) {
@@ -679,8 +694,8 @@ impl LenPacket {
 }
 
 #[cfg(feature = "alloc")]
-impl postcard::ser_flavors::Flavor for LenPacket {
-    type Output = LenPacket;
+impl postcard::ser_flavors::Flavor for &'_ mut LenPacket {
+    type Output = ();
 
     fn try_push(&mut self, data: u8) -> postcard::Result<()> {
         self.push(data);
@@ -688,7 +703,7 @@ impl postcard::ser_flavors::Flavor for LenPacket {
     }
 
     fn finalize(self) -> postcard::Result<Self::Output> {
-        Ok(self)
+        Ok(())
     }
 }
 
@@ -703,9 +718,12 @@ impl<B: IoBuf> OwnedPacket<B> {
     pub fn parse_with_offset(packet_buf: B, offset: usize) -> Result<Self, Error> {
         let buf = &stellarator_buf::deref(&packet_buf)[offset..];
         let Packet {
-            packet_ty,
-            req_id,
-            id,
+            header:
+                PacketHeader {
+                    packet_ty,
+                    req_id,
+                    id,
+                },
             ..
         } = Packet::try_ref_from_bytes(buf)?;
         let packet_ty = *packet_ty;
