@@ -2,11 +2,13 @@
 
 ## unreleased
 
+## v0.14
+
 - **(breaking)** Switch vtables to use a new bytecode based format. This changes makes vtables simpler and more flexible. This change also effects the Lua format. You can now formulate a vtable with the `vtable_msg` function:
 
   ```lua
   vtable =  vtable_msg(1, {
-      field(0, 12, schema("f32", {3}, pair(1, "accel"))), # field 
+      field(0, 12, schema("f32", {3}, pair(1, "accel"))), # field
       field(12, 12, schema("f32", {3}, pair(1, "gyro"))),
   })
 
