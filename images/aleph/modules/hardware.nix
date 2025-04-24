@@ -57,7 +57,7 @@ in {
       });
     })
   ];
-  sdImage.compressImage = false;
+  sdImage.compressImage = true;
   boot.loader.systemd-boot.enable = true;
   boot.loader.systemd-boot.installDeviceTree = true;
   boot.loader.systemd-boot-dtb.enable = true;
