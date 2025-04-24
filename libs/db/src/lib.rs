@@ -803,7 +803,6 @@ impl<A: AsyncWrite + 'static> PacketTx<A> {
             return Err(err);
         }
         pkt.as_mut_packet().header.req_id = self.req_id;
-        println!("Sending packet with {:?}", pkt.as_packet());
         let tx = self.tx.lock().await;
         let res = rent!(tx.send(pkt).await, pkt);
         self.pkt = Some(pkt);

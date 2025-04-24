@@ -1,4 +1,4 @@
-use bevy::utils::tracing;
+use bevy::prelude::*;
 use miette::{Context, IntoDiagnostic, miette};
 use std::path::PathBuf;
 use stellarator::util::CancelToken;
@@ -42,7 +42,7 @@ pub async fn run_recipe(
             return Err(miette!("error generating s10 plan from python file"));
         }
         path = out_dir.join("s10.toml");
-        tracing::debug!("Generated s10 plan: {}", path.display());
+        debug!("Generated s10 plan: {}", path.display());
     }
 
     // If not a s10 plan file, bail out

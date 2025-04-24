@@ -1021,7 +1021,7 @@ pub fn graph_touch(
     primary_window: Query<&Window, With<PrimaryWindow>>,
     touch_tracker: Res<TouchTracker>,
 ) {
-    let Ok(window) = primary_window.get_single() else {
+    let Ok(window) = primary_window.single() else {
         return;
     };
 
@@ -1091,7 +1091,7 @@ pub fn zoom_graph(
         return;
     }
 
-    let Ok(window) = primary_window.get_single() else {
+    let Ok(window) = primary_window.single() else {
         return;
     };
 
@@ -1152,7 +1152,7 @@ pub fn pan_graph(
     key_state: Res<LogicalKeyState>,
     mut commands: Commands,
 ) {
-    let Ok(window) = primary_window.get_single() else {
+    let Ok(window) = primary_window.single() else {
         return;
     };
 
@@ -1172,21 +1172,21 @@ pub fn pan_graph(
             viewport.physical_size.y as f32 + viewport.physical_position.y as f32,
         );
         if !viewport_rect.contains(cursor_pos) {
-            if let Some(mut e) = commands.get_entity(entity) {
+            if let Ok(mut e) = commands.get_entity(entity) {
                 e.try_insert(LastPos(None));
             }
             continue;
         }
 
         if mouse_buttons.just_pressed(MouseButton::Left) {
-            if let Some(mut e) = commands.get_entity(entity) {
+            if let Ok(mut e) = commands.get_entity(entity) {
                 e.try_insert(LastPos(Some(cursor_pos)));
             }
             continue;
         }
 
         if !mouse_buttons.pressed(MouseButton::Left) {
-            if let Some(mut e) = commands.get_entity(entity) {
+            if let Ok(mut e) = commands.get_entity(entity) {
                 e.try_insert(LastPos(None));
             }
             continue;
@@ -1210,7 +1210,7 @@ pub fn pan_graph(
             delta_device_pixels / viewport_rect.size() * graph_state.zoom_factor * offset_mask;
         graph_state.pan_offset += delta;
 
-        if let Some(mut e) = commands.get_entity(entity) {
+        if let Ok(mut e) = commands.get_entity(entity) {
             e.try_insert(LastPos(Some(cursor_pos)));
         }
     }
@@ -1226,7 +1226,7 @@ pub fn reset_graph(
         *last_click = Some(Instant::now());
     }
 
-    let Ok(window) = primary_window.get_single() else {
+    let Ok(window) = primary_window.single() else {
         return;
     };
 

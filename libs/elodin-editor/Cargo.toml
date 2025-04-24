@@ -15,11 +15,11 @@ nox.path = "../nox"
 nox.default-features = false
 
 # bevy
-bevy.version = "0.15"
+bevy.version = "0.16"
 bevy.features = ["wayland"]
-bevy_render.version = "0.15"
-bevy_color.version = "0.15"
-bevy_egui.version = "0.33"
+bevy_render.version = "0.16"
+bevy_color.version = "0.16"
+bevy_egui.version = "0.34.0-rc.2"
 egui.version = "0.31"
 egui.features = ["rayon"]
 egui_tiles = "0.12"
@@ -27,11 +27,14 @@ egui_table.version = "0.3"
 winit.version = "0.30"
 winit.features = ["rwh_05"]
 raw-window-handle = "0.5"
-bevy_infinite_grid = "=0.14.0"                                # the released version of infinite grid has a bug with hdr this commit is just before that release
+bevy_infinite_grid.git = "https://github.com/Cyannide/bevy_infinite_grid.git"
+bevy_infinite_grid.branch = "bevy-0.16"
 big_space.git = "https://github.com/elodin-sys/big_space.git"
-big_space.branch = "no_prop_rot_v0.15"
-bevy_editor_cam = "0.5.0"
-bevy_framepace = "0.18"
+big_space.branch = "no_prop_rot_v0.16"
+bevy_editor_cam.git = "https://github.com/tomara-x/bevy_editor_cam.git"
+bevy_editor_cam.branch = "bevy-0.16"
+bevy_framepace.git = "https://github.com/aloucks/bevy_framepace.git"
+bevy_framepace.branch = "bevy-0.16"
 
 # rand
 fastrand.version = "2"

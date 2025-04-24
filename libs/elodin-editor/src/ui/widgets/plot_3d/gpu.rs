@@ -18,11 +18,11 @@ use bevy::{
     ecs::{
         bundle::Bundle,
         component::Component,
-        entity::Entity,
+        entity::{ContainsEntity, Entity},
         query::Has,
-        schedule::{IntoSystemConfigs, IntoSystemSetConfigs, SystemSet},
+        schedule::{IntoScheduleConfigs, SystemSet},
         system::{
-            Commands, Query, Res, ResMut, Resource, SystemState,
+            Commands, Query, Res, ResMut, SystemState,
             lifetimeless::{Read, SRes},
         },
         world::{FromWorld, Mut, World},
@@ -30,7 +30,7 @@ use bevy::{
     image::BevyDefault,
     math::{Mat4, Vec4},
     pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup},
-    prelude::{Color, Deref},
+    prelude::{Color, Deref, Resource},
     render::{
         ExtractSchedule, MainWorld, Render, RenderApp, RenderSet,
         extract_component::{ComponentUniforms, DynamicUniformIndex, UniformComponentPlugin},
@@ -47,6 +47,7 @@ use bevy::{
 use bevy_render::{
     extract_component::ExtractComponent,
     sync_world::{MainEntity, SyncToRenderWorld, TemporaryRenderEntity},
+    view::RetainedViewEntity,
 };
 use big_space::GridCell;
 use binding_types::storage_buffer_read_only_sized;
@@ -538,7 +539,6 @@ fn extract_lines(
 }
 
 type ViewQuery = (
-    Entity,
     &'static ExtractedView,
     &'static Msaa,
     Option<&'static RenderLayers>,
@@ -563,14 +563,14 @@ fn queue_line(
     let draw_function = draw_functions.read().get_id::<DrawLineData>().unwrap();
 
     for (
-        view_entity,
         view,
         msaa,
         render_layers,
         (normal_prepass, depth_prepass, motion_vector_prepass, deferred_prepass),
     ) in &mut views
     {
-        let Some(transparent_phase) = transparent_render_phases.get_mut(&view_entity) else {
+        let Some(transparent_phase) = transparent_render_phases.get_mut(&view.retained_view_entity)
+        else {
             continue;
         };
         let render_layers = render_layers.cloned().unwrap_or_default();
@@ -608,7 +608,8 @@ fn queue_line(
                 pipeline,
                 distance: 0.,
                 batch_range: 0..1,
-                extra_index: PhaseItemExtraIndex::NONE,
+                extra_index: PhaseItemExtraIndex::None,
+                indexed: true,
             });
         }
     }

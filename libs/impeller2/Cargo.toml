@@ -42,7 +42,7 @@ miette.optional = true
 const-fnv1a-hash = "1.1.0"
 
 # bevy
-bevy.version = "0.15"
+bevy.version = "0.16"
 bevy.default-features = false
 bevy.optional = true
 

@@ -20,7 +20,7 @@ zerocopy.version = "0.8.2"
 zerocopy.features = ["derive"]
 
 # bevy
-bevy.version = "0.15"
+bevy.version = "0.16"
 bevy.optional = true
 
 # serde

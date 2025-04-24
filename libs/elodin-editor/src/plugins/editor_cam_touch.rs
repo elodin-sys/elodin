@@ -1,5 +1,5 @@
 use bevy::app::{App, Plugin, Update};
-use bevy::ecs::schedule::IntoSystemConfigs;
+use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::ecs::system::Query;
 use bevy::input::touch::Touch;
 use bevy::math::{DVec3, Vec2};

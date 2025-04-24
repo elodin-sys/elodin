@@ -1,7 +1,6 @@
 use bevy::{
     ecs::system::SystemParam,
     prelude::*,
-    utils::HashMap,
     window::{EnabledButtons, PresentMode, PrimaryWindow, WindowResolution, WindowTheme},
 };
 use bevy_egui::EguiContexts;
@@ -12,6 +11,7 @@ use impeller2_bevy::{
     spawn_tcp_connect,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::{
     collections::BTreeMap,
     net::{Ipv6Addr, SocketAddr, ToSocketAddrs},
@@ -66,8 +66,7 @@ fn create_startup_window(
             },
             StartupWindow,
         ));
-    } else {
-        let mut primary = primary.single_mut();
+    } else if let Ok(mut primary) = primary.single_mut() {
         primary.visible = true
     }
 }
@@ -177,8 +176,12 @@ impl StartupLayout<'_, '_> {
 
     fn switch_to_main(&mut self) {
         let e = self.window.single_mut();
-        self.commands.entity(e).despawn();
-        self.main_window.single_mut().visible = true;
+        self.commands
+            .entity(e.expect("Window entity should exist"))
+            .despawn();
+        if let Ok(mut window) = self.main_window.single_mut() {
+            window.visible = true;
+        }
     }
 
     fn open_file(&mut self, file: PathBuf) {
