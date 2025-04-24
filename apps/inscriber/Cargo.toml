@@ -9,8 +9,9 @@ publish = false
 # errors
 anyhow = "1"
 
-# async
+# io
 stellarator.path = "../../libs/stellarator"
+zstd = "0.13.2"
 
 # terminal
 promkit.version = "0.9.1"
