@@ -57,6 +57,9 @@ in {
       });
     })
   ];
+  imports = [
+    ./systemd-boot-dtb.nix
+  ];
   sdImage.compressImage = true;
   boot.loader.systemd-boot.enable = true;
   boot.loader.systemd-boot.installDeviceTree = true;
