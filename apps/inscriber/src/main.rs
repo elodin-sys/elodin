@@ -206,7 +206,13 @@ impl ExternalDisk {
 
 impl Display for ExternalDisk {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} ({})", self.identifier, self.size)
+        write!(
+            f,
+            "{} {} - ({})",
+            self.identifier,
+            self.name.as_deref().unwrap_or_default(),
+            self.size
+        )
     }
 }
 
@@ -262,7 +268,7 @@ fn list_external_disks() -> anyhow::Result<Vec<ExternalDisk>> {
 #[cfg(target_os = "linux")]
 fn list_external_disks() -> anyhow::Result<Vec<ExternalDisk>> {
     let output = Command::new("lsblk")
-        .args(&["-o", "NAME,SIZE,TYPE,MODEL,MOUNTPOINT", "-d", "-n", "-p"])
+        .args(["-o", "NAME,SIZE,TYPE,MODEL,MOUNTPOINT", "-d", "-n", "-p"])
         .output()?;
 
     if !output.status.success() {
@@ -329,7 +335,7 @@ fn is_external_disk_linux(path: &str) -> anyhow::Result<bool> {
     }
 
     if device_name == "sda" {
-        let output = Command::new("ls").args(&["/sys/block/"]).output()?;
+        let output = Command::new("ls").arg("/sys/block/").output()?;
         let output_str = String::from_utf8_lossy(&output.stdout);
         let disk_count = output_str
             .split_whitespace()
