@@ -1,4 +1,5 @@
-#!/usr/bin/env bash
+#! /usr/bin/env nix-shell
+#! nix-shell -i bash -p gum nix-output-monitor
 set -eu
 
 # Default values
@@ -7,9 +8,9 @@ default_host="aleph.local"
 target=".#nixosConfigurations.default.config.system.build.toplevel"
 no_aleph_builder=false
 
-log_info() { echo -e "\033[1;36m[INFO]\033[0m  $*" >&2; }
-log_warn() { echo -e "\033[1;33m[WARN]\033[0m  $*" >&2; }
-log_error() { echo -e "\033[1;31m[ERROR]\033[0m $*" >&2; }
+log_info() { gum log --level info "$*"; }
+log_warn() { gum log --level warn "$*"; }
+log_error() { gum log --level error "$*"; }
 
 show_usage() {
   echo "Usage: $0 [options]"
@@ -188,11 +189,11 @@ fi
 if [ "$no_aleph_builder" = false ] && ! ( ([ "$(uname -m)" = "aarch64" ] && [ "$(uname)" = "Linux" ]) ||
   ([ -f /etc/nix/machines ] && grep -q 'aarch64-linux' /etc/nix/machines)); then
   log_warn "No aarch64-linux builder found, falling back to building on Aleph (slow)"
-  build_cmd="nix build --accept-flake-config --eval-store auto --store ssh-ng://$user@$host $target --print-out-paths"
+  build_cmd="nom build --accept-flake-config --eval-store auto --store ssh-ng://$user@$host $target --print-out-paths"
   log_info "Running: $build_cmd"
   out_path=$(eval "$build_cmd")
 else
-  build_cmd="nix build --accept-flake-config $target --print-out-paths"
+  build_cmd="nom build --accept-flake-config $target --print-out-paths"
   log_info "Running: $build_cmd"
   out_path=$(eval "$build_cmd")
   copy_cmd="nix copy --no-check-sigs --to ssh-ng://$user@$host $out_path"
