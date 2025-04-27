@@ -40,6 +40,7 @@ def nix_step(
     agents={},
 ):
     heredoc_command = f"""nix develop {flake} --command bash <<'EOF'
+set -o pipefail
 {command}
 EOF"""
     return step(
