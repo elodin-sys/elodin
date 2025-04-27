@@ -436,12 +436,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_nop() {
+    async fn test_nop() {
         Completion::run(Nop).await.unwrap();
     }
 
     #[test]
-    fn test_timeout() {
+    async fn test_timeout() {
         let start = Instant::now();
         Completion::run(Timeout::new(Duration::from_millis(250)))
             .await

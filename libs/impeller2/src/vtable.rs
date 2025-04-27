@@ -767,6 +767,7 @@ mod tests {
                 }
                 _ => todo!(),
             }
+            Ok(())
         }
     }
 
@@ -803,7 +804,7 @@ mod tests {
             bar: 5.0,
         };
         let mut sink = TestSink::default();
-        v.apply(foo.as_bytes(), &mut sink).unwrap();
+        v.apply(foo.as_bytes(), &mut sink).unwrap().unwrap();
         let test = sink
             .f32_entities
             .get(&(ComponentId::new("test"), EntityId(1)))
