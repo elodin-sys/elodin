@@ -16,26 +16,8 @@ icon = ""
 
 The expansion board has a built-in RP2040-based programmer that is pre-flashed with [debugprobe firmware](https://github.com/elodin-sys/debugprobe)
 that allows it to function as a CMSIS-DAP probe. This makes it easy to flash new firmware onto the FC board over USB using standard tools such as
-[OpenOCD](https://openocd.org/) or [probe-rs](https://probe.rs/). We recommend using probe-rs because it has less of a configuration burden, and
+[probe-rs](https://probe.rs/docs/getting-started/installation) or [OpenOCD](https://openocd.org/). We recommend using probe-rs because it has less of a configuration burden, and
 has out-of-the-box support for RTT (Real-Time Transfer) logging.
-
-### Probe-rs Install
-
-{% alert(kind="info") %}
-Probe-rs v0.25.0 has a regression that prevents it from working well with the STM32H7 series. We recommend using v0.24.0 until the issue is resolved.
-{% end %}
-
-Install probe-rs v0.24.0 using the following install scripts:
-
-**Linux/macOS**
-```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/probe-rs/probe-rs/releases/tag/v0.24.0/download/probe-rs-tools-installer.sh | sh
-```
-
-**Windows**
-```sh
-irm https://github.com/probe-rs/probe-rs/releases/tag/v0.24.0/download/probe-rs-tools-installer.ps1 | iex
-```
 
 ### Building the expansion boards default firmware
 

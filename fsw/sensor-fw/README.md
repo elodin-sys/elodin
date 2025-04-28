@@ -3,7 +3,7 @@
 ## Pre-requisites
 
 - [`rust` + `cargo`](https://rustup.rs/)
-- [`probe-rs`](https://probe.rs/docs/getting-started/installation/) v0.24 (recommended) or [`openocd`](https://openocd.org/)
+- [`probe-rs`](https://probe.rs/docs/getting-started/installation/) or [`openocd`](https://openocd.org/)
 - [`flip-link`](https://github.com/knurling-rs/flip-link#installation)
 
 ## Flashing instructions
