@@ -30,6 +30,7 @@
       onnx
       tqdm
       matplotlib
+      pycuda
       (onnxruntime-gpu-wheel ps)
     ];
 in {
@@ -45,6 +46,8 @@ in {
       nvidia-jetpack.l4t-multimedia
       nvidia-jetpack.l4t-camera
     ];
+    NVCC_PREPEND_FLAGS = "--compiler-bindir ${pkgs.gcc11}/bin/gcc";
+    NVCC_APPEND_FLAGS = "-I${pkgs.cudaPackages.cuda_cudart.include}/include";
   };
   hardware.graphics.enable = true;
   virtualisation.podman = {
@@ -79,6 +82,7 @@ in {
     lsof
     gst_all_1.gstreamer
     gst_all_1.gst-plugins-base
+    cudaPackages.cuda_nvcc
     nvidia-jetpack.samples.cuda-test
     nvidia-jetpack.samples.cudnn-test
     (python311.withPackages pythonPackages)

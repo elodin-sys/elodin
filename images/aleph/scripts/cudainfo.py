@@ -182,6 +182,198 @@ def get_jetson_info():
     return info
 
 
+def check_pycuda():
+    """Test if PyCUDA works properly"""
+    result = {"initialized": False, "device_info": None, "kernel_test": False, "error": None}
+
+    try:
+        import pycuda.autoinit
+        import pycuda.driver as drv
+        from pycuda.compiler import SourceModule
+        import numpy as np
+
+        result["initialized"] = True
+
+        # Get device information
+        device = pycuda.driver.Device(0)
+        result["device_info"] = {
+            "name": device.name(),
+            "compute_capability": device.compute_capability(),
+            "total_memory": f"{device.total_memory() / (1024**2):.2f} MB",
+        }
+
+        # Try running a simple test kernel
+        mod = SourceModule("""
+        __global__ void add(float *a, float *b, float *c)
+        {
+          int i = threadIdx.x + blockIdx.x * blockDim.x;
+          c[i] = a[i] + b[i];
+        }
+        """)
+
+        add_kernel = mod.get_function("add")
+
+        # Create test data
+        a = np.random.randn(100).astype(np.float32)
+        b = np.random.randn(100).astype(np.float32)
+        c = np.zeros_like(a)
+
+        # Run kernel
+        add_kernel(drv.In(a), drv.In(b), drv.Out(c), block=(100, 1, 1), grid=(1, 1))
+
+        # Verify results
+        expected = a + b
+        if np.allclose(c, expected):
+            result["kernel_test"] = True
+        else:
+            result["kernel_test"] = False
+            result["error"] = "Kernel execution produced incorrect results"
+
+    except ImportError as e:
+        result["error"] = f"PyCUDA not installed: {str(e)}"
+    except Exception as e:
+        result["error"] = f"Error running PyCUDA test: {str(e)}"
+
+    return result
+
+
+def test_cuda_workflow():
+    """
+    Test a complete CUDA workflow:
+    1. Initialize CUDA context
+    2. Allocate GPU memory
+    3. Transfer data to GPU
+    4. Execute a kernel
+    5. Transfer results back
+    6. Verify correctness
+
+    Returns a dictionary with results of each step and error messages if any.
+    """
+    result = {
+        "context_init": {"success": False, "error": None},
+        "memory_allocation": {"success": False, "error": None},
+        "host_to_device": {"success": False, "error": None},
+        "kernel_execution": {"success": False, "error": None},
+        "device_to_host": {"success": False, "error": None},
+        "result_verification": {"success": False, "error": None},
+        "overall": False,
+    }
+
+    try:
+        # Step 1: Initialize CUDA context
+        try:
+            import pycuda.driver as drv
+
+            drv.init()
+            context = drv.Device(0).make_context()
+            result["context_init"]["success"] = True
+        except Exception as e:
+            result["context_init"]["error"] = str(e)
+            raise
+
+        # Step 2: Allocate GPU memory
+        try:
+            import numpy as np
+
+            # Create input data
+            a_host = np.random.randint(0, 100, size=1000).astype(np.int32)
+            b_host = np.random.randint(0, 100, size=1000).astype(np.int32)
+            c_host = np.zeros_like(a_host)
+
+            # Allocate device memory
+            a_gpu = drv.mem_alloc(a_host.nbytes)
+            b_gpu = drv.mem_alloc(b_host.nbytes)
+            c_gpu = drv.mem_alloc(c_host.nbytes)
+
+            result["memory_allocation"]["success"] = True
+        except Exception as e:
+            result["memory_allocation"]["error"] = str(e)
+            raise
+
+        # Step 3: Transfer data to GPU
+        try:
+            drv.memcpy_htod(a_gpu, a_host)
+            drv.memcpy_htod(b_gpu, b_host)
+            result["host_to_device"]["success"] = True
+        except Exception as e:
+            result["host_to_device"]["error"] = str(e)
+            raise
+
+        # Step 4: Execute kernel
+        try:
+            from pycuda.compiler import SourceModule
+
+            # Define a simple kernel that adds two arrays
+            mod = SourceModule("""
+            __global__ void add(int *a, int *b, int *c)
+            {
+                int i = threadIdx.x + blockIdx.x * blockDim.x;
+                if (i < 1000) {
+                    c[i] = a[i] + b[i];
+                }
+            }
+            """)
+
+            # Get the kernel function
+            add_kernel = mod.get_function("add")
+
+            # Launch kernel
+            add_kernel(a_gpu, b_gpu, c_gpu, block=(128, 1, 1), grid=(8, 1))
+
+            # Synchronize to make sure kernel execution is complete
+            context.synchronize()
+
+            result["kernel_execution"]["success"] = True
+        except Exception as e:
+            result["kernel_execution"]["error"] = str(e)
+            raise
+
+        # Step 5: Transfer results back to host
+        try:
+            drv.memcpy_dtoh(c_host, c_gpu)
+            result["device_to_host"]["success"] = True
+        except Exception as e:
+            result["device_to_host"]["error"] = str(e)
+            raise
+
+        # Step 6: Verify results
+        try:
+            expected = a_host + b_host
+            if np.array_equal(c_host, expected):
+                result["result_verification"]["success"] = True
+            else:
+                result["result_verification"]["error"] = "Results don't match expected values"
+        except Exception as e:
+            result["result_verification"]["error"] = str(e)
+            raise
+
+        # Overall success only if all steps succeeded
+        result["overall"] = all(
+            step["success"]
+            for step in [
+                result["context_init"],
+                result["memory_allocation"],
+                result["host_to_device"],
+                result["kernel_execution"],
+                result["device_to_host"],
+                result["result_verification"],
+            ]
+        )
+
+    except Exception:
+        # We'll let the individual step error messages explain what went wrong
+        pass
+    finally:
+        # Clean up - Release CUDA context if it was created
+        if result["context_init"]["success"]:
+            try:
+                context.pop()
+            except Exception:
+                pass  # Context may have already been destroyed
+
+    return result
+
+
 def main():
     print_section("SYSTEM INFORMATION")
     print(f"Python version: {sys.version}")
@@ -359,7 +551,47 @@ def main():
                                 print(f"CUDA device name: {name_buffer.value.decode('utf-8')}")
     except Exception as e:
         print(f"Error in CUDA initialization test: {e}")
+
+    # Check PyCUDA functionality
+    print_section("PYCUDA FUNCTIONALITY TEST")
+    pycuda_result = check_pycuda()
+
+    if pycuda_result["initialized"]:
+        print("✅ PyCUDA successfully initialized")
+
+        if pycuda_result["device_info"]:
+            info = pycuda_result["device_info"]
+            print(f"Device: {info['name']}")
+            print(f"Compute capability: {info['compute_capability']}")
+            print(f"Total memory: {info['total_memory']}")
+
+        if pycuda_result["kernel_test"]:
+            print("✅ PyCUDA kernel execution test PASSED")
+        else:
+            print(
+                f"❌ PyCUDA kernel execution test FAILED: {pycuda_result.get('error', 'Unknown error')}"
+            )
+    else:
+        print(f"❌ PyCUDA initialization FAILED: {pycuda_result.get('error', 'Unknown error')}")
+
     print("\nDiagnostics completed.")
+
+    # Test complete CUDA workflow
+    print_section("COMPLETE CUDA WORKFLOW TEST")
+    workflow_result = test_cuda_workflow()
+
+    if workflow_result["overall"]:
+        print("✅ Complete CUDA workflow test PASSED")
+    else:
+        print("❌ Complete CUDA workflow test FAILED")
+
+    # Print details of each step
+    for step, details in workflow_result.items():
+        if step != "overall":
+            if details["success"]:
+                print(f"  ✅ {step.replace('_', ' ').title()}: PASSED")
+            else:
+                print(f"  ❌ {step.replace('_', ' ').title()}: FAILED - {details['error']}")
 
 
 if __name__ == "__main__":
