@@ -33,6 +33,21 @@
       (onnxruntime-gpu-wheel ps)
     ];
 in {
+  nixpkgs.config = {
+    allowUnfree = true;
+    cudaSupport = true;
+    cudaCapabilities = ["7.2" "8.7"];
+  };
+  nix.settings.extra-substituters = [
+    "https://cache.nixos.org"
+    "http://ci-arm1.elodin.dev:5000"
+  ];
+  nix.settings.trusted-public-keys = [
+    "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
+    "builder-cache-1:q7rDGIQgkg1nsxNEg7mHN1kEDuxPmJhQpuIXCCwLj8E="
+  ];
+  nix.settings.experimental-features = ["nix-command" "flakes"];
+
   environment.variables = with pkgs; {
     LD_LIBRARY_PATH = lib.makeLibraryPath [
       stdenv.cc.cc.lib
@@ -95,4 +110,19 @@ in {
     aleph-status
   ];
   programs.fish.enable = true;
+  nix.settings.trusted-users = ["root" "@wheel"];
+  security.pam.loginLimits = [
+    {
+      domain = "*";
+      type = "soft";
+      item = "nofile";
+      value = "65536";
+    }
+    {
+      domain = "*";
+      type = "hard";
+      item = "nofile";
+      value = "524288";
+    }
+  ];
 }
