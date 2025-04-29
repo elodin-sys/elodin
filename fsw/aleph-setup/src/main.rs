@@ -173,7 +173,7 @@ async fn create_user() -> anyhow::Result<String> {
         .args([
             "-m",
             "-G",
-            "wheel",
+            "wheel,dialout,video",
             "-s",
             "/run/current-system/sw/bin/bash",
             "-U",
