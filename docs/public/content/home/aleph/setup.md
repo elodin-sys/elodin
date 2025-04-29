@@ -136,7 +136,7 @@ ping fde1:2240:a1ef::1
 
 {% alert(kind="notice") %}
 Wait approximately 30 seconds for the carrier board to boot up before attempting to connect via SSH.
-The Aleph connection will be a new local network connection broadcasting as `aleph.local`.
+The Aleph connection will be a new local network connection broadcasting as `aleph-<random suffix>.local`.
 {% end %}
 
 The carrier board runs a custom Linux distribution with a pre-installed SSH server. You can connect to the carrier board via SSH using the following command:
@@ -149,7 +149,7 @@ ssh root@fde1:2240:a1ef::1
 
 First install Elodin Editor using the instructions in [Quick Start](/home/quickstart#install)
 
-Next launch Elodin. You should be greeted with a startup window. You can connect to Aleph by selecting the "Connect to IP Address" option from the menu and entering `aleph.local:2240` in the IP address field.
+Next launch Elodin. You should be greeted with a startup window. You can connect to Aleph by selecting the "Connect to IP Address" option from the menu and entering `[fde1:2240:a1ef::1]:2240` in the IP address field.
 
 
 <img src="/assets/aleph-connect.png" alt="screenshot of editor connecting to aleph"/>
