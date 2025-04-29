@@ -37,7 +37,6 @@ in {
     LD_LIBRARY_PATH = lib.makeLibraryPath [
       stdenv.cc.cc.lib
       cudaPackages.cudatoolkit
-      cudaPackages.cudatoolkit
       cudaPackages.cudnn
       cudaPackages.tensorrt
       cudaPackages.vpi2
@@ -47,6 +46,7 @@ in {
       nvidia-jetpack.l4t-camera
     ];
   };
+  hardware.graphics.enable = true;
   virtualisation.podman = {
     enable = true;
     # TODO: replace with `hardware.nvidia-container-toolkit.enable` when it works (https://github.com/nixos/nixpkgs/issues/344729).
