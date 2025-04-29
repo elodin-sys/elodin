@@ -30,6 +30,7 @@
       onnx
       tqdm
       matplotlib
+      pycuda
       (onnxruntime-gpu-wheel ps)
     ];
 in {
@@ -52,7 +53,6 @@ in {
     LD_LIBRARY_PATH = lib.makeLibraryPath [
       stdenv.cc.cc.lib
       cudaPackages.cudatoolkit
-      cudaPackages.cudatoolkit
       cudaPackages.cudnn
       cudaPackages.tensorrt
       cudaPackages.vpi2
@@ -61,7 +61,10 @@ in {
       nvidia-jetpack.l4t-multimedia
       nvidia-jetpack.l4t-camera
     ];
+    NVCC_PREPEND_FLAGS = "--compiler-bindir ${pkgs.gcc11}/bin/gcc";
+    NVCC_APPEND_FLAGS = "-I${pkgs.cudaPackages.cuda_cudart.include}/include";
   };
+  hardware.graphics.enable = true;
   virtualisation.podman = {
     enable = true;
     # TODO: replace with `hardware.nvidia-container-toolkit.enable` when it works (https://github.com/nixos/nixpkgs/issues/344729).
@@ -94,6 +97,7 @@ in {
     lsof
     gst_all_1.gstreamer
     gst_all_1.gst-plugins-base
+    cudaPackages.cuda_nvcc
     nvidia-jetpack.samples.cuda-test
     nvidia-jetpack.samples.cudnn-test
     (python311.withPackages pythonPackages)
