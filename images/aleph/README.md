@@ -30,15 +30,9 @@ When you receive Aleph, it comes with NixOS pre-installed. On first login you wi
 ### Connect Aleph to WiFi
 First connect to Aleph with right-most USB-C port. This port has an Ethernet gadget enabled that will allow you to SSH into Aleph.
 
-Run `ssh root@aleph.local`. The default password is `root`. Once logged in you will be guided through the setup. If the setup does not start, you can manually start it by running `aleph-setup`.
+Run `ssh root@fde1:2240:a1ef::1`. The default password is `root`. Once logged in you will be guided through the setup. If the setup does not start, you can manually start it by running `aleph-setup`.
 
 2. **SSH to Aleph**: Log in to Aleph using SSH. The default root password is `root`.
-   ```bash
-   # Access via USB Ethernet (always works regardless of hostname)
-   ssh root@aleph.local
-   ```
-
-   If mDNS resolution fails (common on some networks or operating systems), use the static IPv6 address instead:
    ```bash
    ssh root@fde1:2240:a1ef::1
    ```
@@ -51,7 +45,7 @@ Run `ssh root@aleph.local`. The default password is `root`. Once logged in you w
 
 After connecting to WiFi, Aleph will store your network credentials and reconnect automatically on subsequent boots. You can verify the connection with `ping google.com` or by checking the assigned IP address with `ip addr show wlan0`.
 
-Once connected to WiFi, you'll be able to SSH directly to Aleph over your wireless network using its unique hostname (which you can find with the `scripts/aleph-scan.sh` script). The USB Ethernet connection will remain available as a fallback access method with the consistent name `aleph.local`.
+Once connected to WiFi, you'll be able to SSH directly to Aleph over your wireless network using its unique hostname (which you can find with the `scripts/aleph-scan.sh` script). The USB Ethernet connection will remain available as a fallback access method with `fde1:2240:a1ef::1` as the static IPv6 address.
 
 [![asciicast](https://asciinema.org/a/716409.svg)](https://asciinema.org/a/716409)
 
@@ -72,7 +66,7 @@ This is the recommended development workflow for iterating on the NixOS configur
 
 3. Run `./deploy.sh` to deploy with default settings, or specify a custom host/user:
    ```bash
-   # Deploy using default settings ($USER@aleph.local)
+   # Deploy using default settings ($USER@fde1:2240:a1ef::1)
    ./deploy.sh
    # Deploy using custom host and username
    ./deploy.sh --host aleph-99a2.local --user myuser
@@ -115,11 +109,6 @@ This method requires a USB flash drive or SD card with at least 8GB of space. Th
 1. **Establish Connection**: Connect to Aleph via the right-most USB-C port (which has the Ethernet gadget enabled). This sets up a local network connection between your computer and Aleph over USB.
 
 2. **SSH to Aleph**: Log in to Aleph using SSH. The default root password is `root`.
-   ```bash
-   ssh root@aleph.local
-   ```
-
-   If mDNS resolution fails (common on some networks or operating systems), use the static IPv6 address instead:
    ```bash
    ssh root@fde1:2240:a1ef::1
    ```

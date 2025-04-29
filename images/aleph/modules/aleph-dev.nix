@@ -110,7 +110,7 @@ in {
     aleph-status
   ];
   programs.fish.enable = true;
-  nix.settings.trusted-users = ["root" "@wheel"];
+  nix.settings.trusted-users = ["@wheel"];
   security.pam.loginLimits = [
     {
       domain = "*";

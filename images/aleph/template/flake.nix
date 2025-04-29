@@ -61,7 +61,7 @@
         PermitRootLogin = "yes";
       };
       security.sudo.wheelNeedsPassword = false;
-      nix.settings.trusted-users = ["root" "@wheel"];
+      nix.settings.trusted-users = ["@wheel"];
     };
     # sets up two different nixos systems default and installer
     # installer is setup to be flashed to a usb drive, and contains the

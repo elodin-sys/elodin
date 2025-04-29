@@ -34,9 +34,6 @@
     '';
   };
   boot.kernel.sysctl = {"net.ipv6.conf.all.forwarding" = true;};
-  environment.etc."avahi/hosts".text = ''
-    fde1:2240:a1ef::1 aleph.local
-  '';
   services.avahi = {
     enable = true;
     nssmdns4 = true;

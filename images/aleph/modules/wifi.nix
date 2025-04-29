@@ -1,8 +1,7 @@
 {lib, ...}: {
   networking.hostName = lib.mkForce "";
   systemd.services.set-hostname = {
-    description = "Set hostname from /etc/machine-id";
-    after = ["network.target"];
+    description = "Set hostname from /proc/device-tree/serial-number";
     before = ["systemd-hostnamed.service"];
     serviceConfig = {
       User = "root";
@@ -11,11 +10,11 @@
       RemainAfterExit = true;
     };
     script = ''
-      ID_PREFIX=$(head -c 4 /etc/machine-id)
-      echo "aleph-$ID_PREFIX" > /etc/hostname
-      echo "Hostname set to aleph-$ID_PREFIX"
+      SERIAL_SUFFIX=$(cat /proc/device-tree/serial-number | tr -d '\0' | xargs printf '%x' | tail -c 4)
+      echo "aleph-$SERIAL_SUFFIX" > /etc/hostname
+      echo "Hostname set to aleph-$SERIAL_SUFFIX"
     '';
-    wantedBy = ["multi-user.target"];
+    wantedBy = ["sysinit.target"];
   };
   networking.dhcpcd.enable = true;
   networking.wireless.iwd = {
