@@ -174,7 +174,6 @@ test_steps = [
                     "nix build --accept-flake-config .#sdimage",
                     """[[ $BUILDKITE_BRANCH == main ]] && buildkite-agent artifact upload result/sd-image/*.img.zst || echo "Not on main branch, skipping upload." """,
                 ],
-                depends_on="toplevel",
                 agents={"queue": "nixos-arm"},
             ),
             step(
