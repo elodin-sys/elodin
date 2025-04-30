@@ -9,7 +9,7 @@ mod tests {
     };
     use impeller2_stellar::Client;
     use postcard_schema::{Schema, schema::owned::OwnedNamedType};
-    use std::{borrow::Cow, net::SocketAddr, sync::Arc, time::Duration};
+    use std::{borrow::Cow, collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
     use stellarator::{net::TcpListener, sleep, spawn, struc_con::stellar, test};
     use zerocopy::FromBytes;
     use zerocopy::IntoBytes;
@@ -398,6 +398,38 @@ mod tests {
     }
 
     #[test]
+    async fn test_update_asset() {
+        let (addr, _db) = setup_test_db().await.unwrap();
+        let mut client = Client::connect(addr).await.unwrap();
+
+        let asset_id = 0;
+        let test_data = vec![1, 2, 3, 4, 5];
+
+        let set_asset = SetAsset {
+            id: asset_id,
+            buf: Cow::Owned(test_data.clone()),
+        };
+
+        client.send(&set_asset).await.0.unwrap();
+        let asset_id = 0;
+        let test_data = vec![0xFF, 0xFF];
+
+        let set_asset = SetAsset {
+            id: asset_id,
+            buf: Cow::Owned(test_data.clone()),
+        };
+
+        client.send(&set_asset).await.0.unwrap();
+        sleep(Duration::from_millis(50)).await;
+
+        let get_asset = GetAsset { id: asset_id };
+        let asset = client.request(&get_asset).await.unwrap();
+
+        assert_eq!(asset.id, asset_id);
+        assert_eq!(asset.buf.as_ref(), test_data.as_slice());
+    }
+
+    #[test]
     async fn test_dump_schema() {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut client = Client::connect(addr).await.unwrap();
@@ -515,6 +547,19 @@ mod tests {
         let entity_id = EntityId(42);
         let component_id = ComponentId::new("archive_test");
 
+        // Set metadata for our test data
+        client
+            .send(&SetEntityMetadata::new(entity_id, "TestEntity"))
+            .await
+            .0
+            .unwrap();
+
+        client
+            .send(&SetComponentMetadata::new(component_id, "TestComponent"))
+            .await
+            .0
+            .unwrap();
+
         let vtable = vtable([raw_field(
             0,
             8,
@@ -531,9 +576,9 @@ mod tests {
             .0
             .unwrap();
 
-        // Send some data
-        for i in 0..3 {
-            let value = i as f64 * 10.0;
+        // Send some data - we'll use specific values for easy verification
+        let test_values = [10.5f64, 20.5, 30.5];
+        for &value in &test_values {
             let mut pkt = LenPacket::table(vtable_id, 8);
             pkt.extend_aligned(&[value]);
             client.send(pkt).await.0.unwrap();
@@ -551,15 +596,23 @@ mod tests {
         };
 
         let response = client.request(&save_archive).await.unwrap();
-
         assert_eq!(response.path, archive_path);
-
         assert!(archive_path.exists());
 
-        // Clean up
-        if archive_path.exists() {
-            let _ = std::fs::remove_file(archive_path);
-        }
+        let file =
+            std::fs::File::open(&archive_path.join("TestEntity_TestComponent.arrow")).unwrap();
+        let mut reader = arrow::ipc::reader::FileReader::try_new(file, None).unwrap();
+        let batch = reader.next().unwrap().unwrap();
+        assert_eq!(batch.num_columns(), 2);
+        assert_eq!(batch.num_rows(), 3);
+        let _ = batch.column_by_name("time").unwrap();
+        let component = batch.column_by_name("TestEntity_TestComponent").unwrap();
+        let values = component
+            .as_fixed_size_list()
+            .values()
+            .as_primitive::<Float64Type>()
+            .values();
+        assert_eq!(values, &[10.5, 20.5, 30.5]);
     }
 
     #[test]
@@ -1295,5 +1348,133 @@ mod tests {
             panic!("invalid response");
         };
         assert_eq!(elodin_db::Error::TimeTravel.to_string(), err.description);
+    }
+
+    #[test]
+    async fn test_db_reopen() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("elodin_db_persistence_test_{}", fastrand::u64(..)));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Create entity and component identifiers
+        let entity_id = EntityId(55);
+        let component_id = ComponentId::new("persistence_test");
+        let vtable_id = 1u16.to_le_bytes();
+        let test_value = 123.45f64;
+        let asset_id = 77;
+        let asset_data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+        // Define message type for testing
+        #[derive(postcard_schema::Schema, serde::Deserialize, serde::Serialize)]
+        struct TestMsg {
+            value: u32,
+            text: String,
+        }
+
+        let test_msg = TestMsg {
+            value: 42,
+            text: "Hello, persistence!".to_string(),
+        };
+
+        let set_msg_metadata = SetMsgMetadata {
+            id: TestMsg::ID,
+            metadata: MsgMetadata {
+                name: "TestMessage".to_string(),
+                schema: TestMsg::SCHEMA.into(),
+                metadata: [("category".to_string(), "persistence_test".to_string())]
+                    .into_iter()
+                    .collect(),
+            },
+        };
+
+        {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let server = Server::from_listener(listener, temp_dir.clone()).unwrap();
+            stellar(move || async { server.run().await });
+
+            let mut client = Client::connect(addr).await.unwrap();
+
+            client
+                .send(
+                    &SetEntityMetadata::new(entity_id, "Persistence Test Entity").metadata(
+                        [("type".to_string(), "test".to_string())]
+                            .into_iter()
+                            .collect(),
+                    ),
+                )
+                .await
+                .0
+                .unwrap();
+
+            client
+                .send(
+                    &SetComponentMetadata::new(component_id, "Persistence Test Component")
+                        .metadata(
+                            [("unit".to_string(), "test_unit".to_string())]
+                                .into_iter()
+                                .collect(),
+                        ),
+                )
+                .await
+                .0
+                .unwrap();
+
+            let vtable = vtable([raw_field(
+                0,
+                8,
+                schema(PrimType::F64, &[1], pair(entity_id, component_id)),
+            )]);
+
+            client
+                .send(&VTableMsg {
+                    id: vtable_id,
+                    vtable,
+                })
+                .await
+                .0
+                .unwrap();
+
+            let mut pkt = LenPacket::table(vtable_id, 8);
+            pkt.extend_aligned(&[test_value]);
+            client.send(pkt).await.0.unwrap();
+
+            client.send(&set_msg_metadata).await.0.unwrap();
+
+            client.send(&test_msg).await.0.unwrap();
+
+            let set_asset = SetAsset {
+                id: asset_id,
+                buf: Cow::Owned(asset_data.clone()),
+            };
+
+            client.send(&set_asset).await.0.unwrap();
+
+            sleep(Duration::from_millis(100)).await;
+        }
+
+        let db = elodin_db::DB::open(temp_dir.clone()).unwrap();
+        db.with_state_mut(|state| {
+            let entity = state.get_entity_metadata(entity_id).unwrap();
+            assert_eq!(
+                entity.metadata.clone(),
+                [("type".to_string(), "test".to_string())]
+                    .into_iter()
+                    .collect::<HashMap<_, _>>(),
+            );
+            let component = state.get_component_metadata(component_id).unwrap();
+            assert_eq!(&component.name, "Persistence Test Component");
+            assert_eq!(
+                component.metadata.clone(),
+                [("unit".to_string(), "test_unit".to_string())]
+                    .into_iter()
+                    .collect()
+            );
+            let msg = state.get_or_insert_msg_log(TestMsg::ID, &temp_dir).unwrap();
+            let msg_metadata = msg.metadata().unwrap();
+            assert_eq!(msg_metadata, &set_msg_metadata.metadata);
+            let (_, msg_data) = msg.latest().expect("missing msg");
+            assert_eq!(msg_data, postcard::to_allocvec(&test_msg).unwrap());
+        });
     }
 }

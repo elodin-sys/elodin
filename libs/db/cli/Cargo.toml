@@ -62,6 +62,6 @@ nox.path = "../../nox"
 hifitime.version = "4.0"
 
 # arrow
-arrow.version = "54.2.0"
+arrow.version = "55"
 #arrow.features = ["ipc"]
 #arrow.default-features = false

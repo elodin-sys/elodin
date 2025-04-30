@@ -54,7 +54,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 
 # serialize
-arrow = { version = "54", default-features = false, features = ["ipc"] }
+arrow = { version = "55", default-features = false, features = ["ipc"] }
 serde.version = "1.0"
 serde_json = "1.0"
 postcard.version = "1.0.8"
