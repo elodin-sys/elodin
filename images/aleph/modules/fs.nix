@@ -62,6 +62,7 @@
         '';
       fdtPath = "${config.hardware.deviceTree.package}/${config.hardware.deviceTree.name}";
     in {
+      imageName = "aleph-os.img";
       firmwareSize = 256;
       populateFirmwareCommands = ''
         mkdir -pv firmware
