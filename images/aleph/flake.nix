@@ -59,23 +59,13 @@
     devModules = {
       aleph-dev = ./modules/aleph-dev.nix;
     };
-    defaultModule = {
-      pkgs,
-      config,
-      lib,
-      ...
-    }: {
+    defaultModule = {config, ...}: {
       imports = [
         "${nixpkgs}/nixos/modules/profiles/minimal.nix"
       ];
       nixpkgs.overlays = [
         jetpack.overlays.default
-        rust-overlay.overlays.default
         overlay
-        (final: prev: {
-          inherit (final.nvidia-jetpack) cudaPackages;
-          opencv4 = prev.opencv4.override {inherit (final) cudaPackages;};
-        })
       ];
       system.stateVersion = "24.11";
       i18n.supportedLocales = [(config.i18n.defaultLocale + "/UTF-8")];
@@ -90,31 +80,20 @@
     installerSystem = module: let
       baseNixosConfig = nixpkgs.lib.nixosSystem {
         inherit system;
-        modules = builtins.attrValues baseModules;
+        modules = [module];
       };
-      defaultNixosConfig = nixpkgs.lib.nixosSystem {
+    in
+      nixpkgs.lib.nixosSystem {
         inherit system;
-        modules =
-          builtins.attrValues baseModules
-          ++ builtins.attrValues fswModules
-          ++ builtins.attrValues devModules;
+        modules = [
+          module
+          ({...}: {
+            imports = [./modules/installer.nix];
+            aleph.sd.enable = true;
+            aleph.installer.system = baseNixosConfig.config.system.build.toplevel;
+          })
+        ];
       };
-      installerNixosConfig = nixpkgs.lib.nixosSystem {
-        inherit system;
-        modules =
-          builtins.attrValues baseModules
-          ++ [
-            ({...}: {
-              imports = [./modules/installer.nix];
-              aleph.sd.enable = true;
-              aleph.installer.system = baseNixosConfig.config.system.build.toplevel;
-            })
-          ];
-      };
-    in {
-      default = defaultNixosConfig;
-      installer = installerNixosConfig;
-    };
   in
     flake-utils.lib.eachDefaultSystem (
       system: let
@@ -137,7 +116,18 @@
       nixosModules = baseModules // fswModules // devModules;
       overlays.default = overlay;
       overlays.jetpack = jetpack.overlays.default;
-      nixosConfigurations = installerSystem nixosModules.default;
+      nixosConfigurations = {
+        default = nixpkgs.lib.nixosSystem {
+          inherit system;
+          modules =
+            builtins.attrValues baseModules
+            ++ builtins.attrValues fswModules
+            ++ builtins.attrValues devModules;
+        };
+        installer = installerSystem ({...}: {
+          imports = builtins.attrValues baseModules;
+        });
+      };
       packages.aarch64-linux = {
         toplevel = nixosConfigurations.default.config.system.build.toplevel;
         sdimage = nixosConfigurations.installer.config.system.build.sdImage;

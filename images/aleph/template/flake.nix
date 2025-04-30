@@ -17,6 +17,7 @@
     self,
     ...
   }: rec {
+    system = "aarch64-linux";
     nixosModules.default = {config, ...}: {
       imports = with aleph.nixosModules; [
         "${nixpkgs}/nixos/modules/profiles/minimal.nix"
@@ -68,11 +69,16 @@
     # installer is setup to be flashed to a usb drive, and contains the
     # aleph-installer tool. This tool lets you install the system to the nvme
     # drive
-    nixosConfigurations = aleph.lib.installerSystem nixosModules.default;
+    nixosConfigurations = {
+      default = nixpkgs.lib.nixosSystem {
+        inherit system;
+        modules = [nixosModules.default];
+      };
+    };
     packages.aarch64-linux = {
-      default = nixosConfigurations.installer.config.system.build.sdImage;
-      toplevel = nixosConfigurations.default.config.system.build.toplevel; # the toplevel config, this allows
-      # you to use the deploy.sh script
+      sdimage = aleph.packages.x86_64-linux.sdImage;
+      # the toplevel config, this allows you to use the deploy.sh script:
+      default = nixosConfigurations.default.config.system.build.toplevel;
     };
   };
 }
