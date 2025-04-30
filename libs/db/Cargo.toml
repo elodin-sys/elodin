@@ -70,14 +70,14 @@ directories = "5.0.1"
 
 
 # arrow
-arrow.version = "54.2.0"
+arrow.version = "55.0"
 arrow.features = ["canonical_extension_types", "csv"]
-arrow-schema.version = "54.2.0"
+arrow-schema.version = "55"
 arrow-schema.features = ["canonical_extension_types"]
-datafusion.version = "45.0.0"
+datafusion.version = "47"
 convert_case = "0.6.0"
 thingbuf.version = "0.1"
-parquet.version = "54"
+parquet.version = "55"
 parquet.optional = true
 
 

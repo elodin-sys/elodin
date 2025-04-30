@@ -78,7 +78,7 @@ hifitime.version = "4.0"
 stacker = "0.1.19"
 
 # arrow
-arrow.version = "54.2.0"
+arrow.version = "55"
 arrow.features = ["canonical_extension_types"]
 
 # lua

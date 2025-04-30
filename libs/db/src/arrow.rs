@@ -213,7 +213,7 @@ impl DB {
                         let mut writer =
                             arrow::ipc::writer::FileWriter::try_new(&mut file, schema)?;
                         writer.write(&record_batch)?;
-                        writer.flush()?;
+                        writer.finish()?;
                     }
                     #[cfg(feature = "parquet")]
                     ArchiveFormat::Parquet => {
