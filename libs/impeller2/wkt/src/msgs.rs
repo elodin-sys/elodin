@@ -481,7 +481,7 @@ impl Request for SQLQuery {
     type Reply<B: IoBuf + Clone> = ArrowIPC<'static>;
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct MsgMetadata {
     pub name: String,
     pub schema: OwnedNamedType,
@@ -492,7 +492,7 @@ impl Msg for MsgMetadata {
     const ID: PacketId = [224, 30];
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SetMsgMetadata {
     pub id: PacketId,
     pub metadata: MsgMetadata,
