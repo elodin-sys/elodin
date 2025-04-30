@@ -24,7 +24,7 @@
         # hardware modules
         jetpack # core module required to make jetpack-nixos work
         hardware # aleph specific hardware module, brings in the forked-kernel and device tree
-        sd-image # module that allows building sd-card images compatible with aleph
+        fs # module that allows building sd-card images compatible with aleph
 
         # networking modules
         usb-eth # sets up the usb ethernet gadget present on aleph
@@ -39,6 +39,7 @@
 
         # default tooling
         aleph-setup # a setup tool that guides you through setting up wifi and a user on first login
+        aleph-base # a set of default configuration options that make developing on aleph easier
         aleph-dev # a default set of packages like cuda, opencv, and git that make developing on aleph easier
 
         # default fsw

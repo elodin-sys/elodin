@@ -39,18 +39,25 @@
         inherit (final.nvidia-jetpack) cudaPackages;
         opencv4 = prev.opencv4.override {inherit (final) cudaPackages;};
       };
-    modules = {
+    baseModules = {
+      default = defaultModule;
+      jetpack = jetpack.nixosModules.default;
       usb-eth = ./modules/usb-eth.nix;
       hardware = ./modules/hardware.nix;
       minimal = ./modules/minimal.nix;
-      sd-image = ./modules/sd-image.nix;
-      aleph-dev = ./modules/aleph-dev.nix;
+      fs = ./modules/fs.nix;
+      aleph-base = ./modules/aleph-base.nix;
+      aleph-setup = ./modules/aleph-setup.nix;
+      wifi = ./modules/wifi.nix;
+    };
+    fswModules = {
       elodin-db = ./modules/elodin-db.nix;
       aleph-serial-bridge = ./modules/aleph-serial-bridge.nix;
       tegrastats-bridge = ./modules/tegrastats-bridge.nix;
       mekf = ./modules/mekf.nix;
-      aleph-setup = ./modules/aleph-setup.nix;
-      wifi = ./modules/wifi.nix;
+    };
+    devModules = {
+      aleph-dev = ./modules/aleph-dev.nix;
     };
     defaultModule = {
       pkgs,
@@ -58,12 +65,9 @@
       lib,
       ...
     }: {
-      imports =
-        [
-          "${nixpkgs}/nixos/modules/profiles/minimal.nix"
-          jetpack.nixosModules.default
-        ]
-        ++ builtins.attrValues modules;
+      imports = [
+        "${nixpkgs}/nixos/modules/profiles/minimal.nix"
+      ];
       nixpkgs.overlays = [
         jetpack.overlays.default
         rust-overlay.overlays.default
@@ -80,37 +84,32 @@
       services.openssh.settings.PermitRootLogin = "yes";
       # services.nvpmodel.enable = false;
       # services.nvfancontrol.enable = false;
-      # Disable all the power saving features. They all negatively impact reliability.
       security.sudo.wheelNeedsPassword = false;
       users.users.root.password = "root";
-      environment.etc."elodin-version" = let
-        rustToolchain = p: p.rust-bin.stable."1.85.0".default;
-        craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
-      in {
-        text = (craneLib.crateNameFromCargoToml {cargoToml = ../../Cargo.toml;}).version;
-        enable = true;
-      };
     };
     installerSystem = module: let
-      appModule = {lib, ...}: {
-        imports = [defaultModule];
-        fileSystems."/".device = lib.mkForce "/dev/disk/by-label/APP";
-        fileSystems."/boot".device = lib.mkForce "/dev/disk/by-label/BOOT";
-      };
-      installerModule = {...}: {
-        imports = [
-          defaultModule
-          ./modules/installer.nix
-        ];
-        aleph.installer.system = defaultNixosConfig.config.system.build.toplevel;
+      baseNixosConfig = nixpkgs.lib.nixosSystem {
+        inherit system;
+        modules = builtins.attrValues baseModules;
       };
       defaultNixosConfig = nixpkgs.lib.nixosSystem {
         inherit system;
-        modules = [appModule];
+        modules =
+          builtins.attrValues baseModules
+          ++ builtins.attrValues fswModules
+          ++ builtins.attrValues devModules;
       };
       installerNixosConfig = nixpkgs.lib.nixosSystem {
         inherit system;
-        modules = [installerModule];
+        modules =
+          builtins.attrValues baseModules
+          ++ [
+            ({...}: {
+              imports = [./modules/installer.nix];
+              aleph.sd.enable = true;
+              aleph.installer.system = baseNixosConfig.config.system.build.toplevel;
+            })
+          ];
       };
     in {
       default = defaultNixosConfig;
@@ -135,17 +134,11 @@
       }
     )
     // rec {
-      nixosModules =
-        {
-          default = defaultModule;
-          jetpack = jetpack.nixosModules.default;
-        }
-        // modules;
+      nixosModules = baseModules // fswModules // devModules;
       overlays.default = overlay;
       overlays.jetpack = jetpack.overlays.default;
       nixosConfigurations = installerSystem nixosModules.default;
       packages.aarch64-linux = {
-        default = nixosConfigurations.default.config.system.build.sdImage;
         toplevel = nixosConfigurations.default.config.system.build.toplevel;
         sdimage = nixosConfigurations.installer.config.system.build.sdImage;
       };

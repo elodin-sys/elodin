@@ -18,7 +18,7 @@
       gum spin --title "Creating ROOT" -- parted -s /dev/nvme0n1 -- mkpart root ext4 512MB 100%
       gum spin --title "Created ESP" -- parted -s /dev/nvme0n1 -- mkpart ESP fat32 1MB 512MB
       gum spin --title "Set ESP ON" -- parted -s /dev/nvme0n1 -- set 2 esp on
-      gum spin --title "Format ROOT" -- mkfs.ext4 -q -L APP /dev/nvme0n1p1
+      gum spin --title "Format ROOT" -- mkfs.ext4 -q -L APP -U ${config.aleph.fs.rootPartitionUUID} /dev/nvme0n1p1
       gum spin --title "Format ESP" -- mkfs.fat -F 32 -n BOOT /dev/nvme0n1p2
 
       # install
