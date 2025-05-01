@@ -29,10 +29,11 @@
     rust-overlay,
   }: let
     system = "aarch64-linux";
+    rustToolchain = p: p.rust-bin.fromRustupToolchainFile ../../rust-toolchain.toml;
     overlay = final: prev:
       (prev.lib.packagesFromDirectoryRecursive {
         directory = ./pkgs;
-        callPackage = path: args: final.callPackage path (args // {inherit crane;});
+        callPackage = path: args: final.callPackage path (args // {inherit crane rustToolchain;});
       })
       // (rust-overlay.overlays.default final prev)
       // {
