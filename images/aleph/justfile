@@ -6,7 +6,7 @@ default:
   @just --list
 
 download-sdimage:
-  curl -OL https://storage.googleapis.com/elodin-releases/latest/aleph-os.img.zst
+  curl -L https://storage.googleapis.com/elodin-releases/latest/aleph-os.img.zst | zstd -d > aleph-os.img
 
 buildkite-upload-sdimage:
   #!/usr/bin/env sh
