@@ -111,7 +111,7 @@ This method installs a minimal base NixOS image on Aleph, returning the device t
 
 2. Flash the image to a USB drive.
 
-    ⚠️ The `dd` command cause **PERMANENT DATA LOSS** if used incorrectly. Double-check your device name before proceeding.
+    ⚠️ The `dd` command can cause **PERMANENT DATA LOSS** if used incorrectly. Double-check your device name before proceeding.
 
     - Identify your USB drive's device name:
         - **Linux:** Run `lsblk` and look for your USB drive (e.g., `/dev/sdb`, `/dev/sdc`).
