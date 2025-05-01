@@ -7,9 +7,8 @@
   };
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-24.11";
     aleph.url = "github:elodin-sys/elodin/main?dir=images/aleph";
-    aleph.inputs.nixpkgs.follows = "nixpkgs";
+    nixpkgs.follows = "aleph/nixpkgs";
   };
   outputs = {
     nixpkgs,
@@ -76,7 +75,7 @@
       };
     };
     packages.aarch64-linux = {
-      sdimage = aleph.packages.x86_64-linux.sdImage;
+      sdimage = aleph.packages.aarch64-linux.sdimage;
       # the toplevel config, this allows you to use the deploy.sh script:
       default = nixosConfigurations.default.config.system.build.toplevel;
     };
