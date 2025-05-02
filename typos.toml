@@ -17,16 +17,17 @@
 
 [files]
 extend-exclude = [
- "**/target/*",
- "docs/public/static/js/*",
- "**/vendor/*",
- "pcbs/*",
- "/apps/unreal-demo/Plugins/RustPlugin",
- "*.dts",
- "images/orin-nano/flake.nix",
- "**/simulink/**/*.xml",
- "libs/basilisk-rs/basilisk/**/*",
- "libs/stellarator/maitake",
- "images/aleph/modules/*.nix"
+    "**/target/*",
+    "docs/public/static/js/*",
+    "**/vendor/*",
+    "pcbs/*",
+    "/apps/unreal-demo/Plugins/RustPlugin",
+    "*.dts",
+    "images/orin-nano/flake.nix",
+    "**/simulink/**/*.xml",
+    "libs/basilisk-rs/basilisk/**/*",
+    "libs/stellarator/maitake",
+    "images/aleph/modules/*.nix",
+    "*.age",
 ]
 ignore-vcs = true
