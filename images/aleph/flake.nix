@@ -108,6 +108,7 @@
           default = pkgs.mkShell {
             buildInputs = with pkgs; [
               just
+              zstd
             ];
           };
         };

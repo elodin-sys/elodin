@@ -3,9 +3,13 @@
 ## Install Nix
 
 - [Determinate Nix installer](https://determinate.systems/nix-installer) (recommended)
-- [Upstream Nix installer](https://nix.dev/manual/nix/2.28/installation/installing-binary#multi-user-installation)
+- [Upstream Nix installer](https://nix.dev/manual/nix/latest/installation/installing-binary#multi-user-installation)
 
-NOTE: The rest of the README assumes you're running Determinate Nix on your local machine. If you are running upstream Nix, you will need to modify the steps accordingly.
+<details>
+
+<summary>Nix Setup</summary>
+
+### Determinate Nix
 
 Add your username to "trusted-users" in `/etc/nix/nix.custom.conf`:
 ```
@@ -21,40 +25,50 @@ sudo launchctl kickstart -k system/systems.determinate.nix-daemon
 sudo systemctl restart nix-daemon.service
 ```
 
+### Upstream Nix
+
+Enable some nix experimental features and add your username to "trusted-users" in `/etc/nix/nix.conf`:
+```
+# /etc/nix/nix.conf
+experimental-features = nix-command flakes
+trusted-users = root <your_username>
+```
+
+Restart the nix-daemon:
+```sh
+# macOS:
+sudo launchctl kickstart -k system/org.nixos.nix-daemon
+# Linux:
+sudo systemctl restart nix-daemon.service
+```
+
+</details>
+
 ## Initial Setup
 
 When you receive Aleph, it comes with NixOS pre-installed. On first login you will be prompted to connect the device to WiFi and create a new user account.
-
-
 
 ### Connect Aleph to WiFi
 First connect to Aleph with right-most USB-C port. This port has an Ethernet gadget enabled that will allow you to SSH into Aleph.
 
 Run `ssh root@fde1:2240:a1ef::1`. The default password is `root`. Once logged in you will be guided through the setup. If the setup does not start, you can manually start it by running `aleph-setup`.
 
-2. **SSH to Aleph**: Log in to Aleph using SSH. The default root password is `root`.
+1. **SSH to Aleph**: Log in to Aleph using SSH. The default root password is `root`.
    ```bash
    ssh root@fde1:2240:a1ef::1
    ```
    This IPv6 address is configured in the [modules/usb-eth.nix](modules/usb-eth.nix) file.
 
-3. **Connect to WiFi**: Use [`iwctl`](https://wiki.archlinux.org/title/Iwd#Connect_to_a_network) to connect to your wireless network. The following command will prompt you for your WiFi password:
+2. **Connect to WiFi**: Use [`iwctl`](https://wiki.archlinux.org/title/Iwd#Connect_to_a_network) to connect to your wireless network. The following command will prompt you for your WiFi password:
    ```bash
    iwctl station wlan0 connect "YourNetworkName"
    ```
 
 After connecting to WiFi, Aleph will store your network credentials and reconnect automatically on subsequent boots. You can verify the connection with `ping google.com` or by checking the assigned IP address with `ip addr show wlan0`.
 
-Once connected to WiFi, you'll be able to SSH directly to Aleph over your wireless network using its unique hostname (which you can find with the `scripts/aleph-scan.sh` script). The USB Ethernet connection will remain available as a fallback access method with `fde1:2240:a1ef::1` as the static IPv6 address.
+Once connected to WiFi, you can SSH directly to Aleph over your wireless network using its unique `.local` domain name. Find your device's hostname by running the `hostname` command (e.g., `aleph-99a2`), then connect using: `ssh aleph-99a2.local`. The USB Ethernet connection will remain available as a fallback access method with `fde1:2240:a1ef::1` as the static IPv6 address.
 
 [![asciicast](https://asciinema.org/a/716409.svg)](https://asciinema.org/a/716409)
-
-### Finding Your Aleph Device
-
-Each Aleph has a unique hostname based on a random suffix (e.g., `aleph-99a2.local`). You can find your device on the network using the included scan script:
-```bash
-./scripts/aleph-scan.sh
-```
 
 ## System Update
 
@@ -68,18 +82,13 @@ This is the recommended development workflow for iterating on the NixOS configur
    ```bash
    # Deploy using default settings ($USER@fde1:2240:a1ef::1)
    ./deploy.sh
-   # Deploy using custom host and username
-   ./deploy.sh --host aleph-99a2.local --user myuser
-   # Deploy using IPv6 address
-   ./deploy.sh --host fde1:2240:a1ef::1
-   # Don't use Aleph as a remote builder (uses local machine or configured builders instead)
-   ./deploy.sh --no-aleph-builder
+   # Deploy using custom host
+   ./deploy.sh --host aleph-99a2.local
    # Show all available options
    ./deploy.sh --help
    ```
 
 The deploy script will:
-- Check if your user exists on Aleph and create it if needed
 - Build the NixOS configuration
 - Copy all necessary store paths to Aleph
 - Activate the new configuration
@@ -91,18 +100,55 @@ NOTE: The bootloader can only be accessed via the serial console. So, you'll nee
 
 ## Fresh Install / Recovery (via USB / SD card)
 
-NOTE: Do not use this method unless you know what you're doing. In most cases, this isn't necessary and you should use the [`System Update`](#system-update) method described above.
+This method installs a minimal base NixOS image on Aleph, returning the device to its factory state. It's useful primarily for recovery when the system becomes unbootable or severely corrupted. This method requires a USB drive with at least 8GB of space.
 
-This is the recommended way to do a fresh install of NixOS on Aleph. This method is also useful for recovering from a broken system.
-This method requires a USB flash drive or SD card with at least 8GB of space. The host system must have Nix installed. In the case of macOS, a remote x86_64-linux (or aarch64-linux) builder is required.
+1. Download the latest OS image and decompress it.
+   ```bash
+   # This convenience script just runs:
+   # curl -L https://storage.googleapis.com/elodin-releases/latest/aleph-os.img.zst | zstd -d > aleph-os.img
+   ./justfile download-sdimage
+   ```
 
-1. Build the sd card image with: `nix build .#sdimage` (run from images/aleph).
-2. Flash the sd card image to a flash drive (or SD card if using a nano).
-3. Plug the flash drive into the middle USB port on Aleph – you can use a USB hub if you need to power and use the flash drive.
-4. Connect to Aleph via serial console and boot from the flash drive. This requires pressing ESC during the boot process, then selecting the flash drive from the boot menu.
-5. Log in using `root:root` and run `aleph-installer`.
-6. Remove flash drive and reboot Aleph.
+2. Flash the image to a USB drive.
 
+    ⚠️ The `dd` command can cause **PERMANENT DATA LOSS** if used incorrectly. Double-check your device name before proceeding.
+
+    - Identify your USB drive's device name:
+        - **Linux:** Run `lsblk` and look for your USB drive (e.g., `/dev/sdb`, `/dev/sdc`).
+        - **macOS**: Run `diskutil list` and identify your USB drive (e.g., `/dev/disk2`). For better performance, use the raw device path (e.g., `/dev/rdisk2`).
+    - Unmount the USB drive:
+        - **Linux:** `sudo umount /dev/sdX*` (replace `/dev/sdX` with your device name)
+        - **macOS:** `sudo diskutil unmountDisk /dev/diskX` (replace `/dev/diskX` with your device identifier)
+    - Write the image to the USB drive:
+      ```bash
+      # Replace /dev/sdX with your actual device name
+      sudo dd if=aleph-os.img of=/dev/sdX bs=4M status=progress oflag=sync
+      ```
+    - Safely umount and remove the USB drive.
+
+3. Boot Aleph from the USB drive.
+    - Insert the USB drive into the middle USB-C port on Aleph.
+    - Power Aleph using the debug USB-C port (leftmost port) or using the DC power connector.
+    - The UEFI firmware should automatically boot from USB. If not, access the boot menu by connecting via serial console and pressing ESC during boot.
+
+4. Connect to Aleph and run the installer.
+    - Connect to Aleph using the rightmost USB-C port (Ethernet gadget).
+    - SSH into Aleph (password: `root`).
+      ```bash
+      ssh root@fde1:2240:a1ef::1
+      ```
+    - Run the installer script and follow the prompts.
+      ```bash
+      aleph-installer
+      ```
+
+5. Remove the USB drive and reboot Aleph.
+
+After rebooting, you can re-establish SSH connectivity and proceed with the initial setup as described in the earlier sections.
+
+<details>
+
+<summary>Appendix</summary>
 
 ## Manual WiFi Setup
 
@@ -122,3 +168,5 @@ This method requires a USB flash drive or SD card with at least 8GB of space. Th
 After connecting to WiFi, Aleph will store your network credentials and reconnect automatically on subsequent boots. You can verify the connection with `ping google.com` or by checking the assigned IP address with `ip addr show wlan0`.
 
 Once connected to WiFi, you'll be able to SSH directly to Aleph over your wireless network, which is more convenient for ongoing development. The USB Ethernet connection will remain available as a fallback access method.
+
+</details>

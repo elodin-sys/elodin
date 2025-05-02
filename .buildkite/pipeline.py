@@ -163,7 +163,7 @@ test_steps = [
             step(
                 label=":nix: toplevel",
                 key="toplevel",
-                command="cd images/aleph; nix build --accept-flake-config .#toplevel",
+                command=["cd images/aleph", "nix build --accept-flake-config .#toplevel"],
                 agents={"queue": "nixos-arm"},
             ),
             step(
@@ -172,9 +172,8 @@ test_steps = [
                 command=[
                     "cd images/aleph",
                     "nix build --accept-flake-config .#sdimage",
-                    """[[ $BUILDKITE_BRANCH == main ]] && buildkite-agent artifact upload result/sd-image/*.img.zst || echo "Not on main branch, skipping upload." """,
+                    "./justfile buildkite-upload-sdimage",
                 ],
-                depends_on="toplevel",
                 agents={"queue": "nixos-arm"},
             ),
             step(

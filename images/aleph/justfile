@@ -1,0 +1,19 @@
+#! /usr/bin/env nix
+#! nix develop --accept-flake-config --command just --justfile
+
+[private]
+default:
+  @just --list
+
+download-sdimage:
+  curl -L https://storage.googleapis.com/elodin-releases/latest/aleph-os.img.zst | zstd -d > aleph-os.img
+
+buildkite-upload-sdimage:
+  #!/usr/bin/env sh
+  if [[ $BUILDKITE_BRANCH == main ]]; then
+    buildkite-agent artifact upload aleph-os.img.zst
+    gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+    gcloud storage cp "gs://elodin-ci/build/$BUILDKITE_PIPELINE_ID/$BUILDKITE_BUILD_ID/$BUILDKITE_JOB_ID/aleph-os.img.zst" "gs://elodin-releases/latest/"
+  else
+    echo "Not on main branch, skipping upload."
+  fi
