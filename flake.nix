@@ -1,56 +1,56 @@
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
+    crane.url = "github:ipetkov/crane";
     systems.url = "github:nix-systems/default";
-    flake-utils = {
-      url = "github:numtide/flake-utils";
-      inputs.systems.follows = "systems";
-    };
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    crane = {
-      url = "github:ipetkov/crane";
-    };
-    flake-parts = {
-      url = "github:hercules-ci/flake-parts";
-      inputs.nixpkgs-lib.follows = "nixpkgs";
+    flake-utils = {
+      url = "github:numtide/flake-utils";
+      inputs.systems.follows = "systems";
     };
   };
 
-  outputs = inputs @ {
+  outputs = {
     nixpkgs,
-    flake-parts,
+    crane,
     rust-overlay,
-    systems,
+    flake-utils,
     ...
-  }:
-    flake-parts.lib.mkFlake {inherit inputs;} {
-      systems = import systems;
-      perSystem = {
-        pkgs,
-        system,
-        ...
-      }: let
-        overlays = [
-          rust-overlay.overlays.default
-        ];
-      in {
-        _module.args = {
-          pkgs = import nixpkgs {
-            inherit system overlays;
-            config.allowUnfree = true;
-          };
-          flakeInputs = inputs;
-          rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-        };
-        imports = [
-          ./nix/shell.nix
-          ./nix/docs.nix
-          ./nix/elodin-cli.nix
-          ./nix/elodin-py.nix
-        ];
+  }: let
+    rustToolchain = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+    elodinOverlay = final: prev: {
+      elodin = {
+        memserve = final.callPackage ./nix/pkgs/memserve.nix {inherit crane rustToolchain;};
+        elodin-cli = final.callPackage ./nix/pkgs/elodin-cli.nix {inherit crane rustToolchain;};
+        elodin-py = final.callPackage ./nix/pkgs/elodin-py.nix {inherit crane rustToolchain;};
+        elodin-db = final.callPackage ./images/aleph/pkgs/elodin-db.nix {inherit crane rustToolchain;};
       };
     };
+  in
+    flake-utils.lib.eachDefaultSystem (
+      system: let
+        pkgs = (nixpkgs.legacyPackages.${system}.extend rust-overlay.overlays.default).extend elodinOverlay;
+        config.packages = pkgs.elodin;
+        docs-image = pkgs.callPackage ./nix/docs.nix {inherit config;};
+        devShells = pkgs.callPackage ./nix/shell.nix {inherit config rustToolchain;};
+      in {
+        packages = with pkgs.elodin;
+          {
+            inherit memserve elodin-db elodin-cli elodin-py;
+          }
+          // pkgs.lib.attrsets.optionalAttrs pkgs.stdenv.isLinux {
+            inherit docs-image;
+          };
+        devShells = with devShells;
+          {
+            inherit c ops python nix-tools writing docs;
+          }
+          // pkgs.lib.attrsets.optionalAttrs pkgs.stdenv.isLinux {
+            inherit rust;
+          };
+      }
+    );
 }

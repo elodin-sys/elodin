@@ -1,10 +1,10 @@
 {
   pkgs,
   crane,
+  rustToolchain,
   lib,
   ...
 }: let
-  rustToolchain = p: p.rust-bin.stable."1.85.0".default;
   craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
   crateName = craneLib.crateNameFromCargoToml {cargoToml = ../../../fsw/aleph-setup/Cargo.toml;};
   version = (craneLib.crateNameFromCargoToml {cargoToml = ../../../Cargo.toml;}).version;
