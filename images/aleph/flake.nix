@@ -9,15 +9,15 @@
     nixpkgs.url = "github:nixos/nixpkgs/nixos-24.11";
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
     jetpack.url = "github:anduril/jetpack-nixos/master";
-    jetpack.inputs.nixpkgs.follows = "nixpkgs";
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
-    crane = {
-      url = "github:ipetkov/crane";
-    };
+    crane.url = "github:ipetkov/crane";
+    agenix.url = "github:ryantm/agenix";
+
+    jetpack.inputs.nixpkgs.follows = "nixpkgs";
+    rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
+    agenix.inputs.nixpkgs.follows = "nixpkgs";
+    agenix.inputs.systems.follows = "flake-utils/systems";
   };
   outputs = {
     self,
@@ -27,6 +27,7 @@
     jetpack,
     crane,
     rust-overlay,
+    agenix,
   }: let
     system = "aarch64-linux";
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ../../rust-toolchain.toml;
@@ -62,7 +63,6 @@
     };
     devModules = {
       aleph-dev = ./modules/aleph-dev.nix;
-      elodin-docs = ../../nix/modules/docs.nix;
     };
     defaultModule = {config, ...}: {
       imports = [
@@ -127,7 +127,7 @@
           modules =
             builtins.attrValues baseModules
             ++ builtins.attrValues fswModules
-            ++ [devModules.aleph-dev];
+            ++ builtins.attrValues devModules;
         };
         installer = installerSystem ({...}: {
           imports = builtins.attrValues baseModules;
@@ -137,7 +137,9 @@
           modules =
             builtins.attrValues baseModules
             ++ [
-              devModules.elodin-docs
+              agenix.nixosModules.default
+              ../../nix/modules/docs.nix
+              ../../nix/modules/tunnel.nix
               ({pkgs, ...}: {
                 services.nvpmodel.profileNumber = 1;
                 services.nvpmodel.configFile = "${pkgs.nvidia-jetpack.l4t-nvpmodel}/etc/nvpmodel/nvpmodel_p3767_0003.conf";
