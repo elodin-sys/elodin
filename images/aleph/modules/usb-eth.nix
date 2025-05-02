@@ -3,7 +3,6 @@
     "g_ncm.dev_addr=bf:02:bf:e2:b4:90"
     "g_ncm.host_addr=cf:52:68:62:d9:08"
   ];
-  networking.firewall.enable = false;
   networking.interfaces.usb0.useDHCP = false;
   networking.interfaces.dummy0.useDHCP = false;
   networking.interfaces.usb0.ipv4.addresses = [

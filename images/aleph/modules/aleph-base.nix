@@ -23,4 +23,11 @@
       value = "524288";
     }
   ];
+  environment.etc."elodin-version" = let
+    cargoToml = builtins.fromTOML (builtins.readFile ../../../Cargo.toml);
+    version = cargoToml.workspace.package.version;
+  in {
+    text = version;
+    enable = true;
+  };
 }

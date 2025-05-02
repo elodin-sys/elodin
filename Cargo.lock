@@ -4421,7 +4421,6 @@ dependencies = [
  "axum-streams",
  "clap 4.5.37",
  "convert_case 0.6.0",
- "cordyceps",
  "datafusion",
  "directories",
  "fastrand 2.2.0",

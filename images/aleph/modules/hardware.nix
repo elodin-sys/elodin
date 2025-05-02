@@ -87,6 +87,5 @@ in {
     carrierBoard = "devkit";
     #kernel.realtime = true;
   };
-  services.nvpmodel.profileNumber = 0;
   hardware.firmware = [pkgs.linux-firmware];
 }

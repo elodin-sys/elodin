@@ -104,11 +104,4 @@ in {
     (writeShellScriptBin "aleph-scan" (builtins.readFile ../scripts/aleph-scan.sh))
     aleph-status
   ];
-  environment.etc."elodin-version" = let
-    cargoToml = builtins.fromTOML (builtins.readFile ../../../Cargo.toml);
-    version = cargoToml.workspace.package.version;
-  in {
-    text = version;
-    enable = true;
-  };
 }
