@@ -1,7 +1,7 @@
 {
   pkgs,
   lib,
-  flakeInputs,
+  crane,
   rustToolchain,
   system,
   ...
@@ -21,9 +21,9 @@
     url = "https://github.com/elodin-sys/xla/releases/download/v0.5.4/${xla_path}";
     sha256 = builtins.getAttr system xla_sha256_map;
   };
-  craneLib = (flakeInputs.crane.mkLib pkgs).overrideToolchain rustToolchain;
-  pname = (craneLib.crateNameFromCargoToml {cargoToml = ../libs/nox-py/Cargo.toml;}).pname;
-  version = (craneLib.crateNameFromCargoToml {cargoToml = ../Cargo.toml;}).version;
+  craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
+  pname = (craneLib.crateNameFromCargoToml {cargoToml = ../../libs/nox-py/Cargo.toml;}).pname;
+  version = (craneLib.crateNameFromCargoToml {cargoToml = ../../Cargo.toml;}).version;
 
   pyFilter = path: _type: builtins.match ".*py$" path != null;
   mdFilter = path: _type: builtins.match ".*nox-py.*md$" path != null;
@@ -32,7 +32,7 @@
   cppFilter = path: _type: builtins.match ".*[h|(cpp)|(cpp.jinja)]$" path != null;
   srcFilter = path: type: (pyFilter path type) || (mdFilter path type) || (protoFilter path type) || (assetFilter path type) || (cppFilter path type) || (craneLib.filterCargoSources path type);
   src = lib.cleanSourceWith {
-    src = craneLib.path ./..;
+    src = craneLib.path ./../..;
     filter = srcFilter;
   };
 
@@ -79,6 +79,5 @@
       propagatedBuildInputs = with ps; [jax jaxlib typing-extensions numpy polars pytest];
       pythonImportsCheck = [wheelName];
     };
-in {
-  packages.elodin-py = elodin pkgs.python3Packages;
-}
+in
+  elodin pkgs.python3Packages
