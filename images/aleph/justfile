@@ -11,6 +11,7 @@ download-sdimage:
 buildkite-upload-sdimage:
   #!/usr/bin/env sh
   if [[ $BUILDKITE_BRANCH == main ]]; then
+    cd result/sd-image
     buildkite-agent artifact upload aleph-os.img.zst
     gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
     gcloud storage cp "gs://elodin-ci/build/$BUILDKITE_PIPELINE_ID/$BUILDKITE_BUILD_ID/$BUILDKITE_JOB_ID/aleph-os.img.zst" "gs://elodin-releases/latest/"
