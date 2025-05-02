@@ -35,6 +35,9 @@
         directory = ./pkgs;
         callPackage = path: args: final.callPackage path (args // {inherit crane rustToolchain;});
       })
+      // {
+        memserve = final.callPackage ../../nix/pkgs/memserve.nix {inherit crane rustToolchain;};
+      }
       // (rust-overlay.overlays.default final prev)
       // {
         inherit (final.nvidia-jetpack) cudaPackages;
@@ -59,6 +62,7 @@
     };
     devModules = {
       aleph-dev = ./modules/aleph-dev.nix;
+      elodin-docs = ../../nix/modules/docs.nix;
     };
     defaultModule = {config, ...}: {
       imports = [
@@ -123,11 +127,23 @@
           modules =
             builtins.attrValues baseModules
             ++ builtins.attrValues fswModules
-            ++ builtins.attrValues devModules;
+            ++ [devModules.aleph-dev];
         };
         installer = installerSystem ({...}: {
           imports = builtins.attrValues baseModules;
         });
+        docs = nixpkgs.lib.nixosSystem {
+          inherit system;
+          modules =
+            builtins.attrValues baseModules
+            ++ [
+              devModules.elodin-docs
+              ({pkgs, ...}: {
+                services.nvpmodel.profileNumber = 1;
+                services.nvpmodel.configFile = "${pkgs.nvidia-jetpack.l4t-nvpmodel}/etc/nvpmodel/nvpmodel_p3767_0003.conf";
+              })
+            ];
+        };
       };
       packages.aarch64-linux = {
         toplevel = nixosConfigurations.default.config.system.build.toplevel;

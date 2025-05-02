@@ -5,7 +5,7 @@ set -eu
 # Default values
 default_user="${USER}"
 default_host="fde1:2240:a1ef::1"
-target=".#nixosConfigurations.default.config.system.build.toplevel"
+default_config="default"
 no_aleph_builder=false
 
 log_info() { gum log --level info "$*"; }
@@ -18,18 +18,20 @@ show_usage() {
   echo "Options:"
   echo "  -h, --host HOST       Specify the hostname or IP address (default: $default_host)"
   echo "  -u, --user USER       Specify the SSH username (default: $default_user)"
+  echo "  -c, --config CONFIG   Specify the NixOS configuration (default: $default_config)"
   echo "  --no-aleph-builder    Don't use Aleph as a remote builder (use local machine or"
   echo "                         configured remote builders instead)"
   echo "  --help                Show this help message"
   echo
   echo "Example:"
-  echo "  $0 -h fde1:2240:a1ef::1 -u myuser"
+  echo "  $0 -h fde1:2240:a1ef::1 -u myuser -c my-custom-config"
   exit 1
 }
 
 # Parse command line arguments
 user="$default_user"
 host="$default_host"
+config="$default_config"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -39,6 +41,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     -u|--user)
       user="$2"
+      shift 2
+      ;;
+    -c|--config)
+      config="$2"
       shift 2
       ;;
     --no-aleph-builder)
@@ -55,7 +61,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-log_info "Using host: $host, user: $user"
+# Construct the target path with the selected configuration
+target=".#nixosConfigurations.$config.config.system.build.toplevel"
+
+log_info "Using host: $host, user: $user, configuration: $config"
 if [ "$no_aleph_builder" = true ]; then
   log_info "Not using Aleph as a remote builder"
 fi
