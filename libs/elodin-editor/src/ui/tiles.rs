@@ -1186,7 +1186,7 @@ pub fn spawn_panel(
 
 pub fn shortcuts(key_state: Res<LogicalKeyState>, mut ui_state: ResMut<TileState>) {
     // tab switching
-    if key_state.pressed(&Key::Control) && key_state.pressed(&Key::Tab) {
+    if key_state.pressed(&Key::Control) && key_state.just_pressed(&Key::Tab) {
         // TODO(sphw): we should have a more intelligent focus system
         let Some(tile_id) = ui_state.tree.root() else {
             return;
