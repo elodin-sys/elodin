@@ -33,6 +33,7 @@
       };
       l4t-xusb-firmware = prev.nvidia-jetpack.l4t-xusb-firmware;
       kernelPatches = [];
+      realtime = true;
     };
   in {
     aleph.kernelPackages = prev.linuxPackagesFor kernel;
@@ -85,7 +86,7 @@ in {
     enable = true;
     som = "orin-nx";
     carrierBoard = "devkit";
-    #kernel.realtime = true;
+    kernel.realtime = true;
   };
   hardware.firmware = [pkgs.linux-firmware];
 }

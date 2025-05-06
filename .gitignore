@@ -8,6 +8,7 @@ result-bin
 .venv
 .vscode
 node_modules
+aleph-os.img
 
 # kubernetes
 kubernetes/deploy

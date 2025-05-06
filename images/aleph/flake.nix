@@ -61,8 +61,10 @@
       tegrastats-bridge = ./modules/tegrastats-bridge.nix;
       mekf = ./modules/mekf.nix;
     };
+    
     devModules = {
       aleph-dev = ./modules/aleph-dev.nix;
+      # sdc-dev = ./modules/sdc-dev.nix;
     };
     defaultModule = {config, ...}: {
       imports = [
