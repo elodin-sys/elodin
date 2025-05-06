@@ -93,22 +93,25 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         egui::Frame::NONE
             .inner_margin(egui::Margin::symmetric(8, 8))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("SHOW POINTS")
-                            .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
-                        let mut use_points = graph_state.line_type == LineType::Points;
-                        theme::configure_input_with_border(ui.style_mut());
-                        ui.checkbox(&mut use_points, "");
-                        graph_state.line_type = if use_points {
-                            LineType::Points
-                        } else {
-                            LineType::Line
-                        };
+                ui.label(
+                    egui::RichText::new("LINE TYPE")
+                        .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
+                );
+                ui.add_space(8.0);
+                theme::configure_combo_box(ui.style_mut());
+                ui.style_mut().spacing.combo_width = ui.available_size().x;
+                egui::ComboBox::from_id_salt("LINE_TYPE")
+                    .selected_text(match graph_state.line_type {
+                        LineType::Line => "Line",
+                        LineType::Points => "Points",
+                        LineType::Bars => "Bars",
+                    })
+                    .show_ui(ui, |ui| {
+                        theme::configure_combo_item(ui.style_mut());
+                        ui.selectable_value(&mut graph_state.line_type, LineType::Line, "Line");
+                        ui.selectable_value(&mut graph_state.line_type, LineType::Points, "Points");
+                        ui.selectable_value(&mut graph_state.line_type, LineType::Bars, "Bars");
                     });
-                });
             });
 
         let mut remove_list: SmallVec<[(EntityId, ComponentId); 1]> = SmallVec::new();

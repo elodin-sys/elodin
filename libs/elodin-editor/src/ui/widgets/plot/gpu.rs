@@ -48,6 +48,7 @@ use crate::ui::widgets::plot::{CHUNK_COUNT, CHUNK_LEN, Line};
 
 const LINE_SHADER_HANDLE: Handle<Shader> = weak_handle!("e44f3b60-cb86-42a2-b7d8-d8dbf1f0299a");
 const POINT_SHADER_HANDLE: Handle<Shader> = weak_handle!("4f1aa57d-aacd-4d17-859f-0dad0ee3890f");
+const BAR_SHADER_HANDLE: Handle<Shader> = weak_handle!("091989F7-D5B1-4C6C-B9C1-EDD5EE51F1B1");
 
 pub const VALUE_BUFFER_SIZE: NonZeroU64 =
     NonZeroU64::new((CHUNK_COUNT * CHUNK_LEN * size_of::<f32>()) as u64).unwrap();
@@ -69,6 +70,7 @@ impl Plugin for PlotGpuPlugin {
 
         load_internal_asset!(app, LINE_SHADER_HANDLE, "./line.wgsl", Shader::from_wgsl);
         load_internal_asset!(app, POINT_SHADER_HANDLE, "./points.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app, BAR_SHADER_HANDLE, "./bars.wgsl", Shader::from_wgsl);
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
@@ -249,6 +251,7 @@ impl SpecializedRenderPipeline for LinePipeline {
         let shader = match key.line_type {
             LineType::Line => LINE_SHADER_HANDLE,
             LineType::Points => POINT_SHADER_HANDLE,
+            LineType::Bars => BAR_SHADER_HANDLE,
         };
 
         RenderPipelineDescriptor {
@@ -318,6 +321,7 @@ pub struct LineWidgetWidth(pub usize);
 pub enum LineType {
     Line,
     Points,
+    Bars,
 }
 
 #[derive(Clone, Component, ExtractComponent)]
