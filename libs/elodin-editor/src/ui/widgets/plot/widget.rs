@@ -356,6 +356,7 @@ impl Plot {
                                     line_visible_range: LineVisibleRange(
                                         line_visible_range.clone(),
                                     ),
+                                    line_type: graph_state.line_type,
                                 })
                                 .insert(LineWidgetWidth(ui.max_rect().width() as usize))
                                 .id();
@@ -378,6 +379,7 @@ impl Plot {
                                     graph_state.line_width,
                                     color.into_bevy(),
                                 ))
+                                .try_insert(graph_state.line_type)
                                 .try_insert(LineWidgetWidth(ui.max_rect().width() as usize))
                                 .try_insert(LineVisibleRange(line_visible_range.clone()));
                         }

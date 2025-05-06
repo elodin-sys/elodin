@@ -13,8 +13,14 @@ use impeller2_bevy::ComponentMetadataRegistry;
 use crate::ui::{
     EntityData, SettingModal, SettingModalState,
     colors::{self, with_opacity},
+    theme,
     utils::MarginSides,
-    widgets::{WidgetSystem, button::ECheckboxButton, label::label_with_buttons, plot::GraphState},
+    widgets::{
+        WidgetSystem,
+        button::ECheckboxButton,
+        label::label_with_buttons,
+        plot::{GraphState, gpu::LineType},
+    },
 };
 
 use super::InspectorIcons;
@@ -83,6 +89,26 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                 ui.style_mut().spacing.slider_width = ui.available_size().x;
                 ui.style_mut().visuals.widgets.inactive.bg_fill = colors::PRIMARY_ONYX_8;
                 ui.add(egui::Slider::new(&mut graph_state.line_width, 1.0..=15.0).show_value(false))
+            });
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(8, 8))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("SHOW POINTS")
+                            .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                        let mut use_points = graph_state.line_type == LineType::Points;
+                        theme::configure_input_with_border(ui.style_mut());
+                        ui.checkbox(&mut use_points, "");
+                        graph_state.line_type = if use_points {
+                            LineType::Points
+                        } else {
+                            LineType::Line
+                        };
+                    });
+                });
             });
 
         let mut remove_list: SmallVec<[(EntityId, ComponentId); 1]> = SmallVec::new();

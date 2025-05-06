@@ -47,6 +47,7 @@ use std::ops::Range;
 use crate::ui::widgets::plot::{CHUNK_COUNT, CHUNK_LEN, Line};
 
 const LINE_SHADER_HANDLE: Handle<Shader> = weak_handle!("e44f3b60-cb86-42a2-b7d8-d8dbf1f0299a");
+const POINT_SHADER_HANDLE: Handle<Shader> = weak_handle!("4f1aa57d-aacd-4d17-859f-0dad0ee3890f");
 
 pub const VALUE_BUFFER_SIZE: NonZeroU64 =
     NonZeroU64::new((CHUNK_COUNT * CHUNK_LEN * size_of::<f32>()) as u64).unwrap();
@@ -67,6 +68,7 @@ impl Plugin for PlotGpuPlugin {
             .init_asset::<Line>();
 
         load_internal_asset!(app, LINE_SHADER_HANDLE, "./line.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app, POINT_SHADER_HANDLE, "./points.wgsl", Shader::from_wgsl);
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
@@ -140,6 +142,7 @@ pub struct LineBundle {
     pub uniform: LineUniform,
     pub config: LineConfig,
     pub line_visible_range: LineVisibleRange,
+    pub line_type: LineType,
 }
 
 #[derive(Component, ShaderType, Clone, Copy, ExtractComponent)]
@@ -215,6 +218,7 @@ impl FromWorld for LinePipeline {
 #[derive(PartialEq, Eq, Hash, Clone)]
 pub struct LinePipelineKey {
     view_key: Mesh2dPipelineKey,
+    line_type: LineType,
 }
 
 impl SpecializedRenderPipeline for LinePipeline {
@@ -242,16 +246,20 @@ impl SpecializedRenderPipeline for LinePipeline {
         } else {
             TextureFormat::bevy_default()
         };
+        let shader = match key.line_type {
+            LineType::Line => LINE_SHADER_HANDLE,
+            LineType::Points => POINT_SHADER_HANDLE,
+        };
 
         RenderPipelineDescriptor {
             vertex: VertexState {
-                shader: LINE_SHADER_HANDLE,
+                shader: shader.clone(),
                 entry_point: "vertex".into(),
                 shader_defs: shader_defs.clone(),
                 buffers: line_vertex_buffer_layouts(),
             },
             fragment: Some(FragmentState {
-                shader: LINE_SHADER_HANDLE,
+                shader,
                 shader_defs,
                 entry_point: "fragment".into(),
                 targets: vec![Some(ColorTargetState {
@@ -305,6 +313,12 @@ pub struct LineConfig {
 
 #[derive(Component, Clone, ExtractComponent)]
 pub struct LineWidgetWidth(pub usize);
+
+#[derive(Component, Clone, Copy, ExtractComponent, Hash, PartialEq, Eq, Debug)]
+pub enum LineType {
+    Line,
+    Points,
+}
 
 #[derive(Clone, Component, ExtractComponent)]
 pub struct GpuLine {
@@ -379,6 +393,7 @@ type LineQueryMut = (
     &'static mut LineUniform,
     &'static mut LineVisibleRange,
     &'static mut LineWidgetWidth,
+    &'static mut LineType,
     Option<&'static mut GpuLine>,
 );
 
@@ -394,7 +409,7 @@ fn extract_lines(
         ResMut<'static, Assets<Line>>,
     )>::new(&mut main_world);
     let (mut lines, mut line_assets) = state.get_mut(&mut main_world);
-    for (entity, line_handle, config, uniform, line_visible_range, width, gpu_line) in
+    for (entity, line_handle, config, uniform, line_visible_range, width, line_type, gpu_line) in
         lines.iter_mut()
     {
         let Some(line) = line_assets.get_mut(&line_handle.0) else {
@@ -475,6 +490,7 @@ fn extract_lines(
                 config: config.clone(),
                 uniform: *uniform,
                 line_visible_range: line_visible_range.clone(),
+                line_type: *line_type,
             },
             gpu_line,
             TemporaryRenderEntity,
@@ -488,7 +504,7 @@ fn queue_line(
     pipeline: Res<LinePipeline>,
     mut pipelines: ResMut<SpecializedRenderPipelines<LinePipeline>>,
     pipeline_cache: Res<PipelineCache>,
-    lines: Query<(Entity, &MainEntity, &LineConfig)>,
+    lines: Query<(Entity, &MainEntity, &LineConfig, &LineType)>,
     mut transparent_render_phases: ResMut<ViewSortedRenderPhases<Transparent2d>>,
     mut views: Query<(&ExtractedView, &Msaa, Option<&RenderLayers>)>,
 ) {
@@ -504,7 +520,7 @@ fn queue_line(
             | Mesh2dPipelineKey::from_hdr(view.hdr);
 
         let render_layers = render_layers.unwrap_or_default();
-        for (entity, main_entity, config) in &lines {
+        for (entity, main_entity, config, line_type) in &lines {
             if !config.render_layers.intersects(render_layers) {
                 continue;
             }
@@ -512,7 +528,10 @@ fn queue_line(
             let pipeline = pipelines.specialize(
                 &pipeline_cache,
                 &pipeline,
-                LinePipelineKey { view_key: mesh_key },
+                LinePipelineKey {
+                    view_key: mesh_key,
+                    line_type: *line_type,
+                },
             );
 
             transparent_phase.add(Transparent2d {
