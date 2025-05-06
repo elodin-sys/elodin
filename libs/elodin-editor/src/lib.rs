@@ -922,7 +922,6 @@ pub struct TimeRangeBehavior {
 enum Offset {
     Earliest(Duration),
     Latest(Duration),
-    #[allow(unused)]
     Fixed(Timestamp),
 }
 

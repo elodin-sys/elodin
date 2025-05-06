@@ -19,6 +19,7 @@ use impeller2_bevy::{ComponentMetadataRegistry, CurrentStreamId, PacketTx};
 use impeller2_wkt::{BodyAxes, EntityMetadata, IsRecording, SetDbSettings, SetStreamState};
 
 use crate::{
+    Offset, SelectedTimeRange, TimeRangeBehavior,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
         self, EntityData, HdrEnabled,
@@ -526,6 +527,20 @@ fn set_playback_speed() -> PaletteItem {
     })
 }
 
+fn fix_current_time_range() -> PaletteItem {
+    PaletteItem::new(
+        "Fix Current Time Range",
+        SIMULATION_LABEL,
+        |_: In<String>,
+         selected_range: Res<SelectedTimeRange>,
+         mut behavior: ResMut<TimeRangeBehavior>| {
+            behavior.start = Offset::Fixed(selected_range.0.start);
+            behavior.end = Offset::Fixed(selected_range.0.end);
+            PaletteEvent::Exit
+        },
+    )
+}
+
 pub fn save_preset() -> PaletteItem {
     PaletteItem::new("Save Preset", PRESETS_LABEL, |_name: In<String>| {
         PalettePage::new(vec![save_preset_inner()]).into()
@@ -700,6 +715,7 @@ impl Default for PalettePage {
                 },
             ),
             set_playback_speed(),
+            fix_current_time_range(),
             create_graph(None),
             create_action(None),
             create_monitor(None),
