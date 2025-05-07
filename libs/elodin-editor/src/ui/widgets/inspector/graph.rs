@@ -4,6 +4,7 @@ use bevy::ecs::{
     world::World,
 };
 use bevy_egui::egui;
+use impeller2_wkt::GraphType;
 use smallvec::SmallVec;
 
 use egui::Align;
@@ -19,7 +20,7 @@ use crate::ui::{
         WidgetSystem,
         button::ECheckboxButton,
         label::{self, label_with_buttons},
-        plot::{GraphState, gpu::LineType},
+        plot::GraphState,
     },
 };
 
@@ -76,7 +77,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new("LINE WIDTH")
+                        egui::RichText::new("WIDTH")
                             .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
                     );
                     ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
@@ -93,23 +94,23 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
             .inner_margin(egui::Margin::symmetric(0, 8))
             .show(ui, |ui| {
                 ui.label(
-                    egui::RichText::new("LINE TYPE")
+                    egui::RichText::new("GRAPH TYPE")
                         .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
                 );
                 ui.add_space(8.0);
                 theme::configure_combo_box(ui.style_mut());
                 ui.style_mut().spacing.combo_width = ui.available_size().x;
-                egui::ComboBox::from_id_salt("LINE_TYPE")
-                    .selected_text(match graph_state.line_type {
-                        LineType::Line => "Line",
-                        LineType::Points => "Points",
-                        LineType::Bars => "Bars",
+                egui::ComboBox::from_id_salt("graph_type")
+                    .selected_text(match graph_state.graph_type {
+                        GraphType::Line => "Line",
+                        GraphType::Point => "Point",
+                        GraphType::Bar => "Bar",
                     })
                     .show_ui(ui, |ui| {
                         theme::configure_combo_item(ui.style_mut());
-                        ui.selectable_value(&mut graph_state.line_type, LineType::Line, "Line");
-                        ui.selectable_value(&mut graph_state.line_type, LineType::Points, "Points");
-                        ui.selectable_value(&mut graph_state.line_type, LineType::Bars, "Bars");
+                        ui.selectable_value(&mut graph_state.graph_type, GraphType::Line, "Line");
+                        ui.selectable_value(&mut graph_state.graph_type, GraphType::Point, "Point");
+                        ui.selectable_value(&mut graph_state.graph_type, GraphType::Bar, "Bar");
                     });
             });
 

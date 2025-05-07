@@ -41,6 +41,7 @@ use bevy_render::extract_component::ExtractComponent;
 use bevy_render::sync_world::{MainEntity, SyncToRenderWorld, TemporaryRenderEntity};
 use binding_types::storage_buffer_read_only_sized;
 use impeller2::types::Timestamp;
+use impeller2_wkt::GraphType;
 use std::num::NonZeroU64;
 use std::ops::Range;
 
@@ -144,7 +145,7 @@ pub struct LineBundle {
     pub uniform: LineUniform,
     pub config: LineConfig,
     pub line_visible_range: LineVisibleRange,
-    pub line_type: LineType,
+    pub graph_type: GraphType,
 }
 
 #[derive(Component, ShaderType, Clone, Copy, ExtractComponent)]
@@ -220,7 +221,7 @@ impl FromWorld for LinePipeline {
 #[derive(PartialEq, Eq, Hash, Clone)]
 pub struct LinePipelineKey {
     view_key: Mesh2dPipelineKey,
-    line_type: LineType,
+    graph_type: GraphType,
 }
 
 impl SpecializedRenderPipeline for LinePipeline {
@@ -248,10 +249,10 @@ impl SpecializedRenderPipeline for LinePipeline {
         } else {
             TextureFormat::bevy_default()
         };
-        let shader = match key.line_type {
-            LineType::Line => LINE_SHADER_HANDLE,
-            LineType::Points => POINT_SHADER_HANDLE,
-            LineType::Bars => BAR_SHADER_HANDLE,
+        let shader = match key.graph_type {
+            GraphType::Line => LINE_SHADER_HANDLE,
+            GraphType::Point => POINT_SHADER_HANDLE,
+            GraphType::Bar => BAR_SHADER_HANDLE,
         };
 
         RenderPipelineDescriptor {
@@ -316,13 +317,6 @@ pub struct LineConfig {
 
 #[derive(Component, Clone, ExtractComponent)]
 pub struct LineWidgetWidth(pub usize);
-
-#[derive(Component, Clone, Copy, ExtractComponent, Hash, PartialEq, Eq, Debug)]
-pub enum LineType {
-    Line,
-    Points,
-    Bars,
-}
 
 #[derive(Clone, Component, ExtractComponent)]
 pub struct GpuLine {
@@ -397,7 +391,7 @@ type LineQueryMut = (
     &'static mut LineUniform,
     &'static mut LineVisibleRange,
     &'static mut LineWidgetWidth,
-    &'static mut LineType,
+    &'static mut GraphType,
     Option<&'static mut GpuLine>,
 );
 
@@ -413,7 +407,7 @@ fn extract_lines(
         ResMut<'static, Assets<Line>>,
     )>::new(&mut main_world);
     let (mut lines, mut line_assets) = state.get_mut(&mut main_world);
-    for (entity, line_handle, config, uniform, line_visible_range, width, line_type, gpu_line) in
+    for (entity, line_handle, config, uniform, line_visible_range, width, graph_type, gpu_line) in
         lines.iter_mut()
     {
         let Some(line) = line_assets.get_mut(&line_handle.0) else {
@@ -494,7 +488,7 @@ fn extract_lines(
                 config: config.clone(),
                 uniform: *uniform,
                 line_visible_range: line_visible_range.clone(),
-                line_type: *line_type,
+                graph_type: *graph_type,
             },
             gpu_line,
             TemporaryRenderEntity,
@@ -508,7 +502,7 @@ fn queue_line(
     pipeline: Res<LinePipeline>,
     mut pipelines: ResMut<SpecializedRenderPipelines<LinePipeline>>,
     pipeline_cache: Res<PipelineCache>,
-    lines: Query<(Entity, &MainEntity, &LineConfig, &LineType)>,
+    lines: Query<(Entity, &MainEntity, &LineConfig, &GraphType)>,
     mut transparent_render_phases: ResMut<ViewSortedRenderPhases<Transparent2d>>,
     mut views: Query<(&ExtractedView, &Msaa, Option<&RenderLayers>)>,
 ) {
@@ -524,7 +518,7 @@ fn queue_line(
             | Mesh2dPipelineKey::from_hdr(view.hdr);
 
         let render_layers = render_layers.unwrap_or_default();
-        for (entity, main_entity, config, line_type) in &lines {
+        for (entity, main_entity, config, graph_type) in &lines {
             if !config.render_layers.intersects(render_layers) {
                 continue;
             }
@@ -534,7 +528,7 @@ fn queue_line(
                 &pipeline,
                 LinePipelineKey {
                     view_key: mesh_key,
-                    line_type: *line_type,
+                    graph_type: *graph_type,
                 },
             );
 

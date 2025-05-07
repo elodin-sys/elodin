@@ -79,6 +79,7 @@ pub fn tile_to_panel(
                 Some(Panel::Graph(impeller2_wkt::Graph {
                     entities,
                     name: Some(graph_state.label.clone()),
+                    graph_type: graph_state.graph_type,
                 }))
             }
             Pane::Monitor(monitor) => Some(Panel::ComponentMonitor(ComponentMonitor {

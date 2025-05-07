@@ -10,12 +10,11 @@ use bevy_egui::egui::{self, Color32};
 
 use impeller2::types::{ComponentId, EntityId};
 use impeller2_bevy::ComponentValue;
+use impeller2_wkt::GraphType;
 
 use crate::MainCamera;
 use crate::plugins::navigation_gizmo::RenderLayerAlloc;
 use crate::ui::{ViewportRect, colors};
-
-use super::gpu::LineType;
 
 pub type GraphStateComponent = Vec<(bool, egui::Color32)>;
 pub type GraphStateEntity = BTreeMap<ComponentId, GraphStateComponent>;
@@ -40,7 +39,7 @@ pub struct GraphState {
     pub line_width: f32,
     pub zoom_factor: Vec2,
     pub pan_offset: Vec2,
-    pub line_type: LineType,
+    pub graph_type: GraphType,
     pub label: String,
 }
 
@@ -61,7 +60,7 @@ impl GraphBundle {
             line_width: 2.0,
             zoom_factor: Vec2::ONE,
             pan_offset: Vec2::ZERO,
-            line_type: LineType::Line,
+            graph_type: GraphType::Line,
             label,
         };
         GraphBundle {
