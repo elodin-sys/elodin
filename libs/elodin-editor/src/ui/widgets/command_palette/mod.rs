@@ -432,12 +432,11 @@ impl WidgetSystem for PaletteItems<'_> {
                 ui.colored_label(colors::REDDISH_DEFAULT, format!("Error: {}", err_msg));
             }
             let mut state_mut = state.get_mut(world);
+            state_mut.command_palette_state.page_stack.push(page);
             if let Some(event) = res.inner {
-                state_mut.command_palette_state.page_stack.push(page);
                 state_mut.command_palette_state.handle_event(event);
             } else {
                 state_mut.command_palette_state.selected_index = selected_index;
-                state_mut.command_palette_state.page_stack.push(page);
             }
         } else {
             let mut state_mut = state.get_mut(world);
