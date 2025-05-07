@@ -425,6 +425,9 @@ pub fn queue_timestamp_read(
     mut graph_data: ResMut<CollectedGraphData>,
     mut lines: ResMut<Assets<Line>>,
 ) {
+    if selected_range.0.end.0 == i64::MIN || selected_range.0.start.0 == i64::MAX {
+        return;
+    }
     for (&entity_id, entity) in graph_data.entities.iter_mut() {
         for (&component_id, component) in entity.components.iter_mut() {
             let mut line = component
