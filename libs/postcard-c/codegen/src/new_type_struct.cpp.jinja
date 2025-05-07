@@ -3,29 +3,20 @@
 
 #include <stdio.h>
 #include <span>
-#include <unordered_map>
-#include <variant>
 #include <vector>
-#include <optional>
 
 #if __has_include("postcard.h")
 #include "postcard.h"
 #endif
 
-
 struct {{name}} {
   static constexpr std::string_view name = "{{name}}";
 
-  {% for field in ty.Struct -%}
-    {{cpp_ty(field.ty)}} {{ field.name }};
-  {% endfor %}
-
+  {{cpp_ty(ty.NewtypeStruct)}} value;
 
   size_t encoded_size() const {
     size_t size = 0;
-    {% for field in ty.Struct -%}
-        {{cpp_size(field) | indent(4)}}
-    {% endfor %}
+    {{cpp_value_size(ty.NewtypeStruct)}}
     return size;
   }
 
@@ -62,11 +53,8 @@ struct {{name}} {
 
   postcard_error_t encode_raw(postcard_slice_t* slice) const {
     postcard_error_t result;
-    {% for field in ty.Struct -%}
-        {{cpp_encode(field) | indent(4)}}
-        if(result != POSTCARD_SUCCESS) return result;
-    {% endfor %}
-    return POSTCARD_SUCCESS;
+    {{ cpp_value_encode(ty.NewtypeStruct) }}
+    return result;
   }
 
   postcard_error_t decode(std::span<const std::byte>& input) {
@@ -82,12 +70,8 @@ struct {{name}} {
 
   postcard_error_t decode_raw(postcard_slice_t* slice) {
     postcard_error_t result;
-    {% for field in ty.Struct -%}
-    {{cpp_decode(field)|indent(4)}}
-    if(result != POSTCARD_SUCCESS) return result;
-
-    {% endfor %}
-    return POSTCARD_SUCCESS;
+    {{ cpp_value_decode(ty.NewtypeStruct) }}
+    return result;
   }
 };
 

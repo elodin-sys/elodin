@@ -7,6 +7,7 @@ use postcard_schema::schema::owned::{
 
 static CPP_STRUCT_TMPL: &str = include_str!("./struct.cpp.jinja");
 static CPP_ENUM_TMPL: &str = include_str!("./enum.cpp.jinja");
+static CPP_NEW_TYPE_STRUCT_TMPL: &str = include_str!("./new_type_struct.cpp.jinja");
 
 pub trait SchemaExt {
     fn to_cpp() -> miette::Result<String>;
@@ -24,6 +25,8 @@ pub fn generate_cpp(ty: &OwnedNamedType) -> miette::Result<String> {
     env.add_template("struct", CPP_STRUCT_TMPL)
         .into_diagnostic()?;
     env.add_template("enum", CPP_ENUM_TMPL).into_diagnostic()?;
+    env.add_template("new_type_struct", CPP_NEW_TYPE_STRUCT_TMPL)
+        .into_diagnostic()?;
 
     env.add_function("cpp_ty", |ty: ViaDeserialize<OwnedNamedType>| {
         to_cpp_ty(ty.0)
@@ -37,33 +40,58 @@ pub fn generate_cpp(ty: &OwnedNamedType) -> miette::Result<String> {
         cpp_decode(&ty.0)
     });
 
+    env.add_function("cpp_value_encode", |ty: ViaDeserialize<OwnedNamedType>| {
+        let ty = OwnedNamedValue {
+            name: "value".to_string(),
+            ty: ty.0,
+        };
+        cpp_encode(&ty)
+    });
+
+    env.add_function("cpp_value_decode", |ty: ViaDeserialize<OwnedNamedType>| {
+        let ty = OwnedNamedValue {
+            name: "value".to_string(),
+            ty: ty.0,
+        };
+        cpp_decode(&ty)
+    });
+    env.add_function("cpp_value_size", |ty: ViaDeserialize<OwnedNamedType>| {
+        let ty = OwnedNamedValue {
+            name: "value".to_string(),
+            ty: ty.0,
+        };
+        cpp_size(&ty)
+    });
+
     env.add_function("cpp_size", |ty: ViaDeserialize<OwnedNamedValue>| {
         cpp_size(&ty.0)
     });
 
     env.add_function(
         "cpp_variant_type",
-        |variant: ViaDeserialize<OwnedDataModelVariant>| cpp_variant_type(&variant.0),
+        |variant: ViaDeserialize<OwnedDataModelVariant>,
+         enum_name: Option<&str>,
+         variant_name: Option<&str>| cpp_variant_type(&variant.0, enum_name, variant_name),
     );
 
     env.add_function(
         "cpp_encode_variant",
-        |value_name: &str, variant_type: ViaDeserialize<OwnedDataModelVariant>| {
-            cpp_encode_variant(value_name, &variant_type.0)
+        |value_name: &str, variant: ViaDeserialize<OwnedDataModelVariant>| {
+            cpp_encode_variant(value_name, &variant.0)
         },
     );
 
     env.add_function(
         "cpp_decode_variant",
-        |value_name: &str, variant_type: ViaDeserialize<OwnedDataModelVariant>| {
-            cpp_decode_variant(value_name, &variant_type.0)
+        |value_name: &str, variant: ViaDeserialize<OwnedDataModelVariant>| {
+            cpp_decode_variant(value_name, &variant.0)
         },
     );
 
     env.add_function(
         "cpp_size_variant",
-        |value_name: &str, variant_type: ViaDeserialize<OwnedDataModelVariant>| {
-            cpp_size_variant(value_name, &variant_type.0)
+        |value_name: &str, variant: ViaDeserialize<OwnedDataModelVariant>| {
+            cpp_size_variant(value_name, &variant.0)
         },
     );
     env.add_function(
@@ -79,8 +107,30 @@ pub fn generate_cpp(ty: &OwnedNamedType) -> miette::Result<String> {
             let tmpl = env.get_template("struct").expect("template missing");
             Ok(tmpl.render(ty).into_diagnostic()?)
         }
-        OwnedDataModelType::Enum(_) => {
+        OwnedDataModelType::Enum(variants) => {
+            let mut result = String::new();
+            for variant in variants {
+                if let OwnedDataModelVariant::StructVariant(fields) = &variant.ty {
+                    let struct_name = format!("{}{}", ty.name, variant.name);
+                    let struct_type = OwnedNamedType {
+                        name: struct_name,
+                        ty: OwnedDataModelType::Struct(fields.clone()),
+                    };
+
+                    // Generate the struct definition
+                    let struct_code = generate_cpp(&struct_type)?;
+                    result.push_str(&struct_code);
+                    result.push_str("\n\n");
+                }
+            }
             let tmpl = env.get_template("enum").expect("template missing");
+            result.push_str(&tmpl.render(ty).into_diagnostic()?);
+            Ok(result)
+        }
+        OwnedDataModelType::NewtypeStruct(_) => {
+            let tmpl = env
+                .get_template("new_type_struct")
+                .expect("template missing");
             Ok(tmpl.render(ty).into_diagnostic()?)
         }
         _ => Err(miette::miette!("unsupported data ty")),
@@ -231,13 +281,16 @@ pub fn cpp_size(ty: &OwnedNamedValue) -> String {
 }
 
 pub fn cpp_size_variant(value_name: &str, variant: &OwnedDataModelVariant) -> String {
-    if let OwnedDataModelVariant::NewtypeVariant(named_ty) = variant {
-        cpp_size(&OwnedNamedValue {
+    match variant {
+        OwnedDataModelVariant::NewtypeVariant(named_ty) => cpp_size(&OwnedNamedValue {
             name: value_name.to_string(),
             ty: *named_ty.clone(),
-        })
-    } else {
-        "".to_string()
+        }),
+        OwnedDataModelVariant::StructVariant(_) => {
+            // For struct variants, we get the size using the value's encoded_size method
+            format!("size += {}.encoded_size();", value_name)
+        }
+        _ => "".to_string(),
     }
 }
 
@@ -398,7 +451,7 @@ pub fn cpp_decode(ty: &OwnedNamedValue) -> String {
             out += &format!(
                 "    {} val;\n",
                 to_cpp_ty(OwnedNamedType {
-                    name: "".to_string(),
+                    name: inner.name.clone(),
                     ty: inner.ty.clone()
                 })
             );
@@ -556,36 +609,56 @@ pub fn cpp_decode(ty: &OwnedNamedValue) -> String {
 
 /// Helper function to generate code for encoding enum variant data
 /// Returns the appropriate C++ type for an enum variant
-pub fn cpp_variant_type(variant: &OwnedDataModelVariant) -> String {
+pub fn cpp_variant_type(
+    variant: &OwnedDataModelVariant,
+    enum_name: Option<&str>,
+    variant_name: Option<&str>,
+) -> String {
     match variant {
         OwnedDataModelVariant::UnitVariant => "std::monostate".to_string(),
         OwnedDataModelVariant::NewtypeVariant(named_ty) => to_cpp_ty(*named_ty.clone()),
         OwnedDataModelVariant::TupleVariant(_) => todo!(),
-        OwnedDataModelVariant::StructVariant(_) => todo!(),
+        OwnedDataModelVariant::StructVariant(fields) => {
+            if let (Some(enum_name), Some(variant_name)) = (enum_name, variant_name) {
+                let struct_name = format!("{}{}", enum_name, variant_name);
+                to_cpp_ty(OwnedNamedType {
+                    name: struct_name,
+                    ty: OwnedDataModelType::Struct(fields.clone()),
+                })
+            } else {
+                "std::monostate".to_string()
+            }
+        }
     }
 }
 
 /// Helper function to generate code for encoding enum variant data
 pub fn cpp_encode_variant(value_name: &str, variant: &OwnedDataModelVariant) -> String {
-    if let OwnedDataModelVariant::NewtypeVariant(named_ty) = variant {
-        cpp_encode(&OwnedNamedValue {
+    match variant {
+        OwnedDataModelVariant::NewtypeVariant(named_ty) => cpp_encode(&OwnedNamedValue {
             name: value_name.to_string(),
             ty: *named_ty.clone(),
-        })
-    } else {
-        "".to_string()
+        }),
+        OwnedDataModelVariant::StructVariant(_) => {
+            // For struct variants, we encode using the value's encode_raw method
+            format!("result = {}.encode_raw(slice);", value_name)
+        }
+        _ => "".to_string(),
     }
 }
 
 /// Helper function to generate code for decoding enum variant data
 pub fn cpp_decode_variant(value_name: &str, variant: &OwnedDataModelVariant) -> String {
-    if let OwnedDataModelVariant::NewtypeVariant(named_ty) = variant {
-        cpp_decode(&OwnedNamedValue {
+    match variant {
+        OwnedDataModelVariant::NewtypeVariant(named_ty) => cpp_decode(&OwnedNamedValue {
             name: value_name.to_string(),
             ty: *named_ty.clone(),
-        })
-    } else {
-        "".to_string()
+        }),
+        OwnedDataModelVariant::StructVariant(_) => {
+            // For struct variants, we decode using the value's decode_raw method
+            format!("result = {}.decode_raw(slice);", value_name)
+        }
+        _ => "".to_string(),
     }
 }
 

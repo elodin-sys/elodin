@@ -19,14 +19,10 @@ use crate::{
 
 use crate::AssetId;
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, postcard_schema::Schema)]
 pub struct VTableMsg {
     pub id: PacketId,
     pub vtable: VTable<Vec<Op>, Vec<u8>, Vec<Field>>,
-}
-
-impl Msg for VTableMsg {
-    const ID: PacketId = [224, 0];
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
@@ -373,6 +369,7 @@ macro_rules! impl_user_data_msg {
                 methods.add_method("msg", |_, this, ()| {
                     use impeller2::types::IntoLenPacket;
                     let msg = this.into_len_packet().inner;
+                    println!("{:?}", msg);
                     Ok(msg)
                 });
             }

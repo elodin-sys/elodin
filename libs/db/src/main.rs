@@ -2,6 +2,7 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use clap::{Parser, Subcommand};
 use elodin_db::Server;
+use impeller2::vtable;
 use miette::IntoDiagnostic;
 use postcard_c_codegen::SchemaExt;
 use tracing::info;
@@ -99,13 +100,19 @@ async fn main() -> miette::Result<()> {
         Commands::GenCpp { output_path } => {
             let defs = [
                 include_str!("../../postcard-c/postcard.h").to_string(),
-                include_str!("./helpers.hpp").to_string(),
+                include_str!("../cpp/helpers.hpp").to_string(),
                 impeller2_wkt::InitialTimestamp::to_cpp()?,
                 impeller2_wkt::FixedRateBehavior::to_cpp()?,
                 impeller2_wkt::StreamBehavior::to_cpp()?,
                 impeller2_wkt::StreamFilter::to_cpp()?,
                 impeller2_wkt::Stream::to_cpp()?,
                 impeller2_wkt::MsgStream::to_cpp()?,
+                vtable::Field::to_cpp()?,
+                vtable::Op::to_cpp()?,
+                vtable::OpRef::to_cpp()?,
+                impeller2::types::PrimType::to_cpp()?,
+                vtable::VTable::<Vec<vtable::Op>, Vec<u8>, Vec<vtable::Field>>::to_cpp()?,
+                impeller2_wkt::VTableMsg::to_cpp()?,
             ]
             .join("\n");
             std::fs::write(output_path, defs).into_diagnostic()?;
