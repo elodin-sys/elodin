@@ -112,6 +112,7 @@ impl mlua::UserData for ComponentId {}
     TryFromBytes,
     Immutable,
     IntoBytes,
+    postcard_schema::Schema,
 )]
 #[repr(u64)]
 #[serde(rename_all = "kebab-case")]
@@ -515,7 +516,7 @@ pub type RequestId = u8;
 
 pub const PACKET_HEADER_LEN: usize = 4;
 
-#[derive(TryFromBytes, Unaligned, Immutable, KnownLayout, Debug)]
+#[derive(TryFromBytes, Unaligned, Immutable, KnownLayout, Debug, IntoBytes)]
 #[repr(C)]
 pub struct PacketHeader {
     pub packet_ty: PacketTy,

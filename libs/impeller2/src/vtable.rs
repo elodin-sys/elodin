@@ -657,13 +657,13 @@ pub mod builder {
             }
             let op = match op.as_ref() {
                 OpBuilder::Data { align, data } => {
-                    let offset = Offset(self.vtable.data.len() as u16);
                     let len = data.len() as u16;
                     let padding = (align - (self.vtable.data.len() % align)) % align;
 
                     for _ in 0..padding {
                         self.vtable.data.push(0);
                     }
+                    let offset = Offset(self.vtable.data.len() as u16);
                     self.vtable.data.extend_from_slice(data);
                     Op::Data { offset, len }
                 }
