@@ -37,10 +37,12 @@ use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc, spawn_g
 use ui::{
     SelectedObject,
     tiles::{self, TileState},
+    utils::FriendlyEpoch,
     widgets::plot::{CollectedGraphData, gpu::LineHandle},
 };
 
 pub mod chunks;
+mod offset_parse;
 mod plugins;
 pub mod ui;
 
@@ -941,7 +943,7 @@ impl std::fmt::Display for Offset {
                 write!(f, "-{d}")
             }
             Offset::Fixed(timestamp) => {
-                let timestamp = hifitime::Epoch::from(*timestamp);
+                let timestamp = FriendlyEpoch(hifitime::Epoch::from(*timestamp));
                 write!(f, "{timestamp}")
             }
         }
@@ -959,7 +961,7 @@ impl std::fmt::Display for TimeRangeBehavior {
                 write!(f, "LAST {start}")
             }
             (start, end) => {
-                write!(f, "{start}..{end}")
+                write!(f, "{start} — {end}")
             }
         }
     }
