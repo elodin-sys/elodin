@@ -41,12 +41,14 @@ pub struct GraphState {
     pub zoom_factor: Vec2,
     pub pan_offset: Vec2,
     pub line_type: LineType,
+    pub label: String,
 }
 
 impl GraphBundle {
     pub fn new(
         render_layer_alloc: &mut RenderLayerAlloc,
         entities: BTreeMap<EntityId, GraphStateEntity>,
+        label: String,
     ) -> Self {
         let Some(layer) = render_layer_alloc.alloc() else {
             todo!("ran out of layers")
@@ -60,6 +62,7 @@ impl GraphBundle {
             zoom_factor: Vec2::ONE,
             pan_offset: Vec2::ZERO,
             line_type: LineType::Line,
+            label,
         };
         GraphBundle {
             camera: Camera {

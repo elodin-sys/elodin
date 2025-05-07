@@ -725,6 +725,7 @@ impl Plot {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &self,
         ui: &mut egui::Ui,

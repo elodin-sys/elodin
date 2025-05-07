@@ -18,7 +18,7 @@ use crate::ui::{
     widgets::{
         WidgetSystem,
         button::ECheckboxButton,
-        label::label_with_buttons,
+        label::{self, label_with_buttons},
         plot::{GraphState, gpu::LineType},
     },
 };
@@ -34,7 +34,7 @@ pub struct InspectorGraph<'w, 's> {
 }
 
 impl WidgetSystem for InspectorGraph<'_, '_> {
-    type Args = (InspectorIcons, Entity, String);
+    type Args = (InspectorIcons, Entity);
     type Output = ();
 
     fn ui_system(
@@ -45,7 +45,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
     ) {
         let state_mut = state.get_mut(world);
 
-        let (icons, graph_id, label) = args;
+        let (icons, graph_id) = args;
 
         let InspectorGraph {
             entities,
@@ -55,10 +55,14 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         } = state_mut;
 
         let graph_label_margin = egui::Margin::same(0).top(10.0).bottom(14.0);
-        let [add_clicked] = label_with_buttons(
+        let Ok(mut graph_state) = graph_states.get_mut(graph_id) else {
+            return;
+        };
+
+        let [add_clicked] = label::editable_label_with_buttons(
             ui,
             [icons.add],
-            label,
+            &mut graph_state.label,
             colors::PRIMARY_CREAME,
             graph_label_margin,
         );
@@ -67,13 +71,8 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         }
 
         ui.separator();
-
-        let Ok(mut graph_state) = graph_states.get_mut(graph_id) else {
-            return;
-        };
-
         egui::Frame::NONE
-            .inner_margin(egui::Margin::symmetric(8, 8))
+            .inner_margin(egui::Margin::symmetric(0, 8))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
@@ -91,7 +90,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                 ui.add(egui::Slider::new(&mut graph_state.line_width, 1.0..=15.0).show_value(false))
             });
         egui::Frame::NONE
-            .inner_margin(egui::Margin::symmetric(8, 8))
+            .inner_margin(egui::Margin::symmetric(0, 8))
             .show(ui, |ui| {
                 ui.label(
                     egui::RichText::new("LINE TYPE")

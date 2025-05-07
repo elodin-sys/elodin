@@ -327,7 +327,11 @@ fn graph_entity_item(
                                     values.clone(),
                                 ))),
                             )));
-                            let bundle = GraphBundle::new(&mut render_layer_alloc, entities);
+                            let bundle = GraphBundle::new(
+                                &mut render_layer_alloc,
+                                entities,
+                                "Graph".to_string(),
+                            );
                             tile_state.create_graph_tile(tile_id, bundle);
                             PaletteEvent::Exit
                         },
@@ -552,14 +556,11 @@ fn set_time_range_behavior() -> PaletteItem {
                 ),
                 "Start Offset",
                 move |start_str: In<String>| {
-                    let start_offset = match Offset::from_str(&start_str.0) {
-                        Ok(offset) => offset,
-                        Err(_) => {
-                            return PaletteEvent::Error(format!(
-                                "Invalid start offset format: {}",
-                                start_str.0
-                            ));
-                        }
+                    let Ok(start_offset) = Offset::from_str(&start_str.0) else {
+                        return PaletteEvent::Error(format!(
+                            "Invalid start offset format: {}",
+                            start_str.0
+                        ));
                     };
 
                     PalettePage::new(vec![
@@ -569,17 +570,14 @@ fn set_time_range_behavior() -> PaletteItem {
                             ),
                             "End Offset",
                             move |end_str: In<String>, mut behavior: ResMut<TimeRangeBehavior>| {
-                                let end_offset = match Offset::from_str(&end_str.0) {
-                                    Ok(offset) => offset,
-                                    Err(_) => {
-                                        return PaletteEvent::Error(format!(
-                                            "Invalid end offset format: {}",
-                                            end_str.0
-                                        ));
-                                    }
+                                let Ok(end_offset) = Offset::from_str(&end_str.0) else {
+                                    return PaletteEvent::Error(format!(
+                                        "Invalid end offset format: {}",
+                                        end_str.0
+                                    ));
                                 };
 
-                                behavior.start = start_offset.clone();
+                                behavior.start = start_offset;
                                 behavior.end = end_offset;
                                 PaletteEvent::Exit
                             },

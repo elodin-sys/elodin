@@ -863,6 +863,7 @@ impl From<Timestamp> for hifitime::Epoch {
     }
 }
 
+#[cfg(feature = "hifitime")]
 impl From<hifitime::Epoch> for Timestamp {
     fn from(epoch: hifitime::Epoch) -> Self {
         Timestamp((epoch.to_unix_milliseconds() * 1000.0) as i64)
