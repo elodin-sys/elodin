@@ -5,7 +5,11 @@
 Install `elodin-db` using the standalone installer script:
 
 ```sh
+# Install the latest version
 curl -LsSf https://storage.googleapis.com/elodin-releases/install-db.sh | sh
+
+# Install a specific version (e.g., 0.13.3)
+curl -LsSf https://storage.googleapis.com/elodin-releases/install-db.sh | sh -s v0.13.3
 ```
 
 Alternatively, you can download the latest portable binary for your platform:
@@ -33,7 +37,7 @@ cc examples/client.c -lm -o /tmp/client; /tmp/client
 ```
 
 
-### Subscribe to data with C++ 
+### Subscribe to data with C++
 
 [./examples/client.cpp](./examples/client.cpp) includes an example of how to subscribe to data using C++. It can be built and run using:
 
