@@ -122,7 +122,7 @@ impl RenderLayerAlloc {
     }
 
     pub fn free_all(&mut self) {
-        self.0 = !1;
+        self.0 = !0;
     }
 }
 

@@ -683,6 +683,7 @@ pub fn load_preset_inner(name: String) -> PaletteItem {
                         schema_reg,
                         ..
                     } = params;
+                    render_layer_alloc.free_all();
                     tile_state.clear(&mut commands, &mut selected_object);
                     tiles::spawn_panel(
                         &panel,
