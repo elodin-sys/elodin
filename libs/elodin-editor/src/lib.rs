@@ -159,14 +159,16 @@ impl Plugin for EditorPlugin {
             .add_plugins(big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
             .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
             .add_plugins(EmbeddedAssetPlugin)
-            .add_plugins(EguiPlugin)
+            .add_plugins(EguiPlugin {
+                enable_multipass_for_primary_context: false,
+            })
             .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
             .add_plugins(NavigationGizmoPlugin)
             .add_plugins(impeller2_bevy::Impeller2Plugin)
             //.add_plugins(crate::plugins::gizmos::GizmoPlugin)
             .add_plugins(ui::UiPlugin)
-            .add_plugins(FrameTimeDiagnosticsPlugin)
-            .add_plugins(WireframePlugin)
+            .add_plugins(FrameTimeDiagnosticsPlugin::default())
+            .add_plugins(WireframePlugin::default())
             .add_plugins(editor_cam_touch::EditorCamTouchPlugin)
             .add_plugins(crate::ui::widgets::PlotPlugin)
             .add_plugins(crate::plugins::LogicalKeyPlugin)
@@ -285,6 +287,7 @@ fn spawn_main_camera(
         main_camera_layers = main_camera_layers.with(grid_layer);
         grid_layers = grid_layers.with(grid_layer);
     }
+
     let grid_visibility = if viewport.show_grid {
         Visibility::Visible
     } else {
@@ -308,6 +311,7 @@ fn spawn_main_camera(
             grid_layers,
         ))
         .id();
+
     let mut camera = commands.spawn((
         Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)).looking_at(Vec3::ZERO, Vec3::Y),
         Camera3d::default(),
@@ -872,8 +876,8 @@ fn clear_state_new_connection(
         _ => return,
     }
     entity_map.0.retain(|_, entity| {
-        if let Some(entity) = commands.get_entity(*entity) {
-            entity.despawn_recursive();
+        if let Ok(mut entity_commands) = commands.get_entity(*entity) {
+            entity_commands.despawn();
         }
         false
     });
@@ -881,8 +885,8 @@ fn clear_state_new_connection(
         map.0.clear();
     });
     for line in lines.iter() {
-        if let Some(e) = commands.get_entity(line) {
-            e.try_despawn_recursive();
+        if let Ok(mut entity_commands) = commands.get_entity(line) {
+            entity_commands.despawn();
         }
     }
     glbs.0.clear();

@@ -1,9 +1,10 @@
 use bevy::{
     ecs::{
-        system::{In, Local, Res, ResMut, Resource, SystemParam, SystemState},
+        system::{In, Local, Res, ResMut, SystemParam, SystemState},
         world::World,
     },
     input::keyboard::Key,
+    prelude::Resource,
 };
 use bevy_egui::EguiContexts;
 use egui::{Margin, Modifiers, epaint::Shadow};

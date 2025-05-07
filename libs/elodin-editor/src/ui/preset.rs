@@ -41,7 +41,7 @@ pub fn tile_to_panel(
 
                 let track_entity = cam
                     .parent
-                    .and_then(|e| entity_id.get(e.get()).ok())
+                    .and_then(|e| entity_id.get(e.parent()).ok())
                     .copied();
 
                 let track_rotation = cam.no_propagate_rot.is_none();

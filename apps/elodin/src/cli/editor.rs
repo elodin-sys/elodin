@@ -1,5 +1,5 @@
+use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowResized};
-use bevy::{prelude::*, utils::tracing};
 use core::fmt;
 use elodin_editor::EditorPlugin;
 use miette::{IntoDiagnostic, miette};
@@ -84,7 +84,7 @@ impl Cli {
                 tokio::spawn(async move {
                     let _drop = ctrl_c_cancel_token.drop_guard(); // binding needs to be named to ensure drop is called at end of scope
                     tokio::signal::ctrl_c().await.unwrap();
-                    tracing::info!("Received Ctrl-C, shutting down");
+                    info!("Received Ctrl-C, shutting down");
                 });
                 if let Simulator::File(path) = &sim {
                     let res = elodin_editor::run::run_recipe(
@@ -197,7 +197,7 @@ struct BevyCancelToken(CancelToken);
 
 fn check_cancel_token(token: Res<BevyCancelToken>, mut exit: EventWriter<AppExit>) {
     if token.0.is_cancelled() {
-        exit.send(AppExit::Success);
+        exit.write(AppExit::Success);
     }
 }
 
@@ -212,11 +212,11 @@ fn on_window_resize(
         }
         let window_state = format!("{:.1} {:.1}\n", e.width, e.height);
         if let Err(err) = window_state_file.0.rewind() {
-            tracing::warn!(?err, "failed to rewind window state file");
+            warn!(?err, "failed to rewind window state file");
             return;
         }
         if let Err(err) = window_state_file.0.write_all(window_state.as_bytes()) {
-            tracing::warn!(?err, "failed to write window state");
+            warn!(?err, "failed to write window state");
         }
     }
 }

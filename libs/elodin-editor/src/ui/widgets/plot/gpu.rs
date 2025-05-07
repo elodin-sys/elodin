@@ -1,9 +1,9 @@
-use bevy::asset::{AssetApp, Assets};
+use bevy::asset::{AssetApp, Assets, weak_handle};
 use bevy::color::ColorToComponents;
 use bevy::core_pipeline::core_2d::CORE_2D_DEPTH_FORMAT;
 use bevy::ecs::bundle::Bundle;
 use bevy::ecs::entity::Entity;
-use bevy::ecs::schedule::{IntoSystemConfigs, IntoSystemSetConfigs, SystemSet};
+use bevy::ecs::schedule::{IntoScheduleConfigs, SystemSet};
 use bevy::ecs::system::{Commands, Query, Res, ResMut, SystemState};
 use bevy::math::{FloatOrd, Vec4};
 use bevy::prelude::Deref;
@@ -24,13 +24,10 @@ use bevy::{
     core_pipeline::core_2d::Transparent2d,
     ecs::{
         component::Component,
-        system::{
-            Resource,
-            lifetimeless::{Read, SRes},
-        },
+        system::lifetimeless::{Read, SRes},
         world::FromWorld,
     },
-    prelude::Color,
+    prelude::{Color, Resource},
     render::{
         RenderApp,
         extract_component::UniformComponentPlugin,
@@ -49,8 +46,7 @@ use std::ops::Range;
 
 use crate::ui::widgets::plot::{CHUNK_COUNT, CHUNK_LEN, Line};
 
-const LINE_SHADER_HANDLE: Handle<Shader> =
-    Handle::weak_from_u128(175745314079092880743018103868034362817);
+const LINE_SHADER_HANDLE: Handle<Shader> = weak_handle!("e44f3b60-cb86-42a2-b7d8-d8dbf1f0299a");
 
 pub const VALUE_BUFFER_SIZE: NonZeroU64 =
     NonZeroU64::new((CHUNK_COUNT * CHUNK_LEN * size_of::<f32>()) as u64).unwrap();
@@ -494,12 +490,13 @@ fn queue_line(
     pipeline_cache: Res<PipelineCache>,
     lines: Query<(Entity, &MainEntity, &LineConfig)>,
     mut transparent_render_phases: ResMut<ViewSortedRenderPhases<Transparent2d>>,
-    mut views: Query<(Entity, &ExtractedView, &Msaa, Option<&RenderLayers>)>,
+    mut views: Query<(&ExtractedView, &Msaa, Option<&RenderLayers>)>,
 ) {
     let draw_function = draw_functions.read().get_id::<DrawLine2d>().unwrap();
 
-    for (view_entity, view, msaa, render_layers) in &mut views {
-        let Some(transparent_phase) = transparent_render_phases.get_mut(&view_entity) else {
+    for (view, msaa, render_layers) in &mut views {
+        let Some(transparent_phase) = transparent_render_phases.get_mut(&view.retained_view_entity)
+        else {
             continue;
         };
 
@@ -523,8 +520,10 @@ fn queue_line(
                 draw_function,
                 pipeline,
                 batch_range: 0..1,
-                extra_index: PhaseItemExtraIndex::NONE,
+                extra_index: PhaseItemExtraIndex::None,
                 sort_key: FloatOrd(0.0),
+                extracted_index: 0,
+                indexed: true,
             });
         }
     }

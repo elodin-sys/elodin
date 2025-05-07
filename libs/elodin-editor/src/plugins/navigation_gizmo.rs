@@ -222,7 +222,7 @@ pub fn spawn_gizmo(
                 NavGizmoParent { main_camera },
                 render_layers.clone(),
             ))
-            .set_parent(nav_gizmo);
+            .insert(ChildOf(nav_gizmo));
         commands
             .spawn((
                 Mesh3d(sphere.clone()),
@@ -234,7 +234,7 @@ pub fn spawn_gizmo(
             .observe(cube_color_highlight)
             .observe(cube_color_reset)
             .observe(cb)
-            .set_parent(nav_gizmo);
+            .insert(ChildOf(nav_gizmo));
     }
 
     let nav_gizmo_camera = commands
@@ -319,7 +319,7 @@ fn side_clicked_cb(
             return;
         }
         if click.button == PointerButton::Primary {
-            look_to.send(LookToTrigger::auto_snap_up_direction(
+            look_to.write(LookToTrigger::auto_snap_up_direction(
                 direction, entity, transform, editor_cam,
             ));
         }
@@ -333,7 +333,7 @@ pub fn sync_nav_camera(
 ) {
     for (entity, nav_gizmo, mut nav_transform) in nav_transform_query.iter_mut() {
         let Ok(main) = main_transform_query.get(nav_gizmo.main_camera) else {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
             continue;
         };
         nav_transform.rotation = main.rotation.conjugate();

@@ -31,7 +31,7 @@ stellarator.path = "../../libs/stellarator"
 uuid = "1.7.0"
 directories = "5.0.1"
 zstd = "0.13.0"
-bevy.version = "0.15"
+bevy.version = "0.16"
 tracing-subscriber = { version = "0.3", features = ["chrono"] }
 
 elodin-editor.path = "../../libs/elodin-editor"

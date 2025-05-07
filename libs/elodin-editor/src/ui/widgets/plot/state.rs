@@ -23,7 +23,7 @@ pub struct GraphBundle {
     pub graph_state: GraphState,
     pub camera: Camera,
     pub camera_2d: Camera2d,
-    pub projection: OrthographicProjection,
+    pub projection: Projection,
     pub tonemapping: Tonemapping,
     pub viewport_rect: ViewportRect,
     pub render_layers: RenderLayers,
@@ -64,7 +64,7 @@ impl GraphBundle {
                 ..Default::default()
             },
             tonemapping: Tonemapping::None,
-            projection: OrthographicProjection {
+            projection: Projection::Orthographic(OrthographicProjection {
                 near: 0.0,
                 far: 1000.0,
                 viewport_origin: Vec2::new(0.0, 0.0),
@@ -74,7 +74,7 @@ impl GraphBundle {
                 },
                 scale: 1.0,
                 area: Rect::new(0., 0., 500., 1.),
-            },
+            }),
             graph_state,
             camera_2d: Camera2d,
             viewport_rect: ViewportRect(None),

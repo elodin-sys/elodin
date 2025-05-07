@@ -2,9 +2,10 @@ use bevy::{
     app::{App, Plugin, PreUpdate},
     ecs::{
         query::{QueryFilter, With},
-        system::{Resource, SystemParam, SystemState},
+        system::{SystemParam, SystemState},
         world::{Mut, World},
     },
+    prelude::Resource,
     window::PrimaryWindow,
 };
 use bevy_egui::{EguiContext, egui};
@@ -76,7 +77,7 @@ impl RootWidgetSystemExt for World {
         f: impl FnOnce(&mut Self, egui::Context) -> R,
     ) -> Option<R> {
         let mut state = self.query_filtered::<&mut EguiContext, (With<EguiContext>, F)>();
-        let Ok(mut egui_ctx) = state.get_single_mut(self) else {
+        let Ok(mut egui_ctx) = state.single_mut(self) else {
             return None;
         };
         let ctx = egui_ctx.get_mut().clone();

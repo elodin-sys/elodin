@@ -71,7 +71,7 @@ pub fn sync_line_plot_3d(
             continue;
         };
 
-        if let Some(mut entity) = commands.get_entity(entity) {
+        if let Ok(mut entity) = commands.get_entity(entity) {
             entity.try_insert(LineBundle {
                 line: gpu::LineHandles([x, y, z]),
                 uniform: LineUniform {

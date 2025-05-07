@@ -98,7 +98,7 @@ fn sink_inner(
                 .get_resource_mut::<PacketIdHandlers>()
                 .and_then(|mut handlers| handlers.remove(&pkt_id));
             if let Some(handler) = handler {
-                if let Err(err) = world.run_system_with_input(handler, &pkt) {
+                if let Err(err) = world.run_system_with(handler, &pkt) {
                     bevy::log::error!(?err, "packet id handler error");
                 }
             }
@@ -115,7 +115,7 @@ fn sink_inner(
                 .get_resource_mut::<RequestIdHandlers>()
                 .and_then(|mut handlers| handlers.remove(&req_id));
             if let Some(handler) = handler {
-                match world.run_system_with_input(handler, &pkt) {
+                match world.run_system_with(handler, &pkt) {
                     Ok(completed) => {
                         if !completed {
                             world
@@ -131,7 +131,7 @@ fn sink_inner(
         }
 
         for handler in packet_handlers.0.iter() {
-            if let Err(err) = world.run_system_with_input(*handler, (&pkt, vtable_registry)) {
+            if let Err(err) = world.run_system_with(*handler, (&pkt, vtable_registry)) {
                 bevy::log::error!(?err, "packet handler error");
             }
         }
@@ -157,7 +157,7 @@ fn sink_inner(
                 for metadata in metadata.entity_metadata.into_iter() {
                     let mut e = if let Some(entity) = world_sink.entity_map.get(&metadata.entity_id)
                     {
-                        let Some(e) = world_sink.commands.get_entity(*entity) else {
+                        let Ok(e) = world_sink.commands.get_entity(*entity) else {
                             continue;
                         };
                         e
@@ -302,7 +302,7 @@ impl Decomponentize for WorldSink<'_, '_> {
         _timestamp: Option<Timestamp>,
     ) -> Result<(), Infallible> {
         let e = if let Some(entity) = self.entity_map.get(&entity_id) {
-            let Some(e) = self.commands.get_entity(*entity) else {
+            let Ok(e) = self.commands.get_entity(*entity) else {
                 return Ok(());
             };
             e.id()
@@ -441,7 +441,7 @@ where
         let mut val = C::default();
         let _ = val.apply_value(C::COMPONENT_ID, entity_id, value, None);
         let mut e = if let Some(entity) = entity_map.0.get(&entity_id) {
-            let Some(e) = commands.get_entity(*entity) else {
+            let Ok(e) = commands.get_entity(*entity) else {
                 return;
             };
             e
@@ -497,7 +497,7 @@ impl<T: DeserializeOwned + Asset + Send + Sync + Component> AssetAdapter
             return;
         };
         let mut e = if let Some(entity) = entity_map.0.get(&entity_id) {
-            let Some(e) = commands.get_entity(*entity) else {
+            let Ok(e) = commands.get_entity(*entity) else {
                 return;
             };
             e

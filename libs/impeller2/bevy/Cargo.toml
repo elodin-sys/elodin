@@ -16,7 +16,7 @@ impeller2-wkt.features = ["gui", "bevy"]
 nox.path = "../../nox"
 
 # bevy
-bevy.version = "0.15"
+bevy.version = "0.16"
 bevy.default-features = false
 # channels
 thingbuf = "0.1.6"

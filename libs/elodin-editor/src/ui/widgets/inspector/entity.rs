@@ -1,9 +1,10 @@
 use std::{collections::BTreeMap, fmt::Display};
 
 use bevy::ecs::{
-    system::{Query, Res, ResMut, Resource, SystemParam, SystemState},
+    system::{Query, Res, ResMut, SystemParam, SystemState},
     world::World,
 };
+use bevy::prelude::Resource;
 use bevy_egui::egui::{self, Align, Color32, Layout, RichText, emath};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2_bevy::{

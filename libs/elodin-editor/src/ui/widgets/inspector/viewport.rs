@@ -6,7 +6,6 @@ use bevy::{
         query::Without,
         system::{Commands, Query},
     },
-    hierarchy::BuildChildren,
     math::Vec3,
     render::{camera::Projection, view::Visibility},
 };
@@ -74,8 +73,8 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                 .margin(egui::Margin::same(0).bottom(16.0)),
         );
 
-        let before_parent = cam.parent.map(|p| p.get());
-        let mut selected_parent: Option<Entity> = cam.parent.map(|p| p.get());
+        let before_parent = cam.parent.map(|p| p.parent());
+        let mut selected_parent: Option<Entity> = cam.parent.map(|p| p.parent());
         let selected_name = selected_parent
             .and_then(|id| entities_meta.get(id).ok())
             .map(|(_, _, _, meta)| meta.name.clone())
@@ -124,13 +123,13 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         if before_parent != selected_parent || reset_focus {
             if let Some(entity) = selected_parent {
                 if let Ok(entity_cell) = entity_transform_query.get(entity) {
-                    cam_entity.set_parent(entity);
+                    cam_entity.insert(ChildOf(entity));
                     cam.transform.translation = Vec3::new(10.0, 0.0, 0.0);
                     cam.transform.look_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y);
                     *cam.grid_cell = *entity_cell;
                 }
             } else {
-                cam_entity.remove_parent();
+                cam_entity.remove_parent_in_place();
                 cam_entity.insert(cam.global_transform.compute_transform());
             }
         }

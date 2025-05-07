@@ -157,7 +157,7 @@ pub struct CameraQuery {
     transform: &'static mut Transform,
     global_transform: &'static mut GlobalTransform,
     grid_cell: &'static mut GridCell<i128>,
-    parent: Option<&'static Parent>,
+    parent: Option<&'static ChildOf>,
     grid_handle: Option<&'static GridHandle>,
     no_propagate_rot: Option<&'static big_space::propagation::NoPropagateRot>,
 }
@@ -323,7 +323,9 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if cfg!(target_os = "windows") {
-                            let (window_id, _, _) = state_mut.windows.single();
+                            let Ok((window_id, _, _)) = state_mut.windows.single() else {
+                                return;
+                            };
                             let winit_window =
                                 state_mut.winit_windows.get_window(window_id).unwrap();
                             ui.horizontal_centered(|ui| {
@@ -353,7 +355,7 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
                                     )
                                     .clicked()
                                 {
-                                    state_mut.app_exit.send(AppExit::Success);
+                                    state_mut.app_exit.write(AppExit::Success);
                                 }
                                 ui.add_space(2.0);
                             });
@@ -457,7 +459,7 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         let window = state_mut.window;
         let images = state_mut.images;
 
-        let Ok(window) = window.get_single() else {
+        let Ok(window) = window.single() else {
             return;
         };
         let width = window.resolution.width();
@@ -561,7 +563,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
         let entities_meta = state_mut.entities_meta;
         let hovered_entity = state_mut.hovered_entity;
 
-        let Ok(window) = window.get_single() else {
+        let Ok(window) = window.single() else {
             return;
         };
 
@@ -667,12 +669,12 @@ fn set_camera_viewport(
 }
 
 fn sync_camera_grid_cell(
-    mut query: Query<(Option<&Parent>, &mut GridCell<i128>), With<MainCamera>>,
+    mut query: Query<(Option<&ChildOf>, &mut GridCell<i128>), With<MainCamera>>,
     entity_transform_query: Query<&GridCell<i128>, Without<MainCamera>>,
 ) {
     for (parent, mut grid_cell) in query.iter_mut() {
         if let Some(parent) = parent {
-            if let Ok(entity_cell) = entity_transform_query.get(parent.get()) {
+            if let Ok(entity_cell) = entity_transform_query.get(parent.parent()) {
                 *grid_cell = *entity_cell;
             }
         }

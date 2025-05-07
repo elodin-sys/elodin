@@ -16,6 +16,7 @@ use impeller2::types::{ComponentId, EntityId};
 use impeller2_bevy::{ComponentMetadataRegistry, ComponentSchemaRegistry, EntityMap};
 use impeller2_wkt::{EntityMetadata, Graph, Panel, Viewport};
 use nox::Tensor;
+use smallvec::SmallVec;
 use std::collections::{BTreeMap, HashMap};
 
 use super::{
@@ -50,7 +51,7 @@ pub struct TileIcons {
 #[derive(Resource, Clone)]
 pub struct TileState {
     pub tree: egui_tiles::Tree<Pane>,
-    pub tree_actions: Vec<TreeAction>,
+    pub tree_actions: smallvec::SmallVec<[TreeAction; 4]>,
     pub graphs: HashMap<TileId, Entity>,
 }
 
@@ -157,7 +158,7 @@ impl TileState {
                     }
                 }
                 Tile::Pane(Pane::Graph(graph)) => {
-                    commands.entity(graph.id).despawn_recursive();
+                    commands.entity(graph.id).despawn();
                     if let Some(graph_id) = self.graphs.get(tile_id) {
                         commands.entity(*graph_id).despawn();
                         self.graphs.remove(tile_id);
@@ -297,7 +298,7 @@ impl Default for TileState {
     fn default() -> Self {
         Self {
             tree: egui_tiles::Tree::new_tabs("tab_tree", vec![]),
-            tree_actions: vec![],
+            tree_actions: SmallVec::new(),
             graphs: HashMap::new(),
         }
     }
@@ -305,7 +306,7 @@ impl Default for TileState {
 
 struct TreeBehavior<'w> {
     icons: TileIcons,
-    tree_actions: Vec<TreeAction>,
+    tree_actions: SmallVec<[TreeAction; 4]>,
     world: &'w mut World,
 }
 
@@ -803,7 +804,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                     if let Ok(grid_cell) = state_mut.grid_cell.get(*parent) {
                                         camera.try_insert(*grid_cell);
                                     }
-                                    camera.set_parent(*parent);
+                                    camera.insert(ChildOf(*parent));
                                 }
                             }
                         }
@@ -900,19 +901,19 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     Pane::Viewport(viewport) => {
                         let Some(cam) = viewport.camera else { continue };
                         if active_tiles.contains(tile_id) {
-                            if let Some(mut cam) = state_mut.commands.get_entity(cam) {
+                            if let Ok(mut cam) = state_mut.commands.get_entity(cam) {
                                 cam.try_insert(ViewportRect(viewport.rect));
                             }
-                        } else if let Some(mut cam) = state_mut.commands.get_entity(cam) {
+                        } else if let Ok(mut cam) = state_mut.commands.get_entity(cam) {
                             cam.try_insert(ViewportRect(None));
                         }
                     }
                     Pane::Graph(graph) => {
                         if active_tiles.contains(tile_id) {
-                            if let Some(mut cam) = state_mut.commands.get_entity(graph.id) {
+                            if let Ok(mut cam) = state_mut.commands.get_entity(graph.id) {
                                 cam.try_insert(ViewportRect(graph.rect));
                             }
-                        } else if let Some(mut cam) = state_mut.commands.get_entity(graph.id) {
+                        } else if let Ok(mut cam) = state_mut.commands.get_entity(graph.id) {
                             cam.try_insert(ViewportRect(None));
                         }
                     }
@@ -1019,7 +1020,7 @@ pub fn spawn_panel(
                     if let Ok(grid_cell) = grid_cell.get(*parent) {
                         camera.try_insert(*grid_cell);
                     }
-                    camera.set_parent(*parent);
+                    camera.insert(ChildOf(*parent));
                 }
             };
             // Convert from Z-up to Y-up
