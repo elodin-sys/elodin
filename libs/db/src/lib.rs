@@ -635,6 +635,7 @@ struct DBSink<'a> {
     components: &'a HashMap<(EntityId, ComponentId), Component>,
     last_updated: &'a AtomicCell<Timestamp>,
     sunk_new_time_series: bool,
+    table_received: Timestamp,
 }
 
 impl Decomponentize for DBSink<'_> {
@@ -646,7 +647,7 @@ impl Decomponentize for DBSink<'_> {
         value: impeller2::types::ComponentView<'_>,
         timestamp: Option<Timestamp>,
     ) -> Result<(), Error> {
-        let timestamp = timestamp.unwrap_or_else(Timestamp::now);
+        let timestamp = timestamp.unwrap_or(self.table_received);
         let value_buf = value.as_bytes();
         let Some(component) = self.components.get(&(entity_id, component_id)) else {
             return Err(Error::ComponentNotFound(component_id));
@@ -1101,6 +1102,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     components: &state.components,
                     last_updated: &db.last_updated,
                     sunk_new_time_series: false,
+                    table_received: Timestamp::now(),
                 };
                 table
                     .sink(&state.vtable_registry, &mut sink)?
