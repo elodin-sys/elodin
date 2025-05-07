@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::{collections::BTreeMap, str::FromStr, time::Duration};
 
 use bevy::{
     ecs::{
@@ -192,6 +192,7 @@ pub enum PaletteEvent {
         next_page: PalettePage,
     },
     Exit,
+    Error(String),
 }
 
 impl From<PalettePage> for PaletteEvent {
@@ -212,6 +213,7 @@ pub struct MatchedPaletteItem<'a> {
 const VIEWPORT_LABEL: &str = "VIEWPORT";
 const TILES_LABEL: &str = "TILES";
 const SIMULATION_LABEL: &str = "SIMULATION";
+const TIME_LABEL: &str = "TIME";
 const HELP_LABEL: &str = "HELP";
 const PRESETS_LABEL: &str = "PRESETS";
 
@@ -491,7 +493,7 @@ pub fn create_sql(tile_id: Option<TileId>) -> PaletteItem {
 }
 
 fn set_playback_speed() -> PaletteItem {
-    PaletteItem::new("Set Playback Speed", SIMULATION_LABEL, |_: In<String>| {
+    PaletteItem::new("Set Playback Speed", TIME_LABEL, |_: In<String>| {
         let speeds = [
             0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 20.0, 30.0, 40.0,
             50.0, 100.0,
@@ -530,7 +532,7 @@ fn set_playback_speed() -> PaletteItem {
 fn fix_current_time_range() -> PaletteItem {
     PaletteItem::new(
         "Fix Current Time Range",
-        SIMULATION_LABEL,
+        TIME_LABEL,
         |_: In<String>,
          selected_range: Res<SelectedTimeRange>,
          mut behavior: ResMut<TimeRangeBehavior>| {
@@ -539,6 +541,60 @@ fn fix_current_time_range() -> PaletteItem {
             PaletteEvent::Exit
         },
     )
+}
+
+fn set_time_range_behavior() -> PaletteItem {
+    PaletteItem::new("Set Time Range", TIME_LABEL, |_: In<String>| {
+        PalettePage::new(vec![
+            PaletteItem::new(
+                LabelSource::placeholder(
+                    "Enter start offset (e.g., '+5m', '-10s', '=2023-01-01T00:00:00Z')",
+                ),
+                "Start Offset",
+                move |start_str: In<String>| {
+                    let start_offset = match Offset::from_str(&start_str.0) {
+                        Ok(offset) => offset,
+                        Err(_) => {
+                            return PaletteEvent::Error(format!(
+                                "Invalid start offset format: {}",
+                                start_str.0
+                            ));
+                        }
+                    };
+
+                    PalettePage::new(vec![
+                        PaletteItem::new(
+                            LabelSource::placeholder(
+                                "Enter end offset (e.g., '+5m', '-10s', '=2023-01-01T00:00:00Z')",
+                            ),
+                            "End Offset",
+                            move |end_str: In<String>, mut behavior: ResMut<TimeRangeBehavior>| {
+                                let end_offset = match Offset::from_str(&end_str.0) {
+                                    Ok(offset) => offset,
+                                    Err(_) => {
+                                        return PaletteEvent::Error(format!(
+                                            "Invalid end offset format: {}",
+                                            end_str.0
+                                        ));
+                                    }
+                                };
+
+                                behavior.start = start_offset.clone();
+                                behavior.end = end_offset;
+                                PaletteEvent::Exit
+                            },
+                        )
+                        .default(),
+                    ])
+                    .prompt("Enter the end offset")
+                    .into()
+                },
+            )
+            .default(),
+        ])
+        .prompt("Enter the start offset")
+        .into()
+    })
 }
 
 pub fn save_preset() -> PaletteItem {
@@ -716,6 +772,7 @@ impl Default for PalettePage {
             ),
             set_playback_speed(),
             fix_current_time_range(),
+            set_time_range_behavior(),
             create_graph(None),
             create_action(None),
             create_monitor(None),

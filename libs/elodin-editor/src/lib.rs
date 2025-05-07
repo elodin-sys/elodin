@@ -920,7 +920,7 @@ pub struct TimeRangeBehavior {
     end: Offset,
 }
 
-#[derive(Resource, PartialEq, Eq, Clone, Copy)]
+#[derive(Resource, PartialEq, Eq, Clone, Copy, Debug)]
 enum Offset {
     Earliest(Duration),
     Latest(Duration),
@@ -961,7 +961,7 @@ impl std::fmt::Display for TimeRangeBehavior {
                 write!(f, "LAST {start}")
             }
             (start, end) => {
-                write!(f, "{start} — {end}")
+                write!(f, "{start} ↔ {end}")
             }
         }
     }
