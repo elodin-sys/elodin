@@ -54,12 +54,15 @@ in {
     ];
     NVCC_PREPEND_FLAGS = "--compiler-bindir ${pkgs.gcc11}/bin/gcc";
     NVCC_APPEND_FLAGS = "-I${pkgs.cudaPackages.cuda_cudart.include}/include";
+    CONTAINER_HOST = "unix:///run/podman/podman.sock";
   };
   hardware.graphics.enable = true;
   virtualisation.podman = {
     enable = true;
     # TODO: replace with `hardware.nvidia-container-toolkit.enable` when it works (https://github.com/nixos/nixpkgs/issues/344729).
     enableNvidia = true;
+    dockerCompat = true;
+    dockerSocket.enable = true;
   };
   environment.systemPackages = with pkgs; [
     libgpiod_1
