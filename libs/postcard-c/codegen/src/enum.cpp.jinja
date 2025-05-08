@@ -1,17 +1,3 @@
-#ifndef {{name}}_H
-#define {{name}}_H
-
-#include <stdio.h>
-#include <span>
-#include <variant>
-#include <type_traits>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
 class {{name}} : public std::variant<{% for variant in ty.Enum -%}
 
   {{cpp_variant_type(variant.ty, name, variant.name)}}{% if not loop.last %}, {% endif %}
@@ -163,5 +149,3 @@ public:
     return POSTCARD_SUCCESS;
   }
 };
-
-#endif

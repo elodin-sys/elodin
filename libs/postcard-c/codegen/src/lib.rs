@@ -8,6 +8,7 @@ use postcard_schema::schema::owned::{
 static CPP_STRUCT_TMPL: &str = include_str!("./struct.cpp.jinja");
 static CPP_ENUM_TMPL: &str = include_str!("./enum.cpp.jinja");
 static CPP_NEW_TYPE_STRUCT_TMPL: &str = include_str!("./new_type_struct.cpp.jinja");
+static HEADER_TMPL: &str = include_str!("./header.hpp.jinja");
 
 pub trait SchemaExt {
     fn to_cpp() -> miette::Result<String>;
@@ -18,6 +19,28 @@ impl<S: postcard_schema::Schema> SchemaExt for S {
         let owned_ty: OwnedNamedType = S::SCHEMA.into();
         generate_cpp(&owned_ty)
     }
+}
+
+pub fn hpp_header(
+    name: impl ToString,
+    types: impl IntoIterator<Item = String>,
+) -> miette::Result<String> {
+    let types = types.into_iter().collect::<Vec<String>>();
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct HeaderData {
+        name: String,
+        types: Vec<String>,
+    }
+    let mut env = Environment::new();
+    env.add_template("header", HEADER_TMPL).into_diagnostic()?;
+
+    let tmpl = env.get_template("header").expect("template missing");
+    Ok(tmpl
+        .render(HeaderData {
+            name: name.to_string(),
+            types,
+        })
+        .into_diagnostic()?)
 }
 
 pub fn generate_cpp(ty: &OwnedNamedType) -> miette::Result<String> {

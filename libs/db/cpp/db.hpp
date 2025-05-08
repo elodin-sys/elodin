@@ -1,3 +1,19 @@
+#ifndef ELODIN_DB_H
+#define ELODIN_DB_H
+
+#include <stdio.h>
+#include <span>
+#include <variant>
+#include <type_traits>
+#include <vector>
+#include <optional>
+
+
+#if __has_include("postcard.h")
+#include "postcard.h"
+#endif
+
+
 #ifndef POSTCARD_H
 #define POSTCARD_H
 
@@ -1051,6 +1067,7 @@ inline size_t postcard_size_map(size_t count)
 
 #endif // POSTCARD_H
 
+
 #ifndef ELO_DB_HELPERS_H
 #define ELO_DB_HELPERS_H
 
@@ -1161,19 +1178,6 @@ public:
 
 #endif
 
-#ifndef InitialTimestamp_H
-#define InitialTimestamp_H
-
-#include <stdio.h>
-#include <span>
-#include <variant>
-#include <type_traits>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
 
 class InitialTimestamp : public std::variant<std::monostate, std::monostate, int64_t> {
 public:
@@ -1374,22 +1378,6 @@ public:
   }
 };
 
-#endif
-#ifndef FixedRateBehavior_H
-#define FixedRateBehavior_H
-
-#include <stdio.h>
-#include <span>
-#include <unordered_map>
-#include <variant>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
-
 struct FixedRateBehavior {
   static constexpr std::string_view name = "FixedRateBehavior";
 
@@ -1521,21 +1509,6 @@ struct FixedRateBehavior {
     return POSTCARD_SUCCESS;
   }
 };
-
-#endif
-#ifndef StreamBehavior_H
-#define StreamBehavior_H
-
-#include <stdio.h>
-#include <span>
-#include <variant>
-#include <type_traits>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
 
 class StreamBehavior : public std::variant<std::monostate, FixedRateBehavior> {
 public:
@@ -1700,22 +1673,6 @@ public:
   }
 };
 
-#endif
-#ifndef StreamFilter_H
-#define StreamFilter_H
-
-#include <stdio.h>
-#include <span>
-#include <unordered_map>
-#include <variant>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
-
 struct StreamFilter {
   static constexpr std::string_view name = "StreamFilter";
 
@@ -1841,22 +1798,6 @@ struct StreamFilter {
   }
 };
 
-#endif
-#ifndef Stream_H
-#define Stream_H
-
-#include <stdio.h>
-#include <span>
-#include <unordered_map>
-#include <variant>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
-
 struct Stream {
   static constexpr std::string_view name = "Stream";
 
@@ -1944,22 +1885,6 @@ struct Stream {
     return POSTCARD_SUCCESS;
   }
 };
-
-#endif
-#ifndef MsgStream_H
-#define MsgStream_H
-
-#include <stdio.h>
-#include <span>
-#include <unordered_map>
-#include <variant>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
 
 struct MsgStream {
   static constexpr std::string_view name = "MsgStream";
@@ -2053,22 +1978,6 @@ struct MsgStream {
   }
 };
 
-#endif
-#ifndef Field_H
-#define Field_H
-
-#include <stdio.h>
-#include <span>
-#include <unordered_map>
-#include <variant>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
-
 struct Field {
   static constexpr std::string_view name = "Field";
 
@@ -2157,22 +2066,6 @@ struct Field {
   }
 };
 
-#endif
-#ifndef OpData_H
-#define OpData_H
-
-#include <stdio.h>
-#include <span>
-#include <unordered_map>
-#include <variant>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
-
 struct OpData {
   static constexpr std::string_view name = "OpData";
 
@@ -2253,23 +2146,6 @@ struct OpData {
     return POSTCARD_SUCCESS;
   }
 };
-
-#endif
-
-#ifndef OpTable_H
-#define OpTable_H
-
-#include <stdio.h>
-#include <span>
-#include <unordered_map>
-#include <variant>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
 
 struct OpTable {
   static constexpr std::string_view name = "OpTable";
@@ -2352,23 +2228,6 @@ struct OpTable {
   }
 };
 
-#endif
-
-#ifndef OpPair_H
-#define OpPair_H
-
-#include <stdio.h>
-#include <span>
-#include <unordered_map>
-#include <variant>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
-
 struct OpPair {
   static constexpr std::string_view name = "OpPair";
 
@@ -2449,23 +2308,6 @@ struct OpPair {
     return POSTCARD_SUCCESS;
   }
 };
-
-#endif
-
-#ifndef OpSchema_H
-#define OpSchema_H
-
-#include <stdio.h>
-#include <span>
-#include <unordered_map>
-#include <variant>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
 
 struct OpSchema {
   static constexpr std::string_view name = "OpSchema";
@@ -2555,23 +2397,6 @@ struct OpSchema {
   }
 };
 
-#endif
-
-#ifndef OpTimestamp_H
-#define OpTimestamp_H
-
-#include <stdio.h>
-#include <span>
-#include <unordered_map>
-#include <variant>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
-
 struct OpTimestamp {
   static constexpr std::string_view name = "OpTimestamp";
 
@@ -2652,23 +2477,6 @@ struct OpTimestamp {
     return POSTCARD_SUCCESS;
   }
 };
-
-#endif
-
-#ifndef OpExt_H
-#define OpExt_H
-
-#include <stdio.h>
-#include <span>
-#include <unordered_map>
-#include <variant>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
 
 struct OpExt {
   static constexpr std::string_view name = "OpExt";
@@ -2775,22 +2583,6 @@ struct OpExt {
     return POSTCARD_SUCCESS;
   }
 };
-
-#endif
-
-#ifndef Op_H
-#define Op_H
-
-#include <stdio.h>
-#include <span>
-#include <variant>
-#include <type_traits>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
 
 class Op : public std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt> {
 public:
@@ -3150,18 +2942,6 @@ public:
   }
 };
 
-#endif
-#ifndef OpRef_H
-#define OpRef_H
-
-#include <stdio.h>
-#include <span>
-#include <vector>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
 struct OpRef {
   static constexpr std::string_view name = "OpRef";
 
@@ -3227,21 +3007,6 @@ struct OpRef {
     return result;
   }
 };
-
-#endif
-#ifndef PrimType_H
-#define PrimType_H
-
-#include <stdio.h>
-#include <span>
-#include <variant>
-#include <type_traits>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
 
 class PrimType : public std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate> {
 public:
@@ -3727,22 +3492,6 @@ public:
   }
 };
 
-#endif
-#ifndef VTable_H
-#define VTable_H
-
-#include <stdio.h>
-#include <span>
-#include <unordered_map>
-#include <variant>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
-
 struct VTable {
   static constexpr std::string_view name = "VTable";
 
@@ -3876,22 +3625,6 @@ struct VTable {
   }
 };
 
-#endif
-#ifndef VTableMsg_H
-#define VTableMsg_H
-
-#include <stdio.h>
-#include <span>
-#include <unordered_map>
-#include <variant>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
-
 struct VTableMsg {
   static constexpr std::string_view name = "VTableMsg";
 
@@ -3990,5 +3723,6 @@ struct VTableMsg {
     return POSTCARD_SUCCESS;
   }
 };
+
 
 #endif
