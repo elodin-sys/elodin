@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::ops::Range;
 
 use bevy::core_pipeline::tonemapping::Tonemapping;
 
@@ -41,6 +42,8 @@ pub struct GraphState {
     pub pan_offset: Vec2,
     pub graph_type: GraphType,
     pub label: String,
+    pub auto_y_range: bool,
+    pub y_range: Range<f64>,
 }
 
 impl GraphBundle {
@@ -62,6 +65,8 @@ impl GraphBundle {
             pan_offset: Vec2::ZERO,
             graph_type: GraphType::Line,
             label,
+            y_range: 0.0..1.0,
+            auto_y_range: true,
         };
         GraphBundle {
             camera: Camera {

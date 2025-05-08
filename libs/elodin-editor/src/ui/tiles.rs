@@ -1152,13 +1152,11 @@ pub fn spawn_panel(
             }
 
             let graph_label = graph_label(graph, entity_map, entity_metadata, metadata_store);
-            let graph_id = commands
-                .spawn(GraphBundle::new(
-                    render_layer_alloc,
-                    entities,
-                    graph_label.clone(),
-                ))
-                .id();
+            let mut bundle = GraphBundle::new(render_layer_alloc, entities, graph_label.clone());
+            bundle.graph_state.auto_y_range = graph.auto_y_range;
+            bundle.graph_state.y_range = graph.y_range.clone();
+            bundle.graph_state.graph_type = graph.graph_type;
+            let graph_id = commands.spawn(bundle).id();
             let graph = GraphPane::new(graph_id, graph_label);
             ui_state.insert_tile(Tile::Pane(Pane::Graph(graph)), parent_id, false)
         }

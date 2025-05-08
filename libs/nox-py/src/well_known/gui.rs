@@ -125,6 +125,8 @@ impl Panel {
                 name,
                 entities,
                 graph_type,
+                auto_y_range: true,
+                y_range: 0.0..1.0,
             }),
         })
     }
