@@ -4,10 +4,15 @@
 
 using namespace vtable;
 
+struct Foo {
+    double time;
+    double mag;
+};
+
 int main() {
     auto table = builder::vtable({
-        builder::raw_field(0, 8, builder::schema(PrimType::F64(), {}, builder::pair(1, "time"))),
-        builder::raw_field(8, 16, builder::schema(PrimType::F64(), {}, builder::pair(1, "mag")))
+        builder::field<Foo, &Foo::time>(builder::schema(PrimType::F64(), {}, builder::pair(1, "time"))),
+        builder::field<Foo, &Foo::mag>(builder::schema(PrimType::F64(), {}, builder::pair(1, "mag")))
     });
     auto vtable_msg = VTableMsg {
         .id = {1,0},
