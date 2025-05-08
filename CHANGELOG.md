@@ -8,6 +8,8 @@
 - **(feat)** Add command palette action that sets the time range of the editor
 - **(feat)** Allow user's to rename the graph's title in the inspector
 - **(feat)** Add vtable builder to elodin-db's C++ API. You can find an example of its usage in libs/db/cpp/example.cpp
+- **(feat)** Add vtable builder to elodin-db's C++ API. You can find an example of its usage in libs/db/cpp/example.cpp
+- **(feat)** Add ability to manually specify y axis bounds on a plot
 
 ## v0.14
 
