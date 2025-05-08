@@ -8888,6 +8888,7 @@ dependencies = [
  "minijinja",
  "postcard-schema",
  "ron 0.9.0",
+ "serde",
 ]
 
 [[package]]
