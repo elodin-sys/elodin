@@ -76,7 +76,6 @@ public:
 
     size_t read(uint8_t* data, size_t len)
     {
-        auto remaining = len;
         auto res = ::read(fd_, data, len);
         if (res < 0) {
             throw std::system_error(errno, std::generic_category(), "Failed to read");
@@ -102,8 +101,7 @@ try {
     auto stream_msg_buf = stream_msg.encode_vec();
 
     // prints out the Stream msg that will be sent to the DB
-    auto stream_msg_buf_span = std::span<uint8_t>(reinterpret_cast<uint8_t*>(stream_msg_buf.data()), stream_msg_buf.size());
-    // std::println("stream encoded {}", stream_msg_buf_span);
+    // std::println("stream encoded {}", stream_msg_buf);
 
     sock.write_all(stream_msg_buf.data(), stream_msg_buf.size());
 
@@ -111,12 +109,10 @@ try {
     auto msg_stream = MsgStream {
         .msg_id = { 6, 166 }
     };
-    auto msg_stream_msg = Msg<MsgStream>(msg_stream);
-    auto msg_stream_msg_buf = stream_msg.encode_vec();
+    auto msg_stream_msg_buf = Msg(msg_stream).encode_vec();
 
     // prints out the MsgStream msg that will be sent to the DB
-    auto msg_stream_msg_buf_span = std::span<uint8_t>(reinterpret_cast<uint8_t*>(msg_stream_msg_buf.data()), msg_stream_msg_buf.size());
-    // std::println("msg stream encoded {}", msg_stream_msg_buf_span);
+    // std::println("msg stream encoded {}", msg_stream_msg_buf);
 
     sock.write_all(msg_stream_msg_buf.data(), msg_stream_msg_buf.size());
 

@@ -220,7 +220,7 @@ pub fn cpp_size(ty: &OwnedNamedValue) -> String {
         OwnedDataModelType::Seq(inner) => {
             let mut out = String::default();
             out += &format!("size += postcard_size_seq({}.size());\n", ty.name);
-            out += &format!("for(const auto& val: {}) {{\n  ", ty.name);
+            out += &format!("for([[maybe_unused]] const auto& val: {}) {{\n  ", ty.name);
             out += &cpp_size(&OwnedNamedValue {
                 name: "val".to_string(),
                 ty: *inner.clone(),
@@ -232,8 +232,10 @@ pub fn cpp_size(ty: &OwnedNamedValue) -> String {
         OwnedDataModelType::Map { key, val } => {
             let mut out = String::default();
             out += &format!("size += postcard_size_map({}.size());\n", ty.name);
-            out += &format!("for(const auto& [k, v]: {}) {{\n  ", ty.name);
-
+            out += &format!(
+                "for([[maybe_unused]] const auto& [k, v]: {}) {{\n  ",
+                ty.name
+            );
             // size for key
             out += &format!(
                 "{}\n  ",
@@ -284,17 +286,10 @@ pub fn cpp_size(ty: &OwnedNamedValue) -> String {
         OwnedDataModelType::Tuple(tys) => {
             let mut out = String::new();
             for (i, inner_ty) in tys.iter().enumerate() {
-                out += &format!(
-                    r#"{{
-                        auto val = std::get<{i}>({});
-                        {}
-                    }}"#,
-                    ty.name,
-                    cpp_size(&OwnedNamedValue {
-                        name: "val".to_string(),
-                        ty: inner_ty.clone()
-                    })
-                );
+                out += &cpp_size(&OwnedNamedValue {
+                    name: format!("(std::get<{i}>({}))", ty.name),
+                    ty: inner_ty.clone(),
+                });
             }
             out
         }
@@ -344,6 +339,7 @@ pub fn cpp_encode(ty: &OwnedNamedValue) -> String {
                 ty: *inner.clone(),
             })
             .replace("\n", "\n  ");
+            out += "\n  if(result != POSTCARD_SUCCESS) return result;";
             out += "\n}";
             out
         }
@@ -602,10 +598,9 @@ pub fn cpp_decode(ty: &OwnedNamedValue) -> String {
             let mut out = String::new();
             for (i, ty) in tys.iter().enumerate() {
                 out += &format!(
-                    r#"{} val{i};
-                    {}"#,
+                    "{} val{i};\n{}\n",
                     to_cpp_ty(ty.clone()),
-                    cpp_encode(&OwnedNamedValue {
+                    cpp_decode(&OwnedNamedValue {
                         name: format!("val{i}"),
                         ty: ty.clone()
                     })

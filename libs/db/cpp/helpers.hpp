@@ -8,11 +8,12 @@
 #include <string_view>
 #include <vector>
 
-inline uint32_t fnv1a_hash_32(const std::string_view str) {
+inline uint32_t fnv1a_hash_32(const std::string_view str)
+{
     uint32_t hash = 0x811c9dc5;
     size_t i = 0;
     for (auto c : str) {
-        if(++i >= 32){
+        if (++i >= 32) {
             break;
         }
         hash ^= static_cast<uint8_t>(c);
@@ -21,34 +22,36 @@ inline uint32_t fnv1a_hash_32(const std::string_view str) {
     return hash;
 }
 
-
-inline uint64_t fnv1a_hash_64(const std::string_view str) {
+inline uint64_t fnv1a_hash_64(const std::string_view str)
+{
     uint64_t hash = 0xcbf29ce484222325;
     size_t i = 0;
     for (auto c : str) {
-        if(++i >= 64){
+        if (++i >= 64) {
             break;
         }
         hash ^= static_cast<uint8_t>(c);
-        hash *= 0x00000100000001B3;;
+        hash *= 0x00000100000001B3;
     }
     return hash;
 }
 
-
-inline uint16_t fnv1a_hash_16_xor(const std::string_view str) {
+inline uint16_t fnv1a_hash_16_xor(const std::string_view str)
+{
     auto hash = fnv1a_hash_32(str);
     uint16_t upper = static_cast<uint16_t>((hash >> 16) & 0xFFFF);
     uint16_t lower = static_cast<uint16_t>(hash & 0xFFFF);
     return upper ^ lower;
 }
 
-inline std::array<uint8_t, 2> msg_id(const std::string_view str) {
+inline std::array<uint8_t, 2> msg_id(const std::string_view str)
+{
     auto hash = fnv1a_hash_16_xor(str);
-    return {static_cast<uint8_t>(hash & 0xff), static_cast<uint8_t>((hash >> 8) & 0xff)};
+    return { static_cast<uint8_t>(hash & 0xff), static_cast<uint8_t>((hash >> 8) & 0xff) };
 }
 
-inline uint64_t component_id(const std::string_view str) {
+inline uint64_t component_id(const std::string_view str)
+{
     auto hash = fnv1a_hash_64(str) & ~(1ul << 63);
     return hash;
 }
@@ -104,6 +107,5 @@ public:
         return buf;
     }
 };
-
 
 #endif
