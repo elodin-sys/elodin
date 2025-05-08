@@ -4,6 +4,7 @@ use bevy::{
     ecs::{
         entity::Entity,
         event::EventReader,
+        hierarchy::ChildOf,
         query::With,
         system::{Commands, Local, Query, Res, SystemParam},
     },
@@ -369,6 +370,7 @@ impl Plot {
                                     ),
                                     graph_type: graph_state.graph_type,
                                 })
+                                .insert(ChildOf(graph_id))
                                 .insert(LineWidgetWidth(ui.max_rect().width() as usize))
                                 .id();
                             graph_state
