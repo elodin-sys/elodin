@@ -1,3 +1,5 @@
+///$(which true);FLAGS="--std=c++23";THIS_FILE="$(cd "$(dirname "$0")"; pwd -P)/$(basename "$0")";OUT_FILE="/tmp/build-cache/$THIS_FILE";mkdir -p "$(dirname "$OUT_FILE")";test "$THIS_FILE" -ot "$OUT_FILE" || $(which clang++ || which g++) $FLAGS "$THIS_FILE" -o "$OUT_FILE" || exit $?;exec bash -c "exec -a \"$0\" \"$OUT_FILE\" $([ $# -eq 0 ] || printf ' "%s"' "$@")"
+
 #include <arpa/inet.h>
 #include <cstdint>
 #include <netinet/in.h>
@@ -137,7 +139,6 @@ try {
     auto vtable_msg_encoded = vtable_msg.encode_vec();
     sock.write_all(vtable_msg_encoded.data(), vtable_msg_encoded.size());
 
-    double val = 1.0;
     auto sensor_data = SensorData {
         .time = 0,
         .mag = { 0.0, 0.0, 0.0 },
