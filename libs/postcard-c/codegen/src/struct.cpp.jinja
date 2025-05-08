@@ -1,18 +1,3 @@
-#ifndef {{name}}_H
-#define {{name}}_H
-
-#include <stdio.h>
-#include <span>
-#include <unordered_map>
-#include <variant>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
-
 struct {{name}} {
   static constexpr std::string_view name = "{{name}}";
 
@@ -90,5 +75,3 @@ struct {{name}} {
     return POSTCARD_SUCCESS;
   }
 };
-
-#endif

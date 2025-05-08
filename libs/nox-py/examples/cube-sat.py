@@ -18,11 +18,11 @@ earth_radius = 6378.1 * 1000
 altitude = 400 * 1000
 radius = earth_radius + altitude
 velocity = np.sqrt(G * M / radius)
-SIM_TIME_STEP = 1.0 / 20.0
+SIM_TIME_STEP = 1.0 / 60.0
 
 cache_directory = el._get_cache_dir()
 
-gravity_model = egm08.EGM08(2190, cache_directory=cache_directory)
+gravity_model = egm08.EGM08(64, cache_directory=cache_directory)
 
 ## sensors
 GyroOmega = Annotated[
@@ -685,7 +685,7 @@ exec = w.run(
     ),
     sim_time_step=SIM_TIME_STEP,
     run_time_step=1 / 5000.0,
-    default_playback_speed=20.0,
+    default_playback_speed=60.0,
     max_ticks=60 * 20 * 60,
     optimize=True,
 )
