@@ -1,7 +1,6 @@
 #ifndef ELO_DB_VTABLE_H
 #define ELO_DB_VTABLE_H
 
-
 #include <string_view>
 #if __has_include("db.hpp")
 #include "db.hpp"
@@ -10,18 +9,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <print>
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <variant>
 #include <vector>
-#include <print>
 
 namespace vtable {
 
-/**
- * A builder for VTable operations
- */
+/// A builder for VTable operations
 class OpBuilder {
 public:
     struct Data {
@@ -56,11 +53,9 @@ public:
         std::shared_ptr<OpBuilder> arg;
     };
 
-    // Using std::variant instead of enum tag and union
     using ValueType = std::variant<Data, Table, Pair, Schema, Timestamp, Ext>;
     ValueType value;
 
-    // Constructors for different operation types
     explicit OpBuilder(const Data& data)
         : value(data)
     {
@@ -99,9 +94,7 @@ public:
     OpBuilder& operator=(OpBuilder&& other) noexcept = default;
 };
 
-/**
- * A builder for VTable fields
- */
+/// A builder for VTable fields
 class FieldBuilder {
 public:
     uint16_t offset;
@@ -118,9 +111,9 @@ public:
 
 namespace builder {
 
-    /**
-        * Creates a data operation builder from the provided data
-        */
+    /// Create an OpBuilder that includes the passed in data in the data section
+    /// ## Safety
+    /// The type passed here should be safe to memcpy
     template <typename T>
     std::shared_ptr<OpBuilder> data(const std::vector<T>& values)
     {
@@ -130,9 +123,9 @@ namespace builder {
         return std::make_shared<OpBuilder>(data);
     }
 
-    /**
-     * Creates a data operation builder from the provided data
-     */
+    /// Create an OpBuilder that includes the passed in data in the data section
+    /// ## Safety
+    /// The type passed here should be safe to memcpy
     template <typename T>
     std::shared_ptr<OpBuilder> data(const T& value)
     {
@@ -142,27 +135,22 @@ namespace builder {
         return std::make_shared<OpBuilder>(data);
     }
 
-    /**
-     * Creates a data operation builder from a byte array
-     */
+    /// Create an OpBuilder that includes the passed in data in the data section,
+    /// this includes an optional alignment value that
     inline std::shared_ptr<OpBuilder> data(const std::vector<uint8_t>& bytes, size_t align = 1)
     {
         OpBuilder::Data data { align, bytes };
         return std::make_shared<OpBuilder>(data);
     }
 
-    /**
-     * Creates a table operation builder with the specified offset and length
-     */
+    /// Creates an OpBuilder with the table specified offset and length
     inline std::shared_ptr<OpBuilder> raw_table(uint16_t offset, uint16_t len)
     {
         OpBuilder::Table table { offset, len };
         return std::make_shared<OpBuilder>(table);
     }
 
-    /**
-     * Creates a pair operation builder from an entity ID and component ID
-     */
+    /// Creates a pair operation builder from an entity ID and component ID
     inline std::shared_ptr<OpBuilder> pair(uint64_t entity_id, std::string_view component_name)
     {
         auto id = component_id(component_name);
@@ -173,9 +161,7 @@ namespace builder {
         return std::make_shared<OpBuilder>(pair);
     }
 
-    /**
-     * Creates a schema operation builder from a primitive type, dimensions, and an argument
-     */
+    /// Creates a schema operation builder from a primitive type, dimensions, and an argument
     inline std::shared_ptr<OpBuilder> schema(PrimType ty, const std::vector<uint64_t>& dim, std::shared_ptr<OpBuilder> arg)
     {
         auto ty_op = builder::data(static_cast<uint64_t>(ty.index()));
@@ -185,9 +171,7 @@ namespace builder {
         return std::make_shared<OpBuilder>(schema);
     }
 
-    /**
-     * Creates a timestamp operation builder from a timestamp source and an argument
-     */
+    /// Creates a timestamp operation builder from a timestamp source and an argument
     inline std::shared_ptr<OpBuilder> timestamp(std::shared_ptr<OpBuilder> timestamp, std::shared_ptr<OpBuilder> arg)
     {
         OpBuilder::Timestamp ts { std::move(timestamp), std::move(arg) };
@@ -204,17 +188,27 @@ namespace builder {
         return std::make_shared<OpBuilder>(ext);
     }
 
-    /**
-     * Creates a field builder with the specified offset, length, and argument
-     */
+    /// Creates a field builder with the specified offset, length, and argument
     inline FieldBuilder raw_field(uint16_t offset, uint16_t len, std::shared_ptr<OpBuilder> arg)
     {
         return FieldBuilder(offset, len, std::move(arg));
     }
 
-    /**
-     * A builder for constructing VTables
-     */
+    /// Creates a field builder from a class and its field
+    /// ## Usage
+    /// ```cpp
+    ///  builder::field<Foo, &Foo::time>(builder::schema(PrimType::F64(), {}, builder::pair(1, "time"))),
+    /// ```
+    template <typename Class, auto MemberPtr>
+    inline FieldBuilder field(std::shared_ptr<OpBuilder> arg)
+    {
+        using FieldType = std::remove_reference_t<decltype(std::declval<Class>().*MemberPtr)>;
+        size_t offset = reinterpret_cast<size_t>(&(reinterpret_cast<Class*>(0)->*MemberPtr));
+        size_t size = sizeof(FieldType);
+        return raw_field(static_cast<uint16_t>(offset), static_cast<uint16_t>(size), std::move(arg));
+    }
+
+    /// A builder for constructing VTables
     class VTableBuilder {
     private:
         VTable vtable;
@@ -223,18 +217,13 @@ namespace builder {
     public:
         VTableBuilder() = default;
 
-        /**
-         * Visits an operation builder, adding it to the VTable and returning its OpRef
-         */
+        /// Visits an operation builder, adding it to the VTable and returning its OpRef
         OpRef visit(const std::shared_ptr<OpBuilder>& op)
         {
-            // Check if already visited
             auto it = visited.find(op.get());
             if (it != visited.end()) {
                 return it->second;
             }
-
-            // Process based on operation type using variant
             Op result_op;
 
             std::visit([&](const auto& val) {
@@ -243,23 +232,18 @@ namespace builder {
                 if constexpr (std::is_same_v<T, OpBuilder::Data>) {
                     const auto& data_op = val;
 
-                    // Calculate padding for alignment
                     const size_t align = data_op.align;
                     const size_t padding = (align - (vtable.data.size() % align)) % align;
 
-                    // Add padding
                     for (size_t i = 0; i < padding; i++) {
                         vtable.data.push_back(0);
                     }
 
-                    // Calculate offset and length
                     const uint16_t offset = static_cast<uint16_t>(vtable.data.size());
                     const uint16_t len = static_cast<uint16_t>(data_op.data.size());
 
-                    // Add data to VTable
                     vtable.data.insert(vtable.data.end(), data_op.data.begin(), data_op.data.end());
 
-                    // Create Data operation
                     result_op = Op::Data(OpData { offset, len });
 
                 } else if constexpr (std::is_same_v<T, OpBuilder::Table>) {
@@ -304,7 +288,6 @@ namespace builder {
             },
                 op->value);
 
-            // Add the operation to the VTable
             OpRef op_ref(static_cast<uint16_t>(vtable.ops.size()));
             vtable.ops.push_back(result_op);
             visited[op.get()] = op_ref;
@@ -312,9 +295,7 @@ namespace builder {
             return op_ref;
         }
 
-        /**
-         * Adds a field to the VTable
-         */
+        /// Adds a field to the VTable
         void push_field(const FieldBuilder& field_builder)
         {
             OpRef arg = visit(field_builder.arg);
@@ -328,18 +309,14 @@ namespace builder {
             vtable.fields.push_back(field);
         }
 
-        /**
-         * Builds and returns the VTable
-         */
+        /// Builds and returns the VTable
         VTable build() const
         {
             return vtable;
         }
     };
 
-    /**
-     * Creates a VTable from the provided field builders
-     */
+    /// Creates a VTable from the provided field builders
     inline VTable vtable(const std::initializer_list<FieldBuilder> fields)
     {
         VTableBuilder builder;
