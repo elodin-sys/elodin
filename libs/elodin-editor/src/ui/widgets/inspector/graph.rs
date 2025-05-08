@@ -7,7 +7,7 @@ use bevy_egui::egui;
 use impeller2_wkt::GraphType;
 use smallvec::SmallVec;
 
-use egui::Align;
+use egui::{Align, Color32};
 use impeller2::types::{ComponentId, EntityId};
 use impeller2_bevy::ComponentMetadataRegistry;
 
@@ -80,6 +80,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                         egui::RichText::new("WIDTH")
                             .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
                     );
+                    ui.separator();
                     ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                         ui.add(egui::DragValue::new(&mut graph_state.line_width).speed(0.2))
                     });
@@ -90,6 +91,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                 ui.style_mut().visuals.widgets.inactive.bg_fill = colors::PRIMARY_ONYX_8;
                 ui.add(egui::Slider::new(&mut graph_state.line_width, 1.0..=15.0).show_value(false))
             });
+        ui.separator();
         egui::Frame::NONE
             .inner_margin(egui::Margin::symmetric(0, 8))
             .show(ui, |ui| {
@@ -112,6 +114,47 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                         ui.selectable_value(&mut graph_state.graph_type, GraphType::Point, "Point");
                         ui.selectable_value(&mut graph_state.graph_type, GraphType::Bar, "Bar");
                     });
+            });
+
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(0, 8))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Y Bounds")
+                            .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
+                    );
+                    ui.add_space(8.0);
+                    theme::configure_input_with_border(ui.style_mut());
+                    ui.checkbox(&mut graph_state.auto_y_range, "Auto?");
+                });
+                ui.add_space(8.0);
+                ui.style_mut().visuals.widgets.hovered.weak_bg_fill = Color32::TRANSPARENT;
+                ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::TRANSPARENT;
+                ui.style_mut().visuals.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+                ui.style_mut().override_font_id =
+                    Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Min").color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
+                    );
+                    ui.add_space(16.0);
+                    ui.add_enabled(
+                        !graph_state.auto_y_range,
+                        egui::DragValue::new(&mut graph_state.y_range.start),
+                    );
+                });
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Max").color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
+                    );
+                    ui.add_space(16.0);
+                    ui.add_enabled(
+                        !graph_state.auto_y_range,
+                        egui::DragValue::new(&mut graph_state.y_range.end),
+                    );
+                })
             });
 
         let mut remove_list: SmallVec<[(EntityId, ComponentId); 1]> = SmallVec::new();
