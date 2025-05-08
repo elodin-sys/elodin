@@ -7,6 +7,7 @@
 - **(feat)** Add right click menu to plots that sets the plot's visible time range as the editor's time range
 - **(feat)** Add command palette action that sets the time range of the editor
 - **(feat)** Allow user's to rename the graph's title in the inspector
+- **(feat)** Add vtable builder to elodin-db's C++ API. You can find an example of its usage in libs/db/cpp/example.cpp
 
 ## v0.14
 
