@@ -37,10 +37,12 @@ use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc, spawn_g
 use ui::{
     SelectedObject,
     tiles::{self, TileState},
+    utils::FriendlyEpoch,
     widgets::plot::{CollectedGraphData, gpu::LineHandle},
 };
 
 pub mod chunks;
+mod offset_parse;
 mod plugins;
 pub mod ui;
 
@@ -174,7 +176,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(crate::plugins::LogicalKeyPlugin)
             .add_systems(Startup, setup_floating_origin)
             .add_systems(Startup, setup_window_icon)
-            .add_systems(Startup, spawn_clear_bg)
+            //.add_systems(Startup, spawn_clear_bg)
             .add_systems(Startup, setup_clear_state)
             .add_systems(Update, setup_egui_context)
             //.add_systems(Update, make_entities_selectable)
@@ -194,7 +196,7 @@ impl Plugin for EditorPlugin {
                 default_color: Color::WHITE,
             })
             .init_resource::<SyncedGlbs>()
-            .insert_resource(ClearColor(Color::NONE))
+            .insert_resource(ClearColor(Color::Srgba(Srgba::hex("#0C0C0C").unwrap())))
             .insert_resource(TimeRangeBehavior::default())
             .insert_resource(SelectedTimeRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)));
         if cfg!(target_os = "windows") {
@@ -240,38 +242,41 @@ fn setup_floating_origin(mut commands: Commands) {
     ));
 }
 
-fn spawn_clear_bg(mut commands: Commands) {
-    commands.spawn((Camera2d, IsDefaultUiCamera));
-    let bg_color = Color::Srgba(Srgba::hex("#0C0C0C").unwrap());
-    // root node
-    commands
-        .spawn(Node {
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            justify_content: JustifyContent::Stretch,
-            flex_direction: FlexDirection::Column,
-            ..default()
-        })
-        .with_children(|parent| {
-            parent
-                .spawn(Node {
-                    height: Val::Px(56.0),
-                    ..default()
-                })
-                .insert(BackgroundColor(if cfg!(target_os = "macos") {
-                    Color::NONE
-                } else {
-                    bg_color
-                }));
+// NOTE(sphw): enabling this causes weird flickering issues when spawning too many 2d cameras
+// This issue (https://github.com/bevyengine/bevy/issues/18897) looks to be the same thing
+//
+// fn spawn_clear_bg(mut commands: Commands) {
+//     commands.spawn((Camera2d, IsDefaultUiCamera));
+//     let bg_color = Color::Srgba(Srgba::hex("#0C0C0C").unwrap());
+//     // root node
+//     commands
+//         .spawn(Node {
+//             width: Val::Percent(100.0),
+//             height: Val::Percent(100.0),
+//             justify_content: JustifyContent::Stretch,
+//             flex_direction: FlexDirection::Column,
+//             ..default()
+//         })
+//         .with_children(|parent| {
+//             parent
+//                 .spawn(Node {
+//                     height: Val::Px(56.0),
+//                     ..default()
+//                 })
+//                 .insert(BackgroundColor(if cfg!(target_os = "macos") {
+//                     Color::NONE
+//                 } else {
+//                     bg_color
+//                 }));
 
-            parent
-                .spawn(Node {
-                    height: Val::Percent(100.0),
-                    ..default()
-                })
-                .insert(BackgroundColor(bg_color));
-        });
-}
+//             parent
+//                 .spawn(Node {
+//                     height: Val::Percent(100.0),
+//                     ..default()
+//                 })
+//                 .insert(BackgroundColor(bg_color));
+//         });
+// }
 
 fn spawn_main_camera(
     commands: &mut Commands,
@@ -317,7 +322,7 @@ fn spawn_main_camera(
         Camera3d::default(),
         Camera {
             hdr: false,
-            clear_color: ClearColorConfig::None,
+            clear_color: ClearColorConfig::Default,
             order: 1,
             ..Default::default()
         },
@@ -918,11 +923,10 @@ pub struct TimeRangeBehavior {
     end: Offset,
 }
 
-#[derive(Resource, PartialEq, Eq, Clone, Copy)]
+#[derive(Resource, PartialEq, Eq, Clone, Copy, Debug)]
 enum Offset {
     Earliest(Duration),
     Latest(Duration),
-    #[allow(unused)]
     Fixed(Timestamp),
 }
 
@@ -942,7 +946,7 @@ impl std::fmt::Display for Offset {
                 write!(f, "-{d}")
             }
             Offset::Fixed(timestamp) => {
-                let timestamp = hifitime::Epoch::from(*timestamp);
+                let timestamp = FriendlyEpoch(hifitime::Epoch::from(*timestamp));
                 write!(f, "{timestamp}")
             }
         }
@@ -960,7 +964,7 @@ impl std::fmt::Display for TimeRangeBehavior {
                 write!(f, "LAST {start}")
             }
             (start, end) => {
-                write!(f, "{start}..{end}")
+                write!(f, "{start} ↔ {end}")
             }
         }
     }

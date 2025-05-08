@@ -29,7 +29,7 @@ use std::{
 };
 
 use crate::{
-    SelectedTimeRange,
+    Offset, SelectedTimeRange, TimeRangeBehavior,
     plugins::LogicalKeyState,
     ui::{
         colors::{self, ColorExt, with_opacity},
@@ -63,6 +63,7 @@ pub struct PlotWidget<'w, 's> {
     selected_time_range: Res<'w, SelectedTimeRange>,
     earliest_timestamp: Res<'w, EarliestTimestamp>,
     current_timestamp: Res<'w, CurrentTimestamp>,
+    time_range_behavior: ResMut<'w, TimeRangeBehavior>,
     line_query: Query<'w, 's, &'static LineHandle>,
 }
 
@@ -102,8 +103,9 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             &state.lines,
             &state.line_query,
             &state.collected_graph_data,
-            &graph_state,
+            &mut graph_state,
             &scrub_icon,
+            &mut state.time_range_behavior,
         );
     }
 }
@@ -356,6 +358,7 @@ impl Plot {
                                     line_visible_range: LineVisibleRange(
                                         line_visible_range.clone(),
                                     ),
+                                    graph_type: graph_state.graph_type,
                                 })
                                 .insert(LineWidgetWidth(ui.max_rect().width() as usize))
                                 .id();
@@ -378,6 +381,7 @@ impl Plot {
                                     graph_state.line_width,
                                     color.into_bevy(),
                                 ))
+                                .try_insert(graph_state.graph_type)
                                 .try_insert(LineWidgetWidth(ui.max_rect().width() as usize))
                                 .try_insert(LineVisibleRange(line_visible_range.clone()));
                         }
@@ -721,17 +725,33 @@ impl Plot {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &self,
         ui: &mut egui::Ui,
         lines: &Assets<Line>,
         line_handles: &Query<&LineHandle>,
         collected_graph_data: &CollectedGraphData,
-        graph_state: &GraphState,
+        graph_state: &mut GraphState,
         scrub_icon: &egui::TextureId,
+        time_range_behavior: &mut TimeRangeBehavior,
     ) {
-        let _response = ui.allocate_rect(self.rect, egui::Sense::click_and_drag());
+        let response = ui.allocate_rect(self.rect, egui::Sense::click_and_drag());
         let pointer_pos = ui.input(|i| i.pointer.latest_pos());
+
+        response.context_menu(|ui| {
+            if ui.button("Set Time Range to Viewport Bounds").clicked() {
+                let start = Timestamp((self.bounds.min_x as i64) + self.earliest_timestamp.0);
+                let end = Timestamp((self.bounds.max_x as i64) + self.earliest_timestamp.0);
+                graph_state.zoom_factor = Vec2::new(1.0, 1.0);
+                graph_state.pan_offset = Vec2::ZERO;
+                *time_range_behavior = TimeRangeBehavior {
+                    start: Offset::Fixed(start),
+                    end: Offset::Fixed(end),
+                };
+                ui.close_menu();
+            }
+        });
 
         let border_rect = self.get_border_rect(self.rect);
 

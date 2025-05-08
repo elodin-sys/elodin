@@ -2,6 +2,12 @@
 
 ## unreleased
 
+- **(feat)** Add new two plot types: point and bar. You can change the plot type by selecting the graph, and modifying the plot type in the inspector panel.
+- **(fix)** Fix problem with Ctrl-Tab shortcut moving too fast
+- **(feat)** Add right click menu to plots that sets the plot's visible time range as the editor's time range
+- **(feat)** Add command palette action that sets the time range of the editor
+- **(feat)** Allow user's to rename the graph's title in the inspector
+
 ## v0.14
 
 - **(breaking)** Switch vtables to use a new bytecode based format. This changes makes vtables simpler and more flexible. This change also effects the Lua format. You can now formulate a vtable with the `vtable_msg` function:

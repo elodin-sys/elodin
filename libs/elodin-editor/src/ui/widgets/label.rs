@@ -112,6 +112,53 @@ impl egui::Widget for ELabel {
     }
 }
 
+pub fn editable_label_with_buttons<const N: usize>(
+    ui: &mut egui::Ui,
+    btn_icons: [egui::TextureId; N],
+    label: &mut String,
+    color: egui::Color32,
+    margin: egui::Margin,
+) -> [bool; N] {
+    let mut clicked = [false; N];
+
+    egui::Frame::NONE.inner_margin(margin).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            let (label_rect, btn_rect) = utils::get_rects_from_relative_width(
+                ui.max_rect(),
+                0.8,
+                ui.spacing().interact_size.y,
+            );
+
+            ui.allocate_new_ui(UiBuilder::new().max_rect(label_rect), |ui| {
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.text_edit_singleline(label);
+                    // let text = egui::RichText::new(label.to_string()).color(color);
+                    // ui.add(egui::Label::new(text));
+                });
+            });
+
+            ui.allocate_new_ui(UiBuilder::new().max_rect(btn_rect), |ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    for (i, btn_icon) in btn_icons.iter().enumerate() {
+                        let btn = ui.add(
+                            EImageButton::new(*btn_icon)
+                                .scale(1.2, 1.2)
+                                .image_tint(color)
+                                .bg_color(colors::TRANSPARENT),
+                        );
+
+                        if btn.clicked() {
+                            clicked[i] = true;
+                        }
+                    }
+                });
+            });
+        });
+    });
+
+    clicked
+}
+
 pub fn label_with_buttons<const N: usize>(
     ui: &mut egui::Ui,
     btn_icons: [egui::TextureId; N],

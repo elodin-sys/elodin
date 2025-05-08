@@ -10,6 +10,7 @@ use bevy_egui::egui::{self, Color32};
 
 use impeller2::types::{ComponentId, EntityId};
 use impeller2_bevy::ComponentValue;
+use impeller2_wkt::GraphType;
 
 use crate::MainCamera;
 use crate::plugins::navigation_gizmo::RenderLayerAlloc;
@@ -38,12 +39,15 @@ pub struct GraphState {
     pub line_width: f32,
     pub zoom_factor: Vec2,
     pub pan_offset: Vec2,
+    pub graph_type: GraphType,
+    pub label: String,
 }
 
 impl GraphBundle {
     pub fn new(
         render_layer_alloc: &mut RenderLayerAlloc,
         entities: BTreeMap<EntityId, GraphStateEntity>,
+        label: String,
     ) -> Self {
         let Some(layer) = render_layer_alloc.alloc() else {
             todo!("ran out of layers")
@@ -56,6 +60,8 @@ impl GraphBundle {
             line_width: 2.0,
             zoom_factor: Vec2::ONE,
             pan_offset: Vec2::ZERO,
+            graph_type: GraphType::Line,
+            label,
         };
         GraphBundle {
             camera: Camera {

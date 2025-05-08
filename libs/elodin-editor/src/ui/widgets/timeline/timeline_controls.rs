@@ -184,8 +184,10 @@ fn time_range_selector_button(
     behavior: &mut TimeRangeBehavior,
 ) -> impl FnOnce(&mut Ui) -> egui::Response + '_ {
     move |ui| {
+        let behavior_string = behavior.to_string();
+        let width = behavior_string.len() as f32 * 7.5;
         ui.allocate_ui_with_layout(
-            egui::vec2(215.0, 34.0),
+            egui::vec2(width + 50.0, 34.0),
             egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
             |ui| {
                 let font_id = egui::TextStyle::Button.resolve(ui.style());
@@ -206,7 +208,7 @@ fn time_range_selector_button(
                 ui.painter().text(
                     ui.max_rect().left_center() + egui::vec2(8.0, 0.0),
                     egui::Align2::LEFT_CENTER,
-                    behavior.to_string(),
+                    behavior_string,
                     font_id,
                     colors::PRIMARY_CREAME,
                 );

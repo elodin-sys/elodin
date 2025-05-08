@@ -29,7 +29,7 @@ use super::{
         WidgetSystem, WidgetSystemExt,
         button::{EImageButton, ETileButton},
         command_palette::{CommandPaletteState, palette_items},
-        plot::{self, GraphBundle, PlotWidget},
+        plot::{self, GraphBundle, GraphState, PlotWidget},
     },
 };
 use crate::{
@@ -190,13 +190,18 @@ pub enum Pane {
 }
 
 impl Pane {
-    fn title(&self) -> &str {
+    fn title(&self, graph_states: &Query<&GraphState>) -> String {
         match self {
-            Pane::Graph(pane) => &pane.label,
-            Pane::Viewport(viewport) => &viewport.label,
-            Pane::Monitor(monitor) => &monitor.label,
-            Pane::SQLTable(..) => "SQL",
-            Pane::ActionTile(action) => &action.label,
+            Pane::Graph(pane) => {
+                if let Ok(graph_state) = graph_states.get(pane.id) {
+                    return graph_state.label.to_string();
+                }
+                pane.label.to_string()
+            }
+            Pane::Viewport(viewport) => viewport.label.to_string(),
+            Pane::Monitor(monitor) => monitor.label.to_string(),
+            Pane::SQLTable(..) => "SQL".to_string(),
+            Pane::ActionTile(action) => action.label.to_string(),
         }
     }
 
@@ -341,7 +346,9 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     }
 
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
-        pane.title().into()
+        let mut query = SystemState::<Query<&GraphState>>::new(self.world);
+        let query = query.get(self.world);
+        pane.title(&query).into()
     }
 
     fn pane_ui(
@@ -818,19 +825,24 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         }
                     }
                     TreeAction::AddGraph(parent_tile_id, graph_bundle) => {
-                        let graph_bundle = if let Some(graph_bundle) = graph_bundle {
-                            graph_bundle
-                        } else {
-                            GraphBundle::new(&mut state_mut.render_layer_alloc, BTreeMap::default())
-                        };
-                        let graph_id = state_mut.commands.spawn(graph_bundle).id();
-
                         let graph_label = graph_label(
                             &Graph::default(),
                             &state_mut.entity_map,
                             &state_mut.entity_metadata,
                             &state_mut.metadata_store,
                         );
+
+                        let graph_bundle = if let Some(graph_bundle) = graph_bundle {
+                            graph_bundle
+                        } else {
+                            GraphBundle::new(
+                                &mut state_mut.render_layer_alloc,
+                                BTreeMap::default(),
+                                graph_label.clone(),
+                            )
+                        };
+                        let graph_id = state_mut.commands.spawn(graph_bundle).id();
+
                         let graph = GraphPane::new(graph_id, graph_label.clone());
                         let pane = Pane::Graph(graph);
 
@@ -1139,10 +1151,14 @@ pub fn spawn_panel(
                 entities.insert(entity.entity_id, components);
             }
 
-            let graph_id = commands
-                .spawn(GraphBundle::new(render_layer_alloc, entities))
-                .id();
             let graph_label = graph_label(graph, entity_map, entity_metadata, metadata_store);
+            let graph_id = commands
+                .spawn(GraphBundle::new(
+                    render_layer_alloc,
+                    entities,
+                    graph_label.clone(),
+                ))
+                .id();
             let graph = GraphPane::new(graph_id, graph_label);
             ui_state.insert_tile(Tile::Pane(Pane::Graph(graph)), parent_id, false)
         }
@@ -1186,7 +1202,7 @@ pub fn spawn_panel(
 
 pub fn shortcuts(key_state: Res<LogicalKeyState>, mut ui_state: ResMut<TileState>) {
     // tab switching
-    if key_state.pressed(&Key::Control) && key_state.pressed(&Key::Tab) {
+    if key_state.pressed(&Key::Control) && key_state.just_pressed(&Key::Tab) {
         // TODO(sphw): we should have a more intelligent focus system
         let Some(tile_id) = ui_state.tree.root() else {
             return;

@@ -23,7 +23,7 @@ bevy_egui.version = "0.34.0-rc.2"
 egui.version = "0.31"
 egui.features = ["rayon"]
 egui_tiles = "0.12"
-egui_table.version = "0.3"
+egui_table = "0.3"
 winit.version = "0.30"
 winit.features = ["rwh_05"]
 raw-window-handle = "0.5"
@@ -89,6 +89,10 @@ impeller2-cli.path = "../db/cli"
 
 # channels
 flume = "0.11.1"
+
+# parsing
+jiff = "0.2"
+peg = "0.8.5"
 
 
 [target.'cfg(target_family = "wasm")'.dependencies]

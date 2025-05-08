@@ -1,7 +1,7 @@
 use crate::*;
 
 use impeller2::component::Asset;
-use impeller2_wkt::{Graph, GraphComponent, Split};
+use impeller2_wkt::{Graph, GraphComponent, GraphType, Split};
 use nox_ecs::nox::Vector3;
 use numpy::PyArrayLike1;
 use pyo3::exceptions::PyValueError;
@@ -97,8 +97,22 @@ impl Panel {
     }
 
     #[staticmethod]
-    #[pyo3(signature = (*entities, name = None))]
-    pub fn graph(entities: Vec<GraphEntity>, name: Option<String>) -> PyResult<Self> {
+    #[pyo3(signature = (*entities, name = None, ty = None))]
+    pub fn graph(
+        entities: Vec<GraphEntity>,
+        name: Option<String>,
+        ty: Option<String>,
+    ) -> PyResult<Self> {
+        let graph_type = match ty.as_deref() {
+            None | Some("line") => GraphType::Line,
+            Some("bar") => GraphType::Bar,
+            Some("point") => GraphType::Point,
+            _ => {
+                return Err(PyValueError::new_err(
+                    "invalid graph type please select either: line, point, or bar",
+                ));
+            }
+        };
         let entities = entities
             .into_iter()
             .map(|x| impeller2_wkt::GraphEntity {
@@ -107,7 +121,11 @@ impl Panel {
             })
             .collect();
         Ok(Self {
-            inner: impeller2_wkt::Panel::Graph(Graph { name, entities }),
+            inner: impeller2_wkt::Panel::Graph(Graph {
+                name,
+                entities,
+                graph_type,
+            }),
         })
     }
 }

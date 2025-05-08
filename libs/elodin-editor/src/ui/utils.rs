@@ -1,4 +1,5 @@
 use bevy_egui::egui;
+use hifitime::Epoch;
 
 pub fn get_galley_layout_job(
     text: impl ToString,
@@ -25,6 +26,16 @@ pub fn time_label_ms(time: f64) -> String {
     let minutes = (time_in_seconds / 60) % 60;
 
     format!("{minutes:0>2}:{seconds:0>2}.{milliseconds:0>3.0}")
+}
+
+pub struct FriendlyEpoch(pub Epoch);
+
+impl std::fmt::Display for FriendlyEpoch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (y, month, day, hour, min, sec, ns) = self.0.to_gregorian_utc();
+        let sec = (sec as f64) + (ns as f64) * 1e-9;
+        write!(f, "{y}-{month}-{day}T{hour}:{min}:{sec:0.3}")
+    }
 }
 
 pub fn get_rects_from_relative_width(

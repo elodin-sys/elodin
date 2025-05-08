@@ -76,6 +76,8 @@ impl Asset for Panel {
 pub struct Graph {
     pub entities: Vec<GraphEntity>,
     pub name: Option<String>,
+    #[serde(default)]
+    pub graph_type: GraphType,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -88,6 +90,15 @@ pub struct GraphEntity {
 pub struct GraphComponent {
     pub component_id: ComponentId,
     pub indexes: Vec<usize>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq, Debug, Default)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub enum GraphType {
+    #[default]
+    Line,
+    Point,
+    Bar,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

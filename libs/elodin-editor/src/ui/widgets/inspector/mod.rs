@@ -152,13 +152,11 @@ impl WidgetSystem for InspectorContent<'_> {
                                     (icons, camera),
                                 );
                             }
-                            SelectedObject::Graph {
-                                label, graph_id, ..
-                            } => {
+                            SelectedObject::Graph { graph_id, .. } => {
                                 ui.add_widget_with::<InspectorGraph>(
                                     world,
                                     "inspector_graph",
-                                    (icons, graph_id, label),
+                                    (icons, graph_id),
                                 );
                             }
                             SelectedObject::Action { action_id, .. } => {

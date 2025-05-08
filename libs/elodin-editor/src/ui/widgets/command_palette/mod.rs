@@ -33,6 +33,7 @@ pub struct CommandPaletteState {
     pub page_stack: Vec<PalettePage>,
     pub selected_index: usize,
     pub auto_open_item: Option<PaletteItem>,
+    pub error: Option<String>,
 }
 
 impl CommandPaletteState {
@@ -49,6 +50,7 @@ impl CommandPaletteState {
     pub fn handle_event(&mut self, event: PaletteEvent) {
         match event {
             PaletteEvent::Exit => {
+                self.error = None;
                 self.show = false;
                 self.selected_index = 0;
             }
@@ -56,6 +58,7 @@ impl CommandPaletteState {
                 next_page,
                 prev_page_label,
             } => {
+                self.error = None;
                 self.filter = "".to_string();
                 if let Some(prev_page_label) = prev_page_label {
                     self.page_stack.last_mut().expect("unreachable").label = Some(prev_page_label);
@@ -63,6 +66,9 @@ impl CommandPaletteState {
                 self.page_stack.push(next_page);
                 self.input_focus = true;
                 self.selected_index = 0;
+            }
+            PaletteEvent::Error(err) => {
+                self.error = Some(err);
             }
         }
     }
@@ -355,6 +361,7 @@ impl WidgetSystem for PaletteItems<'_> {
         let mut selected_index = command_palette_state.selected_index;
         let hit_enter = kbd.just_pressed(&Key::Enter);
         let filter = command_palette_state.filter.clone();
+        let error = command_palette_state.error.clone();
 
         if command_palette_state.page_stack.is_empty() {
             command_palette_state
@@ -378,7 +385,6 @@ impl WidgetSystem for PaletteItems<'_> {
         if max_visible_rows > 0 {
             let res = egui::ScrollArea::vertical()
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
-                //.max_height(ui.max_rect().height() - 64.0)
                 .show_rows(ui, row_height, max_visible_rows, |ui, row_range| {
                     let mut current_heading: Option<String> = None;
                     for (
@@ -421,6 +427,10 @@ impl WidgetSystem for PaletteItems<'_> {
                     }
                     None
                 });
+            if let Some(err_msg) = &error {
+                ui.add_space(row_height * 0.5);
+                ui.colored_label(colors::REDDISH_DEFAULT, format!("Error: {}", err_msg));
+            }
             let mut state_mut = state.get_mut(world);
             state_mut.command_palette_state.page_stack.push(page);
             if let Some(event) = res.inner {

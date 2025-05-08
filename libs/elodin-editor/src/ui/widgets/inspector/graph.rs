@@ -4,6 +4,7 @@ use bevy::ecs::{
     world::World,
 };
 use bevy_egui::egui;
+use impeller2_wkt::GraphType;
 use smallvec::SmallVec;
 
 use egui::Align;
@@ -13,8 +14,14 @@ use impeller2_bevy::ComponentMetadataRegistry;
 use crate::ui::{
     EntityData, SettingModal, SettingModalState,
     colors::{self, with_opacity},
+    theme,
     utils::MarginSides,
-    widgets::{WidgetSystem, button::ECheckboxButton, label::label_with_buttons, plot::GraphState},
+    widgets::{
+        WidgetSystem,
+        button::ECheckboxButton,
+        label::{self, label_with_buttons},
+        plot::GraphState,
+    },
 };
 
 use super::InspectorIcons;
@@ -28,7 +35,7 @@ pub struct InspectorGraph<'w, 's> {
 }
 
 impl WidgetSystem for InspectorGraph<'_, '_> {
-    type Args = (InspectorIcons, Entity, String);
+    type Args = (InspectorIcons, Entity);
     type Output = ();
 
     fn ui_system(
@@ -39,7 +46,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
     ) {
         let state_mut = state.get_mut(world);
 
-        let (icons, graph_id, label) = args;
+        let (icons, graph_id) = args;
 
         let InspectorGraph {
             entities,
@@ -49,10 +56,14 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         } = state_mut;
 
         let graph_label_margin = egui::Margin::same(0).top(10.0).bottom(14.0);
-        let [add_clicked] = label_with_buttons(
+        let Ok(mut graph_state) = graph_states.get_mut(graph_id) else {
+            return;
+        };
+
+        let [add_clicked] = label::editable_label_with_buttons(
             ui,
             [icons.add],
-            label,
+            &mut graph_state.label,
             colors::PRIMARY_CREAME,
             graph_label_margin,
         );
@@ -61,17 +72,12 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         }
 
         ui.separator();
-
-        let Ok(mut graph_state) = graph_states.get_mut(graph_id) else {
-            return;
-        };
-
         egui::Frame::NONE
-            .inner_margin(egui::Margin::symmetric(8, 8))
+            .inner_margin(egui::Margin::symmetric(0, 8))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new("LINE WIDTH")
+                        egui::RichText::new("WIDTH")
                             .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
                     );
                     ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
@@ -83,6 +89,29 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                 ui.style_mut().spacing.slider_width = ui.available_size().x;
                 ui.style_mut().visuals.widgets.inactive.bg_fill = colors::PRIMARY_ONYX_8;
                 ui.add(egui::Slider::new(&mut graph_state.line_width, 1.0..=15.0).show_value(false))
+            });
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(0, 8))
+            .show(ui, |ui| {
+                ui.label(
+                    egui::RichText::new("GRAPH TYPE")
+                        .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
+                );
+                ui.add_space(8.0);
+                theme::configure_combo_box(ui.style_mut());
+                ui.style_mut().spacing.combo_width = ui.available_size().x;
+                egui::ComboBox::from_id_salt("graph_type")
+                    .selected_text(match graph_state.graph_type {
+                        GraphType::Line => "Line",
+                        GraphType::Point => "Point",
+                        GraphType::Bar => "Bar",
+                    })
+                    .show_ui(ui, |ui| {
+                        theme::configure_combo_item(ui.style_mut());
+                        ui.selectable_value(&mut graph_state.graph_type, GraphType::Line, "Line");
+                        ui.selectable_value(&mut graph_state.graph_type, GraphType::Point, "Point");
+                        ui.selectable_value(&mut graph_state.graph_type, GraphType::Bar, "Bar");
+                    });
             });
 
         let mut remove_list: SmallVec<[(EntityId, ComponentId); 1]> = SmallVec::new();

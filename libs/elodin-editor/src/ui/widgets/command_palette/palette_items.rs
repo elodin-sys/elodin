@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::{collections::BTreeMap, str::FromStr, time::Duration};
 
 use bevy::{
     ecs::{
@@ -19,6 +19,7 @@ use impeller2_bevy::{ComponentMetadataRegistry, CurrentStreamId, PacketTx};
 use impeller2_wkt::{BodyAxes, EntityMetadata, IsRecording, SetDbSettings, SetStreamState};
 
 use crate::{
+    Offset, SelectedTimeRange, TimeRangeBehavior,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
         self, EntityData, HdrEnabled,
@@ -191,6 +192,7 @@ pub enum PaletteEvent {
         next_page: PalettePage,
     },
     Exit,
+    Error(String),
 }
 
 impl From<PalettePage> for PaletteEvent {
@@ -211,6 +213,7 @@ pub struct MatchedPaletteItem<'a> {
 const VIEWPORT_LABEL: &str = "VIEWPORT";
 const TILES_LABEL: &str = "TILES";
 const SIMULATION_LABEL: &str = "SIMULATION";
+const TIME_LABEL: &str = "TIME";
 const HELP_LABEL: &str = "HELP";
 const PRESETS_LABEL: &str = "PRESETS";
 
@@ -324,7 +327,11 @@ fn graph_entity_item(
                                     values.clone(),
                                 ))),
                             )));
-                            let bundle = GraphBundle::new(&mut render_layer_alloc, entities);
+                            let bundle = GraphBundle::new(
+                                &mut render_layer_alloc,
+                                entities,
+                                "Graph".to_string(),
+                            );
                             tile_state.create_graph_tile(tile_id, bundle);
                             PaletteEvent::Exit
                         },
@@ -490,7 +497,7 @@ pub fn create_sql(tile_id: Option<TileId>) -> PaletteItem {
 }
 
 fn set_playback_speed() -> PaletteItem {
-    PaletteItem::new("Set Playback Speed", SIMULATION_LABEL, |_: In<String>| {
+    PaletteItem::new("Set Playback Speed", TIME_LABEL, |_: In<String>| {
         let speeds = [
             0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 20.0, 30.0, 40.0,
             50.0, 100.0,
@@ -523,6 +530,68 @@ fn set_playback_speed() -> PaletteItem {
             prev_page_label: None,
             next_page,
         }
+    })
+}
+
+fn fix_current_time_range() -> PaletteItem {
+    PaletteItem::new(
+        "Fix Current Time Range",
+        TIME_LABEL,
+        |_: In<String>,
+         selected_range: Res<SelectedTimeRange>,
+         mut behavior: ResMut<TimeRangeBehavior>| {
+            behavior.start = Offset::Fixed(selected_range.0.start);
+            behavior.end = Offset::Fixed(selected_range.0.end);
+            PaletteEvent::Exit
+        },
+    )
+}
+
+fn set_time_range_behavior() -> PaletteItem {
+    PaletteItem::new("Set Time Range", TIME_LABEL, |_: In<String>| {
+        PalettePage::new(vec![
+            PaletteItem::new(
+                LabelSource::placeholder(
+                    "Enter start offset (e.g., '+5m', '-10s', '=2023-01-01T00:00:00Z')",
+                ),
+                "Start Offset",
+                move |start_str: In<String>| {
+                    let Ok(start_offset) = Offset::from_str(&start_str.0) else {
+                        return PaletteEvent::Error(format!(
+                            "Invalid start offset format: {}",
+                            start_str.0
+                        ));
+                    };
+
+                    PalettePage::new(vec![
+                        PaletteItem::new(
+                            LabelSource::placeholder(
+                                "Enter end offset (e.g., '+5m', '-10s', '=2023-01-01T00:00:00Z')",
+                            ),
+                            "End Offset",
+                            move |end_str: In<String>, mut behavior: ResMut<TimeRangeBehavior>| {
+                                let Ok(end_offset) = Offset::from_str(&end_str.0) else {
+                                    return PaletteEvent::Error(format!(
+                                        "Invalid end offset format: {}",
+                                        end_str.0
+                                    ));
+                                };
+
+                                behavior.start = start_offset;
+                                behavior.end = end_offset;
+                                PaletteEvent::Exit
+                            },
+                        )
+                        .default(),
+                    ])
+                    .prompt("Enter the end offset")
+                    .into()
+                },
+            )
+            .default(),
+        ])
+        .prompt("Enter the start offset")
+        .into()
     })
 }
 
@@ -614,6 +683,7 @@ pub fn load_preset_inner(name: String) -> PaletteItem {
                         schema_reg,
                         ..
                     } = params;
+                    render_layer_alloc.free_all();
                     tile_state.clear(&mut commands, &mut selected_object);
                     tiles::spawn_panel(
                         &panel,
@@ -700,6 +770,8 @@ impl Default for PalettePage {
                 },
             ),
             set_playback_speed(),
+            fix_current_time_range(),
+            set_time_range_behavior(),
             create_graph(None),
             create_action(None),
             create_monitor(None),
