@@ -35,12 +35,11 @@ pub fn hpp_header(
     env.add_template("header", HEADER_TMPL).into_diagnostic()?;
 
     let tmpl = env.get_template("header").expect("template missing");
-    Ok(tmpl
-        .render(HeaderData {
-            name: name.to_string(),
-            types,
-        })
-        .into_diagnostic()?)
+    tmpl.render(HeaderData {
+        name: name.to_string(),
+        types,
+    })
+    .into_diagnostic()
 }
 
 pub fn generate_cpp(ty: &OwnedNamedType) -> miette::Result<String> {
