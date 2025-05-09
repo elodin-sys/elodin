@@ -193,7 +193,7 @@ impl Request for GetEntityMetadata {
     type Reply<B: IoBuf + Clone> = crate::EntityMetadata;
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, postcard_schema::Schema)]
 #[serde(transparent)]
 pub struct SetComponentMetadata(pub ComponentMetadata);
 
@@ -218,10 +218,6 @@ impl SetComponentMetadata {
         self.0.asset = asset;
         self
     }
-}
-
-impl Msg for SetComponentMetadata {
-    const ID: PacketId = [224, 8];
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]

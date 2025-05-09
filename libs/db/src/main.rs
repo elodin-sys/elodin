@@ -115,6 +115,8 @@ async fn main() -> miette::Result<()> {
                     impeller2::types::PrimType::to_cpp()?,
                     vtable::VTable::<Vec<vtable::Op>, Vec<u8>, Vec<vtable::Field>>::to_cpp()?,
                     impeller2_wkt::VTableMsg::to_cpp()?,
+                    impeller2_wkt::ComponentMetadata::to_cpp()?,
+                    impeller2_wkt::SetComponentMetadata::to_cpp()?,
                     include_str!("../cpp/vtable.hpp").to_string(),
                 ],
             )?;

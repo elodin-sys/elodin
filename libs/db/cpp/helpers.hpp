@@ -77,7 +77,7 @@ class Msg {
 public:
     Msg(T p)
     {
-        auto packet_id = msg_id(T::name);
+        auto packet_id = msg_id(T::TYPE_NAME);
         header = PacketHeader {
             .len = 0,
             .ty = PacketType::MSG,

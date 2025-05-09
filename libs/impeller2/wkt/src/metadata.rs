@@ -1,8 +1,9 @@
 use impeller2::types::{ComponentId, EntityId, Msg, PacketId};
+use postcard_schema::Schema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Schema)]
 pub struct ComponentMetadata {
     pub component_id: ComponentId,
     pub name: String,
@@ -19,10 +20,6 @@ impl ComponentMetadata {
             .map(|v| v.as_str())
             .unwrap_or_default()
     }
-}
-
-impl Msg for ComponentMetadata {
-    const ID: PacketId = [224, 11];
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]

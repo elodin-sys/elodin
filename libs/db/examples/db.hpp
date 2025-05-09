@@ -7,6 +7,7 @@
 #include <type_traits>
 #include <vector>
 #include <optional>
+#include <unordered_map>
 
 
 #if __has_include("postcard.h")
@@ -1068,122 +1069,9 @@ inline size_t postcard_size_map(size_t count)
 #endif // POSTCARD_H
 
 
-#ifndef ELO_DB_HELPERS_H
-#define ELO_DB_HELPERS_H
-
-#include <array>
-#include <cstdint>
-#include <cstring>
-#include <span>
-#include <string_view>
-#include <vector>
-
-inline uint32_t fnv1a_hash_32(const std::string_view str)
-{
-    uint32_t hash = 0x811c9dc5;
-    size_t i = 0;
-    for (auto c : str) {
-        if (++i >= 32) {
-            break;
-        }
-        hash ^= static_cast<uint8_t>(c);
-        hash *= 0x01000193;
-    }
-    return hash;
-}
-
-inline uint64_t fnv1a_hash_64(const std::string_view str)
-{
-    uint64_t hash = 0xcbf29ce484222325;
-    size_t i = 0;
-    for (auto c : str) {
-        if (++i >= 64) {
-            break;
-        }
-        hash ^= static_cast<uint8_t>(c);
-        hash *= 0x00000100000001B3;
-    }
-    return hash;
-}
-
-inline uint16_t fnv1a_hash_16_xor(const std::string_view str)
-{
-    auto hash = fnv1a_hash_32(str);
-    uint16_t upper = static_cast<uint16_t>((hash >> 16) & 0xFFFF);
-    uint16_t lower = static_cast<uint16_t>(hash & 0xFFFF);
-    return upper ^ lower;
-}
-
-inline std::array<uint8_t, 2> msg_id(const std::string_view str)
-{
-    auto hash = fnv1a_hash_16_xor(str);
-    return { static_cast<uint8_t>(hash & 0xff), static_cast<uint8_t>((hash >> 8) & 0xff) };
-}
-
-inline uint64_t component_id(const std::string_view str)
-{
-    auto hash = fnv1a_hash_64(str) & ~(1ul << 63);
-    return hash;
-}
-
-enum class PacketType : uint8_t {
-    MSG = 0,
-    TABLE = 1,
-    TIME_SERIES = 2
-};
-
-struct PacketHeader {
-    uint32_t len;
-    PacketType ty;
-    std::array<uint8_t, 2> packet_id;
-    uint8_t request_id;
-};
-
-template <typename T>
-class Msg {
-    PacketHeader header;
-    T payload;
-
-public:
-    Msg(T p)
-    {
-        auto packet_id = msg_id(T::name);
-        header = PacketHeader {
-            .len = 0,
-            .ty = PacketType::MSG,
-            .packet_id = packet_id,
-            .request_id = 0,
-        };
-        payload = p;
-    }
-
-    std::vector<uint8_t> encode_vec()
-    {
-        auto t_size = payload.encoded_size();
-        header.len = t_size + 4;
-        auto header_len = sizeof(PacketHeader);
-        auto buf = std::vector<uint8_t>(t_size + header_len);
-        std::memcpy(buf.data(), &header, header_len);
-        auto span = std::span<uint8_t>(buf).subspan(header_len, t_size);
-        postcard_slice_t slice;
-        postcard_init_slice(&slice, span.data(), span.size());
-        auto res = payload.encode_raw(&slice);
-        if (res == POSTCARD_SUCCESS) {
-            buf.resize(slice.len + header_len);
-        } else {
-            buf.clear();
-        }
-
-        return buf;
-    }
-};
-
-#endif
-
-
 class InitialTimestamp : public std::variant<std::monostate, std::monostate, int64_t> {
 public:
-  static constexpr std::string_view name = "InitialTimestamp";
+  static constexpr std::string_view TYPE_NAME = "InitialTimestamp";
   // Inherit constructors from std::variant
   using std::variant<std::monostate, std::monostate, int64_t>::variant;
 
@@ -1381,7 +1269,7 @@ public:
 };
 
 struct FixedRateBehavior {
-  static constexpr std::string_view name = "FixedRateBehavior";
+  static constexpr std::string_view TYPE_NAME = "FixedRateBehavior";
 
   InitialTimestamp initial_timestamp;
   std::optional<uint64_t> timestep;
@@ -1514,7 +1402,7 @@ struct FixedRateBehavior {
 
 class StreamBehavior : public std::variant<std::monostate, FixedRateBehavior> {
 public:
-  static constexpr std::string_view name = "StreamBehavior";
+  static constexpr std::string_view TYPE_NAME = "StreamBehavior";
   // Inherit constructors from std::variant
   using std::variant<std::monostate, FixedRateBehavior>::variant;
 
@@ -1676,7 +1564,7 @@ public:
 };
 
 struct StreamFilter {
-  static constexpr std::string_view name = "StreamFilter";
+  static constexpr std::string_view TYPE_NAME = "StreamFilter";
 
   std::optional<uint64_t> component_id;
   std::optional<uint64_t> entity_id;
@@ -1801,7 +1689,7 @@ struct StreamFilter {
 };
 
 struct Stream {
-  static constexpr std::string_view name = "Stream";
+  static constexpr std::string_view TYPE_NAME = "Stream";
 
   StreamFilter filter;
   StreamBehavior behavior;
@@ -1889,7 +1777,7 @@ struct Stream {
 };
 
 struct MsgStream {
-  static constexpr std::string_view name = "MsgStream";
+  static constexpr std::string_view TYPE_NAME = "MsgStream";
 
   std::tuple<uint8_t, uint8_t> msg_id;
   
@@ -1977,7 +1865,7 @@ struct MsgStream {
 };
 
 struct Field {
-  static constexpr std::string_view name = "Field";
+  static constexpr std::string_view TYPE_NAME = "Field";
 
   uint16_t offset;
   uint16_t len;
@@ -2065,7 +1953,7 @@ struct Field {
 };
 
 struct OpData {
-  static constexpr std::string_view name = "OpData";
+  static constexpr std::string_view TYPE_NAME = "OpData";
 
   uint16_t offset;
   uint16_t len;
@@ -2146,7 +2034,7 @@ struct OpData {
 };
 
 struct OpTable {
-  static constexpr std::string_view name = "OpTable";
+  static constexpr std::string_view TYPE_NAME = "OpTable";
 
   uint16_t offset;
   uint16_t len;
@@ -2227,7 +2115,7 @@ struct OpTable {
 };
 
 struct OpPair {
-  static constexpr std::string_view name = "OpPair";
+  static constexpr std::string_view TYPE_NAME = "OpPair";
 
   uint16_t entity_id;
   uint16_t component_id;
@@ -2308,7 +2196,7 @@ struct OpPair {
 };
 
 struct OpSchema {
-  static constexpr std::string_view name = "OpSchema";
+  static constexpr std::string_view TYPE_NAME = "OpSchema";
 
   uint16_t ty;
   uint16_t dim;
@@ -2396,7 +2284,7 @@ struct OpSchema {
 };
 
 struct OpTimestamp {
-  static constexpr std::string_view name = "OpTimestamp";
+  static constexpr std::string_view TYPE_NAME = "OpTimestamp";
 
   uint16_t source;
   uint16_t arg;
@@ -2477,7 +2365,7 @@ struct OpTimestamp {
 };
 
 struct OpExt {
-  static constexpr std::string_view name = "OpExt";
+  static constexpr std::string_view TYPE_NAME = "OpExt";
 
   uint16_t arg;
   std::tuple<uint8_t, uint8_t> id;
@@ -2580,7 +2468,7 @@ struct OpExt {
 
 class Op : public std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt> {
 public:
-  static constexpr std::string_view name = "Op";
+  static constexpr std::string_view TYPE_NAME = "Op";
   // Inherit constructors from std::variant
   using std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>::variant;
 
@@ -2937,7 +2825,7 @@ public:
 };
 
 struct OpRef {
-  static constexpr std::string_view name = "OpRef";
+  static constexpr std::string_view TYPE_NAME = "OpRef";
 
   uint16_t value;
 
@@ -3004,7 +2892,7 @@ struct OpRef {
 
 class PrimType : public std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate> {
 public:
-  static constexpr std::string_view name = "PrimType";
+  static constexpr std::string_view TYPE_NAME = "PrimType";
   // Inherit constructors from std::variant
   using std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>::variant;
 
@@ -3487,7 +3375,7 @@ public:
 };
 
 struct VTable {
-  static constexpr std::string_view name = "VTable";
+  static constexpr std::string_view TYPE_NAME = "VTable";
 
   std::vector<Op> ops;
   std::vector<Field> fields;
@@ -3623,7 +3511,7 @@ struct VTable {
 };
 
 struct VTableMsg {
-  static constexpr std::string_view name = "VTableMsg";
+  static constexpr std::string_view TYPE_NAME = "VTableMsg";
 
   std::tuple<uint8_t, uint8_t> id;
   VTable vtable;
@@ -3716,6 +3604,329 @@ struct VTableMsg {
     return POSTCARD_SUCCESS;
   }
 };
+
+struct ComponentMetadata {
+  static constexpr std::string_view TYPE_NAME = "ComponentMetadata";
+
+  uint64_t component_id;
+  std::string name;
+  std::unordered_map<std::string, std::string> metadata;
+  bool asset;
+  
+
+
+  size_t encoded_size() const {
+    size_t size = 0;
+    size += postcard_size_u64(component_id);
+    size += postcard_size_string(name.length());
+    size += postcard_size_map(metadata.size());
+    for([[maybe_unused]] const auto& [k, v]: metadata) {
+      size += postcard_size_string(k.length());
+      size += postcard_size_string(v.length());
+    }
+    size += postcard_size_bool();
+    
+    return size;
+  }
+
+  postcard_error_t encode(std::span<uint8_t>& output) const {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, output.data(), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<uint8_t> encode_vec() const {
+    // Pre-allocate vector with the required size
+    std::vector<uint8_t> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<uint8_t>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, span.data(), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
+    postcard_error_t result;
+    result = postcard_encode_u64(slice, component_id);
+        if(result != POSTCARD_SUCCESS) return result;
+    result = postcard_encode_string(slice, name.c_str(), name.length());
+        if(result != POSTCARD_SUCCESS) return result;
+    result = postcard_start_map(slice, metadata.size());
+    for(const auto& [k, v]: metadata) {
+      result = postcard_encode_string(slice, k.c_str(), k.length());
+      result = postcard_encode_string(slice, v.c_str(), v.length());
+      if(result != POSTCARD_SUCCESS) return result;
+    }
+        if(result != POSTCARD_SUCCESS) return result;
+    result = postcard_encode_bool(slice, asset);
+        if(result != POSTCARD_SUCCESS) return result;
+    
+    return POSTCARD_SUCCESS;
+  }
+
+  postcard_error_t decode(std::span<const uint8_t>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    result = postcard_decode_u64(slice, &component_id);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    size_t name_len;
+    result = postcard_decode_string_len(slice, &name_len);
+    if (result != POSTCARD_SUCCESS) return result;
+    name.resize(name_len);
+    if (name_len > 0) {
+        result = postcard_decode_string(slice, name.data(), name_len, name_len);
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    if(result != POSTCARD_SUCCESS) return result;
+
+    size_t metadata_len;
+    result = postcard_decode_map_len(slice, &metadata_len);
+    if (result != POSTCARD_SUCCESS) return result;
+    metadata.clear();
+    for(size_t i = 0; i < metadata_len; i++) {
+        std::string k;
+        size_t k_len;
+        result = postcard_decode_string_len(slice, &k_len);
+        if (result != POSTCARD_SUCCESS) return result;
+        k.resize(k_len);
+        if (k_len > 0) {
+            result = postcard_decode_string(slice, k.data(), k_len, k_len);
+            if (result != POSTCARD_SUCCESS) return result;
+        }
+        if (result != POSTCARD_SUCCESS) return result;
+        std::string v;
+        size_t v_len;
+        result = postcard_decode_string_len(slice, &v_len);
+        if (result != POSTCARD_SUCCESS) return result;
+        v.resize(v_len);
+        if (v_len > 0) {
+            result = postcard_decode_string(slice, v.data(), v_len, v_len);
+            if (result != POSTCARD_SUCCESS) return result;
+        }
+        if (result != POSTCARD_SUCCESS) return result;
+        metadata[k] = v;
+    }
+    if(result != POSTCARD_SUCCESS) return result;
+
+    result = postcard_decode_bool(slice, &asset);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    
+    return POSTCARD_SUCCESS;
+  }
+};
+
+struct SetComponentMetadata {
+  static constexpr std::string_view TYPE_NAME = "SetComponentMetadata";
+
+  ComponentMetadata value;
+
+  size_t encoded_size() const {
+    size_t size = 0;
+    size += value.encoded_size();
+    return size;
+  }
+
+  postcard_error_t encode(std::span<std::byte>& output) const {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(output.data()), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<std::byte> encode_vec() const {
+    // Pre-allocate vector with the required size
+    std::vector<std::byte> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<std::byte>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(span.data()), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
+    postcard_error_t result;
+    result = value.encode_raw(slice);
+    return result;
+  }
+
+  postcard_error_t decode(std::span<const std::byte>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(input.data())), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    result = value.decode_raw(slice);
+    return result;
+  }
+};
+
+#ifndef ELO_DB_HELPERS_H
+#define ELO_DB_HELPERS_H
+
+#include <array>
+#include <cstdint>
+#include <cstring>
+#include <span>
+#include <string_view>
+#include <vector>
+
+inline uint32_t fnv1a_hash_32(const std::string_view str)
+{
+    uint32_t hash = 0x811c9dc5;
+    size_t i = 0;
+    for (auto c : str) {
+        if (++i >= 32) {
+            break;
+        }
+        hash ^= static_cast<uint8_t>(c);
+        hash *= 0x01000193;
+    }
+    return hash;
+}
+
+inline uint64_t fnv1a_hash_64(const std::string_view str)
+{
+    uint64_t hash = 0xcbf29ce484222325;
+    size_t i = 0;
+    for (auto c : str) {
+        if (++i >= 64) {
+            break;
+        }
+        hash ^= static_cast<uint8_t>(c);
+        hash *= 0x00000100000001B3;
+    }
+    return hash;
+}
+
+inline uint16_t fnv1a_hash_16_xor(const std::string_view str)
+{
+    auto hash = fnv1a_hash_32(str);
+    uint16_t upper = static_cast<uint16_t>((hash >> 16) & 0xFFFF);
+    uint16_t lower = static_cast<uint16_t>(hash & 0xFFFF);
+    return upper ^ lower;
+}
+
+inline std::array<uint8_t, 2> msg_id(const std::string_view str)
+{
+    auto hash = fnv1a_hash_16_xor(str);
+    return { static_cast<uint8_t>(hash & 0xff), static_cast<uint8_t>((hash >> 8) & 0xff) };
+}
+
+inline uint64_t component_id(const std::string_view str)
+{
+    auto hash = fnv1a_hash_64(str) & ~(1ul << 63);
+    return hash;
+}
+
+enum class PacketType : uint8_t {
+    MSG = 0,
+    TABLE = 1,
+    TIME_SERIES = 2
+};
+
+struct PacketHeader {
+    uint32_t len;
+    PacketType ty;
+    std::array<uint8_t, 2> packet_id;
+    uint8_t request_id;
+};
+
+template <typename T>
+class Msg {
+    PacketHeader header;
+    T payload;
+
+public:
+    Msg(T p)
+    {
+        auto packet_id = msg_id(T::TYPE_NAME);
+        header = PacketHeader {
+            .len = 0,
+            .ty = PacketType::MSG,
+            .packet_id = packet_id,
+            .request_id = 0,
+        };
+        payload = p;
+    }
+
+    std::vector<uint8_t> encode_vec()
+    {
+        auto t_size = payload.encoded_size();
+        header.len = t_size + 4;
+        auto header_len = sizeof(PacketHeader);
+        auto buf = std::vector<uint8_t>(t_size + header_len);
+        std::memcpy(buf.data(), &header, header_len);
+        auto span = std::span<uint8_t>(buf).subspan(header_len, t_size);
+        postcard_slice_t slice;
+        postcard_init_slice(&slice, span.data(), span.size());
+        auto res = payload.encode_raw(&slice);
+        if (res == POSTCARD_SUCCESS) {
+            buf.resize(slice.len + header_len);
+        } else {
+            buf.clear();
+        }
+
+        return buf;
+    }
+};
+
+SetComponentMetadata set_component_name(std::string name) {
+   return SetComponentMetadata(ComponentMetadata {
+       .component_id = component_id(name),
+       .name = std::move(name),
+   });
+}
+
+#endif
+
 
 #ifndef ELO_DB_VTABLE_H
 #define ELO_DB_VTABLE_H
