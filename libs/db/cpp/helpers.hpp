@@ -108,4 +108,11 @@ public:
     }
 };
 
+SetComponentMetadata set_component_name(std::string name) {
+   return SetComponentMetadata(ComponentMetadata {
+       .component_id = component_id(name),
+       .name = std::move(name),
+   });
+}
+
 #endif

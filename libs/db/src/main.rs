@@ -102,7 +102,6 @@ async fn main() -> miette::Result<()> {
                 "ELODIN_DB",
                 [
                     include_str!("../../postcard-c/postcard.h").to_string(),
-                    include_str!("../cpp/helpers.hpp").to_string(),
                     impeller2_wkt::InitialTimestamp::to_cpp()?,
                     impeller2_wkt::FixedRateBehavior::to_cpp()?,
                     impeller2_wkt::StreamBehavior::to_cpp()?,
@@ -117,6 +116,7 @@ async fn main() -> miette::Result<()> {
                     impeller2_wkt::VTableMsg::to_cpp()?,
                     impeller2_wkt::ComponentMetadata::to_cpp()?,
                     impeller2_wkt::SetComponentMetadata::to_cpp()?,
+                    include_str!("../cpp/helpers.hpp").to_string(),
                     include_str!("../cpp/vtable.hpp").to_string(),
                 ],
             )?;

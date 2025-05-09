@@ -74,6 +74,12 @@ public:
         }
     }
 
+    template<typename T>
+    void send(T msg) {
+        auto buf = Msg(msg).encode_vec();
+        write_all(buf.data(), buf.size());
+    }
+
     size_t read(uint8_t* data, size_t len)
     {
         auto res = ::read(fd_, data, len);
@@ -119,7 +125,6 @@ try {
     // sends vtable for sensor data
 
     auto table = builder::vtable({
-        builder::field<SensorData, &SensorData::time>(builder::schema(PrimType::I64(), {}, builder::pair(1, "time"))),
         builder::field<SensorData, &SensorData::mag>(builder::schema(PrimType::F32(), { 3 }, builder::pair(1, "mag"))),
         builder::field<SensorData, &SensorData::gyro>(builder::schema(PrimType::F32(), { 3 }, builder::pair(1, "gyro"))),
         builder::field<SensorData, &SensorData::accel>(builder::schema(PrimType::F32(), { 3 }, builder::pair(1, "accel"))),
@@ -135,8 +140,14 @@ try {
     auto vtable_msg_encoded = vtable_msg.encode_vec();
     sock.write_all(vtable_msg_encoded.data(), vtable_msg_encoded.size());
 
+    sock.send(set_component_name("mag"));
+    sock.send(set_component_name("gyro"));
+    sock.send(set_component_name("accel"));
+    sock.send(set_component_name("temp"));
+    sock.send(set_component_name("pressure"));
+    sock.send(set_component_name("humidity"));
+
     auto sensor_data = SensorData {
-        .time = 0,
         .mag = { 0.0, 0.0, 0.0 },
         .gyro = { 0.0, 0.0, 0.0 },
         .accel = { 0.0, 0.0, 0.0 },
@@ -145,6 +156,7 @@ try {
         .humidity = 3.0
     };
 
+    double time = 0;
     while (true) {
         auto data = std::vector<uint8_t>(256);
         auto len = sock.read(data.data(), data.size());
@@ -161,8 +173,8 @@ try {
             .request_id = 0,
         };
 
-        sensor_data.time += 1;
-        sensor_data.temp = std::sin(static_cast<double>(sensor_data.time) / 100000.0);
+        time += 1.0;
+        sensor_data.temp = std::sin(static_cast<double>(time / 100000.0));
 
         sock.write_all(&table_header, sizeof(table_header));
         sock.write_all(&sensor_data, sizeof(sensor_data));
