@@ -26,7 +26,6 @@ struct packet_header_t {
 
 typedef struct sensor_data_t sensor_data_t;
 struct sensor_data_t {
-    int64_t time;
     float mag[3];
     float gyro[3];
     float accel[3];
@@ -70,7 +69,7 @@ int main()
         .mag = { 0.0, 0.0, 0.0 },
         .gyro = { 0.0, 0.0, 0.0 },
         .accel = { 0.0, 0.0, 0.0 },
-        .temp = 1.0,
+        .temp = 0.0,
         .pressure = 2.0,
         .humidity = 3.0
     };
@@ -82,12 +81,14 @@ int main()
     };
 
     // Send sin wave data continuously
+    double time = 0.0;
     while (1) {
         write_all(sock, &sensor_data_header, sizeof(sensor_data_header));
         write_all(sock, &sensor_data, sizeof(sensor_data));
 
-        sensor_data.temp = sin((double)sensor_data.time / 100000.0);
-        usleep(100);
+        time += 1.0 / 1000.0;
+        sensor_data.temp = sin(time);
+        usleep(1000);
     }
     close(sock);
     return 0;
