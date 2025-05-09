@@ -55,5 +55,3 @@ ignore.version = "0.4"
 
 # python run
 which = "6.0.3"
-
-elodin-db.path = "../db"
