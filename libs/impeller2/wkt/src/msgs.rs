@@ -365,7 +365,6 @@ macro_rules! impl_user_data_msg {
                 methods.add_method("msg", |_, this, ()| {
                     use impeller2::types::IntoLenPacket;
                     let msg = this.into_len_packet().inner;
-                    println!("{:?}", msg);
                     Ok(msg)
                 });
             }
