@@ -120,12 +120,12 @@ try {
 
     auto table = builder::vtable({
         builder::field<SensorData, &SensorData::time>(builder::schema(PrimType::I64(), {}, builder::pair(1, "time"))),
-        builder::field<SensorData, &SensorData::mag>(builder::schema(PrimType::F32(), { 3 }, builder::pair(3, "mag"))),
-        builder::field<SensorData, &SensorData::gyro>(builder::schema(PrimType::F32(), { 3 }, builder::pair(3, "gyro"))),
-        builder::field<SensorData, &SensorData::accel>(builder::schema(PrimType::F32(), { 3 }, builder::pair(3, "accel"))),
-        builder::field<SensorData, &SensorData::temp>(builder::schema(PrimType::F32(), {}, builder::pair(3, "temp"))),
-        builder::field<SensorData, &SensorData::pressure>(builder::schema(PrimType::F32(), {}, builder::pair(3, "pressure"))),
-        builder::field<SensorData, &SensorData::humidity>(builder::schema(PrimType::F32(), {}, builder::pair(3, "humidity"))),
+        builder::field<SensorData, &SensorData::mag>(builder::schema(PrimType::F32(), { 3 }, builder::pair(1, "mag"))),
+        builder::field<SensorData, &SensorData::gyro>(builder::schema(PrimType::F32(), { 3 }, builder::pair(1, "gyro"))),
+        builder::field<SensorData, &SensorData::accel>(builder::schema(PrimType::F32(), { 3 }, builder::pair(1, "accel"))),
+        builder::field<SensorData, &SensorData::temp>(builder::schema(PrimType::F32(), {}, builder::pair(1, "temp"))),
+        builder::field<SensorData, &SensorData::pressure>(builder::schema(PrimType::F32(), {}, builder::pair(1, "pressure"))),
+        builder::field<SensorData, &SensorData::humidity>(builder::schema(PrimType::F32(), {}, builder::pair(1, "humidity"))),
     });
 
     auto vtable_msg = Msg(VTableMsg {

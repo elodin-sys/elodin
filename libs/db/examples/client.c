@@ -67,7 +67,6 @@ int main()
     }
 
     sensor_data_t sensor_data = {
-        .time = 0,
         .mag = { 0.0, 0.0, 0.0 },
         .gyro = { 0.0, 0.0, 0.0 },
         .accel = { 0.0, 0.0, 0.0 },
@@ -87,7 +86,6 @@ int main()
         write_all(sock, &sensor_data_header, sizeof(sensor_data_header));
         write_all(sock, &sensor_data, sizeof(sensor_data));
 
-        sensor_data.time += 1;
         sensor_data.temp = sin((double)sensor_data.time / 100000.0);
         usleep(100);
     }
