@@ -15,6 +15,17 @@ order = 1
 
 ## v0.14
 
+### v0.14.1
+- **(feat)** Add new two plot types: point and bar. You can change the plot type by selecting the graph, and modifying the plot type in the inspector panel.
+- **(fix)** Fix problem with Ctrl-Tab shortcut moving too fast
+- **(feat)** Add right click menu to plots that sets the plot's visible time range as the editor's time range
+- **(feat)** Add command palette action that sets the time range of the editor
+- **(feat)** Allow user's to rename the graph's title in the inspector
+- **(feat)** Add vtable builder to elodin-db's C++ API. You can find an example of its usage in libs/db/cpp/example.cpp
+- **(feat)** Add ability to manually specify y axis bounds on a plot
+- **(feat)** Add `UdpVTableStream` message type and `udp_vtable_stream(id, addr)` Lua function to construct it. This allows for static configuration of arbitrary VTable streams over UDP, which is useful for syncing data across instances of `elodin-db`.
+
+### v0.14.0
 - **(breaking)** Switch vtables to use a new bytecode based format. This changes makes vtables simpler and more flexible. This change also effects the Lua format. You can now formulate a vtable with the `vtable_msg` function:
 
   ```lua
