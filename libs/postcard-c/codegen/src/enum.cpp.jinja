@@ -3,7 +3,7 @@ class {{name}} : public std::variant<{% for variant in ty.Enum -%}
   {{cpp_variant_type(variant.ty, name, variant.name)}}{% if not loop.last %}, {% endif %}
 {%- endfor %}> {
 public:
-  static constexpr std::string_view name = "{{name}}";
+  static constexpr std::string_view TYPE_NAME = "{{name}}";
   // Inherit constructors from std::variant
   using std::variant<{% for variant in ty.Enum -%}
     {{cpp_variant_type(variant.ty, name, variant.name)}}{% if not loop.last %}, {% endif %}

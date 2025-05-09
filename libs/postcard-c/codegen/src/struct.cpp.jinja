@@ -1,5 +1,5 @@
 struct {{name}} {
-  static constexpr std::string_view name = "{{name}}";
+  static constexpr std::string_view TYPE_NAME = "{{name}}";
 
   {% for field in ty.Struct -%}
     {{cpp_ty(field.ty)}} {{ field.name }};
