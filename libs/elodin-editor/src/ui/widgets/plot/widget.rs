@@ -4,6 +4,7 @@ use bevy::{
     ecs::{
         entity::Entity,
         event::EventReader,
+        hierarchy::ChildOf,
         query::With,
         system::{Commands, Local, Query, Res, SystemParam},
     },
@@ -187,33 +188,36 @@ impl Plot {
 
         // calc bounds
 
-        let mut y_max: Option<f32> = None;
-        let mut y_min: Option<f32> = None;
+        let (y_min, y_max) = if graph_state.auto_y_range {
+            let mut y_min: Option<f32> = None;
+            let mut y_max: Option<f32> = None;
 
-        for (entity_id, components) in &graph_state.entities {
-            if let Some(entity) = collected_graph_data.entities.get(entity_id) {
-                for (component_id, component_values) in components {
-                    if let Some(component) = entity.components.get(component_id) {
-                        for (value_index, (enabled, _)) in component_values.iter().enumerate() {
-                            if *enabled {
-                                if let Some(line) = component
-                                    .lines
-                                    .get(&value_index)
-                                    .and_then(|handle| lines.get_mut(handle))
-                                {
-                                    let summary = line.data.range_summary(selected_range.0.clone());
-                                    if let Some(min) = summary.min {
-                                        if let Some(y_min) = &mut y_min {
-                                            *y_min = y_min.min(min);
-                                        } else {
-                                            y_min = Some(min)
+            for (entity_id, components) in &graph_state.entities {
+                if let Some(entity) = collected_graph_data.entities.get(entity_id) {
+                    for (component_id, component_values) in components {
+                        if let Some(component) = entity.components.get(component_id) {
+                            for (value_index, (enabled, _)) in component_values.iter().enumerate() {
+                                if *enabled {
+                                    if let Some(line) = component
+                                        .lines
+                                        .get(&value_index)
+                                        .and_then(|handle| lines.get_mut(handle))
+                                    {
+                                        let summary =
+                                            line.data.range_summary(selected_range.0.clone());
+                                        if let Some(min) = summary.min {
+                                            if let Some(y_min) = &mut y_min {
+                                                *y_min = y_min.min(min);
+                                            } else {
+                                                y_min = Some(min)
+                                            }
                                         }
-                                    }
-                                    if let Some(max) = summary.max {
-                                        if let Some(y_max) = &mut y_max {
-                                            *y_max = y_max.max(max);
-                                        } else {
-                                            y_max = Some(max)
+                                        if let Some(max) = summary.max {
+                                            if let Some(y_max) = &mut y_max {
+                                                *y_max = y_max.max(max);
+                                            } else {
+                                                y_max = Some(max)
+                                            }
                                         }
                                     }
                                 }
@@ -222,19 +226,25 @@ impl Plot {
                     }
                 }
             }
-        }
+            (
+                y_min.unwrap_or_default() as f64,
+                y_max.unwrap_or_default() as f64,
+            )
+        } else {
+            (graph_state.y_range.start, graph_state.y_range.end)
+        };
+        graph_state.y_range = y_min..y_max;
+
         let mut steps_y = ((inner_rect.height() / 50.0) as usize).max(1);
         if steps_y % 2 != 0 {
             steps_y += 1;
         }
         let steps_x = ((inner_rect.width() / 75.0) as usize).max(1);
 
-        let original_bounds = PlotBounds::from_lines(
-            &tick_range,
-            earliest_timestamp,
-            y_min.unwrap_or_default() as f64,
-            y_max.unwrap_or_default() as f64,
-        );
+        let original_bounds = PlotBounds::from_lines(&tick_range, earliest_timestamp, y_min, y_max);
+
+        //graph_state = (original_bounds.max_y..original_bounds.min_y)
+
         let bounds_size = DVec2::new(original_bounds.width(), original_bounds.height());
         let outer_ratio = rect.size() / inner_rect.size();
         let outer_ratio = Vec2::new(outer_ratio.x, outer_ratio.y).as_dvec2();
@@ -360,6 +370,7 @@ impl Plot {
                                     ),
                                     graph_type: graph_state.graph_type,
                                 })
+                                .insert(ChildOf(graph_id))
                                 .insert(LineWidgetWidth(ui.max_rect().width() as usize))
                                 .id();
                             graph_state

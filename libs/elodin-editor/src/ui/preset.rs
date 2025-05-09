@@ -80,6 +80,8 @@ pub fn tile_to_panel(
                     entities,
                     name: Some(graph_state.label.clone()),
                     graph_type: graph_state.graph_type,
+                    auto_y_range: graph_state.auto_y_range,
+                    y_range: graph_state.y_range.clone(),
                 }))
             }
             Pane::Monitor(monitor) => Some(Panel::ComponentMonitor(ComponentMonitor {

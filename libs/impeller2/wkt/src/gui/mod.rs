@@ -78,6 +78,8 @@ pub struct Graph {
     pub name: Option<String>,
     #[serde(default)]
     pub graph_type: GraphType,
+    pub auto_y_range: bool,
+    pub y_range: Range<f64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
