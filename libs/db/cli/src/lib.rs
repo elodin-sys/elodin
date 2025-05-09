@@ -932,7 +932,7 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                     print_message("SetComponentMetadata { component_id, name, metadata, asset }");
                     print_message("SetEntityMetadata { entity_id, name, metadata }");
                     print_message(
-                        "UdpUnicast { stream = { filter = { component_id, entity_id }, id }, port }",
+                        "UdpUnicast { stream = { filter = { component_id, entity_id }, id }, addr }",
                     );
                     print_message("SetStreamState { id, playing, tick, time_step }");
                     print_message("SetAsset { id, buf }");
