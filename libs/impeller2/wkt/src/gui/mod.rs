@@ -92,6 +92,7 @@ pub struct GraphEntity {
 pub struct GraphComponent {
     pub component_id: ComponentId,
     pub indexes: Vec<usize>,
+    pub color: Vec<Color>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq, Debug, Default)]

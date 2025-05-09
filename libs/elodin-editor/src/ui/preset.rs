@@ -8,7 +8,7 @@ use super::widgets::plot::GraphState;
 use bevy::prelude::*;
 use egui_tiles::{Tile, TileId};
 use impeller2::types::EntityId;
-use impeller2_wkt::{ActionPane, ComponentMonitor, Panel, SQLTable, Split, Viewport};
+use impeller2_wkt::{ActionPane, Color, ComponentMonitor, Panel, SQLTable, Split, Viewport};
 use nox::{Quaternion, Vector3};
 
 pub fn tile_to_panel(
@@ -61,7 +61,9 @@ pub fn tile_to_panel(
             Pane::Graph(graph) => {
                 let graph_state = graph_states.get(graph.id).ok()?;
                 let mut entities: HashMap<EntityId, impeller2_wkt::GraphEntity> = HashMap::new();
-                for (entity_id, component_id, index) in graph_state.enabled_lines.keys() {
+                for ((entity_id, component_id, index), (_, color)) in
+                    graph_state.enabled_lines.iter()
+                {
                     let entity_id = *entity_id;
                     let entity =
                         entities
@@ -70,9 +72,11 @@ pub fn tile_to_panel(
                                 entity_id,
                                 components: vec![],
                             });
+                    let [r, g, b, _] = color.to_normalized_gamma_f32();
                     entity.components.push(impeller2_wkt::GraphComponent {
                         component_id: *component_id,
                         indexes: vec![*index],
+                        color: vec![Color::rgb(r, g, b)],
                     });
                 }
                 let entities = entities.into_values().collect();

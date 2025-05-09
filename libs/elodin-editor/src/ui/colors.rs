@@ -124,13 +124,11 @@ pub trait EColor {
 
 impl EColor for Color {
     fn into_color32(self) -> Color32 {
-        MINT_DEFAULT
-        // TODO: Enable when colors will be used
-        // Color32::from_rgb(
-        //     (255.0 * self.r) as u8,
-        //     (255.0 * self.g) as u8,
-        //     (255.0 * self.b) as u8,
-        // )
+        Color32::from_rgb(
+            (255.0 * self.r) as u8,
+            (255.0 * self.g) as u8,
+            (255.0 * self.b) as u8,
+        )
     }
 }
 
