@@ -208,6 +208,58 @@ impl egui::Widget for ECheckboxButton {
 }
 
 #[must_use = "You should put this widget in an ui with `ui.add(widget);`"]
+pub struct EColorButton {
+    color: egui::Color32,
+    corner_radius: egui::CornerRadius,
+}
+
+impl EColorButton {
+    pub fn new(color: egui::Color32) -> Self {
+        Self {
+            color,
+            corner_radius: egui::CornerRadius::same(2),
+        }
+    }
+
+    pub fn color(mut self, color: egui::Color32) -> Self {
+        self.color = color;
+        self
+    }
+
+    fn render(&mut self, ui: &mut egui::Ui) -> egui::Response {
+        let desired_size = egui::vec2(16.0, 16.0);
+
+        let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+
+        // Paint the UI
+        if ui.is_rect_visible(rect) {
+            let style = ui.style_mut();
+            style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, self.color);
+            let visuals = ui.style().interact(&response);
+
+            let checkbox_rect = egui::Rect::from_min_size(rect.min, egui::Vec2::splat(16.0));
+
+            ui.painter().rect(
+                checkbox_rect,
+                self.corner_radius,
+                self.color,
+                visuals.bg_stroke,
+                egui::StrokeKind::Middle,
+            );
+        }
+
+        response
+    }
+}
+
+impl egui::Widget for EColorButton {
+    fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
+        self.render(ui)
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+    }
+}
+
+#[must_use = "You should put this widget in an ui with `ui.add(widget);`"]
 pub struct EButton {
     label: String,
     disabled: bool,
