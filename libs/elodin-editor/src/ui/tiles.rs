@@ -22,7 +22,8 @@ use std::collections::{BTreeMap, HashMap};
 use super::{
     HdrEnabled, SelectedObject, ViewportRect,
     actions::ActionTileWidget,
-    colors, images,
+    colors::{self, EColor},
+    images,
     monitor::{MonitorPane, MonitorWidget},
     sql_table::{SQLTablePane, SqlTable, SqlTableWidget},
     widgets::{
@@ -1141,8 +1142,11 @@ pub fn spawn_panel(
                                     .map(|i| (false, colors::get_color_by_index_all(i)))
                                     .collect()
                             });
-                        for index in component.indexes.iter() {
-                            if let Some((enabled, _)) = values.get_mut(*index) {
+                        for (i, index) in component.indexes.iter().enumerate() {
+                            if let Some((enabled, color)) = values.get_mut(*index) {
+                                if let Some(c) = component.color.get(i) {
+                                    *color = c.into_color32();
+                                }
                                 *enabled = true;
                             }
                         }

@@ -155,6 +155,7 @@ impl GraphEntity {
                 let component = GraphComponent {
                     component_id: ComponentId::new(&indexer.component_name),
                     indexes: indexer.indexes(),
+                    color: vec![],
                 };
                 Ok::<_, Error>(component)
             })

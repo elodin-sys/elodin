@@ -344,10 +344,11 @@ impl Plot {
                 });
 
                 for (value_index, (enabled, color)) in component_values.iter().enumerate() {
-                    let entity =
-                        graph_state
-                            .enabled_lines
-                            .get(&(*entity_id, *component_id, value_index));
+                    let entity = graph_state.enabled_lines.get_mut(&(
+                        *entity_id,
+                        *component_id,
+                        value_index,
+                    ));
 
                     let Some(line) = component.lines.get(&value_index) else {
                         continue;
@@ -385,7 +386,8 @@ impl Plot {
                                 value_index,
                             ));
                         }
-                        (Some((entity, _)), true) => {
+                        (Some((entity, graph_state_color)), true) => {
+                            *graph_state_color = *color;
                             commands
                                 .entity(*entity)
                                 .try_insert(LineUniform::new(
