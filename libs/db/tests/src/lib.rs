@@ -93,10 +93,7 @@ mod tests {
             id: vtable_id,
             vtable: vtable.clone(),
         };
-        let vtable_stream = VTableStream {
-            id: 1u16.to_le_bytes(),
-            vtable,
-        };
+        let vtable_stream = VTableStream { id: vtable_id };
         tx_client.send(&msg).await.0.unwrap();
         sleep(Duration::from_millis(50)).await;
         let mut sub = rx_client.stream(&vtable_stream).await.unwrap();
@@ -110,6 +107,9 @@ mod tests {
                 tx_client.send(pkt).await.0.unwrap();
             }
         });
+        let StreamReply::VTable(_) = sub.next().await.unwrap() else {
+            panic!("unexpected reply type");
+        };
         for i in 0..5 {
             let StreamReply::Table(table) = sub.next().await.unwrap() else {
                 panic!("unexpected reply type");

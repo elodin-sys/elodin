@@ -10,6 +10,7 @@
 - **(feat)** Add vtable builder to elodin-db's C++ API. You can find an example of its usage in libs/db/cpp/example.cpp
 - **(feat)** Add vtable builder to elodin-db's C++ API. You can find an example of its usage in libs/db/cpp/example.cpp
 - **(feat)** Add ability to manually specify y axis bounds on a plot
+- **(feat)** Add `UdpVTableStream` message type and `udp_vtable_stream(id, addr)` Lua function to construct it. This allows for static configuration of arbitrary VTable streams over UDP, which is useful for syncing data across instances of `elodin-db`.
 
 ## v0.14
 

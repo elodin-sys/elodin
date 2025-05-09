@@ -9,12 +9,15 @@ use std::{
 };
 
 use impeller2::{
-    types::{ComponentView, LenPacket, Msg, PACKET_HEADER_LEN, PacketId, PrimType, RequestId},
-    vtable::{Op, RealizedOp, RealizedPair},
+    types::{
+        ComponentView, IntoLenPacket, LenPacket, Msg, PACKET_HEADER_LEN, PacketId, PrimType,
+        RequestId,
+    },
+    vtable::{Op, RealizedOp, RealizedPair, VTable},
 };
 use impeller2_stellar::PacketSink;
 use impeller2_wkt::{
-    ComponentValue, FixedRateBehavior, FixedRateOp, InitialTimestamp, MeanOp, VTableStream,
+    ComponentValue, FixedRateBehavior, FixedRateOp, InitialTimestamp, MeanOp, VTableMsg,
 };
 use stellarator::{
     io::AsyncWrite,
@@ -26,12 +29,12 @@ use tracing::{trace, warn};
 use crate::{Component, DB, Error, FixedRateStreamState};
 
 pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
-    vtable_stream: VTableStream,
+    id: [u8; 2],
+    vtable: VTable,
     db: Arc<DB>,
     tx: Arc<Mutex<PacketSink<A>>>,
     req_id: RequestId,
 ) -> Result<(), Error> {
-    let VTableStream { vtable, id } = vtable_stream;
     trace!("spawning vtable stream");
     let table_len = vtable
         .fields
@@ -151,6 +154,16 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
         }
         let prim_type = component.schema.prim_type;
         stellarator::spawn(handle_plan(plan, shard, timestamp, prim_type));
+    }
+    // Send vtable before streaming
+    {
+        let mut pkt = VTableMsg {
+            vtable: vtable.clone(),
+            id,
+        }
+        .into_len_packet();
+        let tx = tx.lock().await;
+        rent!(tx.send(pkt.with_request_id(req_id)).await, pkt)?;
     }
     loop {
         table.wait_ready().await;

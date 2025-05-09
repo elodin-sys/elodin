@@ -98,10 +98,9 @@ impl StreamExt for Client {
         &mut self,
     ) -> Result<Subscription<'_, T>, Error> {
         let vtable = T::as_vtable();
-        let msg = VTableStream {
-            id: fastrand::u16(..).to_le_bytes(),
-            vtable,
-        };
+        let id = fastrand::u16(..).to_le_bytes();
+        self.send(&VTableMsg { id, vtable }).await.0?;
+        let msg = VTableStream { id };
         let sub = self.stream(&msg).await?;
         Ok(Subscription {
             sub,
