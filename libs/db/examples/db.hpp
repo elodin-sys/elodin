@@ -1,3 +1,20 @@
+#ifndef ELODIN_DB_H
+#define ELODIN_DB_H
+
+#include <stdio.h>
+#include <span>
+#include <variant>
+#include <type_traits>
+#include <vector>
+#include <optional>
+#include <unordered_map>
+
+
+#if __has_include("postcard.h")
+#include "postcard.h"
+#endif
+
+
 #ifndef POSTCARD_H
 #define POSTCARD_H
 
@@ -1051,82 +1068,10 @@ inline size_t postcard_size_map(size_t count)
 
 #endif // POSTCARD_H
 
-#ifndef ELO_DB_HELPERS_H
-#define ELO_DB_HELPERS_H
-
-#include <cstring>
-#include <span>
-#include <vector>
-
-enum class PacketType : uint8_t {
-    MSG = 0,
-    TABLE = 1,
-    TIME_SERIES = 2
-};
-
-struct PacketHeader {
-    uint32_t len;
-    PacketType ty;
-    std::array<uint8_t, 2> packet_id;
-    uint8_t request_id;
-};
-
-template <typename T>
-class Msg {
-    PacketHeader header;
-    T payload;
-
-public:
-    Msg(std::array<uint8_t, 2> packet_id, T p)
-    {
-        header = PacketHeader {
-            .len = 0,
-            .ty = PacketType::MSG,
-            .packet_id = packet_id,
-            .request_id = 0,
-        };
-        payload = p;
-    }
-
-    std::vector<std::byte> encode_vec()
-    {
-        auto t_size = payload.encoded_size();
-        header.len = t_size + 4;
-        auto header_len = sizeof(PacketHeader);
-        auto buf = std::vector<std::byte>(t_size + header_len);
-        std::memcpy(buf.data(), &header, header_len);
-        auto span = std::span<std::byte>(buf).subspan(header_len, t_size);
-        postcard_slice_t slice;
-        postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(span.data()), span.size());
-        auto res = payload.encode_raw(&slice);
-        if (res == POSTCARD_SUCCESS) {
-            buf.resize(slice.len + header_len);
-        } else {
-            buf.clear();
-        }
-
-        return buf;
-    }
-};
-
-#endif
-
-#ifndef InitialTimestamp_H
-#define InitialTimestamp_H
-
-#include <stdio.h>
-#include <span>
-#include <variant>
-#include <type_traits>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
 
 class InitialTimestamp : public std::variant<std::monostate, std::monostate, int64_t> {
 public:
+  static constexpr std::string_view TYPE_NAME = "InitialTimestamp";
   // Inherit constructors from std::variant
   using std::variant<std::monostate, std::monostate, int64_t>::variant;
 
@@ -1201,13 +1146,13 @@ public:
     // Tag size (discriminant)
     size += postcard_size_u8(); // Just for the variant tag
 
-    if (auto val = std::get_if<0>((const std::variant<std::monostate, std::monostate, int64_t>*)this)) {
+    if ([[maybe_unused]] auto val = std::get_if<0>((const std::variant<std::monostate, std::monostate, int64_t>*)this)) {
         
     }
-    else if (auto val = std::get_if<1>((const std::variant<std::monostate, std::monostate, int64_t>*)this)) {
+    else if ([[maybe_unused]] auto val = std::get_if<1>((const std::variant<std::monostate, std::monostate, int64_t>*)this)) {
         
     }
-    else if (auto val = std::get_if<2>((const std::variant<std::monostate, std::monostate, int64_t>*)this)) {
+    else if ([[maybe_unused]] auto val = std::get_if<2>((const std::variant<std::monostate, std::monostate, int64_t>*)this)) {
         size += postcard_size_i64((*val));
     }
     
@@ -1215,25 +1160,25 @@ public:
     return size;
   }
 
-  postcard_error_t encode(std::span<std::byte>& output) {
+  postcard_error_t encode(std::span<uint8_t>& output) const {
     postcard_slice_t slice;
-    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(output.data()), output.size());
+    postcard_init_slice(&slice, output.data(), output.size());
     auto res = encode_raw(&slice);
     if(res != POSTCARD_SUCCESS) return res;
     output = output.subspan(0, slice.len);
     return POSTCARD_SUCCESS;
   }
 
-  std::vector<std::byte> encode_vec() {
+  std::vector<uint8_t> encode_vec() const {
     // Pre-allocate vector with the required size
-    std::vector<std::byte> vec(encoded_size());
+    std::vector<uint8_t> vec(encoded_size());
 
     // Create a span from the vector
-    auto span = std::span<std::byte>(vec);
+    auto span = std::span<uint8_t>(vec);
 
     // Encode into the span
     postcard_slice_t slice;
-    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(span.data()), span.size());
+    postcard_init_slice(&slice, span.data(), span.size());
     auto res = encode_raw(&slice);
 
     // Resize to actual used length if successful
@@ -1246,22 +1191,22 @@ public:
     return vec;
   }
 
-  postcard_error_t encode_raw(postcard_slice_t* slice) {
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
     postcard_error_t result;
 
-    if (auto val = std::get_if<0>((std::variant<std::monostate, std::monostate, int64_t>*)this)) {
+    if ([[maybe_unused]] auto val = std::get_if<0>((std::variant<std::monostate, std::monostate, int64_t>*)this)) {
         result = postcard_encode_u8(slice, 0);
         if (result != POSTCARD_SUCCESS) return result;
         
         if (result != POSTCARD_SUCCESS) return result;
     }
-    else if (auto val = std::get_if<1>((std::variant<std::monostate, std::monostate, int64_t>*)this)) {
+    else if ([[maybe_unused]] auto val = std::get_if<1>((std::variant<std::monostate, std::monostate, int64_t>*)this)) {
         result = postcard_encode_u8(slice, 1);
         if (result != POSTCARD_SUCCESS) return result;
         
         if (result != POSTCARD_SUCCESS) return result;
     }
-    else if (auto val = std::get_if<2>((std::variant<std::monostate, std::monostate, int64_t>*)this)) {
+    else if ([[maybe_unused]] auto val = std::get_if<2>((std::variant<std::monostate, std::monostate, int64_t>*)this)) {
         result = postcard_encode_u8(slice, 2);
         if (result != POSTCARD_SUCCESS) return result;
         result = postcard_encode_i64(slice, (*val));
@@ -1275,9 +1220,9 @@ public:
     return POSTCARD_SUCCESS;
   }
 
-  postcard_error_t decode(std::span<const std::byte>& input) {
+  postcard_error_t decode(std::span<const uint8_t>& input) {
     postcard_slice_t slice;
-    postcard_init_slice(&slice, const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(input.data())), input.size());
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
     postcard_error_t result = decode_raw(&slice);
     if (result == POSTCARD_SUCCESS) {
       // Update the input span to point past the decoded data
@@ -1323,23 +1268,9 @@ public:
   }
 };
 
-#endif
-#ifndef FixedRateBehavior_H
-#define FixedRateBehavior_H
-
-#include <stdio.h>
-#include <span>
-#include <unordered_map>
-#include <variant>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
-
 struct FixedRateBehavior {
+  static constexpr std::string_view TYPE_NAME = "FixedRateBehavior";
+
   InitialTimestamp initial_timestamp;
   std::optional<uint64_t> timestep;
   std::optional<uint64_t> frequency;
@@ -1367,38 +1298,38 @@ struct FixedRateBehavior {
     return size;
   }
 
-  postcard_error_t encode(std::span<std::byte>& output) {
+  postcard_error_t encode(std::span<uint8_t>& output) const {
     postcard_slice_t slice;
-    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(output.data()), output.size());
+    postcard_init_slice(&slice, output.data(), output.size());
     auto res = encode_raw(&slice);
     if(res != POSTCARD_SUCCESS) return res;
     output = output.subspan(0, slice.len);
     return POSTCARD_SUCCESS;
   }
 
-  std::vector<std::byte> encode_vec() {
+  std::vector<uint8_t> encode_vec() const {
     // Pre-allocate vector with the required size
-    std::vector<std::byte> vec(encoded_size());
-    
+    std::vector<uint8_t> vec(encoded_size());
+
     // Create a span from the vector
-    auto span = std::span<std::byte>(vec);
-    
+    auto span = std::span<uint8_t>(vec);
+
     // Encode into the span
     postcard_slice_t slice;
-    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(span.data()), span.size());
+    postcard_init_slice(&slice, span.data(), span.size());
     auto res = encode_raw(&slice);
-    
+
     // Resize to actual used length if successful
     if (res == POSTCARD_SUCCESS) {
       vec.resize(slice.len);
     } else {
       vec.clear(); // Clear the vector on error
     }
-    
+
     return vec;
   }
 
-  postcard_error_t encode_raw(postcard_slice_t* slice) {
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
     postcard_error_t result;
     result = initial_timestamp.encode_raw(slice);
         if(result != POSTCARD_SUCCESS) return result;
@@ -1422,9 +1353,9 @@ struct FixedRateBehavior {
     return POSTCARD_SUCCESS;
   }
 
-  postcard_error_t decode(std::span<const std::byte>& input) {
+  postcard_error_t decode(std::span<const uint8_t>& input) {
     postcard_slice_t slice;
-    postcard_init_slice(&slice, const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(input.data())), input.size());
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
     postcard_error_t result = decode_raw(&slice);
     if (result == POSTCARD_SUCCESS) {
       // Update the input span to point past the decoded data
@@ -1469,23 +1400,9 @@ struct FixedRateBehavior {
   }
 };
 
-#endif
-#ifndef StreamBehavior_H
-#define StreamBehavior_H
-
-#include <stdio.h>
-#include <span>
-#include <variant>
-#include <type_traits>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
 class StreamBehavior : public std::variant<std::monostate, FixedRateBehavior> {
 public:
+  static constexpr std::string_view TYPE_NAME = "StreamBehavior";
   // Inherit constructors from std::variant
   using std::variant<std::monostate, FixedRateBehavior>::variant;
 
@@ -1539,10 +1456,10 @@ public:
     // Tag size (discriminant)
     size += postcard_size_u8(); // Just for the variant tag
 
-    if (auto val = std::get_if<0>((const std::variant<std::monostate, FixedRateBehavior>*)this)) {
+    if ([[maybe_unused]] auto val = std::get_if<0>((const std::variant<std::monostate, FixedRateBehavior>*)this)) {
         
     }
-    else if (auto val = std::get_if<1>((const std::variant<std::monostate, FixedRateBehavior>*)this)) {
+    else if ([[maybe_unused]] auto val = std::get_if<1>((const std::variant<std::monostate, FixedRateBehavior>*)this)) {
         size += (*val).encoded_size();
     }
     
@@ -1550,25 +1467,25 @@ public:
     return size;
   }
 
-  postcard_error_t encode(std::span<std::byte>& output) {
+  postcard_error_t encode(std::span<uint8_t>& output) const {
     postcard_slice_t slice;
-    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(output.data()), output.size());
+    postcard_init_slice(&slice, output.data(), output.size());
     auto res = encode_raw(&slice);
     if(res != POSTCARD_SUCCESS) return res;
     output = output.subspan(0, slice.len);
     return POSTCARD_SUCCESS;
   }
 
-  std::vector<std::byte> encode_vec() {
+  std::vector<uint8_t> encode_vec() const {
     // Pre-allocate vector with the required size
-    std::vector<std::byte> vec(encoded_size());
+    std::vector<uint8_t> vec(encoded_size());
 
     // Create a span from the vector
-    auto span = std::span<std::byte>(vec);
+    auto span = std::span<uint8_t>(vec);
 
     // Encode into the span
     postcard_slice_t slice;
-    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(span.data()), span.size());
+    postcard_init_slice(&slice, span.data(), span.size());
     auto res = encode_raw(&slice);
 
     // Resize to actual used length if successful
@@ -1581,16 +1498,16 @@ public:
     return vec;
   }
 
-  postcard_error_t encode_raw(postcard_slice_t* slice) {
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
     postcard_error_t result;
 
-    if (auto val = std::get_if<0>((std::variant<std::monostate, FixedRateBehavior>*)this)) {
+    if ([[maybe_unused]] auto val = std::get_if<0>((std::variant<std::monostate, FixedRateBehavior>*)this)) {
         result = postcard_encode_u8(slice, 0);
         if (result != POSTCARD_SUCCESS) return result;
         
         if (result != POSTCARD_SUCCESS) return result;
     }
-    else if (auto val = std::get_if<1>((std::variant<std::monostate, FixedRateBehavior>*)this)) {
+    else if ([[maybe_unused]] auto val = std::get_if<1>((std::variant<std::monostate, FixedRateBehavior>*)this)) {
         result = postcard_encode_u8(slice, 1);
         if (result != POSTCARD_SUCCESS) return result;
         result = (*val).encode_raw(slice);
@@ -1604,9 +1521,9 @@ public:
     return POSTCARD_SUCCESS;
   }
 
-  postcard_error_t decode(std::span<const std::byte>& input) {
+  postcard_error_t decode(std::span<const uint8_t>& input) {
     postcard_slice_t slice;
-    postcard_init_slice(&slice, const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(input.data())), input.size());
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
     postcard_error_t result = decode_raw(&slice);
     if (result == POSTCARD_SUCCESS) {
       // Update the input span to point past the decoded data
@@ -1646,23 +1563,9 @@ public:
   }
 };
 
-#endif
-#ifndef StreamFilter_H
-#define StreamFilter_H
-
-#include <stdio.h>
-#include <span>
-#include <unordered_map>
-#include <variant>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
-
 struct StreamFilter {
+  static constexpr std::string_view TYPE_NAME = "StreamFilter";
+
   std::optional<uint64_t> component_id;
   std::optional<uint64_t> entity_id;
   
@@ -1688,38 +1591,38 @@ struct StreamFilter {
     return size;
   }
 
-  postcard_error_t encode(std::span<std::byte>& output) {
+  postcard_error_t encode(std::span<uint8_t>& output) const {
     postcard_slice_t slice;
-    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(output.data()), output.size());
+    postcard_init_slice(&slice, output.data(), output.size());
     auto res = encode_raw(&slice);
     if(res != POSTCARD_SUCCESS) return res;
     output = output.subspan(0, slice.len);
     return POSTCARD_SUCCESS;
   }
 
-  std::vector<std::byte> encode_vec() {
+  std::vector<uint8_t> encode_vec() const {
     // Pre-allocate vector with the required size
-    std::vector<std::byte> vec(encoded_size());
-    
+    std::vector<uint8_t> vec(encoded_size());
+
     // Create a span from the vector
-    auto span = std::span<std::byte>(vec);
-    
+    auto span = std::span<uint8_t>(vec);
+
     // Encode into the span
     postcard_slice_t slice;
-    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(span.data()), span.size());
+    postcard_init_slice(&slice, span.data(), span.size());
     auto res = encode_raw(&slice);
-    
+
     // Resize to actual used length if successful
     if (res == POSTCARD_SUCCESS) {
       vec.resize(slice.len);
     } else {
       vec.clear(); // Clear the vector on error
     }
-    
+
     return vec;
   }
 
-  postcard_error_t encode_raw(postcard_slice_t* slice) {
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
     postcard_error_t result;
     if(component_id) {
                         result = postcard_encode_option_some(slice); if(result != POSTCARD_SUCCESS) return result;
@@ -1741,9 +1644,9 @@ struct StreamFilter {
     return POSTCARD_SUCCESS;
   }
 
-  postcard_error_t decode(std::span<const std::byte>& input) {
+  postcard_error_t decode(std::span<const uint8_t>& input) {
     postcard_slice_t slice;
-    postcard_init_slice(&slice, const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(input.data())), input.size());
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
     postcard_error_t result = decode_raw(&slice);
     if (result == POSTCARD_SUCCESS) {
       // Update the input span to point past the decoded data
@@ -1785,23 +1688,9 @@ struct StreamFilter {
   }
 };
 
-#endif
-#ifndef Stream_H
-#define Stream_H
-
-#include <stdio.h>
-#include <span>
-#include <unordered_map>
-#include <variant>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
-
 struct Stream {
+  static constexpr std::string_view TYPE_NAME = "Stream";
+
   StreamFilter filter;
   StreamBehavior behavior;
   uint64_t id;
@@ -1817,38 +1706,38 @@ struct Stream {
     return size;
   }
 
-  postcard_error_t encode(std::span<std::byte>& output) {
+  postcard_error_t encode(std::span<uint8_t>& output) const {
     postcard_slice_t slice;
-    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(output.data()), output.size());
+    postcard_init_slice(&slice, output.data(), output.size());
     auto res = encode_raw(&slice);
     if(res != POSTCARD_SUCCESS) return res;
     output = output.subspan(0, slice.len);
     return POSTCARD_SUCCESS;
   }
 
-  std::vector<std::byte> encode_vec() {
+  std::vector<uint8_t> encode_vec() const {
     // Pre-allocate vector with the required size
-    std::vector<std::byte> vec(encoded_size());
-    
+    std::vector<uint8_t> vec(encoded_size());
+
     // Create a span from the vector
-    auto span = std::span<std::byte>(vec);
-    
+    auto span = std::span<uint8_t>(vec);
+
     // Encode into the span
     postcard_slice_t slice;
-    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(span.data()), span.size());
+    postcard_init_slice(&slice, span.data(), span.size());
     auto res = encode_raw(&slice);
-    
+
     // Resize to actual used length if successful
     if (res == POSTCARD_SUCCESS) {
       vec.resize(slice.len);
     } else {
       vec.clear(); // Clear the vector on error
     }
-    
+
     return vec;
   }
 
-  postcard_error_t encode_raw(postcard_slice_t* slice) {
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
     postcard_error_t result;
     result = filter.encode_raw(slice);
         if(result != POSTCARD_SUCCESS) return result;
@@ -1860,9 +1749,9 @@ struct Stream {
     return POSTCARD_SUCCESS;
   }
 
-  postcard_error_t decode(std::span<const std::byte>& input) {
+  postcard_error_t decode(std::span<const uint8_t>& input) {
     postcard_slice_t slice;
-    postcard_init_slice(&slice, const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(input.data())), input.size());
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
     postcard_error_t result = decode_raw(&slice);
     if (result == POSTCARD_SUCCESS) {
       // Update the input span to point past the decoded data
@@ -1887,72 +1776,52 @@ struct Stream {
   }
 };
 
-#endif
-#ifndef MsgStream_H
-#define MsgStream_H
-
-#include <stdio.h>
-#include <span>
-#include <unordered_map>
-#include <variant>
-#include <vector>
-#include <optional>
-
-#if __has_include("postcard.h")
-#include "postcard.h"
-#endif
-
-
 struct MsgStream {
+  static constexpr std::string_view TYPE_NAME = "MsgStream";
+
   std::tuple<uint8_t, uint8_t> msg_id;
   
 
 
   size_t encoded_size() const {
     size_t size = 0;
-    {
-                            auto val = std::get<0>(msg_id);
-                            size += postcard_size_u8();
-                        }{
-                            auto val = std::get<1>(msg_id);
-                            size += postcard_size_u8();
-                        }
+    size += postcard_size_u8();size += postcard_size_u8();
     
     return size;
   }
 
-  postcard_error_t encode(std::span<std::byte>& output) {
+  postcard_error_t encode(std::span<uint8_t>& output) const {
     postcard_slice_t slice;
-    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(output.data()), output.size());
+    postcard_init_slice(&slice, output.data(), output.size());
     auto res = encode_raw(&slice);
     if(res != POSTCARD_SUCCESS) return res;
     output = output.subspan(0, slice.len);
     return POSTCARD_SUCCESS;
   }
 
-  std::vector<std::byte> encode_vec() {
+  std::vector<uint8_t> encode_vec() const {
     // Pre-allocate vector with the required size
-    std::vector<std::byte> vec(encoded_size());
-    
+    std::vector<uint8_t> vec(encoded_size());
+
     // Create a span from the vector
-    auto span = std::span<std::byte>(vec);
-    
+    auto span = std::span<uint8_t>(vec);
+
     // Encode into the span
     postcard_slice_t slice;
-    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(span.data()), span.size());
+    postcard_init_slice(&slice, span.data(), span.size());
     auto res = encode_raw(&slice);
-    
+
     // Resize to actual used length if successful
     if (res == POSTCARD_SUCCESS) {
       vec.resize(slice.len);
     } else {
       vec.clear(); // Clear the vector on error
     }
-    
+
     return vec;
   }
 
-  postcard_error_t encode_raw(postcard_slice_t* slice) {
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
     postcard_error_t result;
     
                         {
@@ -1970,6 +1839,1039 @@ struct MsgStream {
     return POSTCARD_SUCCESS;
   }
 
+  postcard_error_t decode(std::span<const uint8_t>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    uint8_t val0;
+    result = postcard_decode_u8(slice, &val0);
+    uint8_t val1;
+    result = postcard_decode_u8(slice, &val1);
+    msg_id =  std::tuple<uint8_t, uint8_t>(val0, val1);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    
+    return POSTCARD_SUCCESS;
+  }
+};
+
+struct Field {
+  static constexpr std::string_view TYPE_NAME = "Field";
+
+  uint16_t offset;
+  uint16_t len;
+  uint16_t arg;
+  
+
+
+  size_t encoded_size() const {
+    size_t size = 0;
+    size += postcard_size_u16(offset);
+    size += postcard_size_u16(len);
+    size += postcard_size_u16(arg);
+    
+    return size;
+  }
+
+  postcard_error_t encode(std::span<uint8_t>& output) const {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, output.data(), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<uint8_t> encode_vec() const {
+    // Pre-allocate vector with the required size
+    std::vector<uint8_t> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<uint8_t>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, span.data(), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
+    postcard_error_t result;
+    result = postcard_encode_u16(slice, offset);
+        if(result != POSTCARD_SUCCESS) return result;
+    result = postcard_encode_u16(slice, len);
+        if(result != POSTCARD_SUCCESS) return result;
+    result = postcard_encode_u16(slice, arg);
+        if(result != POSTCARD_SUCCESS) return result;
+    
+    return POSTCARD_SUCCESS;
+  }
+
+  postcard_error_t decode(std::span<const uint8_t>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    result = postcard_decode_u16(slice, &offset);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    result = postcard_decode_u16(slice, &len);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    result = postcard_decode_u16(slice, &arg);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    
+    return POSTCARD_SUCCESS;
+  }
+};
+
+struct OpData {
+  static constexpr std::string_view TYPE_NAME = "OpData";
+
+  uint16_t offset;
+  uint16_t len;
+  
+
+
+  size_t encoded_size() const {
+    size_t size = 0;
+    size += postcard_size_u16(offset);
+    size += postcard_size_u16(len);
+    
+    return size;
+  }
+
+  postcard_error_t encode(std::span<uint8_t>& output) const {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, output.data(), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<uint8_t> encode_vec() const {
+    // Pre-allocate vector with the required size
+    std::vector<uint8_t> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<uint8_t>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, span.data(), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
+    postcard_error_t result;
+    result = postcard_encode_u16(slice, offset);
+        if(result != POSTCARD_SUCCESS) return result;
+    result = postcard_encode_u16(slice, len);
+        if(result != POSTCARD_SUCCESS) return result;
+    
+    return POSTCARD_SUCCESS;
+  }
+
+  postcard_error_t decode(std::span<const uint8_t>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    result = postcard_decode_u16(slice, &offset);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    result = postcard_decode_u16(slice, &len);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    
+    return POSTCARD_SUCCESS;
+  }
+};
+
+struct OpTable {
+  static constexpr std::string_view TYPE_NAME = "OpTable";
+
+  uint16_t offset;
+  uint16_t len;
+  
+
+
+  size_t encoded_size() const {
+    size_t size = 0;
+    size += postcard_size_u16(offset);
+    size += postcard_size_u16(len);
+    
+    return size;
+  }
+
+  postcard_error_t encode(std::span<uint8_t>& output) const {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, output.data(), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<uint8_t> encode_vec() const {
+    // Pre-allocate vector with the required size
+    std::vector<uint8_t> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<uint8_t>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, span.data(), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
+    postcard_error_t result;
+    result = postcard_encode_u16(slice, offset);
+        if(result != POSTCARD_SUCCESS) return result;
+    result = postcard_encode_u16(slice, len);
+        if(result != POSTCARD_SUCCESS) return result;
+    
+    return POSTCARD_SUCCESS;
+  }
+
+  postcard_error_t decode(std::span<const uint8_t>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    result = postcard_decode_u16(slice, &offset);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    result = postcard_decode_u16(slice, &len);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    
+    return POSTCARD_SUCCESS;
+  }
+};
+
+struct OpPair {
+  static constexpr std::string_view TYPE_NAME = "OpPair";
+
+  uint16_t entity_id;
+  uint16_t component_id;
+  
+
+
+  size_t encoded_size() const {
+    size_t size = 0;
+    size += postcard_size_u16(entity_id);
+    size += postcard_size_u16(component_id);
+    
+    return size;
+  }
+
+  postcard_error_t encode(std::span<uint8_t>& output) const {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, output.data(), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<uint8_t> encode_vec() const {
+    // Pre-allocate vector with the required size
+    std::vector<uint8_t> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<uint8_t>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, span.data(), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
+    postcard_error_t result;
+    result = postcard_encode_u16(slice, entity_id);
+        if(result != POSTCARD_SUCCESS) return result;
+    result = postcard_encode_u16(slice, component_id);
+        if(result != POSTCARD_SUCCESS) return result;
+    
+    return POSTCARD_SUCCESS;
+  }
+
+  postcard_error_t decode(std::span<const uint8_t>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    result = postcard_decode_u16(slice, &entity_id);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    result = postcard_decode_u16(slice, &component_id);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    
+    return POSTCARD_SUCCESS;
+  }
+};
+
+struct OpSchema {
+  static constexpr std::string_view TYPE_NAME = "OpSchema";
+
+  uint16_t ty;
+  uint16_t dim;
+  uint16_t arg;
+  
+
+
+  size_t encoded_size() const {
+    size_t size = 0;
+    size += postcard_size_u16(ty);
+    size += postcard_size_u16(dim);
+    size += postcard_size_u16(arg);
+    
+    return size;
+  }
+
+  postcard_error_t encode(std::span<uint8_t>& output) const {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, output.data(), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<uint8_t> encode_vec() const {
+    // Pre-allocate vector with the required size
+    std::vector<uint8_t> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<uint8_t>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, span.data(), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
+    postcard_error_t result;
+    result = postcard_encode_u16(slice, ty);
+        if(result != POSTCARD_SUCCESS) return result;
+    result = postcard_encode_u16(slice, dim);
+        if(result != POSTCARD_SUCCESS) return result;
+    result = postcard_encode_u16(slice, arg);
+        if(result != POSTCARD_SUCCESS) return result;
+    
+    return POSTCARD_SUCCESS;
+  }
+
+  postcard_error_t decode(std::span<const uint8_t>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    result = postcard_decode_u16(slice, &ty);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    result = postcard_decode_u16(slice, &dim);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    result = postcard_decode_u16(slice, &arg);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    
+    return POSTCARD_SUCCESS;
+  }
+};
+
+struct OpTimestamp {
+  static constexpr std::string_view TYPE_NAME = "OpTimestamp";
+
+  uint16_t source;
+  uint16_t arg;
+  
+
+
+  size_t encoded_size() const {
+    size_t size = 0;
+    size += postcard_size_u16(source);
+    size += postcard_size_u16(arg);
+    
+    return size;
+  }
+
+  postcard_error_t encode(std::span<uint8_t>& output) const {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, output.data(), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<uint8_t> encode_vec() const {
+    // Pre-allocate vector with the required size
+    std::vector<uint8_t> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<uint8_t>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, span.data(), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
+    postcard_error_t result;
+    result = postcard_encode_u16(slice, source);
+        if(result != POSTCARD_SUCCESS) return result;
+    result = postcard_encode_u16(slice, arg);
+        if(result != POSTCARD_SUCCESS) return result;
+    
+    return POSTCARD_SUCCESS;
+  }
+
+  postcard_error_t decode(std::span<const uint8_t>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    result = postcard_decode_u16(slice, &source);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    result = postcard_decode_u16(slice, &arg);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    
+    return POSTCARD_SUCCESS;
+  }
+};
+
+struct OpExt {
+  static constexpr std::string_view TYPE_NAME = "OpExt";
+
+  uint16_t arg;
+  std::tuple<uint8_t, uint8_t> id;
+  uint16_t data;
+  
+
+
+  size_t encoded_size() const {
+    size_t size = 0;
+    size += postcard_size_u16(arg);
+    size += postcard_size_u8();size += postcard_size_u8();
+    size += postcard_size_u16(data);
+    
+    return size;
+  }
+
+  postcard_error_t encode(std::span<uint8_t>& output) const {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, output.data(), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<uint8_t> encode_vec() const {
+    // Pre-allocate vector with the required size
+    std::vector<uint8_t> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<uint8_t>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, span.data(), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
+    postcard_error_t result;
+    result = postcard_encode_u16(slice, arg);
+        if(result != POSTCARD_SUCCESS) return result;
+    
+                        {
+                            auto val = std::get<0>(id);
+                            result = postcard_encode_u8(slice, val);
+                        }
+                        
+                        {
+                            auto val = std::get<1>(id);
+                            result = postcard_encode_u8(slice, val);
+                        }
+                        
+        if(result != POSTCARD_SUCCESS) return result;
+    result = postcard_encode_u16(slice, data);
+        if(result != POSTCARD_SUCCESS) return result;
+    
+    return POSTCARD_SUCCESS;
+  }
+
+  postcard_error_t decode(std::span<const uint8_t>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    result = postcard_decode_u16(slice, &arg);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    uint8_t val0;
+    result = postcard_decode_u8(slice, &val0);
+    uint8_t val1;
+    result = postcard_decode_u8(slice, &val1);
+    id =  std::tuple<uint8_t, uint8_t>(val0, val1);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    result = postcard_decode_u16(slice, &data);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    
+    return POSTCARD_SUCCESS;
+  }
+};
+
+class Op : public std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt> {
+public:
+  static constexpr std::string_view TYPE_NAME = "Op";
+  // Inherit constructors from std::variant
+  using std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>::variant;
+
+  
+  // Static constructor for Data variant
+  static Op Data(const OpData& value) {
+    return Op{std::in_place_index<0>, value};
+  }
+  
+
+  // Accessor method for variant Data
+  bool is_data() const {
+    return this->index() == 0;
+  }
+  
+  const OpData* get_data() const {
+    return std::get_if<0>((const std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this);
+  }
+
+  OpData* get_data() {
+    return std::get_if<0>((std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this);
+  }
+  
+
+  
+  // Static constructor for Table variant
+  static Op Table(const OpTable& value) {
+    return Op{std::in_place_index<1>, value};
+  }
+  
+
+  // Accessor method for variant Table
+  bool is_table() const {
+    return this->index() == 1;
+  }
+  
+  const OpTable* get_table() const {
+    return std::get_if<1>((const std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this);
+  }
+
+  OpTable* get_table() {
+    return std::get_if<1>((std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this);
+  }
+  
+
+  
+  // Static constructor for unit variant None
+  static Op None() {
+    return Op{std::in_place_index<2>, std::monostate{}};
+  }
+  
+
+  // Accessor method for variant None
+  bool is_none() const {
+    return this->index() == 2;
+  }
+  
+  const std::monostate* get_none() const {
+    return std::get_if<2>((const std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this);
+  }
+
+  std::monostate* get_none() {
+    return std::get_if<2>((std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this);
+  }
+  
+
+  
+  // Static constructor for Pair variant
+  static Op Pair(const OpPair& value) {
+    return Op{std::in_place_index<3>, value};
+  }
+  
+
+  // Accessor method for variant Pair
+  bool is_pair() const {
+    return this->index() == 3;
+  }
+  
+  const OpPair* get_pair() const {
+    return std::get_if<3>((const std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this);
+  }
+
+  OpPair* get_pair() {
+    return std::get_if<3>((std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this);
+  }
+  
+
+  
+  // Static constructor for Schema variant
+  static Op Schema(const OpSchema& value) {
+    return Op{std::in_place_index<4>, value};
+  }
+  
+
+  // Accessor method for variant Schema
+  bool is_schema() const {
+    return this->index() == 4;
+  }
+  
+  const OpSchema* get_schema() const {
+    return std::get_if<4>((const std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this);
+  }
+
+  OpSchema* get_schema() {
+    return std::get_if<4>((std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this);
+  }
+  
+
+  
+  // Static constructor for Timestamp variant
+  static Op Timestamp(const OpTimestamp& value) {
+    return Op{std::in_place_index<5>, value};
+  }
+  
+
+  // Accessor method for variant Timestamp
+  bool is_timestamp() const {
+    return this->index() == 5;
+  }
+  
+  const OpTimestamp* get_timestamp() const {
+    return std::get_if<5>((const std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this);
+  }
+
+  OpTimestamp* get_timestamp() {
+    return std::get_if<5>((std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this);
+  }
+  
+
+  
+  // Static constructor for Ext variant
+  static Op Ext(const OpExt& value) {
+    return Op{std::in_place_index<6>, value};
+  }
+  
+
+  // Accessor method for variant Ext
+  bool is_ext() const {
+    return this->index() == 6;
+  }
+  
+  const OpExt* get_ext() const {
+    return std::get_if<6>((const std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this);
+  }
+
+  OpExt* get_ext() {
+    return std::get_if<6>((std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this);
+  }
+  
+
+  
+
+  size_t encoded_size() const {
+    size_t size = 0;
+
+    // Tag size (discriminant)
+    size += postcard_size_u8(); // Just for the variant tag
+
+    if ([[maybe_unused]] auto val = std::get_if<0>((const std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this)) {
+        size += (*val).encoded_size();
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<1>((const std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this)) {
+        size += (*val).encoded_size();
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<2>((const std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this)) {
+        
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<3>((const std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this)) {
+        size += (*val).encoded_size();
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<4>((const std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this)) {
+        size += (*val).encoded_size();
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<5>((const std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this)) {
+        size += (*val).encoded_size();
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<6>((const std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this)) {
+        size += (*val).encoded_size();
+    }
+    
+
+    return size;
+  }
+
+  postcard_error_t encode(std::span<uint8_t>& output) const {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, output.data(), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<uint8_t> encode_vec() const {
+    // Pre-allocate vector with the required size
+    std::vector<uint8_t> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<uint8_t>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, span.data(), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
+    postcard_error_t result;
+
+    if ([[maybe_unused]] auto val = std::get_if<0>((std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this)) {
+        result = postcard_encode_u8(slice, 0);
+        if (result != POSTCARD_SUCCESS) return result;
+        result = (*val).encode_raw(slice);
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<1>((std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this)) {
+        result = postcard_encode_u8(slice, 1);
+        if (result != POSTCARD_SUCCESS) return result;
+        result = (*val).encode_raw(slice);
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<2>((std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this)) {
+        result = postcard_encode_u8(slice, 2);
+        if (result != POSTCARD_SUCCESS) return result;
+        
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<3>((std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this)) {
+        result = postcard_encode_u8(slice, 3);
+        if (result != POSTCARD_SUCCESS) return result;
+        result = (*val).encode_raw(slice);
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<4>((std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this)) {
+        result = postcard_encode_u8(slice, 4);
+        if (result != POSTCARD_SUCCESS) return result;
+        result = (*val).encode_raw(slice);
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<5>((std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this)) {
+        result = postcard_encode_u8(slice, 5);
+        if (result != POSTCARD_SUCCESS) return result;
+        result = (*val).encode_raw(slice);
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<6>((std::variant<OpData, OpTable, std::monostate, OpPair, OpSchema, OpTimestamp, OpExt>*)this)) {
+        result = postcard_encode_u8(slice, 6);
+        if (result != POSTCARD_SUCCESS) return result;
+        result = (*val).encode_raw(slice);
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    
+    else {
+        return POSTCARD_ERROR_INVALID_INPUT;
+    }
+
+    return POSTCARD_SUCCESS;
+  }
+
+  postcard_error_t decode(std::span<const uint8_t>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    uint8_t tag;
+    result = postcard_decode_u8(slice, &tag);
+    if (result != POSTCARD_SUCCESS) return result;
+
+    switch(tag) {
+        case 0: {  // Data
+            
+            OpData val;
+            result = val.decode_raw(slice);
+            if (result != POSTCARD_SUCCESS) return result;
+            this->emplace<0>(val);
+            
+            break;
+        }
+        case 1: {  // Table
+            
+            OpTable val;
+            result = val.decode_raw(slice);
+            if (result != POSTCARD_SUCCESS) return result;
+            this->emplace<1>(val);
+            
+            break;
+        }
+        case 2: {  // None
+            
+            this->emplace<2>(std::monostate{});
+            
+            break;
+        }
+        case 3: {  // Pair
+            
+            OpPair val;
+            result = val.decode_raw(slice);
+            if (result != POSTCARD_SUCCESS) return result;
+            this->emplace<3>(val);
+            
+            break;
+        }
+        case 4: {  // Schema
+            
+            OpSchema val;
+            result = val.decode_raw(slice);
+            if (result != POSTCARD_SUCCESS) return result;
+            this->emplace<4>(val);
+            
+            break;
+        }
+        case 5: {  // Timestamp
+            
+            OpTimestamp val;
+            result = val.decode_raw(slice);
+            if (result != POSTCARD_SUCCESS) return result;
+            this->emplace<5>(val);
+            
+            break;
+        }
+        case 6: {  // Ext
+            
+            OpExt val;
+            result = val.decode_raw(slice);
+            if (result != POSTCARD_SUCCESS) return result;
+            this->emplace<6>(val);
+            
+            break;
+        }
+        
+        default:
+            return POSTCARD_ERROR_INVALID_INPUT;
+    }
+
+    return POSTCARD_SUCCESS;
+  }
+};
+
+struct OpRef {
+  static constexpr std::string_view TYPE_NAME = "OpRef";
+
+  uint16_t value;
+
+  size_t encoded_size() const {
+    size_t size = 0;
+    size += postcard_size_u16(value);
+    return size;
+  }
+
+  postcard_error_t encode(std::span<std::byte>& output) const {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(output.data()), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<std::byte> encode_vec() const {
+    // Pre-allocate vector with the required size
+    std::vector<std::byte> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<std::byte>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(span.data()), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
+    postcard_error_t result;
+    result = postcard_encode_u16(slice, value);
+    return result;
+  }
+
   postcard_error_t decode(std::span<const std::byte>& input) {
     postcard_slice_t slice;
     postcard_init_slice(&slice, const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(input.data())), input.size());
@@ -1983,14 +2885,1397 @@ struct MsgStream {
 
   postcard_error_t decode_raw(postcard_slice_t* slice) {
     postcard_error_t result;
-    uint8_t val0;
-                        result = postcard_encode_u8(slice, val0);uint8_t val1;
-                        result = postcard_encode_u8(slice, val1);msg_id =  std::tuple<uint8_t, uint8_t>(val0, val1);
+    result = postcard_decode_u16(slice, &value);
+    return result;
+  }
+};
+
+class PrimType : public std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate> {
+public:
+  static constexpr std::string_view TYPE_NAME = "PrimType";
+  // Inherit constructors from std::variant
+  using std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>::variant;
+
+  
+  // Static constructor for unit variant U8
+  static PrimType U8() {
+    return PrimType{std::in_place_index<0>, std::monostate{}};
+  }
+  
+
+  // Accessor method for variant U8
+  bool is_u_8() const {
+    return this->index() == 0;
+  }
+  
+  const std::monostate* get_u_8() const {
+    return std::get_if<0>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+
+  std::monostate* get_u_8() {
+    return std::get_if<0>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+  
+
+  
+  // Static constructor for unit variant U16
+  static PrimType U16() {
+    return PrimType{std::in_place_index<1>, std::monostate{}};
+  }
+  
+
+  // Accessor method for variant U16
+  bool is_u_16() const {
+    return this->index() == 1;
+  }
+  
+  const std::monostate* get_u_16() const {
+    return std::get_if<1>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+
+  std::monostate* get_u_16() {
+    return std::get_if<1>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+  
+
+  
+  // Static constructor for unit variant U32
+  static PrimType U32() {
+    return PrimType{std::in_place_index<2>, std::monostate{}};
+  }
+  
+
+  // Accessor method for variant U32
+  bool is_u_32() const {
+    return this->index() == 2;
+  }
+  
+  const std::monostate* get_u_32() const {
+    return std::get_if<2>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+
+  std::monostate* get_u_32() {
+    return std::get_if<2>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+  
+
+  
+  // Static constructor for unit variant U64
+  static PrimType U64() {
+    return PrimType{std::in_place_index<3>, std::monostate{}};
+  }
+  
+
+  // Accessor method for variant U64
+  bool is_u_64() const {
+    return this->index() == 3;
+  }
+  
+  const std::monostate* get_u_64() const {
+    return std::get_if<3>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+
+  std::monostate* get_u_64() {
+    return std::get_if<3>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+  
+
+  
+  // Static constructor for unit variant I8
+  static PrimType I8() {
+    return PrimType{std::in_place_index<4>, std::monostate{}};
+  }
+  
+
+  // Accessor method for variant I8
+  bool is_i_8() const {
+    return this->index() == 4;
+  }
+  
+  const std::monostate* get_i_8() const {
+    return std::get_if<4>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+
+  std::monostate* get_i_8() {
+    return std::get_if<4>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+  
+
+  
+  // Static constructor for unit variant I16
+  static PrimType I16() {
+    return PrimType{std::in_place_index<5>, std::monostate{}};
+  }
+  
+
+  // Accessor method for variant I16
+  bool is_i_16() const {
+    return this->index() == 5;
+  }
+  
+  const std::monostate* get_i_16() const {
+    return std::get_if<5>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+
+  std::monostate* get_i_16() {
+    return std::get_if<5>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+  
+
+  
+  // Static constructor for unit variant I32
+  static PrimType I32() {
+    return PrimType{std::in_place_index<6>, std::monostate{}};
+  }
+  
+
+  // Accessor method for variant I32
+  bool is_i_32() const {
+    return this->index() == 6;
+  }
+  
+  const std::monostate* get_i_32() const {
+    return std::get_if<6>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+
+  std::monostate* get_i_32() {
+    return std::get_if<6>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+  
+
+  
+  // Static constructor for unit variant I64
+  static PrimType I64() {
+    return PrimType{std::in_place_index<7>, std::monostate{}};
+  }
+  
+
+  // Accessor method for variant I64
+  bool is_i_64() const {
+    return this->index() == 7;
+  }
+  
+  const std::monostate* get_i_64() const {
+    return std::get_if<7>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+
+  std::monostate* get_i_64() {
+    return std::get_if<7>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+  
+
+  
+  // Static constructor for unit variant Bool
+  static PrimType Bool() {
+    return PrimType{std::in_place_index<8>, std::monostate{}};
+  }
+  
+
+  // Accessor method for variant Bool
+  bool is_bool() const {
+    return this->index() == 8;
+  }
+  
+  const std::monostate* get_bool() const {
+    return std::get_if<8>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+
+  std::monostate* get_bool() {
+    return std::get_if<8>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+  
+
+  
+  // Static constructor for unit variant F32
+  static PrimType F32() {
+    return PrimType{std::in_place_index<9>, std::monostate{}};
+  }
+  
+
+  // Accessor method for variant F32
+  bool is_f_32() const {
+    return this->index() == 9;
+  }
+  
+  const std::monostate* get_f_32() const {
+    return std::get_if<9>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+
+  std::monostate* get_f_32() {
+    return std::get_if<9>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+  
+
+  
+  // Static constructor for unit variant F64
+  static PrimType F64() {
+    return PrimType{std::in_place_index<10>, std::monostate{}};
+  }
+  
+
+  // Accessor method for variant F64
+  bool is_f_64() const {
+    return this->index() == 10;
+  }
+  
+  const std::monostate* get_f_64() const {
+    return std::get_if<10>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+
+  std::monostate* get_f_64() {
+    return std::get_if<10>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this);
+  }
+  
+
+  
+
+  size_t encoded_size() const {
+    size_t size = 0;
+
+    // Tag size (discriminant)
+    size += postcard_size_u8(); // Just for the variant tag
+
+    if ([[maybe_unused]] auto val = std::get_if<0>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<1>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<2>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<3>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<4>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<5>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<6>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<7>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<8>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<9>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<10>((const std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        
+    }
+    
+
+    return size;
+  }
+
+  postcard_error_t encode(std::span<uint8_t>& output) const {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, output.data(), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<uint8_t> encode_vec() const {
+    // Pre-allocate vector with the required size
+    std::vector<uint8_t> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<uint8_t>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, span.data(), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
+    postcard_error_t result;
+
+    if ([[maybe_unused]] auto val = std::get_if<0>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        result = postcard_encode_u8(slice, 0);
+        if (result != POSTCARD_SUCCESS) return result;
+        
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<1>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        result = postcard_encode_u8(slice, 1);
+        if (result != POSTCARD_SUCCESS) return result;
+        
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<2>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        result = postcard_encode_u8(slice, 2);
+        if (result != POSTCARD_SUCCESS) return result;
+        
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<3>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        result = postcard_encode_u8(slice, 3);
+        if (result != POSTCARD_SUCCESS) return result;
+        
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<4>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        result = postcard_encode_u8(slice, 4);
+        if (result != POSTCARD_SUCCESS) return result;
+        
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<5>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        result = postcard_encode_u8(slice, 5);
+        if (result != POSTCARD_SUCCESS) return result;
+        
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<6>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        result = postcard_encode_u8(slice, 6);
+        if (result != POSTCARD_SUCCESS) return result;
+        
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<7>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        result = postcard_encode_u8(slice, 7);
+        if (result != POSTCARD_SUCCESS) return result;
+        
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<8>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        result = postcard_encode_u8(slice, 8);
+        if (result != POSTCARD_SUCCESS) return result;
+        
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<9>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        result = postcard_encode_u8(slice, 9);
+        if (result != POSTCARD_SUCCESS) return result;
+        
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<10>((std::variant<std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate, std::monostate>*)this)) {
+        result = postcard_encode_u8(slice, 10);
+        if (result != POSTCARD_SUCCESS) return result;
+        
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    
+    else {
+        return POSTCARD_ERROR_INVALID_INPUT;
+    }
+
+    return POSTCARD_SUCCESS;
+  }
+
+  postcard_error_t decode(std::span<const uint8_t>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    uint8_t tag;
+    result = postcard_decode_u8(slice, &tag);
+    if (result != POSTCARD_SUCCESS) return result;
+
+    switch(tag) {
+        case 0: {  // U8
+            
+            this->emplace<0>(std::monostate{});
+            
+            break;
+        }
+        case 1: {  // U16
+            
+            this->emplace<1>(std::monostate{});
+            
+            break;
+        }
+        case 2: {  // U32
+            
+            this->emplace<2>(std::monostate{});
+            
+            break;
+        }
+        case 3: {  // U64
+            
+            this->emplace<3>(std::monostate{});
+            
+            break;
+        }
+        case 4: {  // I8
+            
+            this->emplace<4>(std::monostate{});
+            
+            break;
+        }
+        case 5: {  // I16
+            
+            this->emplace<5>(std::monostate{});
+            
+            break;
+        }
+        case 6: {  // I32
+            
+            this->emplace<6>(std::monostate{});
+            
+            break;
+        }
+        case 7: {  // I64
+            
+            this->emplace<7>(std::monostate{});
+            
+            break;
+        }
+        case 8: {  // Bool
+            
+            this->emplace<8>(std::monostate{});
+            
+            break;
+        }
+        case 9: {  // F32
+            
+            this->emplace<9>(std::monostate{});
+            
+            break;
+        }
+        case 10: {  // F64
+            
+            this->emplace<10>(std::monostate{});
+            
+            break;
+        }
+        
+        default:
+            return POSTCARD_ERROR_INVALID_INPUT;
+    }
+
+    return POSTCARD_SUCCESS;
+  }
+};
+
+struct VTable {
+  static constexpr std::string_view TYPE_NAME = "VTable";
+
+  std::vector<Op> ops;
+  std::vector<Field> fields;
+  std::vector<uint8_t> data;
+  
+
+
+  size_t encoded_size() const {
+    size_t size = 0;
+    size += postcard_size_seq(ops.size());
+    for([[maybe_unused]] const auto& val: ops) {
+      size += val.encoded_size();
+    }
+    size += postcard_size_seq(fields.size());
+    for([[maybe_unused]] const auto& val: fields) {
+      size += val.encoded_size();
+    }
+    size += postcard_size_seq(data.size());
+    for([[maybe_unused]] const auto& val: data) {
+      size += postcard_size_u8();
+    }
+    
+    return size;
+  }
+
+  postcard_error_t encode(std::span<uint8_t>& output) const {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, output.data(), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<uint8_t> encode_vec() const {
+    // Pre-allocate vector with the required size
+    std::vector<uint8_t> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<uint8_t>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, span.data(), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
+    postcard_error_t result;
+    result = postcard_start_seq(slice, ops.size());
+    for(const auto& val: ops) {
+      result = val.encode_raw(slice);
+      if(result != POSTCARD_SUCCESS) return result;
+    }
+        if(result != POSTCARD_SUCCESS) return result;
+    result = postcard_start_seq(slice, fields.size());
+    for(const auto& val: fields) {
+      result = val.encode_raw(slice);
+      if(result != POSTCARD_SUCCESS) return result;
+    }
+        if(result != POSTCARD_SUCCESS) return result;
+    result = postcard_start_seq(slice, data.size());
+    for(const auto& val: data) {
+      result = postcard_encode_u8(slice, val);
+      if(result != POSTCARD_SUCCESS) return result;
+    }
+        if(result != POSTCARD_SUCCESS) return result;
+    
+    return POSTCARD_SUCCESS;
+  }
+
+  postcard_error_t decode(std::span<const uint8_t>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    size_t ops_len;
+    result = postcard_decode_seq_len(slice, &ops_len);
+    if (result != POSTCARD_SUCCESS) return result;
+    ops.clear();
+    ops.reserve(ops_len);
+    for(size_t i = 0; i < ops_len; i++) {
+        Op val;
+        result = val.decode_raw(slice);
+        ops.push_back(val);
+    }
+    if(result != POSTCARD_SUCCESS) return result;
+
+    size_t fields_len;
+    result = postcard_decode_seq_len(slice, &fields_len);
+    if (result != POSTCARD_SUCCESS) return result;
+    fields.clear();
+    fields.reserve(fields_len);
+    for(size_t i = 0; i < fields_len; i++) {
+        Field val;
+        result = val.decode_raw(slice);
+        fields.push_back(val);
+    }
+    if(result != POSTCARD_SUCCESS) return result;
+
+    size_t data_len;
+    result = postcard_decode_seq_len(slice, &data_len);
+    if (result != POSTCARD_SUCCESS) return result;
+    data.clear();
+    data.reserve(data_len);
+    for(size_t i = 0; i < data_len; i++) {
+        uint8_t val;
+        result = postcard_decode_u8(slice, &val);
+        data.push_back(val);
+    }
     if(result != POSTCARD_SUCCESS) return result;
 
     
     return POSTCARD_SUCCESS;
   }
 };
+
+struct VTableMsg {
+  static constexpr std::string_view TYPE_NAME = "VTableMsg";
+
+  std::tuple<uint8_t, uint8_t> id;
+  VTable vtable;
+  
+
+
+  size_t encoded_size() const {
+    size_t size = 0;
+    size += postcard_size_u8();size += postcard_size_u8();
+    size += vtable.encoded_size();
+    
+    return size;
+  }
+
+  postcard_error_t encode(std::span<uint8_t>& output) const {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, output.data(), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<uint8_t> encode_vec() const {
+    // Pre-allocate vector with the required size
+    std::vector<uint8_t> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<uint8_t>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, span.data(), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
+    postcard_error_t result;
+    
+                        {
+                            auto val = std::get<0>(id);
+                            result = postcard_encode_u8(slice, val);
+                        }
+                        
+                        {
+                            auto val = std::get<1>(id);
+                            result = postcard_encode_u8(slice, val);
+                        }
+                        
+        if(result != POSTCARD_SUCCESS) return result;
+    result = vtable.encode_raw(slice);
+        if(result != POSTCARD_SUCCESS) return result;
+    
+    return POSTCARD_SUCCESS;
+  }
+
+  postcard_error_t decode(std::span<const uint8_t>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    uint8_t val0;
+    result = postcard_decode_u8(slice, &val0);
+    uint8_t val1;
+    result = postcard_decode_u8(slice, &val1);
+    id =  std::tuple<uint8_t, uint8_t>(val0, val1);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    result = vtable.decode_raw(slice);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    
+    return POSTCARD_SUCCESS;
+  }
+};
+
+struct ComponentMetadata {
+  static constexpr std::string_view TYPE_NAME = "ComponentMetadata";
+
+  uint64_t component_id;
+  std::string name;
+  std::unordered_map<std::string, std::string> metadata;
+  bool asset;
+  
+
+
+  size_t encoded_size() const {
+    size_t size = 0;
+    size += postcard_size_u64(component_id);
+    size += postcard_size_string(name.length());
+    size += postcard_size_map(metadata.size());
+    for([[maybe_unused]] const auto& [k, v]: metadata) {
+      size += postcard_size_string(k.length());
+      size += postcard_size_string(v.length());
+    }
+    size += postcard_size_bool();
+    
+    return size;
+  }
+
+  postcard_error_t encode(std::span<uint8_t>& output) const {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, output.data(), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<uint8_t> encode_vec() const {
+    // Pre-allocate vector with the required size
+    std::vector<uint8_t> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<uint8_t>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, span.data(), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
+    postcard_error_t result;
+    result = postcard_encode_u64(slice, component_id);
+        if(result != POSTCARD_SUCCESS) return result;
+    result = postcard_encode_string(slice, name.c_str(), name.length());
+        if(result != POSTCARD_SUCCESS) return result;
+    result = postcard_start_map(slice, metadata.size());
+    for(const auto& [k, v]: metadata) {
+      result = postcard_encode_string(slice, k.c_str(), k.length());
+      result = postcard_encode_string(slice, v.c_str(), v.length());
+      if(result != POSTCARD_SUCCESS) return result;
+    }
+        if(result != POSTCARD_SUCCESS) return result;
+    result = postcard_encode_bool(slice, asset);
+        if(result != POSTCARD_SUCCESS) return result;
+    
+    return POSTCARD_SUCCESS;
+  }
+
+  postcard_error_t decode(std::span<const uint8_t>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    result = postcard_decode_u64(slice, &component_id);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    size_t name_len;
+    result = postcard_decode_string_len(slice, &name_len);
+    if (result != POSTCARD_SUCCESS) return result;
+    name.resize(name_len);
+    if (name_len > 0) {
+        result = postcard_decode_string(slice, name.data(), name_len, name_len);
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    if(result != POSTCARD_SUCCESS) return result;
+
+    size_t metadata_len;
+    result = postcard_decode_map_len(slice, &metadata_len);
+    if (result != POSTCARD_SUCCESS) return result;
+    metadata.clear();
+    for(size_t i = 0; i < metadata_len; i++) {
+        std::string k;
+        size_t k_len;
+        result = postcard_decode_string_len(slice, &k_len);
+        if (result != POSTCARD_SUCCESS) return result;
+        k.resize(k_len);
+        if (k_len > 0) {
+            result = postcard_decode_string(slice, k.data(), k_len, k_len);
+            if (result != POSTCARD_SUCCESS) return result;
+        }
+        if (result != POSTCARD_SUCCESS) return result;
+        std::string v;
+        size_t v_len;
+        result = postcard_decode_string_len(slice, &v_len);
+        if (result != POSTCARD_SUCCESS) return result;
+        v.resize(v_len);
+        if (v_len > 0) {
+            result = postcard_decode_string(slice, v.data(), v_len, v_len);
+            if (result != POSTCARD_SUCCESS) return result;
+        }
+        if (result != POSTCARD_SUCCESS) return result;
+        metadata[k] = v;
+    }
+    if(result != POSTCARD_SUCCESS) return result;
+
+    result = postcard_decode_bool(slice, &asset);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    
+    return POSTCARD_SUCCESS;
+  }
+};
+
+struct SetComponentMetadata {
+  static constexpr std::string_view TYPE_NAME = "SetComponentMetadata";
+
+  ComponentMetadata value;
+
+  size_t encoded_size() const {
+    size_t size = 0;
+    size += value.encoded_size();
+    return size;
+  }
+
+  postcard_error_t encode(std::span<std::byte>& output) const {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(output.data()), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<std::byte> encode_vec() const {
+    // Pre-allocate vector with the required size
+    std::vector<std::byte> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<std::byte>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(span.data()), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
+    postcard_error_t result;
+    result = value.encode_raw(slice);
+    return result;
+  }
+
+  postcard_error_t decode(std::span<const std::byte>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(input.data())), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    result = value.decode_raw(slice);
+    return result;
+  }
+};
+
+#ifndef ELO_DB_HELPERS_H
+#define ELO_DB_HELPERS_H
+
+#include <array>
+#include <cstdint>
+#include <cstring>
+#include <span>
+#include <string_view>
+#include <vector>
+
+inline uint32_t fnv1a_hash_32(const std::string_view str)
+{
+    uint32_t hash = 0x811c9dc5;
+    size_t i = 0;
+    for (auto c : str) {
+        if (++i >= 32) {
+            break;
+        }
+        hash ^= static_cast<uint8_t>(c);
+        hash *= 0x01000193;
+    }
+    return hash;
+}
+
+inline uint64_t fnv1a_hash_64(const std::string_view str)
+{
+    uint64_t hash = 0xcbf29ce484222325;
+    size_t i = 0;
+    for (auto c : str) {
+        if (++i >= 64) {
+            break;
+        }
+        hash ^= static_cast<uint8_t>(c);
+        hash *= 0x00000100000001B3;
+    }
+    return hash;
+}
+
+inline uint16_t fnv1a_hash_16_xor(const std::string_view str)
+{
+    auto hash = fnv1a_hash_32(str);
+    uint16_t upper = static_cast<uint16_t>((hash >> 16) & 0xFFFF);
+    uint16_t lower = static_cast<uint16_t>(hash & 0xFFFF);
+    return upper ^ lower;
+}
+
+inline std::array<uint8_t, 2> msg_id(const std::string_view str)
+{
+    auto hash = fnv1a_hash_16_xor(str);
+    return { static_cast<uint8_t>(hash & 0xff), static_cast<uint8_t>((hash >> 8) & 0xff) };
+}
+
+inline uint64_t component_id(const std::string_view str)
+{
+    auto hash = fnv1a_hash_64(str) & ~(1ul << 63);
+    return hash;
+}
+
+enum class PacketType : uint8_t {
+    MSG = 0,
+    TABLE = 1,
+    TIME_SERIES = 2
+};
+
+struct PacketHeader {
+    uint32_t len;
+    PacketType ty;
+    std::array<uint8_t, 2> packet_id;
+    uint8_t request_id;
+};
+
+template <typename T>
+class Msg {
+    PacketHeader header;
+    T payload;
+
+public:
+    Msg(T p)
+    {
+        auto packet_id = msg_id(T::TYPE_NAME);
+        header = PacketHeader {
+            .len = 0,
+            .ty = PacketType::MSG,
+            .packet_id = packet_id,
+            .request_id = 0,
+        };
+        payload = p;
+    }
+
+    std::vector<uint8_t> encode_vec()
+    {
+        auto t_size = payload.encoded_size();
+        header.len = t_size + 4;
+        auto header_len = sizeof(PacketHeader);
+        auto buf = std::vector<uint8_t>(t_size + header_len);
+        std::memcpy(buf.data(), &header, header_len);
+        auto span = std::span<uint8_t>(buf).subspan(header_len, t_size);
+        postcard_slice_t slice;
+        postcard_init_slice(&slice, span.data(), span.size());
+        auto res = payload.encode_raw(&slice);
+        if (res == POSTCARD_SUCCESS) {
+            buf.resize(slice.len + header_len);
+        } else {
+            buf.clear();
+        }
+
+        return buf;
+    }
+};
+
+SetComponentMetadata set_component_name(std::string name) {
+   return SetComponentMetadata(ComponentMetadata {
+       .component_id = component_id(name),
+       .name = std::move(name),
+   });
+}
+
+#endif
+
+
+#ifndef ELO_DB_VTABLE_H
+#define ELO_DB_VTABLE_H
+
+#include <string_view>
+#if __has_include("db.hpp")
+#include "db.hpp"
+#endif
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <print>
+#include <tuple>
+#include <type_traits>
+#include <unordered_map>
+#include <variant>
+#include <vector>
+
+namespace vtable {
+
+/// A builder for VTable operations
+class OpBuilder {
+public:
+    struct Data {
+        size_t align;
+        std::vector<uint8_t> data;
+    };
+
+    struct Table {
+        uint16_t offset;
+        uint16_t len;
+    };
+
+    struct Pair {
+        std::shared_ptr<OpBuilder> entity_id;
+        std::shared_ptr<OpBuilder> component_id;
+    };
+
+    struct Schema {
+        std::shared_ptr<OpBuilder> ty;
+        std::shared_ptr<OpBuilder> dim;
+        std::shared_ptr<OpBuilder> arg;
+    };
+
+    struct Timestamp {
+        std::shared_ptr<OpBuilder> timestamp;
+        std::shared_ptr<OpBuilder> arg;
+    };
+
+    struct Ext {
+        std::tuple<uint8_t, uint8_t> id;
+        std::shared_ptr<OpBuilder> data;
+        std::shared_ptr<OpBuilder> arg;
+    };
+
+    using ValueType = std::variant<Data, Table, Pair, Schema, Timestamp, Ext>;
+    ValueType value;
+
+    explicit OpBuilder(const Data& data)
+        : value(data)
+    {
+    }
+
+    explicit OpBuilder(const Table& table)
+        : value(table)
+    {
+    }
+
+    explicit OpBuilder(const Pair& pair)
+        : value(pair)
+    {
+    }
+
+    explicit OpBuilder(const Schema& schema)
+        : value(schema)
+    {
+    }
+
+    explicit OpBuilder(const Timestamp& timestamp)
+        : value(timestamp)
+    {
+    }
+
+    explicit OpBuilder(const Ext& ext)
+        : value(ext)
+    {
+    }
+
+    // Prevent copy, only allow move
+    OpBuilder(const OpBuilder&) = delete;
+    OpBuilder& operator=(const OpBuilder&) = delete;
+
+    OpBuilder(OpBuilder&& other) noexcept = default;
+    OpBuilder& operator=(OpBuilder&& other) noexcept = default;
+};
+
+/// A builder for VTable fields
+class FieldBuilder {
+public:
+    uint16_t offset;
+    uint16_t len;
+    std::shared_ptr<OpBuilder> arg;
+
+    FieldBuilder(uint16_t offset, uint16_t len, std::shared_ptr<OpBuilder> arg)
+        : offset(offset)
+        , len(len)
+        , arg(std::move(arg))
+    {
+    }
+};
+
+namespace builder {
+
+    /// Create an OpBuilder that includes the passed in data in the data section
+    /// ## Safety
+    /// The type passed here should be safe to memcpy
+    template <typename T>
+    std::shared_ptr<OpBuilder> data(const std::vector<T>& values)
+    {
+        const uint8_t* bytes = reinterpret_cast<const uint8_t*>(values.data());
+        std::vector<uint8_t> data_vec(bytes, bytes + sizeof(T) * values.size());
+        OpBuilder::Data data { alignof(T), std::move(data_vec) };
+        return std::make_shared<OpBuilder>(data);
+    }
+
+    /// Create an OpBuilder that includes the passed in data in the data section
+    /// ## Safety
+    /// The type passed here should be safe to memcpy
+    template <typename T>
+    std::shared_ptr<OpBuilder> data(const T& value)
+    {
+        const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&value);
+        std::vector<uint8_t> data_vec(bytes, bytes + sizeof(T));
+        OpBuilder::Data data { alignof(T), std::move(data_vec) };
+        return std::make_shared<OpBuilder>(data);
+    }
+
+    /// Create an OpBuilder that includes the passed in data in the data section,
+    /// this includes an optional alignment value that
+    inline std::shared_ptr<OpBuilder> data(const std::vector<uint8_t>& bytes, size_t align = 1)
+    {
+        OpBuilder::Data data { align, bytes };
+        return std::make_shared<OpBuilder>(data);
+    }
+
+    /// Creates an OpBuilder with the table specified offset and length
+    inline std::shared_ptr<OpBuilder> raw_table(uint16_t offset, uint16_t len)
+    {
+        OpBuilder::Table table { offset, len };
+        return std::make_shared<OpBuilder>(table);
+    }
+
+    /// Creates a pair operation builder from an entity ID and component ID
+    inline std::shared_ptr<OpBuilder> pair(uint64_t entity_id, std::string_view component_name)
+    {
+        auto id = component_id(component_name);
+        auto entity_id_op = data(entity_id);
+        auto component_id_op = data(id);
+
+        OpBuilder::Pair pair { std::move(entity_id_op), std::move(component_id_op) };
+        return std::make_shared<OpBuilder>(pair);
+    }
+
+    /// Creates a schema operation builder from a primitive type, dimensions, and an argument
+    inline std::shared_ptr<OpBuilder> schema(PrimType ty, const std::vector<uint64_t>& dim, std::shared_ptr<OpBuilder> arg)
+    {
+        auto ty_op = builder::data(static_cast<uint64_t>(ty.index()));
+        auto dim_op = builder::data(dim);
+
+        OpBuilder::Schema schema { std::move(ty_op), std::move(dim_op), std::move(arg) };
+        return std::make_shared<OpBuilder>(schema);
+    }
+
+    /// Creates a timestamp operation builder from a timestamp source and an argument
+    inline std::shared_ptr<OpBuilder> timestamp(std::shared_ptr<OpBuilder> timestamp, std::shared_ptr<OpBuilder> arg)
+    {
+        OpBuilder::Timestamp ts { std::move(timestamp), std::move(arg) };
+        return std::make_shared<OpBuilder>(ts);
+    }
+
+    /**
+     * Creates an extension operation builder from a message ID, data, and an argument
+     */
+    inline std::shared_ptr<OpBuilder> ext(std::tuple<uint8_t, uint8_t> id, std::shared_ptr<OpBuilder> data,
+        std::shared_ptr<OpBuilder> arg)
+    {
+        OpBuilder::Ext ext { id, std::move(data), std::move(arg) };
+        return std::make_shared<OpBuilder>(ext);
+    }
+
+    /// Creates a field builder with the specified offset, length, and argument
+    inline FieldBuilder raw_field(uint16_t offset, uint16_t len, std::shared_ptr<OpBuilder> arg)
+    {
+        return FieldBuilder(offset, len, std::move(arg));
+    }
+
+    /// Creates a field builder from a class and its field
+    /// ## Usage
+    /// ```cpp
+    ///  builder::field<Foo, &Foo::time>(builder::schema(PrimType::F64(), {}, builder::pair(1, "time"))),
+    /// ```
+    template <typename Class, auto MemberPtr>
+    inline FieldBuilder field(std::shared_ptr<OpBuilder> arg)
+    {
+        using FieldType = std::remove_reference_t<decltype(std::declval<Class>().*MemberPtr)>;
+        size_t offset = reinterpret_cast<size_t>(&(reinterpret_cast<Class*>(0)->*MemberPtr));
+        size_t size = sizeof(FieldType);
+        return raw_field(static_cast<uint16_t>(offset), static_cast<uint16_t>(size), std::move(arg));
+    }
+
+    /// A builder for constructing VTables
+    class VTableBuilder {
+    private:
+        VTable vtable;
+        std::unordered_map<const OpBuilder*, OpRef> visited;
+
+    public:
+        VTableBuilder() = default;
+
+        /// Visits an operation builder, adding it to the VTable and returning its OpRef
+        OpRef visit(const std::shared_ptr<OpBuilder>& op)
+        {
+            auto it = visited.find(op.get());
+            if (it != visited.end()) {
+                return it->second;
+            }
+            Op result_op;
+
+            std::visit([&](const auto& val) {
+                using T = std::decay_t<decltype(val)>;
+
+                if constexpr (std::is_same_v<T, OpBuilder::Data>) {
+                    const auto& data_op = val;
+
+                    const size_t align = data_op.align;
+                    const size_t padding = (align - (vtable.data.size() % align)) % align;
+
+                    for (size_t i = 0; i < padding; i++) {
+                        vtable.data.push_back(0);
+                    }
+
+                    const uint16_t offset = static_cast<uint16_t>(vtable.data.size());
+                    const uint16_t len = static_cast<uint16_t>(data_op.data.size());
+
+                    vtable.data.insert(vtable.data.end(), data_op.data.begin(), data_op.data.end());
+
+                    result_op = Op::Data(OpData { offset, len });
+
+                } else if constexpr (std::is_same_v<T, OpBuilder::Table>) {
+                    const auto& table_op = val;
+                    result_op = Op::Table(OpTable { table_op.offset, table_op.len });
+                } else if constexpr (std::is_same_v<T, OpBuilder::Pair>) {
+                    const auto& pair_op = val;
+                    OpRef entity_id = visit(pair_op.entity_id);
+                    OpRef component_id = visit(pair_op.component_id);
+
+                    result_op = Op::Pair(OpPair {
+                        static_cast<uint16_t>(entity_id.value),
+                        static_cast<uint16_t>(component_id.value) });
+                } else if constexpr (std::is_same_v<T, OpBuilder::Schema>) {
+                    const auto& schema_op = val;
+                    OpRef ty = visit(schema_op.ty);
+                    OpRef dim = visit(schema_op.dim);
+                    OpRef arg = visit(schema_op.arg);
+
+                    result_op = Op::Schema(OpSchema {
+                        static_cast<uint16_t>(ty.value),
+                        static_cast<uint16_t>(dim.value),
+                        static_cast<uint16_t>(arg.value) });
+                } else if constexpr (std::is_same_v<T, OpBuilder::Timestamp>) {
+                    const auto& timestamp_op = val;
+                    OpRef timestamp = visit(timestamp_op.timestamp);
+                    OpRef arg = visit(timestamp_op.arg);
+
+                    result_op = Op::Timestamp(OpTimestamp {
+                        static_cast<uint16_t>(timestamp.value),
+                        static_cast<uint16_t>(arg.value) });
+                } else if constexpr (std::is_same_v<T, OpBuilder::Ext>) {
+                    const auto& ext_op = val;
+                    OpRef data = visit(ext_op.data);
+                    OpRef arg = visit(ext_op.arg);
+
+                    result_op = Op::Ext(OpExt {
+                        static_cast<uint16_t>(arg.value),
+                        ext_op.id,
+                        static_cast<uint16_t>(data.value) });
+                }
+            },
+                op->value);
+
+            OpRef op_ref(static_cast<uint16_t>(vtable.ops.size()));
+            vtable.ops.push_back(result_op);
+            visited[op.get()] = op_ref;
+
+            return op_ref;
+        }
+
+        /// Adds a field to the VTable
+        void push_field(const FieldBuilder& field_builder)
+        {
+            OpRef arg = visit(field_builder.arg);
+
+            Field field {
+                field_builder.offset,
+                field_builder.len,
+                static_cast<uint16_t>(arg.value)
+            };
+
+            vtable.fields.push_back(field);
+        }
+
+        /// Builds and returns the VTable
+        VTable build() const
+        {
+            return vtable;
+        }
+    };
+
+    /// Creates a VTable from the provided field builders
+    inline VTable vtable(const std::initializer_list<FieldBuilder> fields)
+    {
+        VTableBuilder builder;
+
+        for (const auto& field : fields) {
+            builder.push_field(field);
+        }
+
+        return builder.build();
+    }
+
+// Convenience macro to create a table operation for a struct field
+#define TABLE(type, field)                            \
+    vtable::builder::raw_table(                       \
+        static_cast<uint16_t>(offsetof(type, field)), \
+        static_cast<uint16_t>(sizeof(((type*)nullptr)->field)))
+
+// Convenience macro to create a field builder for a struct field
+#define FIELD(type, field, arg)                                 \
+    vtable::builder::raw_field(                                 \
+        static_cast<uint16_t>(offsetof(type, field)),           \
+        static_cast<uint16_t>(sizeof(((type*)nullptr)->field)), \
+        arg)
+
+} // namespace builder
+} // namespace vtable
+
+#endif // ELO_DB_VTABLE_H
+
+
 
 #endif

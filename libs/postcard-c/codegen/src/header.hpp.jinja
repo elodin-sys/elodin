@@ -1,0 +1,21 @@
+#ifndef {{name}}_H
+#define {{name}}_H
+
+#include <stdio.h>
+#include <span>
+#include <variant>
+#include <type_traits>
+#include <vector>
+#include <optional>
+#include <unordered_map>
+
+
+#if __has_include("postcard.h")
+#include "postcard.h"
+#endif
+
+{% for type in  types %}
+{{ type }}
+{% endfor %}
+
+#endif

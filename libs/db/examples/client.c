@@ -1,12 +1,14 @@
+///$(which true);THIS_FILE="$(cd "$(dirname "$0")"; pwd -P)/$(basename "$0")";OUT_FILE="/tmp/build-cache/$THIS_FILE";mkdir -p "$(dirname "$OUT_FILE")";test "$THIS_FILE" -ot "$OUT_FILE" || $(which clang || which gcc) "$THIS_FILE" -o "$OUT_FILE" || exit $?;exec bash -c "exec -a \"$0\" \"$OUT_FILE\" $([ $# -eq 0 ] || printf ' "%s"' "$@")"
+
+#include <arpa/inet.h>
+#include <assert.h>
+#include <math.h>
+#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <math.h>
-#include <arpa/inet.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <assert.h>
+#include <unistd.h>
 
 enum PacketType {
     MSG = 0,
@@ -33,7 +35,8 @@ struct sensor_data_t {
     float humidity;
 };
 
-ssize_t write_all(int fd, const void *buf, size_t count) {
+ssize_t write_all(int fd, const void* buf, size_t count)
+{
     size_t written = 0;
     while (written < count) {
         ssize_t n = write(fd, buf + written, count - written);
@@ -42,7 +45,8 @@ ssize_t write_all(int fd, const void *buf, size_t count) {
     return written;
 }
 
-int main() {
+int main()
+{
     // Create TCP socket
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
@@ -63,10 +67,9 @@ int main() {
     }
 
     sensor_data_t sensor_data = {
-        .time = 0,
-        .mag = {0.0, 0.0, 0.0},
-        .gyro = {0.0, 0.0, 0.0},
-        .accel = {0.0, 0.0, 0.0},
+        .mag = { 0.0, 0.0, 0.0 },
+        .gyro = { 0.0, 0.0, 0.0 },
+        .accel = { 0.0, 0.0, 0.0 },
         .temp = 1.0,
         .pressure = 2.0,
         .humidity = 3.0
@@ -74,7 +77,7 @@ int main() {
     packet_header_t sensor_data_header = {
         .len = 4 + sizeof(sensor_data),
         .ty = TABLE,
-        .packet_id = {1, 0},
+        .packet_id = { 1, 0 },
         .request_id = 0,
     };
 
@@ -83,7 +86,6 @@ int main() {
         write_all(sock, &sensor_data_header, sizeof(sensor_data_header));
         write_all(sock, &sensor_data, sizeof(sensor_data));
 
-        sensor_data.time += 1;
         sensor_data.temp = sin((double)sensor_data.time / 100000.0);
         usleep(100);
     }

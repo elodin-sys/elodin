@@ -13,6 +13,8 @@ minijinja = "2.8"
 postcard-schema.version = "0.2"
 postcard-schema.features = ["use-std"]
 convert_case = "0.6.0"
+serde.version = "1.0"
+serde.features = ["derive"]
 
 
 # cli

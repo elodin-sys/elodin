@@ -1,38 +1,33 @@
 struct {{name}} {
   static constexpr std::string_view TYPE_NAME = "{{name}}";
 
-  {% for field in ty.Struct -%}
-    {{cpp_ty(field.ty)}} {{ field.name }};
-  {% endfor %}
-
+  {{cpp_ty(ty.NewtypeStruct)}} value;
 
   size_t encoded_size() const {
     size_t size = 0;
-    {% for field in ty.Struct -%}
-        {{cpp_size(field) | indent(4)}}
-    {% endfor %}
+    {{cpp_value_size(ty.NewtypeStruct)}}
     return size;
   }
 
-  postcard_error_t encode(std::span<uint8_t>& output) const {
+  postcard_error_t encode(std::span<std::byte>& output) const {
     postcard_slice_t slice;
-    postcard_init_slice(&slice, output.data(), output.size());
+    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(output.data()), output.size());
     auto res = encode_raw(&slice);
     if(res != POSTCARD_SUCCESS) return res;
     output = output.subspan(0, slice.len);
     return POSTCARD_SUCCESS;
   }
 
-  std::vector<uint8_t> encode_vec() const {
+  std::vector<std::byte> encode_vec() const {
     // Pre-allocate vector with the required size
-    std::vector<uint8_t> vec(encoded_size());
+    std::vector<std::byte> vec(encoded_size());
 
     // Create a span from the vector
-    auto span = std::span<uint8_t>(vec);
+    auto span = std::span<std::byte>(vec);
 
     // Encode into the span
     postcard_slice_t slice;
-    postcard_init_slice(&slice, span.data(), span.size());
+    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(span.data()), span.size());
     auto res = encode_raw(&slice);
 
     // Resize to actual used length if successful
@@ -47,16 +42,13 @@ struct {{name}} {
 
   postcard_error_t encode_raw(postcard_slice_t* slice) const {
     postcard_error_t result;
-    {% for field in ty.Struct -%}
-        {{cpp_encode(field) | indent(4)}}
-        if(result != POSTCARD_SUCCESS) return result;
-    {% endfor %}
-    return POSTCARD_SUCCESS;
+    {{ cpp_value_encode(ty.NewtypeStruct) }}
+    return result;
   }
 
-  postcard_error_t decode(std::span<const uint8_t>& input) {
+  postcard_error_t decode(std::span<const std::byte>& input) {
     postcard_slice_t slice;
-    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
+    postcard_init_slice(&slice, const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(input.data())), input.size());
     postcard_error_t result = decode_raw(&slice);
     if (result == POSTCARD_SUCCESS) {
       // Update the input span to point past the decoded data
@@ -67,11 +59,7 @@ struct {{name}} {
 
   postcard_error_t decode_raw(postcard_slice_t* slice) {
     postcard_error_t result;
-    {% for field in ty.Struct -%}
-    {{cpp_decode(field)|indent(4)}}
-    if(result != POSTCARD_SUCCESS) return result;
-
-    {% endfor %}
-    return POSTCARD_SUCCESS;
+    {{ cpp_value_decode(ty.NewtypeStruct) }}
+    return result;
   }
 };

@@ -1,4 +1,3 @@
-local time_id = ComponentId("time")
 local mag_id = ComponentId("mag")
 local gyro_id = ComponentId("gyro")
 local accel_id = ComponentId("accel")
@@ -7,7 +6,6 @@ local pressure_id = ComponentId("pressure")
 local humidity_id = ComponentId("humidity")
 
 sensor_vt =  vtable_msg(1, {
-    field(0, 8, schema("i64", {}, pair(1, "time"))),
     field(8, 12, schema("f32", {3}, pair(1, "mag"))),
     field(20, 12, schema("f32", {3}, pair(1, "gyro"))),
     field(32, 12, schema("f32", {3}, pair(1, "accel"))),
@@ -18,7 +16,6 @@ sensor_vt =  vtable_msg(1, {
 
 msgs = {
 	SetEntityMetadata({ entity_id = 1, name = "Vehicle" }),
-	SetComponentMetadata({ component_id = time_id, name = "time", metadata = { priority = "100" } }),
 	SetComponentMetadata({ component_id = mag_id, name = "mag", metadata = { priority = "99" } }),
 	SetComponentMetadata({ component_id = gyro_id, name = "gyro", metadata = { priority = "98" } }),
 	SetComponentMetadata({ component_id = accel_id, name = "accel", metadata = { priority = "97" } }),
