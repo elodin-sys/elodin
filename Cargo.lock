@@ -4513,6 +4513,7 @@ dependencies = [
  "miette",
  "nox",
  "parquet",
+ "pin-project",
  "postcard",
  "postcard-c-codegen",
  "postcard-dyn",

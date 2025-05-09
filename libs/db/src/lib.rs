@@ -1,4 +1,5 @@
 use assets::open_assets;
+use futures_lite::StreamExt;
 use impeller2::types::{PacketHeader, PacketTy};
 use impeller2::vtable::builder::{
     OpBuilder, pair, raw_field, raw_table, schema, timestamp, vtable,
@@ -1128,8 +1129,10 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 let mut ctx = db.as_session_context()?;
                 db.insert_views(&mut ctx).await?;
                 let df = ctx.sql(&query).await?;
-                let results = df.collect().await?;
-                for batch in results.into_iter() {
+                let mut stream = df.execute_stream().await?;
+
+                while let Some(batch) = stream.next().await {
+                    let batch = batch?;
                     let mut buf = vec![];
                     let mut writer =
                         ::arrow::ipc::writer::StreamWriter::try_new(&mut buf, batch.schema_ref())?;
