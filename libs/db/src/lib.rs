@@ -1,6 +1,6 @@
 use assets::open_assets;
-use futures_lite::StreamExt;
 use datafusion::common::HashSet;
+use futures_lite::StreamExt;
 use impeller2::registry::VTableRegistry;
 use impeller2::types::{PacketHeader, PacketTy};
 use impeller2::vtable::builder::{
