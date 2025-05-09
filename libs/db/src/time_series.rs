@@ -59,7 +59,7 @@ impl TimeSeries {
             .expect("mmep unaligned")
     }
 
-    fn element_size(&self) -> usize {
+    pub fn element_size(&self) -> usize {
         *self.data.extra() as usize
     }
 

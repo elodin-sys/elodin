@@ -49,6 +49,7 @@ memmap2 = "0.9"
 smallvec.version = "1.11.2"
 smallvec.features = ["const_generics", "union", "serde"]
 zerocopy.version = "0.8.2"
+pin-project = "1"
 
 # errors
 thiserror = "2"
