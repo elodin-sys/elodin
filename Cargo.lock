@@ -10059,7 +10059,6 @@ dependencies = [
  "async-watcher",
  "cargo_metadata",
  "clap 4.5.37",
- "elodin-db",
  "futures",
  "futures-lite 2.6.0",
  "ignore",
