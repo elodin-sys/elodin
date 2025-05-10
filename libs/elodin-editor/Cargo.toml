@@ -94,9 +94,10 @@ flume = "0.11.1"
 jiff = "0.2"
 peg = "0.8.5"
 
-
 # video
-ffmpeg-next = "7.1.0"
+openh264 = "0.8"
+yuv = "0.8.4"
+pic-scale = "0.6"
 
 
 [target.'cfg(target_family = "wasm")'.dependencies]

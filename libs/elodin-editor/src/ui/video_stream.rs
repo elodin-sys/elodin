@@ -8,11 +8,14 @@ use bevy::{
     prelude::{Commands, Component, Entity, Query, World},
 };
 use egui::{self, Color32, ColorImage, TextureHandle, TextureOptions, Vec2};
-use ffmpeg_next::frame::Video;
-use ffmpeg_next::{Packet, codec, decoder};
+// use ffmpeg_next::frame::Video;
+// use ffmpeg_next::{Packet, codec, decoder};
 use impeller2::types::OwnedPacket;
 use impeller2_bevy::{CommandsExt, PacketGrantR};
 use impeller2_wkt::MsgStream;
+use pic_scale::{
+    ImageStore, ImageStoreMut, LinearScaler, ResamplingFunction, Scaling, ThreadingPolicy,
+};
 
 #[derive(Clone)]
 pub struct VideoStreamPane {
@@ -55,7 +58,7 @@ pub enum StreamState {
 
 #[derive(Component)]
 pub struct VideoDecoderHandle {
-    tx: flume::Sender<Packet>,
+    tx: flume::Sender<Vec<u8>>,
     rx: flume::Receiver<ColorImage>,
     width: Arc<AtomicU32>,
     _handle: std::thread::JoinHandle<()>,
@@ -63,21 +66,43 @@ pub struct VideoDecoderHandle {
 
 impl Default for VideoDecoderHandle {
     fn default() -> Self {
-        let (packet_tx, packet_rx) = flume::unbounded();
+        let (packet_tx, packet_rx) = flume::unbounded::<Vec<u8>>();
         let (image_tx, image_rx) = flume::bounded(8);
         let width = Arc::new(AtomicU32::new(0));
         let frame_width = width.clone();
         let _handle = std::thread::spawn(move || {
-            let codec = decoder::find(codec::Id::H264).unwrap();
-            let mut decoder = codec::context::Context::new_with_codec(codec)
-                .decoder()
-                .video()
-                .unwrap();
+            let mut decoder = openh264::decoder::Decoder::new().unwrap();
+            let mut scaler = LinearScaler::new(ResamplingFunction::Bilinear);
+            scaler.set_threading_policy(ThreadingPolicy::Adaptive);
+
+            let mut rgba = vec![];
             while let Ok(packet) = packet_rx.recv() {
-                let _ = decoder.send_packet(&packet);
-                while let Some(image) =
-                    get_frame(&mut decoder, frame_width.load(atomic::Ordering::Relaxed))
-                {
+                use openh264::formats::YUVSource;
+                if let Ok(Some(yuv)) = decoder.decode(&packet) {
+                    let (width, height) = yuv.dimensions();
+                    rgba.clear();
+                    rgba.resize(width * height * 4, 0);
+                    yuv.write_rgba8(&mut rgba);
+                    let input = ImageStore::<'_, u8, 4>::borrow(&rgba, width, height).unwrap();
+
+                    let (width, height) = (width as f64, height as f64);
+                    let desired_width = frame_width.load(atomic::Ordering::Relaxed);
+                    let aspect_ratio = dbg!(height / width);
+                    let new_width = width.min(desired_width as f64);
+                    let new_height = (new_width * aspect_ratio) as usize;
+                    let new_width = new_width as usize;
+
+                    let mut image = ColorImage::new([new_width, new_height], Color32::TRANSPARENT);
+                    let out = unsafe {
+                        std::slice::from_raw_parts_mut(
+                            image.pixels.as_mut_ptr() as *mut u8,
+                            image.pixels.len() * size_of::<Color32>(),
+                        )
+                    };
+                    let mut out =
+                        ImageStoreMut::<'_, u8, 4>::borrow(out, new_width, new_height).unwrap();
+
+                    scaler.resize_rgba(&input, &mut out, false).unwrap();
                     let _ = image_tx.send(image);
                 }
             }
@@ -93,7 +118,7 @@ impl Default for VideoDecoderHandle {
 
 impl VideoDecoderHandle {
     pub fn process_frame(&mut self, frame_data: &[u8]) {
-        let _ = self.tx.send(Packet::copy(frame_data));
+        let _ = self.tx.send(frame_data.to_vec());
     }
 
     pub fn render_frame(&mut self, stream: &mut VideoStream) {
@@ -107,39 +132,6 @@ impl VideoDecoderHandle {
             }
         }
     }
-}
-
-fn get_frame(decoder: &mut decoder::Video, desired_width: u32) -> Option<ColorImage> {
-    use ffmpeg_next::format::Pixel;
-    use ffmpeg_next::software::scaling::{context::Context as ScalingContext, flag::Flags};
-    let mut frame = Video::empty();
-    decoder.receive_frame(&mut frame).ok()?;
-    let (og_width, og_height) = (frame.width() as u32, frame.height() as u32);
-    let aspect_ratio = frame.height() as f64 / frame.width() as f64;
-    let width = (frame.width() as f64).min(desired_width as f64);
-    let height = width * aspect_ratio;
-
-    let rgb_frame = if frame.format() != Pixel::RGB24 {
-        let mut rgb = Video::new(Pixel::RGB24, width as u32, height as u32);
-
-        let mut scaler = ScalingContext::get(
-            frame.format(),
-            og_width,
-            og_height,
-            Pixel::RGB24,
-            width as u32,
-            height as u32,
-            Flags::FAST_BILINEAR,
-        )
-        .ok()?;
-
-        scaler.run(&frame, &mut rgb).ok()?;
-
-        rgb
-    } else {
-        frame
-    };
-    Some(video_frame_to_image(rgb_frame))
 }
 
 #[derive(SystemParam)]
@@ -251,25 +243,4 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
             }
         }
     }
-}
-
-fn video_frame_to_image(frame: Video) -> ColorImage {
-    let size = [frame.width() as usize, frame.height() as usize];
-    let data = frame.data(0);
-    let stride = frame.stride(0);
-    let pixel_size_bytes = 3;
-    let byte_width: usize = pixel_size_bytes * frame.width() as usize;
-    let height: usize = frame.height() as usize;
-    let mut pixels = Vec::with_capacity(size[0] * size[1]);
-    for line in 0..height {
-        let begin = line * stride;
-        let end = begin + byte_width;
-        let data_line = &data[begin..end];
-        pixels.extend(
-            data_line
-                .chunks_exact(pixel_size_bytes)
-                .map(|p| Color32::from_rgb(p[0], p[1], p[2])),
-        )
-    }
-    ColorImage { size, pixels }
 }
