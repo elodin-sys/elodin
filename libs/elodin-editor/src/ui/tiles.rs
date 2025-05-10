@@ -26,6 +26,7 @@ use super::{
     images,
     monitor::{MonitorPane, MonitorWidget},
     sql_table::{SQLTablePane, SqlTable, SqlTableWidget},
+    video_stream::VideoDecoderHandle,
     widgets::{
         WidgetSystem, WidgetSystemExt,
         button::{EImageButton, ETileButton},
@@ -142,12 +143,12 @@ impl TileState {
 
     pub fn create_video_stream_tile(
         &mut self,
-        message_id: u16,
+        msg_id: [u8; 2],
         label: String,
         tile_id: Option<TileId>,
     ) {
         self.tree_actions
-            .push(TreeAction::AddVideoStream(tile_id, message_id, label));
+            .push(TreeAction::AddVideoStream(tile_id, msg_id, label));
     }
 
     pub fn is_empty(&self) -> bool {
@@ -343,7 +344,7 @@ pub enum TreeAction {
     AddMonitor(Option<TileId>, EntityId, ComponentId),
     AddSQLTable(Option<TileId>),
     AddActionTile(Option<TileId>, String, String),
-    AddVideoStream(Option<TileId>, u16, String),
+    AddVideoStream(Option<TileId>, [u8; 2], String),
     DeleteTab(TileId),
     SelectTile(TileId),
 }
@@ -891,13 +892,16 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             ui_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
-                    TreeAction::AddVideoStream(parent_tile_id, message_id, label) => {
+                    TreeAction::AddVideoStream(parent_tile_id, msg_id, label) => {
                         let entity = state_mut
                             .commands
-                            .spawn(super::video_stream::VideoStream {
-                                message_id,
-                                ..Default::default()
-                            })
+                            .spawn((
+                                super::video_stream::VideoStream {
+                                    msg_id,
+                                    ..Default::default()
+                                },
+                                VideoDecoderHandle::default(),
+                            ))
                             .id();
                         let pane = Pane::VideoStream(super::video_stream::VideoStreamPane {
                             entity,

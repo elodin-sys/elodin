@@ -14,7 +14,7 @@ use bevy::{
 use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::TileId;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
-use impeller2::types::ComponentId;
+use impeller2::types::{ComponentId, msg_id};
 use impeller2_bevy::{ComponentMetadataRegistry, CurrentStreamId, PacketTx};
 use impeller2_wkt::{BodyAxes, EntityMetadata, IsRecording, SetDbSettings, SetStreamState};
 
@@ -500,15 +500,23 @@ pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Video Stream",
         VIDEO_LABEL,
-        move |input: In<String>, mut tile_state: ResMut<tiles::TileState>| -> PaletteEvent {
-            let input = input.0.trim();
-            //if let Ok(message_id) = input.parse::<u16>() {
-            let label = format!("Video Stream {}", 123);
-            tile_state.create_video_stream_tile(123, label, tile_id);
-            PaletteEvent::Exit
-            // } else {
-            //     PaletteEvent::Error("Invalid msg id".to_string())
-            // }
+        move |_: In<String>| -> PaletteEvent {
+            PalettePage::new(vec![
+                PaletteItem::new(
+                    LabelSource::placeholder(
+                        "Enter the name of the msg containing the video frames",
+                    ),
+                    "",
+                    move |In(msg_name): In<String>, mut tile_state: ResMut<tiles::TileState>| {
+                        let msg_name = msg_name.trim();
+                        let label = format!("Video Stream {}", msg_name);
+                        tile_state.create_video_stream_tile(msg_id(&msg_name), label, tile_id);
+                        PaletteEvent::Exit
+                    },
+                )
+                .default(),
+            ])
+            .into()
         },
     )
 }

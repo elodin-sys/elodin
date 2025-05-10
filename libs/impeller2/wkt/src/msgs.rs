@@ -2,8 +2,8 @@ use impeller2::{
     buf::IoBuf,
     schema::Schema,
     types::{
-        ComponentId, EntityId, LenPacket, Msg, MsgBuf, OwnedTable, OwnedTimeSeries, PacketId,
-        Request, Timestamp, TryFromPacket,
+        ComponentId, EntityId, Msg, MsgBuf, OwnedTable, OwnedTimeSeries, PacketId, Request,
+        Timestamp, TryFromPacket,
     },
     vtable::{Field, Op, VTable},
 };

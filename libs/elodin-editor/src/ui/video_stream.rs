@@ -1,18 +1,18 @@
-use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{self, AtomicU32};
 use std::time::{Duration, Instant};
 
-use bevy::ecs::system::{InRef, NonSendMut};
+use bevy::ecs::system::InRef;
 use bevy::{
     ecs::system::SystemParam,
-    prelude::{Commands, Component, Entity, In, NonSend, Query, Resource, World},
+    prelude::{Commands, Component, Entity, Query, World},
 };
 use egui::{self, Color32, ColorImage, TextureHandle, TextureOptions, Vec2};
 use ffmpeg_next::frame::Video;
-use ffmpeg_next::{codec, decoder};
-use impeller2::buf::Slice;
-use impeller2::types::{MsgBuf, OwnedPacket};
+use ffmpeg_next::{Packet, codec, decoder};
+use impeller2::types::OwnedPacket;
 use impeller2_bevy::{CommandsExt, PacketGrantR};
-use impeller2_wkt::{ErrorResponse, MsgStream};
+use impeller2_wkt::MsgStream;
 
 #[derive(Clone)]
 pub struct VideoStreamPane {
@@ -20,10 +20,9 @@ pub struct VideoStreamPane {
     pub label: String,
 }
 
-// This component doesn't contain any FFmpeg references, ensuring thread safety
 #[derive(Component)]
 pub struct VideoStream {
-    pub message_id: u16,
+    pub msg_id: [u8; 2],
     pub current_frame: Option<ColorImage>,
     pub texture_handle: Option<TextureHandle>,
     pub size: Vec2,
@@ -35,7 +34,7 @@ pub struct VideoStream {
 impl Default for VideoStream {
     fn default() -> Self {
         Self {
-            message_id: 0,
+            msg_id: [0, 0],
             current_frame: None,
             texture_handle: None,
             size: Vec2::ZERO,
@@ -54,122 +53,99 @@ pub enum StreamState {
     Error(String),
 }
 
-// Simple non-thread-safe video decoder system
-#[derive(Default)]
-pub struct VideoDecoderManager {
-    decoders: HashMap<Entity, VideoDecoder>,
-    pending_frames: HashMap<Entity, Vec<Vec<u8>>>,
+#[derive(Component)]
+pub struct VideoDecoderHandle {
+    tx: flume::Sender<Packet>,
+    rx: flume::Receiver<ColorImage>,
+    width: Arc<AtomicU32>,
+    _handle: std::thread::JoinHandle<()>,
 }
 
-pub struct VideoDecoder {
-    decoder: decoder::Video,
-}
-
-impl VideoDecoder {
-    pub fn new() -> Self {
-        let codec = decoder::find(codec::Id::H264).unwrap();
-
-        let decoder = codec::context::Context::new_with_codec(codec)
-            .decoder()
-            .video()
-            .unwrap();
-        Self { decoder }
-    }
-}
-
-impl VideoDecoderManager {
-    pub fn new() -> Self {
-        Self {
-            decoders: HashMap::new(),
-            pending_frames: HashMap::new(),
+impl Default for VideoDecoderHandle {
+    fn default() -> Self {
+        let (packet_tx, packet_rx) = flume::unbounded();
+        let (image_tx, image_rx) = flume::bounded(8);
+        let width = Arc::new(AtomicU32::new(0));
+        let frame_width = width.clone();
+        let _handle = std::thread::spawn(move || {
+            let codec = decoder::find(codec::Id::H264).unwrap();
+            let mut decoder = codec::context::Context::new_with_codec(codec)
+                .decoder()
+                .video()
+                .unwrap();
+            while let Ok(packet) = packet_rx.recv() {
+                let _ = decoder.send_packet(&packet);
+                while let Some(image) =
+                    get_frame(&mut decoder, frame_width.load(atomic::Ordering::Relaxed))
+                {
+                    let _ = image_tx.send(image);
+                }
+            }
+        });
+        VideoDecoderHandle {
+            tx: packet_tx,
+            rx: image_rx,
+            _handle,
+            width,
         }
     }
+}
 
-    // Queue a new frame for processing
-    pub fn queue_frame(&mut self, entity: Entity, data: Vec<u8>) {
-        let queue = self.pending_frames.entry(entity).or_default();
-        queue.push(data);
+impl VideoDecoderHandle {
+    pub fn process_frame(&mut self, frame_data: &[u8]) {
+        let _ = self.tx.send(Packet::copy(frame_data));
     }
 
-    // Process entity and update its frame
-    pub fn process_frame(&mut self, entity: Entity, stream: &mut VideoStream, frame_data: &[u8]) {
-        // Initialize the decoder if needed
-        if !self.decoders.contains_key(&entity) {
-            let decoder = VideoDecoder::new();
-            self.decoders.insert(entity, decoder);
-        }
-
-        // Get a frame to process
-        println!("encoding frame data");
-        // Get the decoder for this entity
-        if let Some(decoder) = self.decoders.get_mut(&entity) {
-            if let Err(err) = Self::decode_av1_frame(&mut decoder.decoder, &frame_data) {
-                if stream.current_frame.is_none() {
-                    stream.state = StreamState::Error(format!("Failed to decode frame: {}", err));
+    pub fn render_frame(&mut self, stream: &mut VideoStream) {
+        while let Ok(frame) = self.rx.try_recv() {
+            stream.current_frame = Some(frame);
+            stream.frame_count += 1;
+            if stream.size == Vec2::ZERO && stream.current_frame.is_some() {
+                if let Some(ref img) = stream.current_frame {
+                    stream.size = Vec2::new(img.width() as f32, img.height() as f32);
                 }
             }
         }
     }
-    pub fn render_frame(&mut self, entity: Entity, stream: &mut VideoStream) {
-        if let Some(decoder) = self.decoders.get_mut(&entity) {
-            while let Some(frame) = Self::get_av1_frame(&mut decoder.decoder) {
-                println!("got frame");
-                stream.current_frame = Some(frame);
-                stream.frame_count += 1;
-                if stream.size == Vec2::ZERO && stream.current_frame.is_some() {
-                    if let Some(ref img) = stream.current_frame {
-                        stream.size = Vec2::new(img.width() as f32, img.height() as f32);
-                    }
-                }
-            }
-        }
-    }
+}
 
-    fn decode_av1_frame(decoder: &mut decoder::Video, frame_data: &[u8]) -> Result<(), String> {
-        use ffmpeg_next::Packet;
+fn get_frame(decoder: &mut decoder::Video, desired_width: u32) -> Option<ColorImage> {
+    use ffmpeg_next::format::Pixel;
+    use ffmpeg_next::software::scaling::{context::Context as ScalingContext, flag::Flags};
+    let mut frame = Video::empty();
+    decoder.receive_frame(&mut frame).ok()?;
+    let (og_width, og_height) = (frame.width() as u32, frame.height() as u32);
+    let aspect_ratio = frame.height() as f64 / frame.width() as f64;
+    let width = (frame.width() as f64).min(desired_width as f64);
+    let height = width * aspect_ratio;
 
-        let packet = Packet::borrow(frame_data);
-        let _ = decoder.send_packet(&packet);
-        Ok(())
-    }
+    let rgb_frame = if frame.format() != Pixel::RGB24 {
+        let mut rgb = Video::new(Pixel::RGB24, width as u32, height as u32);
 
-    fn get_av1_frame(decoder: &mut decoder::Video) -> Option<ColorImage> {
-        use ffmpeg_next::format::Pixel;
-        use ffmpeg_next::software::scaling::{context::Context as ScalingContext, flag::Flags};
-        let mut frame = Video::empty();
-        decoder.receive_frame(&mut frame).ok()?;
+        let mut scaler = ScalingContext::get(
+            frame.format(),
+            og_width,
+            og_height,
+            Pixel::RGB24,
+            width as u32,
+            height as u32,
+            Flags::FAST_BILINEAR,
+        )
+        .ok()?;
 
-        let width = frame.width() as usize;
-        let height = frame.height() as usize;
+        scaler.run(&frame, &mut rgb).ok()?;
 
-        let rgb_frame = if frame.format() != Pixel::RGB24 {
-            let mut rgb = Video::new(Pixel::RGB24, width as u32, height as u32);
-
-            let mut scaler = ScalingContext::get(
-                frame.format(),
-                width as u32,
-                height as u32,
-                Pixel::RGB24,
-                width as u32,
-                height as u32,
-                Flags::BILINEAR,
-            )
-            .ok()?;
-
-            scaler.run(&frame, &mut rgb).ok()?;
-
-            rgb
-        } else {
-            frame
-        };
-        Some(video_frame_to_image(rgb_frame))
-    }
+        rgb
+    } else {
+        frame
+    };
+    Some(video_frame_to_image(rgb_frame))
 }
 
 #[derive(SystemParam)]
 pub struct VideoStreamWidget<'w, 's> {
     streams: Query<'w, 's, &'static mut VideoStream>,
-    decoder_manager: NonSendMut<'w, VideoDecoderManager>,
+    decoders: Query<'w, 's, &'static mut VideoDecoderHandle>,
     commands: Commands<'w, 's>,
 }
 
@@ -181,127 +157,100 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
         world: &mut World,
         state: &mut bevy::ecs::system::SystemState<Self>,
         ui: &mut egui::Ui,
-        VideoStreamPane { entity, label }: Self::Args,
+        VideoStreamPane { entity, .. }: Self::Args,
     ) -> Self::Output {
         let mut state = state.get_mut(world);
         let Ok(mut stream) = state.streams.get_mut(entity) else {
             return;
         };
 
+        let Ok(mut decoder) = state.decoders.get_mut(entity) else {
+            return;
+        };
+
         // Check if it's time to process a new frame
         if stream.last_update.elapsed() > Duration::from_millis(16) {
             if let StreamState::Streaming = stream.state {
-                state.decoder_manager.render_frame(entity, &mut stream);
+                decoder.render_frame(&mut stream);
                 stream.last_update = Instant::now();
             }
         }
 
-        ui.vertical(|ui| {
-            ui.horizontal(|ui| {
-                ui.heading(&label);
+        if let StreamState::None = stream.state {
+            stream.state = StreamState::Streaming;
+            let entity = entity;
 
-                ui.add_space(ui.available_width() - 120.0);
-                    if let StreamState::None = stream.state {
-                                    stream.state = StreamState::Streaming;
-                        let msg_id = stream.message_id.to_le_bytes();
-                        let entity = entity;
+            state.commands.send_req_reply_raw(
+                MsgStream {
+                    msg_id: stream.msg_id,
+                },
+                move |InRef(res): InRef<OwnedPacket<PacketGrantR>>,
+                      mut decoders: Query<&mut VideoDecoderHandle>| {
+                    match res {
+                        OwnedPacket::Msg(msg_buf) => {
+                            if let Ok(mut decoder) = decoders.get_mut(entity) {
+                                decoder.process_frame(&msg_buf.buf);
+                            }
+                        }
+                        _ => {}
+                    };
+                    false
+                },
+            );
+        }
 
-                        state.commands.send_req_reply_raw(
-                            MsgStream { msg_id },
-                            move |InRef(res): InRef<OwnedPacket<PacketGrantR>>,
-                                  mut streams: Query<&mut VideoStream>,
-                            mut decoder_manager: NonSendMut<VideoDecoderManager>| {
-                                let Ok(mut stream) = streams.get_mut(entity) else {
-                                    return false;
-                                };
-                                match res {
-                                    OwnedPacket::Msg(msg_buf) => {
-                                        decoder_manager.process_frame(entity, &mut stream, &msg_buf.buf);
-                                    }
-                                    _ => {}
-                                };
-                                false
-                            },
+        let available_size = ui.available_size();
+
+        match &stream.state {
+            StreamState::None => {
+                ui.centered_and_justified(|ui| {
+                    ui.label("No video stream. Please send a valid H264 stream");
+                });
+            }
+            StreamState::Streaming => {
+                let aspect_ratio = if stream.size.y > 0.0 {
+                    stream.size.x / stream.size.y
+                } else {
+                    16.0 / 9.0
+                };
+                let width = (available_size.x).min(available_size.y * aspect_ratio);
+                let height = width / aspect_ratio;
+                let display_size = Vec2::new(width, height);
+                decoder.width.store(width as u32, atomic::Ordering::Relaxed);
+
+                if let Some(frame) = stream.current_frame.take() {
+                    if stream.texture_handle.is_none() {
+                        let texture_handle = ui.ctx().load_texture(
+                            format!("video_stream_{}", entity.index()),
+                            frame,
+                            TextureOptions::default(),
                         );
+                        stream.texture_handle = Some(texture_handle);
+                    } else if let Some(texture) = &mut stream.texture_handle {
+                        texture.set(frame, TextureOptions::default());
                     }
-            });
+                }
 
-            let available_size = ui.available_size();
-
-            match &stream.state {
-                StreamState::None => {
+                if let Some(texture) = &stream.texture_handle {
                     ui.centered_and_justified(|ui| {
-                        ui.label("No video stream. Please send a valid H264 stream");
+                        ui.add(egui::Image::new(egui::load::SizedTexture::new(
+                            texture.id(),
+                            display_size,
+                        )));
                     });
-                }
-                StreamState::Streaming => {
-                    // Display the current frame if available
-                    if let Some(frame) = stream.current_frame.take() {
-                        if stream.texture_handle.is_none() {
-                            let texture_handle = ui.ctx().load_texture(
-                                format!("video_stream_{}", entity.index()),
-                                frame,
-                                TextureOptions::default(),
-                            );
-                            stream.texture_handle = Some(texture_handle);
-                        } else if let Some(texture) = &mut stream.texture_handle {
-                            texture.set(frame, TextureOptions::default());
-                        }
-
-                    } else {
-                        // ui.centered_and_justified(|ui| {
-                        //     ui.spinner();
-                        //     ui.label("Waiting for video frames...");
-                        // });
-                    }
-
-                        if let Some(texture) = &stream.texture_handle {
-                            // Calculate aspect ratio for proper display
-                            let aspect_ratio = if stream.size.y > 0.0 {
-                                stream.size.x / stream.size.y
-                            } else {
-                                16.0 / 9.0
-                            };
-                            let width = (available_size.x).min(available_size.y * aspect_ratio);
-                            let height = width / aspect_ratio;
-                            let display_size = Vec2::new(width, height);
-
-                            ui.centered_and_justified(|ui| {
-                                ui.add(egui::Image::new(egui::load::SizedTexture::new(
-                                    texture.id(),
-                                    display_size,
-                                )));
-                            });
-
-                            ui.horizontal(|ui| {
-                                ui.label(format!(
-                                    "Frame: {} | Size: {}x{}",
-                                    stream.frame_count, stream.size.x as u32, stream.size.y as u32,
-                                ));
-                            });
-                        } else {
-                            ui.centered_and_justified(|ui| {
-                                ui.spinner();
-                                ui.label("Processing frames...");
-                            });
-                        }
-                }
-                StreamState::Error(error) => {
+                } else {
                     ui.centered_and_justified(|ui| {
-                        ui.colored_label(
-                            super::colors::REDDISH_DEFAULT,
-                            format!("Error: {}", error),
-                        );
+                        ui.spinner();
                     });
                 }
             }
-        });
+            StreamState::Error(error) => {
+                ui.centered_and_justified(|ui| {
+                    ui.colored_label(super::colors::REDDISH_DEFAULT, format!("Error: {}", error));
+                });
+            }
+        }
     }
-}
-
-// Register the necessary resource
-pub fn setup_video_system(world: &mut World) {
-    world.insert_non_send_resource(VideoDecoderManager::new());
 }
 
 fn video_frame_to_image(frame: Video) -> ColorImage {
@@ -311,7 +260,7 @@ fn video_frame_to_image(frame: Video) -> ColorImage {
     let pixel_size_bytes = 3;
     let byte_width: usize = pixel_size_bytes * frame.width() as usize;
     let height: usize = frame.height() as usize;
-    let mut pixels = vec![];
+    let mut pixels = Vec::with_capacity(size[0] * size[1]);
     for line in 0..height {
         let begin = line * stride;
         let end = begin + byte_width;

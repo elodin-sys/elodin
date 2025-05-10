@@ -1,12 +1,12 @@
 use anyhow::{Context, Result};
 use clap::Parser;
-use ffmpeg_next::{self as ffmpeg, codec, encoder, format::Pixel, frame::Video, picture};
-use impeller2::types::{LenPacket, Msg, OwnedPacket};
+use ffmpeg_next::{self as ffmpeg, codec, encoder, picture};
+use impeller2::types::{LenPacket, msg_id};
 use impeller2_stellar::Client;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
-use tracing::{error, info, warn};
+use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 /// Video streamer that encodes video files to AV1 and sends OBUs to elodin-db
@@ -15,7 +15,7 @@ use tracing_subscriber::EnvFilter;
 struct Args {
     input: PathBuf,
 
-    msg_id: u16,
+    msg_name: String,
 
     /// Elodin DB address in the format IP:PORT
     #[clap(short, long, default_value = "127.0.0.1:2240")]
@@ -64,6 +64,7 @@ impl VideoStreamer {
         let context = ffmpeg::codec::context::Context::from_parameters(input.parameters()).unwrap();
         let mut decoder = context.decoder().video().unwrap();
 
+        //let encoder_codec = encoder::find_by_name("h264_videotoolbox").unwrap();
         let encoder_codec = encoder::find(codec::Id::H264).unwrap();
 
         let mut encoder = codec::context::Context::new_with_codec(encoder_codec)
@@ -97,8 +98,7 @@ impl VideoStreamer {
         let mut frame_count = 0;
         let mut obu_count = 0;
 
-        info!("Sending OBUs with message ID: {}", self.args.msg_id);
-        let msg_id = self.args.msg_id.to_le_bytes();
+        let msg_id = msg_id(&self.args.msg_name);
         let video_stream_index = input.index();
         for res in ictx.packets() {
             let (stream, packet) = res;
@@ -121,10 +121,9 @@ impl VideoStreamer {
                 while encoder.receive_packet(&mut packet).is_ok() {
                     obu_count += 1;
                     if let Some(data) = packet.data() {
-                        println!("sending pkt {:?}", data.len());
                         let mut pkt = LenPacket::msg(msg_id, data.len());
                         pkt.extend_from_slice(data);
-                        if let Err(err) = self.client.send(pkt).await.0 {
+                        if let Err(_) = self.client.send(pkt).await.0 {
                             self.client = Client::connect(self.args.db_addr)
                                 .await
                                 .context("Failed to connect to elodin-db")?;
@@ -141,10 +140,9 @@ impl VideoStreamer {
         while encoder.receive_packet(&mut packet).is_ok() {
             obu_count += 1;
             if let Some(data) = packet.data() {
-                println!("sending pkt {:?}", data.len());
                 let mut pkt = LenPacket::msg(msg_id, data.len());
                 pkt.extend_from_slice(data);
-                if let Err(err) = self.client.send(pkt).await.0 {}
+                if let Err(_) = self.client.send(pkt).await.0 {}
             }
         }
 

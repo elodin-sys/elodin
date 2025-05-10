@@ -178,7 +178,6 @@ impl Plugin for EditorPlugin {
             .add_systems(Startup, setup_window_icon)
             //.add_systems(Startup, spawn_clear_bg)
             .add_systems(Startup, setup_clear_state)
-            .add_systems(Startup, ui::video_stream::setup_video_system)
             .add_systems(Update, setup_egui_context)
             //.add_systems(Update, make_entities_selectable)
             .add_systems(PreUpdate, setup_cell)
