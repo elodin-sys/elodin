@@ -3,8 +3,7 @@ resolver = "2"
 members = [
     "libs/elodin-editor",
     "libs/nox",
-    "libs/nox-ecs",
-    "libs/nox-ecs-macros",
+    "libs/nox-ecs", "libs/nox-ecs-macros",
     "libs/nox-py",
     "libs/nox-frames",
     "libs/noxla",
@@ -37,6 +36,7 @@ members = [
     "fsw/tegrastats-bridge",
     "fsw/aleph-setup",
     "apps/inscriber",
+    "fsw/video-streamer",
 ]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 
@@ -73,7 +73,7 @@ roci.default-features = false
 roci-adcs.path = "libs/roci/adcs"
 nox.path = "libs/nox"
 nox.default-features = false
-nox-ecs.path = "libs/nox-ecs"
+gox-ecs.path = "libs/nox-ecs"
 basilisk.path = "libs/basilisk-rs"
 nox-frames.path = "libs/nox-frames"
 wmm.path = "libs/wmm"

@@ -706,6 +706,10 @@ pub trait CommandsExt {
     where
         M::Reply<Slice<Vec<u8>>>: Msg + DeserializeOwned + 'static,
         S: IntoSystem<In<Result<M::Reply<Slice<Vec<u8>>>, ErrorResponse>>, bool, Marker>;
+
+    fn send_req_reply_raw<S, M: Msg + Request, Marker>(&mut self, msg: M, handler: S)
+    where
+        S: IntoSystem<InRef<'static, OwnedPacket<PacketGrantR>>, bool, Marker>;
 }
 
 impl CommandsExt for Commands<'_, '_> {
@@ -754,6 +758,19 @@ impl CommandsExt for Commands<'_, '_> {
         }
         let system = adapter::<M::Reply<Slice<Vec<u8>>>>.pipe(handler);
         let system = IntoSystem::into_system(system);
+
+        let cmd = ReplyHandlerCommand {
+            request: msg.into_len_packet(),
+            system,
+        };
+        self.queue(cmd);
+    }
+
+    fn send_req_reply_raw<S, M: Msg + Request, Marker>(&mut self, msg: M, handler: S)
+    where
+        S: IntoSystem<InRef<'static, OwnedPacket<PacketGrantR>>, bool, Marker>,
+    {
+        let system = IntoSystem::into_system(handler);
 
         let cmd = ReplyHandlerCommand {
             request: msg.into_len_packet(),

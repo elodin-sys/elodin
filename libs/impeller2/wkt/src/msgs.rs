@@ -2,8 +2,8 @@ use impeller2::{
     buf::IoBuf,
     schema::Schema,
     types::{
-        ComponentId, EntityId, Msg, OwnedTable, OwnedTimeSeries, PacketId, Request, Timestamp,
-        TryFromPacket,
+        ComponentId, EntityId, LenPacket, Msg, MsgBuf, OwnedTable, OwnedTimeSeries, PacketId,
+        Request, Timestamp, TryFromPacket,
     },
     vtable::{Field, Op, VTable},
 };
@@ -497,6 +497,10 @@ impl Msg for SetMsgMetadata {
 #[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
 pub struct MsgStream {
     pub msg_id: PacketId,
+}
+
+impl Request for MsgStream {
+    type Reply<B: IoBuf + Clone> = MsgBuf<B>;
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

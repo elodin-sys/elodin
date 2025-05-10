@@ -95,6 +95,10 @@ jiff = "0.2"
 peg = "0.8.5"
 
 
+# video
+ffmpeg-next = "7.1.0"
+
+
 [target.'cfg(target_family = "wasm")'.dependencies]
 impeller2-bevy.path = "../../libs/impeller2/bevy"
 impeller2-bevy.default-features = false

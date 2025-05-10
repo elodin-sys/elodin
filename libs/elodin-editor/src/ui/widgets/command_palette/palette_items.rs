@@ -210,12 +210,13 @@ pub struct MatchedPaletteItem<'a> {
     pub match_indices: Vec<usize>,
 }
 
-const VIEWPORT_LABEL: &str = "VIEWPORT";
-const TILES_LABEL: &str = "TILES";
-const SIMULATION_LABEL: &str = "SIMULATION";
-const TIME_LABEL: &str = "TIME";
-const HELP_LABEL: &str = "HELP";
-const PRESETS_LABEL: &str = "PRESETS";
+const VIEWPORT_LABEL: &str = "Viewport";
+const TILES_LABEL: &str = "Tiles";
+const SIMULATION_LABEL: &str = "Simulation";
+const TIME_LABEL: &str = "Time";
+const HELP_LABEL: &str = "Help";
+const PRESETS_LABEL: &str = "Presets";
+const VIDEO_LABEL: &str = "Video";
 
 pub fn create_action(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new("Create Action", TILES_LABEL, move |_: In<String>| {
@@ -495,6 +496,22 @@ pub fn create_sql(tile_id: Option<TileId>) -> PaletteItem {
         },
     )
 }
+pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
+    PaletteItem::new(
+        "Create Video Stream",
+        VIDEO_LABEL,
+        move |input: In<String>, mut tile_state: ResMut<tiles::TileState>| -> PaletteEvent {
+            let input = input.0.trim();
+            //if let Ok(message_id) = input.parse::<u16>() {
+            let label = format!("Video Stream {}", 123);
+            tile_state.create_video_stream_tile(123, label, tile_id);
+            PaletteEvent::Exit
+            // } else {
+            //     PaletteEvent::Error("Invalid msg id".to_string())
+            // }
+        },
+    )
+}
 
 fn set_playback_speed() -> PaletteItem {
     PaletteItem::new("Set Playback Speed", TIME_LABEL, |_: In<String>| {
@@ -715,6 +732,7 @@ pub fn create_tiles(tile_id: TileId) -> PalettePage {
         create_monitor(Some(tile_id)),
         create_viewport(Some(tile_id)),
         create_sql(Some(tile_id)),
+        create_video_stream(Some(tile_id)),
     ])
 }
 
@@ -777,6 +795,7 @@ impl Default for PalettePage {
             create_monitor(None),
             create_viewport(None),
             create_sql(None),
+            create_video_stream(None),
             save_preset(),
             load_preset(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {
