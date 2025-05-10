@@ -113,7 +113,7 @@ void reader_thread_func(const char* ip, uint16_t port) {
                 break;
             }
 
-            std::println("Reader thread received data: {} bytes", len);
+            // std::println("Reader thread received data: {} bytes", len);
         }
     } catch (const std::exception& e) {
         std::cerr << "Reader thread error: " << e.what() << std::endl;
@@ -149,6 +149,7 @@ try {
     sock.send(set_component_name("temp"));
     sock.send(set_component_name("pressure"));
     sock.send(set_component_name("humidity"));
+    sock.send(set_entity_name(1, "vehicle"));
 
     // Start the reader thread
     std::println("Main thread: starting reader thread");
@@ -174,7 +175,6 @@ try {
         sensor_data.time = system_clock::now().time_since_epoch() / microseconds(1);
         sensor_data.temp = std::sin(static_cast<double>(sensor_data.time) / 1000000.0);
 
-        std::println("writing {}, {} bytes", sizeof(table_header), sizeof(sensor_data));
         sock.write_all(&table_header, sizeof(table_header));
         sock.write_all(&sensor_data, sizeof(sensor_data));
         usleep(1000);

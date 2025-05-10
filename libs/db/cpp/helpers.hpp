@@ -115,4 +115,11 @@ SetComponentMetadata set_component_name(std::string name) {
    });
 }
 
+SetEntityMetadata set_entity_name(uint64_t entity_id, std::string name) {
+    return SetEntityMetadata(EntityMetadata {
+        .entity_id = entity_id,
+        .name = std::move(name),
+    });
+}
+
 #endif
