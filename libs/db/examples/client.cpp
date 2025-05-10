@@ -6,18 +6,20 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include <array>
 #include <cmath>
 #include <cstddef>
 #include <iostream>
 #include <print>
-#include <span>
 #include <system_error>
 #include <vector>
+#include <chrono>
+#include <thread>
 
 #include "db.hpp"
 
 using namespace vtable;
+using namespace vtable::builder;
+using namespace std::chrono;
 
 struct SensorData {
     int64_t time;
@@ -93,53 +95,54 @@ private:
     int fd_ = -1;
 };
 
+// Thread function to read from a socket connection
+void reader_thread_func(const char* ip, uint16_t port) {
+    try {
+        std::println("Reader thread: connecting to {}:{}", ip, port);
+        auto read_sock = Socket(ip, port);
+        read_sock.send(VTableStream {
+            .id = { 2, 0 },
+        });
+
+        // Read loop
+        while (true) {
+            auto data = std::vector<uint8_t>(1024);
+            auto len = read_sock.read(data.data(), data.size());
+            if (len == 0) {
+                std::println("Reader thread: connection closed");
+                break;
+            }
+
+            std::println("Reader thread received data: {} bytes", len);
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Reader thread error: " << e.what() << std::endl;
+    }
+    std::println("Reader thread: exiting");
+}
+
 int main()
 try {
-    auto sock = Socket("127.0.0.1", 2240);
+    const char* ip = "127.0.0.1";
+    const uint16_t port = 2240;
 
-    // create a new real time stream
-    // sending this message will create a new "stream" that sends out all new data
-    // as it comes in
-    auto stream = Stream {
-        .behavior = StreamBehavior::RealTime()
-    };
-    auto stream_msg = Msg<Stream>(stream);
-    auto stream_msg_buf = stream_msg.encode_vec();
-
-    // prints out the Stream msg that will be sent to the DB
-    // std::println("stream encoded {}", stream_msg_buf);
-
-    sock.write_all(stream_msg_buf.data(), stream_msg_buf.size());
-
-    // create a new msg stream
-    auto msg_stream = MsgStream {
-        .msg_id = { 6, 166 }
-    };
-    auto msg_stream_msg_buf = Msg(msg_stream).encode_vec();
-
-    // prints out the MsgStream msg that will be sent to the DB
-    // std::println("msg stream encoded {}", msg_stream_msg_buf);
-
-    sock.write_all(msg_stream_msg_buf.data(), msg_stream_msg_buf.size());
-
-    // sends vtable for sensor data
-
+    // Connect the main socket for writing
+    std::println("Main thread: connecting writer socket");
+    auto sock = Socket(ip, port);
+    auto time = builder::raw_table(0, 8);
     auto table = builder::vtable({
-        builder::field<SensorData, &SensorData::mag>(builder::schema(PrimType::F32(), { 3 }, builder::pair(1, "mag"))),
-        builder::field<SensorData, &SensorData::gyro>(builder::schema(PrimType::F32(), { 3 }, builder::pair(1, "gyro"))),
-        builder::field<SensorData, &SensorData::accel>(builder::schema(PrimType::F32(), { 3 }, builder::pair(1, "accel"))),
-        builder::field<SensorData, &SensorData::temp>(builder::schema(PrimType::F32(), {}, builder::pair(1, "temp"))),
-        builder::field<SensorData, &SensorData::pressure>(builder::schema(PrimType::F32(), {}, builder::pair(1, "pressure"))),
-        builder::field<SensorData, &SensorData::humidity>(builder::schema(PrimType::F32(), {}, builder::pair(1, "humidity"))),
+        field<SensorData, &SensorData::mag>(schema(PrimType::F32(), { 3 }, timestamp(time, pair(1, "mag")))),
+        field<SensorData, &SensorData::gyro>(schema(PrimType::F32(), { 3 }, timestamp(time, pair(1, "gyro")))),
+        field<SensorData, &SensorData::accel>(schema(PrimType::F32(), { 3 }, timestamp(time, pair(1, "accel")))),
+        field<SensorData, &SensorData::temp>(schema(PrimType::F32(), {}, timestamp(time, pair(1, "temp")))),
+        field<SensorData, &SensorData::pressure>(schema(PrimType::F32(), {}, timestamp(time, pair(1, "pressure")))),
+        field<SensorData, &SensorData::humidity>(schema(PrimType::F32(), {}, timestamp(time, pair(1, "humidity")))),
     });
 
-    auto vtable_msg = Msg(VTableMsg {
+    sock.send(VTableMsg {
         .id = { 2, 0 },
         .vtable = table,
     });
-    auto vtable_msg_encoded = vtable_msg.encode_vec();
-    sock.write_all(vtable_msg_encoded.data(), vtable_msg_encoded.size());
-
     sock.send(set_component_name("mag"));
     sock.send(set_component_name("gyro"));
     sock.send(set_component_name("accel"));
@@ -147,24 +150,19 @@ try {
     sock.send(set_component_name("pressure"));
     sock.send(set_component_name("humidity"));
 
+    // Start the reader thread
+    std::println("Main thread: starting reader thread");
+    std::thread reader(reader_thread_func, ip, port);
+
     auto sensor_data = SensorData {
         .mag = { 0.0, 0.0, 0.0 },
         .gyro = { 0.0, 0.0, 0.0 },
         .accel = { 0.0, 0.0, 0.0 },
-        .temp = 1.0,
+        .temp = 0.0,
         .pressure = 2.0,
         .humidity = 3.0
     };
-
-    double time = 0;
     while (true) {
-        auto data = std::vector<uint8_t>(256);
-        auto len = sock.read(data.data(), data.size());
-        if (len == 0) {
-            return 0;
-        }
-        // std::println("received data {}", std::span(data.data(), len));
-
         // send sin wave data continuously
         auto table_header = PacketHeader {
             .len = 4 + sizeof(sensor_data),
@@ -173,15 +171,19 @@ try {
             .request_id = 0,
         };
 
-        time += 1.0;
-        sensor_data.temp = std::sin(static_cast<double>(time / 100000.0));
+        sensor_data.time = system_clock::now().time_since_epoch() / microseconds(1);
+        sensor_data.temp = std::sin(static_cast<double>(sensor_data.time) / 1000000.0);
 
+        std::println("writing {}, {} bytes", sizeof(table_header), sizeof(sensor_data));
         sock.write_all(&table_header, sizeof(table_header));
         sock.write_all(&sensor_data, sizeof(sensor_data));
+        usleep(1000);
     }
 
+    // We should never reach here, but if we do:
+    reader.join();
     return 0;
 } catch (const std::exception& e) {
-    std::cerr << "error: " << e.what() << std::endl;
+    std::cerr << "Main thread error: " << e.what() << std::endl;
     return 1;
 }
