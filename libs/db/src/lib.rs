@@ -1,5 +1,7 @@
 use assets::open_assets;
+use datafusion::common::HashSet;
 use futures_lite::StreamExt;
+use impeller2::registry::VTableRegistry;
 use impeller2::types::{PacketHeader, PacketTy};
 use impeller2::vtable::builder::{
     OpBuilder, pair, raw_field, raw_table, schema, timestamp, vtable,
@@ -22,21 +24,17 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use smallvec::SmallVec;
 use std::{
     borrow::Cow,
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     ffi::OsStr,
-    sync::atomic::AtomicI64,
-};
-use std::{
-    net::SocketAddr,
+    net::{SocketAddr, ToSocketAddrs},
     ops::Range,
     path::{Path, PathBuf},
     sync::{
-        Arc,
-        atomic::{self, AtomicBool, AtomicU64},
+        Arc, RwLock,
+        atomic::{self, AtomicBool, AtomicI64, AtomicU64},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
-use std::{sync::RwLock, time::Duration};
 use stellarator::{
     buf::Slice,
     io::{AsyncRead, AsyncWrite, OwnedReader, OwnedWriter, SplitExt},
@@ -86,6 +84,8 @@ pub struct State {
 
     vtable_registry: registry::HashMapRegistry,
     streams: HashMap<StreamId, Arc<FixedRateStreamState>>,
+
+    udp_vtable_streams: HashSet<(SocketAddr, [u8; 2])>,
 }
 
 impl DB {
@@ -849,7 +849,17 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         Packet::Msg(m) if m.id == UdpUnicast::ID => {
             let udp_broadcast = m.parse::<UdpUnicast>()?;
             let db = db.clone();
-            handle_unicast_stream(udp_broadcast.addr, udp_broadcast.stream, db);
+            let addr = udp_broadcast
+                .addr
+                .to_socket_addrs()?
+                .next()
+                .ok_or_else(|| {
+                    Error::Io(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "missing socket ip",
+                    ))
+                })?;
+            handle_unicast_stream(addr, udp_broadcast.stream, db);
         }
         Packet::Msg(m) if m.id == Stream::ID => {
             let stream = m.parse::<Stream>()?;
@@ -1198,13 +1208,49 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             tx.send_msg(&ArchiveSaved { path }).await?;
         }
         Packet::Msg(m) if m.id == VTableStream::ID => {
-            let vtable_stream = m.parse::<VTableStream>()?;
+            let VTableStream { id } = m.parse::<VTableStream>()?;
+            let vtable = db
+                .with_state(|state| state.vtable_registry.get(&id).cloned())
+                .ok_or(Error::InvalidMsgId)?;
             stellarator::spawn(handle_vtable_stream(
-                vtable_stream,
+                id,
+                vtable,
                 db.clone(),
                 tx.tx.clone(),
                 m.req_id,
             ));
+        }
+        Packet::Msg(m) if m.id == UdpVTableStream::ID => {
+            let UdpVTableStream { id, addr } = m.parse::<UdpVTableStream>()?;
+            let addr = addr.to_socket_addrs()?.next().ok_or_else(|| {
+                Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "missing socket ip",
+                ))
+            })?;
+            db.with_state_mut(|state| {
+                // ensure idempotency
+                if state.udp_vtable_streams.contains(&(addr, id)) {
+                    return Ok(());
+                }
+                let vtable = state
+                    .vtable_registry
+                    .get(&id)
+                    .ok_or(Error::InvalidMsgId)?
+                    .clone();
+                let db = db.clone();
+                let req_id = m.req_id;
+                stellarator::struc_con::stellar(move || async move {
+                    info!("VTable streaming to udp://{}", addr);
+                    let mut socket = UdpSocket::ephemeral()?;
+                    socket.connect(addr);
+                    let (_, tx) = socket.split();
+                    let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
+                    handle_vtable_stream(id, vtable, db, tx, req_id).await
+                });
+                state.udp_vtable_streams.insert((addr, id));
+                Ok::<_, Error>(())
+            })?;
         }
         Packet::Msg(m) => db.push_msg(Timestamp::now(), m.id, &m.buf)?,
         _ => {}

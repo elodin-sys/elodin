@@ -9,7 +9,7 @@ use impeller2::{
 };
 use postcard_schema::schema::owned::OwnedNamedType;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Cow, net::SocketAddr, path::PathBuf, time::Duration};
+use std::{borrow::Cow, path::PathBuf, time::Duration};
 use std::{collections::HashMap, ops::Range};
 
 use crate::{
@@ -38,7 +38,6 @@ pub struct Stream {
 #[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
 pub struct VTableStream {
     pub id: PacketId,
-    pub vtable: VTable<Vec<Op>, Vec<u8>, Vec<Field>>,
 }
 
 impl Request for VTableStream {
@@ -365,7 +364,6 @@ macro_rules! impl_user_data_msg {
                 methods.add_method("msg", |_, this, ()| {
                     use impeller2::types::IntoLenPacket;
                     let msg = this.into_len_packet().inner;
-                    println!("{:?}", msg);
                     Ok(msg)
                 });
             }
@@ -388,6 +386,7 @@ impl_user_data_msg!(SetStreamState);
 impl_user_data_msg!(SetComponentMetadata);
 impl_user_data_msg!(SetEntityMetadata);
 impl_user_data_msg!(UdpUnicast);
+impl_user_data_msg!(UdpVTableStream);
 
 #[derive(Serialize, Deserialize)]
 pub struct GetEarliestTimestamp;
@@ -537,14 +536,16 @@ impl Msg for MsgBatch {
     const ID: PacketId = [224, 35];
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
 pub struct UdpUnicast {
     pub stream: Stream,
-    pub addr: SocketAddr,
+    pub addr: String,
 }
 
-impl Msg for UdpUnicast {
-    const ID: PacketId = [224, 36];
+#[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
+pub struct UdpVTableStream {
+    pub id: PacketId,
+    pub addr: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]

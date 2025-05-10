@@ -296,13 +296,11 @@ impl Client {
         Ok(())
     }
 
-    pub async fn vtable_stream(&mut self, mut stream: VTableStream) -> anyhow::Result<()> {
-        if stream.id == [0, 0] {
-            stream.id = fastrand::u16(..).to_le_bytes();
-        }
-        let mut vtable: HashMap<PacketId, VTable> = HashMap::new();
-        vtable.insert(stream.id, stream.vtable.clone());
-        let stream = self.client.stream(&stream).await?;
+    pub async fn vtable_stream(&mut self, vtable: VTable) -> anyhow::Result<()> {
+        let id = fastrand::u16(..).to_le_bytes();
+        let vtable_msg = VTableMsg { vtable, id };
+        self.client.send(&vtable_msg).await.0?;
+        let stream = self.client.stream(&VTableStream { id }).await?;
         let cancel = Arc::new(AtomicBool::new(true));
         let canceler = cancel.clone();
         std::thread::spawn(move || {
@@ -317,16 +315,9 @@ impl Client {
             let msg = stream.next().await?;
             match msg {
                 StreamReply::Table(table) => {
-                    if let Some(vtable) = vtable.get(&table.id) {
-                        println!("found table with id {:?}", table.id);
-                        vtable.apply(&table.buf[..], &mut DebugSink)??;
-                    } else {
-                        println!("table ({:?}) = {:?}", table.id, &table.buf[..]);
-                    }
+                    vtable_msg.vtable.apply(&table.buf[..], &mut DebugSink)??;
                 }
-                StreamReply::VTable(msg) => {
-                    vtable.insert(msg.id, msg.vtable);
-                }
+                StreamReply::VTable(_) => {}
             }
         }
         Ok(())
@@ -546,8 +537,7 @@ impl UserData for Client {
             |_, mut this, fields: Vec<UserDataRef<LuaFieldBuilder>>| async move {
                 let fields = fields.into_iter().map(|field| field.0.clone());
                 let vtable = vtable::builder::vtable(fields);
-                this.vtable_stream(VTableStream { id: [0, 0], vtable })
-                    .await?;
+                this.vtable_stream(vtable).await?;
                 Ok(())
             },
         );
@@ -798,6 +788,13 @@ pub fn lua() -> anyhow::Result<Lua> {
             },
         )?,
     )?;
+    lua.globals().set(
+        "udp_vtable_stream",
+        lua.create_function(|lua, (id, addr): (u16, String)| {
+            let id = id.to_le_bytes();
+            lua.create_ser_userdata(UdpVTableStream { id, addr })
+        })?,
+    )?;
 
     Ok(lua)
 }
@@ -884,6 +881,7 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                         "connect(addr) -> Client",
                         "Connects to a database and returns a client",
                     );
+                    print_message("udp_vtable_stream(id, addr) -> UdpVTableStream");
                     print_usage_line(
                         "Client:send_table(component_id, entity_id, ty, shape, data)",
                         "Sends a new ComponentValue to the db",
@@ -932,7 +930,7 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                     print_message("SetComponentMetadata { component_id, name, metadata, asset }");
                     print_message("SetEntityMetadata { entity_id, name, metadata }");
                     print_message(
-                        "UdpUnicast { stream = { filter = { component_id, entity_id }, id }, port }",
+                        "UdpUnicast { stream = { filter = { component_id, entity_id }, id }, addr }",
                     );
                     print_message("SetStreamState { id, playing, tick, time_step }");
                     print_message("SetAsset { id, buf }");

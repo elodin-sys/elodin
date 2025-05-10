@@ -7,10 +7,10 @@ local local_client = connect(ground_station_addr)
 local metadata_dump = remote_client:dump_metadata()
 local metadata_msgs = {}
 for _, entity_metadata in pairs(metadata_dump["entity_metadata"]) do
-	table.insert(metadata_msgs, SetEntityMetadata(entity_metadata))
+    table.insert(metadata_msgs, SetEntityMetadata(entity_metadata))
 end
 for _, component_metadata in pairs(metadata_dump["component_metadata"]) do
-	table.insert(metadata_msgs, SetComponentMetadata(component_metadata))
+    table.insert(metadata_msgs, SetComponentMetadata(component_metadata))
 end
 local_client:send_msgs(metadata_msgs)
-remote_client:send_msg(UdpUnicast({ stream = { id = 2 }, addr = ground_station_addr }))
+remote_client:send_msg(udp_vtable_stream(1, ground_station_addr))
