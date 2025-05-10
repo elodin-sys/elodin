@@ -50,7 +50,6 @@ impl Default for VideoStream {
 pub enum StreamState {
     #[default]
     None,
-    Requested(Instant),
     Streaming,
     Error(String),
 }
@@ -68,7 +67,7 @@ pub struct VideoDecoder {
 
 impl VideoDecoder {
     pub fn new() -> Self {
-        let codec = decoder::find(codec::Id::AV1).unwrap();
+        let codec = decoder::find(codec::Id::H264).unwrap();
 
         let decoder = codec::context::Context::new_with_codec(codec)
             .decoder()
@@ -127,35 +126,10 @@ impl VideoDecoderManager {
     }
 
     fn decode_av1_frame(decoder: &mut decoder::Video, frame_data: &[u8]) -> Result<(), String> {
-        use ffmpeg_next::util::frame::video::Video;
-        use ffmpeg_next::{Error, Packet};
+        use ffmpeg_next::Packet;
 
-        let packet = Packet::copy(frame_data);
-
-        // Send the packet to the decoder
-        if let Err(e) = decoder.send_packet(&packet) {
-            return Err(format!("Error sending packet to decoder: {}", e));
-        }
-
-        // Allocate a frame to receive decoded data
-        //let mut frame = Video::empty();
-
-        // Receive the decoded frame
-        // match decoder.receive_frame(&mut frame) {
-        //     Ok(()) => {}
-        //     Err(Error::Eof) =>{
-        //         return Err("End of stream reached".to_string());
-        //     }
-        //     Err(e) => {
-        //         // let codec = decoder::find(codec::Id::AV1).unwrap();
-        //         // *decoder = codec::context::Context::new_with_codec(codec)
-        //         //     .decoder()
-        //         //     .video()
-        //         //     .unwrap();
-
-        //         return Err(format!("Error receiving frame: {}", e));
-        //     }
-        // }
+        let packet = Packet::borrow(frame_data);
+        let _ = decoder.send_packet(&packet);
         Ok(())
     }
 
@@ -163,12 +137,7 @@ impl VideoDecoderManager {
         use ffmpeg_next::format::Pixel;
         use ffmpeg_next::software::scaling::{context::Context as ScalingContext, flag::Flags};
         let mut frame = Video::empty();
-        decoder
-            .receive_frame(&mut frame)
-            .inspect_err(|err| {
-                dbg!(err);
-            })
-            .ok()?;
+        decoder.receive_frame(&mut frame).ok()?;
 
         let width = frame.width() as usize;
         let height = frame.height() as usize;
@@ -232,17 +201,8 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                 ui.heading(&label);
 
                 ui.add_space(ui.available_width() - 120.0);
-
-                if ui
-                    .add_sized(
-                        [100.0, 32.0],
-                        super::widgets::button::EButton::green("REFRESH"),
-                    )
-                    .clicked()
-                {
                     if let StreamState::None = stream.state {
-                        stream.state = StreamState::Requested(Instant::now());
-
+                                    stream.state = StreamState::Streaming;
                         let msg_id = stream.message_id.to_le_bytes();
                         let entity = entity;
 
@@ -256,9 +216,6 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                                 };
                                 match res {
                                     OwnedPacket::Msg(msg_buf) => {
-                                        if let StreamState::Requested(_) = stream.state {
-                                            stream.state = StreamState::Streaming;
-                                        }
                                         decoder_manager.process_frame(entity, &mut stream, &msg_buf.buf);
                                     }
                                     _ => {}
@@ -267,7 +224,6 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                             },
                         );
                     }
-                }
             });
 
             let available_size = ui.available_size();
@@ -275,23 +231,12 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
             match &stream.state {
                 StreamState::None => {
                     ui.centered_and_justified(|ui| {
-                        ui.label("No video stream loaded. Click REFRESH to start streaming.");
-                    });
-                }
-                StreamState::Requested(time) => {
-                    let _elapsed = time.elapsed().as_secs_f32();
-                    ui.centered_and_justified(|ui| {
-                        ui.spinner();
-                        ui.label(format!(
-                            "Requesting video stream for message ID: {}...",
-                            stream.message_id
-                        ));
+                        ui.label("No video stream. Please send a valid H264 stream");
                     });
                 }
                 StreamState::Streaming => {
                     // Display the current frame if available
-                    if let Some(frame) = stream.current_frame.clone() {
-                        // Initialize texture if needed
+                    if let Some(frame) = stream.current_frame.take() {
                         if stream.texture_handle.is_none() {
                             let texture_handle = ui.ctx().load_texture(
                                 format!("video_stream_{}", entity.index()),
@@ -300,8 +245,15 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                             );
                             stream.texture_handle = Some(texture_handle);
                         } else if let Some(texture) = &mut stream.texture_handle {
-                            texture.set(frame.clone(), TextureOptions::default());
+                            texture.set(frame, TextureOptions::default());
                         }
+
+                    } else {
+                        // ui.centered_and_justified(|ui| {
+                        //     ui.spinner();
+                        //     ui.label("Waiting for video frames...");
+                        // });
+                    }
 
                         if let Some(texture) = &stream.texture_handle {
                             // Calculate aspect ratio for proper display
@@ -333,12 +285,6 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                                 ui.label("Processing frames...");
                             });
                         }
-                    } else {
-                        ui.centered_and_justified(|ui| {
-                            ui.spinner();
-                            ui.label("Waiting for video frames...");
-                        });
-                    }
                 }
                 StreamState::Error(error) => {
                     ui.centered_and_justified(|ui| {

@@ -730,8 +730,8 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + 'static>(
     mut rx: PacketStream<OwnedReader<A>>,
     db: Arc<DB>,
 ) -> Result<(), Error> {
-    let mut buf = vec![0u8; 1024 * 64];
-    let mut resp_pkt = LenPacket::new(PacketTy::Msg, [0, 0], 1024 * 64);
+    let mut buf = vec![0u8; 8 * 1024 * 1024];
+    let mut resp_pkt = LenPacket::new(PacketTy::Msg, [0, 0], 8 * 1024 * 1024);
     loop {
         let pkt = rx.next(buf).await?;
         let req_id = pkt.req_id();

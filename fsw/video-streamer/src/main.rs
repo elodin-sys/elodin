@@ -64,7 +64,7 @@ impl VideoStreamer {
         let context = ffmpeg::codec::context::Context::from_parameters(input.parameters()).unwrap();
         let mut decoder = context.decoder().video().unwrap();
 
-        let encoder_codec = encoder::find(codec::Id::AV1).unwrap();
+        let encoder_codec = encoder::find(codec::Id::H264).unwrap();
 
         let mut encoder = codec::context::Context::new_with_codec(encoder_codec)
             .encoder()
@@ -83,9 +83,12 @@ impl VideoStreamer {
 
         // Set AV1 specific options
         let mut opts = ffmpeg::Dictionary::new();
-        opts.set("cpu-used", &self.args.speed.to_string());
-        opts.set("keyint_min", &self.args.keyframe_interval.to_string());
-        opts.set("g", &self.args.keyframe_interval.to_string());
+        // opts.set("cpu-used", &self.args.speed.to_string());
+        // opts.set("keyint_min", &self.args.keyframe_interval.to_string());
+        // opts.set("g", &self.args.keyframe_interval.to_string());
+        opts.set("g", "12");
+        opts.set("preset", "medium");
+        opts.set("profile", "baseline");
         opts.set("header_at_keyframes", &"true");
         let mut encoder = encoder.open_with(opts)?;
 
@@ -103,7 +106,7 @@ impl VideoStreamer {
                 continue;
             }
 
-            decoder.send_packet(&packet)?;
+            decoder.send_packet(&packet).unwrap();
 
             while decoder.receive_frame(&mut frame).is_ok() {
                 frame_count += 1;
@@ -118,9 +121,14 @@ impl VideoStreamer {
                 while encoder.receive_packet(&mut packet).is_ok() {
                     obu_count += 1;
                     if let Some(data) = packet.data() {
+                        println!("sending pkt {:?}", data.len());
                         let mut pkt = LenPacket::msg(msg_id, data.len());
                         pkt.extend_from_slice(data);
-                        self.client.send(pkt).await.0?;
+                        if let Err(err) = self.client.send(pkt).await.0 {
+                            self.client = Client::connect(self.args.db_addr)
+                                .await
+                                .context("Failed to connect to elodin-db")?;
+                        }
                     }
                     stellarator::sleep(Duration::from_secs_f64(1.0 / 30.0)).await;
                 }
@@ -133,9 +141,10 @@ impl VideoStreamer {
         while encoder.receive_packet(&mut packet).is_ok() {
             obu_count += 1;
             if let Some(data) = packet.data() {
+                println!("sending pkt {:?}", data.len());
                 let mut pkt = LenPacket::msg(msg_id, data.len());
                 pkt.extend_from_slice(data);
-                self.client.send(pkt).await.0?;
+                if let Err(err) = self.client.send(pkt).await.0 {}
             }
         }
 
