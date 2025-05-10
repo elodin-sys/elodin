@@ -3605,6 +3605,94 @@ struct VTableMsg {
   }
 };
 
+struct VTableStream {
+  static constexpr std::string_view TYPE_NAME = "VTableStream";
+
+  std::tuple<uint8_t, uint8_t> id;
+  
+
+
+  size_t encoded_size() const {
+    size_t size = 0;
+    size += postcard_size_u8();size += postcard_size_u8();
+    
+    return size;
+  }
+
+  postcard_error_t encode(std::span<uint8_t>& output) const {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, output.data(), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<uint8_t> encode_vec() const {
+    // Pre-allocate vector with the required size
+    std::vector<uint8_t> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<uint8_t>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, span.data(), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
+    postcard_error_t result;
+    
+                        {
+                            auto val = std::get<0>(id);
+                            result = postcard_encode_u8(slice, val);
+                        }
+                        
+                        {
+                            auto val = std::get<1>(id);
+                            result = postcard_encode_u8(slice, val);
+                        }
+                        
+        if(result != POSTCARD_SUCCESS) return result;
+    
+    return POSTCARD_SUCCESS;
+  }
+
+  postcard_error_t decode(std::span<const uint8_t>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    uint8_t val0;
+    result = postcard_decode_u8(slice, &val0);
+    uint8_t val1;
+    result = postcard_decode_u8(slice, &val1);
+    id =  std::tuple<uint8_t, uint8_t>(val0, val1);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    
+    return POSTCARD_SUCCESS;
+  }
+};
+
 struct ComponentMetadata {
   static constexpr std::string_view TYPE_NAME = "ComponentMetadata";
 
