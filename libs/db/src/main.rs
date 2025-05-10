@@ -117,6 +117,8 @@ async fn main() -> miette::Result<()> {
                     impeller2_wkt::VTableStream::to_cpp()?,
                     impeller2_wkt::ComponentMetadata::to_cpp()?,
                     impeller2_wkt::SetComponentMetadata::to_cpp()?,
+                    impeller2_wkt::EntityMetadata::to_cpp()?,
+                    impeller2_wkt::SetEntityMetadata::to_cpp()?,
                     include_str!("../cpp/helpers.hpp").to_string(),
                     include_str!("../cpp/vtable.hpp").to_string(),
                 ],
