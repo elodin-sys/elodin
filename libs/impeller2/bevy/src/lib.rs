@@ -26,8 +26,8 @@ use impeller2_wkt::{
     AssetId, BodyAxes, ComponentMetadata, CurrentTimestamp, DbSettings, DumpAssets, DumpMetadata,
     DumpMetadataResp, DumpSchema, DumpSchemaResp, EarliestTimestamp, EntityMetadata, ErrorResponse,
     FixedRateBehavior, GetDbSettings, GetEarliestTimestamp, Glb, IsRecording, LastUpdated, Line3d,
-    Material, Mesh, Panel, Stream, StreamBehavior, StreamFilter, StreamId, StreamTimestamp,
-    SubscribeLastUpdated, VTableMsg, VectorArrow, WorldPos,
+    Material, Mesh, Panel, Stream, StreamBehavior, StreamId, StreamTimestamp, SubscribeLastUpdated,
+    VTableMsg, VectorArrow, WorldPos,
 };
 use serde::de::DeserializeOwned;
 use std::{
@@ -783,20 +783,15 @@ impl CommandsExt for Commands<'_, '_> {
 pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPacket> {
     [
         Stream {
-            filter: StreamFilter {
-                component_id: None,
-                entity_id: None,
-            },
             behavior: StreamBehavior::FixedRate(FixedRateBehavior {
                 initial_timestamp: impeller2_wkt::InitialTimestamp::Earliest,
-                timestep: Some(Duration::from_secs_f64(1.0 / 60.0).as_nanos() as u64),
-                frequency: Some(60),
+                timestep: Duration::from_secs_f64(1.0 / 60.0).as_nanos() as u64,
+                frequency: 60,
             }),
             id: stream_id,
         }
         .into_len_packet(),
         Stream {
-            filter: StreamFilter::default(),
             behavior: StreamBehavior::RealTime,
             id: fastrand::u64(..),
         }

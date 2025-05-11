@@ -28,8 +28,6 @@ pub struct VTableMsg {
 #[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
 pub struct Stream {
     #[serde(default)]
-    pub filter: StreamFilter,
-    #[serde(default)]
     pub behavior: StreamBehavior,
     #[serde(default)]
     pub id: StreamId,
@@ -75,11 +73,23 @@ pub struct FixedRateOp {
     pub behavior: FixedRateBehavior,
 }
 
-#[derive(Serialize, Deserialize, Default, Debug, Clone, postcard_schema::Schema)]
+#[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
 pub struct FixedRateBehavior {
     pub initial_timestamp: InitialTimestamp,
-    pub timestep: Option<u64>,
-    pub frequency: Option<u64>,
+    /// The time interval between each tick in nanoseconds
+    pub timestep: u64,
+    /// The number of ticks per second
+    pub frequency: u64,
+}
+
+impl Default for FixedRateBehavior {
+    fn default() -> Self {
+        Self {
+            initial_timestamp: Default::default(),
+            timestep: (1e9 / 60.0) as u64,
+            frequency: 60,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, postcard_schema::Schema)]
@@ -98,12 +108,6 @@ pub enum StreamBehavior {
 }
 
 pub type StreamId = u64;
-
-#[derive(Serialize, Deserialize, Default, Debug, Clone, postcard_schema::Schema)]
-pub struct StreamFilter {
-    pub component_id: Option<ComponentId>,
-    pub entity_id: Option<EntityId>,
-}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SetStreamState {
