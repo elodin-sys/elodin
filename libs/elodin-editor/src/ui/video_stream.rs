@@ -5,14 +5,14 @@ use std::time::{Duration, Instant};
 use bevy::ecs::system::InRef;
 use bevy::{
     ecs::system::SystemParam,
-    prelude::{Commands, Component, Entity, Query, World},
+    prelude::{Commands, Component, Entity, Query, Res, World},
 };
 use egui::{self, Color32, ColorImage, TextureHandle, TextureOptions, Vec2};
 // use ffmpeg_next::frame::Video;
 // use ffmpeg_next::{Packet, codec, decoder};
 use impeller2::types::OwnedPacket;
-use impeller2_bevy::{CommandsExt, PacketGrantR};
-use impeller2_wkt::MsgStream;
+use impeller2_bevy::{CommandsExt, CurrentStreamId, PacketGrantR};
+use impeller2_wkt::{FixedRateMsgStream, FixedRateOp, MsgStream};
 use pic_scale::{
     ImageStore, ImageStoreMut, LinearScaler, ResamplingFunction, Scaling, ThreadingPolicy,
 };
@@ -87,7 +87,7 @@ impl Default for VideoDecoderHandle {
 
                     let (width, height) = (width as f64, height as f64);
                     let desired_width = frame_width.load(atomic::Ordering::Relaxed);
-                    let aspect_ratio = dbg!(height / width);
+                    let aspect_ratio = height / width;
                     let new_width = width.min(desired_width as f64);
                     let new_height = (new_width * aspect_ratio) as usize;
                     let new_width = new_width as usize;
@@ -139,6 +139,7 @@ pub struct VideoStreamWidget<'w, 's> {
     streams: Query<'w, 's, &'static mut VideoStream>,
     decoders: Query<'w, 's, &'static mut VideoDecoderHandle>,
     commands: Commands<'w, 's>,
+    stream_id: Res<'w, CurrentStreamId>,
 }
 
 impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
@@ -173,8 +174,12 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
             let entity = entity;
 
             state.commands.send_req_reply_raw(
-                MsgStream {
+                FixedRateMsgStream {
                     msg_id: stream.msg_id,
+                    fixed_rate: FixedRateOp {
+                        stream_id: state.stream_id.0,
+                        behavior: Default::default(),
+                    },
                 },
                 move |InRef(res): InRef<OwnedPacket<PacketGrantR>>,
                       mut decoders: Query<&mut VideoDecoderHandle>| {

@@ -1173,6 +1173,36 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             let req_id = m.req_id;
             stellarator::spawn(handle_msg_stream(msg_id, req_id, msg_log, tx.tx.clone()));
         }
+        Packet::Msg(m) if m.id == FixedRateMsgStream::ID => {
+            let FixedRateMsgStream { msg_id, fixed_rate } = m.parse::<FixedRateMsgStream>()?;
+            let (msg_log, stream_state) = db.with_state_mut(move |s| {
+                let msg_log = s.get_or_insert_msg_log(msg_id, &db.path).cloned()?;
+                let stream_state = s
+                    .streams
+                    .entry(fixed_rate.stream_id)
+                    .or_insert_with(|| {
+                        todo!()
+                        // FixedRateStreamState::from_state(
+                        //     stream_id,
+                        //     req_id,
+                        //     time_step,
+                        //     current_tick,
+                        //     filter,
+                        //     frequency,
+                        // )
+                    })
+                    .clone();
+                Ok::<_, Error>((msg_log, stream_state))
+            })?;
+            let req_id = m.req_id;
+            stellarator::spawn(handle_fixed_rate_msg_stream(
+                msg_id,
+                req_id,
+                msg_log,
+                tx.tx.clone(),
+                stream_state,
+            ));
+        }
         Packet::Msg(m) if m.id == GetMsgMetadata::ID => {
             let GetMsgMetadata { msg_id } = m.parse::<GetMsgMetadata>()?;
             let Some(metadata) =
@@ -1276,6 +1306,47 @@ pub async fn handle_msg_stream<A: AsyncWrite>(
         pkt.clear();
     }
 }
+
+pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
+    msg_id: PacketId,
+    req_id: RequestId,
+    msg_log: MsgLog,
+    tx: Arc<Mutex<PacketSink<A>>>,
+    stream_state: Arc<FixedRateStreamState>,
+) -> Result<(), Error> {
+    let mut pkt = LenPacket::msg(msg_id, 64).with_request_id(req_id);
+    let mut last_sent_timestamp: Option<Timestamp> = None;
+    loop {
+        if !stream_state.wait_for_playing().await {
+            return Ok(());
+        }
+        let start = Instant::now();
+        let current_timestamp = stream_state.current_timestamp();
+        let Some((msg_timestamp, msg)) = msg_log.get_nearest(current_timestamp) else {
+            continue;
+        };
+
+        if Some(msg_timestamp) == last_sent_timestamp {
+            stream_state
+                .wait_for_tick(start.elapsed(), current_timestamp)
+                .await;
+            continue;
+        }
+
+        {
+            let tx = tx.lock().await;
+            pkt.extend_from_slice(msg);
+            rent!(tx.send(pkt).await, pkt)?;
+            pkt.clear();
+        }
+        last_sent_timestamp = Some(msg_timestamp);
+
+        stream_state
+            .wait_for_tick(start.elapsed(), current_timestamp)
+            .await;
+    }
+}
+
 pub struct FixedRateStreamState {
     stream_id: StreamId,
     req_id: RequestId,
@@ -1356,6 +1427,26 @@ impl FixedRateStreamState {
 
     fn set_playing(&self, playing: bool) {
         self.playing_cell.set_playing(playing)
+    }
+
+    async fn wait_for_playing(&self) -> bool {
+        self.playing_cell
+            .wait_cell
+            .wait_for(|| self.is_playing() || self.is_scrubbed())
+            .await
+            .is_ok()
+    }
+
+    async fn wait_for_tick(&self, elapsed: Duration, last_timestamp: Timestamp) {
+        let sleep_time = self.sleep_time().saturating_sub(elapsed);
+        futures_lite::future::race(
+            async {
+                self.playing_cell.wait_for_change().await;
+            },
+            stellarator::sleep(sleep_time),
+        )
+        .await;
+        self.try_increment_tick(last_timestamp);
     }
 }
 
@@ -1502,13 +1593,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
     let mut table = LenPacket::table([0; 2], 2048 - 16);
     let mut components = db.with_state(|state| state.components.clone());
     loop {
-        if state
-            .playing_cell
-            .wait_cell
-            .wait_for(|| state.is_playing() || state.is_scrubbed())
-            .await
-            .is_err()
-        {
+        if !state.wait_for_playing().await {
             return Ok(());
         }
         let start = Instant::now();
@@ -1548,15 +1633,9 @@ async fn handle_fixed_stream<A: AsyncWrite>(
                 table
             )?;
         }
-        let sleep_time = state.sleep_time().saturating_sub(start.elapsed());
-        futures_lite::future::race(
-            async {
-                state.playing_cell.wait_for_change().await;
-            },
-            stellarator::sleep(sleep_time),
-        )
-        .await;
-        state.try_increment_tick(current_timestamp);
+        state
+            .wait_for_tick(start.elapsed(), current_timestamp)
+            .await;
     }
 }
 

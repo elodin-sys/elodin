@@ -503,6 +503,16 @@ impl Request for MsgStream {
     type Reply<B: IoBuf + Clone> = MsgBuf<B>;
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
+pub struct FixedRateMsgStream {
+    pub msg_id: PacketId,
+    pub fixed_rate: FixedRateOp,
+}
+
+impl Request for FixedRateMsgStream {
+    type Reply<B: IoBuf + Clone> = MsgBuf<B>;
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GetMsgMetadata {
     pub msg_id: PacketId,
