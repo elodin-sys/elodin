@@ -508,6 +508,7 @@ pub enum PacketTy {
     Msg = 0,
     Table = 1,
     TimeSeries = 2,
+    MsgWithTimestamp = 3,
 }
 
 pub type PacketId = [u8; 2];
@@ -610,6 +611,12 @@ impl LenPacket {
 
     pub fn msg(id: PacketId, cap: usize) -> Self {
         Self::new(PacketTy::Msg, id, cap)
+    }
+
+    pub fn msg_with_timestamp(id: PacketId, timestamp: Timestamp, cap: usize) -> Self {
+        let mut pkt = Self::new(PacketTy::MsgWithTimestamp, id, cap + size_of::<Timestamp>());
+        pkt.extend_from_slice(timestamp.as_bytes());
+        pkt
     }
 
     pub fn table(id: PacketId, cap: usize) -> Self {
@@ -734,7 +741,28 @@ impl<B: IoBuf> OwnedPacket<B> {
             .try_slice(PACKET_HEADER_LEN + offset..)
             .ok_or(Error::InvalidPacket)?;
         Ok(match packet_ty {
-            PacketTy::Msg => OwnedPacket::Msg(MsgBuf { id, req_id, buf }),
+            PacketTy::Msg => OwnedPacket::Msg(MsgBuf {
+                id,
+                req_id,
+                buf,
+                timestamp: None,
+            }),
+            PacketTy::MsgWithTimestamp => {
+                let timestamp_buf = buf
+                    .get(..size_of::<Timestamp>())
+                    .ok_or(Error::InvalidPacket)?;
+                let timestamp = Timestamp::read_from_bytes(timestamp_buf)?;
+                let buf = buf
+                    .into_inner()
+                    .try_slice(PACKET_HEADER_LEN + offset + size_of::<Timestamp>()..)
+                    .ok_or(Error::InvalidPacket)?;
+                OwnedPacket::Msg(MsgBuf {
+                    id,
+                    req_id,
+                    buf,
+                    timestamp: Some(timestamp),
+                })
+            }
             PacketTy::Table => OwnedPacket::Table(OwnedTable { id, req_id, buf }),
             PacketTy::TimeSeries => {
                 let time_series = TimeSeries::try_ref_from_bytes(&buf)?;
@@ -783,6 +811,7 @@ impl<B: IoBuf> OwnedTable<B> {
 pub struct MsgBuf<B: IoBuf> {
     pub id: PacketId,
     pub req_id: RequestId,
+    pub timestamp: Option<Timestamp>,
     pub buf: Slice<B>,
 }
 

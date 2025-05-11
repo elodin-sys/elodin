@@ -302,6 +302,7 @@ impl DB {
                 Ok::<_, Error>(())
             })?;
         }
+        self.last_updated.update_max(timestamp);
         Ok(())
     }
 
@@ -1139,11 +1140,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     sunk_new_time_series: false,
                     table_received: Timestamp::now(),
                 };
-                table
-                    .sink(&state.vtable_registry, &mut sink)?
-                    .inspect_err(|err| {
-                        dbg!(err);
-                    })?;
+                table.sink(&state.vtable_registry, &mut sink)??;
                 if sink.sunk_new_time_series {
                     db.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
                 }
@@ -1290,7 +1287,10 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 Ok::<_, Error>(())
             })?;
         }
-        Packet::Msg(m) => db.push_msg(Timestamp::now(), m.id, &m.buf)?,
+        Packet::Msg(m) => {
+            let timestamp = m.timestamp.unwrap_or(Timestamp::now());
+            db.push_msg(timestamp, m.id, &m.buf)?
+        }
         _ => {}
     }
     Ok(())
@@ -1623,10 +1623,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
                 )
                 .await
                 .0?;
-            rent!(
-                stream.send(table.with_request_id(req_id)).await,
-                table
-            )?;
+            rent!(stream.send(table.with_request_id(req_id)).await, table)?;
         }
         state
             .wait_for_tick(start.elapsed(), current_timestamp)
