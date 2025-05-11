@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{self, AtomicU32};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use bevy::ecs::system::InRef;
 use bevy::{
@@ -8,12 +8,14 @@ use bevy::{
     prelude::{Commands, Component, Entity, Query, Res, World},
 };
 use egui::{self, Color32, ColorImage, TextureHandle, TextureOptions, Vec2};
-use impeller2::types::OwnedPacket;
+use impeller2::types::{OwnedPacket, Timestamp};
 use impeller2_bevy::{CommandsExt, CurrentStreamId, PacketGrantR};
-use impeller2_wkt::{FixedRateMsgStream, FixedRateOp};
+use impeller2_wkt::{CurrentTimestamp, FixedRateMsgStream, FixedRateOp};
 use pic_scale::{
     ImageStore, ImageStoreMut, LinearScaler, ResamplingFunction, Scaling, ThreadingPolicy,
 };
+
+use super::colors::{self, ColorExt};
 
 #[derive(Clone)]
 pub struct VideoStreamPane {
@@ -25,6 +27,7 @@ pub struct VideoStreamPane {
 pub struct VideoStream {
     pub msg_id: [u8; 2],
     pub current_frame: Option<ColorImage>,
+    pub frame_timestamp: Option<Timestamp>,
     pub texture_handle: Option<TextureHandle>,
     pub size: Vec2,
     pub frame_count: usize,
@@ -42,6 +45,7 @@ impl Default for VideoStream {
             frame_count: 0,
             state: StreamState::None,
             last_update: Instant::now(),
+            frame_timestamp: None,
         }
     }
 }
@@ -56,15 +60,15 @@ pub enum StreamState {
 
 #[derive(Component)]
 pub struct VideoDecoderHandle {
-    tx: flume::Sender<Vec<u8>>,
-    rx: flume::Receiver<ColorImage>,
+    tx: flume::Sender<(Vec<u8>, Timestamp)>,
+    rx: flume::Receiver<(ColorImage, Timestamp)>,
     width: Arc<AtomicU32>,
     _handle: std::thread::JoinHandle<()>,
 }
 
 impl Default for VideoDecoderHandle {
     fn default() -> Self {
-        let (packet_tx, packet_rx) = flume::bounded::<Vec<u8>>(8);
+        let (packet_tx, packet_rx) = flume::bounded::<(Vec<u8>, Timestamp)>(8);
         let (image_tx, image_rx) = flume::bounded(8);
         let width = Arc::new(AtomicU32::new(0));
         let frame_width = width.clone();
@@ -74,7 +78,7 @@ impl Default for VideoDecoderHandle {
             scaler.set_threading_policy(ThreadingPolicy::Adaptive);
 
             let mut rgba = vec![];
-            while let Ok(packet) = packet_rx.recv() {
+            while let Ok((packet, timestamp)) = packet_rx.recv() {
                 use openh264::formats::YUVSource;
                 if let Ok(Some(yuv)) = decoder.decode(&packet) {
                     let (width, height) = yuv.dimensions();
@@ -101,7 +105,7 @@ impl Default for VideoDecoderHandle {
                         ImageStoreMut::<'_, u8, 4>::borrow(out, new_width, new_height).unwrap();
 
                     scaler.resize_rgba(&input, &mut out, false).unwrap();
-                    let _ = image_tx.send(image);
+                    let _ = image_tx.send((image, timestamp));
                 }
             }
         });
@@ -115,13 +119,14 @@ impl Default for VideoDecoderHandle {
 }
 
 impl VideoDecoderHandle {
-    pub fn process_frame(&mut self, frame_data: &[u8]) {
-        let _ = self.tx.try_send(frame_data.to_vec());
+    pub fn process_frame(&mut self, timestamp: Timestamp, frame_data: &[u8]) {
+        let _ = self.tx.try_send((frame_data.to_vec(), timestamp));
     }
 
     pub fn render_frame(&mut self, stream: &mut VideoStream) {
-        while let Ok(frame) = self.rx.try_recv() {
+        while let Ok((frame, timestamp)) = self.rx.try_recv() {
             stream.current_frame = Some(frame);
+            stream.frame_timestamp = Some(timestamp);
             stream.frame_count += 1;
             if stream.size == Vec2::ZERO && stream.current_frame.is_some() {
                 if let Some(ref img) = stream.current_frame {
@@ -138,6 +143,7 @@ pub struct VideoStreamWidget<'w, 's> {
     decoders: Query<'w, 's, &'static mut VideoDecoderHandle>,
     commands: Commands<'w, 's>,
     stream_id: Res<'w, CurrentStreamId>,
+    current_time: Res<'w, CurrentTimestamp>,
 }
 
 impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
@@ -181,7 +187,11 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                     match res {
                         OwnedPacket::Msg(msg_buf) => {
                             if let Ok(mut decoder) = decoders.get_mut(entity) {
-                                decoder.process_frame(&msg_buf.buf);
+                                if let Some(timestamp) = msg_buf.timestamp {
+                                    decoder.process_frame(timestamp, &msg_buf.buf);
+                                } else {
+                                    println!("no timestamp");
+                                }
                             }
                         }
                         _ => {}
@@ -192,6 +202,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
         }
 
         let available_size = ui.available_size();
+        let max_rect = ui.max_rect();
 
         match &stream.state {
             StreamState::None => {
@@ -233,7 +244,32 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                 } else {
                     ui.centered_and_justified(|ui| {
                         ui.spinner();
+                        ui.add(egui::Label::new(
+                            egui::RichText::new("Waiting for first frame")
+                                .size(16.0)
+                                .color(colors::PEACH_DEFAULT),
+                        ));
                     });
+                }
+
+                if let Some(frame_timestamp) = stream.frame_timestamp {
+                    if (frame_timestamp.0 - state.current_time.0.0).abs() > 200000 {
+                        ui.painter()
+                            .rect_filled(max_rect, 0, Color32::BLACK.opacity(0.75));
+                        ui.put(
+                            egui::Rect::from_center_size(
+                                max_rect.center(),
+                                egui::vec2(350.0, 20.0),
+                            ),
+                            egui::Label::new(
+                                egui::RichText::new(
+                                    "Loss of Signal - Frame out date. Waiting for new keyframe",
+                                )
+                                .size(16.0)
+                                .color(colors::YOLK_DEFAULT),
+                            ),
+                        );
+                    }
                 }
             }
             StreamState::Error(error) => {

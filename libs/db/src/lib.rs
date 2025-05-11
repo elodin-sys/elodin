@@ -1309,9 +1309,9 @@ pub async fn handle_msg_stream<A: AsyncWrite>(
             continue;
         };
         let tx = tx.lock().await;
+        pkt.clear();
         pkt.extend_from_slice(msg);
         rent!(tx.send(pkt).await, pkt)?;
-        pkt.clear();
     }
 }
 
@@ -1322,7 +1322,7 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
     tx: Arc<Mutex<PacketSink<A>>>,
     stream_state: Arc<FixedRateStreamState>,
 ) -> Result<(), Error> {
-    let mut pkt = LenPacket::msg(msg_id, 64).with_request_id(req_id);
+    let mut pkt = LenPacket::msg_with_timestamp(msg_id, Timestamp(0), 64).with_request_id(req_id);
     let mut last_sent_timestamp: Option<Timestamp> = None;
     loop {
         if !stream_state.wait_for_playing().await {
@@ -1343,9 +1343,10 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
 
         {
             let tx = tx.lock().await;
+            pkt.clear();
+            pkt.extend_from_slice(msg_timestamp.as_bytes());
             pkt.extend_from_slice(msg);
             rent!(tx.send(pkt).await, pkt)?;
-            pkt.clear();
         }
         last_sent_timestamp = Some(msg_timestamp);
 
