@@ -20,6 +20,9 @@ bytes = "1.5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+kdam.version = "0.6.2"
+kdam.features = ["gradient", "template", "unicode"]
+
 [[bin]]
 name = "video-streamer"
 path = "src/main.rs"

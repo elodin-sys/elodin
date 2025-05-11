@@ -1,8 +1,11 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use ffmpeg_next::{self as ffmpeg, codec, encoder, picture};
-use impeller2::types::{LenPacket, msg_id};
+use impeller2::types::{msg_id, LenPacket, Timestamp};
 use impeller2_stellar::Client;
+use kdam::term::Colorizer;
+use kdam::BarExt;
+use std::io::IsTerminal;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -61,6 +64,8 @@ impl VideoStreamer {
             .context("No video stream found")
             .unwrap();
 
+        let total_count = input.frames();
+        let time_base: f64 = input.time_base().into();
         let context = ffmpeg::codec::context::Context::from_parameters(input.parameters()).unwrap();
         let mut decoder = context.decoder().video().unwrap();
 
@@ -78,9 +83,7 @@ impl VideoStreamer {
         encoder.set_aspect_ratio(decoder.aspect_ratio());
         encoder.set_format(decoder.format());
         encoder.set_frame_rate(decoder.frame_rate());
-        //encoder.set_time_base(Some(decoder.frame_rate().unwrap().invert()));
-
-        //encoder.set_pix_fmt(ffmpeg::format::Pixel::YUV420P);
+        //encoder.set_time_base(rational_time_base);
 
         // Set AV1 specific options
         let mut opts = ffmpeg::Dictionary::new();
@@ -100,6 +103,23 @@ impl VideoStreamer {
 
         let msg_id = msg_id(&self.args.msg_name);
         let video_stream_index = input.index();
+        let start_time = Timestamp::now();
+
+        kdam::term::init(std::io::stderr().is_terminal());
+        let mut bar = kdam::tqdm!(
+            total = total_count as usize,
+            bar_format = format!(
+                "{{animation}} {} ",
+                "{percentage:3.1}% {rate:.4}{unit}/s|{elapsed human=true}|{remaining human=true}"
+                    .colorize("#EE6FF8")
+            ),
+            colour = kdam::Colour::gradient(&["#5A56E0", "#EE6FF8"]),
+            dynamic_ncols = true,
+            unit = "F",
+            unit_scale = true,
+            force_refresh = true
+        );
+        let mut frame_timestamp;
         for res in ictx.packets() {
             let (stream, packet) = res;
             if stream.index() != video_stream_index {
@@ -110,18 +130,20 @@ impl VideoStreamer {
 
             while decoder.receive_frame(&mut frame).is_ok() {
                 frame_count += 1;
-                info!("Processing frame {}", frame_count);
 
-                let timestamp = frame.timestamp();
-                frame.set_pts(timestamp);
+                frame_timestamp = frame.timestamp();
+                let time = time_base * frame_timestamp.unwrap_or(0) as f64;
+                frame.set_pts(frame_timestamp);
                 frame.set_kind(picture::Type::None);
                 encoder.send_frame(&frame).unwrap();
 
                 let mut packet = ffmpeg::Packet::empty();
+                let mut pkt_timestamp = start_time + Duration::from_secs_f64(time);
                 while encoder.receive_packet(&mut packet).is_ok() {
                     obu_count += 1;
                     if let Some(data) = packet.data() {
-                        let mut pkt = LenPacket::msg(msg_id, data.len());
+                        let mut pkt =
+                            LenPacket::msg_with_timestamp(msg_id, pkt_timestamp, data.len());
                         pkt.extend_from_slice(data);
                         if let Err(_) = self.client.send(pkt).await.0 {
                             self.client = Client::connect(self.args.db_addr)
@@ -129,21 +151,25 @@ impl VideoStreamer {
                                 .context("Failed to connect to elodin-db")?;
                         }
                     }
-                    stellarator::sleep(Duration::from_secs_f64(1.0 / 30.0)).await;
+                    pkt_timestamp.0 += 1;
                 }
+                bar.update(1);
             }
         }
 
-        // Flush the encoder
         encoder.send_eof().unwrap();
         let mut packet = ffmpeg::Packet::empty();
+        frame_timestamp = frame.timestamp();
+        let time = time_base * frame_timestamp.unwrap_or(0) as f64;
+        let mut pkt_timestamp = start_time + Duration::from_secs_f64(time);
         while encoder.receive_packet(&mut packet).is_ok() {
             obu_count += 1;
             if let Some(data) = packet.data() {
-                let mut pkt = LenPacket::msg(msg_id, data.len());
+                let mut pkt = LenPacket::msg_with_timestamp(msg_id, pkt_timestamp, data.len());
                 pkt.extend_from_slice(data);
                 if let Err(_) = self.client.send(pkt).await.0 {}
             }
+            pkt_timestamp.0 += 1;
         }
 
         info!("Video processing complete.");

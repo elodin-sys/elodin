@@ -12079,6 +12079,7 @@ dependencies = [
  "impeller2",
  "impeller2-stellar",
  "impeller2-wkt",
+ "kdam",
  "miette 5.10.0",
  "postcard",
  "stellarator",

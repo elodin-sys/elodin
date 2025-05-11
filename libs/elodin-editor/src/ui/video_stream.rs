@@ -64,7 +64,7 @@ pub struct VideoDecoderHandle {
 
 impl Default for VideoDecoderHandle {
     fn default() -> Self {
-        let (packet_tx, packet_rx) = flume::unbounded::<Vec<u8>>();
+        let (packet_tx, packet_rx) = flume::bounded::<Vec<u8>>(8);
         let (image_tx, image_rx) = flume::bounded(8);
         let width = Arc::new(AtomicU32::new(0));
         let frame_width = width.clone();
@@ -116,7 +116,7 @@ impl Default for VideoDecoderHandle {
 
 impl VideoDecoderHandle {
     pub fn process_frame(&mut self, frame_data: &[u8]) {
-        let _ = self.tx.send(frame_data.to_vec());
+        let _ = self.tx.try_send(frame_data.to_vec());
     }
 
     pub fn render_frame(&mut self, stream: &mut VideoStream) {
@@ -159,12 +159,9 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
             return;
         };
 
-        // Check if it's time to process a new frame
-        if stream.last_update.elapsed() > Duration::from_millis(16) {
-            if let StreamState::Streaming = stream.state {
-                decoder.render_frame(&mut stream);
-                stream.last_update = Instant::now();
-            }
+        if let StreamState::Streaming = stream.state {
+            decoder.render_frame(&mut stream);
+            stream.last_update = Instant::now();
         }
 
         if let StreamState::None = stream.state {
