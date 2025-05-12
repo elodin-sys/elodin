@@ -253,13 +253,13 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                 }
 
                 if let Some(frame_timestamp) = stream.frame_timestamp {
-                    if (frame_timestamp.0 - state.current_time.0.0).abs() > 200000 {
+                    if (frame_timestamp.0 - state.current_time.0.0).abs() > 500000 {
                         ui.painter()
                             .rect_filled(max_rect, 0, Color32::BLACK.opacity(0.75));
                         ui.put(
                             egui::Rect::from_center_size(
-                                max_rect.center(),
-                                egui::vec2(350.0, 20.0),
+                                max_rect.center_top() + egui::vec2(0., 16.0),
+                                egui::vec2(max_rect.width(), 20.0),
                             ),
                             egui::Label::new(
                                 egui::RichText::new(
