@@ -5,7 +5,7 @@ edition = "2021"
 description = "Streams video files to elodin-db after re-encoding to AV1"
 
 [dependencies]
-ffmpeg-next = "7.1.0"
+ffmpeg-next.version = "7.1.0"
 impeller2 = { path = "../../libs/impeller2" }
 impeller2-stellar = { path = "../../libs/impeller2/stellar" }
 impeller2-wkt = { path = "../../libs/impeller2/wkt" }
@@ -17,12 +17,6 @@ postcard = "1.0"
 stellarator.path = "../../libs/stellarator"
 byteorder = "1.5"
 bytes = "1.5"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 kdam.version = "0.6.2"
 kdam.features = ["gradient", "template", "unicode"]
-
-[[bin]]
-name = "video-streamer"
-path = "src/main.rs"

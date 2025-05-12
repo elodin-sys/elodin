@@ -106,5 +106,6 @@ in {
     (writeShellScriptBin "flash-mcu" (builtins.readFile ../scripts/flash-mcu.sh))
     (writeShellScriptBin "aleph-scan" (builtins.readFile ../scripts/aleph-scan.sh))
     aleph-status
+    video-streamer
   ];
 }
