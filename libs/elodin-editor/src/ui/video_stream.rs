@@ -14,6 +14,7 @@ use impeller2_wkt::{CurrentTimestamp, FixedRateMsgStream, FixedRateOp};
 use pic_scale::{
     ImageStore, ImageStoreMut, LinearScaler, ResamplingFunction, Scaling, ThreadingPolicy,
 };
+use video_toolbox::H264Decoder;
 
 use super::colors::{self, ColorExt};
 
@@ -66,49 +67,112 @@ pub struct VideoDecoderHandle {
     _handle: std::thread::JoinHandle<()>,
 }
 
+#[cfg(not(target_os = "macos"))]
+fn decode_video(
+    frame_width: Arc<AtomicU32>,
+    packet_rx: flume::Receiver<(Vec<u8>, Timestamp)>,
+    image_tx: flume::Sender<(ColorImage, Timestamp)>,
+) {
+    let mut decoder = openh264::decoder::Decoder::new().unwrap();
+    let mut scaler = LinearScaler::new(ResamplingFunction::Bilinear);
+    scaler.set_threading_policy(ThreadingPolicy::Adaptive);
+
+    let mut rgba = vec![];
+    while let Ok((packet, timestamp)) = packet_rx.recv() {
+        use openh264::formats::YUVSource;
+        if let Ok(Some(yuv)) = decoder.decode(&packet) {
+            let (width, height) = yuv.dimensions();
+            rgba.clear();
+            rgba.resize(width * height * 4, 0);
+            yuv.write_rgba8(&mut rgba);
+            let input = ImageStore::<'_, u8, 4>::borrow(&rgba, width, height).unwrap();
+
+            let (width, height) = (width as f64, height as f64);
+            let desired_width = frame_width.load(atomic::Ordering::Relaxed);
+            let aspect_ratio = height / width;
+            let new_width = width.min(desired_width as f64);
+            let new_height = (new_width * aspect_ratio) as usize;
+            let new_width = new_width as usize;
+
+            let mut image = ColorImage::new([new_width, new_height], Color32::TRANSPARENT);
+            let out = unsafe {
+                std::slice::from_raw_parts_mut(
+                    image.pixels.as_mut_ptr() as *mut u8,
+                    image.pixels.len() * size_of::<Color32>(),
+                )
+            };
+            let mut out = ImageStoreMut::<'_, u8, 4>::borrow(out, new_width, new_height).unwrap();
+
+            scaler.resize_rgba(&input, &mut out, false).unwrap();
+            let _ = image_tx.send((image, timestamp));
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn decode_video(
+    frame_width: Arc<AtomicU32>,
+    packet_rx: flume::Receiver<(Vec<u8>, Timestamp)>,
+    image_tx: flume::Sender<(ColorImage, Timestamp)>,
+) {
+    let mut video_toolbox = video_toolbox::VideoToolboxDecoder::new().unwrap();
+    let mut scaler = LinearScaler::new(ResamplingFunction::Bilinear);
+    scaler.set_threading_policy(ThreadingPolicy::Adaptive);
+
+    let mut rgba = vec![];
+    while let Ok((packet, timestamp)) = packet_rx.recv() {
+        if let Ok(Some(frame)) = video_toolbox.decode(&packet, 0) {
+            let width = frame.width();
+            let height = frame.height();
+            rgba.clear();
+            rgba.resize(width * height * 4, 0);
+            yuv::yuv_nv12_to_rgba(
+                &yuv::YuvBiPlanarImage {
+                    y_plane: frame.y_plane(),
+                    y_stride: frame.y_stride() as u32,
+                    uv_plane: frame.uv_plane(),
+                    uv_stride: frame.uv_stride() as u32,
+                    width: width as u32,
+                    height: height as u32,
+                },
+                &mut rgba,
+                (width * 4) as u32,
+                yuv::YuvRange::Full,
+                yuv::YuvStandardMatrix::Bt601,
+                Default::default(),
+            )
+            .unwrap();
+            let input = ImageStore::<'_, u8, 4>::borrow(&rgba, width, height).unwrap();
+
+            let (width, height) = (width as f64, height as f64);
+            let desired_width = frame_width.load(atomic::Ordering::Relaxed);
+            let aspect_ratio = height / width;
+            let new_width = width.min(desired_width as f64);
+            let new_height = (new_width * aspect_ratio) as usize;
+            let new_width = new_width as usize;
+
+            let mut image = ColorImage::new([new_width, new_height], Color32::TRANSPARENT);
+            let out = unsafe {
+                std::slice::from_raw_parts_mut(
+                    image.pixels.as_mut_ptr() as *mut u8,
+                    image.pixels.len() * size_of::<Color32>(),
+                )
+            };
+            let mut out = ImageStoreMut::<'_, u8, 4>::borrow(out, new_width, new_height).unwrap();
+
+            scaler.resize_rgba(&input, &mut out, false).unwrap();
+            let _ = image_tx.send((image, timestamp));
+        }
+    }
+}
+
 impl Default for VideoDecoderHandle {
     fn default() -> Self {
         let (packet_tx, packet_rx) = flume::bounded::<(Vec<u8>, Timestamp)>(8);
         let (image_tx, image_rx) = flume::bounded(8);
         let width = Arc::new(AtomicU32::new(0));
         let frame_width = width.clone();
-        let _handle = std::thread::spawn(move || {
-            let mut decoder = openh264::decoder::Decoder::new().unwrap();
-            let mut scaler = LinearScaler::new(ResamplingFunction::Bilinear);
-            scaler.set_threading_policy(ThreadingPolicy::Adaptive);
-
-            let mut rgba = vec![];
-            while let Ok((packet, timestamp)) = packet_rx.recv() {
-                use openh264::formats::YUVSource;
-                if let Ok(Some(yuv)) = decoder.decode(&packet) {
-                    let (width, height) = yuv.dimensions();
-                    rgba.clear();
-                    rgba.resize(width * height * 4, 0);
-                    yuv.write_rgba8(&mut rgba);
-                    let input = ImageStore::<'_, u8, 4>::borrow(&rgba, width, height).unwrap();
-
-                    let (width, height) = (width as f64, height as f64);
-                    let desired_width = frame_width.load(atomic::Ordering::Relaxed);
-                    let aspect_ratio = height / width;
-                    let new_width = width.min(desired_width as f64);
-                    let new_height = (new_width * aspect_ratio) as usize;
-                    let new_width = new_width as usize;
-
-                    let mut image = ColorImage::new([new_width, new_height], Color32::TRANSPARENT);
-                    let out = unsafe {
-                        std::slice::from_raw_parts_mut(
-                            image.pixels.as_mut_ptr() as *mut u8,
-                            image.pixels.len() * size_of::<Color32>(),
-                        )
-                    };
-                    let mut out =
-                        ImageStoreMut::<'_, u8, 4>::borrow(out, new_width, new_height).unwrap();
-
-                    scaler.resize_rgba(&input, &mut out, false).unwrap();
-                    let _ = image_tx.send((image, timestamp));
-                }
-            }
-        });
+        let _handle = std::thread::spawn(move || decode_video(frame_width, packet_rx, image_tx));
         VideoDecoderHandle {
             tx: packet_tx,
             rx: image_rx,

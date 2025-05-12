@@ -28,6 +28,7 @@ members = [
     "libs/stellarator/macros",
     "libs/stellarator/maitake",
     "libs/stellarator/maitake/util",
+    "libs/video-toolbox",
     "fsw/serial-bridge",
     "fsw/mekf",
     "fsw/lqr",

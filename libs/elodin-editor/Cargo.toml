@@ -99,8 +99,6 @@ jiff = "0.2"
 peg = "0.8.5"
 
 # video
-openh264 = "0.8"
-yuv = "0.8.4"
 pic-scale = "0.6"
 
 
@@ -130,6 +128,8 @@ impeller2-bevy.default-features = false
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.26.0"
 objc = "0.2.7"
+video-toolbox.path = "../video-toolbox"
+yuv = "0.8.4"
 
 # windows
 [target.'cfg(windows)'.dependencies]
@@ -137,3 +137,7 @@ winapi = { version = "0.3", features = ["winuser", "dwmapi", "uxtheme"] }
 image.version = "0.25"
 image.default-features = false
 image.features = ["png"]
+
+# non-macos
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+openh264 = "0.8"
