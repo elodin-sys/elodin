@@ -216,6 +216,13 @@ impl DB {
                     .and_then(|p| p.parse().ok())
                     .ok_or(Error::InvalidMsgId)?;
                 let msg_log = MsgLog::open(path)?;
+                if let Some(first_timestamp) = msg_log.timestamps().first() {
+                    start_timestamp = start_timestamp.min(first_timestamp.0);
+                }
+
+                if let Some((timestamp, _)) = msg_log.latest() {
+                    last_updated = timestamp.0.max(last_updated);
+                };
                 msg_logs.insert(msg_id.to_le_bytes(), msg_log);
             }
         }
@@ -243,6 +250,11 @@ impl DB {
             msg_logs,
             ..Default::default()
         };
+        let earliest_timestamp = if start_timestamp == i64::MAX {
+            Timestamp::now()
+        } else {
+            Timestamp(start_timestamp)
+        };
         Ok(DB {
             state: RwLock::new(state),
             path,
@@ -253,7 +265,7 @@ impl DB {
                 db_state.default_stream_time_step.as_nanos() as u64
             ),
             last_updated: AtomicCell::new(Timestamp(last_updated)),
-            earliest_timestamp: Timestamp(start_timestamp),
+            earliest_timestamp,
         })
     }
 
