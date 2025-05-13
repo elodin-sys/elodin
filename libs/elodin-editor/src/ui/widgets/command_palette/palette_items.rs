@@ -498,7 +498,7 @@ pub fn create_sql(tile_id: Option<TileId>) -> PaletteItem {
 pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Video Stream",
-        TILE_LABEL,
+        TILES_LABEL,
         move |_: In<String>| -> PaletteEvent {
             PalettePage::new(vec![
                 PaletteItem::new(

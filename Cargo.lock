@@ -4605,7 +4605,6 @@ name = "elodin-editor"
 version = "0.14.1"
 dependencies = [
  "arrow",
- "bbq2",
  "bevy",
  "bevy_color",
  "bevy_editor_cam",

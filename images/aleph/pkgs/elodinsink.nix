@@ -1,4 +1,4 @@
-  {
+{
   pkgs,
   crane,
   rustToolchain,
@@ -29,16 +29,15 @@
       gst_all_1.gst-plugins-good
     ];
     LIBCLANG_PATH = "${pkgs.buildPackages.libclang.lib}/lib";
-      };
+  };
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
   bin = craneLib.buildPackage (commonArgs
     // {
       inherit cargoArtifacts;
-    postInstall = ''
-          mkdir -p $out/lib/gstreamer-1.0
-          cp $out/lib/libgstelodin.so $out/lib/gstreamer-1.0/
-        '';
-
+      postInstall = ''
+        mkdir -p $out/lib/gstreamer-1.0
+        cp $out/lib/libgstelodin.so $out/lib/gstreamer-1.0/
+      '';
     });
 in
   bin
