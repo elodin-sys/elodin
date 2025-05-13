@@ -510,7 +510,7 @@ pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
                     move |In(msg_name): In<String>, mut tile_state: ResMut<tiles::TileState>| {
                         let msg_name = msg_name.trim();
                         let label = format!("Video Stream {}", msg_name);
-                        tile_state.create_video_stream_tile(msg_id(&msg_name), label, tile_id);
+                        tile_state.create_video_stream_tile(msg_id(msg_name), label, tile_id);
                         PaletteEvent::Exit
                     },
                 )

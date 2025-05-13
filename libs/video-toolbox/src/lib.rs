@@ -161,7 +161,7 @@ pub fn find_nal_units(data: &[u8]) -> Vec<NalUnit> {
             // Find the next start code or end of data
             let mut nal_end = data.len();
             for i in (nal_start + 3)..data.len() {
-                if (data[i - 3] == 0 && data[i - 2] == 0 && data[i - 1] == 1)
+                if (i <= 3 && data[i - 3] == 0 && data[i - 2] == 0 && data[i - 1] == 1)
                     || (i > 3
                         && data[i - 4] == 0
                         && data[i - 3] == 0

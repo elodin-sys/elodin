@@ -1,4 +1,4 @@
-use crate::{find_nal_units, DecodedFrame, Error, H264Decoder, NalType, Result};
+use crate::{DecodedFrame, Error, H264Decoder, NalType, Result, find_nal_units};
 use objc2::rc::Retained;
 use objc2_core_foundation::{CFDictionary, CFNumber, CFString};
 use objc2_core_media::{
@@ -6,17 +6,17 @@ use objc2_core_media::{
     CMVideoFormatDescriptionCreateFromH264ParameterSets,
 };
 use objc2_core_video::{
-    kCVPixelBufferPixelFormatTypeKey, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
     CVPixelBuffer, CVPixelBufferGetBaseAddressOfPlane, CVPixelBufferGetBytesPerRowOfPlane,
-    CVPixelBufferGetHeight, CVPixelBufferGetWidth, CVPixelBufferLockBaseAddress,
-    CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
+    CVPixelBufferGetHeight, CVPixelBufferGetPixelFormatType, CVPixelBufferGetWidth,
+    CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
+    kCVPixelBufferPixelFormatTypeKey, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
 };
 use objc2_video_toolbox::VTDecodeInfoFlags;
 use objc2_video_toolbox::{
     VTDecodeFrameFlags, VTDecompressionOutputCallbackRecord, VTDecompressionSession,
 };
 use std::ptr::NonNull;
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 
 struct DecoderRx {
     rx: mpsc::Receiver<Result<DecodedFrame>>,
@@ -145,12 +145,10 @@ impl VideoToolboxDecoder {
             unsafe { session.invalidate() }
         }
 
-        // Create the format description
         let format_description = self.create_format_description()?;
 
-        // Prepare callback
         let tx = Arc::clone(&self.tx);
-        let mut callback = VTDecompressionOutputCallbackRecord {
+        let callback = VTDecompressionOutputCallbackRecord {
             decompressionOutputCallback: Some(decompress_callback),
             decompressionOutputRefCon: Arc::into_raw(tx) as *mut _,
         };
@@ -169,9 +167,8 @@ impl VideoToolboxDecoder {
                 None,                // allocator
                 &format_description, // video_format_description
                 None,
-                //decoder_dict.as_ptr(),                // video_decoder_specification
                 Some(output_dict.as_opaque()), // destination_image_buffer_attributes
-                &mut callback,                 // output_callback
+                &callback,                     // output_callback
                 NonNull::new_unchecked(&mut session), // decompression_session_out
             )
         };
@@ -248,7 +245,7 @@ impl H264Decoder for VideoToolboxDecoder {
                         None,                                   // block_allocator
                         std::ptr::null_mut(),                   // custom_block_source
                         0,                                      // offset_to_data
-                        self.frame_data.len() as usize,         // data_length
+                        self.frame_data.len(),                  // data_length
                         0,                                      // flags
                         NonNull::new(&mut block_buffer_out as *mut _).unwrap(),
                     );
