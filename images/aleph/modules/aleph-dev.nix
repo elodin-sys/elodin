@@ -91,6 +91,12 @@ in {
     lsof
     gst_all_1.gstreamer
     gst_all_1.gst-plugins-base
+    gst_all_1.gst-plugins-good
+    gst_all_1.gst-plugins-bad
+    gst_all_1.gst-plugins-ugly
+    gst_all_1.gst-plugins-rs
+    nvidia-jetpack.l4t-gstreamer
+    nvidia-jetpack.l4t-multimedia
     cudaPackages.cuda_nvcc
     nvidia-jetpack.samples.cuda-test
     nvidia-jetpack.samples.cudnn-test
@@ -107,5 +113,6 @@ in {
     (writeShellScriptBin "aleph-scan" (builtins.readFile ../scripts/aleph-scan.sh))
     aleph-status
     video-streamer
+    elodinsink
   ];
 }

@@ -55,6 +55,8 @@ gst-launch-1.0 filesrc location=video.mp4 ! qtdemux !  ! h264parse config-interv
 ### Streaming from a Camera
 
 ```bash
+gst-launch-1.0 -v v4l2src device=/dev/video0 ! jpegdec ! nvvidconv ! nvv4l2h264enc  ! h264parse config-interval=-1 ! elodinsink db-address=127.0.0.1:2240 msg-name="webcam" # using aleph for webcams that use jpg
+gst-launch-1.0 -v v4l2src device=/dev/video0 ! nvv4l2decoder! nvvidconv ! nvv4l2h264enc  ! h264parse config-interval=-1 ! elodinsink db-address=127.0.0.1:2240 msg-name="webcam" # using aleph for webcams that use h264
 gst-launch-1.0 avfvideosrc ! vtenc_h264_hw max-keyframe-interval=12 realtime=true ! h264parse config-interval=-1 ! elodinsink db-address=127.0.0.1:2240 msg-name="webcam" # macos
 gst-launch-1.0 v4l2src device=/dev/video0 ! videoconvert ! x264enc ! video/x-h264, profile=baseline key-int-max=12 ! h264parse config-interval=-1 ! elodinsink db-address=127.0.0.1:2240 msg-name="webcam" # linux
 ```
