@@ -216,7 +216,6 @@ const SIMULATION_LABEL: &str = "Simulation";
 const TIME_LABEL: &str = "Time";
 const HELP_LABEL: &str = "Help";
 const PRESETS_LABEL: &str = "Presets";
-const VIDEO_LABEL: &str = "Video";
 
 pub fn create_action(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new("Create Action", TILES_LABEL, move |_: In<String>| {
@@ -499,7 +498,7 @@ pub fn create_sql(tile_id: Option<TileId>) -> PaletteItem {
 pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Video Stream",
-        VIDEO_LABEL,
+        TILE_LABEL,
         move |_: In<String>| -> PaletteEvent {
             PalettePage::new(vec![
                 PaletteItem::new(
