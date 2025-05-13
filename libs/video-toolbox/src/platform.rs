@@ -1,4 +1,4 @@
-use crate::{DecodedFrame, Error, H264Decoder, NalType, Result, find_nal_units};
+use crate::{find_nal_units, DecodedFrame, Error, H264Decoder, NalType, Result};
 use objc2::rc::Retained;
 use objc2_core_foundation::{CFDictionary, CFNumber, CFString};
 use objc2_core_media::{
@@ -6,17 +6,17 @@ use objc2_core_media::{
     CMVideoFormatDescriptionCreateFromH264ParameterSets,
 };
 use objc2_core_video::{
+    kCVPixelBufferPixelFormatTypeKey, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
     CVPixelBuffer, CVPixelBufferGetBaseAddressOfPlane, CVPixelBufferGetBytesPerRowOfPlane,
     CVPixelBufferGetHeight, CVPixelBufferGetWidth, CVPixelBufferLockBaseAddress,
-    CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress, kCVPixelBufferPixelFormatTypeKey,
-    kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+    CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
 };
 use objc2_video_toolbox::VTDecodeInfoFlags;
 use objc2_video_toolbox::{
     VTDecodeFrameFlags, VTDecompressionOutputCallbackRecord, VTDecompressionSession,
 };
 use std::ptr::NonNull;
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc, Arc};
 
 struct DecoderRx {
     rx: mpsc::Receiver<Result<DecodedFrame>>,

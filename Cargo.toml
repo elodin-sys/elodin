@@ -38,6 +38,7 @@ members = [
     "fsw/aleph-setup",
     "apps/inscriber",
     "fsw/video-streamer",
+    "fsw/gstreamer"
 ]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 

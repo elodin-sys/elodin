@@ -39,6 +39,7 @@
       libclang
       gfortran
       gfortran.cc.lib
+      ffmpeg-full
     ];
     LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
     doCheck = false;
