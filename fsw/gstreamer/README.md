@@ -3,7 +3,7 @@
 A GStreamer plugin that loads H.264 video streams, send Annex B NAL units to elodin-db as msgs
 ## Requirements
 
-- Rust 
+- Rust
 - GStreamer development libraries (1.18 or newer)
 - elodin-db instance running and accessible
 
@@ -54,11 +54,26 @@ gst-launch-1.0 filesrc location=video.mp4 ! qtdemux !  ! h264parse config-interv
 
 ### Streaming from a Camera
 
+#### Stream from a Genicam on Aleph
+This example uses aravis to load the video from a USB
 ```bash
-gst-launch-1.0 -v v4l2src device=/dev/video0 ! jpegdec ! nvvidconv ! nvv4l2h264enc  ! h264parse config-interval=-1 ! elodinsink db-address=127.0.0.1:2240 msg-name="webcam" # using aleph for webcams that use jpg
-gst-launch-1.0 -v v4l2src device=/dev/video0 ! nvv4l2decoder! nvvidconv ! nvv4l2h264enc  ! h264parse config-interval=-1 ! elodinsink db-address=127.0.0.1:2240 msg-name="webcam" # using aleph for webcams that use h264
-gst-launch-1.0 avfvideosrc ! vtenc_h264_hw max-keyframe-interval=12 realtime=true ! h264parse config-interval=-1 ! elodinsink db-address=127.0.0.1:2240 msg-name="webcam" # macos
-gst-launch-1.0 v4l2src device=/dev/video0 ! videoconvert ! x264enc ! video/x-h264, profile=baseline key-int-max=12 ! h264parse config-interval=-1 ! elodinsink db-address=127.0.0.1:2240 msg-name="webcam" # linux
+gst-launch-1.0 -v aravissrc ! bayer2rgb  ! videoconvert ! 'video/x-raw, format=NV12, width=1280,height=720' ! nvvidconv  ! nvv4l2h264enc ! video/x-h264, profile=baseline !  h264parse config-interval=-1 ! elodinsink db-address=127.0.0.1:2240 msg-name="cam"
+```
+
+#### Streaming from a JPG Webcam on Aleph
+```bash
+gst-launch-1.0 -v v4l2src device=/dev/video0 ! jpegdec ! nvvidconv ! nvv4l2h264enc  ! h264parse config-interval=-1 ! elodinsink db-address=127.0.0.1:2240 msg-name="webcam"
+```
+
+
+#### Streaming from a Webcam on Aleph
+```bash
+gst-launch-1.0 -v v4l2src device=/dev/video0 ! nvv4l2decoder! nvvidconv ! nvv4l2h264enc  ! h264parse config-interval=-1 ! elodinsink db-address=127.0.0.1:2240 msg-name="webcam"
+```
+
+#### Streaming from a Webcam on macOS
+```bash
+gst-launch-1.0 avfvideosrc ! vtenc_h264_hw max-keyframe-interval=12 realtime=true ! h264parse config-interval=-1 ! elodinsink db-address=127.0.0.1:2240 msg-name="webcam"
 ```
 
 ## Properties

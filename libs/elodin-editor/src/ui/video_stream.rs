@@ -327,7 +327,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                             ),
                             egui::Label::new(
                                 egui::RichText::new(
-                                    "Loss of Signal - Frame out date. Waiting for new keyframe",
+                                    "Loss of Signal - Frame out of date. Waiting for new keyframe",
                                 )
                                 .size(16.0)
                                 .color(colors::YOLK_DEFAULT),
