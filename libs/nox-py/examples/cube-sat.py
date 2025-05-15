@@ -18,7 +18,7 @@ earth_radius = 6378.1 * 1000
 altitude = 400 * 1000
 radius = earth_radius + altitude
 velocity = np.sqrt(G * M / radius)
-SIM_TIME_STEP = 1.0 / 60.0
+SIM_TIME_STEP = 1.0 / 120.0
 
 cache_directory = el._get_cache_dir()
 

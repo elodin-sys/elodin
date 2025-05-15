@@ -10,7 +10,7 @@ use crate::ui::{
     EntityData, EntityFilter, EntityPair, SelectedObject, SidebarState, colors, utils,
 };
 
-use super::{WidgetSystem, WidgetSystemExt};
+use super::{WidgetSystem, WidgetSystemExt, inspector::entity::search};
 
 #[derive(SystemParam)]
 pub struct Hierarchy<'w> {
@@ -115,38 +115,21 @@ pub fn header(
 ) -> egui::Response {
     ui.vertical(|ui| {
         egui::Frame::NONE
-            .outer_margin(egui::Margin::same(16))
-            .stroke(egui::Stroke::new(1.0, colors::BORDER_GREY))
-            .corner_radius(egui::CornerRadius::same(3))
-            .inner_margin(egui::Margin::same(8))
+            .inner_margin(egui::Margin::symmetric(16, 16))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.style_mut().spacing.item_spacing = egui::vec2(8.0, 0.0);
-
-                    ui.add(
-                        egui::widgets::Image::new(egui::load::SizedTexture::new(
-                            search_icon,
-                            [ui.spacing().interact_size.y, ui.spacing().interact_size.y],
-                        ))
-                        .tint(colors::with_opacity(colors::PRIMARY_CREAME, 0.4)),
-                    );
-
-                    ui.add(egui::TextEdit::singleline(&mut entity_filter.0).frame(false));
-                });
-            });
-
-        if !compact {
-            ui.separator();
-
-            egui::Frame::NONE
-                .inner_margin(egui::Margin::symmetric(16, 16))
-                .show(ui, |ui| {
+                if !compact {
                     ui.add(egui::Label::new(
                         egui::RichText::new("ENTITIES")
                             .color(colors::with_opacity(colors::PRIMARY_CREAME, 0.4)),
                     ));
-                });
-        }
+                }
+            });
+        ui.separator();
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(4, 8))
+            .show(ui, |ui| {
+                search(ui, &mut entity_filter.0, search_icon);
+            });
     })
     .response
 }

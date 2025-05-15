@@ -3,8 +3,7 @@ resolver = "2"
 members = [
     "libs/elodin-editor",
     "libs/nox",
-    "libs/nox-ecs",
-    "libs/nox-ecs-macros",
+    "libs/nox-ecs", "libs/nox-ecs-macros",
     "libs/nox-py",
     "libs/nox-frames",
     "libs/noxla",
@@ -29,6 +28,7 @@ members = [
     "libs/stellarator/macros",
     "libs/stellarator/maitake",
     "libs/stellarator/maitake/util",
+    "libs/video-toolbox",
     "fsw/serial-bridge",
     "fsw/mekf",
     "fsw/lqr",
@@ -37,6 +37,8 @@ members = [
     "fsw/tegrastats-bridge",
     "fsw/aleph-setup",
     "apps/inscriber",
+    "fsw/video-streamer",
+    "fsw/gstreamer"
 ]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 

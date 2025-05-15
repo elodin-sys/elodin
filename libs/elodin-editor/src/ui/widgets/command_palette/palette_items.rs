@@ -14,7 +14,7 @@ use bevy::{
 use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::TileId;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
-use impeller2::types::ComponentId;
+use impeller2::types::{ComponentId, msg_id};
 use impeller2_bevy::{ComponentMetadataRegistry, CurrentStreamId, PacketTx};
 use impeller2_wkt::{BodyAxes, EntityMetadata, IsRecording, SetDbSettings, SetStreamState};
 
@@ -210,12 +210,12 @@ pub struct MatchedPaletteItem<'a> {
     pub match_indices: Vec<usize>,
 }
 
-const VIEWPORT_LABEL: &str = "VIEWPORT";
-const TILES_LABEL: &str = "TILES";
-const SIMULATION_LABEL: &str = "SIMULATION";
-const TIME_LABEL: &str = "TIME";
-const HELP_LABEL: &str = "HELP";
-const PRESETS_LABEL: &str = "PRESETS";
+const VIEWPORT_LABEL: &str = "Viewport";
+const TILES_LABEL: &str = "Tiles";
+const SIMULATION_LABEL: &str = "Simulation";
+const TIME_LABEL: &str = "Time";
+const HELP_LABEL: &str = "Help";
+const PRESETS_LABEL: &str = "Presets";
 
 pub fn create_action(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new("Create Action", TILES_LABEL, move |_: In<String>| {
@@ -495,6 +495,30 @@ pub fn create_sql(tile_id: Option<TileId>) -> PaletteItem {
         },
     )
 }
+pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
+    PaletteItem::new(
+        "Create Video Stream",
+        TILES_LABEL,
+        move |_: In<String>| -> PaletteEvent {
+            PalettePage::new(vec![
+                PaletteItem::new(
+                    LabelSource::placeholder(
+                        "Enter the name of the msg containing the video frames",
+                    ),
+                    "",
+                    move |In(msg_name): In<String>, mut tile_state: ResMut<tiles::TileState>| {
+                        let msg_name = msg_name.trim();
+                        let label = format!("Video Stream {}", msg_name);
+                        tile_state.create_video_stream_tile(msg_id(msg_name), label, tile_id);
+                        PaletteEvent::Exit
+                    },
+                )
+                .default(),
+            ])
+            .into()
+        },
+    )
+}
 
 fn set_playback_speed() -> PaletteItem {
     PaletteItem::new("Set Playback Speed", TIME_LABEL, |_: In<String>| {
@@ -715,6 +739,7 @@ pub fn create_tiles(tile_id: TileId) -> PalettePage {
         create_monitor(Some(tile_id)),
         create_viewport(Some(tile_id)),
         create_sql(Some(tile_id)),
+        create_video_stream(Some(tile_id)),
     ])
 }
 
@@ -777,6 +802,7 @@ impl Default for PalettePage {
             create_monitor(None),
             create_viewport(None),
             create_sql(None),
+            create_video_stream(None),
             save_preset(),
             load_preset(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {

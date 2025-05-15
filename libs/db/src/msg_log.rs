@@ -66,7 +66,7 @@ impl MsgLog {
         Ok(())
     }
 
-    fn timestamps(&self) -> &[Timestamp] {
+    pub fn timestamps(&self) -> &[Timestamp] {
         <[Timestamp]>::ref_from_bytes(self.timestamps.get(..).expect("couldn't get full range"))
             .expect("mmep unaligned")
     }

@@ -105,7 +105,6 @@ async fn main() -> miette::Result<()> {
                     impeller2_wkt::InitialTimestamp::to_cpp()?,
                     impeller2_wkt::FixedRateBehavior::to_cpp()?,
                     impeller2_wkt::StreamBehavior::to_cpp()?,
-                    impeller2_wkt::StreamFilter::to_cpp()?,
                     impeller2_wkt::Stream::to_cpp()?,
                     impeller2_wkt::MsgStream::to_cpp()?,
                     vtable::Field::to_cpp()?,

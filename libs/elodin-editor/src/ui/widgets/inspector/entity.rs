@@ -93,7 +93,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                 });
             });
 
-        search(ui, state_mut.filter.as_mut(), icons.search);
+        search(ui, &mut state_mut.filter.0, icons.search);
 
         let matcher = SkimMatcherV2::default().smart_case().use_cache(true);
 
@@ -173,18 +173,16 @@ pub struct ComponentFilter(pub String);
 
 pub fn search(
     ui: &mut egui::Ui,
-    component_filter: &mut ComponentFilter,
+    filter: &mut String,
     search_icon: egui::TextureId,
 ) -> egui::Response {
     ui.vertical(|ui| {
         egui::Frame::NONE
-            .stroke(egui::Stroke::new(1., colors::BORDER_GREY))
             .corner_radius(egui::CornerRadius::same(3))
-            .inner_margin(egui::Margin::same(8))
+            .inner_margin(egui::Margin::same(4))
+            .fill(colors::SURFACE_SECONDARY)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.style_mut().spacing.item_spacing = egui::vec2(8.0, 0.0);
-
                     ui.add(
                         egui::widgets::Image::new(egui::load::SizedTexture::new(
                             search_icon,
@@ -193,7 +191,14 @@ pub fn search(
                         .tint(colors::with_opacity(colors::PRIMARY_CREAME, 0.4)),
                     );
 
-                    ui.add(egui::TextEdit::singleline(&mut component_filter.0).frame(false));
+                    let mut font_id = egui::TextStyle::Button.resolve(ui.style());
+                    font_id.size = 12.0;
+                    ui.add_sized(
+                        ui.available_size(),
+                        egui::TextEdit::singleline(filter)
+                            .frame(false)
+                            .font(font_id),
+                    );
                 });
             });
     })

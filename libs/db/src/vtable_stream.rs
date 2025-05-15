@@ -3,9 +3,9 @@ use std::{
     ops::Range,
     sync::{
         Arc,
-        atomic::{self, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
     },
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use impeller2::{
@@ -16,9 +16,7 @@ use impeller2::{
     vtable::{Op, RealizedOp, RealizedPair, VTable},
 };
 use impeller2_stellar::PacketSink;
-use impeller2_wkt::{
-    ComponentValue, FixedRateBehavior, FixedRateOp, InitialTimestamp, MeanOp, VTableMsg,
-};
+use impeller2_wkt::{ComponentValue, FixedRateBehavior, FixedRateOp, MeanOp, VTableMsg};
 use stellarator::{
     io::AsyncWrite,
     rent,
@@ -99,20 +97,7 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
                         .ok_or(Error::ComponentNotFound(component_id))?
                         .clone();
 
-                    let state = FixedRateStreamState::from_state(
-                        stream_id,
-                        req_id,
-                        Duration::from_nanos(behavior.timestep.unwrap_or_else(|| {
-                            db.default_stream_time_step.load(atomic::Ordering::Relaxed)
-                        })),
-                        match behavior.initial_timestamp {
-                            InitialTimestamp::Earliest => db.earliest_timestamp,
-                            InitialTimestamp::Latest => db.last_updated.latest(),
-                            InitialTimestamp::Manual(timestamp) => timestamp,
-                        },
-                        Default::default(),
-                        behavior.frequency.unwrap_or(60),
-                    );
+                    let state = db.get_or_insert_fixed_rate_state(stream_id, behavior);
                     plan.insert(
                         0,
                         StreamStage::FixedRate(FixedRateStage {
@@ -265,7 +250,7 @@ impl Field {
 
 struct FixedRateStage {
     component: Component,
-    state: FixedRateStreamState,
+    state: Arc<FixedRateStreamState>,
     last_tick: Instant,
 }
 

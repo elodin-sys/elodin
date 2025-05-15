@@ -107,6 +107,7 @@ pub fn tile_to_panel(
                     lua: action_tile.lua.clone(),
                 }))
             }
+            Pane::VideoStream(_) => None,
         },
         Tile::Container(container) => match container {
             egui_tiles::Container::Tabs(t) => {

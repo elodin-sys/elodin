@@ -1,0 +1,23 @@
+[package]
+name = "video-streamer"
+version = "0.1.0"
+edition = "2024"
+description = "Streams video files to elodin-db after re-encoding to AV1"
+publish = false
+
+[dependencies]
+ffmpeg-next.version = "7.1.0"
+impeller2 = { path = "../../libs/impeller2" }
+impeller2-stellar = { path = "../../libs/impeller2/stellar" }
+impeller2-wkt = { path = "../../libs/impeller2/wkt" }
+clap = { version = "4.4", features = ["derive"] }
+thiserror = "1.0"
+miette = { version = "5.10", features = ["fancy"] }
+anyhow = "1.0"
+postcard = "1.0"
+stellarator.path = "../../libs/stellarator"
+byteorder = "1.5"
+bytes = "1.5"
+
+kdam.version = "0.6.2"
+kdam.features = ["gradient", "template", "unicode"]

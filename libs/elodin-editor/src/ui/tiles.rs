@@ -26,6 +26,7 @@ use super::{
     images,
     monitor::{MonitorPane, MonitorWidget},
     sql_table::{SQLTablePane, SqlTable, SqlTableWidget},
+    video_stream::{IsTileVisible, VideoDecoderHandle},
     widgets::{
         WidgetSystem, WidgetSystemExt,
         button::{EImageButton, ETileButton},
@@ -140,6 +141,16 @@ impl TileState {
         self.tree_actions.push(TreeAction::AddSQLTable(tile_id));
     }
 
+    pub fn create_video_stream_tile(
+        &mut self,
+        msg_id: [u8; 2],
+        label: String,
+        tile_id: Option<TileId>,
+    ) {
+        self.tree_actions
+            .push(TreeAction::AddVideoStream(tile_id, msg_id, label));
+    }
+
     pub fn is_empty(&self) -> bool {
         self.tree.active_tiles().is_empty()
     }
@@ -188,6 +199,7 @@ pub enum Pane {
     Monitor(MonitorPane),
     SQLTable(SQLTablePane),
     ActionTile(ActionTilePane),
+    VideoStream(super::video_stream::VideoStreamPane),
 }
 
 impl Pane {
@@ -203,6 +215,7 @@ impl Pane {
             Pane::Monitor(monitor) => monitor.label.to_string(),
             Pane::SQLTable(..) => "SQL".to_string(),
             Pane::ActionTile(action) => action.label.to_string(),
+            Pane::VideoStream(video_stream) => video_stream.label.to_string(),
         }
     }
 
@@ -240,6 +253,14 @@ impl Pane {
             }
             Pane::ActionTile(pane) => {
                 ui.add_widget_with::<ActionTileWidget>(world, "action_tile", pane.entity);
+                egui_tiles::UiResponse::None
+            }
+            Pane::VideoStream(pane) => {
+                ui.add_widget_with::<super::video_stream::VideoStreamWidget>(
+                    world,
+                    "video_stream",
+                    pane.clone(),
+                );
                 egui_tiles::UiResponse::None
             }
         }
@@ -323,6 +344,7 @@ pub enum TreeAction {
     AddMonitor(Option<TileId>, EntityId, ComponentId),
     AddSQLTable(Option<TileId>),
     AddActionTile(Option<TileId>, String, String),
+    AddVideoStream(Option<TileId>, [u8; 2], String),
     DeleteTab(TileId),
     SelectTile(TileId),
 }
@@ -870,6 +892,35 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             ui_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
+                    TreeAction::AddVideoStream(parent_tile_id, msg_id, label) => {
+                        let entity = state_mut
+                            .commands
+                            .spawn((
+                                super::video_stream::VideoStream {
+                                    msg_id,
+                                    ..Default::default()
+                                },
+                                bevy::ui::Node {
+                                    position_type: PositionType::Absolute,
+                                    ..Default::default()
+                                },
+                                bevy::prelude::ImageNode {
+                                    image_mode: NodeImageMode::Stretch,
+                                    ..Default::default()
+                                },
+                                VideoDecoderHandle::default(),
+                            ))
+                            .id();
+                        let pane = Pane::VideoStream(super::video_stream::VideoStreamPane {
+                            entity,
+                            label: label.clone(),
+                        });
+                        if let Some(tile_id) =
+                            ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
+                        {
+                            ui_state.tree.make_active(|id, _| id == tile_id);
+                        }
+                    }
 
                     TreeAction::SelectTile(tile_id) => {
                         ui_state.tree.make_active(|id, _| id == tile_id);
@@ -933,6 +984,11 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     Pane::Monitor(_) => {}
                     Pane::SQLTable(_) => {}
                     Pane::ActionTile(_) => {}
+                    Pane::VideoStream(stream) => {
+                        if let Ok(mut stream) = state_mut.commands.get_entity(stream.entity) {
+                            stream.try_insert(IsTileVisible(active_tiles.contains(tile_id)));
+                        }
+                    }
                 }
             }
         })

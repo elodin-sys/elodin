@@ -26,8 +26,8 @@ use impeller2_wkt::{
     AssetId, BodyAxes, ComponentMetadata, CurrentTimestamp, DbSettings, DumpAssets, DumpMetadata,
     DumpMetadataResp, DumpSchema, DumpSchemaResp, EarliestTimestamp, EntityMetadata, ErrorResponse,
     FixedRateBehavior, GetDbSettings, GetEarliestTimestamp, Glb, IsRecording, LastUpdated, Line3d,
-    Material, Mesh, Panel, Stream, StreamBehavior, StreamFilter, StreamId, StreamTimestamp,
-    SubscribeLastUpdated, VTableMsg, VectorArrow, WorldPos,
+    Material, Mesh, Panel, Stream, StreamBehavior, StreamId, StreamTimestamp, SubscribeLastUpdated,
+    VTableMsg, VectorArrow, WorldPos,
 };
 use serde::de::DeserializeOwned;
 use std::{
@@ -706,6 +706,10 @@ pub trait CommandsExt {
     where
         M::Reply<Slice<Vec<u8>>>: Msg + DeserializeOwned + 'static,
         S: IntoSystem<In<Result<M::Reply<Slice<Vec<u8>>>, ErrorResponse>>, bool, Marker>;
+
+    fn send_req_reply_raw<S, M: Msg + Request, Marker>(&mut self, msg: M, handler: S)
+    where
+        S: IntoSystem<InRef<'static, OwnedPacket<PacketGrantR>>, bool, Marker>;
 }
 
 impl CommandsExt for Commands<'_, '_> {
@@ -761,25 +765,33 @@ impl CommandsExt for Commands<'_, '_> {
         };
         self.queue(cmd);
     }
+
+    fn send_req_reply_raw<S, M: Msg + Request, Marker>(&mut self, msg: M, handler: S)
+    where
+        S: IntoSystem<InRef<'static, OwnedPacket<PacketGrantR>>, bool, Marker>,
+    {
+        let system = IntoSystem::into_system(handler);
+
+        let cmd = ReplyHandlerCommand {
+            request: msg.into_len_packet(),
+            system,
+        };
+        self.queue(cmd);
+    }
 }
 
 pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPacket> {
     [
         Stream {
-            filter: StreamFilter {
-                component_id: None,
-                entity_id: None,
-            },
             behavior: StreamBehavior::FixedRate(FixedRateBehavior {
                 initial_timestamp: impeller2_wkt::InitialTimestamp::Earliest,
-                timestep: Some(Duration::from_secs_f64(1.0 / 60.0).as_nanos() as u64),
-                frequency: Some(60),
+                timestep: Duration::from_secs_f64(1.0 / 60.0).as_nanos() as u64,
+                frequency: 60,
             }),
             id: stream_id,
         }
         .into_len_packet(),
         Stream {
-            filter: StreamFilter::default(),
             behavior: StreamBehavior::RealTime,
             id: fastrand::u64(..),
         }
