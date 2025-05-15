@@ -43,45 +43,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// Decoded video frame information
 #[derive(Debug, Clone)]
 pub struct DecodedFrame {
-    // Store the actual pixel data instead of the buffer reference
-    pub y_plane: Vec<u8>,
-    pub uv_plane: Vec<u8>,
+    pub rgba: Vec<u8>,
     pub width: usize,
     pub height: usize,
-    pub y_stride: usize,
-    pub uv_stride: usize,
-}
-
-impl DecodedFrame {
-    /// Get the width of the frame in pixels
-    pub fn width(&self) -> usize {
-        self.width
-    }
-
-    /// Get the height of the frame in pixels
-    pub fn height(&self) -> usize {
-        self.height
-    }
-
-    /// Get the Y plane stride (bytes per row)
-    pub fn y_stride(&self) -> usize {
-        self.y_stride
-    }
-
-    /// Get the UV plane stride (bytes per row)
-    pub fn uv_stride(&self) -> usize {
-        self.uv_stride
-    }
-
-    /// Get a reference to the Y plane data
-    pub fn y_plane(&self) -> &[u8] {
-        &self.y_plane
-    }
-
-    /// Get a reference to the UV plane data
-    pub fn uv_plane(&self) -> &[u8] {
-        &self.uv_plane
-    }
 }
 
 /// Flag indicating NAL unit type
@@ -118,22 +82,6 @@ pub struct NalUnit<'a> {
     pub nal_type: NalType,
     /// Raw NAL unit data (without start code)
     pub data: &'a [u8],
-}
-
-/// H264 decoder using VideoToolbox
-pub trait H264Decoder {
-    fn new() -> Result<Self>
-    where
-        Self: Sized;
-
-    /// Decode H264 Annex-B NAL units
-    fn decode_nal(&mut self, nal_data: &[u8], pts: i64) -> Result<Option<DecodedFrame>>;
-
-    /// Decode a frame from a complete H264 Annex-B NAL packet
-    fn decode(&mut self, packet: &[u8], pts: i64) -> Result<Option<DecodedFrame>>;
-
-    /// Reset the decoder state
-    fn reset(&mut self) -> Result<()>;
 }
 
 /// Helper function to find NAL units in an Annex-B formatted buffer

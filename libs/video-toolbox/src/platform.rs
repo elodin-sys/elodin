@@ -1,4 +1,4 @@
-use crate::{find_nal_units, DecodedFrame, Error, H264Decoder, NalType, Result};
+use crate::{DecodedFrame, Error, NalType, Result, find_nal_units};
 use objc2::rc::Retained;
 use objc2_core_foundation::{CFDictionary, CFNumber, CFString};
 use objc2_core_media::{
@@ -6,24 +6,26 @@ use objc2_core_media::{
     CMVideoFormatDescriptionCreateFromH264ParameterSets,
 };
 use objc2_core_video::{
-    kCVPixelBufferPixelFormatTypeKey, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
-    CVPixelBuffer, CVPixelBufferGetBaseAddressOfPlane, CVPixelBufferGetBytesPerRowOfPlane,
-    CVPixelBufferGetHeight, CVPixelBufferGetPixelFormatType, CVPixelBufferGetWidth,
+    CVPixelBuffer, CVPixelBufferCreate, CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow,
+    CVPixelBufferGetDataSize, CVPixelBufferGetHeight, CVPixelBufferGetWidth,
     CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
+    kCVPixelBufferPixelFormatTypeKey, kCVPixelFormatType_24RGB,
+    kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
 };
-use objc2_video_toolbox::VTDecodeInfoFlags;
 use objc2_video_toolbox::{
     VTDecodeFrameFlags, VTDecompressionOutputCallbackRecord, VTDecompressionSession,
 };
+use objc2_video_toolbox::{VTDecodeInfoFlags, VTPixelTransferSession};
+use std::cell::RefCell;
 use std::ptr::NonNull;
-use std::sync::{mpsc, Arc};
+use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-struct DecoderRx {
-    rx: mpsc::Receiver<Result<DecodedFrame>>,
-}
-
-struct DecodedTx {
-    tx: mpsc::SyncSender<Result<DecodedFrame>>,
+struct DecompressContext {
+    frame: Rc<RefCell<Option<Result<DecodedFrame>>>>,
+    pixel_transfer: Retained<VTPixelTransferSession>,
+    pub desired_width: Arc<AtomicUsize>,
 }
 
 /// H264 decoder using VideoToolbox
@@ -31,14 +33,25 @@ pub struct VideoToolboxDecoder {
     decompression_session: Option<Retained<VTDecompressionSession>>,
     sps_data: Option<Vec<u8>>,
     pps_data: Option<Vec<u8>>,
-    tx: Arc<DecodedTx>,
-    rx: DecoderRx,
+    ctx: Rc<DecompressContext>,
+    frame: Rc<RefCell<Option<Result<DecodedFrame>>>>,
     frame_data: Vec<u8>,
 }
 
-// Callback function for decompression
+impl DecompressContext {
+    pub fn set_frame(&self, frame: DecodedFrame) {
+        let mut out = self.frame.borrow_mut();
+        *out = Some(Ok(frame));
+    }
+
+    pub fn set_err(&self, err: Error) {
+        let mut out = self.frame.borrow_mut();
+        *out = Some(Err(err));
+    }
+}
+
 extern "C-unwind" fn decompress_callback(
-    tx: *mut std::ffi::c_void,
+    ctx: *mut std::ffi::c_void,
     _source_frame_ref_con: *mut std::ffi::c_void,
     status: i32,
     _info_flags: VTDecodeInfoFlags,
@@ -46,67 +59,99 @@ extern "C-unwind" fn decompress_callback(
     _presentation_time_stamp: CMTime,
     _presentation_duration: CMTime,
 ) {
-    let tx = unsafe { &*(tx as *const DecodedTx) };
+    let ctx = unsafe { &*(ctx as *const DecompressContext) };
 
     if status != 0 {
-        let _ = tx.tx.send(Err(Error::VideoToolbox(status)));
+        ctx.set_err(Error::VideoToolbox(status));
         return;
     }
 
     let buffer = NonNull::new(buffer);
 
-    // Process the decoded frame
     if let Some(pixel_buffer) = buffer {
-        let width = unsafe { CVPixelBufferGetWidth(pixel_buffer.as_ref()) } as usize;
-        let height = unsafe { CVPixelBufferGetHeight(pixel_buffer.as_ref()) } as usize;
-        let y_stride =
-            unsafe { CVPixelBufferGetBytesPerRowOfPlane(pixel_buffer.as_ref(), 0) } as usize;
-        let uv_stride =
-            unsafe { CVPixelBufferGetBytesPerRowOfPlane(pixel_buffer.as_ref(), 1) } as usize;
+        let in_width = unsafe { CVPixelBufferGetWidth(pixel_buffer.as_ref()) } as f64;
+        let in_height = unsafe { CVPixelBufferGetHeight(pixel_buffer.as_ref()) } as f64;
 
-        unsafe {
-            CVPixelBufferLockBaseAddress(pixel_buffer.as_ref(), CVPixelBufferLockFlags::ReadOnly)
+        let desired_width = ctx.desired_width.load(Ordering::Relaxed);
+        let aspect_ratio = in_height / in_width;
+        let new_width = in_width.min(desired_width as f64);
+        let new_height = (new_width * aspect_ratio) as usize;
+        let new_width = new_width as usize;
+
+        let mut out_buffer = std::ptr::null_mut();
+        let status = unsafe {
+            CVPixelBufferCreate(
+                None,
+                new_width,
+                new_height,
+                kCVPixelFormatType_24RGB,
+                None,
+                NonNull::new_unchecked(&mut out_buffer),
+            )
         };
-
-        let y_ptr = unsafe { CVPixelBufferGetBaseAddressOfPlane(pixel_buffer.as_ref(), 0) };
-        let uv_ptr = unsafe { CVPixelBufferGetBaseAddressOfPlane(pixel_buffer.as_ref(), 1) };
-
-        if y_ptr.is_null() || uv_ptr.is_null() {
-            unsafe {
-                CVPixelBufferUnlockBaseAddress(
-                    pixel_buffer.as_ref(),
-                    CVPixelBufferLockFlags::ReadOnly,
-                )
-            };
-            let _ = tx.tx.send(Err(Error::DecodeFrame));
+        if status != 0 {
             return;
         }
 
-        let y_size = y_stride * height;
-        let uv_height = (height + 1) / 2;
-        let uv_size = uv_stride * uv_height;
+        let Some(out_buffer) = NonNull::new(out_buffer) else {
+            ctx.set_err(Error::DecodeFrame);
+            return;
+        };
 
-        // ideally we would somehow handle this in a zero copy manner, but the pixel buffers only
-        // lives for as long as this callback
-        let y_plane = unsafe { std::slice::from_raw_parts(y_ptr as *const u8, y_size).to_vec() };
-        let uv_plane = unsafe { std::slice::from_raw_parts(uv_ptr as *const u8, uv_size).to_vec() };
+        let status = unsafe {
+            ctx.pixel_transfer
+                .transfer_image(pixel_buffer.as_ref(), out_buffer.as_ref())
+        };
+        if status != 0 {
+            ctx.set_err(Error::DecodeFrame);
+            return;
+        }
+
+        let width = unsafe { CVPixelBufferGetWidth(out_buffer.as_ref()) } as usize;
+        let height = unsafe { CVPixelBufferGetHeight(out_buffer.as_ref()) } as usize;
+        let stride = unsafe { CVPixelBufferGetBytesPerRow(out_buffer.as_ref()) } as usize / 3;
 
         unsafe {
-            CVPixelBufferUnlockBaseAddress(pixel_buffer.as_ref(), CVPixelBufferLockFlags::ReadOnly)
+            CVPixelBufferLockBaseAddress(out_buffer.as_ref(), CVPixelBufferLockFlags::ReadOnly)
         };
 
+        let base_addr = unsafe { CVPixelBufferGetBaseAddress(out_buffer.as_ref()) };
+        let size = unsafe { CVPixelBufferGetDataSize(out_buffer.as_ref()) };
+
+        if base_addr.is_null() {
+            unsafe {
+                CVPixelBufferUnlockBaseAddress(
+                    out_buffer.as_ref(),
+                    CVPixelBufferLockFlags::ReadOnly,
+                )
+            };
+
+            ctx.set_err(Error::DecodeFrame);
+            return;
+        }
+
+        let slice = unsafe { std::slice::from_raw_parts(base_addr as *const [u8; 3], size / 3) };
+        let mut rgba = Vec::with_capacity(slice.len() * 4);
+        for slice in slice.chunks(stride) {
+            let slice = &slice[..width];
+            for chunk in slice {
+                let [r, g, b] = *chunk;
+                rgba.extend_from_slice(&[r, g, b, 255]);
+            }
+        }
         let frame = DecodedFrame {
-            y_plane,
-            uv_plane,
+            rgba,
             width,
             height,
-            y_stride,
-            uv_stride,
         };
 
-        let _ = tx.tx.send(Ok(frame));
+        unsafe {
+            CVPixelBufferUnlockBaseAddress(out_buffer.as_ref(), CVPixelBufferLockFlags::ReadOnly)
+        };
+
+        ctx.set_frame(frame);
     } else {
-        let _ = tx.tx.send(Err(Error::DecodeFrame));
+        ctx.set_err(Error::DecodeFrame);
     }
 }
 
@@ -147,10 +192,10 @@ impl VideoToolboxDecoder {
 
         let format_description = self.create_format_description()?;
 
-        let tx = Arc::clone(&self.tx);
+        let ctx = Rc::clone(&self.ctx);
         let callback = VTDecompressionOutputCallbackRecord {
             decompressionOutputCallback: Some(decompress_callback),
-            decompressionOutputRefCon: Arc::into_raw(tx) as *mut _,
+            decompressionOutputRefCon: Rc::into_raw(ctx) as *mut _,
         };
 
         let rgba = CFNumber::new_i32(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange as i32);
@@ -183,21 +228,34 @@ impl VideoToolboxDecoder {
     }
 }
 
-impl H264Decoder for VideoToolboxDecoder {
-    fn new() -> Result<Self> {
-        let (tx, rx) = mpsc::sync_channel(2);
+impl VideoToolboxDecoder {
+    pub fn new(desired_width: Arc<AtomicUsize>) -> Result<Self> {
+        let frame = Rc::new(RefCell::new(None));
+        let pixel_transfer = unsafe {
+            let mut session = std::ptr::null_mut();
+
+            let status = VTPixelTransferSession::create(None, NonNull::new_unchecked(&mut session));
+            if status != 0 {
+                return Err(Error::DecompressionSession);
+            }
+            Retained::from_raw(session).ok_or(Error::DecompressionSession)?
+        };
 
         Ok(Self {
             decompression_session: None,
             sps_data: None,
             pps_data: None,
             frame_data: vec![],
-            tx: Arc::new(DecodedTx { tx }),
-            rx: DecoderRx { rx },
+            ctx: Rc::new(DecompressContext {
+                pixel_transfer,
+                desired_width,
+                frame: frame.clone(),
+            }),
+            frame,
         })
     }
 
-    fn decode_nal(&mut self, nal_data: &[u8], pts: i64) -> Result<Option<DecodedFrame>> {
+    pub fn decode_nal(&mut self, nal_data: &[u8], pts: i64) -> Result<Option<DecodedFrame>> {
         if nal_data.is_empty() {
             return Ok(None);
         }
@@ -310,18 +368,16 @@ impl H264Decoder for VideoToolboxDecoder {
                     return Err(Error::DecodeFrame);
                 }
 
-                let frame = self.rx.rx.try_recv().ok();
-                if let Some(result) = frame {
-                    result.map(Some)
-                } else {
-                    Ok(None)
-                }
+                let Some(res) = self.frame.borrow_mut().take() else {
+                    return Ok(None);
+                };
+                res.map(Some)
             }
             _ => Ok(None),
         }
     }
 
-    fn decode(&mut self, packet: &[u8], pts: i64) -> Result<Option<DecodedFrame>> {
+    pub fn decode(&mut self, packet: &[u8], pts: i64) -> Result<Option<DecodedFrame>> {
         let nal_units = find_nal_units(packet);
 
         let mut result = None;
@@ -337,18 +393,5 @@ impl H264Decoder for VideoToolboxDecoder {
         }
 
         Ok(result)
-    }
-
-    fn reset(&mut self) -> Result<()> {
-        if let Some(session) = self.decompression_session.take() {
-            unsafe {
-                session.invalidate();
-            }
-        }
-
-        self.sps_data = None;
-        self.pps_data = None;
-
-        Ok(())
     }
 }
