@@ -2,10 +2,10 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use ffmpeg_next::format::Pixel;
 use ffmpeg_next::{self as ffmpeg, codec, encoder, picture};
-use impeller2::types::{msg_id, LenPacket, Timestamp};
+use impeller2::types::{LenPacket, Timestamp, msg_id};
 use impeller2_stellar::Client;
-use kdam::term::Colorizer;
 use kdam::BarExt;
+use kdam::term::Colorizer;
 use std::io::IsTerminal;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -76,7 +76,7 @@ impl Args {
         opts.set("g", &self.keyframe_interval.to_string());
         opts.set("preset", "medium");
         opts.set("profile:v", "baseline");
-        opts.set("header_at_keyframes", &"true");
+        opts.set("header_at_keyframes", "true");
         let mut encoder = encoder.open_with(opts)?;
 
         let mut frame = ffmpeg::util::frame::Video::empty();
@@ -158,7 +158,7 @@ impl Args {
                             data.len(),
                         );
                         pkt.extend_from_slice(data);
-                        if let Err(_) = client.send(pkt).await.0 {
+                        if client.send(pkt).await.0.is_err() {
                             client = Client::connect(self.db_addr)
                                 .await
                                 .context("Failed to connect to elodin-db")?;
@@ -179,7 +179,7 @@ impl Args {
             if let Some(data) = packet.data() {
                 let mut pkt = LenPacket::msg_with_timestamp(msg_id, pkt_timestamp, data.len());
                 pkt.extend_from_slice(data);
-                if let Err(_) = client.send(pkt).await.0 {}
+                let _ = client.send(pkt).await.0;
             }
             pkt_timestamp.0 += 1;
         }

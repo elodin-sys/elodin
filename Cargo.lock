@@ -4658,7 +4658,6 @@ dependencies = [
  "web-time",
  "winapi",
  "winit",
- "yuv",
  "zerocopy 0.8.14",
 ]
 
@@ -12480,6 +12479,7 @@ dependencies = [
  "objc2-foundation 0.3.1",
  "objc2-video-toolbox",
  "thiserror 1.0.69",
+ "wide",
 ]
 
 [[package]]
@@ -13546,15 +13546,6 @@ dependencies = [
  "quote",
  "syn 2.0.101",
  "synstructure",
-]
-
-[[package]]
-name = "yuv"
-version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d03c082fceb319b53bc35ddb2c8bf9c7f9a64f34090f18a0f05737def94c48d"
-dependencies = [
- "num-traits",
 ]
 
 [[package]]

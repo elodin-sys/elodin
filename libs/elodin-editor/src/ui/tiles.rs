@@ -26,7 +26,7 @@ use super::{
     images,
     monitor::{MonitorPane, MonitorWidget},
     sql_table::{SQLTablePane, SqlTable, SqlTableWidget},
-    video_stream::VideoDecoderHandle,
+    video_stream::{IsTileVisible, VideoDecoderHandle},
     widgets::{
         WidgetSystem, WidgetSystemExt,
         button::{EImageButton, ETileButton},
@@ -900,6 +900,14 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                     msg_id,
                                     ..Default::default()
                                 },
+                                bevy::ui::Node {
+                                    position_type: PositionType::Absolute,
+                                    ..Default::default()
+                                },
+                                bevy::prelude::ImageNode {
+                                    image_mode: NodeImageMode::Stretch,
+                                    ..Default::default()
+                                },
                                 VideoDecoderHandle::default(),
                             ))
                             .id();
@@ -976,7 +984,11 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     Pane::Monitor(_) => {}
                     Pane::SQLTable(_) => {}
                     Pane::ActionTile(_) => {}
-                    Pane::VideoStream(_) => {}
+                    Pane::VideoStream(stream) => {
+                        if let Ok(mut stream) = state_mut.commands.get_entity(stream.entity) {
+                            stream.try_insert(IsTileVisible(active_tiles.contains(tile_id)));
+                        }
+                    }
                 }
             }
         })

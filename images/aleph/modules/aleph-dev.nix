@@ -120,6 +120,5 @@ in {
     aleph-status
     video-streamer
     elodinsink
-    
   ];
 }

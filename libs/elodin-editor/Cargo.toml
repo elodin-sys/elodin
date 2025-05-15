@@ -94,9 +94,6 @@ flume = "0.11.1"
 jiff = "0.2"
 peg = "0.8.5"
 
-# video
-pic-scale = "0.6"
-
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 impeller2-bevy.path = "../../libs/impeller2/bevy"
@@ -125,7 +122,6 @@ impeller2-bevy.default-features = false
 cocoa = "0.26.0"
 objc = "0.2.7"
 video-toolbox.path = "../video-toolbox"
-yuv = "0.8.4"
 
 # windows
 [target.'cfg(windows)'.dependencies]
@@ -137,3 +133,4 @@ image.features = ["png"]
 # non-macos
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 openh264 = "0.8"
+pic-scale = "0.6"

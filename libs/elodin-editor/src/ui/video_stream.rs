@@ -1,20 +1,28 @@
-use std::sync::Arc;
-use std::sync::atomic::{self, AtomicU32};
-use std::time::Instant;
-
+use crate::ui::PrimaryWindow;
+use bevy::asset::Assets;
+use bevy::asset::RenderAssetUsages;
+use bevy::ecs::query::QueryData;
 use bevy::ecs::system::InRef;
+use bevy::image::Image;
+use bevy::prelude::With;
+use bevy::render::render_resource::Extent3d;
+use bevy::render::render_resource::TextureDimension;
+use bevy::ui::Display;
+use bevy::ui::Node;
+use bevy::ui::widget::ImageNode;
 use bevy::{
     ecs::system::SystemParam,
-    prelude::{Commands, Component, Entity, Query, Res, World},
+    prelude::{Commands, Component, Entity, Query, Res, ResMut, World},
+    ui::Val,
 };
-use egui::{self, Color32, ColorImage, TextureHandle, TextureOptions, Vec2};
+use egui::{self, Color32, TextureHandle, Vec2};
 use impeller2::types::{OwnedPacket, Timestamp};
 use impeller2_bevy::{CommandsExt, CurrentStreamId, PacketGrantR};
 use impeller2_wkt::{CurrentTimestamp, FixedRateMsgStream, FixedRateOp};
-use pic_scale::{
-    ImageStore, ImageStoreMut, LinearScaler, ResamplingFunction, Scaling, ThreadingPolicy,
-};
-use video_toolbox::H264Decoder;
+use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{self};
+use std::time::Instant;
 
 use super::colors::{self, ColorExt};
 
@@ -27,7 +35,7 @@ pub struct VideoStreamPane {
 #[derive(Component)]
 pub struct VideoStream {
     pub msg_id: [u8; 2],
-    pub current_frame: Option<ColorImage>,
+    pub current_frame: Option<Image>,
     pub frame_timestamp: Option<Timestamp>,
     pub texture_handle: Option<TextureHandle>,
     pub size: Vec2,
@@ -35,6 +43,9 @@ pub struct VideoStream {
     pub state: StreamState,
     pub last_update: Instant,
 }
+
+#[derive(Component)]
+pub struct IsTileVisible(pub bool);
 
 impl Default for VideoStream {
     fn default() -> Self {
@@ -62,17 +73,20 @@ pub enum StreamState {
 #[derive(Component)]
 pub struct VideoDecoderHandle {
     tx: flume::Sender<(Vec<u8>, Timestamp)>,
-    rx: flume::Receiver<(ColorImage, Timestamp)>,
-    width: Arc<AtomicU32>,
+    rx: flume::Receiver<(Image, Timestamp)>,
+    width: Arc<AtomicUsize>,
     _handle: std::thread::JoinHandle<()>,
 }
 
 #[cfg(not(target_os = "macos"))]
 fn decode_video(
-    frame_width: Arc<AtomicU32>,
+    frame_width: Arc<AtomicUsize>,
     packet_rx: flume::Receiver<(Vec<u8>, Timestamp)>,
-    image_tx: flume::Sender<(ColorImage, Timestamp)>,
+    image_tx: flume::Sender<(Image, Timestamp)>,
 ) {
+    use pic_scale::{
+        ImageStore, ImageStoreMut, LinearScaler, ResamplingFunction, Scaling, ThreadingPolicy,
+    };
     let mut decoder = openh264::decoder::Decoder::new().unwrap();
     let mut scaler = LinearScaler::new(ResamplingFunction::Bilinear);
     scaler.set_threading_policy(ThreadingPolicy::Adaptive);
@@ -94,16 +108,26 @@ fn decode_video(
             let new_height = (new_width * aspect_ratio) as usize;
             let new_width = new_width as usize;
 
-            let mut image = ColorImage::new([new_width, new_height], Color32::TRANSPARENT);
-            let out = unsafe {
-                std::slice::from_raw_parts_mut(
-                    image.pixels.as_mut_ptr() as *mut u8,
-                    image.pixels.len() * size_of::<Color32>(),
-                )
-            };
-            let mut out = ImageStoreMut::<'_, u8, 4>::borrow(out, new_width, new_height).unwrap();
+            let mut pixels = vec![0; new_width * new_height * 4];
 
-            scaler.resize_rgba(&input, &mut out, false).unwrap();
+            {
+                let mut out =
+                    ImageStoreMut::<'_, u8, 4>::borrow(&mut pixels, new_width, new_height).unwrap();
+                scaler.resize_rgba(&input, &mut out, false).unwrap();
+            }
+
+            let image = Image::new(
+                Extent3d {
+                    width: new_width as u32,
+                    height: new_height as u32,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2,
+                pixels,
+                bevy_render::render_resource::TextureFormat::Rgba8UnormSrgb,
+                RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+            );
+
             let _ = image_tx.send((image, timestamp));
         }
     }
@@ -111,56 +135,25 @@ fn decode_video(
 
 #[cfg(target_os = "macos")]
 fn decode_video(
-    frame_width: Arc<AtomicU32>,
+    frame_width: Arc<AtomicUsize>,
     packet_rx: flume::Receiver<(Vec<u8>, Timestamp)>,
-    image_tx: flume::Sender<(ColorImage, Timestamp)>,
+    image_tx: flume::Sender<(Image, Timestamp)>,
 ) {
-    let mut video_toolbox = video_toolbox::VideoToolboxDecoder::new().unwrap();
-    let mut scaler = LinearScaler::new(ResamplingFunction::Bilinear);
-    scaler.set_threading_policy(ThreadingPolicy::Adaptive);
+    let mut video_toolbox = video_toolbox::VideoToolboxDecoder::new(frame_width).unwrap();
 
-    let mut rgba = vec![];
     while let Ok((packet, timestamp)) = packet_rx.recv() {
         if let Ok(Some(frame)) = video_toolbox.decode(&packet, 0) {
-            let width = frame.width();
-            let height = frame.height();
-            rgba.clear();
-            rgba.resize(width * height * 4, 0);
-            yuv::yuv_nv12_to_rgba(
-                &yuv::YuvBiPlanarImage {
-                    y_plane: frame.y_plane(),
-                    y_stride: frame.y_stride() as u32,
-                    uv_plane: frame.uv_plane(),
-                    uv_stride: frame.uv_stride() as u32,
-                    width: width as u32,
-                    height: height as u32,
+            let image = Image::new(
+                Extent3d {
+                    width: frame.width as u32,
+                    height: frame.height as u32,
+                    depth_or_array_layers: 1,
                 },
-                &mut rgba,
-                (width * 4) as u32,
-                yuv::YuvRange::Full,
-                yuv::YuvStandardMatrix::Bt601,
-                Default::default(),
-            )
-            .unwrap();
-            let input = ImageStore::<'_, u8, 4>::borrow(&rgba, width, height).unwrap();
-
-            let (width, height) = (width as f64, height as f64);
-            let desired_width = frame_width.load(atomic::Ordering::Relaxed);
-            let aspect_ratio = height / width;
-            let new_width = width.min(desired_width as f64);
-            let new_height = (new_width * aspect_ratio) as usize;
-            let new_width = new_width as usize;
-
-            let mut image = ColorImage::new([new_width, new_height], Color32::TRANSPARENT);
-            let out = unsafe {
-                std::slice::from_raw_parts_mut(
-                    image.pixels.as_mut_ptr() as *mut u8,
-                    image.pixels.len() * size_of::<Color32>(),
-                )
-            };
-            let mut out = ImageStoreMut::<'_, u8, 4>::borrow(out, new_width, new_height).unwrap();
-
-            scaler.resize_rgba(&input, &mut out, false).unwrap();
+                TextureDimension::D2,
+                frame.rgba,
+                bevy_render::render_resource::TextureFormat::Rgba8UnormSrgb,
+                RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+            );
             let _ = image_tx.send((image, timestamp));
         }
     }
@@ -170,7 +163,7 @@ impl Default for VideoDecoderHandle {
     fn default() -> Self {
         let (packet_tx, packet_rx) = flume::bounded::<(Vec<u8>, Timestamp)>(8);
         let (image_tx, image_rx) = flume::bounded(8);
-        let width = Arc::new(AtomicU32::new(0));
+        let width = Arc::new(AtomicUsize::new(0));
         let frame_width = width.clone();
         let _handle = std::thread::spawn(move || decode_video(frame_width, packet_rx, image_tx));
         VideoDecoderHandle {
@@ -201,13 +194,23 @@ impl VideoDecoderHandle {
     }
 }
 
+#[derive(QueryData)]
+#[query_data(mutable)]
+pub struct WidgetQuery {
+    stream: &'static mut VideoStream,
+    decoder: &'static mut VideoDecoderHandle,
+    ui_node: &'static mut Node,
+    image_node: &'static mut ImageNode,
+}
+
 #[derive(SystemParam)]
 pub struct VideoStreamWidget<'w, 's> {
-    streams: Query<'w, 's, &'static mut VideoStream>,
-    decoders: Query<'w, 's, &'static mut VideoDecoderHandle>,
+    query: Query<'w, 's, WidgetQuery>,
     commands: Commands<'w, 's>,
     stream_id: Res<'w, CurrentStreamId>,
     current_time: Res<'w, CurrentTimestamp>,
+    images: ResMut<'w, Assets<Image>>,
+    window: Query<'w, 's, &'static bevy_egui::EguiContextSettings, With<PrimaryWindow>>,
 }
 
 impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
@@ -221,11 +224,14 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
         VideoStreamPane { entity, .. }: Self::Args,
     ) -> Self::Output {
         let mut state = state.get_mut(world);
-        let Ok(mut stream) = state.streams.get_mut(entity) else {
-            return;
-        };
 
-        let Ok(mut decoder) = state.decoders.get_mut(entity) else {
+        let Ok(WidgetQueryItem {
+            mut stream,
+            mut decoder,
+            mut image_node,
+            mut ui_node,
+        }) = state.query.get_mut(entity)
+        else {
             return;
         };
 
@@ -236,8 +242,6 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
 
         if let StreamState::None = stream.state {
             stream.state = StreamState::Streaming;
-            let entity = entity;
-
             state.commands.send_req_reply_raw(
                 FixedRateMsgStream {
                     msg_id: stream.msg_id,
@@ -246,27 +250,51 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                         behavior: Default::default(),
                     },
                 },
-                move |InRef(res): InRef<OwnedPacket<PacketGrantR>>,
+                move |InRef(pkt): InRef<OwnedPacket<PacketGrantR>>,
                       mut decoders: Query<&mut VideoDecoderHandle>| {
-                    match res {
-                        OwnedPacket::Msg(msg_buf) => {
-                            if let Ok(mut decoder) = decoders.get_mut(entity) {
-                                if let Some(timestamp) = msg_buf.timestamp {
-                                    decoder.process_frame(timestamp, &msg_buf.buf);
-                                } else {
-                                    println!("no timestamp");
-                                }
+                    if let OwnedPacket::Msg(msg_buf) = pkt {
+                        if let Ok(mut decoder) = decoders.get_mut(entity) {
+                            if let Some(timestamp) = msg_buf.timestamp {
+                                decoder.process_frame(timestamp, &msg_buf.buf);
                             }
                         }
-                        _ => {}
-                    };
+                    }
                     false
                 },
             );
         }
 
-        let available_size = ui.available_size();
         let max_rect = ui.max_rect();
+
+        let Some(egui_settings) = state.window.iter().next() else {
+            return;
+        };
+
+        let scale_factor = egui_settings.scale_factor;
+        let viewport_pos = max_rect.left_top().to_vec2() * scale_factor;
+        let viewport_size = max_rect.size() * scale_factor;
+
+        let (width, height) = if let Some(image) = state.images.get(&image_node.image) {
+            let aspect_ratio = image.height() as f32 / image.width() as f32;
+            let height = viewport_size.x * aspect_ratio;
+            if height > viewport_size.y {
+                let width = viewport_size.y / aspect_ratio;
+                (width, viewport_size.y)
+            } else {
+                (viewport_size.x, height)
+            }
+        } else {
+            (viewport_size.x, viewport_size.y)
+        };
+
+        let x_offset = (viewport_size.x - width) / 2.0;
+        let y_offset = (viewport_size.y - height) / 2.0;
+        ui_node.left = Val::Px(viewport_pos.x + x_offset);
+        ui_node.top = Val::Px(viewport_pos.y + y_offset);
+        ui_node.width = Val::Px(width);
+        ui_node.height = Val::Px(height);
+        ui_node.max_width = Val::Px(viewport_size.x);
+        ui_node.max_height = Val::Px(viewport_size.y);
 
         match &stream.state {
             StreamState::None => {
@@ -275,45 +303,12 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                 });
             }
             StreamState::Streaming => {
-                let aspect_ratio = if stream.size.y > 0.0 {
-                    stream.size.x / stream.size.y
-                } else {
-                    16.0 / 9.0
-                };
-                let width = (available_size.x).min(available_size.y * aspect_ratio);
-                let height = width / aspect_ratio;
-                let display_size = Vec2::new(width, height);
-                decoder.width.store(width as u32, atomic::Ordering::Relaxed);
+                decoder
+                    .width
+                    .store(width as usize, atomic::Ordering::Relaxed);
 
                 if let Some(frame) = stream.current_frame.take() {
-                    if stream.texture_handle.is_none() {
-                        let texture_handle = ui.ctx().load_texture(
-                            format!("video_stream_{}", entity.index()),
-                            frame,
-                            TextureOptions::default(),
-                        );
-                        stream.texture_handle = Some(texture_handle);
-                    } else if let Some(texture) = &mut stream.texture_handle {
-                        texture.set(frame, TextureOptions::default());
-                    }
-                }
-
-                if let Some(texture) = &stream.texture_handle {
-                    ui.centered_and_justified(|ui| {
-                        ui.add(egui::Image::new(egui::load::SizedTexture::new(
-                            texture.id(),
-                            display_size,
-                        )));
-                    });
-                } else {
-                    ui.centered_and_justified(|ui| {
-                        ui.spinner();
-                        ui.add(egui::Label::new(
-                            egui::RichText::new("Waiting for first frame")
-                                .size(16.0)
-                                .color(colors::PEACH_DEFAULT),
-                        ));
-                    });
+                    image_node.image = state.images.add(frame);
                 }
 
                 if let Some(frame_timestamp) = stream.frame_timestamp {
@@ -322,7 +317,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                             .rect_filled(max_rect, 0, Color32::BLACK.opacity(0.75));
                         ui.put(
                             egui::Rect::from_center_size(
-                                max_rect.center_top() + egui::vec2(0., 16.0),
+                                max_rect.center_top() + egui::vec2(0., 64.0),
                                 egui::vec2(max_rect.width(), 20.0),
                             ),
                             egui::Label::new(
@@ -341,6 +336,16 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                     ui.colored_label(super::colors::REDDISH_DEFAULT, format!("Error: {}", error));
                 });
             }
+        }
+    }
+}
+
+pub fn set_visibility(mut query: Query<(&mut Node, &IsTileVisible)>) {
+    for (mut ui_node, is_visible) in &mut query {
+        if is_visible.0 {
+            ui_node.display = Display::Block;
+        } else {
+            ui_node.display = Display::None;
         }
     }
 }
