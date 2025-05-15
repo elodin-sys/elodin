@@ -1650,8 +1650,7 @@ impl DBVisitor {
     fn vtable(
         &self,
         components: &HashMap<(EntityId, ComponentId), Component>,
-    ) -> Result<VTable<Vec<impeller2::vtable::Op>, Vec<u8>, Vec<impeller2::vtable::Field>>, Error>
-    {
+    ) -> Result<VTable, Error> {
         let mut fields = vec![];
         let mut offset = 0;
         self.visit(components, |entity| {
