@@ -3,7 +3,8 @@ resolver = "2"
 members = [
     "libs/elodin-editor",
     "libs/nox",
-    "libs/nox-ecs", "libs/nox-ecs-macros",
+    "libs/nox-ecs",
+    "libs/nox-ecs-macros",
     "libs/nox-py",
     "libs/nox-frames",
     "libs/noxla",
