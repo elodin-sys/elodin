@@ -22,7 +22,7 @@ use crate::{
     Offset, SelectedTimeRange, TimeRangeBehavior,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        self, EntityData, HdrEnabled,
+        self, EntityData, HdrEnabled, colors,
         tiles::{self, SyncViewportParams},
         widgets::plot::{GraphBundle, default_component_values},
     },
@@ -732,6 +732,26 @@ pub fn load_preset_inner(name: String) -> PaletteItem {
     )
 }
 
+pub fn set_color_scheme() -> PaletteItem {
+    PaletteItem::new("Set Color Scheme", PRESETS_LABEL, |_: In<String>| {
+        let schemes = [
+            ("DARK", &colors::DARK),
+            ("LIGHT", &colors::LIGHT),
+            ("CATPPUCINI LATTE", &colors::CATPPUCINI_LATTE),
+            ("CATPPUCINI MOCHA", &colors::CATPPUCINI_MOCHA),
+            ("CATPPUCINI MACCIHAITO", &colors::CATPPUCINI_MACCHIATO),
+        ];
+        let mut items = vec![];
+        for (name, schema) in schemes {
+            items.push(PaletteItem::new(name, "", move |_: In<String>| {
+                colors::set_schema(schema);
+                PaletteEvent::Exit
+            }));
+        }
+        PalettePage::new(items).into()
+    })
+}
+
 pub fn create_tiles(tile_id: TileId) -> PalettePage {
     PalettePage::new(vec![
         create_graph(Some(tile_id)),
@@ -805,6 +825,7 @@ impl Default for PalettePage {
             create_video_stream(None),
             save_preset(),
             load_preset(),
+            set_color_scheme(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {
                 let _ = opener::open("https://docs.elodin.systems");
                 PaletteEvent::Exit

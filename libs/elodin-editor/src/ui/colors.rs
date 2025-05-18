@@ -10,24 +10,6 @@ use impeller2_wkt::Color;
 pub const WHITE: Color32 = Color32::WHITE;
 pub const TRANSPARENT: Color32 = Color32::TRANSPARENT;
 
-pub const PRIMARY_CREAME: Color32 = Color32::from_rgb(0xFF, 0xFB, 0xF0);
-pub const PRIMARY_CREAME_6: Color32 = Color32::from_rgb(0x99, 0x97, 0x90);
-pub const PRIMARY_CREAME_8: Color32 = Color32::from_rgb(0xCC, 0xC9, 0xC0);
-pub const PRIMARY_CREAME_9: Color32 = Color32::from_rgb(0xE6, 0xE2, 0xD8);
-pub const PRIMARY_CREAME_5: Color32 = Color32::from_rgb(0x22, 0x21, 0x21);
-
-pub const PRIMARY_SMOKE: Color32 = Color32::from_rgb(0x0D, 0x0D, 0x0D);
-
-pub const BLACK_BLACK_600: Color32 = Color32::from_rgb(0x1F, 0x1F, 0x1F);
-
-pub const BORDER_GREY: Color32 = Color32::from_rgb(0x20, 0x20, 0x20); // white * 0.05
-
-pub const PRIMARY_ONYX: Color32 = Color32::from_rgb(0x17, 0x16, 0x15);
-pub const PRIMARY_ONYX_5: Color32 = Color32::from_rgb(0x97, 0x96, 0x96);
-pub const PRIMARY_ONYX_6: Color32 = Color32::from_rgb(0x74, 0x73, 0x73);
-pub const PRIMARY_ONYX_8: Color32 = Color32::from_rgb(0x45, 0x45, 0x44);
-pub const PRIMARY_ONYX_9: Color32 = Color32::from_rgb(0x2E, 0x2D, 0x2C);
-
 pub const TURQUOISE_DEFAULT: Color32 = Color32::from_rgb(0x69, 0xB3, 0xBF);
 pub const SLATE_DEFAULT: Color32 = Color32::from_rgb(0x7F, 0x70, 0xFF);
 pub const PUMPKIN_DEFAULT: Color32 = Color32::from_rgb(0xFF, 0x6F, 0x1E);
@@ -175,9 +157,15 @@ pub struct ColorScheme {
     pub icon_secondary: Color32,
 
     pub border_primary: Color32,
+
+    pub highlight: Color32,
+    pub error: Color32,
+    pub success: Color32,
+
+    pub shadow: Color32,
 }
 
-static DARK: ColorScheme = ColorScheme {
+pub static DARK: ColorScheme = ColorScheme {
     bg_primary: Color32::from_rgb(0x1F, 0x1F, 0x1F),
     bg_secondary: Color32::from_rgb(0x16, 0x16, 0x16),
 
@@ -189,14 +177,100 @@ static DARK: ColorScheme = ColorScheme {
     icon_secondary: Color32::from_rgb(0x62, 0x62, 0x62),
 
     border_primary: Color32::from_rgb(0x2E, 0x2D, 0x2C),
+
+    highlight: Color32::from_rgb(0x14, 0x5F, 0xCF),
+    error: REDDISH_DEFAULT,
+    success: MINT_DEFAULT,
+
+    shadow: Color32::BLACK,
+};
+
+pub static LIGHT: ColorScheme = ColorScheme {
+    bg_primary: Color32::from_rgb(0xFF, 0xFB, 0xF0),
+    bg_secondary: Color32::from_rgb(0xE6, 0xE2, 0xD8),
+
+    text_primary: Color32::from_rgb(0x17, 0x16, 0x15),
+    text_secondary: Color32::from_rgb(0x2E, 0x2D, 0x2C),
+    text_tertiary: Color32::from_rgb(0x45, 0x45, 0x44),
+
+    icon_primary: Color32::from_rgb(0x17, 0x16, 0x15),
+    icon_secondary: Color32::from_rgb(0x2E, 0x2D, 0x2C),
+
+    border_primary: Color32::from_rgb(0xCD, 0xC3, 0xB0),
+
+    highlight: Color32::from_rgb(0x14, 0x5F, 0xCF),
+    error: REDDISH_DEFAULT,
+    success: MINT_DEFAULT,
+
+    shadow: Color32::BLACK,
+};
+
+pub static CATPPUCINI_LATTE: ColorScheme = ColorScheme {
+    bg_primary: Color32::from_rgb(0xEF, 0xF1, 0xF5),
+    bg_secondary: Color32::from_rgb(0xDC, 0xE0, 0xE8),
+
+    text_primary: Color32::from_rgb(0x4C, 0x4F, 0x69),
+    text_secondary: Color32::from_rgb(0x5C, 0x5F, 0x77),
+    text_tertiary: Color32::from_rgb(0x6C, 0x6F, 0x85),
+
+    icon_primary: Color32::from_rgb(0x40, 0x40, 0x40),
+    icon_secondary: Color32::from_rgb(0x80, 0x80, 0x80),
+
+    border_primary: Color32::from_rgb(0xCC, 0xD0, 0xDA),
+
+    highlight: Color32::from_rgb(0x7C, 0x7F, 0x93),
+    error: Color32::from_rgb(0xE6, 0x45, 0x53),
+    success: Color32::from_rgb(0x40, 0xA0, 0x2B),
+
+    shadow: Color32::BLACK,
+};
+
+pub static CATPPUCINI_MOCHA: ColorScheme = ColorScheme {
+    bg_primary: Color32::from_rgb(0x1E, 0x1E, 0x2E),
+    bg_secondary: Color32::from_rgb(0x11, 0x11, 0x1B),
+
+    text_primary: Color32::from_rgb(0xCD, 0xD6, 0xF4),
+    text_secondary: Color32::from_rgb(0xBA, 0xC2, 0xDE),
+    text_tertiary: Color32::from_rgb(0xA6, 0xAD, 0xC8),
+
+    icon_primary: Color32::from_rgb(0xCD, 0xD6, 0xF4),
+    icon_secondary: Color32::from_rgb(0xBA, 0xC2, 0xDE),
+
+    border_primary: Color32::from_rgb(0x31, 0x32, 0x44),
+
+    highlight: Color32::from_rgb(0x93, 0x99, 0xB2),
+    error: Color32::from_rgb(0xF3, 0x8B, 0xA8),
+    success: Color32::from_rgb(0xA6, 0xE3, 0xA1),
+
+    shadow: Color32::BLACK,
+};
+
+pub static CATPPUCINI_MACCHIATO: ColorScheme = ColorScheme {
+    bg_primary: Color32::from_rgb(0x24, 0x27, 0x3A),
+    bg_secondary: Color32::from_rgb(0x1E, 0x20, 0x30),
+
+    text_primary: Color32::from_rgb(0xCA, 0xD3, 0xF5),
+    text_secondary: Color32::from_rgb(0xA5, 0xAD, 0xCB),
+    text_tertiary: Color32::from_rgb(0xB8, 0xC0, 0xE0),
+
+    icon_primary: Color32::from_rgb(0xCA, 0xD3, 0xF5),
+    icon_secondary: Color32::from_rgb(0xA5, 0xAD, 0xCB),
+
+    border_primary: Color32::from_rgb(0x45, 0x47, 0x5A),
+
+    highlight: Color32::from_rgb(0x6E, 0x73, 0x8D),
+    error: Color32::from_rgb(0xED, 0x87, 0x96),
+    success: Color32::from_rgb(0xA6, 0xDA, 0x95),
+
+    shadow: Color32::BLACK,
 };
 
 static COLOR_SCHEME: AtomicPtr<ColorScheme> = AtomicPtr::new(std::ptr::null_mut());
 
-pub fn get_schema() -> &'static ColorScheme {
+pub fn get_scheme() -> &'static ColorScheme {
     let ptr = COLOR_SCHEME.load(atomic::Ordering::Relaxed);
     if ptr.is_null() {
-        &DARK
+        &CATPPUCINI_LATTE
     } else {
         unsafe { &*ptr }
     }

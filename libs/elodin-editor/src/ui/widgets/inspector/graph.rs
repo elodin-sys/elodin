@@ -16,7 +16,7 @@ use impeller2_bevy::ComponentMetadataRegistry;
 
 use crate::ui::{
     EntityData, SettingModal, SettingModalState,
-    colors::{self, with_opacity},
+    colors::{self, get_scheme, with_opacity},
     theme,
     utils::MarginSides,
     widgets::{
@@ -67,7 +67,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
             ui,
             [icons.add],
             &mut graph_state.label,
-            colors::PRIMARY_CREAME,
+            get_scheme().text_primary,
             graph_label_margin,
         );
         if add_clicked {
@@ -81,7 +81,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                 ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new("WIDTH")
-                            .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
+                            .color(with_opacity(get_scheme().text_primary, 0.6)),
                     );
                     ui.separator();
                     ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
@@ -91,7 +91,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
 
                 ui.add_space(8.0);
                 ui.style_mut().spacing.slider_width = ui.available_size().x;
-                ui.style_mut().visuals.widgets.inactive.bg_fill = colors::PRIMARY_ONYX_8;
+                ui.style_mut().visuals.widgets.inactive.bg_fill = get_scheme().border_primary;
                 ui.add(egui::Slider::new(&mut graph_state.line_width, 1.0..=15.0).show_value(false))
             });
         ui.separator();
@@ -100,7 +100,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
             .show(ui, |ui| {
                 ui.label(
                     egui::RichText::new("GRAPH TYPE")
-                        .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
+                        .color(with_opacity(get_scheme().text_primary, 0.6)),
                 );
                 ui.add_space(8.0);
                 theme::configure_combo_box(ui.style_mut());
@@ -125,7 +125,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                 ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new("Y Bounds")
-                            .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
+                            .color(with_opacity(get_scheme().text_primary, 0.6)),
                     );
                     ui.add_space(8.0);
                     theme::configure_input_with_border(ui.style_mut());
@@ -139,7 +139,8 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new("Min").color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
+                        egui::RichText::new("Min")
+                            .color(with_opacity(get_scheme().text_primary, 0.6)),
                     );
                     ui.add_space(16.0);
                     ui.add_enabled(
@@ -150,7 +151,8 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new("Max").color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
+                        egui::RichText::new("Max")
+                            .color(with_opacity(get_scheme().text_primary, 0.6)),
                     );
                     ui.add_space(16.0);
                     ui.add_enabled(
@@ -170,7 +172,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     ui,
                     [icons.add],
                     &entity_metadata.name,
-                    colors::PRIMARY_CREAME,
+                    get_scheme().text_primary,
                     entity_label_margin,
                 );
                 if add_clicked {
@@ -190,7 +192,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                         ui,
                         [icons.subtract],
                         component_label,
-                        with_opacity(colors::PRIMARY_CREAME, 0.3),
+                        with_opacity(get_scheme().text_primary, 0.3),
                         component_label_margin,
                     );
                     if subtract_clicked {

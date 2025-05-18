@@ -18,6 +18,7 @@ use big_space::GridCell;
 use egui::CornerRadius;
 use egui_tiles::TileId;
 use impeller2::types::{ComponentId, EntityId};
+use self::colors::get_scheme;
 use impeller2_bevy::ComponentValueMap;
 use impeller2_wkt::EntityMetadata;
 use widgets::{
@@ -288,7 +289,7 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
             .frame(
                 egui::Frame {
                     fill: Color32::TRANSPARENT,
-                    stroke: egui::Stroke::new(0.0, colors::BORDER_GREY),
+                    stroke: egui::Stroke::new(0.0, get_scheme().border_primary),
                     ..Default::default()
                 }
                 .inner_margin(
@@ -588,8 +589,8 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
                     .title_bar(false)
                     .resizable(false)
                     .frame(egui::Frame {
-                        fill: colors::with_opacity(colors::PRIMARY_SMOKE, 0.5),
-                        stroke: egui::Stroke::new(1.0, colors::with_opacity(colors::WHITE, 0.5)),
+                        fill: colors::with_opacity(get_scheme().bg_secondary, 0.5),
+                        stroke: egui::Stroke::new(1.0, colors::with_opacity(get_scheme().text_primary, 0.5)),
                         inner_margin: egui::Margin::symmetric(16, 8),
                         ..Default::default()
                     })

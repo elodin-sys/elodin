@@ -22,7 +22,7 @@ use std::{
 use crate::VERSION;
 
 use super::{
-    colors::{self, ColorExt},
+    colors::{self, ColorExt, get_scheme},
     images,
     theme::{self, corner_radius_sm},
     widgets::{RootWidgetSystem, RootWidgetSystemExt, button::EButton},
@@ -280,7 +280,7 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                         ui.painter().rect_filled(
                             ui.max_rect(),
                             egui::CornerRadius::ZERO,
-                            colors::BLACK_BLACK_600,
+                            get_scheme().bg_primary,
                         );
                         ui.add_space(87.);
                         ui.add(egui::Image::new(SizedTexture::new(
@@ -290,7 +290,7 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                         ui.add_space(10.0);
                         ui.label(
                             RichText::new(format!("VERSION {}", VERSION))
-                                .color(colors::PRIMARY_CREAME_6),
+                                .color(get_scheme().text_secondary),
                         );
                         ui.add_space(75.0);
                         if !cfg!(target_os = "windows") {
@@ -329,7 +329,7 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
 
         egui::SidePanel::right("right")
             .exact_width(322.0)
-            .frame(egui::Frame::NONE)
+            .frame(egui::Frame::NONE.fill(get_scheme().bg_secondary))
             .resizable(false)
             .show(ctx, |ui| {
                 for item in state.recent_files.recent_files.clone().into_values().rev() {
@@ -354,19 +354,19 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
             } => {
                 egui::Modal::new(egui::Id::new("connect_to_ip"))
                     .frame(egui::Frame {
-                        fill: colors::BLACK_BLACK_600,
+                        fill: get_scheme().bg_primary,
                         stroke: egui::Stroke::NONE,
                         inner_margin: egui::Margin::same(24),
                         outer_margin: egui::Margin::symmetric(0, 0),
                         corner_radius: CornerRadius::same(8),
                         shadow: egui::Shadow {
-                            color: colors::PRIMARY_SMOKE.opacity(0.2),
+                            color: get_scheme().bg_secondary.opacity(0.2),
                             spread: 3,
                             blur: 32,
                             offset: [0, 5],
                         },
                     })
-                    .backdrop_color(colors::SURFACE_SECONDARY.opacity(0.85))
+                    .backdrop_color(get_scheme().bg_secondary.opacity(0.85))
                     .show(ctx, |ui| {
                         ui.add(
                             egui::Label::new(RichText::new("Connect to IP Address").size(18.))
@@ -376,7 +376,7 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                         ui.add(
                             egui::Label::new(
                                 RichText::new("Enter the IP address of a DB or Sim")
-                                    .color(colors::PRIMARY_ONYX_5)
+                                    .color(get_scheme().text_tertiary)
                                     .size(12.),
                             )
                             .selectable(false),
@@ -403,14 +403,14 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
 
                         style.spacing.button_padding = [16.0, 16.0].into();
 
-                        style.visuals.widgets.active.bg_fill = colors::SURFACE_SECONDARY;
-                        style.visuals.widgets.open.bg_fill = colors::SURFACE_SECONDARY;
-                        style.visuals.widgets.inactive.bg_fill = colors::SURFACE_SECONDARY;
-                        style.visuals.widgets.hovered.bg_fill = colors::SURFACE_SECONDARY;
+                        style.visuals.widgets.active.bg_fill = get_scheme().bg_secondary;
+                        style.visuals.widgets.open.bg_fill = get_scheme().bg_secondary;
+                        style.visuals.widgets.inactive.bg_fill = get_scheme().bg_secondary;
+                        style.visuals.widgets.hovered.bg_fill = get_scheme().bg_secondary;
                         ui.add(
                             egui::Label::new(
                                 RichText::new("IP:PORT")
-                                    .color(colors::PRIMARY_ONYX_5)
+                                    .color(get_scheme().text_tertiary)
                                     .size(12.),
                             )
                             .selectable(false),
@@ -444,7 +444,7 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                                     ui.add(
                                         egui::Label::new(
                                             RichText::new("Connecting")
-                                                .color(colors::HYPERBLUE_DEFAULT)
+                                                .color(get_scheme().highlight)
                                                 .size(12.),
                                         )
                                         .selectable(false),
@@ -506,11 +506,11 @@ fn startup_button(
                     ui.max_rect(),
                     corner_radius_sm(),
                     if response.is_pointer_button_down_on() {
-                        colors::PRIMARY_SMOKE
+                        get_scheme().bg_secondary
                     } else if response.hovered() {
-                        colors::PRIMARY_SMOKE.opacity(0.75)
+                        get_scheme().bg_secondary.opacity(0.75)
                     } else {
-                        colors::SURFACE_SECONDARY
+                        get_scheme().bg_secondary
                     },
                 );
 
@@ -527,7 +527,7 @@ fn startup_button(
                     egui::Align2::LEFT_CENTER,
                     label,
                     font_id,
-                    colors::PRIMARY_CREAME,
+                    get_scheme().text_primary,
                 );
 
                 response
@@ -554,7 +554,7 @@ fn recent_item_button(
                     ui.allocate_rect(ui.max_rect(), egui::Sense::CLICK | egui::Sense::HOVER);
 
                 egui::Image::new(SizedTexture::new(arrow, egui::vec2(24., 24.)))
-                    .tint(colors::WHITE)
+                    .tint(get_scheme().text_primary)
                     .paint_at(
                         ui,
                         egui::Rect::from_center_size(
@@ -596,7 +596,7 @@ fn recent_item_button(
                     egui::Align2::LEFT_CENTER,
                     title,
                     title_font_id,
-                    colors::PRIMARY_CREAME,
+                    get_scheme().text_primary,
                 );
 
                 ui.painter().text(
@@ -604,7 +604,7 @@ fn recent_item_button(
                     egui::Align2::LEFT_CENTER,
                     subtitle,
                     subtitle_font_id,
-                    colors::PRIMARY_CREAME_6,
+                    get_scheme().text_secondary,
                 );
 
                 ui.painter().rect_filled(
@@ -614,9 +614,9 @@ fn recent_item_button(
                     ),
                     CornerRadius::ZERO,
                     if response.hovered() {
-                        colors::PRIMARY_CREAME_6.opacity(0.05)
+                        get_scheme().text_secondary.opacity(0.05)
                     } else {
-                        colors::PRIMARY_CREAME_6.opacity(0.1)
+                        get_scheme().text_secondary.opacity(0.1)
                     },
                 );
 
@@ -628,13 +628,13 @@ fn recent_item_button(
                     ui.painter().rect_filled(
                         overlay_rect,
                         CornerRadius::ZERO,
-                        colors::PRIMARY_SMOKE.opacity(0.75),
+                        get_scheme().bg_secondary.opacity(0.75),
                     );
                 } else if response.hovered() {
                     ui.painter().rect_filled(
                         overlay_rect,
                         CornerRadius::ZERO,
-                        colors::PRIMARY_SMOKE.opacity(0.3),
+                        get_scheme().bg_secondary.opacity(0.3),
                     );
                 }
 
