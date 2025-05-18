@@ -1,3 +1,9 @@
+use std::sync::{
+    LazyLock,
+    atomic::{self, AtomicPtr},
+};
+
+use arc_swap::ArcSwap;
 use egui::Color32;
 use impeller2_wkt::Color;
 
@@ -155,4 +161,47 @@ pub mod bevy {
     pub const GREEN: Color = Color::srgb(0.53, 0.87, 0.62);
     pub const BLUE: Color = Color::srgb(0.08, 0.38, 0.82);
     pub const GREY_900: Color = Color::srgb(0.2, 0.2, 0.2);
+}
+
+pub struct ColorScheme {
+    pub bg_primary: Color32,
+    pub bg_secondary: Color32,
+
+    pub text_primary: Color32,
+    pub text_secondary: Color32,
+    pub text_tertiary: Color32,
+
+    pub icon_primary: Color32,
+    pub icon_secondary: Color32,
+
+    pub border_primary: Color32,
+}
+
+static DARK: ColorScheme = ColorScheme {
+    bg_primary: Color32::from_rgb(0x1F, 0x1F, 0x1F),
+    bg_secondary: Color32::from_rgb(0x16, 0x16, 0x16),
+
+    text_primary: Color32::from_rgb(0xFF, 0xFB, 0xF0),
+    text_secondary: Color32::from_rgb(0x6D, 0x6D, 0x6D),
+    text_tertiary: Color32::from_rgb(0x6B, 0x6B, 0x6B),
+
+    icon_primary: Color32::from_rgb(0xFF, 0xFB, 0xF0),
+    icon_secondary: Color32::from_rgb(0x62, 0x62, 0x62),
+
+    border_primary: Color32::from_rgb(0x2E, 0x2D, 0x2C),
+};
+
+static COLOR_SCHEME: AtomicPtr<ColorScheme> = AtomicPtr::new(std::ptr::null_mut());
+
+pub fn get_schema() -> &'static ColorScheme {
+    let ptr = COLOR_SCHEME.load(atomic::Ordering::Relaxed);
+    if ptr.is_null() {
+        &DARK
+    } else {
+        unsafe { &*ptr }
+    }
+}
+
+pub fn set_schema(schema: &'static ColorScheme) {
+    COLOR_SCHEME.store((schema as *const _) as *mut _, atomic::Ordering::Relaxed);
 }
