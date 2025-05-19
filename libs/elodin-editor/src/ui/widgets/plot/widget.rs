@@ -19,7 +19,7 @@ use bevy::{
     window::{PrimaryWindow, Window},
 };
 use bevy_egui::egui::{self, Align, Layout};
-use egui::{Color32, CornerRadius, Frame, Margin, Pos2, RichText, Stroke};
+use egui::{CornerRadius, Frame, Margin, Pos2, RichText, Stroke};
 use impeller2::types::{ComponentId, EntityId, Timestamp};
 use impeller2_bevy::{ComponentMetadataRegistry, EntityMap};
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, EntityMetadata};
@@ -33,7 +33,7 @@ use crate::{
     Offset, SelectedTimeRange, TimeRangeBehavior,
     plugins::LogicalKeyState,
     ui::{
-        colors::{self, ColorExt, get_scheme, with_opacity},
+        colors::{ColorExt, get_scheme, with_opacity},
         utils::format_num,
         widgets::{
             WidgetSystem,

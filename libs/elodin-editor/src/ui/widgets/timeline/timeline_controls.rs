@@ -3,7 +3,7 @@ use bevy::ecs::{
     world::World,
 };
 use bevy_egui::egui;
-use egui::{Ui, load::SizedTexture};
+use egui::{load::SizedTexture, Ui};
 use impeller2::types::Timestamp;
 use impeller2_bevy::{CurrentStreamId, PacketTx};
 use impeller2_wkt::{
@@ -11,13 +11,13 @@ use impeller2_wkt::{
 };
 
 use crate::{
-    TimeRangeBehavior,
     ui::{
-        Paused,
-        colors::{self, ColorExt, get_scheme, with_opacity},
+        colors::{get_scheme, ColorExt},
         theme::configure_combo_box,
-        widgets::{WidgetSystem, button::EImageButton, time_label::time_label},
+        widgets::{button::EImageButton, time_label::time_label, WidgetSystem},
+        Paused,
     },
+    TimeRangeBehavior,
 };
 
 use super::TimelineIcons;
@@ -84,7 +84,7 @@ impl WidgetSystem for TimelineControls<'_> {
                             );
 
                             if frame_back_btn.clicked() && tick.0 > earliest_timestamp.0 {
-                                tick.0.0 -= (hifitime::Duration::from_seconds(tick_time.0)
+                                tick.0 .0 -= (hifitime::Duration::from_seconds(tick_time.0)
                                     .total_nanoseconds()
                                     / 1000) as i64;
                                 tick_changed = true;
@@ -112,7 +112,7 @@ impl WidgetSystem for TimelineControls<'_> {
                             );
 
                             if frame_forward_btn.clicked() && tick.0 < max_tick.0 {
-                                tick.0.0 += (hifitime::Duration::from_seconds(tick_time.0)
+                                tick.0 .0 += (hifitime::Duration::from_seconds(tick_time.0)
                                     .total_nanoseconds()
                                     / 1000) as i64;
 
@@ -124,7 +124,7 @@ impl WidgetSystem for TimelineControls<'_> {
                             );
 
                             if jump_to_end_btn.clicked() {
-                                tick.0 = Timestamp(max_tick.0.0 - 1);
+                                tick.0 = Timestamp(max_tick.0 .0 - 1);
                                 tick_changed = true;
                             }
                         },
@@ -271,7 +271,7 @@ fn time_range_window(
                         if response.hovered() {
                             get_scheme().bg_primary.opacity(0.75)
                         } else {
-                            colors::TRANSPARENT
+                            egui::Color32::TRANSPARENT
                         },
                     );
                     painter.text(

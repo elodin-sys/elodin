@@ -8,7 +8,7 @@ use bevy::{
 use impeller2_bevy::{ConnectionStatus, ThreadConnectionStatus};
 use impeller2_wkt::SimulationTimeStep;
 
-use crate::ui::colors::{self, get_scheme};
+use crate::ui::colors::get_scheme;
 
 use super::RootWidgetSystem;
 

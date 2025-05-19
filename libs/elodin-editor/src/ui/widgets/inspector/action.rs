@@ -4,7 +4,7 @@ use bevy::{
 };
 use egui::{Color32, CornerRadius, RichText, Stroke};
 
-use crate::ui::{actions::ActionTile, colors::{self, get_scheme}, widgets::WidgetSystem};
+use crate::ui::{actions::ActionTile, colors::{get_scheme}, widgets::WidgetSystem};
 
 #[derive(SystemParam)]
 pub struct InspectorAction<'w, 's> {

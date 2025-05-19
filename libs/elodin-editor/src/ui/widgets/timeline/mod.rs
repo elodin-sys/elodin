@@ -12,7 +12,7 @@ use timeline_slider::TimelineSlider;
 use crate::{
     SelectedTimeRange,
     ui::{
-        colors::{self, get_scheme},
+        colors::{get_scheme},
         images,
     },
 };

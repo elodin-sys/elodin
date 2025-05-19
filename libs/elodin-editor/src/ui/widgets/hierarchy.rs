@@ -8,7 +8,7 @@ use impeller2_wkt::EntityMetadata;
 
 use crate::ui::{
     EntityData, EntityFilter, EntityPair, SelectedObject, SidebarState,
-    colors::{self, get_scheme},
+    colors::{get_scheme},
     utils,
 };
 

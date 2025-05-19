@@ -13,7 +13,7 @@ use impeller2_bevy::CommandsExt;
 use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery};
 
 use super::{
-    colors::{self, ColorExt, get_scheme},
+    colors::{ColorExt, get_scheme},
     theme,
     widgets::{WidgetSystem, button::EButton},
 };

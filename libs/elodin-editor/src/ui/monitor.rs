@@ -5,7 +5,7 @@ use impeller2_bevy::ComponentValueExt;
 use impeller2_bevy::{ComponentMetadataRegistry, ComponentValueMap, EntityMap};
 use impeller2_wkt::EntityMetadata;
 
-use super::{colors::{self, get_scheme}, widgets::WidgetSystem};
+use super::{colors::{get_scheme}, widgets::WidgetSystem};
 
 #[derive(Clone)]
 pub struct MonitorPane {

@@ -24,7 +24,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{self};
 use std::time::Instant;
 
-use super::colors::{self, ColorExt, get_scheme};
+use super::colors::{ColorExt, get_scheme};
 
 #[derive(Clone)]
 pub struct VideoStreamPane {

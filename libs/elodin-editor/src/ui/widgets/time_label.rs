@@ -4,7 +4,7 @@ use std::str::FromStr;
 use egui::{Response, Ui};
 use hifitime::prelude::*;
 
-use crate::ui::colors::{self, get_scheme};
+use crate::ui::colors::get_scheme;
 
 pub fn time_label(time: Epoch) -> impl for<'a> FnOnce(&'a mut Ui) -> Response {
     move |ui| {

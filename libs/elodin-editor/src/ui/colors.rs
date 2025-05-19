@@ -1,9 +1,5 @@
-use std::sync::{
-    LazyLock,
-    atomic::{self, AtomicPtr},
-};
+use std::sync::atomic::{self, AtomicPtr};
 
-use arc_swap::ArcSwap;
 use egui::Color32;
 use impeller2_wkt::Color;
 

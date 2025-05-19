@@ -10,7 +10,7 @@ use impeller2_bevy::ComponentMetadataRegistry;
 
 use crate::ui::{
     EntityData, InspectorAnchor, SettingModal, SettingModalState,
-    colors::{self, ColorExt, get_scheme, with_opacity},
+    colors::{ColorExt, get_scheme, with_opacity},
     images, theme,
     utils::MarginSides,
 };
