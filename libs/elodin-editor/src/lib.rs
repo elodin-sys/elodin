@@ -2,15 +2,14 @@ use std::{collections::HashMap, ops::Range, time::Duration};
 
 use crate::plugins::editor_cam_touch;
 use bevy::{
-    DefaultPlugins,
     asset::embedded_asset,
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
     log::LogPlugin,
     math::{DQuat, DVec3},
     pbr::{
-        DirectionalLightShadowMap,
         wireframe::{WireframeConfig, WireframePlugin},
+        DirectionalLightShadowMap,
     },
     prelude::*,
     render::{
@@ -19,6 +18,7 @@ use bevy::{
     },
     window::{PresentMode, WindowResolution, WindowTheme},
     winit::WinitSettings,
+    DefaultPlugins,
 };
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::prelude::OrbitConstraint;
@@ -33,13 +33,13 @@ use impeller2_bevy::{
 use impeller2_wkt::{CurrentTimestamp, NewConnection, SetStreamState, Viewport, WorldPos};
 use impeller2_wkt::{EarliestTimestamp, Glb, LastUpdated};
 use nox::Tensor;
-use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc, spawn_gizmo};
+use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerAlloc};
 use ui::{
-    SelectedObject,
-    colors::{ColorExt, get_scheme},
+    colors::{get_scheme, ColorExt},
     tiles::{self, TileState},
     utils::FriendlyEpoch,
-    widgets::plot::{CollectedGraphData, gpu::LineHandle},
+    widgets::plot::{gpu::LineHandle, CollectedGraphData},
+    SelectedObject,
 };
 
 pub mod chunks;
@@ -144,7 +144,7 @@ impl Plugin for EditorPlugin {
                             },
                             composite_alpha_mode,
                             prevent_default_event_handling: true,
-                            decorations: !cfg!(target_os = "windows"),
+                            decorations: cfg!(target_os = "macos"),
                             visible: cfg!(target_os = "linux"),
                             ..default()
                         }),
@@ -203,7 +203,7 @@ impl Plugin for EditorPlugin {
             .insert_resource(ClearColor(get_scheme().bg_secondary.into_bevy()))
             .insert_resource(TimeRangeBehavior::default())
             .insert_resource(SelectedTimeRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)));
-        if cfg!(target_os = "windows") {
+        if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
         }
 
@@ -408,7 +408,7 @@ fn setup_titlebar(
             NSColor, NSToolbar, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility,
             NSWindowToolbarStyle,
         },
-        base::{BOOL, id, nil},
+        base::{id, nil, BOOL},
     };
     use objc::{
         class,
