@@ -3896,6 +3896,202 @@ struct SetComponentMetadata {
   }
 };
 
+struct EntityMetadata {
+  static constexpr std::string_view TYPE_NAME = "EntityMetadata";
+
+  uint64_t entity_id;
+  std::string name;
+  std::unordered_map<std::string, std::string> metadata;
+  
+
+
+  size_t encoded_size() const {
+    size_t size = 0;
+    size += postcard_size_u64(entity_id);
+    size += postcard_size_string(name.length());
+    size += postcard_size_map(metadata.size());
+    for([[maybe_unused]] const auto& [k, v]: metadata) {
+      size += postcard_size_string(k.length());
+      size += postcard_size_string(v.length());
+    }
+    
+    return size;
+  }
+
+  postcard_error_t encode(std::span<uint8_t>& output) const {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, output.data(), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<uint8_t> encode_vec() const {
+    // Pre-allocate vector with the required size
+    std::vector<uint8_t> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<uint8_t>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, span.data(), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
+    postcard_error_t result;
+    result = postcard_encode_u64(slice, entity_id);
+        if(result != POSTCARD_SUCCESS) return result;
+    result = postcard_encode_string(slice, name.c_str(), name.length());
+        if(result != POSTCARD_SUCCESS) return result;
+    result = postcard_start_map(slice, metadata.size());
+    for(const auto& [k, v]: metadata) {
+      result = postcard_encode_string(slice, k.c_str(), k.length());
+      result = postcard_encode_string(slice, v.c_str(), v.length());
+      if(result != POSTCARD_SUCCESS) return result;
+    }
+        if(result != POSTCARD_SUCCESS) return result;
+    
+    return POSTCARD_SUCCESS;
+  }
+
+  postcard_error_t decode(std::span<const uint8_t>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    result = postcard_decode_u64(slice, &entity_id);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    size_t name_len;
+    result = postcard_decode_string_len(slice, &name_len);
+    if (result != POSTCARD_SUCCESS) return result;
+    name.resize(name_len);
+    if (name_len > 0) {
+        result = postcard_decode_string(slice, name.data(), name_len, name_len);
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    if(result != POSTCARD_SUCCESS) return result;
+
+    size_t metadata_len;
+    result = postcard_decode_map_len(slice, &metadata_len);
+    if (result != POSTCARD_SUCCESS) return result;
+    metadata.clear();
+    for(size_t i = 0; i < metadata_len; i++) {
+        std::string k;
+        size_t k_len;
+        result = postcard_decode_string_len(slice, &k_len);
+        if (result != POSTCARD_SUCCESS) return result;
+        k.resize(k_len);
+        if (k_len > 0) {
+            result = postcard_decode_string(slice, k.data(), k_len, k_len);
+            if (result != POSTCARD_SUCCESS) return result;
+        }
+        if (result != POSTCARD_SUCCESS) return result;
+        std::string v;
+        size_t v_len;
+        result = postcard_decode_string_len(slice, &v_len);
+        if (result != POSTCARD_SUCCESS) return result;
+        v.resize(v_len);
+        if (v_len > 0) {
+            result = postcard_decode_string(slice, v.data(), v_len, v_len);
+            if (result != POSTCARD_SUCCESS) return result;
+        }
+        if (result != POSTCARD_SUCCESS) return result;
+        metadata[k] = v;
+    }
+    if(result != POSTCARD_SUCCESS) return result;
+
+    
+    return POSTCARD_SUCCESS;
+  }
+};
+
+struct SetEntityMetadata {
+  static constexpr std::string_view TYPE_NAME = "SetEntityMetadata";
+
+  EntityMetadata value;
+
+  size_t encoded_size() const {
+    size_t size = 0;
+    size += value.encoded_size();
+    return size;
+  }
+
+  postcard_error_t encode(std::span<std::byte>& output) const {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(output.data()), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<std::byte> encode_vec() const {
+    // Pre-allocate vector with the required size
+    std::vector<std::byte> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<std::byte>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(span.data()), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
+    postcard_error_t result;
+    result = value.encode_raw(slice);
+    return result;
+  }
+
+  postcard_error_t decode(std::span<const std::byte>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(input.data())), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    result = value.decode_raw(slice);
+    return result;
+  }
+};
+
 #ifndef ELO_DB_HELPERS_H
 #define ELO_DB_HELPERS_H
 
@@ -4011,6 +4207,13 @@ SetComponentMetadata set_component_name(std::string name) {
        .component_id = component_id(name),
        .name = std::move(name),
    });
+}
+
+SetEntityMetadata set_entity_name(uint64_t entity_id, std::string name) {
+    return SetEntityMetadata(EntityMetadata {
+        .entity_id = entity_id,
+        .name = std::move(name),
+    });
 }
 
 #endif

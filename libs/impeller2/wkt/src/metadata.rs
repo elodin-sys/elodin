@@ -1,4 +1,4 @@
-use impeller2::types::{ComponentId, EntityId, Msg, PacketId};
+use impeller2::types::{ComponentId, EntityId};
 use postcard_schema::Schema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -22,17 +22,13 @@ impl ComponentMetadata {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Schema)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct EntityMetadata {
     pub entity_id: EntityId,
     pub name: String,
     #[serde(default)]
     pub metadata: HashMap<String, String>,
-}
-
-impl Msg for EntityMetadata {
-    const ID: PacketId = [224, 30];
 }
 
 pub trait MetadataExt {

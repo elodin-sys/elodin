@@ -219,7 +219,7 @@ impl SetComponentMetadata {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, postcard_schema::Schema)]
 #[serde(transparent)]
 pub struct SetEntityMetadata(pub EntityMetadata);
 
@@ -238,10 +238,6 @@ impl SetEntityMetadata {
         self.0.metadata = metadata;
         self
     }
-}
-
-impl Msg for SetEntityMetadata {
-    const ID: PacketId = [224, 9];
 }
 
 #[derive(Serialize, Deserialize, Debug)]
