@@ -11,7 +11,7 @@ pub struct Command {
 }
 
 impl Command {
-    pub fn apply(&self, mut pins: [&mut hal::gpio::Pin; 8]) {
+    pub fn apply(&self, pins: &mut [hal::gpio::Pin; 8]) {
         for (pin, state) in pins.iter_mut().zip(self.gpios.iter()) {
             if *state {
                 pin.set_high();
@@ -30,7 +30,7 @@ pub struct CommandBridge<R> {
 
 impl<R> CommandBridge<R>
 where
-    R: Deref<Target = pac::usart1::RegisterBlock>,
+    R: Deref<Target = pac::usart1::RegisterBlock> + hal::RccPeriph,
     hal::usart::Usart<R>: Write<Error = hal::usart::UartError>,
     hal::usart::Usart<R>: Read<Error = hal::usart::UartError>,
     hal::usart::Usart<R>: ReadReady<Error = hal::usart::UartError>,
