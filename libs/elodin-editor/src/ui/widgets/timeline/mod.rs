@@ -11,10 +11,7 @@ use timeline_slider::TimelineSlider;
 
 use crate::{
     SelectedTimeRange,
-    ui::{
-        colors::{get_scheme},
-        images,
-    },
+    ui::{colors::get_scheme, images},
 };
 
 use super::{WidgetSystem, WidgetSystemExt};

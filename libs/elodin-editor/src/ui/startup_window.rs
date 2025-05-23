@@ -283,10 +283,10 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                             get_scheme().bg_primary,
                         );
                         ui.add_space(87.);
-                        ui.add(egui::Image::new(SizedTexture::new(
-                            logo_full,
-                            egui::vec2(113., 24.),
-                        )));
+                        ui.add(
+                            egui::Image::new(SizedTexture::new(logo_full, egui::vec2(113., 24.)))
+                                .tint(get_scheme().text_primary),
+                        );
                         ui.add_space(10.0);
                         ui.label(
                             RichText::new(format!("VERSION {}", VERSION))
