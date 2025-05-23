@@ -9,10 +9,8 @@ use bevy_egui::{EguiContexts, egui};
 use impeller2_bevy::ComponentMetadataRegistry;
 
 use crate::ui::{
-    EntityData, InspectorAnchor, SettingModal, SettingModalState,
-    colors::{ColorExt, get_scheme, with_opacity},
-    images, theme,
-    utils::MarginSides,
+    EntityData, InspectorAnchor, SettingModal, SettingModalState, colors::get_scheme, images,
+    theme, utils::MarginSides,
 };
 
 use super::{

@@ -119,7 +119,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     ui.label(egui::RichText::new("Y Bounds").color(get_scheme().text_secondary));
                     ui.add_space(8.0);
                     theme::configure_input_with_border(ui.style_mut());
-                    ui.checkbox(&mut graph_state.auto_y_range, "Auto?");
+                    ui.checkbox(&mut graph_state.auto_y_range, "Auto Bounds?");
                 });
                 ui.add_space(8.0);
                 ui.style_mut().visuals.widgets.hovered.weak_bg_fill = Color32::TRANSPARENT;
@@ -127,24 +127,27 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                 ui.style_mut().visuals.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
                 ui.style_mut().override_font_id =
                     Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Min").color(get_scheme().text_secondary));
-                    ui.add_space(16.0);
-                    ui.add_enabled(
-                        !graph_state.auto_y_range,
-                        egui::DragValue::new(&mut graph_state.y_range.start),
-                    );
-                });
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Max").color(get_scheme().text_secondary));
-                    ui.add_space(16.0);
-                    ui.add_enabled(
-                        !graph_state.auto_y_range,
-                        egui::DragValue::new(&mut graph_state.y_range.end),
-                    );
+                ui.horizontal_wrapped(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Min").color(get_scheme().text_secondary));
+                        ui.add_space(16.0);
+                        ui.add_enabled(
+                            !graph_state.auto_y_range,
+                            egui::DragValue::new(&mut graph_state.y_range.start).speed(0.01),
+                        );
+                    });
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Max").color(get_scheme().text_secondary));
+                        ui.add_space(16.0);
+                        ui.add_enabled(
+                            !graph_state.auto_y_range,
+                            egui::DragValue::new(&mut graph_state.y_range.end).speed(0.01),
+                        );
+                    })
                 })
             });
+        ui.separator();
 
         let mut remove_list: SmallVec<[(EntityId, ComponentId); 1]> = SmallVec::new();
         for (entity_id, components) in &mut graph_state.entities {

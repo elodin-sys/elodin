@@ -159,6 +159,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         }
 
         if let Projection::Perspective(persp) = cam.projection.as_mut() {
+            ui.separator();
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(8, 8))
                 .show(ui, |ui| {
@@ -184,6 +185,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         }
 
         if let Some(&GridHandle { grid }) = cam.grid_handle {
+            ui.separator();
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(8, 8))
                 .show(ui, |ui| {
