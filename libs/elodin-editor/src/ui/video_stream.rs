@@ -24,7 +24,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{self};
 use std::time::Instant;
 
-use super::colors::{self, ColorExt};
+use super::colors::{ColorExt, get_scheme};
 
 #[derive(Clone)]
 pub struct VideoStreamPane {
@@ -325,7 +325,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                                     "Loss of Signal - Frame out of date. Waiting for new keyframe",
                                 )
                                 .size(16.0)
-                                .color(colors::YOLK_DEFAULT),
+                                .color(get_scheme().highlight),
                             ),
                         );
                     }
@@ -333,7 +333,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
             }
             StreamState::Error(error) => {
                 ui.centered_and_justified(|ui| {
-                    ui.colored_label(super::colors::REDDISH_DEFAULT, format!("Error: {}", error));
+                    ui.colored_label(get_scheme().error, format!("Error: {}", error));
                 });
             }
         }

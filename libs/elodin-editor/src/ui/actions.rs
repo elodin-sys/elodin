@@ -10,7 +10,7 @@ use impeller2_bevy::{ConnectionAddr, ConnectionStatus, ThreadConnectionStatus};
 use impeller2_cli::mlua::MultiValue;
 
 use super::{
-    colors::{self, ColorExt},
+    colors::{ColorExt, get_scheme},
     widgets::{WidgetSystem, button::EButton},
 };
 
@@ -133,19 +133,19 @@ impl WidgetSystem for ActionTileWidget<'_, '_> {
                     Status::Completed(Err(err)) => {
                         let modal = egui::Modal::new(egui::Id::new("connect_to_ip"))
                             .frame(egui::Frame {
-                                fill: colors::BLACK_BLACK_600,
+                                fill: get_scheme().bg_primary,
                                 stroke: egui::Stroke::NONE,
                                 inner_margin: egui::Margin::same(24),
                                 outer_margin: egui::Margin::symmetric(0, 0),
                                 corner_radius: CornerRadius::same(8),
                                 shadow: egui::Shadow {
-                                    color: colors::PRIMARY_SMOKE.opacity(0.2),
+                                    color: get_scheme().bg_secondary.opacity(0.2),
                                     spread: 3,
                                     blur: 32,
                                     offset: [0, 5],
                                 },
                             })
-                            .backdrop_color(colors::SURFACE_SECONDARY.opacity(0.85))
+                            .backdrop_color(get_scheme().bg_secondary.opacity(0.85))
                             .show(ui.ctx(), |ui| {
                                 ui.add(
                                     egui::Label::new(
@@ -154,7 +154,7 @@ impl WidgetSystem for ActionTileWidget<'_, '_> {
                                     .selectable(false),
                                 );
                                 ui.add_space(5.);
-                                ui.colored_label(colors::REDDISH_DEFAULT, err);
+                                ui.colored_label(get_scheme().error, err);
                             });
                         if modal.should_close() {
                             tile.status = Status::Pending

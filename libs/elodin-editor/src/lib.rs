@@ -36,6 +36,7 @@ use nox::Tensor;
 use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc, spawn_gizmo};
 use ui::{
     SelectedObject,
+    colors::{ColorExt, get_scheme},
     tiles::{self, TileState},
     utils::FriendlyEpoch,
     widgets::plot::{CollectedGraphData, gpu::LineHandle},
@@ -143,7 +144,7 @@ impl Plugin for EditorPlugin {
                             },
                             composite_alpha_mode,
                             prevent_default_event_handling: true,
-                            decorations: !cfg!(target_os = "windows"),
+                            decorations: cfg!(target_os = "macos"),
                             visible: cfg!(target_os = "linux"),
                             ..default()
                         }),
@@ -192,16 +193,17 @@ impl Plugin for EditorPlugin {
             .add_systems(PreUpdate, set_floating_origin.after(sync_pos))
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
+            .add_systems(PostUpdate, set_clear_color)
             //.add_systems(Update, clamp_current_time)
             .insert_resource(WireframeConfig {
                 global: false,
                 default_color: Color::WHITE,
             })
             .init_resource::<SyncedGlbs>()
-            .insert_resource(ClearColor(Color::Srgba(Srgba::hex("#0C0C0C").unwrap())))
+            .insert_resource(ClearColor(get_scheme().bg_secondary.into_bevy()))
             .insert_resource(TimeRangeBehavior::default())
             .insert_resource(SelectedTimeRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)));
-        if cfg!(target_os = "windows") {
+        if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
         }
 
@@ -246,6 +248,10 @@ fn setup_floating_origin(mut commands: Commands) {
 
 fn spawn_ui_cam(mut commands: Commands) {
     commands.spawn((Camera2d, IsDefaultUiCamera));
+}
+
+fn set_clear_color(mut clear_color: ResMut<ClearColor>) {
+    clear_color.0 = get_scheme().bg_secondary.into_bevy();
 }
 
 // NOTE(sphw): enabling this causes weird flickering issues when spawning too many 2d cameras
@@ -1054,4 +1060,8 @@ pub fn clamp_current_time(
     if new_timestamp != current_timestamp.0 {
         packet_tx.send_msg(SetStreamState::rewind(**current_stream_id, new_timestamp))
     }
+}
+
+pub fn dirs() -> directories::ProjectDirs {
+    directories::ProjectDirs::from("systems", "elodin", "editor").unwrap()
 }

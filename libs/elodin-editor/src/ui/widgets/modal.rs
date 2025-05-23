@@ -9,10 +9,8 @@ use bevy_egui::{EguiContexts, egui};
 use impeller2_bevy::ComponentMetadataRegistry;
 
 use crate::ui::{
-    EntityData, InspectorAnchor, SettingModal, SettingModalState,
-    colors::{self, with_opacity},
-    images, theme,
-    utils::MarginSides,
+    EntityData, InspectorAnchor, SettingModal, SettingModalState, colors::get_scheme, images,
+    theme, utils::MarginSides,
 };
 
 use super::{
@@ -74,7 +72,7 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
                 .title_bar(false)
                 .resizable(false)
                 .frame(egui::Frame {
-                    fill: colors::PRIMARY_SMOKE,
+                    fill: get_scheme().bg_secondary,
                     stroke: egui::Stroke::NONE,
                     inner_margin: egui::Margin::same(16),
                     outer_margin: egui::Margin::symmetric(4, 0),
@@ -145,7 +143,7 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
             ui,
             [close_icon],
             "Add Component",
-            colors::PRIMARY_CREAME,
+            get_scheme().text_primary,
             title_margin,
         );
         if close_clicked {
@@ -157,7 +155,7 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
 
         ui.add(
             ELabel::new("ENTITY")
-                .text_color(colors::with_opacity(colors::PRIMARY_CREAME, 0.6))
+                .text_color(get_scheme().text_secondary)
                 .padding(egui::Margin::same(0).top(16.0).bottom(8.0)),
         );
 
@@ -193,7 +191,7 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
         if let Some((entity_id, _, components, _)) = selected_entity {
             ui.add(
                 ELabel::new("COMPONENT")
-                    .text_color(colors::with_opacity(colors::PRIMARY_CREAME, 0.6))
+                    .text_color(get_scheme().text_secondary)
                     .padding(egui::Margin::same(0).top(16.0).bottom(8.0)),
             );
 
@@ -233,15 +231,7 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
             if let Some((component_id, component)) = selected_component {
                 ui.add_space(16.0);
 
-                let add_component_btn = ui.add(
-                    EButton::new("ADD COMPONENT")
-                        .color(colors::MINT_DEFAULT)
-                        .bg_color(with_opacity(colors::MINT_DEFAULT, 0.05))
-                        .stroke(egui::Stroke::new(
-                            1.0,
-                            with_opacity(colors::MINT_DEFAULT, 0.4),
-                        )),
-                );
+                let add_component_btn = ui.add(EButton::green("ADD COMPONENT"));
 
                 if add_component_btn.clicked() {
                     let values = default_component_values(entity_id, component_id, component);

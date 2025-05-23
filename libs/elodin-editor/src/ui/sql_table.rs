@@ -13,7 +13,7 @@ use impeller2_bevy::CommandsExt;
 use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery};
 
 use super::{
-    colors::{self, ColorExt},
+    colors::{ColorExt, get_scheme},
     theme,
     widgets::{WidgetSystem, button::EButton},
 };
@@ -84,13 +84,13 @@ impl egui_table::TableDelegate for SqlTableResults<'_> {
         ui.painter().rect_filled(
             ui.max_rect(),
             egui::CornerRadius::ZERO,
-            colors::BONE_DEFAULT,
+            get_scheme().text_primary,
         );
         for field in &schema.fields[cell.col_range.clone()] {
             egui::Frame::NONE
                 .inner_margin(egui::Margin::same(8))
                 .show(ui, |ui| {
-                    ui.strong(RichText::new(field.name()).color(colors::PRIMARY_SMOKE));
+                    ui.strong(RichText::new(field.name()).color(get_scheme().bg_secondary));
                 });
         }
     }
@@ -113,7 +113,7 @@ impl egui_table::TableDelegate for SqlTableResults<'_> {
             ui.painter().rect_filled(
                 ui.max_rect(),
                 egui::CornerRadius::ZERO,
-                colors::SURFACE_SECONDARY.opacity(0.4),
+                get_scheme().bg_secondary.opacity(0.4),
             );
         }
 
@@ -161,25 +161,31 @@ impl WidgetSystem for SqlTableWidget<'_, '_> {
                     style.visuals.widgets.open.corner_radius = theme::corner_radius_xs();
 
                     style.visuals.widgets.inactive.bg_stroke =
-                        Stroke::new(1.0, colors::BORDER_GREY);
+                        Stroke::new(1.0, get_scheme().border_primary);
                     style.visuals.widgets.inactive.fg_stroke =
-                        Stroke::new(1.0, colors::PRIMARY_CREAME);
+                        Stroke::new(1.0, get_scheme().text_primary);
                     style.visuals.widgets.hovered.bg_stroke =
-                        Stroke::new(1.0, colors::HYPERBLUE_DEFAULT.opacity(0.5));
+                        Stroke::new(1.0, get_scheme().highlight.opacity(0.5));
 
                     style.spacing.button_padding = [16.0, 16.0].into();
 
-                    style.visuals.widgets.active.bg_fill = colors::PRIMARY_SMOKE;
-                    style.visuals.widgets.open.bg_fill = colors::PRIMARY_SMOKE;
-                    style.visuals.widgets.inactive.bg_fill = colors::SURFACE_SECONDARY;
-                    style.visuals.widgets.hovered.bg_fill = colors::SURFACE_SECONDARY;
+                    style.visuals.widgets.active.bg_fill = get_scheme().bg_primary;
+                    style.visuals.widgets.open.bg_fill = get_scheme().bg_primary;
+                    style.visuals.widgets.inactive.bg_fill = get_scheme().bg_primary;
+                    style.visuals.widgets.hovered.bg_fill = get_scheme().bg_primary;
+
+                    style.visuals.widgets.active.weak_bg_fill = get_scheme().bg_primary;
+                    style.visuals.widgets.open.weak_bg_fill = get_scheme().bg_primary;
+                    style.visuals.widgets.inactive.weak_bg_fill = get_scheme().bg_primary;
+                    style.visuals.widgets.hovered.weak_bg_fill = get_scheme().bg_primary;
                     style.visuals.widgets.active.fg_stroke =
-                        Stroke::new(1.0, colors::PRIMARY_CREAME);
+                        Stroke::new(1.0, get_scheme().text_primary);
                     let text_edit_width = ui.max_rect().width() - 104.0;
                     let text_edit_res = ui.add(
                         egui::TextEdit::singleline(&mut table.current_query)
                             .hint_text("Enter an SQL query - like `show tables`")
                             .desired_width(text_edit_width)
+                            .background_color(get_scheme().bg_primary)
                             .margin(egui::Margin::symmetric(16, 8)),
                     );
                     ui.add_space(16.0);
@@ -241,8 +247,7 @@ impl WidgetSystem for SqlTableWidget<'_, '_> {
                 table.show(ui, &mut del);
             }
             SqlTableState::Error(error_response) => {
-                let label =
-                    RichText::new(&error_response.description).color(colors::REDDISH_DEFAULT);
+                let label = RichText::new(&error_response.description).color(get_scheme().error);
                 ui.label(label);
             }
         }

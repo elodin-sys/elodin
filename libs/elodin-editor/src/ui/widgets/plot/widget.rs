@@ -19,7 +19,7 @@ use bevy::{
     window::{PrimaryWindow, Window},
 };
 use bevy_egui::egui::{self, Align, Layout};
-use egui::{Color32, CornerRadius, Frame, Margin, Pos2, RichText, Stroke};
+use egui::{CornerRadius, Frame, Margin, Pos2, RichText, Stroke};
 use impeller2::types::{ComponentId, EntityId, Timestamp};
 use impeller2_bevy::{ComponentMetadataRegistry, EntityMap};
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, EntityMetadata};
@@ -33,7 +33,7 @@ use crate::{
     Offset, SelectedTimeRange, TimeRangeBehavior,
     plugins::LogicalKeyState,
     ui::{
-        colors::{self, ColorExt, with_opacity},
+        colors::{ColorExt, get_scheme, with_opacity},
         utils::format_num,
         widgets::{
             WidgetSystem,
@@ -424,8 +424,8 @@ impl Plot {
             steps_y,
             notch_length: 10.0,
             axis_label_margin: 5.0,
-            text_color: colors::PRIMARY_CREAME,
-            border_stroke: egui::Stroke::new(1.0, colors::PRIMARY_ONYX_9),
+            text_color: get_scheme().text_primary,
+            border_stroke: egui::Stroke::new(1.0, get_scheme().border_primary),
 
             show_modal: true,
             earliest_timestamp,
@@ -557,7 +557,7 @@ impl Plot {
         ui.painter().rect(
             pointer_rect,
             egui::CornerRadius::same(2),
-            colors::MINT_DEFAULT,
+            get_scheme().text_primary,
             egui::Stroke::NONE,
             egui::StrokeKind::Middle,
         );
@@ -567,7 +567,7 @@ impl Plot {
             egui::Align2::CENTER_CENTER,
             format_num(pointer_plot_point.y),
             font_id,
-            colors::PRIMARY_ONYX,
+            get_scheme().bg_secondary,
         );
     }
 
@@ -581,13 +581,13 @@ impl Plot {
         ui.painter().vline(
             x_offset + border_rect.min.x,
             0.0..=self.inner_rect.max.y,
-            egui::Stroke::new(1.0, colors::PRIMARY_ONYX_9),
+            egui::Stroke::new(1.0, get_scheme().border_primary),
         );
 
         ui.painter().hline(
             border_rect.min.x..=border_rect.max.x,
             pointer_pos.y,
-            egui::Stroke::new(1.0, colors::PRIMARY_ONYX_9),
+            egui::Stroke::new(1.0, get_scheme().border_primary),
         );
     }
 
@@ -628,14 +628,14 @@ impl Plot {
             .frame(
                 Frame::default()
                     .inner_margin(Margin::same(16))
-                    .stroke(Stroke::new(1.0, colors::BORDER_GREY))
+                    .stroke(Stroke::new(1.0, get_scheme().border_primary))
                     .corner_radius(CornerRadius::same(4))
-                    .fill(colors::PRIMARY_SMOKE)
+                    .fill(get_scheme().bg_secondary)
                     .shadow(egui::epaint::Shadow {
-                        offset: [0, 5],
+                        offset: [0, 0],
                         blur: 8,
-                        spread: 2,
-                        color: Color32::from_black_alpha(191),
+                        spread: 4,
+                        color: get_scheme().shadow.opacity(0.2),
                     }),
             )
             .show(ui.ctx(), |ui| {
@@ -677,7 +677,7 @@ impl Plot {
                             ui.label(
                                 egui::RichText::new(component_data.label.to_owned())
                                     .size(11.0)
-                                    .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
+                                    .color(with_opacity(get_scheme().text_primary, 0.6)),
                             );
                             ui.add_space(8.0);
                         }
@@ -780,7 +780,7 @@ impl Plot {
                 egui::Align2::CENTER_CENTER,
                 "NO DATA POINTS SELECTED",
                 font_id.clone(),
-                colors::WHITE,
+                get_scheme().text_primary,
             );
 
             return;
@@ -841,7 +841,7 @@ impl Plot {
                     ui.painter().circle(
                         pos,
                         6.0,
-                        colors::PRIMARY_SMOKE,
+                        get_scheme().bg_secondary,
                         egui::Stroke::new(2.0, *color),
                     );
                 }
@@ -872,7 +872,7 @@ impl Plot {
             ui.painter().vline(
                 tick_pos,
                 self.rect.min.y..=border_rect.max.y,
-                egui::Stroke::new(line_width, colors::WHITE),
+                egui::Stroke::new(line_width, get_scheme().text_primary),
             );
 
             let scrub_center = egui::pos2(tick_pos, self.rect.min.y + (scrub_height * 0.5));
@@ -883,7 +883,7 @@ impl Plot {
                 *scrub_icon,
                 scrub_rect,
                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                colors::WHITE,
+                get_scheme().text_primary,
             );
         }
     }

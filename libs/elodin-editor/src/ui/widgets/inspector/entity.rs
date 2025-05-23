@@ -17,7 +17,7 @@ use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
         EntityData, EntityPair,
-        colors::{self, with_opacity},
+        colors::get_scheme,
         tiles,
         utils::{MarginSides, format_num},
         widgets::{
@@ -73,20 +73,23 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                     ui.add(
                         label::ELabel::new(&metadata.name)
                             .padding(egui::Margin::same(0).bottom(24.))
-                            .bottom_stroke(label::ELabel::DEFAULT_STROKE)
+                            .bottom_stroke(egui::Stroke {
+                                width: 1.0,
+                                color: get_scheme().border_primary,
+                            })
                             .margin(egui::Margin::same(0).bottom(26.)),
                     );
 
                     ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                         ui.label(
                             RichText::new(entity_id.0.to_string())
-                                .color(colors::PRIMARY_CREAME)
+                                .color(get_scheme().text_primary)
                                 .font(mono_font.clone()),
                         );
                         ui.add_space(6.0);
                         ui.label(
                             egui::RichText::new("ENTITY ID")
-                                .color(with_opacity(colors::PRIMARY_CREAME, 0.6))
+                                .color(get_scheme().text_secondary)
                                 .font(mono_font.clone()),
                         );
                     });
@@ -180,7 +183,7 @@ pub fn search(
         egui::Frame::NONE
             .corner_radius(egui::CornerRadius::same(3))
             .inner_margin(egui::Margin::same(4))
-            .fill(colors::SURFACE_SECONDARY)
+            .fill(get_scheme().bg_secondary)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.add(
@@ -188,7 +191,7 @@ pub fn search(
                             search_icon,
                             [ui.spacing().interact_size.y, ui.spacing().interact_size.y],
                         ))
-                        .tint(colors::with_opacity(colors::PRIMARY_CREAME, 0.4)),
+                        .tint(get_scheme().text_secondary),
                     );
 
                     let mut font_id = egui::TextStyle::Button.resolve(ui.style());
@@ -211,7 +214,7 @@ fn inspector_item_value_ui(
     value: ElementValueMut<'_>,
     size: egui::Vec2,
 ) -> egui::Response {
-    let label_color = colors::with_opacity(colors::PRIMARY_CREAME, 0.4);
+    let label_color = get_scheme().text_secondary;
     ui.allocate_ui_with_layout(
         size,
         Layout::left_to_right(Align::Center).with_main_justify(true),
@@ -245,7 +248,10 @@ fn inspector_item_value_ui(
 
 fn comp_drag_value<Num: emath::Numeric>(ui: &mut egui::Ui, value: &mut Num) -> egui::Response {
     ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
-        ui.style_mut().visuals.widgets.hovered.weak_bg_fill = Color32::TRANSPARENT;
+        let schema = get_scheme();
+        ui.style_mut().visuals.widgets.active.weak_bg_fill = schema.bg_secondary;
+        ui.style_mut().visuals.widgets.open.weak_bg_fill = schema.bg_secondary;
+        ui.style_mut().visuals.widgets.hovered.weak_bg_fill = schema.bg_secondary;
         ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::TRANSPARENT;
         ui.style_mut().visuals.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
         ui.style_mut().override_font_id = Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
@@ -280,7 +286,7 @@ fn inspector_item_multi(
             ui,
             [icon_chart],
             label,
-            colors::PRIMARY_CREAME,
+            get_scheme().text_primary,
             egui::Margin::symmetric(0, 4).bottom(12.0),
         );
         *create_graph = graph_clicked;

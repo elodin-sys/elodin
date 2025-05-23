@@ -7,7 +7,7 @@ use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2_wkt::EntityMetadata;
 
 use crate::ui::{
-    EntityData, EntityFilter, EntityPair, SelectedObject, SidebarState, colors, utils,
+    EntityData, EntityFilter, EntityPair, SelectedObject, SidebarState, colors::get_scheme, utils,
 };
 
 use super::{WidgetSystem, WidgetSystemExt, inspector::entity::search};
@@ -28,7 +28,7 @@ impl WidgetSystem for Hierarchy<'_> {
         args: Self::Args,
     ) -> f32 {
         let state_mut = state.get_mut(world);
-
+        let scheme = get_scheme();
         let (inside_sidebar, icon_search, width) = args;
         let sidebar_state = state_mut.sidebar_state;
 
@@ -36,8 +36,8 @@ impl WidgetSystem for Hierarchy<'_> {
             egui::SidePanel::new(egui::panel::Side::Left, "outline_bottom")
                 .resizable(true)
                 .frame(egui::Frame {
-                    fill: colors::PRIMARY_SMOKE,
-                    stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
+                    fill: scheme.bg_primary,
+                    stroke: egui::Stroke::new(1.0, scheme.border_primary),
                     inner_margin: egui::Margin::same(4),
                     ..Default::default()
                 })
@@ -57,7 +57,7 @@ impl WidgetSystem for Hierarchy<'_> {
             egui::SidePanel::new(egui::panel::Side::Left, "outline_side")
                 .resizable(true)
                 .frame(egui::Frame {
-                    fill: colors::PRIMARY_SMOKE,
+                    fill: scheme.bg_primary,
                     inner_margin: egui::Margin::same(4),
                     ..Default::default()
                 })
@@ -119,8 +119,7 @@ pub fn header(
             .show(ui, |ui| {
                 if !compact {
                     ui.add(egui::Label::new(
-                        egui::RichText::new("ENTITIES")
-                            .color(colors::with_opacity(colors::PRIMARY_CREAME, 0.4)),
+                        egui::RichText::new("ENTITIES").color(get_scheme().text_secondary),
                     ));
                 }
             });
@@ -190,17 +189,17 @@ pub fn entity_list(
 }
 
 fn list_item_ui(ui: &mut egui::Ui, on: bool, metadata: &EntityMetadata) -> egui::Response {
-    let image_tint = colors::WHITE;
-    let image_tint_click = colors::PRIMARY_ONYX_5;
+    let image_tint = get_scheme().text_primary;
+    let image_tint_click = get_scheme().text_secondary;
     let background_color = if on {
-        colors::WHITE
+        get_scheme().text_primary
     } else {
-        colors::PRIMARY_SMOKE
+        get_scheme().bg_primary
     };
     let text_color = if on {
-        colors::PRIMARY_SMOKE
+        get_scheme().bg_primary
     } else {
-        colors::WHITE
+        get_scheme().text_primary
     };
 
     // Set widget size and allocate space
@@ -244,7 +243,7 @@ fn list_item_ui(ui: &mut egui::Ui, on: bool, metadata: &EntityMetadata) -> egui:
         ui.painter().rect(
             icon_rect,
             egui::CornerRadius::same(2),
-            colors::YOLK_DEFAULT,
+            get_scheme().blue,
             egui::Stroke::NONE,
             egui::StrokeKind::Middle,
         );

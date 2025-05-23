@@ -69,6 +69,7 @@ smallvec.features = ["const_generics", "union"]
 nodit.git = "https://github.com/elodin-sys/nodit.git"
 nodit.rev = "cd284cd0f16d475786dae8629cebda4e14177ee1"
 heapless.version = "0.8"
+arc-swap = "1.7.1"
 
 # helpers
 itertools = "0.12.1"

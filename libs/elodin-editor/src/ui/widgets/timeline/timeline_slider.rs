@@ -7,13 +7,15 @@ use bevy::{
     prelude::{Deref, DerefMut, Res, Resource},
 };
 use bevy_egui::egui;
+use egui::{CornerRadius, Margin};
 use impeller2::types::Timestamp;
 use impeller2_bevy::{CurrentStreamId, PacketTx};
 use impeller2_wkt::{CurrentTimestamp, SetStreamState};
 use std::ops::RangeInclusive;
 
 use crate::ui::{
-    colors,
+    colors::get_scheme,
+    utils::{MarginSides, Shrink4},
     widgets::{WidgetSystem, time_label::PrettyDuration},
 };
 
@@ -50,8 +52,6 @@ pub struct Timeline<'a> {
     label_font_size: f32,
     height: f32,
     width: f32,
-    empty_bg: bool,
-    trailing_fill: bool,
 }
 
 impl<'a> Timeline<'a> {
@@ -97,15 +97,13 @@ impl<'a> Timeline<'a> {
             full_range: active_range.clone(),
             active_range,
             handle_image_id: None,
-            handle_image_tint: colors::MINT_DEFAULT,
+            handle_image_tint: get_scheme().success,
             handle_aspect_ratio: 0.5,
             segments: 12,
             label_font_size: 10.0,
             fps: 60.0,
             height: 40.0,
             width: 400.0,
-            empty_bg: false,
-            trailing_fill: true,
         }
     }
 
@@ -204,45 +202,32 @@ impl Timeline<'_> {
 
             let style = (*ui.style()).clone();
             let visuals = style.interact(response);
-            let widget_visuals = &style.visuals.widgets;
 
             // Trailing fill
 
-            // let max_value =
-            //     self.active_range.start() + (full_duration.total_nanoseconds() / 1000) as f64;
             let max_value = *self.active_range.end();
 
             let max_position_1d =
                 position_from_value(max_value, self.active_range.clone(), position_range);
             let max_center = Timeline::pointer_center(max_position_1d, &rect);
 
-            if self.trailing_fill {
-                ui.painter().rect_filled(
-                    rect.with_max_x(max_center.x),
-                    widget_visuals.inactive.corner_radius,
-                    colors::PRIMARY_ONYX,
-                );
-            }
+            ui.painter().rect_filled(
+                rect.with_max_x(max_center.x).shrink4(Margin::ZERO.top(2.0)),
+                CornerRadius::ZERO,
+                get_scheme().bg_secondary,
+            );
 
             // Rail
 
-            if self.empty_bg {
-                ui.painter().rect_filled(
-                    rect,
-                    widget_visuals.inactive.corner_radius,
-                    widget_visuals.inactive.bg_fill,
-                );
-            } else {
-                ui.put(
-                    rect,
-                    self.rail_ui(
-                        visual_segments.into(),
-                        segment_size,
-                        self.label_font_size,
-                        position_range,
-                    ),
-                );
-            }
+            ui.put(
+                rect,
+                self.rail_ui(
+                    visual_segments.into(),
+                    segment_size,
+                    self.label_font_size,
+                    position_range,
+                ),
+            );
 
             // Fixed Max Handle
 
@@ -254,7 +239,7 @@ impl Timeline<'_> {
                     image_id,
                     max_handle_rect,
                     egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    colors::WHITE,
+                    get_scheme().text_primary,
                 );
             }
 
@@ -318,7 +303,7 @@ impl Timeline<'_> {
                         egui::Align2::CENTER_CENTER,
                         segment_label,
                         font_id.clone(),
-                        colors::PRIMARY_CREAME_6,
+                        get_scheme().text_secondary,
                     );
 
                     let top_point = egui::emath::pos2(
@@ -328,7 +313,7 @@ impl Timeline<'_> {
 
                     ui.painter().line_segment(
                         [col_center_btm, top_point],
-                        egui::Stroke::new(1.0, colors::PRIMARY_ONYX_6),
+                        egui::Stroke::new(1.0, get_scheme().border_primary),
                     );
                 }
             })

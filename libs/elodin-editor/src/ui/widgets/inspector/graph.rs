@@ -16,7 +16,7 @@ use impeller2_bevy::ComponentMetadataRegistry;
 
 use crate::ui::{
     EntityData, SettingModal, SettingModalState,
-    colors::{self, with_opacity},
+    colors::{self, get_scheme},
     theme,
     utils::MarginSides,
     widgets::{
@@ -67,7 +67,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
             ui,
             [icons.add],
             &mut graph_state.label,
-            colors::PRIMARY_CREAME,
+            get_scheme().text_primary,
             graph_label_margin,
         );
         if add_clicked {
@@ -79,11 +79,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
             .inner_margin(egui::Margin::symmetric(0, 8))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("WIDTH")
-                            .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
-                    );
-                    ui.separator();
+                    ui.label(egui::RichText::new("WIDTH").color(get_scheme().text_secondary));
                     ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                         ui.add(egui::DragValue::new(&mut graph_state.line_width).speed(0.2))
                     });
@@ -91,17 +87,14 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
 
                 ui.add_space(8.0);
                 ui.style_mut().spacing.slider_width = ui.available_size().x;
-                ui.style_mut().visuals.widgets.inactive.bg_fill = colors::PRIMARY_ONYX_8;
+                ui.style_mut().visuals.widgets.inactive.bg_fill = get_scheme().border_primary;
                 ui.add(egui::Slider::new(&mut graph_state.line_width, 1.0..=15.0).show_value(false))
             });
         ui.separator();
         egui::Frame::NONE
             .inner_margin(egui::Margin::symmetric(0, 8))
             .show(ui, |ui| {
-                ui.label(
-                    egui::RichText::new("GRAPH TYPE")
-                        .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
-                );
+                ui.label(egui::RichText::new("GRAPH TYPE").color(get_scheme().text_secondary));
                 ui.add_space(8.0);
                 theme::configure_combo_box(ui.style_mut());
                 ui.style_mut().spacing.combo_width = ui.available_size().x;
@@ -123,13 +116,10 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
             .inner_margin(egui::Margin::symmetric(0, 8))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("Y Bounds")
-                            .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
-                    );
+                    ui.label(egui::RichText::new("Y Bounds").color(get_scheme().text_secondary));
                     ui.add_space(8.0);
                     theme::configure_input_with_border(ui.style_mut());
-                    ui.checkbox(&mut graph_state.auto_y_range, "Auto?");
+                    ui.checkbox(&mut graph_state.auto_y_range, "Auto Bounds?");
                 });
                 ui.add_space(8.0);
                 ui.style_mut().visuals.widgets.hovered.weak_bg_fill = Color32::TRANSPARENT;
@@ -137,28 +127,27 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                 ui.style_mut().visuals.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
                 ui.style_mut().override_font_id =
                     Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("Min").color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
-                    );
-                    ui.add_space(16.0);
-                    ui.add_enabled(
-                        !graph_state.auto_y_range,
-                        egui::DragValue::new(&mut graph_state.y_range.start),
-                    );
-                });
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("Max").color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
-                    );
-                    ui.add_space(16.0);
-                    ui.add_enabled(
-                        !graph_state.auto_y_range,
-                        egui::DragValue::new(&mut graph_state.y_range.end),
-                    );
+                ui.horizontal_wrapped(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Min").color(get_scheme().text_secondary));
+                        ui.add_space(16.0);
+                        ui.add_enabled(
+                            !graph_state.auto_y_range,
+                            egui::DragValue::new(&mut graph_state.y_range.start).speed(0.01),
+                        );
+                    });
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Max").color(get_scheme().text_secondary));
+                        ui.add_space(16.0);
+                        ui.add_enabled(
+                            !graph_state.auto_y_range,
+                            egui::DragValue::new(&mut graph_state.y_range.end).speed(0.01),
+                        );
+                    })
                 })
             });
+        ui.separator();
 
         let mut remove_list: SmallVec<[(EntityId, ComponentId); 1]> = SmallVec::new();
         for (entity_id, components) in &mut graph_state.entities {
@@ -170,7 +159,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     ui,
                     [icons.add],
                     &entity_metadata.name,
-                    colors::PRIMARY_CREAME,
+                    get_scheme().text_primary,
                     entity_label_margin,
                 );
                 if add_clicked {
@@ -190,7 +179,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                         ui,
                         [icons.subtract],
                         component_label,
-                        with_opacity(colors::PRIMARY_CREAME, 0.3),
+                        get_scheme().text_tertiary,
                         component_label_margin,
                     );
                     if subtract_clicked {

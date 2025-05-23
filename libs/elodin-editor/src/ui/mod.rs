@@ -15,6 +15,7 @@ use bevy_egui::{
 
 use big_space::GridCell;
 
+use self::colors::get_scheme;
 use egui::CornerRadius;
 use egui_tiles::TileId;
 use impeller2::types::{ComponentId, EntityId};
@@ -220,6 +221,7 @@ impl Default for SidebarState {
 pub struct FullscreenState(pub bool);
 
 pub struct TitlebarIcons {
+    pub icon_close: egui::TextureId,
     pub icon_side_bar_right: egui::TextureId,
     pub icon_side_bar_left: egui::TextureId,
     pub icon_fullscreen: egui::TextureId,
@@ -263,11 +265,12 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
             icon_side_bar_left,
             icon_fullscreen,
             icon_exit_fullscreen,
+            icon_close,
         } = args;
 
         let titlebar_height = if cfg!(target_os = "macos") {
             52.0
-        } else if cfg!(target_os = "windows") {
+        } else if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             45.0
         } else {
             34.0
@@ -276,19 +279,23 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
         let titlebar_scale = if cfg!(target_os = "macos") { 1.4 } else { 1.3 };
         let titlebar_margin = if cfg!(target_os = "macos") {
             8
-        } else if cfg!(target_os = "windows") {
+        } else if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             0
         } else {
             4
         };
-        let titlebar_right_margin = if cfg!(target_os = "windows") { 0. } else { 10. };
+        let titlebar_right_margin = if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
+            0.
+        } else {
+            10.
+        };
 
         theme::set_theme(ctx);
         egui::TopBottomPanel::top("title_bar")
             .frame(
                 egui::Frame {
                     fill: Color32::TRANSPARENT,
-                    stroke: egui::Stroke::new(0.0, colors::BORDER_GREY),
+                    stroke: egui::Stroke::new(0.0, get_scheme().border_primary),
                     ..Default::default()
                 }
                 .inner_margin(
@@ -323,7 +330,7 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if cfg!(target_os = "windows") {
+                        if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
                             let Ok((window_id, _, _)) = state_mut.windows.single() else {
                                 return;
                             };
@@ -333,26 +340,35 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
                                 ui.style_mut().visuals.widgets.hovered.weak_bg_fill =
                                     egui::Color32::from_hex("#E81123").expect("invalid red color");
 
+                                ui.style_mut().visuals.widgets.hovered.fg_stroke =
+                                    egui::Stroke::new(1.0, Color32::WHITE);
                                 ui.style_mut().visuals.widgets.hovered.corner_radius =
                                     CornerRadius {
                                         nw: 0,
-                                        ne: 4,
+                                        ne: if cfg!(target_os = "windows") { 4 } else { 0 },
                                         sw: 0,
                                         se: 0,
                                     };
-
+                                let btn = if cfg!(target_os = "windows") {
+                                    egui::Button::new(
+                                        RichText::new("\u{e8bb}")
+                                            .font(egui::FontId {
+                                                size: 10.0,
+                                                family: egui::FontFamily::Proportional,
+                                            })
+                                            .line_height(Some(11.0)),
+                                    )
+                                } else {
+                                    egui::Button::image(egui::load::SizedTexture::new(
+                                        icon_close,
+                                        egui::vec2(11., 11.),
+                                    ))
+                                    .image_tint_follows_text_color(true)
+                                };
                                 if ui
                                     .add_sized(
                                         egui::vec2(45.0, 40.0),
-                                        egui::Button::new(
-                                            RichText::new("\u{e8bb}")
-                                                .font(egui::FontId {
-                                                    size: 10.0,
-                                                    family: egui::FontFamily::Proportional,
-                                                })
-                                                .line_height(Some(11.0)),
-                                        )
-                                        .stroke(egui::Stroke::NONE),
+                                        btn.stroke(egui::Stroke::NONE),
                                     )
                                     .clicked()
                                 {
@@ -363,26 +379,40 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
 
                             let maximized = winit_window.is_maximized();
                             ui.scope(|ui| {
+                                ui.style_mut().visuals.widgets.hovered.fg_stroke =
+                                    egui::Stroke::new(1.0, Color32::WHITE);
                                 ui.style_mut().visuals.widgets.hovered.weak_bg_fill =
                                     egui::Color32::from_hex("#4E4D53").expect("invalid red color");
                                 ui.style_mut().visuals.widgets.hovered.corner_radius =
                                     CornerRadius::ZERO;
+                                let btn = if cfg!(target_os = "windows") {
+                                    egui::Button::new(
+                                        RichText::new(if maximized {
+                                            "\u{e923}"
+                                        } else {
+                                            "\u{e922}"
+                                        })
+                                        .font(egui::FontId {
+                                            size: 10.0,
+                                            family: egui::FontFamily::Proportional,
+                                        })
+                                        .line_height(Some(11.0)),
+                                    )
+                                } else {
+                                    egui::Button::image(egui::load::SizedTexture::new(
+                                        if maximized {
+                                            icon_exit_fullscreen
+                                        } else {
+                                            icon_fullscreen
+                                        },
+                                        egui::vec2(11., 11.),
+                                    ))
+                                    .image_tint_follows_text_color(true)
+                                };
                                 if ui
                                     .add_sized(
                                         egui::vec2(45.0, 40.0),
-                                        egui::Button::new(
-                                            RichText::new(if maximized {
-                                                "\u{e923}"
-                                            } else {
-                                                "\u{e922}"
-                                            })
-                                            .font(egui::FontId {
-                                                size: 10.0,
-                                                family: egui::FontFamily::Proportional,
-                                            })
-                                            .line_height(Some(11.0)),
-                                        )
-                                        .stroke(egui::Stroke::NONE),
+                                        btn.stroke(egui::Stroke::NONE),
                                     )
                                     .clicked()
                                 {
@@ -394,12 +424,16 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
                                     .add_sized(
                                         egui::vec2(45.0, 40.0),
                                         egui::Button::new(
-                                            RichText::new("\u{e921}")
-                                                .font(egui::FontId {
-                                                    size: 10.0,
-                                                    family: egui::FontFamily::Proportional,
-                                                })
-                                                .line_height(Some(11.0)),
+                                            RichText::new(if cfg!(target_os = "windows") {
+                                                "\u{e921}"
+                                            } else {
+                                                "—"
+                                            })
+                                            .font(egui::FontId {
+                                                size: 10.0,
+                                                family: egui::FontFamily::Proportional,
+                                            })
+                                            .line_height(Some(11.0)),
                                         )
                                         .stroke(egui::Stroke::NONE),
                                     )
@@ -483,6 +517,7 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
             icon_side_bar_left: contexts.add_image(images.icon_side_bar_left.clone_weak()),
             icon_fullscreen: contexts.add_image(images.icon_fullscreen.clone_weak()),
             icon_exit_fullscreen: contexts.add_image(images.icon_exit_fullscreen.clone_weak()),
+            icon_close: contexts.add_image(images.icon_close.clone_weak()),
         };
 
         world.add_root_widget_with::<Titlebar, With<PrimaryWindow>>("titlebar", titlebar_icons);
@@ -588,8 +623,11 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
                     .title_bar(false)
                     .resizable(false)
                     .frame(egui::Frame {
-                        fill: colors::with_opacity(colors::PRIMARY_SMOKE, 0.5),
-                        stroke: egui::Stroke::new(1.0, colors::with_opacity(colors::WHITE, 0.5)),
+                        fill: colors::with_opacity(get_scheme().bg_secondary, 0.5),
+                        stroke: egui::Stroke::new(
+                            1.0,
+                            colors::with_opacity(get_scheme().text_primary, 0.5),
+                        ),
                         inner_margin: egui::Margin::symmetric(16, 8),
                         ..Default::default()
                     })
