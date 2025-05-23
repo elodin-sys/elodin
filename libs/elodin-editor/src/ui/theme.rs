@@ -16,8 +16,7 @@ pub fn set_theme(context: &mut egui::Context) {
 
     style.visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, scheme.border_primary);
     style.visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, scheme.text_primary);
-    style.visuals.widgets.hovered.bg_stroke =
-        egui::Stroke::new(1.0, scheme.text_primary.opacity(0.6));
+    style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, scheme.text_secondary);
     style.visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0, scheme.border_primary);
 
     style.visuals.extreme_bg_color = scheme.bg_secondary;

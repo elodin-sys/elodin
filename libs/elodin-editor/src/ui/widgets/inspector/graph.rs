@@ -16,7 +16,7 @@ use impeller2_bevy::ComponentMetadataRegistry;
 
 use crate::ui::{
     EntityData, SettingModal, SettingModalState,
-    colors::{self, get_scheme, with_opacity},
+    colors::{self, get_scheme},
     theme,
     utils::MarginSides,
     widgets::{
@@ -79,11 +79,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
             .inner_margin(egui::Margin::symmetric(0, 8))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("WIDTH")
-                            .color(with_opacity(get_scheme().text_primary, 0.6)),
-                    );
-                    ui.separator();
+                    ui.label(egui::RichText::new("WIDTH").color(get_scheme().text_secondary));
                     ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                         ui.add(egui::DragValue::new(&mut graph_state.line_width).speed(0.2))
                     });
@@ -98,10 +94,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         egui::Frame::NONE
             .inner_margin(egui::Margin::symmetric(0, 8))
             .show(ui, |ui| {
-                ui.label(
-                    egui::RichText::new("GRAPH TYPE")
-                        .color(with_opacity(get_scheme().text_primary, 0.6)),
-                );
+                ui.label(egui::RichText::new("GRAPH TYPE").color(get_scheme().text_secondary));
                 ui.add_space(8.0);
                 theme::configure_combo_box(ui.style_mut());
                 ui.style_mut().spacing.combo_width = ui.available_size().x;
@@ -123,10 +116,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
             .inner_margin(egui::Margin::symmetric(0, 8))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("Y Bounds")
-                            .color(with_opacity(get_scheme().text_primary, 0.6)),
-                    );
+                    ui.label(egui::RichText::new("Y Bounds").color(get_scheme().text_secondary));
                     ui.add_space(8.0);
                     theme::configure_input_with_border(ui.style_mut());
                     ui.checkbox(&mut graph_state.auto_y_range, "Auto?");
@@ -138,10 +128,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                 ui.style_mut().override_font_id =
                     Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
                 ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("Min")
-                            .color(with_opacity(get_scheme().text_primary, 0.6)),
-                    );
+                    ui.label(egui::RichText::new("Min").color(get_scheme().text_secondary));
                     ui.add_space(16.0);
                     ui.add_enabled(
                         !graph_state.auto_y_range,
@@ -150,10 +137,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                 });
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("Max")
-                            .color(with_opacity(get_scheme().text_primary, 0.6)),
-                    );
+                    ui.label(egui::RichText::new("Max").color(get_scheme().text_secondary));
                     ui.add_space(16.0);
                     ui.add_enabled(
                         !graph_state.auto_y_range,
@@ -192,7 +176,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                         ui,
                         [icons.subtract],
                         component_label,
-                        with_opacity(get_scheme().text_primary, 0.3),
+                        get_scheme().text_tertiary,
                         component_label_margin,
                     );
                     if subtract_clicked {

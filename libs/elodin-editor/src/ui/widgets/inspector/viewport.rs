@@ -17,12 +17,12 @@ use impeller2::component::Component;
 use impeller2_wkt::WorldPos;
 
 use crate::ui::CameraQuery;
-use crate::ui::colors::{ColorExt, get_scheme};
+use crate::ui::colors::get_scheme;
 use crate::ui::widgets::WidgetSystem;
 use crate::ui::widgets::label::label_with_buttons;
 use crate::{
     GridHandle, MainCamera,
-    ui::{ EntityData, theme, utils::MarginSides, widgets::label::ELabel},
+    ui::{EntityData, theme, utils::MarginSides, widgets::label::ELabel},
 };
 
 use super::{InspectorIcons, empty_inspector};
@@ -90,7 +90,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     ui,
                     [icons.search],
                     "TRACK ENTITY",
-                    scheme.text_secondary.opacity(0.6),
+                    scheme.text_secondary,
                     egui::Margin::same(0).bottom(8.0),
                 )[0];
 
@@ -139,8 +139,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new("TRACK ROTATION")
-                                .color(scheme.text_secondary.opacity(0.6)),
+                            egui::RichText::new("TRACK ROTATION").color(scheme.text_secondary),
                         );
                         ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                             let mut track_rotation = cam.no_propagate_rot.is_none();
@@ -165,9 +164,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                 .show(ui, |ui| {
                     let mut fov = persp.fov.to_degrees();
                     ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new("FOV").color(scheme.text_secondary.opacity(0.6)),
-                        );
+                        ui.label(egui::RichText::new("FOV").color(scheme.text_secondary));
                         ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                             if ui.add(egui::DragValue::new(&mut fov).speed(0.1)).changed() {
                                 persp.fov = fov.to_radians();
@@ -191,10 +188,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                 .inner_margin(egui::Margin::symmetric(8, 8))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new("SHOW GRID")
-                                .color(scheme.text_secondary.opacity(0.6)),
-                        );
+                        ui.label(egui::RichText::new("SHOW GRID").color(scheme.text_secondary));
                         ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                             let mut visibility = grid_visibility.get_mut(grid).unwrap();
                             let mut visible = *visibility == Visibility::Visible;

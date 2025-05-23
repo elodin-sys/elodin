@@ -19,7 +19,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::VERSION;
+use crate::{VERSION, dirs};
 
 use super::{
     colors::{self, ColorExt, get_scheme},
@@ -553,6 +553,23 @@ fn recent_item_button(
                 let response =
                     ui.allocate_rect(ui.max_rect(), egui::Sense::CLICK | egui::Sense::HOVER);
 
+                let bg_color = if response.is_pointer_button_down_on() {
+                    get_scheme().bg_primary.opacity(0.75)
+                } else if response.hovered() {
+                    get_scheme().bg_primary.opacity(0.5)
+                } else {
+                    Color32::TRANSPARENT
+                };
+
+                ui.painter().rect_filled(
+                    egui::Rect::from_min_max(
+                        ui.max_rect().min,
+                        ui.max_rect().max - egui::vec2(0., 1.),
+                    ),
+                    CornerRadius::ZERO,
+                    bg_color,
+                );
+
                 egui::Image::new(SizedTexture::new(arrow, egui::vec2(24., 24.)))
                     .tint(get_scheme().text_primary)
                     .paint_at(
@@ -620,24 +637,6 @@ fn recent_item_button(
                     },
                 );
 
-                let overlay_rect = egui::Rect::from_min_max(
-                    ui.max_rect().min,
-                    ui.max_rect().max - egui::vec2(0., 1.),
-                );
-                if response.is_pointer_button_down_on() {
-                    ui.painter().rect_filled(
-                        overlay_rect,
-                        CornerRadius::ZERO,
-                        get_scheme().bg_secondary.opacity(0.75),
-                    );
-                } else if response.hovered() {
-                    ui.painter().rect_filled(
-                        overlay_rect,
-                        CornerRadius::ZERO,
-                        get_scheme().bg_secondary.opacity(0.3),
-                    );
-                }
-
                 response
             },
         )
@@ -645,12 +644,8 @@ fn recent_item_button(
     }
 }
 
-pub fn dirs() -> directories::ProjectDirs {
-    directories::ProjectDirs::from("systems", "elodin", "editor").unwrap()
-}
-
 fn recent_files() -> RecentItems {
-    let recent_file_path = dirs().data_dir().join("recent_items.toml");
+    let recent_file_path = dirs().data_dir().join("recent_items.postcard");
     let Ok(contents) = std::fs::read(recent_file_path) else {
         return RecentItems::default();
     };
@@ -661,7 +656,7 @@ fn save_recent_files(paths: &RecentItems) {
     let dirs = dirs();
     let data_dir = dirs.data_dir();
     let _ = std::fs::create_dir_all(data_dir);
-    let recent_file_path = data_dir.join("recent_items.toml");
+    let recent_file_path = data_dir.join("recent_items.postcard");
     let Ok(contents) = postcard::to_allocvec(&paths) else {
         return;
     };

@@ -2,14 +2,15 @@ use std::{collections::HashMap, ops::Range, time::Duration};
 
 use crate::plugins::editor_cam_touch;
 use bevy::{
+    DefaultPlugins,
     asset::embedded_asset,
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
     log::LogPlugin,
     math::{DQuat, DVec3},
     pbr::{
-        wireframe::{WireframeConfig, WireframePlugin},
         DirectionalLightShadowMap,
+        wireframe::{WireframeConfig, WireframePlugin},
     },
     prelude::*,
     render::{
@@ -18,7 +19,6 @@ use bevy::{
     },
     window::{PresentMode, WindowResolution, WindowTheme},
     winit::WinitSettings,
-    DefaultPlugins,
 };
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::prelude::OrbitConstraint;
@@ -33,13 +33,13 @@ use impeller2_bevy::{
 use impeller2_wkt::{CurrentTimestamp, NewConnection, SetStreamState, Viewport, WorldPos};
 use impeller2_wkt::{EarliestTimestamp, Glb, LastUpdated};
 use nox::Tensor;
-use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerAlloc};
+use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc, spawn_gizmo};
 use ui::{
-    colors::{get_scheme, ColorExt},
+    SelectedObject,
+    colors::{ColorExt, get_scheme},
     tiles::{self, TileState},
     utils::FriendlyEpoch,
-    widgets::plot::{gpu::LineHandle, CollectedGraphData},
-    SelectedObject,
+    widgets::plot::{CollectedGraphData, gpu::LineHandle},
 };
 
 pub mod chunks;
@@ -408,7 +408,7 @@ fn setup_titlebar(
             NSColor, NSToolbar, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility,
             NSWindowToolbarStyle,
         },
-        base::{id, nil, BOOL},
+        base::{BOOL, id, nil},
     };
     use objc::{
         class,
@@ -1060,4 +1060,8 @@ pub fn clamp_current_time(
     if new_timestamp != current_timestamp.0 {
         packet_tx.send_msg(SetStreamState::rewind(**current_stream_id, new_timestamp))
     }
+}
+
+pub fn dirs() -> directories::ProjectDirs {
+    directories::ProjectDirs::from("systems", "elodin", "editor").unwrap()
 }

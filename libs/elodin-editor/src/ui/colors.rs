@@ -2,6 +2,9 @@ use std::sync::atomic::{self, AtomicPtr};
 
 use egui::Color32;
 use impeller2_wkt::Color;
+use serde::{Deserialize, Serialize};
+
+use crate::dirs;
 
 pub const WHITE: Color32 = Color32::WHITE;
 pub const TRANSPARENT: Color32 = Color32::TRANSPARENT;
@@ -141,6 +144,7 @@ pub mod bevy {
     pub const GREY_900: Color = Color::srgb(0.2, 0.2, 0.2);
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct ColorScheme {
     pub bg_primary: Color32,
     pub bg_secondary: Color32,
@@ -155,6 +159,7 @@ pub struct ColorScheme {
     pub border_primary: Color32,
 
     pub highlight: Color32,
+    pub blue: Color32,
     pub error: Color32,
     pub success: Color32,
 
@@ -175,6 +180,7 @@ pub static DARK: ColorScheme = ColorScheme {
     border_primary: Color32::from_rgb(0x2E, 0x2D, 0x2C),
 
     highlight: Color32::from_rgb(0x14, 0x5F, 0xCF),
+    blue: Color32::from_rgb(0x14, 0x5F, 0xCF),
     error: REDDISH_DEFAULT,
     success: MINT_DEFAULT,
 
@@ -195,6 +201,7 @@ pub static LIGHT: ColorScheme = ColorScheme {
     border_primary: Color32::from_rgb(0xCD, 0xC3, 0xB0),
 
     highlight: Color32::from_rgb(0x14, 0x5F, 0xCF),
+    blue: Color32::from_rgb(0x14, 0x5F, 0xCF),
     error: REDDISH_DEFAULT,
     success: MINT_DEFAULT,
 
@@ -215,6 +222,7 @@ pub static CATPPUCINI_LATTE: ColorScheme = ColorScheme {
     border_primary: Color32::from_rgb(0xCC, 0xD0, 0xDA),
 
     highlight: Color32::from_rgb(0x7C, 0x7F, 0x93),
+    blue: Color32::from_rgb(0x1E, 0x66, 0xF5),
     error: Color32::from_rgb(0xE6, 0x45, 0x53),
     success: Color32::from_rgb(0x40, 0xA0, 0x2B),
 
@@ -235,6 +243,7 @@ pub static CATPPUCINI_MOCHA: ColorScheme = ColorScheme {
     border_primary: Color32::from_rgb(0x31, 0x32, 0x44),
 
     highlight: Color32::from_rgb(0x93, 0x99, 0xB2),
+    blue: Color32::from_rgb(0x89, 0xB4, 0xFA),
     error: Color32::from_rgb(0xF3, 0x8B, 0xA8),
     success: Color32::from_rgb(0xA6, 0xE3, 0xA1),
 
@@ -255,6 +264,7 @@ pub static CATPPUCINI_MACCHIATO: ColorScheme = ColorScheme {
     border_primary: Color32::from_rgb(0x45, 0x47, 0x5A),
 
     highlight: Color32::from_rgb(0x6E, 0x73, 0x8D),
+    blue: Color32::from_rgb(0x8A, 0xAD, 0xF4),
     error: Color32::from_rgb(0xED, 0x87, 0x96),
     success: Color32::from_rgb(0xA6, 0xDA, 0x95),
 
@@ -266,12 +276,24 @@ static COLOR_SCHEME: AtomicPtr<ColorScheme> = AtomicPtr::new(std::ptr::null_mut(
 pub fn get_scheme() -> &'static ColorScheme {
     let ptr = COLOR_SCHEME.load(atomic::Ordering::Relaxed);
     if ptr.is_null() {
-        &CATPPUCINI_LATTE
+        load_color_scheme()
+            .map(|c| &*Box::leak(Box::new(c)))
+            .unwrap_or(&DARK)
     } else {
         unsafe { &*ptr }
     }
 }
 
+fn load_color_scheme() -> Option<ColorScheme> {
+    let color_scheme_path = dirs().data_dir().join("color_scheme.json");
+    let json = std::fs::read_to_string(color_scheme_path).ok()?;
+    serde_json::from_str(&json).ok()
+}
+
 pub fn set_schema(schema: &'static ColorScheme) {
     COLOR_SCHEME.store((schema as *const _) as *mut _, atomic::Ordering::Relaxed);
+    let color_scheme_path = dirs().data_dir().join("color_scheme.json");
+    if let Ok(json) = serde_json::to_string(&schema) {
+        let _ = std::fs::write(color_scheme_path, json);
+    }
 }

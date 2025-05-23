@@ -87,10 +87,10 @@ fn editor_status_label_ui(ui: &mut egui::Ui, status: ConnectionStatus) -> egui::
     let text_color = get_scheme().text_secondary;
 
     let (status_label, status_color) = match status {
-        ConnectionStatus::NoConnection => ("DISCONNECTED", get_scheme().highlight),
-        ConnectionStatus::Success => ("CONNECTED", get_scheme().text_primary),
-        ConnectionStatus::Connecting => ("CONNECTING", get_scheme().highlight),
-        ConnectionStatus::Error => ("CONNECTION ERROR", get_scheme().highlight),
+        ConnectionStatus::NoConnection => ("DISCONNECTED", get_scheme().error),
+        ConnectionStatus::Success => ("CONNECTED", get_scheme().success),
+        ConnectionStatus::Connecting => ("CONNECTING", get_scheme().blue),
+        ConnectionStatus::Error => ("CONNECTION ERROR", get_scheme().error),
     };
 
     // Set widget size and allocate space

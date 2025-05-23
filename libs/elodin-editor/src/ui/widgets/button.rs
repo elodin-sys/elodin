@@ -291,7 +291,7 @@ impl EButton {
         EButton::new(label)
             .color(get_scheme().success)
             .bg_color(get_scheme().success.opacity(0.04))
-            .stroke(Stroke::new(1.0, get_scheme().border_primary))
+            .stroke(Stroke::new(1.0, get_scheme().success.opacity(0.4)))
     }
 
     pub fn red(label: impl ToString) -> Self {

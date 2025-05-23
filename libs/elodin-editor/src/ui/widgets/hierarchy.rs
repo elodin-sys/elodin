@@ -7,9 +7,7 @@ use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2_wkt::EntityMetadata;
 
 use crate::ui::{
-    EntityData, EntityFilter, EntityPair, SelectedObject, SidebarState,
-    colors::{get_scheme},
-    utils,
+    EntityData, EntityFilter, EntityPair, SelectedObject, SidebarState, colors::get_scheme, utils,
 };
 
 use super::{WidgetSystem, WidgetSystemExt, inspector::entity::search};
@@ -245,7 +243,7 @@ fn list_item_ui(ui: &mut egui::Ui, on: bool, metadata: &EntityMetadata) -> egui:
         ui.painter().rect(
             icon_rect,
             egui::CornerRadius::same(2),
-            get_scheme().highlight,
+            get_scheme().blue,
             egui::Stroke::NONE,
             egui::StrokeKind::Middle,
         );

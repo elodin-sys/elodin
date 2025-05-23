@@ -17,7 +17,7 @@ use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
         EntityData, EntityPair,
-        colors::{self, get_scheme, with_opacity},
+        colors::get_scheme,
         tiles,
         utils::{MarginSides, format_num},
         widgets::{
@@ -89,7 +89,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                         ui.add_space(6.0);
                         ui.label(
                             egui::RichText::new("ENTITY ID")
-                                .color(with_opacity(get_scheme().text_primary, 0.6))
+                                .color(get_scheme().text_secondary)
                                 .font(mono_font.clone()),
                         );
                     });
@@ -191,7 +191,7 @@ pub fn search(
                             search_icon,
                             [ui.spacing().interact_size.y, ui.spacing().interact_size.y],
                         ))
-                        .tint(colors::with_opacity(get_scheme().text_primary, 0.4)),
+                        .tint(get_scheme().text_secondary),
                     );
 
                     let mut font_id = egui::TextStyle::Button.resolve(ui.style());
@@ -214,7 +214,7 @@ fn inspector_item_value_ui(
     value: ElementValueMut<'_>,
     size: egui::Vec2,
 ) -> egui::Response {
-    let label_color = colors::with_opacity(get_scheme().text_primary, 0.4);
+    let label_color = get_scheme().text_secondary;
     ui.allocate_ui_with_layout(
         size,
         Layout::left_to_right(Align::Center).with_main_justify(true),

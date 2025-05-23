@@ -646,7 +646,7 @@ pub fn save_preset_inner() -> PaletteItem {
                     tile_id,
                     &ui_state,
                 );
-                let dirs = ui::startup_window::dirs();
+                let dirs = crate::dirs();
                 let dir = dirs.data_dir().join("presets");
                 let _ = std::fs::create_dir(&dir);
                 let _ = std::fs::write(
@@ -662,7 +662,7 @@ pub fn save_preset_inner() -> PaletteItem {
 
 pub fn load_preset() -> PaletteItem {
     PaletteItem::new("Load Preset", PRESETS_LABEL, |_: In<String>| {
-        let dirs = ui::startup_window::dirs();
+        let dirs = crate::dirs();
         let dir = dirs.data_dir().join("presets");
         let Ok(elems) = std::fs::read_dir(dir) else {
             return PaletteEvent::Exit;
@@ -688,7 +688,7 @@ pub fn load_preset_inner(name: String) -> PaletteItem {
         move |_: In<String>,
               params: SyncViewportParams,
               mut selected_object: ResMut<ui::SelectedObject>| {
-            let dirs = ui::startup_window::dirs();
+            let dirs = crate::dirs();
             let path = dirs.data_dir().join("presets").join(name.clone());
             if let Ok(json) = std::fs::read_to_string(path) {
                 if let Ok(panel) = serde_json::from_str::<impeller2_wkt::Panel>(&json) {

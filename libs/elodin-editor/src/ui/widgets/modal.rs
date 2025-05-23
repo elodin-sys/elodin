@@ -157,7 +157,7 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
 
         ui.add(
             ELabel::new("ENTITY")
-                .text_color(get_scheme().text_secondary.opacity(0.6))
+                .text_color(get_scheme().text_secondary)
                 .padding(egui::Margin::same(0).top(16.0).bottom(8.0)),
         );
 
@@ -193,7 +193,7 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
         if let Some((entity_id, _, components, _)) = selected_entity {
             ui.add(
                 ELabel::new("COMPONENT")
-                    .text_color(get_scheme().text_secondary.opacity(0.6))
+                    .text_color(get_scheme().text_secondary)
                     .padding(egui::Margin::same(0).top(16.0).bottom(8.0)),
             );
 
@@ -233,15 +233,7 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
             if let Some((component_id, component)) = selected_component {
                 ui.add_space(16.0);
 
-                let add_component_btn = ui.add(
-                    EButton::new("ADD COMPONENT")
-                        .color(get_scheme().success)
-                        .bg_color(with_opacity(get_scheme().success, 0.05))
-                        .stroke(egui::Stroke::new(
-                            1.0,
-                            with_opacity(get_scheme().success, 0.4),
-                        )),
-                );
+                let add_component_btn = ui.add(EButton::green("ADD COMPONENT"));
 
                 if add_component_btn.clicked() {
                     let values = default_component_values(entity_id, component_id, component);
