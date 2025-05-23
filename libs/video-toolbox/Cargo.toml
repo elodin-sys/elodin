@@ -1,0 +1,20 @@
+[package]
+name = "video-toolbox"
+version = "0.1.0"
+edition = "2024"
+description = "High-level wrapper for Apple's VideoToolbox framework"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+bitflags = "2.5.0"
+thiserror = "1.0"
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+objc2 = "0.6"
+objc2-video-toolbox = "0.3.1"
+objc2-foundation = "0.3.1"
+objc2-core-media = "0.3.1"
+objc2-core-video = "0.3.1"
+objc2-core-foundation = "0.3.1"
+block2 = "0.6.1"
+wide = "0.7.32"

@@ -190,6 +190,8 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, sync_paused)
             .add_systems(PreUpdate, set_selected_range)
             .add_systems(PreUpdate, set_floating_origin.after(sync_pos))
+            .add_systems(Startup, spawn_ui_cam)
+            .add_systems(PostUpdate, ui::video_stream::set_visibility)
             //.add_systems(Update, clamp_current_time)
             .insert_resource(WireframeConfig {
                 global: false,
@@ -240,6 +242,10 @@ fn setup_floating_origin(mut commands: Commands) {
         GridCell::<i128>::default(),
         Transform::IDENTITY,
     ));
+}
+
+fn spawn_ui_cam(mut commands: Commands) {
+    commands.spawn((Camera2d, IsDefaultUiCamera));
 }
 
 // NOTE(sphw): enabling this causes weird flickering issues when spawning too many 2d cameras

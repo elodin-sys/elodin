@@ -29,6 +29,7 @@ members = [
     "libs/stellarator/macros",
     "libs/stellarator/maitake",
     "libs/stellarator/maitake/util",
+    "libs/video-toolbox",
     "fsw/serial-bridge",
     "fsw/mekf",
     "fsw/lqr",
@@ -37,6 +38,8 @@ members = [
     "fsw/tegrastats-bridge",
     "fsw/aleph-setup",
     "apps/inscriber",
+    "fsw/video-streamer",
+    "fsw/gstreamer"
 ]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 

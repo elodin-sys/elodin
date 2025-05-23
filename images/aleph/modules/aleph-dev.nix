@@ -47,6 +47,7 @@ in {
       cudaPackages.cudnn
       cudaPackages.tensorrt
       cudaPackages.vpi2
+      gst_all_1.gstreamer
       nvidia-jetpack.l4t-cuda
       nvidia-jetpack.l4t-gstreamer
       nvidia-jetpack.l4t-multimedia
@@ -55,6 +56,10 @@ in {
     NVCC_PREPEND_FLAGS = "--compiler-bindir ${pkgs.gcc11}/bin/gcc";
     NVCC_APPEND_FLAGS = "-I${pkgs.cudaPackages.cuda_cudart.include}/include";
     CONTAINER_HOST = "unix:///run/podman/podman.sock";
+    GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" [
+      gst_all_1.gstreamer
+      aravis
+    ];
   };
   hardware.graphics.enable = true;
   virtualisation.podman = {
@@ -91,6 +96,13 @@ in {
     lsof
     gst_all_1.gstreamer
     gst_all_1.gst-plugins-base
+    gst_all_1.gst-plugins-good
+    gst_all_1.gst-plugins-bad
+    gst_all_1.gst-plugins-ugly
+    gst_all_1.gst-plugins-rs
+    aravis
+    nvidia-jetpack.l4t-gstreamer
+    nvidia-jetpack.l4t-multimedia
     cudaPackages.cuda_nvcc
     nvidia-jetpack.samples.cuda-test
     nvidia-jetpack.samples.cudnn-test
@@ -106,5 +118,7 @@ in {
     (writeShellScriptBin "flash-mcu" (builtins.readFile ../scripts/flash-mcu.sh))
     (writeShellScriptBin "aleph-scan" (builtins.readFile ../scripts/aleph-scan.sh))
     aleph-status
+    video-streamer
+    elodinsink
   ];
 }

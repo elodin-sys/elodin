@@ -1,0 +1,41 @@
+[package]
+name = "gst-elodin-plugin"
+version = "0.1.0"
+edition = "2021"
+description = "GStreamer plugin that streams Annex B NAL units to elodin-db"
+
+[dependencies]
+gstreamer = { version = "0.23", features = ["v1_18"] }
+gstreamer-base = { version = "0.23", features = ["v1_18"] }
+gstreamer-video = { version = "0.23", features = ["v1_18"] }
+
+# impeller
+impeller2.path = "../../libs/impeller2"
+impeller2.features = ["std"]
+impeller2-wkt = { path = "../../libs/impeller2/wkt" }
+
+# General utilities
+anyhow = "1.0"
+
+[lib]
+name = "gstelodin"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[build-dependencies]
+gst-plugin-version-helper = "0.8"
+pkg-config = "0.3"
+
+[features]
+capi = []
+
+[package.metadata.capi]
+min_version = "0.9.21"
+
+[package.metadata.capi.header]
+enabled = false
+
+[package.metadata.capi.library]
+install_subdir = "gstreamer-1.0"
+versioning = false
+import_library = false

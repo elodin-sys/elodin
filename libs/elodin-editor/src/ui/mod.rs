@@ -49,6 +49,7 @@ pub mod sql_table;
 mod theme;
 pub mod tiles;
 pub mod utils;
+pub mod video_stream;
 pub mod widgets;
 
 #[cfg(not(target_family = "wasm"))]

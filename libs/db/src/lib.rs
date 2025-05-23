@@ -216,6 +216,13 @@ impl DB {
                     .and_then(|p| p.parse().ok())
                     .ok_or(Error::InvalidMsgId)?;
                 let msg_log = MsgLog::open(path)?;
+                if let Some(first_timestamp) = msg_log.timestamps().first() {
+                    start_timestamp = start_timestamp.min(first_timestamp.0);
+                }
+
+                if let Some((timestamp, _)) = msg_log.latest() {
+                    last_updated = timestamp.0.max(last_updated);
+                };
                 msg_logs.insert(msg_id.to_le_bytes(), msg_log);
             }
         }
@@ -243,6 +250,11 @@ impl DB {
             msg_logs,
             ..Default::default()
         };
+        let earliest_timestamp = if start_timestamp == i64::MAX {
+            Timestamp::now()
+        } else {
+            Timestamp(start_timestamp)
+        };
         Ok(DB {
             state: RwLock::new(state),
             path,
@@ -253,7 +265,7 @@ impl DB {
                 db_state.default_stream_time_step.as_nanos() as u64
             ),
             last_updated: AtomicCell::new(Timestamp(last_updated)),
-            earliest_timestamp: Timestamp(start_timestamp),
+            earliest_timestamp,
         })
     }
 
@@ -302,7 +314,32 @@ impl DB {
                 Ok::<_, Error>(())
             })?;
         }
+        self.last_updated.update_max(timestamp);
         Ok(())
+    }
+
+    pub fn get_or_insert_fixed_rate_state(
+        &self,
+        stream_id: StreamId,
+        behavior: FixedRateBehavior,
+    ) -> Arc<FixedRateStreamState> {
+        let mut state = self.state.write().expect("poisoned lock");
+        state
+            .streams
+            .entry(stream_id)
+            .or_insert_with(|| {
+                Arc::new(FixedRateStreamState::new(
+                    stream_id,
+                    Duration::from_nanos(behavior.timestep),
+                    match behavior.initial_timestamp {
+                        InitialTimestamp::Earliest => self.earliest_timestamp,
+                        InitialTimestamp::Latest => self.last_updated.latest(),
+                        InitialTimestamp::Manual(timestamp) => timestamp,
+                    },
+                    behavior.frequency,
+                ))
+            })
+            .clone()
     }
 }
 
@@ -730,8 +767,8 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + 'static>(
     mut rx: PacketStream<OwnedReader<A>>,
     db: Arc<DB>,
 ) -> Result<(), Error> {
-    let mut buf = vec![0u8; 1024 * 64];
-    let mut resp_pkt = LenPacket::new(PacketTy::Msg, [0, 0], 1024 * 64);
+    let mut buf = vec![0u8; 8 * 1024 * 1024];
+    let mut resp_pkt = LenPacket::new(PacketTy::Msg, [0, 0], 8 * 1024 * 1024);
     loop {
         let pkt = rx.next(buf).await?;
         let req_id = pkt.req_id();
@@ -1115,11 +1152,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     sunk_new_time_series: false,
                     table_received: Timestamp::now(),
                 };
-                table
-                    .sink(&state.vtable_registry, &mut sink)?
-                    .inspect_err(|err| {
-                        dbg!(err);
-                    })?;
+                table.sink(&state.vtable_registry, &mut sink)??;
                 if sink.sunk_new_time_series {
                     db.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
                 }
@@ -1172,6 +1205,20 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 db.with_state_mut(|s| s.get_or_insert_msg_log(msg_id, &db.path).cloned())?;
             let req_id = m.req_id;
             stellarator::spawn(handle_msg_stream(msg_id, req_id, msg_log, tx.tx.clone()));
+        }
+        Packet::Msg(m) if m.id == FixedRateMsgStream::ID => {
+            let FixedRateMsgStream { msg_id, fixed_rate } = m.parse::<FixedRateMsgStream>()?;
+            let msg_log =
+                db.with_state_mut(|s| s.get_or_insert_msg_log(msg_id, &db.path).cloned())?;
+            let stream_state =
+                db.get_or_insert_fixed_rate_state(fixed_rate.stream_id, fixed_rate.behavior);
+            stellarator::spawn(handle_fixed_rate_msg_stream(
+                msg_id,
+                m.req_id,
+                msg_log,
+                tx.tx.clone(),
+                stream_state,
+            ));
         }
         Packet::Msg(m) if m.id == GetMsgMetadata::ID => {
             let GetMsgMetadata { msg_id } = m.parse::<GetMsgMetadata>()?;
@@ -1252,7 +1299,10 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 Ok::<_, Error>(())
             })?;
         }
-        Packet::Msg(m) => db.push_msg(Timestamp::now(), m.id, &m.buf)?,
+        Packet::Msg(m) => {
+            let timestamp = m.timestamp.unwrap_or(Timestamp::now());
+            db.push_msg(timestamp, m.id, &m.buf)?
+        }
         _ => {}
     }
     Ok(())
@@ -1271,39 +1321,75 @@ pub async fn handle_msg_stream<A: AsyncWrite>(
             continue;
         };
         let tx = tx.lock().await;
+        pkt.clear();
         pkt.extend_from_slice(msg);
         rent!(tx.send(pkt).await, pkt)?;
-        pkt.clear();
     }
 }
+
+pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
+    msg_id: PacketId,
+    req_id: RequestId,
+    msg_log: MsgLog,
+    tx: Arc<Mutex<PacketSink<A>>>,
+    stream_state: Arc<FixedRateStreamState>,
+) -> Result<(), Error> {
+    let mut pkt = LenPacket::msg_with_timestamp(msg_id, Timestamp(0), 64).with_request_id(req_id);
+    let mut last_sent_timestamp: Option<Timestamp> = None;
+    loop {
+        if !stream_state.wait_for_playing().await {
+            return Ok(());
+        }
+        let start = Instant::now();
+        let current_timestamp = stream_state.current_timestamp();
+        let Some((msg_timestamp, msg)) = msg_log.get_nearest(current_timestamp) else {
+            continue;
+        };
+
+        if Some(msg_timestamp) == last_sent_timestamp {
+            stream_state
+                .wait_for_tick(start.elapsed(), current_timestamp)
+                .await;
+            continue;
+        }
+
+        {
+            let tx = tx.lock().await;
+            pkt.clear();
+            pkt.extend_from_slice(msg_timestamp.as_bytes());
+            pkt.extend_from_slice(msg);
+            rent!(tx.send(pkt).await, pkt)?;
+        }
+        last_sent_timestamp = Some(msg_timestamp);
+
+        stream_state
+            .wait_for_tick(start.elapsed(), current_timestamp)
+            .await;
+    }
+}
+
 pub struct FixedRateStreamState {
     stream_id: StreamId,
-    req_id: RequestId,
     time_step: AtomicU64,
     frequency: AtomicU64,
     is_scrubbed: AtomicBool,
     current_tick: AtomicI64,
     playing_cell: PlayingCell,
-    filter: StreamFilter,
 }
 
 impl FixedRateStreamState {
-    fn from_state(
+    fn new(
         stream_id: StreamId,
-        req_id: RequestId,
         time_step: Duration,
         current_tick: Timestamp,
-        filter: StreamFilter,
         frequency: u64,
     ) -> FixedRateStreamState {
         FixedRateStreamState {
             stream_id,
-            req_id,
             time_step: AtomicU64::new(time_step.as_nanos() as u64),
             is_scrubbed: AtomicBool::new(false),
             current_tick: AtomicI64::new(current_tick.0),
             playing_cell: PlayingCell::new(true),
-            filter,
             frequency: AtomicU64::new(frequency),
         }
     }
@@ -1357,6 +1443,26 @@ impl FixedRateStreamState {
     fn set_playing(&self, playing: bool) {
         self.playing_cell.set_playing(playing)
     }
+
+    async fn wait_for_playing(&self) -> bool {
+        self.playing_cell
+            .wait_cell
+            .wait_for(|| self.is_playing() || self.is_scrubbed())
+            .await
+            .is_ok()
+    }
+
+    async fn wait_for_tick(&self, elapsed: Duration, last_timestamp: Timestamp) {
+        let sleep_time = self.sleep_time().saturating_sub(elapsed);
+        futures_lite::future::race(
+            async {
+                self.playing_cell.wait_for_change().await;
+            },
+            stellarator::sleep(sleep_time),
+        )
+        .await;
+        self.try_increment_tick(last_timestamp);
+    }
 }
 
 fn handle_unicast_stream(addr: SocketAddr, stream: Stream, db: Arc<DB>) {
@@ -1381,7 +1487,7 @@ fn handle_stream<A: AsyncWrite + 'static>(
 ) -> stellarator::JoinHandle<()> {
     match stream.behavior {
         StreamBehavior::RealTime => stellarator::spawn(async move {
-            match handle_real_time_stream(tx, req_id, stream.filter, db).await {
+            match handle_real_time_stream(tx, req_id, db).await {
                 Ok(_) => {}
                 Err(err) if err.is_stream_closed() => {}
                 Err(err) => {
@@ -1390,24 +1496,20 @@ fn handle_stream<A: AsyncWrite + 'static>(
             }
         }),
         StreamBehavior::FixedRate(fixed_rate) => {
-            let state = Arc::new(FixedRateStreamState::from_state(
+            let state = Arc::new(FixedRateStreamState::new(
                 stream.id,
-                req_id,
-                Duration::from_nanos(fixed_rate.timestep.unwrap_or_else(|| {
-                    db.default_stream_time_step.load(atomic::Ordering::Relaxed)
-                })),
+                Duration::from_nanos(fixed_rate.timestep),
                 match fixed_rate.initial_timestamp {
                     InitialTimestamp::Earliest => db.earliest_timestamp,
                     InitialTimestamp::Latest => db.last_updated.latest(),
                     InitialTimestamp::Manual(timestamp) => timestamp,
                 },
-                stream.filter,
-                fixed_rate.frequency.unwrap_or(60),
+                fixed_rate.frequency,
             ));
             debug!(stream.id = ?stream.id, "inserting stream");
             db.with_state_mut(|s| s.streams.insert(stream.id, state.clone()));
             stellarator::spawn(async move {
-                match handle_fixed_stream(tx, state, db).await {
+                match handle_fixed_stream(tx, req_id, state, db).await {
                     Ok(_) => {}
                     Err(err) if err.is_stream_closed() => {}
                     Err(err) => {
@@ -1422,13 +1524,12 @@ fn handle_stream<A: AsyncWrite + 'static>(
 async fn handle_real_time_stream<A: AsyncWrite + 'static>(
     sink: Arc<Mutex<PacketSink<A>>>,
     req_id: RequestId,
-    filter: StreamFilter,
     db: Arc<DB>,
 ) -> Result<(), Error> {
     let mut visited_ids = HashSet::new();
     loop {
         db.with_state(|state| {
-            filter.visit(&state.components, |component| {
+            DBVisitor.visit(&state.components, |component| {
                 if visited_ids.contains(&(component.component_id, component.entity_id)) {
                     return Ok(());
                 }
@@ -1495,6 +1596,7 @@ async fn handle_real_time_component<A: AsyncWrite>(
 
 async fn handle_fixed_stream<A: AsyncWrite>(
     stream: Arc<Mutex<PacketSink<A>>>,
+    req_id: RequestId,
     state: Arc<FixedRateStreamState>,
     db: Arc<DB>,
 ) -> Result<(), Error> {
@@ -1502,13 +1604,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
     let mut table = LenPacket::table([0; 2], 2048 - 16);
     let mut components = db.with_state(|state| state.components.clone());
     loop {
-        if state
-            .playing_cell
-            .wait_cell
-            .wait_for(|| state.is_playing() || state.is_scrubbed())
-            .await
-            .is_err()
-        {
+        if !state.wait_for_playing().await {
             return Ok(());
         }
         let start = Instant::now();
@@ -1519,16 +1615,13 @@ async fn handle_fixed_stream<A: AsyncWrite>(
             let stream = stream.lock().await;
             let id: PacketId = state.stream_id.to_le_bytes()[..2].try_into().unwrap();
             table = LenPacket::table(id, 2048 - 16);
-            let vtable = state.filter.vtable(&components)?;
+            let vtable = DBVisitor.vtable(&components)?;
             let msg = VTableMsg { id, vtable };
-            stream.send(msg.with_request_id(state.req_id)).await.0?;
+            stream.send(msg.with_request_id(req_id)).await.0?;
             current_gen = vtable_gen;
         }
         table.clear();
-        if let Err(err) = state
-            .filter
-            .populate_table(&components, &mut table, current_timestamp)
-        {
+        if let Err(err) = DBVisitor.populate_table(&components, &mut table, current_timestamp) {
             warn!(?err, "failed to populate table");
         }
         {
@@ -1539,51 +1632,25 @@ async fn handle_fixed_stream<A: AsyncWrite>(
                         timestamp: current_timestamp,
                         stream_id: state.stream_id,
                     }
-                    .with_request_id(state.req_id),
+                    .with_request_id(req_id),
                 )
                 .await
                 .0?;
-            rent!(
-                stream.send(table.with_request_id(state.req_id)).await,
-                table
-            )?;
+            rent!(stream.send(table.with_request_id(req_id)).await, table)?;
         }
-        let sleep_time = state.sleep_time().saturating_sub(start.elapsed());
-        futures_lite::future::race(
-            async {
-                state.playing_cell.wait_for_change().await;
-            },
-            stellarator::sleep(sleep_time),
-        )
-        .await;
-        state.try_increment_tick(current_timestamp);
+        state
+            .wait_for_tick(start.elapsed(), current_timestamp)
+            .await;
     }
 }
 
-pub trait StreamFilterExt {
-    fn visit(
-        &self,
-        components: &HashMap<(EntityId, ComponentId), Component>,
-        f: impl for<'a> FnMut(&'a Component) -> Result<(), Error>,
-    ) -> Result<(), Error>;
-    fn vtable(
-        &self,
-        components: &HashMap<(EntityId, ComponentId), Component>,
-    ) -> Result<VTable, Error>;
-    fn populate_table(
-        &self,
-        components: &HashMap<(EntityId, ComponentId), Component>,
-        table: &mut LenPacket,
-        tick: Timestamp,
-    ) -> Result<(), Error>;
-}
+pub struct DBVisitor;
 
-impl StreamFilterExt for StreamFilter {
+impl DBVisitor {
     fn vtable(
         &self,
         components: &HashMap<(EntityId, ComponentId), Component>,
-    ) -> Result<VTable<Vec<impeller2::vtable::Op>, Vec<u8>, Vec<impeller2::vtable::Field>>, Error>
-    {
+    ) -> Result<VTable, Error> {
         let mut fields = vec![];
         let mut offset = 0;
         self.visit(components, |entity| {
@@ -1627,8 +1694,6 @@ impl StreamFilterExt for StreamFilter {
     ) -> Result<(), Error> {
         components
             .iter()
-            .filter(|((_, id), _)| self.component_id.is_none() || self.component_id == Some(*id))
-            .filter(|((id, _), _)| self.entity_id.is_none() || self.entity_id == Some(*id))
             .try_for_each(|(_, component)| f(component))
     }
 }
