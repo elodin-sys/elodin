@@ -31,6 +31,8 @@ use super::{
         WidgetSystem, WidgetSystemExt,
         button::{EImageButton, ETileButton},
         command_palette::{CommandPaletteState, palette_items},
+        hierarchy::HierarchyContent,
+        inspector::{InspectorContent, InspectorIcons},
         plot::{self, GraphBundle, GraphState, PlotWidget},
     },
 };
@@ -48,6 +50,10 @@ pub struct TileIcons {
     pub scrub: egui::TextureId,
     pub tile_3d_viewer: egui::TextureId,
     pub tile_graph: egui::TextureId,
+    pub subtract: egui::TextureId,
+    pub setting: egui::TextureId,
+    pub search: egui::TextureId,
+    pub chart: egui::TextureId,
 }
 
 #[derive(Resource, Clone)]
@@ -62,6 +68,16 @@ pub struct ViewportContainsPointer(pub bool);
 #[derive(Clone)]
 pub struct ActionTilePane {
     pub entity: Entity,
+    pub label: String,
+}
+
+#[derive(Clone)]
+pub struct HierarchyPane {
+    pub label: String,
+}
+
+#[derive(Clone)]
+pub struct InspectorPane {
     pub label: String,
 }
 
@@ -151,6 +167,14 @@ impl TileState {
             .push(TreeAction::AddVideoStream(tile_id, msg_id, label));
     }
 
+    pub fn create_hierarchy_tile(&mut self, tile_id: Option<TileId>) {
+        self.tree_actions.push(TreeAction::AddHierarchy(tile_id));
+    }
+
+    pub fn create_inspector_tile(&mut self, tile_id: Option<TileId>) {
+        self.tree_actions.push(TreeAction::AddInspector(tile_id));
+    }
+
     pub fn is_empty(&self) -> bool {
         self.tree.active_tiles().is_empty()
     }
@@ -200,6 +224,8 @@ pub enum Pane {
     SQLTable(SQLTablePane),
     ActionTile(ActionTilePane),
     VideoStream(super::video_stream::VideoStreamPane),
+    Hierarchy(HierarchyPane),
+    Inspector(InspectorPane),
 }
 
 impl Pane {
@@ -216,6 +242,8 @@ impl Pane {
             Pane::SQLTable(..) => "SQL".to_string(),
             Pane::ActionTile(action) => action.label.to_string(),
             Pane::VideoStream(video_stream) => video_stream.label.to_string(),
+            Pane::Hierarchy(hierarchy) => hierarchy.label.to_string(),
+            Pane::Inspector(inspector) => inspector.label.to_string(),
         }
     }
 
@@ -226,6 +254,7 @@ impl Pane {
         //state: &mut TileLayout<'_, '_>,
         icons: &TileIcons,
         world: &mut World,
+        tree_actions: &mut SmallVec<[TreeAction; 4]>,
     ) -> egui_tiles::UiResponse {
         let content_rect = ui.available_rect_before_wrap();
         match self {
@@ -261,6 +290,26 @@ impl Pane {
                     "video_stream",
                     pane.clone(),
                 );
+                egui_tiles::UiResponse::None
+            }
+            Pane::Hierarchy(_pane) => {
+                ui.add_widget_with::<HierarchyContent>(world, "hierarchy_content", icons.search);
+                egui_tiles::UiResponse::None
+            }
+            Pane::Inspector(_pane) => {
+                let inspector_icons = InspectorIcons {
+                    chart: icons.chart,
+                    add: icons.add,
+                    subtract: icons.subtract,
+                    setting: icons.setting,
+                    search: icons.search,
+                };
+                let actions = ui.add_widget_with::<InspectorContent>(
+                    world,
+                    "inspector_content",
+                    (inspector_icons, true),
+                );
+                tree_actions.extend(actions.into_iter());
                 egui_tiles::UiResponse::None
             }
         }
@@ -345,6 +394,8 @@ pub enum TreeAction {
     AddSQLTable(Option<TileId>),
     AddActionTile(Option<TileId>, String, String),
     AddVideoStream(Option<TileId>, [u8; 2], String),
+    AddHierarchy(Option<TileId>),
+    AddInspector(Option<TileId>),
     DeleteTab(TileId),
     SelectTile(TileId),
 }
@@ -380,7 +431,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         _tile_id: egui_tiles::TileId,
         pane: &mut Pane,
     ) -> egui_tiles::UiResponse {
-        pane.ui(ui, &self.icons, self.world)
+        pane.ui(ui, &self.icons, self.world, &mut self.tree_actions)
     }
 
     #[allow(clippy::fn_params_excessive_bools)]
@@ -504,9 +555,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                         action_id: action.entity,
                     };
                 }
-                _ => {
-                    *layout.selected_object = SelectedObject::None;
-                }
+                _ => {}
             }
             self.tree_actions.push(TreeAction::SelectTile(tile_id));
         }
@@ -613,6 +662,11 @@ impl WidgetSystem for TileSystem<'_, '_> {
             scrub: contexts.add_image(images.icon_scrub.clone_weak()),
             tile_3d_viewer: contexts.add_image(images.icon_tile_3d_viewer.clone_weak()),
             tile_graph: contexts.add_image(images.icon_tile_graph.clone_weak()),
+
+            subtract: contexts.add_image(images.icon_subtract.clone_weak()),
+            chart: contexts.add_image(images.icon_chart.clone_weak()),
+            setting: contexts.add_image(images.icon_setting.clone_weak()),
+            search: contexts.add_image(images.icon_search.clone_weak()),
         };
 
         let is_empty_tile_tree = ui_state.is_empty() && ui_state.tree_actions.is_empty();
@@ -952,6 +1006,26 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             ui_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
+                    TreeAction::AddHierarchy(parent_tile_id) => {
+                        let pane = Pane::Hierarchy(HierarchyPane {
+                            label: "Entities".to_string(),
+                        });
+                        if let Some(tile_id) =
+                            ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
+                        {
+                            ui_state.tree.make_active(|id, _| id == tile_id);
+                        }
+                    }
+                    TreeAction::AddInspector(parent_tile_id) => {
+                        let pane = Pane::Inspector(InspectorPane {
+                            label: "Inspector".to_string(),
+                        });
+                        if let Some(tile_id) =
+                            ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
+                        {
+                            ui_state.tree.make_active(|id, _| id == tile_id);
+                        }
+                    }
                 }
             }
             let tiles = ui_state.tree.tiles.iter();
@@ -971,6 +1045,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             cam.try_insert(ViewportRect(None));
                         }
                     }
+                    Pane::Hierarchy(_) => {}
+                    Pane::Inspector(_) => {}
                     Pane::Graph(graph) => {
                         if active_tiles.contains(tile_id) {
                             if let Ok(mut cam) = state_mut.commands.get_entity(graph.id) {

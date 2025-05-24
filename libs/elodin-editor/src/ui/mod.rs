@@ -28,14 +28,11 @@ use widgets::{
 
 use crate::{GridHandle, MainCamera, plugins::LogicalKeyState};
 
-use self::widgets::inspector::{Inspector, entity::ComponentFilter};
+use self::widgets::inspector::entity::ComponentFilter;
 use self::widgets::modal::ModalWithSettings;
 
+use self::widgets::command_palette::{self, CommandPalette};
 use self::widgets::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystemExt};
-use self::widgets::{
-    command_palette::{self, CommandPalette},
-    hierarchy::Hierarchy,
-};
 use self::{
     utils::MarginSides,
     widgets::{button::EImageButton, inspector},
@@ -497,20 +494,8 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         let Ok(window) = window.single() else {
             return;
         };
-        let width = window.resolution.width();
-        let height = window.resolution.height();
 
         theme::set_theme(ctx);
-
-        let icon_search = contexts.add_image(images.icon_search.clone_weak());
-
-        let inspector_icons = inspector::InspectorIcons {
-            chart: contexts.add_image(images.icon_chart.clone_weak()),
-            add: contexts.add_image(images.icon_add.clone_weak()),
-            subtract: contexts.add_image(images.icon_subtract.clone_weak()),
-            setting: contexts.add_image(images.icon_setting.clone_weak()),
-            search: contexts.add_image(images.icon_search.clone_weak()),
-        };
 
         let titlebar_icons = TitlebarIcons {
             icon_side_bar_right: contexts.add_image(images.icon_side_bar_right.clone_weak()),
@@ -522,55 +507,13 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
 
         world.add_root_widget_with::<Titlebar, With<PrimaryWindow>>("titlebar", titlebar_icons);
 
-        let landscape_layout = width * 0.75 > height;
-
         #[cfg(not(target_family = "wasm"))]
         world.add_root_widget::<widgets::status_bar::StatusBar>("status_bar");
 
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
-                if landscape_layout {
-                    ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");
-                }
-
-                if landscape_layout {
-                    ui.add_widget_with::<Hierarchy>(
-                        world,
-                        "hierarchy",
-                        (false, icon_search, width),
-                    );
-
-                    ui.add_widget_with::<Inspector>(
-                        world,
-                        "inspector",
-                        (false, inspector_icons, width),
-                    );
-                } else {
-                    egui::TopBottomPanel::new(egui::panel::TopBottomSide::Bottom, "section_bottom")
-                        .resizable(true)
-                        .frame(egui::Frame::default())
-                        .default_height(200.0)
-                        .max_height(width * 0.5)
-                        .show_inside(ui, |ui| {
-                            let hierarchy_width = ui.add_widget_with::<Hierarchy>(
-                                world,
-                                "hierarchy",
-                                (true, icon_search, width),
-                            );
-
-                            let inspector_width = width - hierarchy_width;
-
-                            ui.add_widget_with::<Inspector>(
-                                world,
-                                "inspector",
-                                (true, inspector_icons, inspector_width),
-                            );
-                        });
-
-                    ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");
-                }
-
+                ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");
                 ui.add_widget::<tiles::TileSystem>(world, "tile_system");
             });
     }
