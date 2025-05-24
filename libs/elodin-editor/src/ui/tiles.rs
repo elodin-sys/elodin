@@ -71,16 +71,6 @@ pub struct ActionTilePane {
     pub label: String,
 }
 
-#[derive(Clone)]
-pub struct HierarchyPane {
-    pub label: String,
-}
-
-#[derive(Clone)]
-pub struct InspectorPane {
-    pub label: String,
-}
-
 impl TileState {
     fn insert_tile(
         &mut self,
@@ -224,8 +214,8 @@ pub enum Pane {
     SQLTable(SQLTablePane),
     ActionTile(ActionTilePane),
     VideoStream(super::video_stream::VideoStreamPane),
-    Hierarchy(HierarchyPane),
-    Inspector(InspectorPane),
+    Hierarchy,
+    Inspector,
 }
 
 impl Pane {
@@ -242,8 +232,8 @@ impl Pane {
             Pane::SQLTable(..) => "SQL".to_string(),
             Pane::ActionTile(action) => action.label.to_string(),
             Pane::VideoStream(video_stream) => video_stream.label.to_string(),
-            Pane::Hierarchy(hierarchy) => hierarchy.label.to_string(),
-            Pane::Inspector(inspector) => inspector.label.to_string(),
+            Pane::Hierarchy => "Entities".to_string(),
+            Pane::Inspector => "Inspector".to_string(),
         }
     }
 
@@ -292,11 +282,11 @@ impl Pane {
                 );
                 egui_tiles::UiResponse::None
             }
-            Pane::Hierarchy(_pane) => {
+            Pane::Hierarchy => {
                 ui.add_widget_with::<HierarchyContent>(world, "hierarchy_content", icons.search);
                 egui_tiles::UiResponse::None
             }
-            Pane::Inspector(_pane) => {
+            Pane::Inspector => {
                 let inspector_icons = InspectorIcons {
                     chart: icons.chart,
                     add: icons.add,
@@ -309,7 +299,7 @@ impl Pane {
                     "inspector_content",
                     (inspector_icons, true),
                 );
-                tree_actions.extend(actions.into_iter());
+                tree_actions.extend(actions);
                 egui_tiles::UiResponse::None
             }
         }
@@ -1007,21 +997,15 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         }
                     }
                     TreeAction::AddHierarchy(parent_tile_id) => {
-                        let pane = Pane::Hierarchy(HierarchyPane {
-                            label: "Entities".to_string(),
-                        });
                         if let Some(tile_id) =
-                            ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
+                            ui_state.insert_tile(Tile::Pane(Pane::Hierarchy), parent_tile_id, true)
                         {
                             ui_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
                     TreeAction::AddInspector(parent_tile_id) => {
-                        let pane = Pane::Inspector(InspectorPane {
-                            label: "Inspector".to_string(),
-                        });
                         if let Some(tile_id) =
-                            ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
+                            ui_state.insert_tile(Tile::Pane(Pane::Inspector), parent_tile_id, true)
                         {
                             ui_state.tree.make_active(|id, _| id == tile_id);
                         }
@@ -1045,8 +1029,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             cam.try_insert(ViewportRect(None));
                         }
                     }
-                    Pane::Hierarchy(_) => {}
-                    Pane::Inspector(_) => {}
+                    Pane::Hierarchy => {}
+                    Pane::Inspector => {}
                     Pane::Graph(graph) => {
                         if active_tiles.contains(tile_id) {
                             if let Ok(mut cam) = state_mut.commands.get_entity(graph.id) {
@@ -1330,6 +1314,8 @@ pub fn spawn_panel(
             };
             ui_state.insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false)
         }
+        Panel::Inspector => ui_state.insert_tile(Tile::Pane(Pane::Inspector), parent_id, false),
+        Panel::Hierarchy => ui_state.insert_tile(Tile::Pane(Pane::Hierarchy), parent_id, false),
     }
 }
 

@@ -17,6 +17,8 @@ pub enum Panel {
     ActionPane(ActionPane),
     SQLTable(SQLTable),
     Tabs(Vec<Panel>),
+    Inspector,
+    Hierarchy,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
