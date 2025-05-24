@@ -177,7 +177,6 @@ impl Plot {
         selected_range: SelectedTimeRange,
         earliest_timestamp: Timestamp,
     ) -> Self {
-        //let earliest_timestamp = selected_range.0.start;
         let rect = ui.max_rect();
         let inner_rect = get_inner_rect(rect);
 
@@ -235,48 +234,26 @@ impl Plot {
         };
         graph_state.y_range = y_min..y_max;
 
-        let mut steps_y = ((inner_rect.height() / 50.0) as usize).max(1);
-        if steps_y % 2 != 0 {
-            steps_y += 1;
-        }
-        let steps_x = ((inner_rect.width() / 75.0) as usize).max(1);
-
         let original_bounds = PlotBounds::from_lines(&tick_range, earliest_timestamp, y_min, y_max);
 
-        //graph_state = (original_bounds.max_y..original_bounds.min_y)
-
         let bounds_size = DVec2::new(original_bounds.width(), original_bounds.height());
-        let outer_ratio = rect.size() / inner_rect.size();
-        let outer_ratio = Vec2::new(outer_ratio.x, outer_ratio.y).as_dvec2();
+        let outer_ratio = (rect.size() / inner_rect.size()).as_dvec2();
         let pan_offset = graph_state.pan_offset.as_dvec2() * bounds_size * DVec2::new(-1.0, 1.0);
-        let mut bounds = original_bounds.clone().offset(pan_offset * outer_ratio);
-        let new_bounds = bounds_size * graph_state.zoom_factor.as_dvec2();
-        let offset = new_bounds - bounds_size;
-        bounds.min_x -= offset.x / 2.0;
-        bounds.max_x += offset.x / 2.0;
-        bounds.min_y -= offset.y / 2.0;
-        bounds.max_y += offset.y / 2.0;
+        let outer_pan_offset = pan_offset * outer_ratio;
+        let bounds = original_bounds
+            .offset(outer_pan_offset)
+            .zoom(graph_state.zoom_factor.as_dvec2())
+            .normalize();
 
-        if bounds.min_x >= bounds.max_x {
-            bounds.min_x = bounds.max_x.min(bounds.min_x);
-            bounds.max_x = bounds.min_x + 1.0;
-        }
-        if bounds.min_y >= bounds.max_y {
-            bounds.min_y = bounds.max_y.min(bounds.min_y);
-            bounds.max_y = bounds.min_y + 1.0;
-        }
-
-        let y_range = bounds.max_y - bounds.min_y;
-        let full_y_range = (rect.height() / inner_rect.height()) as f64 * y_range;
+        let y_range = bounds.height();
+        let full_y_range = outer_ratio.y * y_range;
         let y_delta = full_y_range - y_range;
-        let mut new_bounds = bounds.clone();
+        let mut new_bounds = bounds;
         new_bounds.min_y -= y_delta / 2.0;
         new_bounds.max_y -= y_delta / 2.0;
-        let x_range = 1.0 / (bounds.max_x - bounds.min_x);
-        let width = new_bounds.max_x - new_bounds.min_x;
+
         let viewport_origin = DVec2::new(
-            (offset.x / 2.0 - pan_offset.x) * x_range
-                - (selected_range.0.start.0 - earliest_timestamp.0) as f64 / width,
+            (-bounds.min_x + (outer_pan_offset.x - pan_offset.x)) / bounds.width(),
             -(new_bounds.min_y / full_y_range),
         );
         let viewport_origin = viewport_origin.as_vec2();
@@ -285,7 +262,7 @@ impl Plot {
             far: 1000.0,
             viewport_origin,
             scaling_mode: ScalingMode::Fixed {
-                width: width as f32,
+                width: bounds.width() as f32,
                 height: full_y_range as f32,
             },
             scale: 1.0,
@@ -300,8 +277,8 @@ impl Plot {
             .entity(graph_id)
             .try_insert(Projection::Orthographic(orthographic_projection));
 
-        let min_x = -viewport_origin.x as f64 * width;
-        let max_x = width + min_x;
+        let min_x = -viewport_origin.x as f64 * bounds.width();
+        let max_x = bounds.width() + min_x;
 
         let line_visible_range = Timestamp(min_x as i64 + earliest_timestamp.0)
             ..Timestamp(max_x as i64 + earliest_timestamp.0);
@@ -413,6 +390,12 @@ impl Plot {
                     .and_then(|component| component.get(*index))
                     .is_some()
             });
+
+        let mut steps_y = ((inner_rect.height() / 50.0) as usize).max(1);
+        if steps_y % 2 != 0 {
+            steps_y += 1;
+        }
+        let steps_x = ((inner_rect.width() / 75.0) as usize).max(1);
 
         Self {
             tick_range,
@@ -900,7 +883,7 @@ impl Plot {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Copy)]
 pub struct PlotBounds {
     min_x: f64,
     min_y: f64,
@@ -942,6 +925,10 @@ impl PlotBounds {
         self.max_y - self.min_y
     }
 
+    pub fn size(&self) -> DVec2 {
+        DVec2::new(self.width(), self.height())
+    }
+
     pub fn range_x_f32(&self) -> RangeInclusive<f32> {
         (self.min_x as f32)..=(self.max_x as f32)
     }
@@ -962,6 +949,28 @@ impl PlotBounds {
         let min_x = (self.min_x as i64) + earliest_timestamp.0;
         let max_x = (self.max_x as i64) + earliest_timestamp.0;
         Timestamp(min_x)..Timestamp(max_x)
+    }
+
+    pub fn zoom(mut self, zoom_factor: DVec2) -> Self {
+        let offset = self.size() * (zoom_factor - DVec2::ONE);
+        Self {
+            min_x: self.min_x - offset.x / 2.0,
+            max_x: self.max_x + offset.x / 2.0,
+            min_y: self.min_y - offset.y / 2.0,
+            max_y: self.max_y + offset.y / 2.0,
+        }
+    }
+
+    pub fn normalize(mut self) -> Self {
+        if self.min_x >= self.max_x {
+            self.min_x = self.max_x.min(self.min_x);
+            self.max_x = self.min_x + 1.0;
+        }
+        if self.min_y >= self.max_y {
+            self.min_y = self.max_y.min(self.min_y);
+            self.max_y = self.min_y + 1.0;
+        }
+        self
     }
 }
 
@@ -1300,4 +1309,14 @@ fn scroll_offset_from_events(mut scroll_events: EventReader<MouseWheel>) -> f32 
             MouseScrollUnit::Line => ev.y * pixels_per_line,
         })
         .sum::<f32>()
+}
+
+pub trait Vec2Ext {
+    fn as_dvec2(&self) -> DVec2;
+}
+
+impl Vec2Ext for egui::Vec2 {
+    fn as_dvec2(&self) -> DVec2 {
+        DVec2::new(self.x as f64, self.y as f64)
+    }
 }
