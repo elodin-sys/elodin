@@ -44,12 +44,13 @@ c = w.spawn(
 )
 
 w.spawn(
-    el.Panel.viewport(
-        pos=[0.0, -3.0, 3.0],
-        looking_at=[0.0, 0.0, 0.0],
-        hdr=True,
-    ),
-    name="Viewport 1",
+    el.Panel.sidebars(
+        el.Panel.viewport(
+            pos=[0.0, -3.0, 3.0],
+            looking_at=[0.0, 0.0, 0.0],
+            hdr=True,
+        ),
+    )
 )
 
 # Define a new "gravity edge" component type

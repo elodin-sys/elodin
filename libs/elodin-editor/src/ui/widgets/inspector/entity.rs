@@ -18,7 +18,7 @@ use crate::{
     ui::{
         EntityData, EntityPair,
         colors::get_scheme,
-        tiles,
+        tiles::TreeAction,
         utils::{MarginSides, format_num},
         widgets::{
             WidgetSystem, label,
@@ -32,7 +32,6 @@ use super::{InspectorIcons, empty_inspector};
 #[derive(SystemParam)]
 pub struct InspectorEntity<'w, 's> {
     entities: Query<'w, 's, EntityData<'static>>,
-    tile_state: ResMut<'w, tiles::TileState>,
     metadata_store: Res<'w, ComponentMetadataRegistry>,
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     filter: ResMut<'w, ComponentFilter>,
@@ -40,26 +39,26 @@ pub struct InspectorEntity<'w, 's> {
 
 impl WidgetSystem for InspectorEntity<'_, '_> {
     type Args = (InspectorIcons, EntityPair);
-    type Output = ();
+    type Output = SmallVec<[TreeAction; 4]>;
 
     fn ui_system(
         world: &mut World,
         state: &mut SystemState<Self>,
         ui: &mut egui::Ui,
         args: Self::Args,
-    ) {
+    ) -> Self::Output {
+        let mut tree_actions = SmallVec::new();
         let mut state_mut = state.get_mut(world);
 
         let (icons, pair) = args;
 
         let mut entities = state_mut.entities;
-        let mut tile_state = state_mut.tile_state;
         let metadata_store = state_mut.metadata_store;
         let mut render_layer_alloc = state_mut.render_layer_alloc;
         let Ok((entity_id, _, mut component_value_map, metadata)) = entities.get_mut(pair.bevy)
         else {
             ui.add(empty_inspector());
-            return;
+            return tree_actions;
         };
 
         let icon_chart = icons.chart;
@@ -165,9 +164,10 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                 )));
                 let bundle =
                     GraphBundle::new(&mut render_layer_alloc, entities, metadata.name.clone());
-                tile_state.create_graph_tile(None, bundle);
+                tree_actions.push(TreeAction::AddGraph(None, Some(bundle)));
             }
         }
+        tree_actions
     }
 }
 
