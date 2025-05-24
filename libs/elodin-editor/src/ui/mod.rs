@@ -33,10 +33,7 @@ use self::widgets::modal::ModalWithSettings;
 
 use self::widgets::command_palette::{self, CommandPalette};
 use self::widgets::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystemExt};
-use self::{
-    utils::MarginSides,
-    widgets::{button::EImageButton, inspector},
-};
+use self::{utils::MarginSides, widgets::button::EImageButton};
 
 pub mod actions;
 pub mod colors;
@@ -471,7 +468,6 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
 #[derive(SystemParam)]
 pub struct MainLayout<'w, 's> {
     contexts: EguiContexts<'w, 's>,
-    window: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     images: Local<'s, images::Images>,
 }
 
@@ -488,12 +484,7 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         let state_mut = state.get_mut(world);
 
         let mut contexts = state_mut.contexts;
-        let window = state_mut.window;
         let images = state_mut.images;
-
-        let Ok(window) = window.single() else {
-            return;
-        };
 
         theme::set_theme(ctx);
 

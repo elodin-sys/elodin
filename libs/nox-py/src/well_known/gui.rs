@@ -17,6 +17,34 @@ pub struct Panel {
 #[pymethods]
 impl Panel {
     #[staticmethod]
+    pub fn sidebars(inner: Panel) -> Self {
+        let inner = impeller2_wkt::Panel::HSplit(Split {
+            panels: vec![
+                impeller2_wkt::Panel::Hierarchy,
+                inner.inner,
+                impeller2_wkt::Panel::Inspector,
+            ],
+            shares: [(0, 0.125), (1, 0.75), (2, 0.125)].into_iter().collect(),
+            active: true,
+        });
+        Self { inner }
+    }
+
+    #[staticmethod]
+    pub fn inspector() -> Self {
+        Self {
+            inner: impeller2_wkt::Panel::Inspector,
+        }
+    }
+
+    #[staticmethod]
+    pub fn hierarchy() -> Self {
+        Self {
+            inner: impeller2_wkt::Panel::Hierarchy,
+        }
+    }
+
+    #[staticmethod]
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (track_entity = None, track_rotation = true, fov = 45.0, active = false, pos = None, looking_at = None, show_grid = false, hdr = false, name = None))]
     pub fn viewport(

@@ -18,7 +18,7 @@ use crate::{
     ui::{
         EntityData, EntityPair,
         colors::get_scheme,
-        tiles::{self, TreeAction},
+        tiles::TreeAction,
         utils::{MarginSides, format_num},
         widgets::{
             WidgetSystem, label,
