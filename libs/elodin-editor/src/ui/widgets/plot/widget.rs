@@ -236,53 +236,22 @@ impl Plot {
 
         let original_bounds = PlotBounds::from_lines(&tick_range, earliest_timestamp, y_min, y_max);
 
-        let bounds_size = DVec2::new(original_bounds.width(), original_bounds.height());
         let outer_ratio = (rect.size() / inner_rect.size()).as_dvec2();
-        let pan_offset = graph_state.pan_offset.as_dvec2() * bounds_size * DVec2::new(-1.0, 1.0);
-        let outer_pan_offset = pan_offset * outer_ratio;
+        let pan_offset = graph_state.pan_offset.as_dvec2()
+            * DVec2::new(-1.0, 1.0)
+            * outer_ratio
+            * original_bounds.size(); // scale the offset by the final size of the bounds
         let bounds = original_bounds
-            .offset(outer_pan_offset)
-            .zoom(graph_state.zoom_factor.as_dvec2())
-            .normalize();
+            .offset(pan_offset) // pan the bounds by the amount the cursor has moved
+            .zoom_at(outer_ratio, DVec2::new(0.0, 0.5)) // zoom the bounds out so the graph takes up the entire screen
+            .zoom(graph_state.zoom_factor.as_dvec2()) // zoom the bounds based on the current zoom factor
+            .normalize(); // clamp the bounds so max > min
 
-        let y_range = bounds.height();
-        let full_y_range = outer_ratio.y * y_range;
-        let y_delta = full_y_range - y_range;
-        let mut new_bounds = bounds;
-        new_bounds.min_y -= y_delta / 2.0;
-        new_bounds.max_y -= y_delta / 2.0;
-
-        let viewport_origin = DVec2::new(
-            (-bounds.min_x + (outer_pan_offset.x - pan_offset.x)) / bounds.width(),
-            -(new_bounds.min_y / full_y_range),
-        );
-        let viewport_origin = viewport_origin.as_vec2();
-        let orthographic_projection = OrthographicProjection {
-            near: 0.0,
-            far: 1000.0,
-            viewport_origin,
-            scaling_mode: ScalingMode::Fixed {
-                width: bounds.width() as f32,
-                height: full_y_range as f32,
-            },
-            scale: 1.0,
-            area: Rect::new(
-                new_bounds.min_x as f32,
-                new_bounds.min_y as f32,
-                new_bounds.max_x as f32,
-                new_bounds.max_y as f32,
-            ),
-        };
         commands
             .entity(graph_id)
-            .try_insert(Projection::Orthographic(orthographic_projection));
+            .try_insert(Projection::Orthographic(bounds.as_projection()));
 
-        let min_x = -viewport_origin.x as f64 * bounds.width();
-        let max_x = bounds.width() + min_x;
-
-        let line_visible_range = Timestamp(min_x as i64 + earliest_timestamp.0)
-            ..Timestamp(max_x as i64 + earliest_timestamp.0);
-        let bounds = PlotBounds::new(min_x as f64, bounds.min_y, max_x as f64, bounds.max_y);
+        let line_visible_range = bounds.timestamp_range(earliest_timestamp);
 
         // calc lines
 
@@ -817,9 +786,8 @@ impl Plot {
                     };
                     let x = self.x_pos_from_timestamp(timestamp);
                     let y_offset = *y as f64 - self.bounds.min_y;
-                    let y_range = self.bounds.max_y - self.bounds.min_y;
-                    let y_pos = y_offset as f32 * (self.inner_rect.height() / y_range as f32);
-                    let y_pos = self.inner_rect.max.y - y_pos;
+                    let y_pos = y_offset * (self.rect.height() as f64 / self.bounds.height());
+                    let y_pos = self.rect.max.y - y_pos as f32;
                     let pos = Pos2::new(x, y_pos);
                     ui.painter().circle(
                         pos,
@@ -951,7 +919,18 @@ impl PlotBounds {
         Timestamp(min_x)..Timestamp(max_x)
     }
 
-    pub fn zoom(mut self, zoom_factor: DVec2) -> Self {
+    pub fn zoom_at(self, zoom_factor: DVec2, anchor: DVec2) -> Self {
+        let offset = self.size() * (zoom_factor - DVec2::ONE);
+
+        Self {
+            min_x: self.min_x + -offset.x * anchor.x,
+            max_x: self.max_x + offset.x * (1.0 - anchor.x),
+            min_y: self.min_y + -offset.y * anchor.y,
+            max_y: self.max_y + offset.y * (1.0 - anchor.y),
+        }
+    }
+
+    pub fn zoom(self, zoom_factor: DVec2) -> Self {
         let offset = self.size() * (zoom_factor - DVec2::ONE);
         Self {
             min_x: self.min_x - offset.x / 2.0,
@@ -971,6 +950,27 @@ impl PlotBounds {
             self.max_y = self.min_y + 1.0;
         }
         self
+    }
+
+    pub fn as_projection(&self) -> OrthographicProjection {
+        let viewport_origin =
+            DVec2::new(-self.min_x / self.width(), -self.min_y / self.height()).as_vec2();
+        OrthographicProjection {
+            near: 0.0,
+            far: 1000.0,
+            viewport_origin,
+            scaling_mode: ScalingMode::Fixed {
+                width: self.width() as f32,
+                height: self.height() as f32,
+            },
+            scale: 1.0,
+            area: Rect::new(
+                self.min_x as f32,
+                self.min_y as f32,
+                self.max_x as f32,
+                self.max_y as f32,
+            ),
+        }
     }
 }
 
@@ -1026,12 +1026,12 @@ impl PlotPoint {
         Self::new(
             egui::remap(
                 pos.x,
-                range_x_from_rect(&plot.inner_rect),
+                range_x_from_rect(&plot.rect),
                 plot.bounds.range_x_f32(),
             ) as f64,
             egui::remap(
                 pos.y,
-                range_y_from_rect(&plot.inner_rect),
+                range_y_from_rect(&plot.rect),
                 plot.bounds.range_y_f32(),
             ) as f64,
             pos,
@@ -1047,12 +1047,12 @@ impl PlotPoint {
             egui::remap(
                 x as f32,
                 plot.bounds.range_x_f32(),
-                range_x_from_rect(&plot.inner_rect),
+                range_x_from_rect(&plot.rect),
             ),
             egui::remap(
                 y as f32,
                 plot.bounds.range_y_f32(),
-                range_y_from_rect(&plot.inner_rect),
+                range_y_from_rect(&plot.rect),
             ),
         )
     }

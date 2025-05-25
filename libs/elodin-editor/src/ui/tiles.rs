@@ -268,8 +268,8 @@ impl Pane {
         match self {
             Pane::Graph(pane) => {
                 let mut rect = plot::get_inner_rect(content_rect);
-                rect.min.y = content_rect.min.y - 5.0;
-                rect.max.y = content_rect.max.y - 5.0;
+                rect.min.y = content_rect.min.y;
+                rect.max.y = content_rect.max.y;
                 pane.rect = Some(rect);
 
                 ui.add_widget_with::<PlotWidget>(world, "graph", (pane.id, icons.scrub));
