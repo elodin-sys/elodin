@@ -33,7 +33,7 @@ use super::{
         command_palette::{CommandPaletteState, palette_items},
         hierarchy::HierarchyContent,
         inspector::{InspectorContent, InspectorIcons},
-        plot::{self, GraphBundle, GraphState, PlotWidget},
+        plot::{GraphBundle, GraphState, PlotWidget},
     },
 };
 use crate::{

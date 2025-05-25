@@ -733,6 +733,18 @@ impl Plot {
 
         font_id.size = 11.0;
 
+        // Draw border bg
+
+        let border_bg_color = get_scheme().bg_secondary.opacity(0.9);
+        let y_bg_rect = egui::Rect::from_min_max(self.rect.min, self.inner_rect.min)
+            .with_max_y(self.rect.max.y);
+        ui.painter()
+            .rect_filled(y_bg_rect, CornerRadius::ZERO, border_bg_color);
+        let x_bg_rect = egui::Rect::from_min_max(self.inner_rect.max, self.rect.max)
+            .with_min_x(self.inner_rect.min.x);
+        ui.painter()
+            .rect_filled(x_bg_rect, CornerRadius::ZERO, border_bg_color);
+
         // Draw borders
 
         let left_border = [border_rect.left_top(), border_rect.left_bottom()];
@@ -753,9 +765,9 @@ impl Plot {
                 let plot_point = self.bounds.screen_pos_to_value(self.rect, pointer_pos);
                 self.draw_y_axis_flag(ui, pointer_pos, plot_point.y, border_rect, font_id);
 
-                let inner_point_pos = pointer_pos - self.inner_rect.min;
+                let inner_point_pos = pointer_pos - self.rect.min;
                 let timestamp = Timestamp(
-                    (((inner_point_pos.x / self.inner_rect.width()) as f64 * self.bounds.width()
+                    (((inner_point_pos.x / self.rect.width()) as f64 * self.bounds.width()
                         + self.bounds.min_x) as i64)
                         + self.earliest_timestamp.0,
                 );
