@@ -19,7 +19,7 @@ use bevy::{
     window::{PrimaryWindow, Window},
 };
 use bevy_egui::egui::{self, Align, Layout};
-use egui::{CornerRadius, Frame, Margin, Pos2, RichText, Stroke};
+use egui::{CornerRadius, Frame, Margin, RichText, Stroke};
 use impeller2::types::{ComponentId, EntityId, Timestamp};
 use impeller2_bevy::{ComponentMetadataRegistry, EntityMap};
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, EntityMetadata};
@@ -132,14 +132,6 @@ pub struct Plot {
     show_modal: bool,
 }
 
-fn range_x_from_rect(rect: &egui::Rect) -> RangeInclusive<f32> {
-    rect.max.x..=rect.min.x
-}
-
-fn range_y_from_rect(rect: &egui::Rect) -> RangeInclusive<f32> {
-    rect.max.y..=rect.min.y
-}
-
 pub const MARGIN: egui::Margin = egui::Margin {
     left: 60,
     right: 0,
@@ -236,7 +228,7 @@ impl Plot {
         let outer_ratio = (rect.size() / inner_rect.size()).as_dvec2();
         let pan_offset = graph_state.pan_offset.as_dvec2() * DVec2::new(-1.0, 1.0);
         let bounds = PlotBounds::from_lines(&tick_range, earliest_timestamp, y_min, y_max)
-            .zoom_at(outer_ratio, DVec2::new(0.0, 0.5)) // zoom the bounds out so the graph takes up the entire screen
+            .zoom_at(outer_ratio, DVec2::new(1.0, 0.5)) // zoom the bounds out so the graph takes up the entire screen
             .offset_by_norm(pan_offset) // pan the bounds by the amount the cursor has moved
             .zoom(graph_state.zoom_factor.as_dvec2()) // zoom the bounds based on the current zoom factor
             .normalize(); // clamp the bounds so max > min
@@ -401,7 +393,18 @@ impl Plot {
         for i in start_count..=end_count {
             let offset_float = step_size_float * i as f64;
             let offset = hifitime::Duration::from_microseconds(offset_float);
-            let x_pos = self.x_pos_from_timestamp(Timestamp(start.0 + offset_float as i64));
+
+            let x_pos = self
+                .bounds
+                .value_to_screen_pos(
+                    self.rect,
+                    (
+                        self.timestamp_to_x(Timestamp(start.0 + offset_float as i64)),
+                        0.0,
+                    )
+                        .into(),
+                )
+                .x;
 
             ui.painter().line_segment(
                 [
@@ -426,21 +429,16 @@ impl Plot {
 
     fn draw_y_axis(&self, ui: &mut egui::Ui, font_id: &egui::FontId) {
         let draw_tick = |tick| {
-            let mut y_position = PlotPoint::from_plot_point(self, self.bounds.min_x, tick).pos2;
-            y_position.x = self.inner_rect.min.x;
+            let value = DVec2::new(self.bounds.min_x, tick);
+            let screen_pos = self.bounds.value_to_screen_pos(self.rect, value);
+            let screen_pos = egui::pos2(self.inner_rect.min.x, screen_pos.y);
             ui.painter().line_segment(
-                [
-                    egui::pos2(y_position.x, y_position.y),
-                    egui::pos2(y_position.x - self.notch_length, y_position.y),
-                ],
+                [screen_pos, screen_pos - egui::vec2(self.notch_length, 0.0)],
                 self.border_stroke,
             );
 
             ui.painter().text(
-                egui::pos2(
-                    y_position.x - (self.notch_length + self.axis_label_margin),
-                    y_position.y,
-                ),
+                screen_pos - egui::vec2(self.notch_length + self.axis_label_margin, 0.0),
                 egui::Align2::RIGHT_CENTER,
                 format_num(tick),
                 font_id.clone(),
@@ -485,7 +483,8 @@ impl Plot {
     fn draw_y_axis_flag(
         &self,
         ui: &mut egui::Ui,
-        pointer_plot_point: PlotPoint,
+        pointer_pos: egui::Pos2,
+        value: f64,
         border_rect: egui::Rect,
         font_id: egui::FontId,
     ) {
@@ -495,7 +494,7 @@ impl Plot {
         let pointer_rect = egui::Rect::from_center_size(
             egui::pos2(
                 border_rect.min.x - ((label_size.x / 2.0) + label_margin),
-                pointer_plot_point.pos2.y,
+                pointer_pos.y,
             ),
             label_size,
         );
@@ -511,7 +510,7 @@ impl Plot {
         ui.painter().text(
             pointer_rect.center(),
             egui::Align2::CENTER_CENTER,
-            format_num(pointer_plot_point.y),
+            format_num(value),
             font_id,
             get_scheme().bg_secondary,
         );
@@ -751,9 +750,8 @@ impl Plot {
 
         if let Some(pointer_pos) = pointer_pos {
             if self.inner_rect.contains(pointer_pos) && ui.ui_contains_pointer() {
-                let pointer_plot_point = PlotPoint::from_plot_pos2(self, pointer_pos);
-
-                self.draw_y_axis_flag(ui, pointer_plot_point, border_rect, font_id);
+                let plot_point = self.bounds.screen_pos_to_value(self.rect, pointer_pos);
+                self.draw_y_axis_flag(ui, pointer_pos, plot_point.y, border_rect, font_id);
 
                 let inner_point_pos = pointer_pos - self.inner_rect.min;
                 let timestamp = Timestamp(
@@ -778,11 +776,8 @@ impl Plot {
                     let Some((timestamp, y)) = line.data.get_nearest(timestamp) else {
                         continue;
                     };
-                    let x = self.x_pos_from_timestamp(timestamp);
-                    let y_offset = *y as f64 - self.bounds.min_y;
-                    let y_pos = y_offset * (self.rect.height() as f64 / self.bounds.height());
-                    let y_pos = self.rect.max.y - y_pos as f32;
-                    let pos = Pos2::new(x, y_pos);
+                    let value = DVec2::new(self.timestamp_to_x(timestamp), *y as f64);
+                    let pos = self.bounds.value_to_screen_pos(self.rect, value);
                     ui.painter().circle(
                         pos,
                         6.0,
@@ -813,7 +808,13 @@ impl Plot {
             let scrub_height = 12.0 * line_width;
             let scrub_width = scrub_height * aspect_ratio;
 
-            let tick_pos = self.x_pos_from_timestamp(self.current_timestamp);
+            let tick_pos = self
+                .bounds
+                .value_to_screen_pos(
+                    self.rect,
+                    (self.timestamp_to_x(self.current_timestamp), 0.0).into(),
+                )
+                .x;
             ui.painter().vline(
                 tick_pos,
                 self.rect.min.y..=border_rect.max.y,
@@ -833,10 +834,8 @@ impl Plot {
         }
     }
 
-    fn x_pos_from_timestamp(&self, timestamp: Timestamp) -> f32 {
-        (self.inner_rect.width() as f64 / self.bounds.width()
-            * ((timestamp.0 - self.earliest_timestamp.0) as f64 - self.bounds.min_x)) as f32
-            + self.inner_rect.min.x
+    fn timestamp_to_x(&self, timestamp: Timestamp) -> f64 {
+        (timestamp.0 - self.earliest_timestamp.0) as f64
     }
 
     fn visible_time_range(&self) -> Range<Timestamp> {
@@ -877,6 +876,14 @@ impl PlotBounds {
         let min_y = sigfig_round(min_y, 2);
         let max_y = sigfig_round(max_y, 2);
         Self::new(min_x, min_y, max_x, max_y)
+    }
+
+    pub fn min(&self) -> DVec2 {
+        DVec2::new(self.min_x, self.min_y)
+    }
+
+    pub fn max(&self) -> DVec2 {
+        DVec2::new(self.max_x, self.max_y)
     }
 
     pub fn width(&self) -> f64 {
@@ -970,6 +977,24 @@ impl PlotBounds {
             ),
         }
     }
+
+    pub fn screen_pos_to_value(&self, screen_rect: egui::Rect, pos: egui::Pos2) -> DVec2 {
+        let offset = (pos - screen_rect.min).as_dvec2();
+        let screen_to_value = self.size() / screen_rect.size().as_dvec2();
+        self.min() + offset * screen_to_value
+    }
+
+    pub fn value_to_screen_pos(&self, screen_rect: egui::Rect, value: DVec2) -> egui::Pos2 {
+        let offset = value - self.min();
+        let offset = egui::vec2(offset.x as f32, offset.y as f32);
+        let size = self.size();
+        let value_to_screen = screen_rect.size() / egui::vec2(size.x as f32, size.y as f32);
+        let screen_offset = offset * value_to_screen;
+        egui::pos2(
+            screen_rect.min.x + screen_offset.x,
+            screen_rect.max.y - screen_offset.y,
+        )
+    }
 }
 
 fn sigfig_round(x: f64, mut digits: i32) -> f64 {
@@ -1005,55 +1030,6 @@ fn pretty_round(num: f64) -> f64 {
     let result = rounded / multiplier;
 
     if is_negative { -result } else { result }
-}
-
-#[derive(Debug, Clone)]
-pub struct PlotPoint {
-    #[allow(dead_code)] // we might want to use the x values again
-    x: f64,
-    y: f64,
-    pos2: egui::Pos2,
-}
-
-impl PlotPoint {
-    pub fn new(x: f64, y: f64, pos2: egui::Pos2) -> Self {
-        Self { x, y, pos2 }
-    }
-
-    pub fn from_plot_pos2(plot: &Plot, pos: egui::Pos2) -> Self {
-        Self::new(
-            egui::remap(
-                pos.x,
-                range_x_from_rect(&plot.rect),
-                plot.bounds.range_x_f32(),
-            ) as f64,
-            egui::remap(
-                pos.y,
-                range_y_from_rect(&plot.rect),
-                plot.bounds.range_y_f32(),
-            ) as f64,
-            pos,
-        )
-    }
-
-    pub fn from_plot_point(plot: &Plot, x: f64, y: f64) -> Self {
-        Self::new(x, y, Self::pos2(plot, x, y))
-    }
-
-    fn pos2(plot: &Plot, x: f64, y: f64) -> egui::Pos2 {
-        egui::pos2(
-            egui::remap(
-                x as f32,
-                plot.bounds.range_x_f32(),
-                range_x_from_rect(&plot.rect),
-            ),
-            egui::remap(
-                y as f32,
-                plot.bounds.range_y_f32(),
-                range_y_from_rect(&plot.rect),
-            ),
-        )
-    }
 }
 
 pub fn graph_touch(
