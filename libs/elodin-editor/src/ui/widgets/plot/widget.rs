@@ -143,8 +143,8 @@ fn range_y_from_rect(rect: &egui::Rect) -> RangeInclusive<f32> {
 pub const MARGIN: egui::Margin = egui::Margin {
     left: 60,
     right: 0,
-    top: 30,
-    bottom: 40,
+    top: 35,
+    bottom: 35,
 };
 
 pub fn get_inner_rect(rect: egui::Rect) -> egui::Rect {
@@ -233,17 +233,11 @@ impl Plot {
             (graph_state.y_range.start, graph_state.y_range.end)
         };
         graph_state.y_range = y_min..y_max;
-
-        let original_bounds = PlotBounds::from_lines(&tick_range, earliest_timestamp, y_min, y_max);
-
         let outer_ratio = (rect.size() / inner_rect.size()).as_dvec2();
-        let pan_offset = graph_state.pan_offset.as_dvec2()
-            * DVec2::new(-1.0, 1.0)
-            * outer_ratio
-            * original_bounds.size(); // scale the offset by the final size of the bounds
-        let bounds = original_bounds
-            .offset(pan_offset) // pan the bounds by the amount the cursor has moved
+        let pan_offset = graph_state.pan_offset.as_dvec2() * DVec2::new(-1.0, 1.0);
+        let bounds = PlotBounds::from_lines(&tick_range, earliest_timestamp, y_min, y_max)
             .zoom_at(outer_ratio, DVec2::new(0.0, 0.5)) // zoom the bounds out so the graph takes up the entire screen
+            .offset_by_norm(pan_offset) // pan the bounds by the amount the cursor has moved
             .zoom(graph_state.zoom_factor.as_dvec2()) // zoom the bounds based on the current zoom factor
             .normalize(); // clamp the bounds so max > min
 
@@ -903,6 +897,10 @@ impl PlotBounds {
 
     pub fn range_y_f32(&self) -> RangeInclusive<f32> {
         (self.min_y as f32)..=(self.max_y as f32)
+    }
+
+    pub fn offset_by_norm(self, norm_coord: DVec2) -> Self {
+        self.offset(norm_coord * self.size())
     }
 
     pub fn offset(mut self, offset: DVec2) -> Self {
