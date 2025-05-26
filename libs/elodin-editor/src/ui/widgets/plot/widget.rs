@@ -48,7 +48,7 @@ use crate::{
 };
 
 use super::{
-    PlotDataComponent, PlotDataEntity, XYLine,
+    PlotDataComponent, PlotDataEntity,
     gpu::{LineHandle, LineVisibleRange, LineWidgetWidth},
 };
 
@@ -57,7 +57,6 @@ pub struct PlotWidget<'w, 's> {
     collected_graph_data: ResMut<'w, CollectedGraphData>,
     graphs_state: Query<'w, 's, &'static mut GraphState>,
     lines: ResMut<'w, Assets<Line>>,
-    xy_lines: ResMut<'w, Assets<XYLine>>,
     commands: Commands<'w, 's>,
     selected_time_range: Res<'w, SelectedTimeRange>,
     earliest_timestamp: Res<'w, EarliestTimestamp>,
@@ -83,7 +82,7 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             return;
         };
 
-        Plot::from_state(
+        TimeseriesPlot::from_state(
             ui,
             &mut graph_state,
             &mut state.commands,
@@ -95,7 +94,6 @@ impl WidgetSystem for PlotWidget<'_, '_> {
         .render(
             ui,
             &state.lines,
-            &state.xy_lines,
             &state.line_query,
             &state.collected_graph_data,
             &mut graph_state,
@@ -106,7 +104,7 @@ impl WidgetSystem for PlotWidget<'_, '_> {
 }
 
 #[derive(Debug)]
-pub struct Plot {
+pub struct TimeseriesPlot {
     tick_range: Range<Timestamp>,
     current_timestamp: Timestamp,
     earliest_timestamp: Timestamp,
@@ -146,7 +144,7 @@ pub fn get_inner_rect(rect: egui::Rect) -> egui::Rect {
     }
 }
 
-impl Plot {
+impl TimeseriesPlot {
     /// Calculate bounds and point positions based on the current UI allocation
     /// Should be run last, right before render
     #[allow(clippy::too_many_arguments)]
@@ -267,113 +265,8 @@ impl Plot {
         }
     }
 
-    fn draw_y_axis(&self, ui: &mut egui::Ui, font_id: &egui::FontId) {
-        let draw_tick = |tick| {
-            let value = DVec2::new(self.bounds.min_x, tick);
-            let screen_pos = self.bounds.value_to_screen_pos(self.rect, value);
-            let screen_pos = egui::pos2(self.inner_rect.min.x, screen_pos.y);
-            ui.painter().line_segment(
-                [screen_pos, screen_pos - egui::vec2(self.notch_length, 0.0)],
-                self.border_stroke,
-            );
-
-            ui.painter().text(
-                screen_pos - egui::vec2(self.notch_length + self.axis_label_margin, 0.0),
-                egui::Align2::RIGHT_CENTER,
-                format_num(tick),
-                font_id.clone(),
-                self.text_color,
-            );
-        };
-        if !self.bounds.min_y.is_finite() || !self.bounds.max_y.is_finite() {
-            return;
-        }
-        if self.bounds.min_y <= 0.0 {
-            let step_size =
-                pretty_round((self.bounds.max_y - self.bounds.min_y) / self.steps_y as f64);
-            if !step_size.is_normal() {
-                return;
-            }
-            let mut i = 0.0;
-
-            while i < self.bounds.max_y {
-                draw_tick(i);
-                i += step_size;
-            }
-            draw_tick(i);
-
-            let mut i = 0.0;
-            while i > self.bounds.min_y {
-                draw_tick(i);
-                i -= step_size;
-            }
-            draw_tick(i);
-        } else {
-            let step_size = pretty_round(self.bounds.height() / self.steps_y as f64);
-            let steps_y = (0..=self.steps_y)
-                .map(|i| self.bounds.min_y + (i as f64) * step_size)
-                .collect::<Vec<f64>>();
-
-            for y_step in steps_y {
-                draw_tick(y_step);
-            }
-        }
-    }
-
-    fn draw_y_axis_flag(
-        &self,
-        ui: &mut egui::Ui,
-        pointer_pos: egui::Pos2,
-        value: f64,
-        border_rect: egui::Rect,
-        font_id: egui::FontId,
-    ) {
-        let label_size = egui::vec2(70.0, 20.0);
-        let label_margin = 4.0;
-
-        let pointer_rect = egui::Rect::from_center_size(
-            egui::pos2(
-                border_rect.min.x - ((label_size.x / 2.0) + label_margin),
-                pointer_pos.y,
-            ),
-            label_size,
-        );
-
-        ui.painter().rect(
-            pointer_rect,
-            egui::CornerRadius::same(2),
-            get_scheme().text_primary,
-            egui::Stroke::NONE,
-            egui::StrokeKind::Middle,
-        );
-
-        ui.painter().text(
-            pointer_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            format_num(value),
-            font_id,
-            get_scheme().bg_secondary,
-        );
-    }
-
-    fn draw_cursor(
-        &self,
-        ui: &mut egui::Ui,
-        pointer_pos: egui::Pos2,
-        x_offset: f32,
-        border_rect: egui::Rect,
-    ) {
-        ui.painter().vline(
-            x_offset + border_rect.min.x,
-            0.0..=self.inner_rect.max.y,
-            egui::Stroke::new(1.0, get_scheme().border_primary),
-        );
-
-        ui.painter().hline(
-            border_rect.min.x..=border_rect.max.x,
-            pointer_pos.y,
-            egui::Stroke::new(1.0, get_scheme().border_primary),
-        );
+    fn draw_y_axis(&self, ui: &mut egui::Ui) {
+        draw_y_axis(ui, self.bounds, self.steps_y, self.rect, self.inner_rect);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -381,7 +274,6 @@ impl Plot {
         &self,
         ui: &mut egui::Ui,
         lines: &Assets<Line>,
-        _xy_lines: &Assets<XYLine>,
         line_handles: &Query<&LineHandle>,
         graph_state: &GraphState,
         collected_graph_data: &CollectedGraphData,
@@ -440,10 +332,7 @@ impl Plot {
                     let Ok(line_handle) = line_handles.get(*entity) else {
                         continue;
                     };
-                    let Some(line_handle) = (match line_handle {
-                        LineHandle::Timeseries(handle) => Some(handle),
-                        LineHandle::XY(_) => None,
-                    }) else {
+                    let Some(line_handle) = line_handle.as_timeseries() else {
                         continue;
                     };
                     let Some(line) = lines.get(line_handle) else {
@@ -535,7 +424,6 @@ impl Plot {
         &self,
         ui: &mut egui::Ui,
         lines: &Assets<Line>,
-        _xy_lines: &Assets<XYLine>,
         line_handles: &Query<&LineHandle>,
         collected_graph_data: &CollectedGraphData,
         graph_state: &mut GraphState,
@@ -581,37 +469,17 @@ impl Plot {
 
         font_id.size = 11.0;
 
-        // Draw border bg
-
-        let border_bg_color = get_scheme().bg_secondary.opacity(0.9);
-        let y_bg_rect = egui::Rect::from_min_max(self.rect.min, self.inner_rect.min)
-            .with_max_y(self.rect.max.y);
-        ui.painter()
-            .rect_filled(y_bg_rect, CornerRadius::ZERO, border_bg_color);
-        let x_bg_rect = egui::Rect::from_min_max(self.inner_rect.max, self.rect.max)
-            .with_min_x(self.inner_rect.min.x);
-        ui.painter()
-            .rect_filled(x_bg_rect, CornerRadius::ZERO, border_bg_color);
-
-        // Draw borders
-
-        let left_border = [border_rect.left_top(), border_rect.left_bottom()];
-        ui.painter().line_segment(left_border, self.border_stroke);
-
-        let bottom_border = [border_rect.left_bottom(), border_rect.right_bottom()];
-        ui.painter().line_segment(bottom_border, self.border_stroke);
-
-        // Draw axis
+        draw_borders(ui, self.rect, self.inner_rect);
 
         self.draw_x_axis(ui, &font_id);
-        self.draw_y_axis(ui, &font_id);
+        self.draw_y_axis(ui);
 
-        // Draw lines
+        // draw circles and cursor
 
         if let Some(pointer_pos) = pointer_pos {
             if self.inner_rect.contains(pointer_pos) && ui.ui_contains_pointer() {
                 let plot_point = self.bounds.screen_pos_to_value(self.rect, pointer_pos);
-                self.draw_y_axis_flag(ui, pointer_pos, plot_point.y, border_rect, font_id);
+                draw_y_axis_flag(ui, pointer_pos, plot_point.y, border_rect, font_id);
 
                 let inner_point_pos = pointer_pos - self.rect.min;
                 let timestamp = Timestamp(
@@ -620,7 +488,7 @@ impl Plot {
                         + self.earliest_timestamp.0,
                 );
 
-                self.draw_cursor(ui, pointer_pos, inner_point_pos.x, self.inner_rect);
+                draw_cursor(ui, pointer_pos, inner_point_pos.x, self.inner_rect);
 
                 // Draw highlight circles on lines
 
@@ -656,7 +524,6 @@ impl Plot {
                     self.draw_modal(
                         ui,
                         lines,
-                        _xy_lines,
                         line_handles,
                         graph_state,
                         collected_graph_data,
@@ -709,6 +576,138 @@ impl Plot {
         Timestamp(self.bounds.min_x as i64 + self.earliest_timestamp.0)
             ..Timestamp(self.bounds.max_x as i64 + self.earliest_timestamp.0)
     }
+}
+
+fn draw_y_axis(
+    ui: &mut egui::Ui,
+    bounds: PlotBounds,
+    steps_y: usize,
+    rect: egui::Rect,
+    inner_rect: egui::Rect,
+) {
+    const NOTCH_LENGTH: f32 = 10.0;
+    const AXIS_LABEL_MARGIN: f32 = 10.0;
+    let border_stroke = egui::Stroke::new(1.0, get_scheme().border_primary);
+    let scheme = get_scheme();
+    let mut font_id = egui::TextStyle::Monospace.resolve(ui.style());
+    font_id.size = 11.0;
+
+    let draw_tick = |tick| {
+        let value = DVec2::new(bounds.min_x, tick);
+        let screen_pos = bounds.value_to_screen_pos(rect, value);
+        let screen_pos = egui::pos2(inner_rect.min.x, screen_pos.y);
+        ui.painter().line_segment(
+            [screen_pos, screen_pos - egui::vec2(NOTCH_LENGTH, 0.0)],
+            border_stroke,
+        );
+
+        ui.painter().text(
+            screen_pos - egui::vec2(NOTCH_LENGTH + AXIS_LABEL_MARGIN, 0.0),
+            egui::Align2::RIGHT_CENTER,
+            format_num(tick),
+            font_id.clone(),
+            scheme.text_primary,
+        );
+    };
+    if !bounds.min_y.is_finite() || !bounds.max_y.is_finite() {
+        return;
+    }
+    if bounds.min_y <= 0.0 {
+        let step_size = pretty_round((bounds.max_y - bounds.min_y) / steps_y as f64);
+        if !step_size.is_normal() {
+            return;
+        }
+        let mut i = 0.0;
+
+        while i < bounds.max_y {
+            draw_tick(i);
+            i += step_size;
+        }
+        draw_tick(i);
+
+        let mut i = 0.0;
+        while i > bounds.min_y {
+            draw_tick(i);
+            i -= step_size;
+        }
+        draw_tick(i);
+    } else {
+        let step_size = pretty_round(bounds.height() / steps_y as f64);
+        let steps_y = (0..=steps_y)
+            .map(|i| bounds.min_y + (i as f64) * step_size)
+            .collect::<Vec<f64>>();
+
+        for y_step in steps_y {
+            draw_tick(y_step);
+        }
+    }
+}
+
+fn draw_y_axis_flag(
+    ui: &mut egui::Ui,
+    pointer_pos: egui::Pos2,
+    value: f64,
+    border_rect: egui::Rect,
+    font_id: egui::FontId,
+) {
+    let label_size = egui::vec2(70.0, 20.0);
+    let label_margin = 4.0;
+
+    let pointer_rect = egui::Rect::from_center_size(
+        egui::pos2(
+            border_rect.min.x - ((label_size.x / 2.0) + label_margin),
+            pointer_pos.y,
+        ),
+        label_size,
+    );
+
+    ui.painter().rect(
+        pointer_rect,
+        egui::CornerRadius::same(2),
+        get_scheme().text_primary,
+        egui::Stroke::NONE,
+        egui::StrokeKind::Middle,
+    );
+
+    ui.painter().text(
+        pointer_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        format_num(value),
+        font_id,
+        get_scheme().bg_secondary,
+    );
+}
+
+fn draw_cursor(ui: &mut egui::Ui, pointer_pos: egui::Pos2, x_offset: f32, inner_rect: egui::Rect) {
+    ui.painter().vline(
+        x_offset + inner_rect.min.x,
+        0.0..=inner_rect.max.y,
+        egui::Stroke::new(1.0, get_scheme().border_primary),
+    );
+
+    ui.painter().hline(
+        inner_rect.min.x..=inner_rect.max.x,
+        pointer_pos.y,
+        egui::Stroke::new(1.0, get_scheme().border_primary),
+    );
+}
+
+fn draw_borders(ui: &mut egui::Ui, rect: egui::Rect, inner_rect: egui::Rect) {
+    // draw bg
+    let border_bg_color = get_scheme().bg_secondary.opacity(0.9);
+    let y_bg_rect = egui::Rect::from_min_max(rect.min, inner_rect.min).with_max_y(rect.max.y);
+    ui.painter()
+        .rect_filled(y_bg_rect, CornerRadius::ZERO, border_bg_color);
+    let x_bg_rect = egui::Rect::from_min_max(inner_rect.max, rect.max).with_min_x(inner_rect.min.x);
+    ui.painter()
+        .rect_filled(x_bg_rect, CornerRadius::ZERO, border_bg_color);
+
+    let border_stroke = egui::Stroke::new(1.0, get_scheme().border_primary);
+    let left_border = [inner_rect.left_top(), inner_rect.left_bottom()];
+    ui.painter().line_segment(left_border, border_stroke);
+
+    let bottom_border = [inner_rect.left_bottom(), inner_rect.right_bottom()];
+    ui.painter().line_segment(bottom_border, border_stroke);
 }
 
 pub fn set_auto_bounds(
