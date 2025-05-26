@@ -151,22 +151,22 @@ pub const MARGIN: egui::Margin = egui::Margin {
     bottom: 35,
 };
 
-const TICK_MARK_LINE_WIDTH: f32 = 1.0;
-const TICK_MARK_ASPECT_RATIO: f32 = 12.0 / 30.0;
-const NOTCH_LENGTH: f32 = 10.0;
-const AXIS_LABEL_MARGIN: f32 = 5.0;
-const Y_AXIS_LABEL_MARGIN: f32 = 10.0;
-const Y_AXIS_FLAG_WIDTH: f32 = 70.0;
-const Y_AXIS_FLAG_HEIGHT: f32 = 20.0;
-const Y_AXIS_FLAG_MARGIN: f32 = 4.0;
-const STEPS_Y_HEIGHT_DIVISOR: f32 = 50.0;
-const STEPS_X_WIDTH_DIVISOR: f32 = 75.0;
+pub const TICK_MARK_LINE_WIDTH: f32 = 1.0;
+pub const TICK_MARK_ASPECT_RATIO: f32 = 12.0 / 30.0;
+pub const NOTCH_LENGTH: f32 = 10.0;
+pub const AXIS_LABEL_MARGIN: f32 = 5.0;
+pub const Y_AXIS_LABEL_MARGIN: f32 = 10.0;
+pub const Y_AXIS_FLAG_WIDTH: f32 = 70.0;
+pub const Y_AXIS_FLAG_HEIGHT: f32 = 20.0;
+pub const Y_AXIS_FLAG_MARGIN: f32 = 4.0;
+pub const STEPS_Y_HEIGHT_DIVISOR: f32 = 50.0;
+pub const STEPS_X_WIDTH_DIVISOR: f32 = 75.0;
 
-const MODAL_WIDTH: f32 = 250.0;
-const MODAL_MARGIN: f32 = 20.0;
+pub const MODAL_WIDTH: f32 = 250.0;
+pub const MODAL_MARGIN: f32 = 20.0;
 
-const ZOOM_SENSITIVITY: f32 = 0.001;
-const SCROLL_PIXELS_PER_LINE: f32 = 100.0;
+pub const ZOOM_SENSITIVITY: f32 = 0.001;
+pub const SCROLL_PIXELS_PER_LINE: f32 = 100.0;
 
 pub fn get_inner_rect(rect: egui::Rect) -> egui::Rect {
     rect.shrink4(MARGIN)
@@ -511,7 +511,7 @@ impl TimeseriesPlot {
     }
 }
 
-fn draw_y_axis(
+pub fn draw_y_axis(
     ui: &mut egui::Ui,
     bounds: PlotBounds,
     steps_y: usize,
@@ -574,7 +574,7 @@ fn draw_y_axis(
     }
 }
 
-fn draw_y_axis_flag(
+pub fn draw_y_axis_flag(
     ui: &mut egui::Ui,
     pointer_pos: egui::Pos2,
     value: f64,
@@ -609,7 +609,12 @@ fn draw_y_axis_flag(
     );
 }
 
-fn draw_cursor(ui: &mut egui::Ui, pointer_pos: egui::Pos2, x_offset: f32, inner_rect: egui::Rect) {
+pub fn draw_cursor(
+    ui: &mut egui::Ui,
+    pointer_pos: egui::Pos2,
+    x_offset: f32,
+    inner_rect: egui::Rect,
+) {
     ui.painter().vline(
         x_offset + inner_rect.min.x,
         0.0..=inner_rect.max.y,
@@ -623,7 +628,7 @@ fn draw_cursor(ui: &mut egui::Ui, pointer_pos: egui::Pos2, x_offset: f32, inner_
     );
 }
 
-fn draw_borders(ui: &mut egui::Ui, rect: egui::Rect, inner_rect: egui::Rect) {
+pub fn draw_borders(ui: &mut egui::Ui, rect: egui::Rect, inner_rect: egui::Rect) {
     // draw bg
     let border_bg_color = get_scheme().bg_secondary.opacity(0.9);
     let y_bg_rect = egui::Rect::from_min_max(rect.min, inner_rect.min).with_max_y(rect.max.y);
@@ -641,7 +646,7 @@ fn draw_borders(ui: &mut egui::Ui, rect: egui::Rect, inner_rect: egui::Rect) {
     ui.painter().line_segment(bottom_border, border_stroke);
 }
 
-fn draw_tick_mark(
+pub fn draw_tick_mark(
     ui: &mut egui::Ui,
     rect: egui::Rect,
     inner_rect: egui::Rect,
@@ -870,10 +875,10 @@ pub fn sync_graphs(
 
 #[derive(Debug, Clone, Default, Copy)]
 pub struct PlotBounds {
-    min_x: f64,
-    min_y: f64,
-    max_x: f64,
-    max_y: f64,
+    pub min_x: f64,
+    pub min_y: f64,
+    pub max_x: f64,
+    pub max_y: f64,
 }
 
 impl PlotBounds {
@@ -884,6 +889,14 @@ impl PlotBounds {
             max_x,
             max_y,
         }
+    }
+
+    pub fn rounded(min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> Self {
+        let min_y = sigfig_round(min_y, 2);
+        let max_y = sigfig_round(max_y, 2);
+        let min_x = sigfig_round(min_x, 2);
+        let max_x = sigfig_round(max_x, 2);
+        Self::new(min_x, min_y, max_x, max_y)
     }
 
     pub fn from_lines(

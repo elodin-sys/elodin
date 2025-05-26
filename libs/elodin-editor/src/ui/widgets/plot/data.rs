@@ -15,6 +15,7 @@ use impeller2_bevy::{
     PacketGrantR, PacketHandlerInput, PacketHandlers,
 };
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, GetTimeSeries};
+use itertools::{Itertools, MinMaxResult};
 use nodit::NoditMap;
 use nodit::interval::ii;
 use roaring::bitmap::RoaringBitmap;
@@ -31,6 +32,8 @@ use std::{collections::BTreeMap, fmt::Debug, ops::Range};
 
 use crate::ui::widgets::plot::gpu::INDEX_BUFFER_LEN;
 use crate::{SelectedTimeRange, TimeRangeBehavior};
+
+use super::PlotBounds;
 
 #[derive(Clone, Debug)]
 pub struct PlotDataComponent {
@@ -589,6 +592,20 @@ impl XYLine {
             view = append_u32(view, index);
         }
         self.x_values.cpu().len() as u32
+    }
+
+    pub fn plot_bounds(&self) -> PlotBounds {
+        let (min_x, max_x) = match self.x_values.cpu().iter().minmax() {
+            MinMaxResult::NoElements => (0.0, 1.0),
+            MinMaxResult::OneElement(x) => (*x - 1.0, *x + 1.0),
+            MinMaxResult::MinMax(min, max) => (*min, *max),
+        };
+        let (min_y, max_y) = match self.y_values.cpu().iter().minmax() {
+            MinMaxResult::NoElements => (0.0, 1.0),
+            MinMaxResult::OneElement(y) => (*y - 1.0, *y + 1.0),
+            MinMaxResult::MinMax(min, max) => (*min, *max),
+        };
+        PlotBounds::new(min_x as f64, min_y as f64, max_x as f64, max_y as f64)
     }
 }
 

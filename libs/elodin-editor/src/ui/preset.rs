@@ -99,6 +99,7 @@ pub fn tile_to_panel(
                     query: sql_table.current_query.clone(),
                 }))
             }
+            Pane::SqlPlot(_) => None,
             Pane::ActionTile(action) => {
                 let action_tile = action_tiles.get(action.entity).ok()?;
 

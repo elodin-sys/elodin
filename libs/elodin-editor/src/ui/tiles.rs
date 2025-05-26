@@ -34,6 +34,7 @@ use super::{
         hierarchy::HierarchyContent,
         inspector::{InspectorContent, InspectorIcons},
         plot::{GraphBundle, GraphState, PlotWidget},
+        sql_plot::SqlPlot,
     },
 };
 use crate::{
@@ -161,6 +162,10 @@ impl TileState {
         self.tree_actions.push(TreeAction::AddSQLTable(tile_id));
     }
 
+    pub fn create_sql_plot_tile(&mut self, tile_id: Option<TileId>) {
+        self.tree_actions.push(TreeAction::AddSqlPlot(tile_id));
+    }
+
     pub fn create_video_stream_tile(
         &mut self,
         msg_id: [u8; 2],
@@ -230,6 +235,7 @@ pub enum Pane {
     Graph(GraphPane),
     Monitor(MonitorPane),
     SQLTable(SQLTablePane),
+    SqlPlot(super::widgets::sql_plot::SQLPlotPane),
     ActionTile(ActionTilePane),
     VideoStream(super::video_stream::VideoStreamPane),
     Hierarchy,
@@ -248,6 +254,7 @@ impl Pane {
             Pane::Viewport(viewport) => viewport.label.to_string(),
             Pane::Monitor(monitor) => monitor.label.to_string(),
             Pane::SQLTable(..) => "SQL".to_string(),
+            Pane::SqlPlot(sql_plot) => sql_plot.label.to_string(),
             Pane::ActionTile(action) => action.label.to_string(),
             Pane::VideoStream(video_stream) => video_stream.label.to_string(),
             Pane::Hierarchy => "Entities".to_string(),
@@ -274,7 +281,7 @@ impl Pane {
                 egui_tiles::UiResponse::None
             }
             Pane::Viewport(pane) => {
-                pane.rect = Some(content_rect.shrink(1.0));
+                pane.rect = Some(content_rect);
                 egui_tiles::UiResponse::None
             }
             Pane::Monitor(pane) => {
@@ -283,6 +290,15 @@ impl Pane {
             }
             Pane::SQLTable(pane) => {
                 ui.add_widget_with::<SqlTableWidget>(world, "sql", pane.clone());
+                egui_tiles::UiResponse::None
+            }
+            Pane::SqlPlot(pane) => {
+                pane.rect = Some(content_rect);
+                ui.add_widget_with::<super::widgets::sql_plot::SqlPlotWidget>(
+                    world,
+                    "sql_plot",
+                    pane.clone(),
+                );
                 egui_tiles::UiResponse::None
             }
             Pane::ActionTile(pane) => {
@@ -397,6 +413,7 @@ pub enum TreeAction {
     AddGraph(Option<TileId>, Option<GraphBundle>),
     AddMonitor(Option<TileId>, EntityId, ComponentId),
     AddSQLTable(Option<TileId>),
+    AddSqlPlot(Option<TileId>),
     AddActionTile(Option<TileId>, String, String),
     AddVideoStream(Option<TileId>, [u8; 2], String),
     AddHierarchy(Option<TileId>),
@@ -1002,6 +1019,26 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             ui_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
+                    TreeAction::AddSqlPlot(parent_tile_id) => {
+                        let graph_bundle = GraphBundle::new(
+                            &mut state_mut.render_layer_alloc,
+                            BTreeMap::default(),
+                            "SQL Plot".to_string(),
+                        );
+                        let graph_entity = state_mut.commands.spawn(graph_bundle).id();
+                        let entity = state_mut.commands.spawn(SqlPlot::default()).id();
+                        let pane = Pane::SqlPlot(super::widgets::sql_plot::SQLPlotPane {
+                            entity,
+                            graph_entity,
+                            rect: None,
+                            label: "SQL Plot".to_string(),
+                        });
+                        if let Some(tile_id) =
+                            ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
+                        {
+                            ui_state.tree.make_active(|id, _| id == tile_id);
+                        }
+                    }
                     TreeAction::AddHierarchy(parent_tile_id) => {
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(Pane::Hierarchy), parent_tile_id, true)
@@ -1068,6 +1105,19 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     }
                     Pane::Monitor(_) => {}
                     Pane::SQLTable(_) => {}
+                    Pane::SqlPlot(sql_plot) => {
+                        if active_tiles.contains(tile_id) {
+                            if let Ok(mut cam) =
+                                state_mut.commands.get_entity(sql_plot.graph_entity)
+                            {
+                                cam.try_insert(ViewportRect(sql_plot.rect));
+                            }
+                        } else if let Ok(mut cam) =
+                            state_mut.commands.get_entity(sql_plot.graph_entity)
+                        {
+                            cam.try_insert(ViewportRect(None));
+                        }
+                    }
                     Pane::ActionTile(_) => {}
                     Pane::VideoStream(stream) => {
                         if let Ok(mut stream) = state_mut.commands.get_entity(stream.entity) {
