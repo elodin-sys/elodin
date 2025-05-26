@@ -26,6 +26,7 @@ use egui::{CornerRadius, Frame, Margin, RichText, Stroke};
 use impeller2::types::{ComponentId, EntityId, Timestamp};
 use impeller2_bevy::{ComponentMetadataRegistry, EntityMap};
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, EntityMetadata};
+use itertools::Itertools;
 use std::time::{Duration, Instant};
 use std::{
     fmt::Debug,
@@ -51,8 +52,8 @@ use crate::{
 };
 
 use super::{
-    PlotDataComponent, PlotDataEntity,
-    gpu::{LineHandle, LineVisibleRange, LineWidgetWidth},
+    PlotDataComponent, PlotDataEntity, XYLine,
+    gpu::{self, LineHandle, LineVisibleRange, LineWidgetWidth},
 };
 
 #[derive(SystemParam)]
@@ -456,10 +457,7 @@ impl TimeseriesPlot {
                     let Ok(line_handle) = line_handles.get(*entity) else {
                         continue;
                     };
-                    let Some(line_handle) = (match line_handle {
-                        LineHandle::Timeseries(handle) => Some(handle),
-                        LineHandle::XY(_) => None,
-                    }) else {
+                    let Some(line_handle) = line_handle.as_timeseries() else {
                         continue;
                     };
                     let Some(line) = lines.get(line_handle) else {
@@ -690,37 +688,53 @@ pub fn sync_bounds(
 
 pub fn auto_y_bounds(
     mut graph_states: Query<&mut GraphState>,
-    collected_graph_data: Res<CollectedGraphData>,
     selected_range: Res<SelectedTimeRange>,
+    line_handles: Query<&LineHandle>,
     mut lines: ResMut<Assets<Line>>,
+    mut xy_lines: ResMut<Assets<XYLine>>,
 ) {
     for mut graph_state in &mut graph_states {
         if graph_state.auto_y_range {
             let mut y_min: Option<f32> = None;
             let mut y_max: Option<f32> = None;
-            for (entity_id, component_id, value_index) in graph_state.enabled_lines.keys() {
-                let Some(entity) = collected_graph_data.entities.get(entity_id) else {
+            for (entity, _) in graph_state.enabled_lines.values() {
+                let Ok(handle) = line_handles.get(*entity) else {
                     continue;
                 };
-
-                let Some(component) = entity.components.get(component_id) else {
+                let Some(line) = handle.get(&mut lines, &mut xy_lines) else {
                     continue;
                 };
+                match line {
+                    gpu::LineMut::Timeseries(line) => {
+                        let summary = line.data.range_summary(selected_range.0.clone());
+                        if let Some(min) = summary.min {
+                            if let Some(y_min) = &mut y_min {
+                                *y_min = y_min.min(min);
+                            } else {
+                                y_min = Some(min)
+                            }
+                        }
+                        if let Some(max) = summary.max {
+                            if let Some(y_max) = &mut y_max {
+                                *y_max = y_max.max(max);
+                            } else {
+                                y_max = Some(max)
+                            }
+                        }
+                    }
+                    gpu::LineMut::XY(xy) => {
+                        let (min, max) = match xy.y_values.cpu().iter().minmax() {
+                            itertools::MinMaxResult::OneElement(elem) => (elem - 1.0, elem + 1.0),
+                            itertools::MinMaxResult::MinMax(min, max) => (*min, *max),
+                            itertools::MinMaxResult::NoElements => continue,
+                        };
 
-                if let Some(line) = component
-                    .lines
-                    .get(value_index)
-                    .and_then(|handle| lines.get_mut(handle))
-                {
-                    let summary = line.data.range_summary(selected_range.0.clone());
-                    if let Some(min) = summary.min {
                         if let Some(y_min) = &mut y_min {
                             *y_min = y_min.min(min);
                         } else {
                             y_min = Some(min)
                         }
-                    }
-                    if let Some(max) = summary.max {
+
                         if let Some(y_max) = &mut y_max {
                             *y_max = y_max.max(max);
                         } else {

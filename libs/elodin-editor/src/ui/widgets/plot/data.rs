@@ -662,7 +662,7 @@ impl<T: IntoBytes + Immutable + Debug + Clone, const N: usize> SharedBuffer<T, N
 }
 
 impl<T, const N: usize> SharedBuffer<T, N> {
-    fn cpu(&self) -> &[T] {
+    pub fn cpu(&self) -> &[T] {
         &self.cpu
     }
 }
