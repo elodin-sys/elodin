@@ -1,4 +1,7 @@
-use crate::editor_cam_touch::*;
+use crate::{
+    editor_cam_touch::*,
+    ui::{theme::corner_radius_sm, utils::Shrink4},
+};
 use bevy::{
     asset::Assets,
     ecs::{
@@ -111,7 +114,7 @@ impl WidgetSystem for PlotWidget<'_, '_> {
         TimeseriesPlot::from_bounds(
             ui.max_rect(),
             bounds,
-            selected_time_range.clone(),
+            selected_time_range.0.clone(),
             earliest_timestamp.0,
             current_timestamp.0,
         )
@@ -129,7 +132,7 @@ impl WidgetSystem for PlotWidget<'_, '_> {
 
 #[derive(Debug)]
 pub struct TimeseriesPlot {
-    tick_range: Range<Timestamp>,
+    selected_range: Range<Timestamp>,
     current_timestamp: Timestamp,
     earliest_timestamp: Timestamp,
     bounds: PlotBounds,
@@ -138,14 +141,6 @@ pub struct TimeseriesPlot {
 
     steps_x: usize,
     steps_y: usize,
-
-    notch_length: f32,
-    axis_label_margin: f32,
-
-    text_color: egui::Color32,
-    border_stroke: egui::Stroke,
-
-    show_modal: bool,
 }
 
 pub const MARGIN: egui::Margin = egui::Margin {
@@ -155,55 +150,58 @@ pub const MARGIN: egui::Margin = egui::Margin {
     bottom: 35,
 };
 
+const TICK_MARK_LINE_WIDTH: f32 = 1.0;
+const TICK_MARK_ASPECT_RATIO: f32 = 12.0 / 30.0;
+const NOTCH_LENGTH: f32 = 10.0;
+const AXIS_LABEL_MARGIN: f32 = 5.0;
+const Y_AXIS_LABEL_MARGIN: f32 = 10.0;
+const Y_AXIS_FLAG_WIDTH: f32 = 70.0;
+const Y_AXIS_FLAG_HEIGHT: f32 = 20.0;
+const Y_AXIS_FLAG_MARGIN: f32 = 4.0;
+const STEPS_Y_HEIGHT_DIVISOR: f32 = 50.0;
+const STEPS_X_WIDTH_DIVISOR: f32 = 75.0;
+
+const MODAL_WIDTH: f32 = 250.0;
+const MODAL_MARGIN: f32 = 20.0;
+
+const ZOOM_SENSITIVITY: f32 = 0.001;
+const SCROLL_PIXELS_PER_LINE: f32 = 100.0;
+
 pub fn get_inner_rect(rect: egui::Rect) -> egui::Rect {
-    egui::Rect {
-        min: egui::pos2(
-            rect.min.x + (MARGIN.left as f32),
-            rect.min.y + (MARGIN.top as f32),
-        ),
-        max: egui::pos2(
-            rect.max.x - (MARGIN.right as f32),
-            rect.max.y - (MARGIN.bottom as f32),
-        ),
-    }
+    rect.shrink4(MARGIN)
 }
 
 impl TimeseriesPlot {
     pub fn from_bounds(
         rect: egui::Rect,
         bounds: PlotBounds,
-        selected_range: SelectedTimeRange,
+        mut selected_range: Range<Timestamp>,
         earliest_timestamp: Timestamp,
         current_timestamp: Timestamp,
     ) -> Self {
         let inner_rect = get_inner_rect(rect);
 
-        let mut tick_range = selected_range.0.clone();
-        if tick_range.start == tick_range.end {
-            tick_range.end += Duration::from_secs(10);
+        if selected_range.start == selected_range.end {
+            selected_range.end += Duration::from_secs(10);
         }
 
-        let mut steps_y = ((inner_rect.height() / 50.0) as usize).max(1);
+        let mut steps_y = ((inner_rect.height() / STEPS_Y_HEIGHT_DIVISOR) as usize).max(1);
         if steps_y % 2 != 0 {
             steps_y += 1;
         }
-        let steps_x = ((inner_rect.width() / 75.0) as usize).max(1);
+        let steps_x = ((inner_rect.width() / STEPS_X_WIDTH_DIVISOR) as usize).max(1);
 
         Self {
-            tick_range,
+            selected_range,
             current_timestamp,
+            earliest_timestamp,
+
             bounds,
             rect,
             inner_rect,
+
             steps_x,
             steps_y,
-            notch_length: 10.0,
-            axis_label_margin: 5.0,
-            text_color: get_scheme().text_primary,
-            border_stroke: egui::Stroke::new(1.0, get_scheme().border_primary),
-
-            show_modal: true,
-            earliest_timestamp,
         }
     }
 
@@ -217,7 +215,7 @@ impl TimeseriesPlot {
             return;
         }
         let visible_time_range = self.visible_time_range();
-        let start = self.tick_range.start;
+        let start = self.selected_range.start;
         let end = visible_time_range.end;
         let start_count = (visible_time_range.start.0 - start.0) / step_size_micro as i64 - 1;
         let end_count = (end.0 - start.0) / step_size_micro as i64 + 1;
@@ -241,20 +239,20 @@ impl TimeseriesPlot {
             ui.painter().line_segment(
                 [
                     egui::pos2(x_pos, self.inner_rect.max.y),
-                    egui::pos2(x_pos, self.inner_rect.max.y + (self.notch_length)),
+                    egui::pos2(x_pos, self.inner_rect.max.y + (NOTCH_LENGTH)),
                 ],
-                self.border_stroke,
+                egui::Stroke::new(1.0, get_scheme().border_primary),
             );
 
             ui.painter().text(
                 egui::pos2(
                     x_pos,
-                    self.inner_rect.max.y + (self.notch_length + self.axis_label_margin),
+                    self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
                 ),
                 egui::Align2::CENTER_TOP,
                 PrettyDuration(offset).to_string(),
                 font_id.clone(),
-                self.text_color,
+                get_scheme().text_primary,
             );
         }
     }
@@ -270,20 +268,17 @@ impl TimeseriesPlot {
         pointer_pos: egui::Pos2,
         timestamp: Timestamp,
     ) {
-        let modal_width = 250.0;
-        let margin = 20.0;
-
-        let anchor_left = pointer_pos.x + modal_width + margin < self.rect.right(); // NOTE: might want to replace pointer_pos with x_offset from `render`
+        let anchor_left = pointer_pos.x + MODAL_WIDTH + MODAL_MARGIN < self.rect.right(); // NOTE: might want to replace pointer_pos with x_offset from `render`
 
         let (pivot, fixed_pos) = if anchor_left {
             (
                 egui::Align2::LEFT_TOP,
-                egui::pos2(pointer_pos.x + margin, pointer_pos.y + margin),
+                egui::pos2(pointer_pos.x + MODAL_MARGIN, pointer_pos.y + MODAL_MARGIN),
             )
         } else {
             (
                 egui::Align2::RIGHT_TOP,
-                egui::pos2(pointer_pos.x - margin, pointer_pos.y + margin),
+                egui::pos2(pointer_pos.x - MODAL_MARGIN, pointer_pos.y + MODAL_MARGIN),
             )
         };
 
@@ -292,12 +287,12 @@ impl TimeseriesPlot {
             .title_bar(false)
             .resizable(false)
             .fixed_pos(fixed_pos)
-            .fixed_size(egui::vec2(modal_width, self.inner_rect.height() / 2.))
+            .fixed_size(egui::vec2(MODAL_WIDTH, self.inner_rect.height() / 2.))
             .frame(
                 Frame::default()
-                    .inner_margin(Margin::same(16))
+                    .inner_margin(Margin::same(8))
                     .stroke(Stroke::new(1.0, get_scheme().border_primary))
-                    .corner_radius(CornerRadius::same(4))
+                    .corner_radius(corner_radius_sm())
                     .fill(get_scheme().bg_secondary)
                     .shadow(egui::epaint::Shadow {
                         offset: [0, 0],
@@ -311,7 +306,7 @@ impl TimeseriesPlot {
 
                 ui.add(time_label(time));
                 let offset = hifitime::Duration::from_microseconds(
-                    (timestamp.0 - self.tick_range.start.0) as f64,
+                    (timestamp.0 - self.selected_range.start.0) as f64,
                 );
                 ui.label(PrettyDuration(offset).to_string());
                 let mut current_entity_id: Option<EntityId> = None;
@@ -364,23 +359,17 @@ impl TimeseriesPlot {
                     ui.horizontal(|ui| {
                         ui.style_mut().override_font_id =
                             Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
-                        ui.with_layout(Layout::top_down_justified(Align::LEFT), |ui| {
-                            ui.horizontal(|ui| {
-                                let (rect, _) = ui.allocate_exact_size(
-                                    egui::vec2(8.0, 8.0),
-                                    egui::Sense::click(),
-                                );
-                                ui.painter().rect(
-                                    rect,
-                                    egui::CornerRadius::same(2),
-                                    *color,
-                                    egui::Stroke::NONE,
-                                    egui::StrokeKind::Middle,
-                                );
-                                ui.add_space(6.);
-                                ui.label(RichText::new(line_data.label.clone()).size(11.0));
-                            })
-                        });
+                        let (rect, _) =
+                            ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::click());
+                        ui.painter().rect(
+                            rect,
+                            egui::CornerRadius::same(2),
+                            *color,
+                            egui::Stroke::NONE,
+                            egui::StrokeKind::Middle,
+                        );
+                        ui.add_space(6.);
+                        ui.label(RichText::new(line_data.label.clone()).size(11.0));
                         let value = line
                             .data
                             .get_nearest(timestamp)
@@ -489,21 +478,19 @@ impl TimeseriesPlot {
                     );
                 }
 
-                if self.show_modal {
-                    self.draw_modal(
-                        ui,
-                        lines,
-                        line_handles,
-                        graph_state,
-                        collected_graph_data,
-                        pointer_pos,
-                        timestamp,
-                    );
-                }
+                self.draw_modal(
+                    ui,
+                    lines,
+                    line_handles,
+                    graph_state,
+                    collected_graph_data,
+                    pointer_pos,
+                    timestamp,
+                );
             }
         }
 
-        if self.tick_range.contains(&self.current_timestamp) {
+        if self.selected_range.contains(&self.current_timestamp) {
             let tick_pos = self
                 .bounds
                 .value_to_screen_pos(
@@ -533,8 +520,6 @@ fn draw_y_axis(
     rect: egui::Rect,
     inner_rect: egui::Rect,
 ) {
-    const NOTCH_LENGTH: f32 = 10.0;
-    const AXIS_LABEL_MARGIN: f32 = 10.0;
     let border_stroke = egui::Stroke::new(1.0, get_scheme().border_primary);
     let scheme = get_scheme();
     let mut font_id = egui::TextStyle::Monospace.resolve(ui.style());
@@ -550,7 +535,7 @@ fn draw_y_axis(
         );
 
         ui.painter().text(
-            screen_pos - egui::vec2(NOTCH_LENGTH + AXIS_LABEL_MARGIN, 0.0),
+            screen_pos - egui::vec2(NOTCH_LENGTH + Y_AXIS_LABEL_MARGIN, 0.0),
             egui::Align2::RIGHT_CENTER,
             format_num(tick),
             font_id.clone(),
@@ -598,8 +583,8 @@ fn draw_y_axis_flag(
     border_rect: egui::Rect,
     font_id: egui::FontId,
 ) {
-    let label_size = egui::vec2(70.0, 20.0);
-    let label_margin = 4.0;
+    let label_size = egui::vec2(Y_AXIS_FLAG_WIDTH, Y_AXIS_FLAG_HEIGHT);
+    let label_margin = Y_AXIS_FLAG_MARGIN;
 
     let pointer_rect = egui::Rect::from_center_size(
         egui::pos2(
@@ -665,16 +650,13 @@ fn draw_tick_mark(
     tick_pos: f32,
     scrub_icon: egui::TextureId,
 ) {
-    const LINE_WIDTH: f32 = 1.0;
-    const ASPECT_RATIO: f32 = 12.0 / 30.0;
-
-    let scrub_height = 12.0 * LINE_WIDTH;
-    let scrub_width = scrub_height * ASPECT_RATIO;
+    let scrub_height = 12.0 * TICK_MARK_LINE_WIDTH;
+    let scrub_width = scrub_height * TICK_MARK_ASPECT_RATIO;
 
     ui.painter().vline(
         tick_pos,
         rect.min.y..=inner_rect.max.y,
-        egui::Stroke::new(LINE_WIDTH, get_scheme().text_primary),
+        egui::Stroke::new(TICK_MARK_LINE_WIDTH, get_scheme().text_primary),
     );
 
     let scrub_center = egui::pos2(tick_pos, rect.min.y + (scrub_height * 0.5));
@@ -764,6 +746,7 @@ pub fn sync_graphs(
 ) {
     for (graph_id, mut graph_state) in &mut graph_states {
         let graph_state = &mut *graph_state;
+
         for (entity_id, components) in &graph_state.entities {
             let entity = collected_graph_data
                 .entities
@@ -1127,8 +1110,6 @@ pub fn zoom_graph(
     primary_window: Query<&Window, With<PrimaryWindow>>,
     key_state: Res<LogicalKeyState>,
 ) {
-    const ZOOM_SENSITIVITY: f32 = 0.001;
-
     let scroll_offset = scroll_offset_from_events(scroll_events);
     if scroll_offset == 0. {
         return;
@@ -1149,12 +1130,10 @@ pub fn zoom_graph(
             continue;
         };
 
-        let viewport_rect = Rect::new(
-            viewport.physical_position.x as f32,
-            viewport.physical_position.y as f32,
-            viewport.physical_size.x as f32 + viewport.physical_position.x as f32,
-            viewport.physical_size.y as f32 + viewport.physical_position.y as f32,
-        );
+        let physical_size = viewport.physical_size.as_vec2();
+        let physical_pos = viewport.physical_position.as_vec2();
+        let viewport_rect = Rect::from_corners(physical_pos, physical_pos + physical_size);
+
         if !viewport_rect.contains(cursor_pos) {
             continue;
         }
@@ -1297,7 +1276,7 @@ pub fn reset_graph(
 }
 
 fn scroll_offset_from_events(mut scroll_events: EventReader<MouseWheel>) -> f32 {
-    let pixels_per_line = 100.; // Maybe make configurable?
+    let pixels_per_line = SCROLL_PIXELS_PER_LINE;
     scroll_events
         .read()
         .map(|ev| match ev.unit {
