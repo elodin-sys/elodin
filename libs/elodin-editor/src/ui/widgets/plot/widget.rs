@@ -396,19 +396,6 @@ impl TimeseriesPlot {
             });
     }
 
-    fn get_border_rect(&self, rect: egui::Rect) -> egui::Rect {
-        egui::Rect {
-            min: egui::pos2(
-                rect.min.x + MARGIN.left as f32,
-                rect.min.y + MARGIN.top as f32,
-            ),
-            max: egui::pos2(
-                rect.max.x - MARGIN.right as f32,
-                rect.max.y - MARGIN.bottom as f32,
-            ),
-        }
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn render(
         &self,
@@ -437,7 +424,6 @@ impl TimeseriesPlot {
             }
         });
 
-        let border_rect = self.get_border_rect(self.rect);
         let mut font_id = egui::TextStyle::Monospace.resolve(ui.style());
 
         if graph_state.enabled_lines.is_empty() {
@@ -462,7 +448,7 @@ impl TimeseriesPlot {
         if let Some(pointer_pos) = pointer_pos {
             if self.inner_rect.contains(pointer_pos) && ui.ui_contains_pointer() {
                 let plot_point = self.bounds.screen_pos_to_value(self.rect, pointer_pos);
-                draw_y_axis_flag(ui, pointer_pos, plot_point.y, border_rect, font_id);
+                draw_y_axis_flag(ui, pointer_pos, plot_point.y, self.inner_rect, font_id);
 
                 let inner_point_pos = pointer_pos - self.rect.min;
                 let timestamp = Timestamp(
@@ -1222,12 +1208,10 @@ pub fn pan_graph(
             continue;
         };
 
-        let viewport_rect = Rect::new(
-            viewport.physical_position.x as f32,
-            viewport.physical_position.y as f32,
-            viewport.physical_size.x as f32 + viewport.physical_position.x as f32,
-            viewport.physical_size.y as f32 + viewport.physical_position.y as f32,
-        );
+        let physical_size = viewport.physical_size.as_vec2();
+        let physical_pos = viewport.physical_position.as_vec2();
+        let viewport_rect = Rect::from_corners(physical_pos, physical_pos + physical_size);
+
         if !viewport_rect.contains(cursor_pos) {
             if let Ok(mut e) = commands.get_entity(entity) {
                 e.try_insert(LastPos(None));
@@ -1300,12 +1284,9 @@ pub fn reset_graph(
                 continue;
             };
 
-            let viewport_rect = Rect::new(
-                viewport.physical_position.x as f32,
-                viewport.physical_position.y as f32,
-                viewport.physical_size.x as f32 + viewport.physical_position.x as f32,
-                viewport.physical_size.y as f32 + viewport.physical_position.y as f32,
-            );
+            let physical_size = viewport.physical_size.as_vec2();
+            let physical_pos = viewport.physical_position.as_vec2();
+            let viewport_rect = Rect::from_corners(physical_pos, physical_pos + physical_size);
             if !viewport_rect.contains(cursor_pos) {
                 continue;
             }
