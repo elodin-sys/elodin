@@ -1048,7 +1048,7 @@ fn sigfig_round(x: f64, mut digits: i32) -> f64 {
     }
 }
 
-fn pretty_round(num: f64) -> f64 {
+pub fn pretty_round(num: f64) -> f64 {
     let mut multiplier = 1.0;
     let mut n = num;
 

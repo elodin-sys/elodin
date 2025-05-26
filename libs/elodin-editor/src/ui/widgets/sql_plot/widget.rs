@@ -23,15 +23,16 @@ use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery};
 use crate::ui::{
     colors::{ColorExt, get_scheme},
     theme,
+    utils::format_num,
     widgets::{
         WidgetSystem,
         button::EButton,
         plot::{
-            CHUNK_LEN, GraphState, PlotBounds, STEPS_Y_HEIGHT_DIVISOR, SharedBuffer, XYLine,
-            draw_borders, draw_y_axis, get_inner_rect,
-            gpu::{
-                LineBundle, LineConfig, LineHandle, LineUniform, LineVisibleRange, LineWidgetWidth,
-            },
+            AXIS_LABEL_MARGIN, CHUNK_LEN, GraphState, NOTCH_LENGTH, PlotBounds,
+            STEPS_X_WIDTH_DIVISOR, STEPS_Y_HEIGHT_DIVISOR, SharedBuffer, XYLine, draw_borders,
+            draw_y_axis, get_inner_rect,
+            gpu::{LineBundle, LineConfig, LineHandle, LineUniform, LineWidgetWidth},
+            pretty_round,
         },
     },
 };
@@ -250,12 +251,12 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
                         let data_bounds = xy_line.plot_bounds();
                         let rect = ui.max_rect();
                         let inner_rect = get_inner_rect(ui.max_rect());
-                        let bounds = sync_bounds_sql(
+                        let bounds = dbg!(sync_bounds_sql(
                             &mut graph_state,
                             data_bounds,
                             rect,
                             inner_rect
-                        );
+                        ));
 
                         graph_state.widget_width = ui.max_rect().width() as f64;
                         graph_state.y_range = bounds.min_y..bounds.max_y;
@@ -292,8 +293,11 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
                             steps_y += 1;
                         }
 
+                        let steps_x = ((inner_rect.width() / STEPS_X_WIDTH_DIVISOR) as usize).max(1);
+
                         draw_borders(ui, rect, inner_rect);
                         draw_y_axis(ui, bounds, steps_y, rect, inner_rect);
+                        draw_x_axis(ui, bounds, steps_x, rect, inner_rect);
 
                         plot.line_entity = Some(line_entity);
 
@@ -311,6 +315,54 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
                 }
             }
         });
+    }
+}
+
+pub fn draw_x_axis(
+    ui: &mut egui::Ui,
+    bounds: PlotBounds,
+    steps_x: usize,
+    rect: egui::Rect,
+    inner_rect: egui::Rect,
+) {
+    let border_stroke = egui::Stroke::new(1.0, get_scheme().border_primary);
+    let scheme = get_scheme();
+    let mut font_id = egui::TextStyle::Monospace.resolve(ui.style());
+    font_id.size = 11.0;
+
+    let draw_tick = |tick| {
+        let value = DVec2::new(tick, bounds.min_y);
+        let screen_pos = bounds.value_to_screen_pos(rect, value);
+        let screen_pos = egui::pos2(screen_pos.x, inner_rect.max.y);
+        ui.painter().line_segment(
+            [screen_pos, screen_pos + egui::vec2(0.0, NOTCH_LENGTH)],
+            border_stroke,
+        );
+
+        ui.painter().text(
+            screen_pos + egui::vec2(0.0, NOTCH_LENGTH + AXIS_LABEL_MARGIN),
+            egui::Align2::CENTER_TOP,
+            format_num(tick),
+            font_id.clone(),
+            scheme.text_primary,
+        );
+    };
+
+    if !bounds.min_x.is_finite() || !bounds.max_x.is_finite() {
+        return;
+    }
+
+    let step_size = pretty_round((bounds.max_x - bounds.min_x) / steps_x as f64);
+    if !step_size.is_normal() {
+        return;
+    }
+
+    let steps_x = (0..=steps_x)
+        .map(|i| bounds.min_x + (i as f64) * step_size)
+        .collect::<Vec<f64>>();
+
+    for x_step in steps_x {
+        draw_tick(x_step);
     }
 }
 
