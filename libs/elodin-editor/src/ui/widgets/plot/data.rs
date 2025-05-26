@@ -620,7 +620,7 @@ impl AsF32 for bool {
 }
 
 #[derive(Debug, Clone)]
-struct SharedBuffer<T, const N: usize> {
+pub struct SharedBuffer<T, const N: usize> {
     cpu: Vec<T>,
     gpu: Arc<spin::Mutex<Option<BufferShard>>>,
     gpu_dirty: Arc<AtomicBool>,

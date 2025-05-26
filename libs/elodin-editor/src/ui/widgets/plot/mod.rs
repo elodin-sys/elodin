@@ -22,7 +22,7 @@ impl Plugin for PlotPlugin {
             .add_systems(PostUpdate, queue_timestamp_read)
             .add_systems(Update, collect_garbage)
             .add_systems(Update, sync_graphs)
-            .add_systems(Update, set_auto_bounds.after(sync_graphs))
+            .add_systems(Update, auto_y_bounds.after(sync_graphs))
             .add_plugins(gpu::PlotGpuPlugin);
     }
 }

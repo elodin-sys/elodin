@@ -76,29 +76,53 @@ impl WidgetSystem for PlotWidget<'_, '_> {
         ui: &mut egui::Ui,
         (id, scrub_icon): Self::Args,
     ) -> Self::Output {
-        let mut state = state.get_mut(world);
+        let PlotWidget {
+            collected_graph_data,
+            mut graphs_state,
+            lines,
+            mut commands,
+            selected_time_range,
+            earliest_timestamp,
+            current_timestamp,
+            mut time_range_behavior,
+            line_query,
+        } = state.get_mut(world);
 
-        let Ok(mut graph_state) = state.graphs_state.get_mut(id) else {
+        let Ok(mut graph_state) = graphs_state.get_mut(id) else {
             return;
         };
 
-        TimeseriesPlot::from_state(
-            ui,
+        let bounds = sync_bounds(
             &mut graph_state,
-            &mut state.commands,
-            id,
-            state.selected_time_range.clone(),
-            state.earliest_timestamp.0,
+            selected_time_range.0.clone(),
+            earliest_timestamp.0,
+            ui.max_rect(),
+            get_inner_rect(ui.max_rect()),
+        );
+
+        let line_visible_range = bounds.timestamp_range(earliest_timestamp.0);
+        graph_state.visible_range = LineVisibleRange(line_visible_range.clone());
+        graph_state.widget_width = ui.max_rect().width() as f64;
+
+        commands
+            .entity(id)
+            .try_insert(Projection::Orthographic(bounds.as_projection()));
+
+        TimeseriesPlot::from_bounds(
+            ui.max_rect(),
+            bounds,
+            selected_time_range.clone(),
+            earliest_timestamp.0,
+            current_timestamp.0,
         )
-        .current_timestamp(state.current_timestamp.0)
         .render(
             ui,
-            &state.lines,
-            &state.line_query,
-            &state.collected_graph_data,
+            &lines,
+            &line_query,
+            &collected_graph_data,
             &mut graph_state,
             &scrub_icon,
-            &mut state.time_range_behavior,
+            &mut time_range_behavior,
         );
     }
 }
@@ -145,44 +169,19 @@ pub fn get_inner_rect(rect: egui::Rect) -> egui::Rect {
 }
 
 impl TimeseriesPlot {
-    /// Calculate bounds and point positions based on the current UI allocation
-    /// Should be run last, right before render
-    #[allow(clippy::too_many_arguments)]
-    pub fn from_state(
-        ui: &egui::Ui,
-        graph_state: &mut GraphState,
-        commands: &mut Commands,
-        graph_id: Entity,
+    pub fn from_bounds(
+        rect: egui::Rect,
+        bounds: PlotBounds,
         selected_range: SelectedTimeRange,
         earliest_timestamp: Timestamp,
+        current_timestamp: Timestamp,
     ) -> Self {
-        let rect = ui.max_rect();
         let inner_rect = get_inner_rect(rect);
 
         let mut tick_range = selected_range.0.clone();
         if tick_range.start == tick_range.end {
             tick_range.end += Duration::from_secs(10);
         }
-
-        // calc bounds
-
-        let (y_min, y_max) = (graph_state.y_range.start, graph_state.y_range.end);
-        let outer_ratio = (rect.size() / inner_rect.size()).as_dvec2();
-        let pan_offset = graph_state.pan_offset.as_dvec2() * DVec2::new(-1.0, 1.0);
-        let bounds = PlotBounds::from_lines(&tick_range, earliest_timestamp, y_min, y_max)
-            .zoom_at(outer_ratio, DVec2::new(1.0, 0.5)) // zoom the bounds out so the graph takes up the entire screen
-            .offset_by_norm(pan_offset) // pan the bounds by the amount the cursor has moved
-            .zoom(graph_state.zoom_factor.as_dvec2()) // zoom the bounds based on the current zoom factor
-            .normalize(); // clamp the bounds so max > min
-
-        commands
-            .entity(graph_id)
-            .try_insert(Projection::Orthographic(bounds.as_projection()));
-
-        let line_visible_range = bounds.timestamp_range(earliest_timestamp);
-
-        graph_state.visible_range = LineVisibleRange(line_visible_range.clone());
-        graph_state.widget_width = rect.width() as f64;
 
         let mut steps_y = ((inner_rect.height() / 50.0) as usize).max(1);
         if steps_y % 2 != 0 {
@@ -192,7 +191,7 @@ impl TimeseriesPlot {
 
         Self {
             tick_range,
-            current_timestamp: Timestamp::EPOCH,
+            current_timestamp,
             bounds,
             rect,
             inner_rect,
@@ -206,11 +205,6 @@ impl TimeseriesPlot {
             show_modal: true,
             earliest_timestamp,
         }
-    }
-
-    pub fn current_timestamp(mut self, tick: Timestamp) -> Self {
-        self.current_timestamp = tick;
-        self
     }
 
     fn draw_x_axis(&self, ui: &mut egui::Ui, font_id: &egui::FontId) {
@@ -263,10 +257,6 @@ impl TimeseriesPlot {
                 self.text_color,
             );
         }
-    }
-
-    fn draw_y_axis(&self, ui: &mut egui::Ui) {
-        draw_y_axis(ui, self.bounds, self.steps_y, self.rect, self.inner_rect);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -448,12 +438,7 @@ impl TimeseriesPlot {
         });
 
         let border_rect = self.get_border_rect(self.rect);
-
-        // Style
-
         let mut font_id = egui::TextStyle::Monospace.resolve(ui.style());
-
-        // Draw inner container
 
         if graph_state.enabled_lines.is_empty() {
             ui.painter().text(
@@ -472,9 +457,7 @@ impl TimeseriesPlot {
         draw_borders(ui, self.rect, self.inner_rect);
 
         self.draw_x_axis(ui, &font_id);
-        self.draw_y_axis(ui);
-
-        // draw circles and cursor
+        draw_y_axis(ui, self.bounds, self.steps_y, self.rect, self.inner_rect);
 
         if let Some(pointer_pos) = pointer_pos {
             if self.inner_rect.contains(pointer_pos) && ui.ui_contains_pointer() {
@@ -514,7 +497,7 @@ impl TimeseriesPlot {
                     let pos = self.bounds.value_to_screen_pos(self.rect, value);
                     ui.painter().circle(
                         pos,
-                        6.0,
+                        4.5,
                         get_scheme().bg_secondary,
                         egui::Stroke::new(2.0, *color),
                     );
@@ -534,14 +517,7 @@ impl TimeseriesPlot {
             }
         }
 
-        // Draw a line for the current_tick
         if self.tick_range.contains(&self.current_timestamp) {
-            let line_width = 1.0;
-            let aspect_ratio = 12.0 / 30.0;
-
-            let scrub_height = 12.0 * line_width;
-            let scrub_width = scrub_height * aspect_ratio;
-
             let tick_pos = self
                 .bounds
                 .value_to_screen_pos(
@@ -549,22 +525,8 @@ impl TimeseriesPlot {
                     (self.timestamp_to_x(self.current_timestamp), 0.0).into(),
                 )
                 .x;
-            ui.painter().vline(
-                tick_pos,
-                self.rect.min.y..=border_rect.max.y,
-                egui::Stroke::new(line_width, get_scheme().text_primary),
-            );
 
-            let scrub_center = egui::pos2(tick_pos, self.rect.min.y + (scrub_height * 0.5));
-            let scrub_rect =
-                egui::Rect::from_center_size(scrub_center, egui::vec2(scrub_width, scrub_height));
-
-            ui.painter().image(
-                *scrub_icon,
-                scrub_rect,
-                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                get_scheme().text_primary,
-            );
+            draw_tick_mark(ui, self.rect, self.inner_rect, tick_pos, *scrub_icon);
         }
     }
 
@@ -710,7 +672,55 @@ fn draw_borders(ui: &mut egui::Ui, rect: egui::Rect, inner_rect: egui::Rect) {
     ui.painter().line_segment(bottom_border, border_stroke);
 }
 
-pub fn set_auto_bounds(
+fn draw_tick_mark(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    inner_rect: egui::Rect,
+    tick_pos: f32,
+    scrub_icon: egui::TextureId,
+) {
+    const LINE_WIDTH: f32 = 1.0;
+    const ASPECT_RATIO: f32 = 12.0 / 30.0;
+
+    let scrub_height = 12.0 * LINE_WIDTH;
+    let scrub_width = scrub_height * ASPECT_RATIO;
+
+    ui.painter().vline(
+        tick_pos,
+        rect.min.y..=inner_rect.max.y,
+        egui::Stroke::new(LINE_WIDTH, get_scheme().text_primary),
+    );
+
+    let scrub_center = egui::pos2(tick_pos, rect.min.y + (scrub_height * 0.5));
+    let scrub_rect =
+        egui::Rect::from_center_size(scrub_center, egui::vec2(scrub_width, scrub_height));
+
+    ui.painter().image(
+        scrub_icon,
+        scrub_rect,
+        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+        get_scheme().text_primary,
+    );
+}
+
+pub fn sync_bounds(
+    graph_state: &mut GraphState,
+    selected_range: Range<Timestamp>,
+    earliest_timestamp: Timestamp,
+    rect: egui::Rect,
+    inner_rect: egui::Rect,
+) -> PlotBounds {
+    let (y_min, y_max) = (graph_state.y_range.start, graph_state.y_range.end);
+    let outer_ratio = (rect.size() / inner_rect.size()).as_dvec2();
+    let pan_offset = graph_state.pan_offset.as_dvec2() * DVec2::new(-1.0, 1.0);
+    PlotBounds::from_lines(&selected_range, earliest_timestamp, y_min, y_max)
+        .zoom_at(outer_ratio, DVec2::new(1.0, 0.5)) // zoom the bounds out so the graph takes up the entire screen
+        .offset_by_norm(pan_offset) // pan the bounds by the amount the cursor has moved
+        .zoom(graph_state.zoom_factor.as_dvec2()) // zoom the bounds based on the current zoom factor
+        .normalize() // clamp the bounds so max > min
+}
+
+pub fn auto_y_bounds(
     mut graph_states: Query<&mut GraphState>,
     collected_graph_data: Res<CollectedGraphData>,
     selected_range: Res<SelectedTimeRange>,
@@ -731,7 +741,7 @@ pub fn set_auto_bounds(
 
                 if let Some(line) = component
                     .lines
-                    .get(&value_index)
+                    .get(value_index)
                     .and_then(|handle| lines.get_mut(handle))
                 {
                     let summary = line.data.range_summary(selected_range.0.clone());
