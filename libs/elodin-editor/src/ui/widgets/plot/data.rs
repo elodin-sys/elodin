@@ -548,6 +548,50 @@ pub struct Line {
     pub last_queried: Option<Instant>,
 }
 
+#[derive(Asset, TypePath, Default)]
+pub struct XYLine {
+    pub label: String,
+    pub x_shard_alloc: Option<BufferShardAlloc>,
+    pub y_shard_alloc: Option<BufferShardAlloc>,
+    pub x_values: SharedBuffer<f32, CHUNK_LEN>,
+    pub y_values: SharedBuffer<f32, CHUNK_LEN>,
+}
+
+impl XYLine {
+    pub fn queue_load(&mut self, render_queue: &RenderQueue, render_device: &RenderDevice) {
+        let x_shard_alloc = self.x_shard_alloc.get_or_insert_with(|| {
+            BufferShardAlloc::with_nan_chunk(CHUNK_COUNT, CHUNK_LEN, render_device, render_queue)
+        });
+        let y_shard_alloc = self.y_shard_alloc.get_or_insert_with(|| {
+            BufferShardAlloc::with_nan_chunk(CHUNK_COUNT, CHUNK_LEN, render_device, render_queue)
+        });
+        self.x_values.queue_load(render_queue, x_shard_alloc);
+        self.y_values.queue_load(render_queue, y_shard_alloc);
+    }
+
+    pub fn write_to_index_buffer(
+        &mut self,
+        index_buffer: &Buffer,
+        render_queue: &RenderQueue,
+    ) -> u32 {
+        let gpu = self.x_values.gpu.lock();
+        let Some(gpu) = gpu.as_ref() else { return 0 };
+        let chunk = gpu.as_index_chunk::<f32>(self.x_values.cpu().len());
+        let mut view = render_queue
+            .write_buffer_with(
+                index_buffer,
+                0,
+                NonZeroU64::new((INDEX_BUFFER_LEN * 4) as u64).unwrap(),
+            )
+            .expect("no write buf");
+        let mut view = &mut view[..];
+        for index in chunk.into_index_iter() {
+            view = append_u32(view, index);
+        }
+        self.x_values.cpu().len() as u32
+    }
+}
+
 pub trait AsF32 {
     fn as_f32(&self) -> f32;
 }
@@ -921,13 +965,6 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         let (chunk_count, index_count) = self.draw_index_count(line_visible_range.clone());
         let desired_index_len = INDEX_BUFFER_LEN.min(pixel_width * 4);
         let step = (index_count.div_ceil(desired_index_len - 2 * chunk_count)).max(1);
-        fn append_u32(view: &mut [u8], val: u32) -> &mut [u8] {
-            if view.len() < 4 {
-                return view;
-            }
-            view[..size_of::<u32>()].copy_from_slice(&val.to_le_bytes());
-            &mut view[size_of::<u32>()..]
-        }
         let mut view = &mut view[..];
         let mut count = 0;
         for chunk in self.draw_index_chunk_iter(line_visible_range) {
@@ -982,6 +1019,14 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             }
         }
     }
+}
+
+fn append_u32(view: &mut [u8], val: u32) -> &mut [u8] {
+    if view.len() < 4 {
+        return view;
+    }
+    view[..size_of::<u32>()].copy_from_slice(&val.to_le_bytes());
+    &mut view[size_of::<u32>()..]
 }
 
 pub fn collect_garbage(

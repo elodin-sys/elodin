@@ -48,7 +48,7 @@ use crate::{
 };
 
 use super::{
-    PlotDataComponent, PlotDataEntity,
+    PlotDataComponent, PlotDataEntity, XYLine,
     gpu::{LineHandle, LineVisibleRange, LineWidgetWidth},
 };
 
@@ -57,6 +57,7 @@ pub struct PlotWidget<'w, 's> {
     collected_graph_data: ResMut<'w, CollectedGraphData>,
     graphs_state: Query<'w, 's, &'static mut GraphState>,
     lines: ResMut<'w, Assets<Line>>,
+    xy_lines: ResMut<'w, Assets<XYLine>>,
     commands: Commands<'w, 's>,
     selected_time_range: Res<'w, SelectedTimeRange>,
     earliest_timestamp: Res<'w, EarliestTimestamp>,
@@ -94,6 +95,7 @@ impl WidgetSystem for PlotWidget<'_, '_> {
         .render(
             ui,
             &state.lines,
+            &state.xy_lines,
             &state.line_query,
             &state.collected_graph_data,
             &mut graph_state,
@@ -379,6 +381,7 @@ impl Plot {
         &self,
         ui: &mut egui::Ui,
         lines: &Assets<Line>,
+        _xy_lines: &Assets<XYLine>,
         line_handles: &Query<&LineHandle>,
         graph_state: &GraphState,
         collected_graph_data: &CollectedGraphData,
@@ -437,7 +440,13 @@ impl Plot {
                     let Ok(line_handle) = line_handles.get(*entity) else {
                         continue;
                     };
-                    let Some(line) = lines.get(&line_handle.0) else {
+                    let Some(line_handle) = (match line_handle {
+                        LineHandle::Timeseries(handle) => Some(handle),
+                        LineHandle::XY(_) => None,
+                    }) else {
+                        continue;
+                    };
+                    let Some(line) = lines.get(line_handle) else {
                         continue;
                     };
                     if current_entity_id.as_ref() != Some(entity_id) {
@@ -526,6 +535,7 @@ impl Plot {
         &self,
         ui: &mut egui::Ui,
         lines: &Assets<Line>,
+        _xy_lines: &Assets<XYLine>,
         line_handles: &Query<&LineHandle>,
         collected_graph_data: &CollectedGraphData,
         graph_state: &mut GraphState,
@@ -620,7 +630,13 @@ impl Plot {
                     let Ok(line_handle) = line_handles.get(*entity) else {
                         continue;
                     };
-                    let Some(line) = lines.get(&line_handle.0) else {
+                    let Some(line_handle) = (match line_handle {
+                        LineHandle::Timeseries(handle) => Some(handle),
+                        LineHandle::XY(_) => None,
+                    }) else {
+                        continue;
+                    };
+                    let Some(line) = lines.get(line_handle) else {
                         continue;
                     };
                     let Some((timestamp, y)) = line.data.get_nearest(timestamp) else {
@@ -640,6 +656,7 @@ impl Plot {
                     self.draw_modal(
                         ui,
                         lines,
+                        _xy_lines,
                         line_handles,
                         graph_state,
                         collected_graph_data,
@@ -801,7 +818,7 @@ pub fn sync_graphs(
                         (None, true) => {
                             let entity = commands
                                 .spawn(LineBundle {
-                                    line: LineHandle(line.clone()),
+                                    line: LineHandle::Timeseries(line.clone()),
                                     uniform: LineUniform::new(
                                         graph_state.line_width,
                                         color.into_bevy(),

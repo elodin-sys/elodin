@@ -45,7 +45,9 @@ use impeller2_wkt::GraphType;
 use std::num::NonZeroU64;
 use std::ops::Range;
 
-use crate::ui::widgets::plot::{CHUNK_COUNT, CHUNK_LEN, Line};
+use crate::ui::widgets::plot::{CHUNK_COUNT, CHUNK_LEN, Line, XYLine};
+
+use super::BufferShardAlloc;
 
 const LINE_SHADER_HANDLE: Handle<Shader> = weak_handle!("e44f3b60-cb86-42a2-b7d8-d8dbf1f0299a");
 const POINT_SHADER_HANDLE: Handle<Shader> = weak_handle!("4f1aa57d-aacd-4d17-859f-0dad0ee3890f");
@@ -67,7 +69,8 @@ pub struct PlotGpuPlugin;
 impl Plugin for PlotGpuPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_plugins(UniformComponentPlugin::<LineUniform>::default())
-            .init_asset::<Line>();
+            .init_asset::<Line>()
+            .init_asset::<XYLine>();
 
         load_internal_asset!(app, LINE_SHADER_HANDLE, "./line.wgsl", Shader::from_wgsl);
         load_internal_asset!(app, POINT_SHADER_HANDLE, "./points.wgsl", Shader::from_wgsl);
@@ -131,9 +134,97 @@ impl Plugin for PlotGpuPlugin {
     }
 }
 
-#[derive(Component, Deref, Debug, Clone, ExtractComponent)]
+#[derive(Component, Debug, Clone, ExtractComponent)]
 #[require(SyncToRenderWorld)]
-pub struct LineHandle(pub Handle<Line>);
+pub enum LineHandle {
+    Timeseries(Handle<Line>),
+    XY(Handle<XYLine>),
+}
+
+pub enum LineMut<'a> {
+    Timeseries(&'a mut Line),
+    XY(&'a mut XYLine),
+}
+
+impl LineMut<'_> {
+    pub fn queue_load_range(
+        &mut self,
+        range: Range<Timestamp>,
+        render_queue: &RenderQueue,
+        render_device: &RenderDevice,
+    ) {
+        match self {
+            LineMut::Timeseries(line) => {
+                line.data
+                    .queue_load_range(range, render_queue, render_device)
+            }
+            LineMut::XY(xy_line) => {
+                xy_line.queue_load(render_queue, render_device);
+            }
+        }
+    }
+
+    pub fn write_to_index_buffer(
+        &mut self,
+        index_buffer: &Buffer,
+        render_queue: &RenderQueue,
+        line_visible_range: Range<Timestamp>,
+        pixel_width: usize,
+    ) -> u32 {
+        match self {
+            LineMut::Timeseries(line) => line.data.write_to_index_buffer(
+                index_buffer,
+                render_queue,
+                line_visible_range,
+                pixel_width,
+            ),
+            LineMut::XY(xy_line) => xy_line.write_to_index_buffer(index_buffer, render_queue),
+        }
+    }
+
+    pub fn x_buffer_shard_alloc(&self) -> Option<&BufferShardAlloc> {
+        match self {
+            LineMut::Timeseries(line) => line.data.timestamp_buffer_shard_alloc(),
+            LineMut::XY(xy_line) => xy_line.x_shard_alloc.as_ref(),
+        }
+    }
+
+    pub fn y_buffer_shard_alloc(&self) -> Option<&BufferShardAlloc> {
+        match self {
+            LineMut::Timeseries(line) => line.data.data_buffer_shard_alloc(),
+            LineMut::XY(xy_line) => xy_line.y_shard_alloc.as_ref(),
+        }
+    }
+}
+
+impl LineHandle {
+    pub fn as_timeseries(&self) -> Option<&Handle<Line>> {
+        if let Self::Timeseries(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_xy(&self) -> Option<&Handle<XYLine>> {
+        if let Self::XY(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn get<'m>(
+        &self,
+        lines: &'m mut Assets<Line>,
+        xy_lines: &'m mut Assets<XYLine>,
+    ) -> Option<LineMut<'m>> {
+        match self {
+            Self::Timeseries(handle) => lines.get_mut(handle).map(LineMut::Timeseries),
+            Self::XY(handle) => xy_lines.get_mut(handle).map(LineMut::XY),
+        }
+    }
+}
 
 #[derive(Component, Deref, Debug, Clone, ExtractComponent)]
 #[require(SyncToRenderWorld)]
@@ -405,15 +496,15 @@ fn extract_lines(
     let mut state = SystemState::<(
         Query<'static, 'static, LineQueryMut>,
         ResMut<'static, Assets<Line>>,
+        ResMut<'static, Assets<XYLine>>,
     )>::new(&mut main_world);
-    let (mut lines, mut line_assets) = state.get_mut(&mut main_world);
+    let (mut lines, mut line_assets, mut xy_lines) = state.get_mut(&mut main_world);
     for (entity, line_handle, config, uniform, line_visible_range, width, graph_type, gpu_line) in
         lines.iter_mut()
     {
-        let Some(line) = line_assets.get_mut(&line_handle.0) else {
+        let Some(mut line) = line_handle.get(&mut line_assets, &mut xy_lines) else {
             continue;
         };
-        let line = &mut line.data;
         line.queue_load_range(line_visible_range.0.clone(), &render_queue, &render_device);
         let index_buffer = if let Some(ref gpu_line) = gpu_line {
             gpu_line.index_buffer.clone()
@@ -439,10 +530,7 @@ fn extract_lines(
                     BindGroupEntry {
                         binding: 0,
                         resource: BindingResource::Buffer(BufferBinding {
-                            buffer: line
-                                .timestamp_buffer_shard_alloc()
-                                .expect("no timestamp buf")
-                                .buffer(),
+                            buffer: line.x_buffer_shard_alloc().expect("no x buf").buffer(),
                             offset: 0,
                             size,
                         }),
@@ -450,10 +538,7 @@ fn extract_lines(
                     BindGroupEntry {
                         binding: 1,
                         resource: BindingResource::Buffer(BufferBinding {
-                            buffer: line
-                                .data_buffer_shard_alloc()
-                                .expect("no data buf")
-                                .buffer(),
+                            buffer: line.y_buffer_shard_alloc().expect("no y buf").buffer(),
                             offset: 0,
                             size,
                         }),
