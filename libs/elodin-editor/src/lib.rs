@@ -42,7 +42,6 @@ use ui::{
     widgets::plot::{CollectedGraphData, gpu::LineHandle},
 };
 
-pub mod chunks;
 mod offset_parse;
 mod plugins;
 pub mod ui;
