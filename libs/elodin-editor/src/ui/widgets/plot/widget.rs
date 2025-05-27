@@ -433,7 +433,14 @@ impl TimeseriesPlot {
         draw_borders(ui, self.rect, self.inner_rect);
 
         self.draw_x_axis(ui, &font_id);
-        draw_y_axis(ui, self.bounds, self.steps_y, self.rect, self.inner_rect, 0.0);
+        draw_y_axis(
+            ui,
+            self.bounds,
+            self.steps_y,
+            self.rect,
+            self.inner_rect,
+            0.0,
+        );
 
         if let Some(pointer_pos) = pointer_pos {
             if self.inner_rect.contains(pointer_pos) && ui.ui_contains_pointer() {
