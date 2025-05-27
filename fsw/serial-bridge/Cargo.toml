@@ -28,6 +28,8 @@ serde.version = "1.0"
 serde.features = ["derive"]
 postcard-schema.version = "0.2"
 postcard-schema.features = ["derive"]
+blackbox.path = "../../fsw/blackbox"
+blackbox.features = ["roci"]
 
 # rand
 fastrand = "2.2.0"
