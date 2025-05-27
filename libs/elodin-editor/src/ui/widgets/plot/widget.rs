@@ -433,7 +433,7 @@ impl TimeseriesPlot {
         draw_borders(ui, self.rect, self.inner_rect);
 
         self.draw_x_axis(ui, &font_id);
-        draw_y_axis(ui, self.bounds, self.steps_y, self.rect, self.inner_rect);
+        draw_y_axis(ui, self.bounds, self.steps_y, self.rect, self.inner_rect, 0.0);
 
         if let Some(pointer_pos) = pointer_pos {
             if self.inner_rect.contains(pointer_pos) && ui.ui_contains_pointer() {
@@ -517,6 +517,7 @@ pub fn draw_y_axis(
     steps_y: usize,
     rect: egui::Rect,
     inner_rect: egui::Rect,
+    y_offset: f32,
 ) {
     let border_stroke = egui::Stroke::new(1.0, get_scheme().border_primary);
     let scheme = get_scheme();
@@ -535,7 +536,7 @@ pub fn draw_y_axis(
         ui.painter().text(
             screen_pos - egui::vec2(NOTCH_LENGTH + Y_AXIS_LABEL_MARGIN, 0.0),
             egui::Align2::RIGHT_CENTER,
-            format_num(tick),
+            format_num(tick + y_offset as f64),
             font_id.clone(),
             scheme.text_primary,
         );

@@ -51,6 +51,8 @@ pub struct SqlPlot {
     pub state: SqlPlotState,
     pub xy_line_handle: Option<Handle<XYLine>>,
     pub line_entity: Option<Entity>,
+    pub x_offset: f64,
+    pub y_offset: f64,
 }
 
 #[derive(Default)]
@@ -71,6 +73,16 @@ impl SqlPlot {
         let x_col = batch.column(0);
         let y_col = batch.column(1);
 
+        self.x_offset = array_iter(x_col).fold(f64::INFINITY, f64::min);
+        self.y_offset = array_iter(y_col).fold(f64::INFINITY, f64::min);
+
+        if !self.x_offset.is_finite() {
+            self.x_offset = 0.0;
+        }
+        if !self.y_offset.is_finite() {
+            self.y_offset = 0.0;
+        }
+
         let mut xy_line = XYLine {
             label: "SQL Data".to_string(),
             x_shard_alloc: None,
@@ -80,11 +92,11 @@ impl SqlPlot {
         };
 
         for value in array_iter(x_col) {
-            xy_line.x_values.push(value);
+            xy_line.x_values.push((value - self.x_offset) as f32);
         }
 
         for value in array_iter(y_col) {
-            xy_line.y_values.push(value);
+            xy_line.y_values.push((value - self.y_offset) as f32);
         }
 
         let handle = xy_lines.add(xy_line);
@@ -251,12 +263,12 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
                         let data_bounds = xy_line.plot_bounds();
                         let rect = ui.max_rect();
                         let inner_rect = get_inner_rect(ui.max_rect());
-                        let bounds = dbg!(sync_bounds_sql(
+                        let bounds = sync_bounds_sql(
                             &mut graph_state,
                             data_bounds,
                             rect,
                             inner_rect
-                        ));
+                        );
 
                         graph_state.widget_width = ui.max_rect().width() as f64;
                         graph_state.y_range = bounds.min_y..bounds.max_y;
@@ -296,8 +308,8 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
                         let steps_x = ((inner_rect.width() / STEPS_X_WIDTH_DIVISOR) as usize).max(1);
 
                         draw_borders(ui, rect, inner_rect);
-                        draw_y_axis(ui, bounds, steps_y, rect, inner_rect);
-                        draw_x_axis(ui, bounds, steps_x, rect, inner_rect);
+                        draw_y_axis(ui, bounds, steps_y, rect, inner_rect, plot.y_offset as f32);
+                        draw_x_axis(ui, bounds, steps_x, rect, inner_rect, plot.x_offset as f32);
 
                         plot.line_entity = Some(line_entity);
 
@@ -324,6 +336,7 @@ pub fn draw_x_axis(
     steps_x: usize,
     rect: egui::Rect,
     inner_rect: egui::Rect,
+    x_offset: f32,
 ) {
     let border_stroke = egui::Stroke::new(1.0, get_scheme().border_primary);
     let scheme = get_scheme();
@@ -342,7 +355,7 @@ pub fn draw_x_axis(
         ui.painter().text(
             screen_pos + egui::vec2(0.0, NOTCH_LENGTH + AXIS_LABEL_MARGIN),
             egui::Align2::CENTER_TOP,
-            format_num(tick),
+            format_num(tick + x_offset as f64),
             font_id.clone(),
             scheme.text_primary,
         );
@@ -366,7 +379,7 @@ pub fn draw_x_axis(
     }
 }
 
-pub fn array_iter(array_ref: &ArrayRef) -> Box<dyn Iterator<Item = f32> + '_> {
+pub fn array_iter(array_ref: &ArrayRef) -> Box<dyn Iterator<Item = f64> + '_> {
     match array_ref.data_type() {
         DataType::Float32 => Box::new(
             array_ref
@@ -374,7 +387,7 @@ pub fn array_iter(array_ref: &ArrayRef) -> Box<dyn Iterator<Item = f32> + '_> {
                 .downcast_ref::<Float32Array>()
                 .unwrap()
                 .iter()
-                .map(|x| x.unwrap_or_default()),
+                .map(|x| x.unwrap_or_default() as f64),
         ),
         DataType::Float64 => Box::new(
             array_ref
@@ -382,7 +395,7 @@ pub fn array_iter(array_ref: &ArrayRef) -> Box<dyn Iterator<Item = f32> + '_> {
                 .downcast_ref::<Float64Array>()
                 .unwrap()
                 .iter()
-                .map(|x| x.unwrap_or_default() as f32),
+                .map(|x| x.unwrap_or_default() as f64),
         ),
         DataType::Int32 => Box::new(
             array_ref
@@ -390,7 +403,7 @@ pub fn array_iter(array_ref: &ArrayRef) -> Box<dyn Iterator<Item = f32> + '_> {
                 .downcast_ref::<Int32Array>()
                 .unwrap()
                 .iter()
-                .map(|x| x.unwrap_or_default() as f32),
+                .map(|x| x.unwrap_or_default() as f64),
         ),
         DataType::Int64 => Box::new(
             array_ref
@@ -398,7 +411,7 @@ pub fn array_iter(array_ref: &ArrayRef) -> Box<dyn Iterator<Item = f32> + '_> {
                 .downcast_ref::<Int64Array>()
                 .unwrap()
                 .iter()
-                .map(|x| x.unwrap_or_default() as f32),
+                .map(|x| x.unwrap_or_default() as f64),
         ),
         DataType::UInt32 => Box::new(
             array_ref
@@ -406,7 +419,7 @@ pub fn array_iter(array_ref: &ArrayRef) -> Box<dyn Iterator<Item = f32> + '_> {
                 .downcast_ref::<UInt32Array>()
                 .unwrap()
                 .iter()
-                .map(|x| x.unwrap_or_default() as f32),
+                .map(|x| x.unwrap_or_default() as f64),
         ),
         DataType::UInt64 => Box::new(
             array_ref
@@ -414,7 +427,7 @@ pub fn array_iter(array_ref: &ArrayRef) -> Box<dyn Iterator<Item = f32> + '_> {
                 .downcast_ref::<UInt64Array>()
                 .unwrap()
                 .iter()
-                .map(|x| x.unwrap_or_default() as f32),
+                .map(|x| x.unwrap_or_default() as f64),
         ),
         DataType::Timestamp(TimeUnit::Second, _) => Box::new(
             array_ref
@@ -422,7 +435,7 @@ pub fn array_iter(array_ref: &ArrayRef) -> Box<dyn Iterator<Item = f32> + '_> {
                 .downcast_ref::<TimestampSecondArray>()
                 .unwrap()
                 .iter()
-                .map(|x| x.unwrap_or_default() as f32),
+                .map(|x| x.unwrap_or_default() as f64),
         ),
 
         DataType::Timestamp(TimeUnit::Millisecond, _) => Box::new(
@@ -431,7 +444,7 @@ pub fn array_iter(array_ref: &ArrayRef) -> Box<dyn Iterator<Item = f32> + '_> {
                 .downcast_ref::<TimestampMillisecondArray>()
                 .unwrap()
                 .iter()
-                .map(|x| x.unwrap_or_default() as f32),
+                .map(|x| x.unwrap_or_default() as f64),
         ),
         DataType::Timestamp(TimeUnit::Microsecond, _) => Box::new(
             array_ref
@@ -439,7 +452,7 @@ pub fn array_iter(array_ref: &ArrayRef) -> Box<dyn Iterator<Item = f32> + '_> {
                 .downcast_ref::<TimestampMicrosecondArray>()
                 .unwrap()
                 .iter()
-                .map(|x| x.unwrap_or_default() as f32),
+                .map(|x| x.unwrap_or_default() as f64),
         ),
         DataType::Timestamp(TimeUnit::Nanosecond, _) => Box::new(
             array_ref
@@ -447,7 +460,7 @@ pub fn array_iter(array_ref: &ArrayRef) -> Box<dyn Iterator<Item = f32> + '_> {
                 .downcast_ref::<TimestampNanosecondArray>()
                 .unwrap()
                 .iter()
-                .map(|x| x.unwrap_or_default() as f32),
+                .map(|x| x.unwrap_or_default() as f64),
         ),
         ty => {
             println!("Unsupported data type: {:?}", ty);
