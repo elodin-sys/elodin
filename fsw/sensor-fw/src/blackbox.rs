@@ -29,6 +29,11 @@ pub struct Record {
     pub mag_sample: u32,
     pub baro: f32,
     pub baro_temp: f32,
+    pub vin: f32,
+    pub vbat: f32,
+    pub aux_current: f32,
+    pub rtc_vbat: f32,
+    pub cpu_temp: f32,
 }
 
 pub struct SdmmcFs {
