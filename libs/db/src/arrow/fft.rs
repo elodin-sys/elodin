@@ -140,7 +140,7 @@ impl ScalarUDFImpl for FftUDF {
                 )
             })?;
 
-        let array = compute_fft_magnitudes(&input.values());
+        let array = compute_fft_magnitudes(input.values());
         Ok(ColumnarValue::Array(Arc::new(array)))
     }
 }

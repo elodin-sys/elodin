@@ -145,11 +145,11 @@ pub struct SqlPlotWidget<'w, 's> {
 }
 
 trait Vec2Ext {
-    fn as_dvec2(self) -> DVec2;
+    fn as_dvec2(&self) -> DVec2;
 }
 
 impl Vec2Ext for egui::Vec2 {
-    fn as_dvec2(self) -> DVec2 {
+    fn as_dvec2(&self) -> DVec2 {
         DVec2::new(self.x as f64, self.y as f64)
     }
 }
@@ -195,7 +195,7 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
                                     if let Some(batch) =
                                         decoder.decode(&mut buffer).ok().and_then(|b| b)
                                     {
-                                        entity.process_record_batch(batch, &mut *xy_lines);
+                                        entity.process_record_batch(batch, &mut xy_lines);
                                         entity.state = SqlPlotState::Results;
                                         return false;
                                     }
@@ -374,7 +374,7 @@ pub fn array_iter(array_ref: &ArrayRef) -> Box<dyn Iterator<Item = f64> + '_> {
                 .downcast_ref::<Float64Array>()
                 .unwrap()
                 .iter()
-                .map(|x| x.unwrap_or_default() as f64),
+                .map(|x| x.unwrap_or_default()),
         ),
         DataType::Int32 => Box::new(
             array_ref
