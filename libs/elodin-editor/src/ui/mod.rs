@@ -169,7 +169,6 @@ impl Plugin for UiPlugin {
             .init_resource::<ComponentFilter>()
             .init_resource::<InspectorAnchor>()
             .init_resource::<tiles::TileState>()
-            .init_resource::<SidebarState>()
             .init_resource::<FullscreenState>()
             .init_resource::<SettingModalState>()
             .init_resource::<HdrEnabled>()
@@ -196,35 +195,17 @@ pub enum SettingModal {
 #[derive(Resource, Default, Clone, Debug)]
 pub struct SettingModalState(pub Option<SettingModal>);
 
-#[derive(Resource)]
-pub struct SidebarState {
-    pub left_open: bool,
-    pub right_open: bool,
-}
-
-impl Default for SidebarState {
-    fn default() -> Self {
-        Self {
-            left_open: true,
-            right_open: true,
-        }
-    }
-}
-
 #[derive(Resource, Default)]
 pub struct FullscreenState(pub bool);
 
 pub struct TitlebarIcons {
     pub icon_close: egui::TextureId,
-    pub icon_side_bar_right: egui::TextureId,
-    pub icon_side_bar_left: egui::TextureId,
     pub icon_fullscreen: egui::TextureId,
     pub icon_exit_fullscreen: egui::TextureId,
 }
 
 #[derive(SystemParam)]
 pub struct Titlebar<'w, 's> {
-    sidebar_state: ResMut<'w, SidebarState>,
     fullscreen_state: ResMut<'w, FullscreenState>,
     app_exit: EventWriter<'w, AppExit>,
     windows: Query<
@@ -251,12 +232,9 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
     ) {
         let mut state_mut = state.get_mut(world);
 
-        let mut sidebar_state = state_mut.sidebar_state;
         let mut fullscreen_state = state_mut.fullscreen_state;
 
         let TitlebarIcons {
-            icon_side_bar_right,
-            icon_side_bar_left,
             icon_fullscreen,
             icon_exit_fullscreen,
             icon_close,
@@ -438,27 +416,6 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
                             });
                             ui.add_space(8.0);
                         }
-                        if ui
-                            .add(
-                                EImageButton::new(icon_side_bar_right)
-                                    .scale(titlebar_scale, titlebar_scale)
-                                    .bg_color(Color32::TRANSPARENT),
-                            )
-                            .clicked()
-                        {
-                            sidebar_state.right_open = !sidebar_state.right_open;
-                        };
-                        ui.add_space(4.0);
-                        if ui
-                            .add(
-                                EImageButton::new(icon_side_bar_left)
-                                    .scale(titlebar_scale, titlebar_scale)
-                                    .bg_color(Color32::TRANSPARENT),
-                            )
-                            .clicked()
-                        {
-                            sidebar_state.left_open = !sidebar_state.left_open;
-                        };
                     });
                 });
             });
@@ -489,8 +446,6 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         theme::set_theme(ctx);
 
         let titlebar_icons = TitlebarIcons {
-            icon_side_bar_right: contexts.add_image(images.icon_side_bar_right.clone_weak()),
-            icon_side_bar_left: contexts.add_image(images.icon_side_bar_left.clone_weak()),
             icon_fullscreen: contexts.add_image(images.icon_fullscreen.clone_weak()),
             icon_exit_fullscreen: contexts.add_image(images.icon_exit_fullscreen.clone_weak()),
             icon_close: contexts.add_image(images.icon_close.clone_weak()),
