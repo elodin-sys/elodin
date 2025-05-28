@@ -25,10 +25,7 @@ use std::{
 };
 use zerocopy::{Immutable, IntoBytes};
 
-use crate::{
-    Component, DB, Error,
-    append_log::AppendLog,
-};
+use crate::{Component, DB, Error, append_log::AppendLog};
 
 mod fft;
 use fft::{FftUDF, FrequencyDomainUDF};

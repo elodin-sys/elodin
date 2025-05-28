@@ -572,9 +572,7 @@ pub fn draw_y_axis(
         draw_tick(i);
     } else {
         let step_size = pretty_round(bounds.height() / steps_y as f64);
-        let steps_y = (0..=steps_y)
-            .map(|i| bounds.min_y + (i as f64) * step_size)
-            .collect::<Vec<f64>>();
+        let steps_y = (0..=steps_y).map(|i| bounds.min_y + (i as f64) * step_size);
 
         for y_step in steps_y {
             draw_tick(y_step);

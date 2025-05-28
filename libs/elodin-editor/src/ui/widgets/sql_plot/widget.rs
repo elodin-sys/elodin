@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use arrow::{
     array::{
@@ -15,6 +15,7 @@ use bevy::{
     math::DVec2,
     prelude::{Commands, Component, Entity, In, Query, ResMut},
     render::camera::Projection,
+    state::state::last_transition,
 };
 use egui::{RichText, Stroke};
 use impeller2_bevy::CommandsExt;
@@ -40,12 +41,11 @@ use crate::ui::{
 #[derive(Clone)]
 pub struct SQLPlotPane {
     pub entity: Entity,
-    pub graph_entity: Entity,
     pub rect: Option<egui::Rect>,
     pub label: String,
 }
 
-#[derive(Component, Default)]
+#[derive(Component)]
 pub struct SqlPlot {
     pub current_query: String,
     pub state: SqlPlotState,
@@ -53,6 +53,25 @@ pub struct SqlPlot {
     pub line_entity: Option<Entity>,
     pub x_offset: f64,
     pub y_offset: f64,
+    pub last_refresh: Option<Instant>,
+    pub refresh_interval: Duration,
+    pub auto_refresh: bool,
+}
+
+impl Default for SqlPlot {
+    fn default() -> Self {
+        Self {
+            current_query: Default::default(),
+            state: Default::default(),
+            xy_line_handle: Default::default(),
+            line_entity: Default::default(),
+            x_offset: Default::default(),
+            y_offset: Default::default(),
+            last_refresh: Default::default(),
+            refresh_interval: Duration::from_millis(500),
+            auto_refresh: Default::default(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -147,11 +166,7 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
         world: &mut bevy::prelude::World,
         state: &mut bevy::ecs::system::SystemState<Self>,
         ui: &mut egui::Ui,
-        SQLPlotPane {
-            entity,
-            graph_entity,
-            ..
-        }: Self::Args,
+        SQLPlotPane { entity, .. }: Self::Args,
     ) -> Self::Output {
         let mut state = state.get_mut(world);
         let Ok(mut plot) = state.states.get_mut(entity) else {
@@ -163,48 +178,54 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
                 egui::Frame::NONE
                     .inner_margin(egui::Margin::same(4))
                     .show(ui, |ui| {
-                        let style = ui.style_mut();
-                        style.visuals.widgets.active.corner_radius = theme::corner_radius_xs();
-                        style.visuals.widgets.hovered.corner_radius = theme::corner_radius_xs();
-                        style.visuals.widgets.open.corner_radius = theme::corner_radius_xs();
+                        // let style = ui.style_mut();
+                        // style.visuals.widgets.active.corner_radius = theme::corner_radius_xs();
+                        // style.visuals.widgets.hovered.corner_radius = theme::corner_radius_xs();
+                        // style.visuals.widgets.open.corner_radius = theme::corner_radius_xs();
 
-                        style.visuals.widgets.inactive.bg_stroke =
-                            Stroke::new(1.0, get_scheme().border_primary);
-                        style.visuals.widgets.inactive.fg_stroke =
-                            Stroke::new(1.0, get_scheme().text_primary);
-                        style.visuals.widgets.hovered.bg_stroke =
-                            Stroke::new(1.0, get_scheme().highlight.opacity(0.5));
+                        // style.visuals.widgets.inactive.bg_stroke =
+                        //     Stroke::new(1.0, get_scheme().border_primary);
+                        // style.visuals.widgets.inactive.fg_stroke =
+                        //     Stroke::new(1.0, get_scheme().text_primary);
+                        // style.visuals.widgets.hovered.bg_stroke =
+                        //     Stroke::new(1.0, get_scheme().highlight.opacity(0.5));
 
-                        style.spacing.button_padding = [16.0, 16.0].into();
+                        // style.spacing.button_padding = [16.0, 16.0].into();
 
-                        style.visuals.widgets.active.bg_fill = get_scheme().bg_primary;
-                        style.visuals.widgets.open.bg_fill = get_scheme().bg_primary;
-                        style.visuals.widgets.inactive.bg_fill = get_scheme().bg_primary;
-                        style.visuals.widgets.hovered.bg_fill = get_scheme().bg_primary;
+                        // style.visuals.widgets.active.bg_fill = get_scheme().bg_primary;
+                        // style.visuals.widgets.open.bg_fill = get_scheme().bg_primary;
+                        // style.visuals.widgets.inactive.bg_fill = get_scheme().bg_primary;
+                        // style.visuals.widgets.hovered.bg_fill = get_scheme().bg_primary;
 
-                        style.visuals.widgets.active.weak_bg_fill = get_scheme().bg_primary;
-                        style.visuals.widgets.open.weak_bg_fill = get_scheme().bg_primary;
-                        style.visuals.widgets.inactive.weak_bg_fill = get_scheme().bg_primary;
-                        style.visuals.widgets.hovered.weak_bg_fill = get_scheme().bg_primary;
-                        style.visuals.widgets.active.fg_stroke =
-                            Stroke::new(1.0, get_scheme().text_primary);
+                        // style.visuals.widgets.active.weak_bg_fill = get_scheme().bg_primary;
+                        // style.visuals.widgets.open.weak_bg_fill = get_scheme().bg_primary;
+                        // style.visuals.widgets.inactive.weak_bg_fill = get_scheme().bg_primary;
+                        // style.visuals.widgets.hovered.weak_bg_fill = get_scheme().bg_primary;
+                        // style.visuals.widgets.active.fg_stroke =
+                        //     Stroke::new(1.0, get_scheme().text_primary);
 
-                        ui.add_space(60.0);
-                        let text_edit_width = ui.max_rect().width() - 165.0;
-                        let text_edit_res = ui.add(
-                            egui::TextEdit::singleline(&mut plot.current_query)
-                                .hint_text("Enter SQL query returning X,Y columns")
-                                .desired_width(text_edit_width)
-                                .background_color(get_scheme().bg_primary)
-                                .margin(egui::Margin::symmetric(16, 8)),
-                        );
-                        ui.add_space(16.0);
-                        let query_res = ui.add_sized([55., 32.], EButton::green("PLOT"));
-                        let enter_key = text_edit_res.lost_focus()
-                            && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter));
+                        // ui.add_space(60.0);
+                        // let text_edit_width = ui.max_rect().width() - 165.0;
+                        // let text_edit_res = ui.add(
+                        //     egui::TextEdit::singleline(&mut plot.current_query)
+                        //         .hint_text("Enter SQL query returning X,Y columns")
+                        //         .desired_width(text_edit_width)
+                        //         .background_color(get_scheme().bg_primary)
+                        //         .margin(egui::Margin::symmetric(16, 8)),
+                        // );
+                        // ui.add_space(16.0);
+                        // let query_res = ui.add_sized([55., 32.], EButton::green("PLOT"));
+                        // let enter_key = text_edit_res.lost_focus()
+                        //     && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter));
 
-                        if query_res.clicked() || enter_key {
+                        let should_refresh = if let Some(last_refresh) = plot.last_refresh {
+                            plot.auto_refresh && last_refresh.elapsed() > plot.refresh_interval
+                        }else{
+                            !plot.current_query.is_empty()
+                        };
+                        if should_refresh {
                             plot.state = SqlPlotState::Requested(Instant::now());
+                            plot.last_refresh = Some(Instant::now());
                             state.commands.send_req_reply(
                                 SQLQuery(plot.current_query.clone()),
                                 move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
@@ -247,12 +268,14 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
                 }
                 SqlPlotState::Requested(_) => {
                     ui.centered_and_justified(|ui| {
-                        ui.label("Loading...");
+                        if plot.line_entity.is_none() {
+                            ui.label("Loading...");
+                        }
                     });
                 }
                 SqlPlotState::Results => {
                     if let Some(xy_line_handle) = &plot.xy_line_handle {
-                        let Ok(mut graph_state) = state.graphs_state.get_mut(graph_entity) else {
+                        let Ok(mut graph_state) = state.graphs_state.get_mut(entity) else {
                             return;
                         };
 
@@ -274,7 +297,7 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
                         graph_state.y_range = bounds.min_y..bounds.max_y;
 
                         state.commands
-                            .entity(graph_entity)
+                            .entity(entity)
                             .try_insert(Projection::Orthographic(bounds.as_projection()));
 
 
@@ -295,7 +318,7 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
                             line_visible_range: graph_state.visible_range.clone(),
                             graph_type: graph_state.graph_type,
                         })
-                        .insert(ChildOf(graph_entity))
+                        .insert(ChildOf(entity))
                         .insert(LineWidgetWidth(ui.max_rect().width() as usize))
                         .id();
 
@@ -369,14 +392,20 @@ pub fn draw_x_axis(
     if !step_size.is_normal() {
         return;
     }
+    let mut i = 0.0;
 
-    let steps_x = (0..=steps_x)
-        .map(|i| bounds.min_x + (i as f64) * step_size)
-        .collect::<Vec<f64>>();
-
-    for x_step in steps_x {
-        draw_tick(x_step);
+    while i < bounds.max_x {
+        draw_tick(i);
+        i += step_size;
     }
+    draw_tick(i);
+
+    let mut i = 0.0;
+    while i > bounds.min_x {
+        draw_tick(i);
+        i -= step_size;
+    }
+    draw_tick(i);
 }
 
 pub fn array_iter(array_ref: &ArrayRef) -> Box<dyn Iterator<Item = f64> + '_> {

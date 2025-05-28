@@ -213,6 +213,13 @@ impl TileState {
                         self.graphs.remove(tile_id);
                     }
                 }
+
+                Tile::Pane(Pane::VideoStream(pane)) => {
+                    commands.entity(pane.entity).despawn();
+                }
+                Tile::Pane(Pane::SqlPlot(pane)) => {
+                    commands.entity(pane.entity).despawn();
+                }
                 _ => {}
             }
 
@@ -254,7 +261,12 @@ impl Pane {
             Pane::Viewport(viewport) => viewport.label.to_string(),
             Pane::Monitor(monitor) => monitor.label.to_string(),
             Pane::SQLTable(..) => "SQL".to_string(),
-            Pane::SqlPlot(sql_plot) => sql_plot.label.to_string(),
+            Pane::SqlPlot(sql_plot) => {
+                if let Ok(graph_state) = graph_states.get(sql_plot.entity) {
+                    return graph_state.label.to_string();
+                }
+                "SQL PLOT".to_string()
+            }
             Pane::ActionTile(action) => action.label.to_string(),
             Pane::VideoStream(video_stream) => video_stream.label.to_string(),
             Pane::Hierarchy => "Entities".to_string(),
@@ -568,6 +580,14 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                         action_id: action.entity,
                     };
                 }
+
+                Tile::Pane(Pane::SqlPlot(pane)) => {
+                    *layout.selected_object = SelectedObject::Graph {
+                        tile_id,
+                        label: pane.label.to_string(),
+                        graph_id: pane.entity,
+                    };
+                }
                 _ => {}
             }
             self.tree_actions.push(TreeAction::SelectTile(tile_id));
@@ -864,6 +884,19 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if let egui_tiles::Tile::Pane(Pane::ActionTile(action)) = tile {
                             state_mut.commands.entity(action.entity).despawn();
                         };
+
+                        if let egui_tiles::Tile::Pane(Pane::VideoStream(pane)) = tile {
+                            state_mut.commands.entity(pane.entity).despawn();
+                        };
+
+                        if let egui_tiles::Tile::Pane(Pane::SqlPlot(pane)) = tile {
+                            state_mut.commands.entity(pane.entity).despawn();
+                        };
+
+                        if let egui_tiles::Tile::Pane(Pane::SQLTable(pane)) = tile {
+                            state_mut.commands.entity(pane.entity).despawn();
+                        };
+
                         ui_state.tree.remove_recursively(tile_id);
 
                         if let Some(graph_id) = ui_state.graphs.get(&tile_id) {
@@ -1025,11 +1058,13 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             BTreeMap::default(),
                             "SQL Plot".to_string(),
                         );
-                        let graph_entity = state_mut.commands.spawn(graph_bundle).id();
-                        let entity = state_mut.commands.spawn(SqlPlot::default()).id();
+                        let entity = state_mut
+                            .commands
+                            .spawn(SqlPlot::default())
+                            .insert(graph_bundle)
+                            .id();
                         let pane = Pane::SqlPlot(super::widgets::sql_plot::SQLPlotPane {
                             entity,
-                            graph_entity,
                             rect: None,
                             label: "SQL Plot".to_string(),
                         });
@@ -1107,14 +1142,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     Pane::SQLTable(_) => {}
                     Pane::SqlPlot(sql_plot) => {
                         if active_tiles.contains(tile_id) {
-                            if let Ok(mut cam) =
-                                state_mut.commands.get_entity(sql_plot.graph_entity)
-                            {
+                            if let Ok(mut cam) = state_mut.commands.get_entity(sql_plot.entity) {
                                 cam.try_insert(ViewportRect(sql_plot.rect));
                             }
-                        } else if let Ok(mut cam) =
-                            state_mut.commands.get_entity(sql_plot.graph_entity)
-                        {
+                        } else if let Ok(mut cam) = state_mut.commands.get_entity(sql_plot.entity) {
                             cam.try_insert(ViewportRect(None));
                         }
                     }
