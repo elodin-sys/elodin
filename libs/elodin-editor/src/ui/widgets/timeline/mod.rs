@@ -11,7 +11,7 @@ use timeline_slider::TimelineSlider;
 
 use crate::{
     SelectedTimeRange,
-    ui::{colors, images},
+    ui::{colors::get_scheme, images},
 };
 
 use super::{WidgetSystem, WidgetSystemExt};
@@ -220,8 +220,8 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
 
         egui::TopBottomPanel::bottom("timeline_panel")
             .frame(egui::Frame {
-                fill: colors::PRIMARY_SMOKE,
-                stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
+                fill: get_scheme().bg_primary,
+                //stroke: egui::Stroke::new(1.0, get_scheme().border_primary),
                 ..Default::default()
             })
             .resizable(false)

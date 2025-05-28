@@ -4,7 +4,7 @@ use bevy::{
 };
 use egui::{Color32, CornerRadius, RichText, Stroke};
 
-use crate::ui::{actions::ActionTile, colors, widgets::WidgetSystem};
+use crate::ui::{actions::ActionTile, colors::get_scheme, widgets::WidgetSystem};
 
 #[derive(SystemParam)]
 pub struct InspectorAction<'w, 's> {
@@ -41,14 +41,14 @@ impl WidgetSystem for InspectorAction<'_, '_> {
 
         style.spacing.button_padding = [16.0, 16.0].into();
 
-        style.visuals.widgets.active.bg_fill = colors::SURFACE_SECONDARY;
-        style.visuals.widgets.open.bg_fill = colors::SURFACE_SECONDARY;
-        style.visuals.widgets.inactive.bg_fill = colors::SURFACE_SECONDARY;
-        style.visuals.widgets.hovered.bg_fill = colors::SURFACE_SECONDARY;
+        style.visuals.widgets.active.bg_fill = get_scheme().bg_secondary;
+        style.visuals.widgets.open.bg_fill = get_scheme().bg_secondary;
+        style.visuals.widgets.inactive.bg_fill = get_scheme().bg_secondary;
+        style.visuals.widgets.hovered.bg_fill = get_scheme().bg_secondary;
         ui.add(
             egui::Label::new(
                 RichText::new("BUTTON LABEL")
-                    .color(colors::PRIMARY_ONYX_5)
+                    .color(get_scheme().text_tertiary)
                     .size(12.),
             )
             .selectable(false),
@@ -63,7 +63,7 @@ impl WidgetSystem for InspectorAction<'_, '_> {
         ui.add(
             egui::Label::new(
                 RichText::new("LUA CMD")
-                    .color(colors::PRIMARY_ONYX_5)
+                    .color(get_scheme().text_tertiary)
                     .size(12.),
             )
             .selectable(false),

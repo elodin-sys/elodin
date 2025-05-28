@@ -5,7 +5,10 @@ use bevy::ecs::{
 };
 use bevy_egui::egui;
 
-use crate::ui::{InspectorAnchor, SelectedObject, SidebarState, colors};
+use crate::ui::{
+    InspectorAnchor, SelectedObject, SidebarState,
+    colors::{self, get_scheme},
+};
 
 use self::{entity::InspectorEntity, graph::InspectorGraph, viewport::InspectorViewport};
 
@@ -64,7 +67,7 @@ impl WidgetSystem for Inspector<'_> {
             egui::SidePanel::new(egui::panel::Side::Right, "inspector_bottom")
                 .resizable(false)
                 .frame(egui::Frame {
-                    fill: colors::PRIMARY_SMOKE,
+                    fill: get_scheme().bg_primary,
                     ..Default::default()
                 })
                 .exact_width(width)
@@ -79,8 +82,7 @@ impl WidgetSystem for Inspector<'_> {
             egui::SidePanel::new(egui::panel::Side::Right, "inspector_side")
                 .resizable(true)
                 .frame(egui::Frame {
-                    fill: colors::PRIMARY_SMOKE,
-                    stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
+                    fill: get_scheme().bg_primary,
                     ..Default::default()
                 })
                 .min_width(width.min(1280.) * 0.15)
@@ -131,7 +133,7 @@ impl WidgetSystem for InspectorContent<'_> {
             .auto_shrink(egui::Vec2b::TRUE)
             .show(ui, |ui| {
                 egui::Frame::NONE
-                    .fill(colors::PRIMARY_SMOKE)
+                    .fill(get_scheme().bg_primary)
                     .inner_margin(16.0)
                     .show(ui, |ui| {
                         ui.vertical(|ui| match selected_object {

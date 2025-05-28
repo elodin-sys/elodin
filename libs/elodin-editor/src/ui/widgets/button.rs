@@ -2,7 +2,7 @@ use bevy_egui::egui::{self, Stroke};
 use egui::Color32;
 
 use crate::ui::{
-    colors::{self, ColorExt, with_opacity},
+    colors::{ColorExt, get_scheme, with_opacity},
     utils::Shrink4,
 };
 
@@ -23,12 +23,12 @@ impl EImageButton {
     pub fn new(image_id: egui::TextureId) -> Self {
         Self {
             image_id,
-            image_tint: colors::WHITE,
-            image_tint_click: colors::PRIMARY_ONYX_5,
-            bg_color: colors::PRIMARY_SMOKE,
+            image_tint: get_scheme().icon_primary,
+            image_tint_click: get_scheme().icon_secondary,
+            bg_color: get_scheme().bg_primary,
             width: 1.0,
             height: 1.0,
-            hovered_bg_color: colors::PRIMARY_ONYX_9,
+            hovered_bg_color: get_scheme().bg_secondary,
         }
     }
 
@@ -118,9 +118,9 @@ pub struct ECheckboxButton {
 impl ECheckboxButton {
     pub fn new(label: String, is_on: bool) -> Self {
         Self {
-            on_color: colors::PRIMARY_CREAME,
-            off_color: colors::PRIMARY_SMOKE,
-            text_color: colors::PRIMARY_CREAME,
+            on_color: get_scheme().text_primary,
+            off_color: get_scheme().bg_secondary,
+            text_color: get_scheme().text_primary,
             margin: egui::Margin::same(8),
             is_on,
             label,
@@ -277,9 +277,9 @@ impl EButton {
         Self {
             label: label.to_string(),
             disabled: false,
-            color: colors::WHITE,
-            bg_color: colors::PRIMARY_SMOKE,
-            stroke: egui::Stroke::new(1.0, colors::WHITE),
+            color: get_scheme().text_primary,
+            bg_color: get_scheme().bg_secondary,
+            stroke: egui::Stroke::new(1.0, get_scheme().border_primary),
             corner_radius: egui::CornerRadius::same(2),
             margin: egui::Margin::same(8),
             width: None,
@@ -289,23 +289,23 @@ impl EButton {
 
     pub fn green(label: impl ToString) -> Self {
         EButton::new(label)
-            .color(colors::MINT_DEFAULT)
-            .bg_color(colors::MINT_DEFAULT.opacity(0.04))
-            .stroke(Stroke::new(1.0, colors::MINT_40))
+            .color(get_scheme().success)
+            .bg_color(get_scheme().success.opacity(0.04))
+            .stroke(Stroke::new(1.0, get_scheme().success.opacity(0.4)))
     }
 
     pub fn red(label: impl ToString) -> Self {
         EButton::new(label)
-            .color(colors::REDDISH_DEFAULT)
-            .bg_color(colors::REDDISH_DEFAULT.opacity(0.04))
-            .stroke(Stroke::new(1.0, colors::REDDISH_DEFAULT))
+            .color(get_scheme().error)
+            .bg_color(get_scheme().error.opacity(0.04))
+            .stroke(Stroke::new(1.0, get_scheme().error))
     }
 
     pub fn gray(label: impl ToString) -> Self {
         EButton::new(label)
-            .color(colors::PRIMARY_CREAME)
+            .color(get_scheme().text_primary)
             .bg_color(Color32::TRANSPARENT)
-            .stroke(Stroke::new(1.0, colors::PRIMARY_ONYX_5))
+            .stroke(Stroke::new(1.0, get_scheme().border_primary))
     }
 
     pub fn disabled(mut self, disabled: bool) -> Self {
@@ -462,9 +462,9 @@ impl ETileButton {
             let font_id = egui::TextStyle::Button.resolve(ui.style());
 
             let style = ui.style_mut();
-            style.visuals.widgets.inactive.bg_fill = with_opacity(colors::PRIMARY_ONYX, 0.35);
-            style.visuals.widgets.active.bg_fill = with_opacity(colors::PRIMARY_ONYX, 0.6);
-            style.visuals.widgets.hovered.bg_fill = with_opacity(colors::PRIMARY_ONYX, 0.9);
+            style.visuals.widgets.inactive.bg_fill = with_opacity(get_scheme().bg_secondary, 0.35);
+            style.visuals.widgets.active.bg_fill = with_opacity(get_scheme().bg_secondary, 0.6);
+            style.visuals.widgets.hovered.bg_fill = with_opacity(get_scheme().bg_secondary, 0.9);
             let visuals = ui.style().interact(&response);
 
             // Background
@@ -473,7 +473,7 @@ impl ETileButton {
                 rect,
                 egui::CornerRadius::same(1),
                 visuals.bg_fill,
-                egui::Stroke::new(1.0, colors::PRIMARY_ONYX_9),
+                egui::Stroke::new(1.0, get_scheme().border_primary),
                 egui::StrokeKind::Middle,
             );
 
@@ -487,7 +487,7 @@ impl ETileButton {
                 egui::Align2::CENTER_CENTER,
                 self.label.to_uppercase(),
                 font_id.clone(),
-                colors::PRIMARY_CREAME,
+                get_scheme().text_primary,
             );
 
             let label_rect = label_rect.expand(8.0);
@@ -508,7 +508,7 @@ impl ETileButton {
                 self.image_id,
                 image_rect,
                 default_uv,
-                colors::PRIMARY_CREAME,
+                get_scheme().icon_primary,
             );
 
             // Description
@@ -519,7 +519,7 @@ impl ETileButton {
                     egui::Align2::CENTER_TOP,
                     description.to_string(),
                     font_id,
-                    colors::PRIMARY_ONYX_6,
+                    get_scheme().text_secondary,
                 );
             }
         }

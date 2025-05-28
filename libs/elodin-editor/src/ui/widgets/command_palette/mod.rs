@@ -13,7 +13,7 @@ use palette_items::PaletteItem;
 use crate::{
     plugins::LogicalKeyState,
     ui::{
-        colors::{self, with_opacity},
+        colors::{self, ColorExt, get_scheme, with_opacity},
         images, theme,
         utils::{MarginSides, Shrink4},
     },
@@ -174,6 +174,7 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
         let palette_width = (screen_rect.width() / 2.0).clamp(500.0, 900.0);
         let palette_size = egui::vec2(palette_width, screen_rect.height() - 128.0);
         let palette_min = egui::pos2(screen_rect.center().x - palette_width / 2.0, 64.0);
+        let scheme = get_scheme();
 
         let cmd_window = egui::Window::new("command_palette")
             .title_bar(false)
@@ -182,14 +183,14 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
             .fixed_pos(palette_min)
             .max_height(palette_size.y)
             .frame(egui::Frame {
-                fill: colors::PRIMARY_ONYX,
-                stroke: egui::Stroke::new(1.0, with_opacity(colors::PRIMARY_CREAME, 0.005)),
-                corner_radius: theme::corner_radius_xs(),
+                fill: scheme.bg_secondary,
+                stroke: egui::Stroke::new(1.0, with_opacity(scheme.text_primary, 0.005)),
+                corner_radius: theme::corner_radius_sm(),
                 shadow: Shadow {
-                    color: colors::PRIMARY_SMOKE,
-                    blur: 16,
-                    offset: [3, 3],
-                    spread: 3,
+                    color: scheme.shadow.opacity(0.2),
+                    blur: 12,
+                    offset: [0, 0],
+                    spread: 4,
                 },
                 ..Default::default()
             })
@@ -249,7 +250,7 @@ impl WidgetSystem for PaletteSearch<'_> {
                         ui.style_mut().interaction.selectable_labels = false;
                         if let Some(label) = &page.label {
                             egui::Frame::NONE
-                                .fill(colors::BONE_DEFAULT)
+                                .fill(get_scheme().text_primary)
                                 .inner_margin(Margin::symmetric(8, 1))
                                 .outer_margin(Margin::ZERO.right(6.0))
                                 .corner_radius(3.0)
@@ -259,14 +260,14 @@ impl WidgetSystem for PaletteSearch<'_> {
                                     ui.label(
                                         egui::RichText::new(label)
                                             .font(font_id)
-                                            .color(colors::PRIMARY_ONYX),
+                                            .color(get_scheme().bg_secondary),
                                     );
                                 });
                         } else {
                             let mut font_id = egui::TextStyle::Button.resolve(ui.style());
                             font_id.size = 16.0;
                             egui::Frame::NONE
-                                .fill(colors::BONE_DEFAULT)
+                                .fill(get_scheme().text_primary)
                                 .outer_margin(Margin::ZERO.right(6.0))
                                 .inner_margin(Margin::symmetric(5, 0))
                                 .corner_radius(3.0)
@@ -274,7 +275,7 @@ impl WidgetSystem for PaletteSearch<'_> {
                                     ui.label(
                                         egui::RichText::new("←")
                                             .font(font_id)
-                                            .color(colors::PRIMARY_ONYX),
+                                            .color(get_scheme().bg_secondary),
                                     );
                                 });
                         }
@@ -402,7 +403,7 @@ impl WidgetSystem for PaletteItems<'_> {
                                     ui.label(
                                         egui::RichText::new(item.header.clone())
                                             .monospace()
-                                            .color(colors::PRIMARY_CREAME_6),
+                                            .color(get_scheme().text_secondary),
                                     );
                                 });
                             }
@@ -429,7 +430,7 @@ impl WidgetSystem for PaletteItems<'_> {
                 });
             if let Some(err_msg) = &error {
                 ui.add_space(row_height * 0.5);
-                ui.colored_label(colors::REDDISH_DEFAULT, format!("Error: {}", err_msg));
+                ui.colored_label(get_scheme().highlight, format!("Error: {}", err_msg));
             }
             let mut state_mut = state.get_mut(world);
             state_mut.command_palette_state.page_stack.push(page);
@@ -444,7 +445,7 @@ impl WidgetSystem for PaletteItems<'_> {
             egui::Frame::NONE.inner_margin(row_margin).show(ui, |ui| {
                 ui.label(
                     egui::RichText::new("Couldn't find anything...")
-                        .color(colors::PRIMARY_CREAME_6),
+                        .color(get_scheme().text_secondary),
                 );
             });
         }
@@ -479,11 +480,11 @@ impl PaletteItemWidget {
 
             margin: egui::Margin::symmetric(16, 8),
 
-            inactive_bg_color: colors::PRIMARY_ONYX,
-            active_bg_color: with_opacity(colors::PRIMARY_CREAME, 0.05),
-            hovered_bg_color: with_opacity(colors::PRIMARY_CREAME, 0.1),
+            inactive_bg_color: get_scheme().bg_secondary,
+            active_bg_color: with_opacity(get_scheme().text_primary, 0.05),
+            hovered_bg_color: with_opacity(get_scheme().text_primary, 0.1),
 
-            text_color: colors::PRIMARY_CREAME,
+            text_color: get_scheme().text_primary,
             active,
         }
     }
@@ -507,7 +508,7 @@ impl PaletteItemWidget {
         let mut layout_job = egui::text::LayoutJob::default();
         let text_format_default = egui::TextFormat::simple(font_id, self.text_color);
         let text_format_highlighted = egui::TextFormat {
-            background: colors::HYPERBLUE_DEFAULT,
+            background: get_scheme().highlight,
             ..text_format_default.clone()
         };
         let mut peekable = self.matched_char_indices.iter().peekable();

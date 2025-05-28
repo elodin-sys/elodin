@@ -17,17 +17,12 @@ use impeller2::component::Component;
 use impeller2_wkt::WorldPos;
 
 use crate::ui::CameraQuery;
+use crate::ui::colors::get_scheme;
 use crate::ui::widgets::WidgetSystem;
 use crate::ui::widgets::label::label_with_buttons;
 use crate::{
     GridHandle, MainCamera,
-    ui::{
-        EntityData,
-        colors::{self, with_opacity},
-        theme,
-        utils::MarginSides,
-        widgets::label::ELabel,
-    },
+    ui::{EntityData, theme, utils::MarginSides, widgets::label::ELabel},
 };
 
 use super::{InspectorIcons, empty_inspector};
@@ -51,6 +46,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) {
+        let scheme = get_scheme();
         let state_mut = state.get_mut(world);
 
         let (icons, camera) = args;
@@ -69,7 +65,10 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         ui.add(
             ELabel::new("Viewport")
                 .padding(egui::Margin::same(8).bottom(24.0))
-                .bottom_stroke(ELabel::DEFAULT_STROKE)
+                .bottom_stroke(egui::Stroke {
+                    color: get_scheme().border_primary,
+                    width: 1.0,
+                })
                 .margin(egui::Margin::same(0).bottom(16.0)),
         );
 
@@ -91,7 +90,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     ui,
                     [icons.search],
                     "TRACK ENTITY",
-                    colors::PRIMARY_CREAME,
+                    scheme.text_secondary,
                     egui::Margin::same(0).bottom(8.0),
                 )[0];
 
@@ -140,8 +139,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new("TRACK ROTATION")
-                                .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
+                            egui::RichText::new("TRACK ROTATION").color(scheme.text_secondary),
                         );
                         ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                             let mut track_rotation = cam.no_propagate_rot.is_none();
@@ -161,15 +159,13 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         }
 
         if let Projection::Perspective(persp) = cam.projection.as_mut() {
+            ui.separator();
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(8, 8))
                 .show(ui, |ui| {
                     let mut fov = persp.fov.to_degrees();
                     ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new("FOV")
-                                .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
-                        );
+                        ui.label(egui::RichText::new("FOV").color(scheme.text_secondary));
                         ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                             if ui.add(egui::DragValue::new(&mut fov).speed(0.1)).changed() {
                                 persp.fov = fov.to_radians();
@@ -178,7 +174,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     });
                     ui.add_space(8.0);
                     ui.style_mut().spacing.slider_width = ui.available_size().x;
-                    ui.style_mut().visuals.widgets.inactive.bg_fill = colors::PRIMARY_ONYX_8;
+                    ui.style_mut().visuals.widgets.inactive.bg_fill = scheme.bg_secondary;
                     if ui
                         .add(egui::Slider::new(&mut fov, 5.0..=120.0).show_value(false))
                         .changed()
@@ -189,14 +185,12 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         }
 
         if let Some(&GridHandle { grid }) = cam.grid_handle {
+            ui.separator();
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(8, 8))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new("SHOW GRID")
-                                .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
-                        );
+                        ui.label(egui::RichText::new("SHOW GRID").color(scheme.text_secondary));
                         ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                             let mut visibility = grid_visibility.get_mut(grid).unwrap();
                             let mut visible = *visibility == Visibility::Visible;

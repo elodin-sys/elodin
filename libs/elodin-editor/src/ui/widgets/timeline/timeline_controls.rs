@@ -14,7 +14,8 @@ use crate::{
     TimeRangeBehavior,
     ui::{
         Paused,
-        colors::{self, ColorExt, with_opacity},
+        colors::{ColorExt, get_scheme},
+        theme::configure_combo_box,
         widgets::{WidgetSystem, button::EImageButton, time_label::time_label},
     },
 };
@@ -56,70 +57,78 @@ impl WidgetSystem for TimelineControls<'_> {
         } = state.get_mut(world);
 
         let mut tick_changed = false;
+        ui.set_height(50.0);
 
         egui::Frame::NONE
-            .inner_margin(egui::Margin::symmetric(16, 12))
+            .inner_margin(egui::Margin::symmetric(8, 8))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.horizontal_centered(|col_ui| {
-                        let btn_scale = 1.4;
-                        col_ui.spacing_mut().item_spacing.x = 8.0;
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), 37.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            let btn_scale = 1.4;
+                            ui.spacing_mut().item_spacing.x = 8.0;
 
-                        let jump_to_start_btn = col_ui.add(
-                            EImageButton::new(icons.jump_to_start).scale(btn_scale, btn_scale),
-                        );
+                            let jump_to_start_btn = ui.add(
+                                EImageButton::new(icons.jump_to_start).scale(btn_scale, btn_scale),
+                            );
 
-                        if jump_to_start_btn.clicked() {
-                            tick.0 = earliest_timestamp.0;
-                            tick_changed = true;
-                        }
-
-                        let frame_back_btn = col_ui
-                            .add(EImageButton::new(icons.frame_back).scale(btn_scale, btn_scale));
-
-                        if frame_back_btn.clicked() && tick.0 > earliest_timestamp.0 {
-                            tick.0.0 -= (hifitime::Duration::from_seconds(tick_time.0)
-                                .total_nanoseconds()
-                                / 1000) as i64;
-                            tick_changed = true;
-                        }
-
-                        if paused.0 {
-                            let play_btn = col_ui
-                                .add(EImageButton::new(icons.play).scale(btn_scale, btn_scale));
-
-                            if play_btn.clicked() {
-                                paused.0 = false;
+                            if jump_to_start_btn.clicked() {
+                                tick.0 = earliest_timestamp.0;
+                                tick_changed = true;
                             }
-                        } else {
-                            let pause_btn = col_ui
-                                .add(EImageButton::new(icons.pause).scale(btn_scale, btn_scale));
 
-                            if pause_btn.clicked() {
-                                paused.0 = true;
+                            let frame_back_btn = ui.add(
+                                EImageButton::new(icons.frame_back).scale(btn_scale, btn_scale),
+                            );
+
+                            if frame_back_btn.clicked() && tick.0 > earliest_timestamp.0 {
+                                tick.0.0 -= (hifitime::Duration::from_seconds(tick_time.0)
+                                    .total_nanoseconds()
+                                    / 1000) as i64;
+                                tick_changed = true;
                             }
-                        }
 
-                        let frame_forward_btn = col_ui.add(
-                            EImageButton::new(icons.frame_forward).scale(btn_scale, btn_scale),
-                        );
+                            if paused.0 {
+                                let play_btn = ui
+                                    .add(EImageButton::new(icons.play).scale(btn_scale, btn_scale));
 
-                        if frame_forward_btn.clicked() && tick.0 < max_tick.0 {
-                            tick.0.0 += (hifitime::Duration::from_seconds(tick_time.0)
-                                .total_nanoseconds()
-                                / 1000) as i64;
+                                if play_btn.clicked() {
+                                    paused.0 = false;
+                                }
+                            } else {
+                                let pause_btn = ui.add(
+                                    EImageButton::new(icons.pause).scale(btn_scale, btn_scale),
+                                );
 
-                            tick_changed = true;
-                        }
+                                if pause_btn.clicked() {
+                                    paused.0 = true;
+                                }
+                            }
 
-                        let jump_to_end_btn = col_ui
-                            .add(EImageButton::new(icons.jump_to_end).scale(btn_scale, btn_scale));
+                            let frame_forward_btn = ui.add(
+                                EImageButton::new(icons.frame_forward).scale(btn_scale, btn_scale),
+                            );
 
-                        if jump_to_end_btn.clicked() {
-                            tick.0 = Timestamp(max_tick.0.0 - 1);
-                            tick_changed = true;
-                        }
-                    });
+                            if frame_forward_btn.clicked() && tick.0 < max_tick.0 {
+                                tick.0.0 += (hifitime::Duration::from_seconds(tick_time.0)
+                                    .total_nanoseconds()
+                                    / 1000) as i64;
+
+                                tick_changed = true;
+                            }
+
+                            let jump_to_end_btn = ui.add(
+                                EImageButton::new(icons.jump_to_end).scale(btn_scale, btn_scale),
+                            );
+
+                            if jump_to_end_btn.clicked() {
+                                tick.0 = Timestamp(max_tick.0.0 - 1);
+                                tick_changed = true;
+                            }
+                        },
+                    );
 
                     ui.allocate_ui_with_layout(
                         ui.available_size(),
@@ -138,11 +147,7 @@ impl WidgetSystem for TimelineControls<'_> {
                                     if res.clicked() {
                                         ui.memory_mut(|mem| mem.toggle_popup(popup_id));
                                     }
-                                    ui.style_mut().visuals.window_fill = colors::SURFACE_SECONDARY;
-                                    ui.style_mut().visuals.window_stroke =
-                                        egui::Stroke::new(1., colors::PRIMARY_CREAME_5);
-                                    ui.style_mut().spacing.menu_margin =
-                                        egui::Margin::symmetric(0, 0);
+                                    configure_combo_box(ui.style_mut());
                                     egui::popup::popup_above_or_below_widget(
                                         ui,
                                         popup_id,
@@ -162,7 +167,8 @@ impl WidgetSystem for TimelineControls<'_> {
                                     ui.add(time_label(time));
 
                                     let time_label = egui::RichText::new("TIME")
-                                        .color(with_opacity(colors::PRIMARY_CREAME, 0.4));
+                                        .color(get_scheme().text_secondary);
+                                    ui.add_space(8.0);
 
                                     ui.add(egui::Label::new(time_label).selectable(false));
 
@@ -197,11 +203,11 @@ fn time_range_selector_button(
                     ui.max_rect(),
                     egui::CornerRadius::ZERO,
                     if response.is_pointer_button_down_on() {
-                        colors::SURFACE_SECONDARY.opacity(0.5)
+                        get_scheme().bg_secondary.opacity(0.5)
                     } else if response.hovered() {
-                        colors::SURFACE_SECONDARY.opacity(0.75)
+                        get_scheme().bg_secondary.opacity(0.75)
                     } else {
-                        colors::SURFACE_SECONDARY
+                        get_scheme().bg_secondary
                     },
                 );
 
@@ -210,7 +216,7 @@ fn time_range_selector_button(
                     egui::Align2::LEFT_CENTER,
                     behavior_string,
                     font_id,
-                    colors::PRIMARY_CREAME,
+                    get_scheme().text_primary,
                 );
                 egui::Image::new(SizedTexture::new(icon, egui::vec2(18., 18.))).paint_at(
                     ui,
@@ -250,7 +256,6 @@ fn time_range_window(
             egui::Layout::default().with_cross_justify(true),
             |ui| {
                 let font_id = egui::TextStyle::Button.resolve(ui.style());
-                ui.add_space(16.0);
                 for range in VISIBLE_RANGES
                     .iter()
                     .filter(|b| b.is_subset(earliest, latest))
@@ -264,24 +269,23 @@ fn time_range_window(
                         response.rect,
                         egui::CornerRadius::ZERO,
                         if response.hovered() {
-                            colors::PRIMARY_SMOKE.opacity(0.75)
+                            get_scheme().bg_primary.opacity(0.75)
                         } else {
-                            colors::TRANSPARENT
+                            egui::Color32::TRANSPARENT
                         },
                     );
                     painter.text(
-                        egui::Pos2::new(response.rect.min.x + 24.0, response.rect.center().y),
+                        egui::Pos2::new(response.rect.min.x + 8.0, response.rect.center().y),
                         egui::Align2::LEFT_CENTER,
                         range.to_string(),
                         font_id.clone(),
-                        colors::BONE_DEFAULT,
+                        get_scheme().text_primary,
                     );
 
                     if response.clicked() {
                         *behavior = *range;
                     }
                 }
-                ui.add_space(16.0);
             },
         );
     }

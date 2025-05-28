@@ -1,5 +1,5 @@
 use crate::ui::{
-    colors,
+    colors::{self, get_scheme},
     utils::{self, Shrink4},
 };
 use bevy_egui::egui;
@@ -18,17 +18,12 @@ pub struct ELabel {
 }
 
 impl ELabel {
-    pub const DEFAULT_STROKE: egui::Stroke = egui::Stroke {
-        width: 1.0,
-        color: colors::PRIMARY_ONYX_9,
-    };
-
     pub fn new(label: impl ToString) -> Self {
         Self {
             label: label.to_string(),
             padding: egui::Margin::same(8),
             margin: egui::Margin::same(0),
-            text_color: colors::PRIMARY_CREAME,
+            text_color: get_scheme().text_primary,
             bottom_stroke: None,
             height: None,
         }
@@ -220,7 +215,7 @@ impl EImageLabel {
         Self {
             image_id,
             image_tint: colors::WHITE,
-            bg_color: colors::PRIMARY_SMOKE,
+            bg_color: get_scheme().bg_secondary,
             frame_size: egui::vec2(40.0, 40.0),
             margin: egui::Margin::same(2),
             corner_radius: egui::CornerRadius::same(4),

@@ -22,7 +22,7 @@ use crate::{
     Offset, SelectedTimeRange, TimeRangeBehavior,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        self, EntityData, HdrEnabled,
+        self, EntityData, HdrEnabled, colors,
         tiles::{self, SyncViewportParams},
         widgets::plot::{GraphBundle, default_component_values},
     },
@@ -646,7 +646,7 @@ pub fn save_preset_inner() -> PaletteItem {
                     tile_id,
                     &ui_state,
                 );
-                let dirs = ui::startup_window::dirs();
+                let dirs = crate::dirs();
                 let dir = dirs.data_dir().join("presets");
                 let _ = std::fs::create_dir(&dir);
                 let _ = std::fs::write(
@@ -662,7 +662,7 @@ pub fn save_preset_inner() -> PaletteItem {
 
 pub fn load_preset() -> PaletteItem {
     PaletteItem::new("Load Preset", PRESETS_LABEL, |_: In<String>| {
-        let dirs = ui::startup_window::dirs();
+        let dirs = crate::dirs();
         let dir = dirs.data_dir().join("presets");
         let Ok(elems) = std::fs::read_dir(dir) else {
             return PaletteEvent::Exit;
@@ -688,7 +688,7 @@ pub fn load_preset_inner(name: String) -> PaletteItem {
         move |_: In<String>,
               params: SyncViewportParams,
               mut selected_object: ResMut<ui::SelectedObject>| {
-            let dirs = ui::startup_window::dirs();
+            let dirs = crate::dirs();
             let path = dirs.data_dir().join("presets").join(name.clone());
             if let Ok(json) = std::fs::read_to_string(path) {
                 if let Ok(panel) = serde_json::from_str::<impeller2_wkt::Panel>(&json) {
@@ -730,6 +730,26 @@ pub fn load_preset_inner(name: String) -> PaletteItem {
             PaletteEvent::Exit
         },
     )
+}
+
+pub fn set_color_scheme() -> PaletteItem {
+    PaletteItem::new("Set Color Scheme", PRESETS_LABEL, |_: In<String>| {
+        let schemes = [
+            ("DARK", &colors::DARK),
+            ("LIGHT", &colors::LIGHT),
+            ("CATPPUCINI LATTE", &colors::CATPPUCINI_LATTE),
+            ("CATPPUCINI MOCHA", &colors::CATPPUCINI_MOCHA),
+            ("CATPPUCINI MACCHIATO", &colors::CATPPUCINI_MACCHIATO),
+        ];
+        let mut items = vec![];
+        for (name, schema) in schemes {
+            items.push(PaletteItem::new(name, "", move |_: In<String>| {
+                colors::set_schema(schema);
+                PaletteEvent::Exit
+            }));
+        }
+        PalettePage::new(items).into()
+    })
 }
 
 pub fn create_tiles(tile_id: TileId) -> PalettePage {
@@ -805,6 +825,7 @@ impl Default for PalettePage {
             create_video_stream(None),
             save_preset(),
             load_preset(),
+            set_color_scheme(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {
                 let _ = opener::open("https://docs.elodin.systems");
                 PaletteEvent::Exit

@@ -22,7 +22,7 @@ use std::collections::{BTreeMap, HashMap};
 use super::{
     HdrEnabled, SelectedObject, ViewportRect,
     actions::ActionTileWidget,
-    colors::{self, EColor},
+    colors::{self, EColor, get_scheme, with_opacity},
     images,
     monitor::{MonitorPane, MonitorWidget},
     sql_table::{SQLTablePane, SqlTable, SqlTableWidget},
@@ -417,16 +417,17 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         let response = ui.interact(rect, id, egui::Sense::click_and_drag());
 
         if ui.is_rect_visible(rect) && !state.is_being_dragged {
+            let scheme = get_scheme();
             let bg_color = match tab_state {
-                TabState::Active => colors::BLACK_BLACK_600,
-                TabState::Selected => colors::PRIMARY_CREAME,
-                TabState::Inactive => colors::PRIMARY_SMOKE,
+                TabState::Active => scheme.bg_primary,
+                TabState::Selected => scheme.text_primary,
+                TabState::Inactive => scheme.bg_secondary,
             };
 
             let text_color = match tab_state {
-                TabState::Active => colors::PRIMARY_CREAME,
-                TabState::Selected => colors::PRIMARY_SMOKE,
-                TabState::Inactive => colors::with_opacity(colors::PRIMARY_CREAME, 0.6),
+                TabState::Active => scheme.text_primary,
+                TabState::Selected => scheme.bg_secondary,
+                TabState::Inactive => with_opacity(scheme.text_primary, 0.6),
             };
 
             ui.painter().rect_filled(rect, 0.0, bg_color);
@@ -442,8 +443,8 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                 EImageButton::new(self.icons.close)
                     .scale(1.3, 1.3)
                     .image_tint(match tab_state {
-                        TabState::Active | TabState::Inactive => colors::PRIMARY_CREAME,
-                        TabState::Selected => colors::BLACK_BLACK_600,
+                        TabState::Active | TabState::Inactive => scheme.text_primary,
+                        TabState::Selected => scheme.bg_primary,
                     })
                     .bg_color(colors::TRANSPARENT)
                     .hovered_bg_color(colors::TRANSPARENT),
@@ -455,19 +456,13 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             ui.painter().hline(
                 rect.x_range(),
                 rect.bottom(),
-                egui::Stroke::new(1.0, colors::BLACK_BLACK_600),
-            );
-
-            ui.painter().vline(
-                rect.left(),
-                rect.y_range(),
-                egui::Stroke::new(1.0, colors::BLACK_BLACK_600),
+                egui::Stroke::new(1.0, scheme.border_primary),
             );
 
             ui.painter().vline(
                 rect.right(),
                 rect.y_range(),
-                egui::Stroke::new(1.0, colors::BLACK_BLACK_600),
+                egui::Stroke::new(1.0, scheme.border_primary),
             );
         }
 
@@ -523,7 +518,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     }
 
     fn tab_bar_color(&self, _visuals: &egui::Visuals) -> Color32 {
-        colors::PRIMARY_SMOKE
+        get_scheme().bg_secondary
     }
 
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
@@ -535,23 +530,27 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     }
 
     fn drag_preview_stroke(&self, _visuals: &Visuals) -> Stroke {
-        Stroke::new(1.0, colors::PRIMARY_CREAME)
+        Stroke::new(1.0, get_scheme().text_primary)
     }
 
     fn drag_preview_color(&self, _visuals: &Visuals) -> Color32 {
-        colors::with_opacity(colors::PRIMARY_CREAME, 0.6)
+        colors::with_opacity(get_scheme().text_primary, 0.6)
     }
 
     fn drag_ui(&mut self, tiles: &Tiles<Pane>, ui: &mut Ui, tile_id: TileId) {
         let mut frame = egui::Frame::popup(ui.style());
-        frame.fill = colors::PRIMARY_CREAME;
+        frame.fill = get_scheme().text_primary;
         frame.corner_radius = CornerRadius::ZERO;
         frame.stroke = Stroke::NONE;
         frame.shadow = egui::epaint::Shadow::NONE;
         frame.show(ui, |ui| {
             let text = self.tab_title_for_tile(tiles, tile_id);
             let text = text.text();
-            ui.label(RichText::new(text).color(colors::PRIMARY_SMOKE).size(11.0));
+            ui.label(
+                RichText::new(text)
+                    .color(get_scheme().bg_secondary)
+                    .size(11.0),
+            );
         });
     }
 
@@ -570,7 +569,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         ui.painter().hline(
             top_bar_rect.x_range(),
             top_bar_rect.bottom(),
-            egui::Stroke::new(1.0, colors::BLACK_BLACK_600),
+            egui::Stroke::new(1.0, get_scheme().border_primary),
         );
 
         ui.style_mut().visuals.widgets.hovered.bg_stroke = Stroke::NONE;
@@ -621,7 +620,7 @@ impl WidgetSystem for TileSystem<'_, '_> {
         egui::CentralPanel::default()
             .frame(Frame {
                 fill: if is_empty_tile_tree {
-                    colors::PRIMARY_SMOKE
+                    get_scheme().bg_secondary
                 } else {
                     colors::TRANSPARENT
                 },

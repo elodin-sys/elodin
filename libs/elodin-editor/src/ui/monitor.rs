@@ -5,7 +5,7 @@ use impeller2_bevy::ComponentValueExt;
 use impeller2_bevy::{ComponentMetadataRegistry, ComponentValueMap, EntityMap};
 use impeller2_wkt::EntityMetadata;
 
-use super::{colors, widgets::WidgetSystem};
+use super::{colors::get_scheme, widgets::WidgetSystem};
 
 #[derive(Clone)]
 pub struct MonitorPane {
@@ -87,7 +87,7 @@ impl WidgetSystem for MonitorWidget<'_, '_> {
 
                         ui.allocate_ui_with_layout([220., 170.].into(), layout, |ui| {
                             Frame::NONE
-                                .stroke(Stroke::new(1.0, colors::PRIMARY_CREAME_5))
+                                .stroke(Stroke::new(1.0, get_scheme().border_primary))
                                 .outer_margin(egui::Margin::symmetric(8, 8))
                                 .inner_margin(egui::Margin::symmetric(8, 0))
                                 .show(ui, |ui| {
@@ -141,7 +141,7 @@ impl WidgetSystem for MonitorWidget<'_, '_> {
                                             let label = RichText::new(label)
                                                 .size(13.0)
                                                 .monospace()
-                                                .color(colors::PRIMARY_CREAME_6);
+                                                .color(get_scheme().text_secondary);
                                             ui.add_space(8.0);
                                             ui.label(label);
                                         },

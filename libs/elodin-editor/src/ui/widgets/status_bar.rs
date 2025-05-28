@@ -8,7 +8,7 @@ use bevy::{
 use impeller2_bevy::{ConnectionStatus, ThreadConnectionStatus};
 use impeller2_wkt::SimulationTimeStep;
 
-use crate::ui::colors;
+use crate::ui::colors::get_scheme;
 
 use super::RootWidgetSystem;
 
@@ -36,7 +36,7 @@ impl RootWidgetSystem for StatusBar<'_> {
 
         egui::TopBottomPanel::bottom("status_bar")
             .frame(egui::Frame {
-                fill: colors::PRIMARY_ONYX,
+                fill: get_scheme().bg_primary,
                 inner_margin: egui::Margin::symmetric(16, 4),
                 ..Default::default()
             })
@@ -59,7 +59,7 @@ impl RootWidgetSystem for StatusBar<'_> {
                     ui.add(egui::Label::new(
                         egui::RichText::new(format!("FPS {render_fps_str}"))
                             .text_style(egui::TextStyle::Small)
-                            .color(colors::PRIMARY_CREAME_6),
+                            .color(get_scheme().text_secondary),
                     ));
 
                     // Simulator TPS
@@ -73,7 +73,7 @@ impl RootWidgetSystem for StatusBar<'_> {
                     ui.add(egui::Label::new(
                         egui::RichText::new(format!("TPS {sim_fps}"))
                             .text_style(egui::TextStyle::Small)
-                            .color(colors::PRIMARY_CREAME_6),
+                            .color(get_scheme().text_secondary),
                     ));
                 });
             });
@@ -84,13 +84,13 @@ fn editor_status_label_ui(ui: &mut egui::Ui, status: ConnectionStatus) -> egui::
     let style = ui.style_mut();
     let font_id = egui::TextStyle::Small.resolve(style);
 
-    let text_color = colors::PRIMARY_CREAME_6;
+    let text_color = get_scheme().text_secondary;
 
     let (status_label, status_color) = match status {
-        ConnectionStatus::NoConnection => ("DISCONNECTED", colors::REDDISH_DEFAULT),
-        ConnectionStatus::Success => ("CONNECTED", colors::MINT_DEFAULT),
-        ConnectionStatus::Connecting => ("CONNECTING", colors::HYPERBLUE_DEFAULT),
-        ConnectionStatus::Error => ("CONNECTION ERROR", colors::REDDISH_DEFAULT),
+        ConnectionStatus::NoConnection => ("DISCONNECTED", get_scheme().error),
+        ConnectionStatus::Success => ("CONNECTED", get_scheme().success),
+        ConnectionStatus::Connecting => ("CONNECTING", get_scheme().blue),
+        ConnectionStatus::Error => ("CONNECTION ERROR", get_scheme().error),
     };
 
     // Set widget size and allocate space
