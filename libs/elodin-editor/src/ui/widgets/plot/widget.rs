@@ -734,7 +734,7 @@ pub fn auto_y_bounds(
                         }
                     }
                     gpu::LineMut::XY(xy) => {
-                        let (min, max) = match xy.y_values.cpu().iter().minmax() {
+                        let (min, max) = match xy.y_values.iter().flat_map(|c| c.cpu()).minmax() {
                             itertools::MinMaxResult::OneElement(elem) => (elem - 1.0, elem + 1.0),
                             itertools::MinMaxResult::MinMax(min, max) => (*min, *max),
                             itertools::MinMaxResult::NoElements => continue,

@@ -12,7 +12,6 @@ use smallvec::SmallVec;
 use egui::{
     Align, Color32,
     color_picker::{Alpha, color_picker_color32},
-    style::WidgetVisuals,
 };
 use impeller2::types::{ComponentId, EntityId};
 use impeller2_bevy::ComponentMetadataRegistry;
@@ -174,7 +173,9 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 8.0);
                     ui.label(egui::RichText::new("Query").color(get_scheme().text_secondary));
                     configure_input_with_border(ui.style_mut());
-                    query(ui, &mut sql_plot.current_query);
+                    let query_res = query(ui, &mut sql_plot.current_query);
+                    let enter_key = query_res.lost_focus()
+                        && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter));
                     ui.separator();
                     ui.label(egui::RichText::new("Behavior").color(get_scheme().text_secondary));
                     ui.horizontal(|ui| {
@@ -197,6 +198,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     if ui
                         .add_sized([max_width, 32.0], EButton::green("Refresh"))
                         .clicked()
+                        || enter_key
                     {
                         sql_plot.last_refresh = None;
                     }

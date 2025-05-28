@@ -15,23 +15,19 @@ use bevy::{
     math::DVec2,
     prelude::{Commands, Component, Entity, In, Query, ResMut},
     render::camera::Projection,
-    state::state::last_transition,
 };
-use egui::{RichText, Stroke};
+use egui::RichText;
 use impeller2_bevy::CommandsExt;
 use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery};
 
 use crate::ui::{
     colors::{ColorExt, get_scheme},
-    theme,
     utils::format_num,
     widgets::{
         WidgetSystem,
-        button::EButton,
         plot::{
-            AXIS_LABEL_MARGIN, CHUNK_LEN, GraphState, NOTCH_LENGTH, PlotBounds,
-            STEPS_X_WIDTH_DIVISOR, STEPS_Y_HEIGHT_DIVISOR, SharedBuffer, XYLine, draw_borders,
-            draw_y_axis, get_inner_rect,
+            AXIS_LABEL_MARGIN, GraphState, NOTCH_LENGTH, PlotBounds, STEPS_X_WIDTH_DIVISOR,
+            STEPS_Y_HEIGHT_DIVISOR, XYLine, draw_borders, draw_y_axis, get_inner_rect,
             gpu::{LineBundle, LineConfig, LineHandle, LineUniform, LineWidgetWidth},
             pretty_round,
         },
@@ -67,7 +63,7 @@ impl Default for SqlPlot {
             line_entity: Default::default(),
             x_offset: Default::default(),
             y_offset: Default::default(),
-            last_refresh: Default::default(),
+            last_refresh: Some(Instant::now()),
             refresh_interval: Duration::from_millis(500),
             auto_refresh: Default::default(),
         }
@@ -106,16 +102,16 @@ impl SqlPlot {
             label: "SQL Data".to_string(),
             x_shard_alloc: None,
             y_shard_alloc: None,
-            x_values: SharedBuffer::<f32, CHUNK_LEN>::default(),
-            y_values: SharedBuffer::<f32, CHUNK_LEN>::default(),
+            x_values: vec![],
+            y_values: vec![],
         };
 
         for value in array_iter(x_col) {
-            xy_line.x_values.push((value - self.x_offset) as f32);
+            xy_line.push_x_value((value - self.x_offset) as f32);
         }
 
         for value in array_iter(y_col) {
-            xy_line.y_values.push((value - self.y_offset) as f32);
+            xy_line.push_y_value((value - self.y_offset) as f32);
         }
 
         let handle = xy_lines.add(xy_line);
@@ -174,91 +170,45 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
         };
 
         ui.vertical(|ui| {
-            ui.horizontal_top(|ui| {
-                egui::Frame::NONE
-                    .inner_margin(egui::Margin::same(4))
-                    .show(ui, |ui| {
-                        // let style = ui.style_mut();
-                        // style.visuals.widgets.active.corner_radius = theme::corner_radius_xs();
-                        // style.visuals.widgets.hovered.corner_radius = theme::corner_radius_xs();
-                        // style.visuals.widgets.open.corner_radius = theme::corner_radius_xs();
-
-                        // style.visuals.widgets.inactive.bg_stroke =
-                        //     Stroke::new(1.0, get_scheme().border_primary);
-                        // style.visuals.widgets.inactive.fg_stroke =
-                        //     Stroke::new(1.0, get_scheme().text_primary);
-                        // style.visuals.widgets.hovered.bg_stroke =
-                        //     Stroke::new(1.0, get_scheme().highlight.opacity(0.5));
-
-                        // style.spacing.button_padding = [16.0, 16.0].into();
-
-                        // style.visuals.widgets.active.bg_fill = get_scheme().bg_primary;
-                        // style.visuals.widgets.open.bg_fill = get_scheme().bg_primary;
-                        // style.visuals.widgets.inactive.bg_fill = get_scheme().bg_primary;
-                        // style.visuals.widgets.hovered.bg_fill = get_scheme().bg_primary;
-
-                        // style.visuals.widgets.active.weak_bg_fill = get_scheme().bg_primary;
-                        // style.visuals.widgets.open.weak_bg_fill = get_scheme().bg_primary;
-                        // style.visuals.widgets.inactive.weak_bg_fill = get_scheme().bg_primary;
-                        // style.visuals.widgets.hovered.weak_bg_fill = get_scheme().bg_primary;
-                        // style.visuals.widgets.active.fg_stroke =
-                        //     Stroke::new(1.0, get_scheme().text_primary);
-
-                        // ui.add_space(60.0);
-                        // let text_edit_width = ui.max_rect().width() - 165.0;
-                        // let text_edit_res = ui.add(
-                        //     egui::TextEdit::singleline(&mut plot.current_query)
-                        //         .hint_text("Enter SQL query returning X,Y columns")
-                        //         .desired_width(text_edit_width)
-                        //         .background_color(get_scheme().bg_primary)
-                        //         .margin(egui::Margin::symmetric(16, 8)),
-                        // );
-                        // ui.add_space(16.0);
-                        // let query_res = ui.add_sized([55., 32.], EButton::green("PLOT"));
-                        // let enter_key = text_edit_res.lost_focus()
-                        //     && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter));
-
-                        let should_refresh = if let Some(last_refresh) = plot.last_refresh {
-                            plot.auto_refresh && last_refresh.elapsed() > plot.refresh_interval
-                        }else{
-                            !plot.current_query.is_empty()
+            let should_refresh = if let Some(last_refresh) = plot.last_refresh {
+                plot.auto_refresh && last_refresh.elapsed() > plot.refresh_interval
+            } else {
+                !plot.current_query.is_empty()
+            };
+            if should_refresh {
+                plot.state = SqlPlotState::Requested(Instant::now());
+                plot.last_refresh = Some(Instant::now());
+                state.commands.send_req_reply(
+                    SQLQuery(plot.current_query.clone()),
+                    move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
+                          mut states: Query<&mut SqlPlot>,
+                          mut xy_lines: ResMut<Assets<XYLine>>| {
+                        let Ok(mut entity) = states.get_mut(entity) else {
+                            return true;
                         };
-                        if should_refresh {
-                            plot.state = SqlPlotState::Requested(Instant::now());
-                            plot.last_refresh = Some(Instant::now());
-                            state.commands.send_req_reply(
-                                SQLQuery(plot.current_query.clone()),
-                                move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
-                                      mut states: Query<&mut SqlPlot>,
-                                      mut xy_lines: ResMut<Assets<XYLine>>| {
-                                    let Ok(mut entity) = states.get_mut(entity) else {
-                                        return true;
-                                    };
-                                    match res {
-                                        Ok(ipc) => {
-                                            if let Some(batch) = ipc.batch {
-                                                let mut decoder = arrow::ipc::reader::StreamDecoder::new();
-                                                let mut buffer =
-                                                    arrow::buffer::Buffer::from(batch.into_owned());
-                                                if let Some(batch) =
-                                                    decoder.decode(&mut buffer).ok().and_then(|b| b)
-                                                {
-                                                    entity.process_record_batch(batch, &mut *xy_lines);
-                                                    entity.state = SqlPlotState::Results;
-                                                    return false;
-                                                }
-                                            }
-                                        }
-                                        Err(err) => {
-                                            entity.state = SqlPlotState::Error(err);
-                                        }
+                        match res {
+                            Ok(ipc) => {
+                                if let Some(batch) = ipc.batch {
+                                    let mut decoder = arrow::ipc::reader::StreamDecoder::new();
+                                    let mut buffer =
+                                        arrow::buffer::Buffer::from(batch.into_owned());
+                                    if let Some(batch) =
+                                        decoder.decode(&mut buffer).ok().and_then(|b| b)
+                                    {
+                                        entity.process_record_batch(batch, &mut *xy_lines);
+                                        entity.state = SqlPlotState::Results;
+                                        return false;
                                     }
-                                    true
-                                },
-                            );
+                                }
+                            }
+                            Err(err) => {
+                                entity.state = SqlPlotState::Error(err);
+                            }
                         }
-                    });
-            });
+                        true
+                    },
+                );
+            }
 
             match &plot.state {
                 SqlPlotState::None => {
@@ -286,56 +236,55 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
                         let data_bounds = xy_line.plot_bounds();
                         let rect = ui.max_rect();
                         let inner_rect = get_inner_rect(ui.max_rect());
-                        let bounds = sync_bounds_sql(
-                            &mut graph_state,
-                            data_bounds,
-                            rect,
-                            inner_rect
-                        );
+                        let bounds =
+                            sync_bounds_sql(&mut graph_state, data_bounds, rect, inner_rect);
 
                         graph_state.widget_width = ui.max_rect().width() as f64;
                         graph_state.y_range = bounds.min_y..bounds.max_y;
 
-                        state.commands
+                        state
+                            .commands
                             .entity(entity)
                             .try_insert(Projection::Orthographic(bounds.as_projection()));
 
-
                         let entity = if let Some(entity) = plot.line_entity {
                             entity
-                        }else{
+                        } else {
                             state.commands.spawn_empty().id()
                         };
-                        let line_entity = state.commands.entity(entity).insert(LineBundle {
-                            line: LineHandle::XY(xy_line_handle.clone()),
-                            uniform: LineUniform::new(
-                                graph_state.line_width,
-                                get_scheme().highlight.into_bevy(),
-                            ),
-                            config: LineConfig {
-                                render_layers: graph_state.render_layers.clone(),
-                            },
-                            line_visible_range: graph_state.visible_range.clone(),
-                            graph_type: graph_state.graph_type,
-                        })
-                        .insert(ChildOf(entity))
-                        .insert(LineWidgetWidth(ui.max_rect().width() as usize))
-                        .id();
+                        let line_entity = state
+                            .commands
+                            .entity(entity)
+                            .insert(LineBundle {
+                                line: LineHandle::XY(xy_line_handle.clone()),
+                                uniform: LineUniform::new(
+                                    graph_state.line_width,
+                                    get_scheme().highlight.into_bevy(),
+                                ),
+                                config: LineConfig {
+                                    render_layers: graph_state.render_layers.clone(),
+                                },
+                                line_visible_range: graph_state.visible_range.clone(),
+                                graph_type: graph_state.graph_type,
+                            })
+                            .insert(ChildOf(entity))
+                            .insert(LineWidgetWidth(ui.max_rect().width() as usize))
+                            .id();
 
-
-                        let mut steps_y = ((inner_rect.height() / STEPS_Y_HEIGHT_DIVISOR) as usize).max(1);
+                        let mut steps_y =
+                            ((inner_rect.height() / STEPS_Y_HEIGHT_DIVISOR) as usize).max(1);
                         if steps_y % 2 != 0 {
                             steps_y += 1;
                         }
 
-                        let steps_x = ((inner_rect.width() / STEPS_X_WIDTH_DIVISOR) as usize).max(1);
+                        let steps_x =
+                            ((inner_rect.width() / STEPS_X_WIDTH_DIVISOR) as usize).max(1);
 
                         draw_borders(ui, rect, inner_rect);
                         draw_y_axis(ui, bounds, steps_y, rect, inner_rect, plot.y_offset as f32);
                         draw_x_axis(ui, bounds, steps_x, rect, inner_rect, plot.x_offset as f32);
 
                         plot.line_entity = Some(line_entity);
-
                     } else {
                         ui.centered_and_justified(|ui| {
                             ui.label("No data to plot");
@@ -344,7 +293,8 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
                 }
                 SqlPlotState::Error(error_response) => {
                     ui.centered_and_justified(|ui| {
-                        let label = RichText::new(&error_response.description).color(get_scheme().error);
+                        let label =
+                            RichText::new(&error_response.description).color(get_scheme().error);
                         ui.label(label);
                     });
                 }
