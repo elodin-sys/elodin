@@ -7,6 +7,23 @@ use hal::{
 static mut PINS_TAKEN: bool = false;
 pub const HSE_FREQ: fugit::Hertz<u32> = fugit::Hertz::<u32>::MHz(24);
 
+// Monitor configuration constants
+pub mod monitor {
+    // Voltage divider for VIN: (147kΩ + 10kΩ) / 10kΩ = 15.7
+    pub const VIN_DIVIDER: f32 = 15.7;
+
+    // Voltage divider for VBAT: (147kΩ + 10kΩ) / 10kΩ = 15.7
+    pub const VBAT_DIVIDER: f32 = 15.7;
+
+    // Current gain for 5V AUX with TPS2521 and RILM = 1kΩ
+    pub const AUX_CURRENT_GAIN: f32 = 5.49; // A/V
+
+    // ADC channel mappings for specific ADCs
+    pub const VIN_CHANNEL: u8 = 0; // PC2_C -> ADC3_INP0
+    pub const VBAT_CHANNEL: u8 = 0; // PA0_C -> ADC12_INP0
+    pub const AUX_CURRENT_CHANNEL: u8 = 1; // PC3_C -> ADC3_INP1
+}
+
 pub struct Pins {
     // I2C1, AF: 4
     pub pb8: Pin, // SCL
@@ -342,6 +359,16 @@ pub fn clock_cfg(pwr: pac::PWR) -> clocks::Clocks {
             divq: 8,   // 100 MHz
             ..Default::default()
         },
+        pll2: clocks::PllCfg {
+            enabled: true,
+            pllp_en: true,
+            pllq_en: false,
+            pllr_en: false,
+            divm: 3,  // pll_input_speed = 8 MHz (24 MHz / 3)
+            divn: 25, // vco_speed = 200 MHz (8 MHz * 25)
+            divp: 8,  // pll2_p_ck = 25 MHz (200 MHz / 8) - max for 16-bit ADC
+            ..Default::default()
+        },
         hsi48_on: true,
         input_src: clocks::InputSrc::Pll1, // 400 MHz (sysclk)
         d1_core_prescaler: clocks::HclkPrescaler::Div1, // 400 MHz (M7 core)
@@ -351,6 +378,7 @@ pub fn clock_cfg(pwr: pac::PWR) -> clocks::Clocks {
         d3_prescaler: clocks::ApbPrescaler::Div2, // 100 MHz
         vos_range: clocks::VosRange::VOS1,
         can_src: clocks::CanSrc::Hse,
+        hse_bypass: true,
         ..Default::default()
     };
 

@@ -1,13 +1,15 @@
 use impeller2::types::{EntityId, LenPacket, Msg, PacketId};
 use impeller2_wkt::{MsgStream, SetEntityMetadata};
-use roci::{AsVTable, Metadatatize, tcp::SinkExt};
+use roci::tcp::SinkExt;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use stellarator::io::{AsyncRead, AsyncWrite};
 use stellarator::net::TcpStream;
 use stellarator::rent;
 use stellarator::{io::SplitExt, struc_con::Joinable};
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
+use zerocopy::{FromBytes, Immutable, IntoBytes};
+
+use blackbox::Record;
 
 fn main() -> anyhow::Result<()> {
     stellarator::run(run)
@@ -19,20 +21,6 @@ async fn run() -> anyhow::Result<()> {
             println!("error connecting {:?}", err);
         }
     }
-}
-
-#[derive(AsVTable, Metadatatize, FromBytes, Immutable, KnownLayout, Debug)]
-#[roci(entity_id = 1)]
-#[repr(C)]
-pub struct Record {
-    pub ts: u32, // in milliseconds
-    pub mag: [f32; 3],
-    pub gyro: [f32; 3],
-    pub accel: [f32; 3],
-    pub mag_temp: f32,
-    pub mag_sample: u32,
-    pub baro: f32,
-    pub baro_temp: f32,
 }
 
 #[derive(Serialize, Deserialize, postcard_schema::Schema, Debug, IntoBytes, Immutable)]
@@ -88,7 +76,7 @@ pub async fn connect() -> anyhow::Result<()> {
             let data = &buf[..n];
             if let Some(decoded) = frame.push(data)? {
                 let mut table = LenPacket::table(id, 64);
-                if <Record>::ref_from_bytes(decoded).is_err() {
+                if Record::ref_from_bytes(decoded).is_err() {
                     println!("failed to decode record");
                     continue;
                 };

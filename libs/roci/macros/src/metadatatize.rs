@@ -49,7 +49,7 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
             };
             let asset = field.asset.unwrap_or_default();
             quote! {
-                .chain(std::iter::once(#impeller_wkt::ComponentMetadata {
+                .chain(core::iter::once(#impeller_wkt::ComponentMetadata {
                     component_id: #component_id,
                     name: #name.to_string(),
                     metadata: Default::default(),
@@ -65,7 +65,7 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
     quote! {
         impl #crate_name::Metadatatize for #ident #generics #where_clause {
             fn metadata() -> impl Iterator<Item = #impeller_wkt::ComponentMetadata> {
-                std::iter::empty()
+                core::iter::empty()
                 #(#metadata_items)*
             }
         }

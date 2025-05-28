@@ -69,7 +69,7 @@ fn main() -> ! {
 
     let uart_bridge = Box::new(healing_usart::HealingUsart::new(usart::Usart::new(
         dp.USART1,
-        115200,
+        1000000,
         usart::UsartConfig::default(),
         &clock_cfg,
     )));
@@ -138,6 +138,20 @@ fn main() -> ! {
     let mut dshot_driver = dshot::Driver::new(pwm_timer, dshot_tx, &mut dp.DMAMUX1);
     defmt::info!("Configured DSHOT driver");
 
+    // Initialize monitor for voltage and current readings
+    let mut monitor = monitor::Monitor::new(
+        dp.ADC1,
+        dp.ADC3,
+        &dp.RCC,
+        bsp::monitor::VIN_CHANNEL,
+        bsp::monitor::VBAT_CHANNEL,
+        bsp::monitor::AUX_CURRENT_CHANNEL,
+        bsp::monitor::VIN_DIVIDER,
+        bsp::monitor::VBAT_DIVIDER,
+        bsp::monitor::AUX_CURRENT_GAIN,
+    );
+    defmt::info!("Configured voltage/current monitor");
+
     // Run FRAM self-test - will panic if there's an issue
     fram.self_test(&mut i2c1_dma);
 
@@ -184,6 +198,11 @@ fn main() -> ! {
                 mag_sample: bmm350.data.sample,
                 baro: bmp581.data.pressure_pascal,
                 baro_temp: bmp581.data.temp_c,
+                vin: monitor.data.vin,
+                vbat: monitor.data.vbat,
+                aux_current: monitor.data.aux_current,
+                rtc_vbat: monitor.data.rtc_vbat,
+                cpu_temp: monitor.data.cpu_temp,
             };
             cmd_bridge.write_record(&record);
         }
@@ -197,6 +216,7 @@ fn main() -> ! {
         let mag_updated = bmm350.update(&mut i2c3_dma, now);
         let _ = bmi270.update(&mut i2c2_dma, now);
         let _ = bmp581.update(&mut i2c3_dma, now);
+        let _ = monitor.update(now);
 
         if mag_updated {
             let record = blackbox::Record {
@@ -208,13 +228,18 @@ fn main() -> ! {
                 mag_sample: bmm350.data.sample,
                 baro: bmp581.data.pressure_pascal,
                 baro_temp: bmp581.data.temp_c,
+                vin: monitor.data.vin,
+                vbat: monitor.data.vbat,
+                aux_current: monitor.data.aux_current,
+                rtc_vbat: monitor.data.rtc_vbat,
+                cpu_temp: monitor.data.cpu_temp,
             };
             blackbox.write_record(record);
         }
 
         if mag_updated && bmm350.data.sample % 400 == 0 {
             defmt::info!(
-                "{}: mag: {}, mag_temp: {}, gyro: {}, accel: {}, baro: {}, baro_temp: {}",
+                "{}: mag: {}, mag_temp: {}, gyro: {}, accel: {}, baro: {}, baro_temp: {}°C",
                 ts,
                 bmm350.data.mag,
                 bmm350.data.temp,
@@ -222,6 +247,15 @@ fn main() -> ! {
                 bmi270.accel_g,
                 bmp581.data.pressure_pascal,
                 bmp581.data.temp_c,
+            );
+            defmt::info!(
+                "{}: vin: {}V, vbat: {}V, current: {}A, rtc_vbat: {}V, cpu_temp: {}°C",
+                ts,
+                monitor.data.vin,
+                monitor.data.vbat,
+                monitor.data.aux_current,
+                monitor.data.rtc_vbat,
+                monitor.data.cpu_temp,
             );
         }
         delay.delay_ns(0);

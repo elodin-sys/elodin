@@ -9,6 +9,7 @@ use cortex_m_semihosting::debug;
 use defmt_rtt as _;
 use hal as _;
 
+pub mod adc;
 pub mod blackbox;
 pub mod bmi270;
 pub mod bmm350;
@@ -25,6 +26,7 @@ pub mod fm24cl16b;
 pub mod healing_usart;
 pub mod i2c_dma;
 pub mod led;
+pub mod monitor;
 pub mod monotonic;
 pub mod peripheral;
 pub mod sdmmc;

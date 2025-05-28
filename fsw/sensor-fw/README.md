@@ -1,5 +1,7 @@
 # Aleph STM32 Firmware
 
+This is the firmware for the STM32H747 MCU on the Aleph FC. It reads sensor data from the IMU, magnetometer, and barometer at a high rate, and stores it on the SD card. It also streams the data over the board-to-board UART to the Orin NX carrier board.
+
 ## Pre-requisites
 
 - [`rust` + `cargo`](https://rustup.rs/)
