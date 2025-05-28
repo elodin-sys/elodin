@@ -179,6 +179,10 @@ impl TileState {
         self.tree_actions.push(TreeAction::AddInspector(tile_id));
     }
 
+    pub fn create_sidebars_layout(&mut self) {
+        self.tree_actions.push(TreeAction::AddSidebars);
+    }
+
     pub fn is_empty(&self) -> bool {
         self.tree.active_tiles().is_empty()
     }
@@ -400,6 +404,7 @@ pub enum TreeAction {
     AddVideoStream(Option<TileId>, [u8; 2], String),
     AddHierarchy(Option<TileId>),
     AddInspector(Option<TileId>),
+    AddSidebars,
     DeleteTab(TileId),
     SelectTile(TileId),
 }
@@ -1013,6 +1018,26 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         {
                             ui_state.tree.make_active(|id, _| id == tile_id);
                         }
+                    }
+                    TreeAction::AddSidebars => {
+                        let hierarchy = ui_state.tree.tiles.insert_new(Tile::Pane(Pane::Hierarchy));
+                        let inspector = ui_state.tree.tiles.insert_new(Tile::Pane(Pane::Inspector));
+
+                        let mut linear = egui_tiles::Linear::new(
+                            egui_tiles::LinearDir::Horizontal,
+                            vec![hierarchy, inspector],
+                        );
+                        if let Some(root) = ui_state.tree.root() {
+                            linear.children.insert(1, root);
+                            linear.shares.set_share(hierarchy, 0.2);
+                            linear.shares.set_share(root, 0.6);
+                            linear.shares.set_share(inspector, 0.2);
+                        }
+                        let root = ui_state
+                            .tree
+                            .tiles
+                            .insert_new(Tile::Container(Container::Linear(linear)));
+                        ui_state.tree.root = Some(root);
                     }
                 }
             }
