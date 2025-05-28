@@ -4,10 +4,13 @@ use bevy::ecs::{
     world::World,
 };
 use bevy_egui::egui;
+use egui::CornerRadius;
+use smallvec::SmallVec;
 
 use crate::ui::{
-    InspectorAnchor, SelectedObject, SidebarState,
+    InspectorAnchor, SelectedObject,
     colors::{self, get_scheme},
+    tiles::TreeAction,
 };
 
 use self::{entity::InspectorEntity, graph::InspectorGraph, viewport::InspectorViewport};
@@ -44,62 +47,6 @@ pub fn empty_inspector() -> impl egui::Widget {
 }
 
 #[derive(SystemParam)]
-pub struct Inspector<'w> {
-    sidebar_state: ResMut<'w, SidebarState>,
-}
-
-impl WidgetSystem for Inspector<'_> {
-    type Args = (bool, InspectorIcons, f32);
-    type Output = ();
-
-    fn ui_system(
-        world: &mut World,
-        state: &mut SystemState<Self>,
-        ui: &mut egui::Ui,
-        args: Self::Args,
-    ) {
-        let state_mut = state.get_mut(world);
-
-        let (inside_sidebar, icons, width) = args;
-        let sidebar_state = state_mut.sidebar_state;
-
-        if inside_sidebar {
-            egui::SidePanel::new(egui::panel::Side::Right, "inspector_bottom")
-                .resizable(false)
-                .frame(egui::Frame {
-                    fill: get_scheme().bg_primary,
-                    ..Default::default()
-                })
-                .exact_width(width)
-                .show_animated_inside(ui, sidebar_state.right_open, |ui| {
-                    ui.add_widget_with::<InspectorContent>(
-                        world,
-                        "inspector_content",
-                        (icons, false),
-                    );
-                });
-        } else {
-            egui::SidePanel::new(egui::panel::Side::Right, "inspector_side")
-                .resizable(true)
-                .frame(egui::Frame {
-                    fill: get_scheme().bg_primary,
-                    ..Default::default()
-                })
-                .min_width(width.min(1280.) * 0.15)
-                .default_width(width.min(1280.) * 0.25)
-                .max_width(width * 0.35)
-                .show_animated_inside(ui, sidebar_state.right_open, |ui| {
-                    ui.add_widget_with::<InspectorContent>(
-                        world,
-                        "inspector_content",
-                        (icons, true),
-                    );
-                });
-        }
-    }
-}
-
-#[derive(SystemParam)]
 pub struct InspectorContent<'w> {
     inspector_anchor: ResMut<'w, InspectorAnchor>,
     selected_object: Res<'w, SelectedObject>,
@@ -107,14 +54,14 @@ pub struct InspectorContent<'w> {
 
 impl WidgetSystem for InspectorContent<'_> {
     type Args = (InspectorIcons, bool);
-    type Output = ();
+    type Output = SmallVec<[TreeAction; 4]>;
 
     fn ui_system(
         world: &mut World,
         state: &mut SystemState<Self>,
         ui: &mut egui::Ui,
         args: Self::Args,
-    ) {
+    ) -> Self::Output {
         let state_mut = state.get_mut(world);
 
         let (icons, is_side_panel) = args;
@@ -127,10 +74,11 @@ impl WidgetSystem for InspectorContent<'_> {
         } else {
             None
         };
+        ui.painter()
+            .rect_filled(ui.max_rect(), CornerRadius::ZERO, get_scheme().bg_primary);
 
         egui::ScrollArea::vertical()
             .max_width(ui.available_width())
-            .auto_shrink(egui::Vec2b::TRUE)
             .show(ui, |ui| {
                 egui::Frame::NONE
                     .fill(get_scheme().bg_primary)
@@ -139,20 +87,20 @@ impl WidgetSystem for InspectorContent<'_> {
                         ui.vertical(|ui| match selected_object {
                             SelectedObject::None => {
                                 ui.add(empty_inspector());
+                                Default::default()
                             }
-                            SelectedObject::Entity(pair) => {
-                                ui.add_widget_with::<InspectorEntity>(
-                                    world,
-                                    "inspector_entity",
-                                    (icons, pair),
-                                );
-                            }
+                            SelectedObject::Entity(pair) => ui.add_widget_with::<InspectorEntity>(
+                                world,
+                                "inspector_entity",
+                                (icons, pair),
+                            ),
                             SelectedObject::Viewport { camera, .. } => {
                                 ui.add_widget_with::<InspectorViewport>(
                                     world,
                                     "inspector_viewport",
                                     (icons, camera),
                                 );
+                                Default::default()
                             }
                             SelectedObject::Graph { graph_id, .. } => {
                                 ui.add_widget_with::<InspectorGraph>(
@@ -160,6 +108,7 @@ impl WidgetSystem for InspectorContent<'_> {
                                     "inspector_graph",
                                     (icons, graph_id),
                                 );
+                                Default::default()
                             }
                             SelectedObject::Action { action_id, .. } => {
                                 ui.add_widget_with::<InspectorAction>(
@@ -167,9 +116,13 @@ impl WidgetSystem for InspectorContent<'_> {
                                     "inspector_action",
                                     action_id,
                                 );
+                                Default::default()
                             }
                         })
                     })
-            });
+                    .inner
+                    .inner
+            })
+            .inner
     }
 }

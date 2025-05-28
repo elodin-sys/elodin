@@ -28,18 +28,12 @@ use widgets::{
 
 use crate::{GridHandle, MainCamera, plugins::LogicalKeyState};
 
-use self::widgets::inspector::{Inspector, entity::ComponentFilter};
+use self::widgets::inspector::entity::ComponentFilter;
 use self::widgets::modal::ModalWithSettings;
 
+use self::widgets::command_palette::{self, CommandPalette};
 use self::widgets::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystemExt};
-use self::widgets::{
-    command_palette::{self, CommandPalette},
-    hierarchy::Hierarchy,
-};
-use self::{
-    utils::MarginSides,
-    widgets::{button::EImageButton, inspector},
-};
+use self::{utils::MarginSides, widgets::button::EImageButton};
 
 pub mod actions;
 pub mod colors;
@@ -175,7 +169,6 @@ impl Plugin for UiPlugin {
             .init_resource::<ComponentFilter>()
             .init_resource::<InspectorAnchor>()
             .init_resource::<tiles::TileState>()
-            .init_resource::<SidebarState>()
             .init_resource::<FullscreenState>()
             .init_resource::<SettingModalState>()
             .init_resource::<HdrEnabled>()
@@ -202,35 +195,17 @@ pub enum SettingModal {
 #[derive(Resource, Default, Clone, Debug)]
 pub struct SettingModalState(pub Option<SettingModal>);
 
-#[derive(Resource)]
-pub struct SidebarState {
-    pub left_open: bool,
-    pub right_open: bool,
-}
-
-impl Default for SidebarState {
-    fn default() -> Self {
-        Self {
-            left_open: true,
-            right_open: true,
-        }
-    }
-}
-
 #[derive(Resource, Default)]
 pub struct FullscreenState(pub bool);
 
 pub struct TitlebarIcons {
     pub icon_close: egui::TextureId,
-    pub icon_side_bar_right: egui::TextureId,
-    pub icon_side_bar_left: egui::TextureId,
     pub icon_fullscreen: egui::TextureId,
     pub icon_exit_fullscreen: egui::TextureId,
 }
 
 #[derive(SystemParam)]
 pub struct Titlebar<'w, 's> {
-    sidebar_state: ResMut<'w, SidebarState>,
     fullscreen_state: ResMut<'w, FullscreenState>,
     app_exit: EventWriter<'w, AppExit>,
     windows: Query<
@@ -257,12 +232,9 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
     ) {
         let mut state_mut = state.get_mut(world);
 
-        let mut sidebar_state = state_mut.sidebar_state;
         let mut fullscreen_state = state_mut.fullscreen_state;
 
         let TitlebarIcons {
-            icon_side_bar_right,
-            icon_side_bar_left,
             icon_fullscreen,
             icon_exit_fullscreen,
             icon_close,
@@ -444,27 +416,6 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
                             });
                             ui.add_space(8.0);
                         }
-                        if ui
-                            .add(
-                                EImageButton::new(icon_side_bar_right)
-                                    .scale(titlebar_scale, titlebar_scale)
-                                    .bg_color(Color32::TRANSPARENT),
-                            )
-                            .clicked()
-                        {
-                            sidebar_state.right_open = !sidebar_state.right_open;
-                        };
-                        ui.add_space(4.0);
-                        if ui
-                            .add(
-                                EImageButton::new(icon_side_bar_left)
-                                    .scale(titlebar_scale, titlebar_scale)
-                                    .bg_color(Color32::TRANSPARENT),
-                            )
-                            .clicked()
-                        {
-                            sidebar_state.left_open = !sidebar_state.left_open;
-                        };
                     });
                 });
             });
@@ -474,7 +425,6 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
 #[derive(SystemParam)]
 pub struct MainLayout<'w, 's> {
     contexts: EguiContexts<'w, 's>,
-    window: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     images: Local<'s, images::Images>,
 }
 
@@ -491,30 +441,11 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         let state_mut = state.get_mut(world);
 
         let mut contexts = state_mut.contexts;
-        let window = state_mut.window;
         let images = state_mut.images;
-
-        let Ok(window) = window.single() else {
-            return;
-        };
-        let width = window.resolution.width();
-        let height = window.resolution.height();
 
         theme::set_theme(ctx);
 
-        let icon_search = contexts.add_image(images.icon_search.clone_weak());
-
-        let inspector_icons = inspector::InspectorIcons {
-            chart: contexts.add_image(images.icon_chart.clone_weak()),
-            add: contexts.add_image(images.icon_add.clone_weak()),
-            subtract: contexts.add_image(images.icon_subtract.clone_weak()),
-            setting: contexts.add_image(images.icon_setting.clone_weak()),
-            search: contexts.add_image(images.icon_search.clone_weak()),
-        };
-
         let titlebar_icons = TitlebarIcons {
-            icon_side_bar_right: contexts.add_image(images.icon_side_bar_right.clone_weak()),
-            icon_side_bar_left: contexts.add_image(images.icon_side_bar_left.clone_weak()),
             icon_fullscreen: contexts.add_image(images.icon_fullscreen.clone_weak()),
             icon_exit_fullscreen: contexts.add_image(images.icon_exit_fullscreen.clone_weak()),
             icon_close: contexts.add_image(images.icon_close.clone_weak()),
@@ -522,55 +453,13 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
 
         world.add_root_widget_with::<Titlebar, With<PrimaryWindow>>("titlebar", titlebar_icons);
 
-        let landscape_layout = width * 0.75 > height;
-
         #[cfg(not(target_family = "wasm"))]
         world.add_root_widget::<widgets::status_bar::StatusBar>("status_bar");
 
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
-                if landscape_layout {
-                    ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");
-                }
-
-                if landscape_layout {
-                    ui.add_widget_with::<Hierarchy>(
-                        world,
-                        "hierarchy",
-                        (false, icon_search, width),
-                    );
-
-                    ui.add_widget_with::<Inspector>(
-                        world,
-                        "inspector",
-                        (false, inspector_icons, width),
-                    );
-                } else {
-                    egui::TopBottomPanel::new(egui::panel::TopBottomSide::Bottom, "section_bottom")
-                        .resizable(true)
-                        .frame(egui::Frame::default())
-                        .default_height(200.0)
-                        .max_height(width * 0.5)
-                        .show_inside(ui, |ui| {
-                            let hierarchy_width = ui.add_widget_with::<Hierarchy>(
-                                world,
-                                "hierarchy",
-                                (true, icon_search, width),
-                            );
-
-                            let inspector_width = width - hierarchy_width;
-
-                            ui.add_widget_with::<Inspector>(
-                                world,
-                                "inspector",
-                                (true, inspector_icons, inspector_width),
-                            );
-                        });
-
-                    ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");
-                }
-
+                ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");
                 ui.add_widget::<tiles::TileSystem>(world, "tile_system");
             });
     }

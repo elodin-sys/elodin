@@ -495,6 +495,39 @@ pub fn create_sql(tile_id: Option<TileId>) -> PaletteItem {
         },
     )
 }
+
+pub fn create_hierarchy(tile_id: Option<TileId>) -> PaletteItem {
+    PaletteItem::new(
+        "Create Hierarchy",
+        TILES_LABEL,
+        move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
+            tile_state.create_hierarchy_tile(tile_id);
+            PaletteEvent::Exit
+        },
+    )
+}
+
+pub fn create_inspector(tile_id: Option<TileId>) -> PaletteItem {
+    PaletteItem::new(
+        "Create Inspector",
+        TILES_LABEL,
+        move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
+            tile_state.create_inspector_tile(tile_id);
+            PaletteEvent::Exit
+        },
+    )
+}
+
+pub fn create_sidebars() -> PaletteItem {
+    PaletteItem::new(
+        "Create Sidebars",
+        TILES_LABEL,
+        move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
+            tile_state.create_sidebars_layout();
+            PaletteEvent::Exit
+        },
+    )
+}
 pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Video Stream",
@@ -760,6 +793,9 @@ pub fn create_tiles(tile_id: TileId) -> PalettePage {
         create_viewport(Some(tile_id)),
         create_sql(Some(tile_id)),
         create_video_stream(Some(tile_id)),
+        create_hierarchy(Some(tile_id)),
+        create_inspector(Some(tile_id)),
+        create_sidebars(),
     ])
 }
 
@@ -823,6 +859,9 @@ impl Default for PalettePage {
             create_viewport(None),
             create_sql(None),
             create_video_stream(None),
+            create_hierarchy(None),
+            create_inspector(None),
+            create_sidebars(),
             save_preset(),
             load_preset(),
             set_color_scheme(),

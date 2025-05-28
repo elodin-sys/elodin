@@ -108,6 +108,8 @@ pub fn tile_to_panel(
                 }))
             }
             Pane::VideoStream(_) => None,
+            Pane::Hierarchy => Some(Panel::Hierarchy),
+            Pane::Inspector => Some(Panel::Inspector),
         },
         Tile::Container(container) => match container {
             egui_tiles::Container::Tabs(t) => {

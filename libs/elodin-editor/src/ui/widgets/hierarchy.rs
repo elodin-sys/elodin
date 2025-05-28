@@ -6,76 +6,9 @@ use bevy_egui::egui;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2_wkt::EntityMetadata;
 
-use crate::ui::{
-    EntityData, EntityFilter, EntityPair, SelectedObject, SidebarState, colors::get_scheme, utils,
-};
+use crate::ui::{EntityData, EntityFilter, EntityPair, SelectedObject, colors::get_scheme, utils};
 
-use super::{WidgetSystem, WidgetSystemExt, inspector::entity::search};
-
-#[derive(SystemParam)]
-pub struct Hierarchy<'w> {
-    sidebar_state: ResMut<'w, SidebarState>,
-}
-
-impl WidgetSystem for Hierarchy<'_> {
-    type Args = (bool, egui::TextureId, f32);
-    type Output = f32;
-
-    fn ui_system(
-        world: &mut World,
-        state: &mut SystemState<Self>,
-        ui: &mut egui::Ui,
-        args: Self::Args,
-    ) -> f32 {
-        let state_mut = state.get_mut(world);
-        let scheme = get_scheme();
-        let (inside_sidebar, icon_search, width) = args;
-        let sidebar_state = state_mut.sidebar_state;
-
-        let outline = if inside_sidebar {
-            egui::SidePanel::new(egui::panel::Side::Left, "outline_bottom")
-                .resizable(true)
-                .frame(egui::Frame {
-                    fill: scheme.bg_primary,
-                    stroke: egui::Stroke::new(1.0, scheme.border_primary),
-                    inner_margin: egui::Margin::same(4),
-                    ..Default::default()
-                })
-                .min_width(width * 0.25)
-                .default_width(width * 0.4)
-                .max_width(width * 0.75)
-                .show_animated_inside(ui, sidebar_state.left_open, |ui| {
-                    ui.add_widget_with::<HierarchyContent>(
-                        world,
-                        "hierarchy_content",
-                        (icon_search, true),
-                    );
-
-                    ui.allocate_space(ui.available_size());
-                })
-        } else {
-            egui::SidePanel::new(egui::panel::Side::Left, "outline_side")
-                .resizable(true)
-                .frame(egui::Frame {
-                    fill: scheme.bg_primary,
-                    inner_margin: egui::Margin::same(4),
-                    ..Default::default()
-                })
-                .min_width(width.min(1280.) * 0.15)
-                .default_width(width.min(1280.) * 0.20)
-                .max_width(width * 0.35)
-                .show_animated_inside(ui, sidebar_state.left_open, |ui| {
-                    ui.add_widget_with::<HierarchyContent>(
-                        world,
-                        "hierarchy_content",
-                        (icon_search, false),
-                    );
-                })
-        };
-
-        outline.map(|o| o.response.rect.width()).unwrap_or(0.0)
-    }
-}
+use super::{WidgetSystem, inspector::entity::search};
 
 #[derive(SystemParam)]
 pub struct HierarchyContent<'w, 's> {
@@ -85,7 +18,7 @@ pub struct HierarchyContent<'w, 's> {
 }
 
 impl WidgetSystem for HierarchyContent<'_, '_> {
-    type Args = (egui::TextureId, bool);
+    type Args = egui::TextureId;
     type Output = ();
 
     fn ui_system(
@@ -94,15 +27,21 @@ impl WidgetSystem for HierarchyContent<'_, '_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) {
+        ui.painter().rect_filled(
+            ui.max_rect(),
+            egui::CornerRadius::ZERO,
+            get_scheme().bg_primary,
+        );
+
         let state_mut = state.get_mut(world);
 
-        let (icon_search, compact) = args;
+        let icon_search = args;
         let entity_filter = state_mut.entity_filter;
         let mut selected_object = state_mut.selected_object;
         let entities = state_mut.entities;
 
         let search_text = entity_filter.0.clone();
-        header(ui, entity_filter, icon_search, compact);
+        header(ui, entity_filter, icon_search);
         entity_list(ui, &entities, &mut selected_object, &search_text);
     }
 }
@@ -111,26 +50,13 @@ pub fn header(
     ui: &mut egui::Ui,
     mut entity_filter: ResMut<EntityFilter>,
     search_icon: egui::TextureId,
-    compact: bool,
 ) -> egui::Response {
-    ui.vertical(|ui| {
-        egui::Frame::NONE
-            .inner_margin(egui::Margin::symmetric(16, 16))
-            .show(ui, |ui| {
-                if !compact {
-                    ui.add(egui::Label::new(
-                        egui::RichText::new("ENTITIES").color(get_scheme().text_secondary),
-                    ));
-                }
-            });
-        ui.separator();
-        egui::Frame::NONE
-            .inner_margin(egui::Margin::symmetric(4, 8))
-            .show(ui, |ui| {
-                search(ui, &mut entity_filter.0, search_icon);
-            });
-    })
-    .response
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(8, 8))
+        .show(ui, |ui| {
+            search(ui, &mut entity_filter.0, search_icon);
+        })
+        .response
 }
 
 pub fn entity_list(
