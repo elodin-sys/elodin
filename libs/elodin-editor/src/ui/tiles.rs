@@ -78,10 +78,24 @@ impl TileState {
         parent_id: Option<TileId>,
         active: bool,
     ) -> Option<TileId> {
-        let parent_id = parent_id.or_else(|| self.tree.root()).or_else(|| {
-            self.tree = egui_tiles::Tree::new_tabs("tab_tree", vec![]);
-            self.tree.root()
-        })?;
+        let parent_id = if let Some(id) = parent_id {
+            id
+        } else {
+            let root_id = self.tree.root().or_else(|| {
+                self.tree = egui_tiles::Tree::new_tabs("tab_tree", vec![]);
+                self.tree.root()
+            })?;
+
+            if let Some(Tile::Container(Container::Linear(linear))) = self.tree.tiles.get(root_id) {
+                if let Some(center) = linear.children.get(linear.children.len() / 2) {
+                    *center
+                } else {
+                    root_id
+                }
+            } else {
+                root_id
+            }
+        };
 
         let tile_id = self.tree.tiles.insert_new(tile);
         let parent_tile = self.tree.tiles.get_mut(parent_id)?;
