@@ -411,17 +411,7 @@ enum TabState {
 }
 
 impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
-    fn on_edit(&mut self, edit_action: egui_tiles::EditAction) {
-        // NOTE: Override accidental selection onDrag
-        let mut layout = SystemState::<TileLayout>::new(self.world);
-        let layout = layout.get_mut(self.world);
-
-        if edit_action == egui_tiles::EditAction::TabSelected {
-            if let Some(tile_id) = layout.selected_object.tile_id() {
-                self.tree_actions.push(TreeAction::SelectTile(tile_id));
-            }
-        }
-    }
+    fn on_edit(&mut self, _edit_action: egui_tiles::EditAction) {}
 
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
         let mut query = SystemState::<Query<&GraphState>>::new(self.world);
