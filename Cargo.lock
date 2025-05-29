@@ -6617,6 +6617,7 @@ dependencies = [
  "miette 7.2.0",
  "mlua",
  "nox",
+ "nox-array",
  "postcard",
  "postcard-schema",
  "replace_with",
@@ -8165,6 +8166,7 @@ dependencies = [
  "lapack-src",
  "libm",
  "netlib-src",
+ "nox-array",
  "noxla",
  "num-traits",
  "numpy",
@@ -8177,6 +8179,13 @@ dependencies = [
  "thiserror 2.0.12",
  "typenum",
  "which 6.0.3",
+ "zerocopy 0.8.14",
+]
+
+[[package]]
+name = "nox-array"
+version = "0.1.0"
+dependencies = [
  "zerocopy 0.8.14",
 ]
 

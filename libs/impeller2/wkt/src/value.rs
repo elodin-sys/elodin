@@ -1,5 +1,5 @@
 use impeller2::types::{ComponentView, ElementValue, PrimType};
-use nox::{Array, ArrayBuf, Dyn};
+use nox::{Array, ArrayBuf, Dyn, array::ArrayViewExt};
 use serde::{Deserialize, Serialize};
 use zerocopy::IntoBytes;
 

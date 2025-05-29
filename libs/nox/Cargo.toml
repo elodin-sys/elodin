@@ -10,7 +10,7 @@ repository = "https://github.com/elodin-sys/elodin"
 
 [features]
 default = []
-std = ["thiserror/std", "faer/std", "num-traits/std"]
+std = ["thiserror/std", "faer/std", "num-traits/std", "nox-array/std"]
 jax = ["pyo3", "pyo3-build-config", "numpy", "noxpr"]
 cuda = ["shared", "xla"]
 noxpr = ["xla", "boxcar", "paste", "itertools", "indent_write"]
@@ -29,6 +29,7 @@ libm = "0.2.8"
 inplace_it = "0.3.6"
 smallvec.version = "1.11.2"
 smallvec.features = ["const_generics", "union"]
+nox-array.path = "./array"
 
 # noxpr
 boxcar.version = "0.2"

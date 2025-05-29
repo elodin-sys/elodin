@@ -29,6 +29,7 @@ use impeller2_wkt::{
     Material, Mesh, Panel, Stream, StreamBehavior, StreamId, StreamTimestamp, SubscribeLastUpdated,
     VTableMsg, VectorArrow, WorldPos,
 };
+use nox::array::ArrayViewExt;
 use serde::de::DeserializeOwned;
 use std::{
     collections::{BTreeMap, HashMap},

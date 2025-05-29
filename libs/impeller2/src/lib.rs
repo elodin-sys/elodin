@@ -49,4 +49,5 @@ pub mod util;
 pub mod vtable;
 
 #[doc(hidden)]
+#[cfg(feature = "nox")]
 pub mod nox_impls;

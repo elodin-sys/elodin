@@ -41,6 +41,7 @@ miette.optional = true
 
 # sub-crates
 stellarator-buf.path = "./buf"
+stellarator-buf.features = ["std"]
 
 # tokio-compat
 tokio.version = "1.3"

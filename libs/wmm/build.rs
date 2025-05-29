@@ -4,8 +4,6 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 
 fn main() {
-    println!("cargo:rerun-if-changed=src/basilisk.h");
-
     let bindings = bindgen::Builder::default()
         // The input header we would like to generate
         // bindings for.

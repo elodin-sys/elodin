@@ -1,9 +1,13 @@
-use nox::{Array, ArrayRepr, ConstDim, Dim, Field, ReprMonad};
-
 use crate::{
     com_de::{AsComponentView, FromComponentView},
+    component::{Component, PrimTypeElem},
     error::Error,
+    schema::Schema,
     types::ComponentView,
+    util::concat_str,
+};
+use nox::{
+    Array, ArrayRepr, ConstDim, Dim, Field, OwnedRepr, ReprMonad, Tensor, array::ArrayViewExt,
 };
 
 macro_rules! impl_array {
@@ -91,5 +95,84 @@ where
 {
     fn as_component_view(&self) -> ComponentView<'_> {
         self.inner().as_component_view()
+    }
+}
+
+impl<T, R> Component for nox::SpatialTransform<T, R>
+where
+    T: Field + PrimTypeElem,
+    R: OwnedRepr,
+{
+    const NAME: &'static str = concat_str!("spatial_transform_", T::PRIM_TYPE.as_str());
+
+    #[cfg(feature = "alloc")]
+    fn schema() -> Schema<Vec<u64>> {
+        Schema::new(T::PRIM_TYPE, [7usize]).unwrap()
+    }
+}
+
+impl<T, R> Component for nox::SpatialMotion<T, R>
+where
+    T: Field + PrimTypeElem,
+    R: OwnedRepr,
+{
+    const NAME: &'static str = concat_str!("spatial_motion_", T::PRIM_TYPE.as_str());
+
+    #[cfg(feature = "alloc")]
+    fn schema() -> Schema<Vec<u64>> {
+        Schema::new(T::PRIM_TYPE, [6usize]).unwrap()
+    }
+}
+
+impl<T, R> Component for nox::SpatialForce<T, R>
+where
+    T: Field + PrimTypeElem,
+    R: OwnedRepr,
+{
+    const NAME: &'static str = concat_str!("spatial_force_", T::PRIM_TYPE.as_str());
+
+    #[cfg(feature = "alloc")]
+    fn schema() -> Schema<Vec<u64>> {
+        Schema::new(T::PRIM_TYPE, [6usize]).unwrap()
+    }
+}
+
+impl<T, R> Component for nox::SpatialInertia<T, R>
+where
+    T: Field + PrimTypeElem,
+    R: OwnedRepr,
+{
+    const NAME: &'static str = concat_str!("spatial_inertia_", T::PRIM_TYPE.as_str());
+
+    #[cfg(feature = "alloc")]
+    fn schema() -> Schema<Vec<u64>> {
+        Schema::new(T::PRIM_TYPE, [7usize]).unwrap()
+    }
+}
+
+impl<T, R> Component for nox::Quaternion<T, R>
+where
+    T: Field + PrimTypeElem,
+    R: OwnedRepr,
+{
+    const NAME: &'static str = concat_str!("quaternion_", T::PRIM_TYPE.as_str());
+
+    #[cfg(feature = "alloc")]
+    fn schema() -> Schema<Vec<u64>> {
+        Schema::new(T::PRIM_TYPE, [4usize]).unwrap()
+    }
+}
+
+impl<T, D, R> Component for Tensor<T, D, R>
+where
+    T: Field + PrimTypeElem,
+    D: Dim + ConstDim,
+    R: OwnedRepr,
+{
+    const NAME: &'static str = concat_str!("tensor_", T::PRIM_TYPE.as_str());
+
+    #[cfg(feature = "alloc")]
+    fn schema() -> Schema<Vec<u64>> {
+        Schema::new(T::PRIM_TYPE, D::DIM).unwrap()
     }
 }

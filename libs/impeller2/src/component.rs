@@ -1,9 +1,9 @@
 use crate::types::ComponentId;
-use crate::{types::PrimType, util::concat_str};
-use nox::{ConstDim, Dim, Field, OwnedRepr, Tensor};
+use crate::util::concat_str;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+#[cfg(feature = "alloc")]
 use crate::schema::Schema;
 
 #[cfg(feature = "alloc")]
@@ -18,93 +18,16 @@ pub trait Component {
     fn schema() -> Schema<Vec<u64>>;
 }
 
-impl<T, D, R> Component for Tensor<T, D, R>
-where
-    T: Field + PrimTypeElem,
-    D: Dim + ConstDim,
-    R: OwnedRepr,
-{
-    const NAME: &'static str = concat_str!("tensor_", T::PRIM_TYPE.as_str());
-
-    #[cfg(feature = "alloc")]
-    fn schema() -> Schema<Vec<u64>> {
-        Schema::new(T::PRIM_TYPE, D::DIM).unwrap()
-    }
-}
-
-impl<T, R> Component for nox::SpatialTransform<T, R>
-where
-    T: Field + PrimTypeElem,
-    R: OwnedRepr,
-{
-    const NAME: &'static str = concat_str!("spatial_transform_", T::PRIM_TYPE.as_str());
-
-    #[cfg(feature = "alloc")]
-    fn schema() -> Schema<Vec<u64>> {
-        Schema::new(T::PRIM_TYPE, [7usize]).unwrap()
-    }
-}
-
-impl<T, R> Component for nox::SpatialMotion<T, R>
-where
-    T: Field + PrimTypeElem,
-    R: OwnedRepr,
-{
-    const NAME: &'static str = concat_str!("spatial_motion_", T::PRIM_TYPE.as_str());
-
-    #[cfg(feature = "alloc")]
-    fn schema() -> Schema<Vec<u64>> {
-        Schema::new(T::PRIM_TYPE, [6usize]).unwrap()
-    }
-}
-
-impl<T, R> Component for nox::SpatialForce<T, R>
-where
-    T: Field + PrimTypeElem,
-    R: OwnedRepr,
-{
-    const NAME: &'static str = concat_str!("spatial_force_", T::PRIM_TYPE.as_str());
-
-    #[cfg(feature = "alloc")]
-    fn schema() -> Schema<Vec<u64>> {
-        Schema::new(T::PRIM_TYPE, [6usize]).unwrap()
-    }
-}
-
-impl<T, R> Component for nox::SpatialInertia<T, R>
-where
-    T: Field + PrimTypeElem,
-    R: OwnedRepr,
-{
-    const NAME: &'static str = concat_str!("spatial_inertia_", T::PRIM_TYPE.as_str());
-
-    #[cfg(feature = "alloc")]
-    fn schema() -> Schema<Vec<u64>> {
-        Schema::new(T::PRIM_TYPE, [7usize]).unwrap()
-    }
-}
-
-impl<T, R> Component for nox::Quaternion<T, R>
-where
-    T: Field + PrimTypeElem,
-    R: OwnedRepr,
-{
-    const NAME: &'static str = concat_str!("quaternion_", T::PRIM_TYPE.as_str());
-
-    #[cfg(feature = "alloc")]
-    fn schema() -> Schema<Vec<u64>> {
-        Schema::new(T::PRIM_TYPE, [4usize]).unwrap()
-    }
-}
-
-trait PrimTypeElem {
-    const PRIM_TYPE: PrimType;
+#[cfg(feature = "alloc")]
+pub(crate) trait PrimTypeElem {
+    const PRIM_TYPE: crate::types::PrimType;
 }
 
 macro_rules! impl_prim_type_element {
     ($ty:ty, $prim_ty:ident) => {
+        #[cfg(feature = "alloc")]
         impl PrimTypeElem for $ty {
-            const PRIM_TYPE: PrimType = PrimType::$prim_ty;
+            const PRIM_TYPE: crate::types::PrimType = crate::types::PrimType::$prim_ty;
         }
     };
 }

@@ -1,11 +1,21 @@
-use std::{
+#![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
+
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
+#[cfg(feature = "alloc")]
+use alloc::vec::Vec;
+
+use core::{
     mem::MaybeUninit,
     ops::{Bound, Deref, DerefMut, Range, RangeBounds},
     ptr::NonNull,
-    sync::atomic::{
-        self, AtomicBool, AtomicI8, AtomicI16, AtomicI32, AtomicI64, AtomicIsize, AtomicU8,
-        AtomicU16, AtomicU32, AtomicU64, AtomicUsize,
-    },
+};
+
+#[cfg(feature = "std")]
+use std::sync::atomic::{
+    self, AtomicBool, AtomicI8, AtomicI16, AtomicI32, AtomicI64, AtomicIsize, AtomicU8, AtomicU16,
+    AtomicU32, AtomicU64, AtomicUsize,
 };
 
 /// A buffer that is safe to pass to io_uring
@@ -82,7 +92,7 @@ pub fn deref(buf: &impl IoBuf) -> &[u8] {
     // source: https://github.com/tokio-rs/tokio-uring/blob/7761222aa7f4bd48c559ca82e9535d47aac96d53/src/buf/mod.rs#L21
     // Safety: the `IoBuf` trait is marked as unsafe and is expected to be
     // implemented correctly.
-    unsafe { std::slice::from_raw_parts(buf.stable_init_ptr(), buf.init_len()) }
+    unsafe { core::slice::from_raw_parts(buf.stable_init_ptr(), buf.init_len()) }
 }
 
 pub fn deref_mut(buf: &mut impl IoBufMut) -> &mut [u8] {
@@ -90,10 +100,11 @@ pub fn deref_mut(buf: &mut impl IoBufMut) -> &mut [u8] {
     // Safety: the `IoBuf` trait is marked as unsafe and is expected to be
     // implemented correctly.
     unsafe {
-        std::slice::from_raw_parts_mut(buf.stable_mut_ptr().as_ptr() as *mut u8, buf.init_len())
+        core::slice::from_raw_parts_mut(buf.stable_mut_ptr().as_ptr() as *mut u8, buf.init_len())
     }
 }
 
+#[cfg(feature = "alloc")]
 unsafe impl IoBuf for Vec<u8> {
     fn stable_init_ptr(&self) -> *const u8 {
         self.as_ptr()
@@ -108,6 +119,7 @@ unsafe impl IoBuf for Vec<u8> {
     }
 }
 
+#[cfg(feature = "alloc")]
 unsafe impl IoBufMut for Vec<u8> {
     fn stable_mut_ptr(&mut self) -> NonNull<MaybeUninit<u8>> {
         NonNull::new(self.as_ptr() as *mut MaybeUninit<u8>).unwrap()
@@ -226,8 +238,8 @@ impl<T: IoBuf> Slice<T> {
     }
 }
 
-impl<T: IoBuf> std::fmt::Debug for Slice<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T: IoBuf> core::fmt::Debug for Slice<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_tuple("Slice").field(&deref(self)).finish()
     }
 }
@@ -272,6 +284,7 @@ impl<T: IoBufMut> DerefMut for Slice<T> {
     }
 }
 
+#[cfg(feature = "std")]
 pub trait AtomicValue {
     type Atomic;
     type Value;
@@ -282,6 +295,7 @@ pub trait AtomicValue {
     fn from_value(val: Self::Value) -> Self;
 }
 
+#[cfg(feature = "std")]
 macro_rules! impl_atomic_value {
     ($($t:ty => $v:ty),+ $(,)?) => {
         $(
@@ -316,6 +330,7 @@ macro_rules! impl_atomic_value {
     };
 }
 
+#[cfg(feature = "std")]
 impl_atomic_value! {
     AtomicBool => bool,
     AtomicI8 => i8,

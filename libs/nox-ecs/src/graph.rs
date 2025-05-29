@@ -4,7 +4,10 @@ use impeller2::{
 };
 
 use bytes::Buf;
-use nox::{ArrayTy, Builder, CompFn, Const, Noxpr, NoxprFn, NoxprTy, Op, ReprMonad, xla::Literal};
+use nox::{
+    ArrayTy, Builder, CompFn, Const, Noxpr, NoxprFn, NoxprTy, Op, ReprMonad, array::ArrayViewExt,
+    xla::Literal,
+};
 use std::{collections::BTreeMap, marker::PhantomData};
 
 use crate::{ComponentArray, ComponentGroup, Query};

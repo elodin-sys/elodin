@@ -9,6 +9,7 @@ use crate::{
     types::{ComponentId, ComponentView, EntityId, Timestamp},
 };
 use core::{convert::Infallible, slice};
+use nox_array::ArrayView;
 
 pub trait Componentize {
     fn sink_columns(&self, output: &mut impl Decomponentize);
@@ -176,7 +177,7 @@ macro_rules! impl_component_view {
 
         impl AsComponentView for $ty {
             fn as_component_view(&self) -> ComponentView<'_> {
-                ComponentView::$prim(nox::ArrayView::from_buf_shape_unchecked(
+                ComponentView::$prim(ArrayView::from_buf_shape_unchecked(
                     slice::from_ref(self),
                     &[],
                 ))

@@ -2,19 +2,18 @@ use core::{
     fmt::Display,
     mem,
     ops::{Add, AddAssign, Sub},
-    sync::atomic::AtomicI64,
     time::Duration,
 };
 
-use nox::ArrayView;
+use nox_array::ArrayView;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned};
 
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-use crate::{buf::ByteBufExt, error::Error};
-use stellarator_buf::{AtomicValue, IoBuf, Slice};
+use crate::error::Error;
+use stellarator_buf::{IoBuf, Slice};
 
 #[derive(
     Serialize,
@@ -247,6 +246,7 @@ impl<'a> From<ComponentView<'a>> for [f32; 3] {
     }
 }
 
+#[cfg(feature = "std")]
 impl core::fmt::Display for ComponentView<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
@@ -654,6 +654,7 @@ impl LenPacket {
     }
 
     pub fn push_aligned<V: zerocopy::IntoBytes + zerocopy::Immutable>(&mut self, val: V) {
+        use crate::buf::ByteBufExt;
         let old_len = self.inner.len();
         let _ = self.inner.push_aligned(val);
         let new_len = self.inner.len();
@@ -662,6 +663,7 @@ impl LenPacket {
     }
 
     pub fn extend_aligned<V: zerocopy::IntoBytes + zerocopy::Immutable>(&mut self, val: &[V]) {
+        use crate::buf::ByteBufExt;
         let old_len = self.inner.len();
         let _ = self.inner.extend_aligned(val);
         let new_len = self.inner.len();
@@ -940,12 +942,13 @@ impl AddAssign<Duration> for Timestamp {
     }
 }
 
-impl AtomicValue for Timestamp {
-    type Atomic = AtomicI64;
+#[cfg(feature = "std")]
+impl stellarator_buf::AtomicValue for Timestamp {
+    type Atomic = std::sync::atomic::AtomicI64;
     type Value = i64;
 
     fn atomic(self) -> Self::Atomic {
-        AtomicI64::new(self.0)
+        std::sync::atomic::AtomicI64::new(self.0)
     }
 
     fn load(atomic: &Self::Atomic, order: core::sync::atomic::Ordering) -> Self {

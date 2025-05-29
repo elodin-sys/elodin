@@ -726,6 +726,7 @@ pub mod builder {
 #[cfg(test)]
 mod tests {
     use core::convert::Infallible;
+    use nox::array::ArrayViewExt;
     use std::collections::HashMap;
 
     use nox::{Array, ArrayBuf, Dyn};
