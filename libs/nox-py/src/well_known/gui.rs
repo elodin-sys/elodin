@@ -24,7 +24,7 @@ impl Panel {
                 inner.inner,
                 impeller2_wkt::Panel::Inspector,
             ],
-            shares: [(0, 0.125), (1, 0.75), (2, 0.125)].into_iter().collect(),
+            shares: [(0, 0.2), (1, 0.6), (2, 0.2)].into_iter().collect(),
             active: true,
         });
         Self { inner }

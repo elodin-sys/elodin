@@ -21,6 +21,7 @@ pub mod label;
 pub mod modal;
 pub mod plot;
 pub mod plot_3d;
+pub mod sql_plot;
 pub mod time_label;
 pub mod timeline;
 

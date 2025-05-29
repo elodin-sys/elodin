@@ -15,6 +15,7 @@ use impeller2_bevy::{
     PacketGrantR, PacketHandlerInput, PacketHandlers,
 };
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, GetTimeSeries};
+use itertools::{Itertools, MinMaxResult};
 use nodit::NoditMap;
 use nodit::interval::ii;
 use roaring::bitmap::RoaringBitmap;
@@ -31,6 +32,8 @@ use std::{collections::BTreeMap, fmt::Debug, ops::Range};
 
 use crate::ui::widgets::plot::gpu::INDEX_BUFFER_LEN;
 use crate::{SelectedTimeRange, TimeRangeBehavior};
+
+use super::PlotBounds;
 
 #[derive(Clone, Debug)]
 pub struct PlotDataComponent {
@@ -548,6 +551,96 @@ pub struct Line {
     pub last_queried: Option<Instant>,
 }
 
+#[derive(Asset, TypePath, Default)]
+pub struct XYLine {
+    pub label: String,
+    pub x_shard_alloc: Option<BufferShardAlloc>,
+    pub y_shard_alloc: Option<BufferShardAlloc>,
+    pub x_values: Vec<SharedBuffer<f32, CHUNK_LEN>>,
+    pub y_values: Vec<SharedBuffer<f32, CHUNK_LEN>>,
+}
+
+impl XYLine {
+    pub fn queue_load(&mut self, render_queue: &RenderQueue, render_device: &RenderDevice) {
+        let x_shard_alloc = self.x_shard_alloc.get_or_insert_with(|| {
+            BufferShardAlloc::with_nan_chunk(CHUNK_COUNT, CHUNK_LEN, render_device, render_queue)
+        });
+        let y_shard_alloc = self.y_shard_alloc.get_or_insert_with(|| {
+            BufferShardAlloc::with_nan_chunk(CHUNK_COUNT, CHUNK_LEN, render_device, render_queue)
+        });
+        for buf in &mut self.x_values {
+            buf.queue_load(render_queue, x_shard_alloc);
+        }
+        for buf in &mut self.y_values {
+            buf.queue_load(render_queue, y_shard_alloc);
+        }
+    }
+
+    pub fn write_to_index_buffer(
+        &mut self,
+        index_buffer: &Buffer,
+        render_queue: &RenderQueue,
+    ) -> u32 {
+        let mut count = 0;
+        let mut view = render_queue
+            .write_buffer_with(
+                index_buffer,
+                0,
+                NonZeroU64::new((INDEX_BUFFER_LEN * 4) as u64).unwrap(),
+            )
+            .expect("no write buf");
+        let mut view = &mut view[..];
+        for buf in &mut self.x_values {
+            let gpu = buf.gpu.lock();
+            let Some(gpu) = gpu.as_ref() else { return 0 };
+            let chunk = gpu.as_index_chunk::<f32>(buf.cpu().len());
+            for index in chunk.into_index_iter() {
+                view = append_u32(view, index);
+            }
+            count += buf.cpu().len() as u32;
+        }
+        count
+    }
+
+    pub fn plot_bounds(&self) -> PlotBounds {
+        let (min_x, max_x) = match self.x_values.iter().flat_map(|c| c.cpu()).minmax() {
+            MinMaxResult::NoElements => (0.0, 1.0),
+            MinMaxResult::OneElement(x) => (*x - 1.0, *x + 1.0),
+            MinMaxResult::MinMax(min, max) => (*min, *max),
+        };
+        let (min_y, max_y) = match self.y_values.iter().flat_map(|c| c.cpu()).minmax() {
+            MinMaxResult::NoElements => (0.0, 1.0),
+            MinMaxResult::OneElement(y) => (*y - 1.0, *y + 1.0),
+            MinMaxResult::MinMax(min, max) => (*min, *max),
+        };
+        PlotBounds::new(min_x as f64, min_y as f64, max_x as f64, max_y as f64)
+    }
+
+    pub fn push_x_value(&mut self, value: f32) {
+        if let Some(buf) = self.x_values.last_mut() {
+            if buf.cpu().len() < CHUNK_LEN {
+                buf.push(value);
+                return;
+            }
+        }
+        let mut buf = SharedBuffer::default();
+        buf.push(value);
+        self.x_values.push(buf);
+    }
+
+    pub fn push_y_value(&mut self, value: f32) {
+        if let Some(buf) = self.y_values.last_mut() {
+            if buf.cpu().len() < CHUNK_LEN {
+                buf.push(value);
+                return;
+            }
+        }
+        let mut buf = SharedBuffer::default();
+        buf.push(value);
+        self.y_values.push(buf);
+    }
+}
+
 pub trait AsF32 {
     fn as_f32(&self) -> f32;
 }
@@ -576,7 +669,7 @@ impl AsF32 for bool {
 }
 
 #[derive(Debug, Clone)]
-struct SharedBuffer<T, const N: usize> {
+pub struct SharedBuffer<T, const N: usize> {
     cpu: Vec<T>,
     gpu: Arc<spin::Mutex<Option<BufferShard>>>,
     gpu_dirty: Arc<AtomicBool>,
@@ -618,7 +711,7 @@ impl<T: IntoBytes + Immutable + Debug + Clone, const N: usize> SharedBuffer<T, N
 }
 
 impl<T, const N: usize> SharedBuffer<T, N> {
-    fn cpu(&self) -> &[T] {
+    pub fn cpu(&self) -> &[T] {
         &self.cpu
     }
 }
@@ -921,13 +1014,6 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         let (chunk_count, index_count) = self.draw_index_count(line_visible_range.clone());
         let desired_index_len = INDEX_BUFFER_LEN.min(pixel_width * 4);
         let step = (index_count.div_ceil(desired_index_len - 2 * chunk_count)).max(1);
-        fn append_u32(view: &mut [u8], val: u32) -> &mut [u8] {
-            if view.len() < 4 {
-                return view;
-            }
-            view[..size_of::<u32>()].copy_from_slice(&val.to_le_bytes());
-            &mut view[size_of::<u32>()..]
-        }
         let mut view = &mut view[..];
         let mut count = 0;
         for chunk in self.draw_index_chunk_iter(line_visible_range) {
@@ -982,6 +1068,14 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             }
         }
     }
+}
+
+fn append_u32(view: &mut [u8], val: u32) -> &mut [u8] {
+    if view.len() < 4 {
+        return view;
+    }
+    view[..size_of::<u32>()].copy_from_slice(&val.to_le_bytes());
+    &mut view[size_of::<u32>()..]
 }
 
 pub fn collect_garbage(

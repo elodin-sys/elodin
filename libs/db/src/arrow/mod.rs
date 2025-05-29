@@ -27,6 +27,9 @@ use zerocopy::{Immutable, IntoBytes};
 
 use crate::{Component, DB, Error, append_log::AppendLog};
 
+mod fft;
+use fft::{FftUDF, FrequencyDomainUDF};
+
 impl<T: IntoBytes + Immutable> AppendLog<T> {
     pub fn as_arrow_buffer(&self, element_size: usize) -> Buffer {
         self.as_arrow_buffer_range(.., element_size)
@@ -189,6 +192,14 @@ impl DB {
         use datafusion::prelude::*;
         let config = SessionConfig::new().set_bool("datafusion.catalog.information_schema", true);
         let ctx = SessionContext::new_with_config(config);
+
+        ctx.register_udf(datafusion::logical_expr::ScalarUDF::new_from_impl(
+            FftUDF::new(),
+        ));
+        ctx.register_udf(datafusion::logical_expr::ScalarUDF::new_from_impl(
+            FrequencyDomainUDF::new(),
+        ));
+
         self.with_state(|state| {
             for component in state.components.values() {
                 let entity_metadata = state.entity_metadata.get(&component.entity_id).unwrap();

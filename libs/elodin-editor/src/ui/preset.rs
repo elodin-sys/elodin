@@ -5,18 +5,23 @@ use super::actions::ActionTile;
 use super::sql_table::SqlTable;
 use super::tiles::{Pane, TileState};
 use super::widgets::plot::GraphState;
+use super::widgets::sql_plot::SqlPlot;
 use bevy::prelude::*;
 use egui_tiles::{Tile, TileId};
 use impeller2::types::EntityId;
-use impeller2_wkt::{ActionPane, Color, ComponentMonitor, Panel, SQLTable, Split, Viewport};
+use impeller2_wkt::{
+    ActionPane, Color, ComponentMonitor, Panel, SQLPlot, SQLTable, Split, Viewport,
+};
 use nox::{Quaternion, Vector3};
 
+#[allow(clippy::too_many_arguments)]
 pub fn tile_to_panel(
     sql_tables: &Query<&SqlTable>,
     cameras: &Query<CameraQuery>,
     entity_id: &Query<&EntityId>,
     action_tiles: &Query<&ActionTile>,
     graph_states: &Query<&GraphState>,
+    sql_plots: &Query<&SqlPlot>,
     tile_id: TileId,
     ui_state: &TileState,
 ) -> Option<Panel> {
@@ -99,6 +104,14 @@ pub fn tile_to_panel(
                     query: sql_table.current_query.clone(),
                 }))
             }
+            Pane::SqlPlot(plot) => {
+                let sql_plot = sql_plots.get(plot.entity).ok()?;
+                Some(Panel::SQLPlot(SQLPlot {
+                    query: sql_plot.current_query.clone(),
+                    auto_refresh: sql_plot.auto_refresh,
+                    refresh_interval: sql_plot.refresh_interval,
+                }))
+            }
             Pane::ActionTile(action) => {
                 let action_tile = action_tiles.get(action.entity).ok()?;
 
@@ -121,6 +134,7 @@ pub fn tile_to_panel(
                         entity_id,
                         action_tiles,
                         graph_states,
+                        sql_plots,
                         *tile_id,
                         ui_state,
                     ) {
@@ -139,6 +153,7 @@ pub fn tile_to_panel(
                         entity_id,
                         action_tiles,
                         graph_states,
+                        sql_plots,
                         *child_id,
                         ui_state,
                     ) {
