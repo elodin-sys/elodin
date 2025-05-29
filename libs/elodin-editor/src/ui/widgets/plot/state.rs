@@ -45,6 +45,8 @@ pub struct GraphState {
     pub label: String,
     pub auto_y_range: bool,
     pub y_range: Range<f64>,
+    pub auto_x_range: bool,
+    pub x_range: Range<f64>,
     pub widget_width: f64,
     pub visible_range: LineVisibleRange,
 }
@@ -69,7 +71,9 @@ impl GraphBundle {
             graph_type: GraphType::Line,
             label,
             y_range: 0.0..1.0,
+            x_range: 0.0..1.0,
             auto_y_range: true,
+            auto_x_range: true,
             widget_width: 1920.0,
             visible_range: LineVisibleRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)),
         };

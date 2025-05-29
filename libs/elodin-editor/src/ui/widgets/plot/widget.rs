@@ -26,7 +26,6 @@ use egui::{CornerRadius, Frame, Margin, RichText, Stroke};
 use impeller2::types::{ComponentId, EntityId, Timestamp};
 use impeller2_bevy::{ComponentMetadataRegistry, EntityMap};
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, EntityMetadata};
-use itertools::Itertools;
 use std::time::{Duration, Instant};
 use std::{
     fmt::Debug,
@@ -433,14 +432,7 @@ impl TimeseriesPlot {
         draw_borders(ui, self.rect, self.inner_rect);
 
         self.draw_x_axis(ui, &font_id);
-        draw_y_axis(
-            ui,
-            self.bounds,
-            self.steps_y,
-            self.rect,
-            self.inner_rect,
-            0.0,
-        );
+        draw_y_axis(ui, self.bounds, self.steps_y, self.rect, self.inner_rect);
 
         if let Some(pointer_pos) = pointer_pos {
             if self.inner_rect.contains(pointer_pos) && ui.ui_contains_pointer() {
@@ -454,7 +446,13 @@ impl TimeseriesPlot {
                         + self.earliest_timestamp.0,
                 );
 
-                draw_cursor(ui, pointer_pos, inner_point_pos.x, self.inner_rect);
+                draw_cursor(
+                    ui,
+                    pointer_pos,
+                    inner_point_pos.x,
+                    self.rect,
+                    self.inner_rect,
+                );
 
                 // Draw highlight circles on lines
 
@@ -524,7 +522,6 @@ pub fn draw_y_axis(
     steps_y: usize,
     rect: egui::Rect,
     inner_rect: egui::Rect,
-    y_offset: f32,
 ) {
     let border_stroke = egui::Stroke::new(1.0, get_scheme().border_primary);
     let scheme = get_scheme();
@@ -543,7 +540,7 @@ pub fn draw_y_axis(
         ui.painter().text(
             screen_pos - egui::vec2(NOTCH_LENGTH + Y_AXIS_LABEL_MARGIN, 0.0),
             egui::Align2::RIGHT_CENTER,
-            format_num(tick + y_offset as f64),
+            format_num(tick),
             font_id.clone(),
             scheme.text_primary,
         );
@@ -619,10 +616,11 @@ pub fn draw_cursor(
     ui: &mut egui::Ui,
     pointer_pos: egui::Pos2,
     x_offset: f32,
+    rect: egui::Rect,
     inner_rect: egui::Rect,
 ) {
     ui.painter().vline(
-        x_offset + inner_rect.min.x,
+        x_offset + rect.min.x,
         0.0..=inner_rect.max.y,
         egui::Stroke::new(1.0, get_scheme().border_primary),
     );
@@ -715,37 +713,16 @@ pub fn auto_y_bounds(
                 let Some(line) = handle.get(&mut lines, &mut xy_lines) else {
                     continue;
                 };
-                match line {
-                    gpu::LineMut::Timeseries(line) => {
-                        let summary = line.data.range_summary(selected_range.0.clone());
-                        if let Some(min) = summary.min {
-                            if let Some(y_min) = &mut y_min {
-                                *y_min = y_min.min(min);
-                            } else {
-                                y_min = Some(min)
-                            }
-                        }
-                        if let Some(max) = summary.max {
-                            if let Some(y_max) = &mut y_max {
-                                *y_max = y_max.max(max);
-                            } else {
-                                y_max = Some(max)
-                            }
-                        }
-                    }
-                    gpu::LineMut::XY(xy) => {
-                        let (min, max) = match xy.y_values.iter().flat_map(|c| c.cpu()).minmax() {
-                            itertools::MinMaxResult::OneElement(elem) => (elem - 1.0, elem + 1.0),
-                            itertools::MinMaxResult::MinMax(min, max) => (*min, *max),
-                            itertools::MinMaxResult::NoElements => continue,
-                        };
-
+                if let gpu::LineMut::Timeseries(line) = line {
+                    let summary = line.data.range_summary(selected_range.0.clone());
+                    if let Some(min) = summary.min {
                         if let Some(y_min) = &mut y_min {
                             *y_min = y_min.min(min);
                         } else {
                             y_min = Some(min)
                         }
-
+                    }
+                    if let Some(max) = summary.max {
                         if let Some(y_max) = &mut y_max {
                             *y_max = y_max.max(max);
                         } else {

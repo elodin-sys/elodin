@@ -19,6 +19,7 @@ use bevy::{
 use egui::RichText;
 use impeller2_bevy::CommandsExt;
 use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery};
+use itertools::Itertools;
 
 use crate::ui::{
     colors::{ColorExt, get_scheme},
@@ -33,6 +34,8 @@ use crate::ui::{
         },
     },
 };
+
+use super::plot::{Line, gpu};
 
 #[derive(Clone)]
 pub struct SQLPlotPane {
@@ -118,6 +121,10 @@ impl SqlPlot {
         self.xy_line_handle = Some(handle);
         self.state = SqlPlotState::Results;
     }
+
+    fn offset(&self) -> DVec2 {
+        DVec2::new(self.x_offset, self.y_offset)
+    }
 }
 
 pub fn sync_bounds_sql(
@@ -140,7 +147,6 @@ pub fn sync_bounds_sql(
 pub struct SqlPlotWidget<'w, 's> {
     states: Query<'w, 's, &'static mut SqlPlot>,
     graphs_state: Query<'w, 's, &'static mut GraphState>,
-    xy_lines: ResMut<'w, Assets<XYLine>>,
     commands: Commands<'w, 's>,
 }
 
@@ -183,7 +189,7 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
                     move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
                           mut states: Query<&mut SqlPlot>,
                           mut xy_lines: ResMut<Assets<XYLine>>| {
-                        let Ok(mut entity) = states.get_mut(entity) else {
+                        let Ok(mut plot) = states.get_mut(entity) else {
                             return true;
                         };
                         match res {
@@ -195,19 +201,85 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
                                     if let Some(batch) =
                                         decoder.decode(&mut buffer).ok().and_then(|b| b)
                                     {
-                                        entity.process_record_batch(batch, &mut xy_lines);
-                                        entity.state = SqlPlotState::Results;
+                                        plot.process_record_batch(batch, &mut xy_lines);
+                                        plot.state = SqlPlotState::Results;
                                         return false;
                                     }
                                 }
                             }
                             Err(err) => {
-                                entity.state = SqlPlotState::Error(err);
+                                plot.state = SqlPlotState::Error(err);
                             }
                         }
                         true
                     },
                 );
+            }
+
+            if let Some(xy_line_handle) = &plot.xy_line_handle {
+                let Ok(mut graph_state) = state.graphs_state.get_mut(entity) else {
+                    return;
+                };
+
+                let data_bounds = PlotBounds::new(
+                    graph_state.x_range.start,
+                    graph_state.y_range.start,
+                    graph_state.x_range.end,
+                    graph_state.y_range.end,
+                )
+                .offset(-plot.offset());
+                let rect = ui.max_rect();
+                let inner_rect = get_inner_rect(ui.max_rect());
+                let bounds = sync_bounds_sql(&mut graph_state, data_bounds, rect, inner_rect);
+
+                graph_state.widget_width = ui.max_rect().width() as f64;
+
+                state
+                    .commands
+                    .entity(entity)
+                    .try_insert(Projection::Orthographic(bounds.as_projection()));
+
+                let entity = if let Some(entity) = plot.line_entity {
+                    entity
+                } else {
+                    state.commands.spawn_empty().id()
+                };
+                let line_entity = state
+                    .commands
+                    .entity(entity)
+                    .insert(LineBundle {
+                        line: LineHandle::XY(xy_line_handle.clone()),
+                        uniform: LineUniform::new(
+                            graph_state.line_width,
+                            get_scheme().highlight.into_bevy(),
+                        ),
+                        config: LineConfig {
+                            render_layers: graph_state.render_layers.clone(),
+                        },
+                        line_visible_range: graph_state.visible_range.clone(),
+                        graph_type: graph_state.graph_type,
+                    })
+                    .insert(ChildOf(entity))
+                    .insert(LineWidgetWidth(ui.max_rect().width() as usize))
+                    .id();
+
+                let mut steps_y = ((inner_rect.height() / STEPS_Y_HEIGHT_DIVISOR) as usize).max(1);
+                if steps_y % 2 != 0 {
+                    steps_y += 1;
+                }
+
+                let steps_x = ((inner_rect.width() / STEPS_X_WIDTH_DIVISOR) as usize).max(1);
+
+                draw_borders(ui, rect, inner_rect);
+                let axis_bounds = bounds.offset(plot.offset());
+                draw_y_axis(ui, axis_bounds, steps_y, rect, inner_rect);
+                draw_x_axis(ui, axis_bounds, steps_x, rect, inner_rect);
+
+                plot.line_entity = Some(line_entity);
+            } else {
+                ui.centered_and_justified(|ui| {
+                    ui.label("No data to plot");
+                });
             }
 
             match &plot.state {
@@ -223,74 +295,7 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
                         }
                     });
                 }
-                SqlPlotState::Results => {
-                    if let Some(xy_line_handle) = &plot.xy_line_handle {
-                        let Ok(mut graph_state) = state.graphs_state.get_mut(entity) else {
-                            return;
-                        };
-
-                        let Some(xy_line) = state.xy_lines.get_mut(xy_line_handle) else {
-                            return;
-                        };
-
-                        let data_bounds = xy_line.plot_bounds();
-                        let rect = ui.max_rect();
-                        let inner_rect = get_inner_rect(ui.max_rect());
-                        let bounds =
-                            sync_bounds_sql(&mut graph_state, data_bounds, rect, inner_rect);
-
-                        graph_state.widget_width = ui.max_rect().width() as f64;
-                        graph_state.y_range = bounds.min_y..bounds.max_y;
-
-                        state
-                            .commands
-                            .entity(entity)
-                            .try_insert(Projection::Orthographic(bounds.as_projection()));
-
-                        let entity = if let Some(entity) = plot.line_entity {
-                            entity
-                        } else {
-                            state.commands.spawn_empty().id()
-                        };
-                        let line_entity = state
-                            .commands
-                            .entity(entity)
-                            .insert(LineBundle {
-                                line: LineHandle::XY(xy_line_handle.clone()),
-                                uniform: LineUniform::new(
-                                    graph_state.line_width,
-                                    get_scheme().highlight.into_bevy(),
-                                ),
-                                config: LineConfig {
-                                    render_layers: graph_state.render_layers.clone(),
-                                },
-                                line_visible_range: graph_state.visible_range.clone(),
-                                graph_type: graph_state.graph_type,
-                            })
-                            .insert(ChildOf(entity))
-                            .insert(LineWidgetWidth(ui.max_rect().width() as usize))
-                            .id();
-
-                        let mut steps_y =
-                            ((inner_rect.height() / STEPS_Y_HEIGHT_DIVISOR) as usize).max(1);
-                        if steps_y % 2 != 0 {
-                            steps_y += 1;
-                        }
-
-                        let steps_x =
-                            ((inner_rect.width() / STEPS_X_WIDTH_DIVISOR) as usize).max(1);
-
-                        draw_borders(ui, rect, inner_rect);
-                        draw_y_axis(ui, bounds, steps_y, rect, inner_rect, plot.y_offset as f32);
-                        draw_x_axis(ui, bounds, steps_x, rect, inner_rect, plot.x_offset as f32);
-
-                        plot.line_entity = Some(line_entity);
-                    } else {
-                        ui.centered_and_justified(|ui| {
-                            ui.label("No data to plot");
-                        });
-                    }
-                }
+                SqlPlotState::Results => {}
                 SqlPlotState::Error(error_response) => {
                     ui.centered_and_justified(|ui| {
                         let label =
@@ -309,7 +314,6 @@ pub fn draw_x_axis(
     steps_x: usize,
     rect: egui::Rect,
     inner_rect: egui::Rect,
-    x_offset: f32,
 ) {
     let border_stroke = egui::Stroke::new(1.0, get_scheme().border_primary);
     let scheme = get_scheme();
@@ -328,7 +332,7 @@ pub fn draw_x_axis(
         ui.painter().text(
             screen_pos + egui::vec2(0.0, NOTCH_LENGTH + AXIS_LABEL_MARGIN),
             egui::Align2::CENTER_TOP,
-            format_num(tick + x_offset as f64),
+            format_num(tick),
             font_id.clone(),
             scheme.text_primary,
         );
@@ -356,6 +360,50 @@ pub fn draw_x_axis(
         i -= step_size;
     }
     draw_tick(i);
+}
+
+pub fn auto_bounds(
+    mut graph_states: Query<(&mut GraphState, &mut SqlPlot)>,
+    line_handles: Query<&LineHandle>,
+    mut lines: ResMut<Assets<Line>>,
+    mut xy_lines: ResMut<Assets<XYLine>>,
+) {
+    for (mut graph_state, plot) in &mut graph_states {
+        if let Some(entity) = plot.line_entity {
+            let Ok(handle) = line_handles.get(entity) else {
+                continue;
+            };
+            let Some(line) = handle.get(&mut lines, &mut xy_lines) else {
+                continue;
+            };
+            if let gpu::LineMut::XY(xy) = line {
+                if graph_state.auto_y_range {
+                    let (min, max) = match xy.y_values.iter().flat_map(|c| c.cpu()).minmax() {
+                        itertools::MinMaxResult::OneElement(elem) => (elem - 1.0, elem + 1.0),
+                        itertools::MinMaxResult::MinMax(min, max) => (*min, *max),
+                        itertools::MinMaxResult::NoElements => continue,
+                    };
+
+                    let min = min as f64 + plot.y_offset;
+                    let max = max as f64 + plot.y_offset;
+
+                    graph_state.y_range = min..max;
+                }
+
+                if graph_state.auto_x_range {
+                    let (min, max) = match xy.x_values.iter().flat_map(|c| c.cpu()).minmax() {
+                        itertools::MinMaxResult::OneElement(elem) => (elem - 1.0, elem + 1.0),
+                        itertools::MinMaxResult::MinMax(min, max) => (*min, *max),
+                        itertools::MinMaxResult::NoElements => continue,
+                    };
+                    let min = min as f64 + plot.x_offset;
+                    let max = max as f64 + plot.x_offset;
+
+                    graph_state.x_range = min..max;
+                }
+            }
+        }
+    }
 }
 
 pub fn array_iter(array_ref: &ArrayRef) -> Box<dyn Iterator<Item = f64> + '_> {

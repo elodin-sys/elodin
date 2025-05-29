@@ -1423,6 +1423,28 @@ pub fn spawn_panel(
         }
         Panel::Inspector => ui_state.insert_tile(Tile::Pane(Pane::Inspector), parent_id, false),
         Panel::Hierarchy => ui_state.insert_tile(Tile::Pane(Pane::Hierarchy), parent_id, false),
+        Panel::SQLPlot(plot) => {
+            let graph_bundle = GraphBundle::new(
+                render_layer_alloc,
+                BTreeMap::default(),
+                "SQL Plot".to_string(),
+            );
+            let entity = commands
+                .spawn(SqlPlot {
+                    current_query: plot.query.clone(),
+                    auto_refresh: plot.auto_refresh,
+                    refresh_interval: plot.refresh_interval,
+                    ..Default::default()
+                })
+                .insert(graph_bundle)
+                .id();
+            let pane = Pane::SqlPlot(super::widgets::sql_plot::SQLPlotPane {
+                entity,
+                rect: None,
+                label: "SQL Plot".to_string(),
+            });
+            ui_state.insert_tile(Tile::Pane(pane), parent_id, true)
+        }
     }
 }
 

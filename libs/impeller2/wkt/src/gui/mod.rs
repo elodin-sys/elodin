@@ -5,6 +5,7 @@ use nox::{ArrayRepr, Quaternion, Vector3};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::Range;
+use std::time::Duration;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
@@ -16,6 +17,7 @@ pub enum Panel {
     ComponentMonitor(ComponentMonitor),
     ActionPane(ActionPane),
     SQLTable(SQLTable),
+    SQLPlot(SQLPlot),
     Tabs(Vec<Panel>),
     Inspector,
     Hierarchy,
@@ -218,4 +220,12 @@ pub struct SQLTable {
 pub struct ActionPane {
     pub label: String,
     pub lua: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct SQLPlot {
+    pub query: String,
+    pub refresh_interval: Duration,
+    pub auto_refresh: bool,
 }

@@ -24,7 +24,10 @@ use crate::{
     ui::{
         self, EntityData, HdrEnabled, colors,
         tiles::{self, SyncViewportParams},
-        widgets::plot::{GraphBundle, default_component_values},
+        widgets::{
+            plot::{GraphBundle, default_component_values},
+            sql_plot::SqlPlot,
+        },
     },
 };
 
@@ -679,6 +682,7 @@ pub fn save_preset_inner() -> PaletteItem {
               entity_id: Query<&impeller2::types::EntityId>,
               action_tiles: Query<&ui::actions::ActionTile>,
               graph_states: Query<&ui::widgets::plot::GraphState>,
+              sql_plots: Query<&SqlPlot>,
               ui_state: Res<tiles::TileState>| {
             if let Some(tile_id) = ui_state.tree.root() {
                 let panel = crate::ui::preset::tile_to_panel(
@@ -687,6 +691,7 @@ pub fn save_preset_inner() -> PaletteItem {
                     &entity_id,
                     &action_tiles,
                     &graph_states,
+                    &sql_plots,
                     tile_id,
                     &ui_state,
                 );

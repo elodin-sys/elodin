@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{ops::Range, time::Duration};
 
 use bevy::ecs::{
     entity::Entity,
@@ -67,6 +67,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         let Ok(mut graph_state) = graph_states.get_mut(graph_id) else {
             return;
         };
+        let graph_state = &mut *graph_state;
         let sql_plot = sql_plots.get_mut(graph_id);
 
         if sql_plot.is_ok() {
@@ -128,41 +129,21 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     });
             });
         ui.separator();
-        egui::Frame::NONE
-            .inner_margin(egui::Margin::symmetric(0, 8))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Y Bounds").color(get_scheme().text_secondary));
-                    ui.add_space(8.0);
-                    theme::configure_input_with_border(ui.style_mut());
-                    ui.checkbox(&mut graph_state.auto_y_range, "Auto Bounds?");
-                });
-                ui.add_space(8.0);
-                ui.style_mut().visuals.widgets.hovered.weak_bg_fill = Color32::TRANSPARENT;
-                ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::TRANSPARENT;
-                ui.style_mut().visuals.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
-                ui.style_mut().override_font_id =
-                    Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
-                ui.horizontal_wrapped(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Min").color(get_scheme().text_secondary));
-                        ui.add_space(16.0);
-                        ui.add_enabled(
-                            !graph_state.auto_y_range,
-                            egui::DragValue::new(&mut graph_state.y_range.start).speed(0.01),
-                        );
-                    });
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Max").color(get_scheme().text_secondary));
-                        ui.add_space(16.0);
-                        ui.add_enabled(
-                            !graph_state.auto_y_range,
-                            egui::DragValue::new(&mut graph_state.y_range.end).speed(0.01),
-                        );
-                    })
-                })
-            });
+        auto_range(
+            ui,
+            "Y Bounds",
+            &mut graph_state.auto_y_range,
+            &mut graph_state.y_range,
+        );
+        if sql_plot.is_ok() {
+            ui.separator();
+            auto_range(
+                ui,
+                "X Bounds",
+                &mut graph_state.auto_x_range,
+                &mut graph_state.x_range,
+            );
+        }
         ui.separator();
 
         if let Ok(mut sql_plot) = sql_plot {
@@ -250,6 +231,44 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
             }
         }
     }
+}
+
+pub fn auto_range(ui: &mut egui::Ui, label: &str, auto_range: &mut bool, range: &mut Range<f64>) {
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(0, 8))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(label).color(get_scheme().text_secondary));
+                ui.add_space(8.0);
+                theme::configure_input_with_border(ui.style_mut());
+                ui.checkbox(auto_range, "Auto Bounds?");
+            });
+            ui.add_space(8.0);
+            ui.style_mut().visuals.widgets.hovered.weak_bg_fill = Color32::TRANSPARENT;
+            ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::TRANSPARENT;
+            ui.style_mut().visuals.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+            ui.style_mut().override_font_id =
+                Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
+            ui.horizontal_wrapped(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Min").color(get_scheme().text_secondary));
+                    ui.add_space(16.0);
+                    ui.add_enabled(
+                        !*auto_range,
+                        egui::DragValue::new(&mut range.start).speed(0.01),
+                    );
+                });
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Max").color(get_scheme().text_secondary));
+                    ui.add_space(16.0);
+                    ui.add_enabled(
+                        !*auto_range,
+                        egui::DragValue::new(&mut range.end).speed(0.01),
+                    );
+                })
+            })
+        });
 }
 
 pub fn query(ui: &mut egui::Ui, query: &mut String) -> egui::Response {
