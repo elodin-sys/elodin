@@ -5,7 +5,7 @@ use core::{
     time::Duration,
 };
 
-use nox::ArrayView;
+use nox_array::ArrayView;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned};
 
@@ -947,7 +947,7 @@ impl stellarator_buf::AtomicValue for Timestamp {
     type Value = i64;
 
     fn atomic(self) -> Self::Atomic {
-        AtomicI64::new(self.0)
+        std::sync::atomic::AtomicI64::new(self.0)
     }
 
     fn load(atomic: &Self::Atomic, order: core::sync::atomic::Ordering) -> Self {

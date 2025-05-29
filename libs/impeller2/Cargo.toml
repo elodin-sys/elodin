@@ -6,13 +6,14 @@ version.workspace = true
 repository.workspace = true
 
 [features]
-default = ["alloc"]
-std = ["miette", "alloc", "serde/std"]
+default = ["alloc", "std"]
+std = ["miette", "alloc", "serde/std", "nox", "stellarator-buf/std"]
 alloc = []
 bevy = ["dep:bevy"]
 mlua = ["dep:mlua"]
 thingbuf = ["dep:thingbuf", "replace_with"]
 hifitime = ["dep:hifitime"]
+nox = ["dep:nox"]
 
 [dependencies]
 # ser-des
@@ -30,8 +31,10 @@ postcard-schema.features = ["derive"]
 # types
 heapless.version = "0.8"
 heapless.features = ["serde"]
+nox-array.path = "../nox/array"
 nox.path = "../nox"
 nox.default-features = false
+nox.optional = true
 stellarator-buf.path = "../stellarator/buf"
 
 # errors
