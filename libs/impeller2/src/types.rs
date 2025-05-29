@@ -246,6 +246,7 @@ impl<'a> From<ComponentView<'a>> for [f32; 3] {
     }
 }
 
+#[cfg(feature = "std")]
 impl core::fmt::Display for ComponentView<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {

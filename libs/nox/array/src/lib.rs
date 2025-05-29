@@ -1,4 +1,5 @@
-use core::fmt;
+#![cfg_attr(not(feature = "std"), no_std)]
+
 use zerocopy::{Immutable, TryFromBytes};
 
 #[derive(Clone, Copy, Debug)]
@@ -39,11 +40,19 @@ impl<'a, T> ArrayView<'a, T> {
         self.buf
     }
 
-    fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.shape.iter().product()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
+#[cfg(feature = "std")]
+use std::fmt;
+
+#[cfg(feature = "std")]
 impl<T: fmt::Display> fmt::Display for ArrayView<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Constants from ndarray for consistency
@@ -88,8 +97,7 @@ impl<T: fmt::Display> fmt::Display for ArrayView<'_, T> {
             Ok(())
         }
 
-        // Handle empty array case
-        if self.len() == 0 {
+        if self.is_empty() {
             write!(
                 f,
                 "{}{}",

@@ -3,5 +3,8 @@ name = "nox-array"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+std = []
+
 [dependencies]
 zerocopy = "0.8"

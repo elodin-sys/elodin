@@ -7,7 +7,7 @@ repository.workspace = true
 
 [features]
 default = ["alloc", "std"]
-std = ["miette", "alloc", "serde/std", "nox", "stellarator-buf/std"]
+std = ["miette", "alloc", "serde/std", "nox", "nox-array/std", "stellarator-buf/std"]
 alloc = []
 bevy = ["dep:bevy"]
 mlua = ["dep:mlua"]
