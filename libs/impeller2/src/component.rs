@@ -4,6 +4,7 @@ use nox::{ConstDim, Dim, Field, OwnedRepr, Tensor};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+#[cfg(feature = "alloc")]
 use crate::schema::Schema;
 
 #[cfg(feature = "alloc")]

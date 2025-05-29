@@ -2,7 +2,6 @@ use core::{
     fmt::Display,
     mem,
     ops::{Add, AddAssign, Sub},
-    sync::atomic::AtomicI64,
     time::Duration,
 };
 
@@ -13,8 +12,8 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unali
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-use crate::{buf::ByteBufExt, error::Error};
-use stellarator_buf::{AtomicValue, IoBuf, Slice};
+use crate::error::Error;
+use stellarator_buf::{IoBuf, Slice};
 
 #[derive(
     Serialize,
@@ -654,6 +653,7 @@ impl LenPacket {
     }
 
     pub fn push_aligned<V: zerocopy::IntoBytes + zerocopy::Immutable>(&mut self, val: V) {
+        use crate::buf::ByteBufExt;
         let old_len = self.inner.len();
         let _ = self.inner.push_aligned(val);
         let new_len = self.inner.len();
@@ -662,6 +662,7 @@ impl LenPacket {
     }
 
     pub fn extend_aligned<V: zerocopy::IntoBytes + zerocopy::Immutable>(&mut self, val: &[V]) {
+        use crate::buf::ByteBufExt;
         let old_len = self.inner.len();
         let _ = self.inner.extend_aligned(val);
         let new_len = self.inner.len();
@@ -940,8 +941,9 @@ impl AddAssign<Duration> for Timestamp {
     }
 }
 
-impl AtomicValue for Timestamp {
-    type Atomic = AtomicI64;
+#[cfg(feature = "std")]
+impl stellarator_buf::AtomicValue for Timestamp {
+    type Atomic = std::sync::atomic::AtomicI64;
     type Value = i64;
 
     fn atomic(self) -> Self::Atomic {

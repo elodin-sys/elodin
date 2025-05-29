@@ -7,7 +7,7 @@ repository.workspace = true
 
 [features]
 default = ["alloc"]
-std = ["miette", "alloc"]
+std = ["miette", "alloc", "serde/std"]
 alloc = []
 bevy = ["dep:bevy"]
 mlua = ["dep:mlua"]
@@ -19,6 +19,7 @@ hifitime = ["dep:hifitime"]
 zerocopy.version = "0.8.2"
 zerocopy.features = ["derive"]
 serde.version = "1.0"
+serde.default-features = false
 serde.features = ["derive"]
 postcard.version = "1.1"
 postcard.features = ["alloc", "experimental-derive"]
