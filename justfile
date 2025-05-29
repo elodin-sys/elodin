@@ -80,7 +80,7 @@ promote tag:
   gh release download {{tag}} --pattern 'elodin-*' --dir $dir
   gsutil -m cp -r "$dir/*" "gs://elodin-releases/{{tag}}/"
   gsutil -m cp -r "gs://elodin-releases/{{tag}}/*" "gs://elodin-releases/latest/"
-  uvx twine upload "$dir/*.whl"
+  uv publish "$dir/*.whl"
 
 public-changelog:
   #!/usr/bin/env sh
