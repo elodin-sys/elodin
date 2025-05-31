@@ -8,8 +8,8 @@ use cortex_m_semihosting::debug;
 
 use defmt_rtt as _;
 use hal as _;
-use panic_probe as _;
 
+pub mod adc;
 pub mod blackbox;
 pub mod bmi270;
 pub mod bmm350;
@@ -22,9 +22,11 @@ pub mod dma;
 pub mod dronecan;
 pub mod dshot;
 pub mod dwt;
+pub mod fm24cl16b;
 pub mod healing_usart;
 pub mod i2c_dma;
 pub mod led;
+pub mod monitor;
 pub mod monotonic;
 pub mod peripheral;
 pub mod sdmmc;
@@ -44,10 +46,45 @@ pub fn init_heap() {
     }
 }
 
-// same panicking *behavior* as `panic-probe` but doesn't print a panic message
-// this prevents the panic message being printed *twice* when `defmt::panic` is invoked
+use core::panic::PanicInfo;
+use core::sync::atomic::{AtomicBool, Ordering};
+
+static mut PANIC_LED: Option<hal::gpio::Pin> = None;
+
+/// Initialize the LED that will be turned on during panic
+pub fn set_panic_led(red_led: hal::gpio::Pin) {
+    unsafe {
+        PANIC_LED = Some(red_led);
+    }
+    defmt::info!("Panic LED initialized");
+}
+
+// The function to actually set the LED high during a panic
+pub fn set_led_on_panic() {
+    unsafe {
+        if let Some(ref mut led) = PANIC_LED {
+            led.set_high();
+        }
+    }
+}
+
+#[panic_handler]
+fn panic(info: &PanicInfo) -> ! {
+    static PANICKED: AtomicBool = AtomicBool::new(false);
+    cortex_m::interrupt::disable();
+
+    // Guard against infinite recursion
+    if !PANICKED.load(Ordering::Relaxed) {
+        PANICKED.store(true, Ordering::Relaxed);
+        set_led_on_panic();
+        defmt::error!("PANIC: {}", defmt::Display2Format(info));
+    }
+    cortex_m::asm::udf()
+}
+
+/// Handler for defmt panic to avoid double-prints
 #[defmt::panic_handler]
-fn panic() -> ! {
+fn defmt_panic() -> ! {
     cortex_m::asm::udf()
 }
 

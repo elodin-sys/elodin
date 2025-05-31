@@ -59,6 +59,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f68f53c83ab957f72c32642f3868eec03eb974d1fb82e453128456482613d36"
 
 [[package]]
+name = "blackbox"
+version = "0.14.1"
+dependencies = [
+ "zerocopy",
+]
+
+[[package]]
 name = "byteorder"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -409,16 +416,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "panic-probe"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4047d9235d1423d66cc97da7d07eddb54d4f154d6c13805c6d0793956f4f25b0"
-dependencies = [
- "cortex-m",
- "defmt",
-]
-
-[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -511,6 +508,7 @@ name = "sensor-fw"
 version = "0.1.0"
 dependencies = [
  "bitfield-struct",
+ "blackbox",
  "cobs",
  "cortex-m",
  "cortex-m-rt",
@@ -530,7 +528,6 @@ dependencies = [
  "fugit",
  "heapless",
  "modular-bitfield",
- "panic-probe",
  "paste",
  "sdio-host",
  "stm32-hal2",
@@ -553,8 +550,8 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stm32-hal2"
-version = "1.8.5"
-source = "git+https://github.com/akhilles/stm32-hal.git?rev=4ea09cc#4ea09cc64f86d0fc4a4325af20c3a9ddffa541db"
+version = "1.9.0"
+source = "git+https://github.com/akhilles/stm32-hal.git?rev=a06e441#a06e4418b30725bbb7f3e958a4799d3581698e23"
 dependencies = [
  "cfg-if",
  "chrono",

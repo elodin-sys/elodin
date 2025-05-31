@@ -1,18 +1,7 @@
 use std::io::Read;
 
+use blackbox::Record;
 use zerocopy::FromBytes;
-
-#[derive(zerocopy::FromBytes, zerocopy::IntoBytes, zerocopy::Immutable)]
-pub struct Record {
-    pub ts: u32, // in milliseconds
-    pub mag: [f32; 3],
-    pub gyro: [f32; 3],
-    pub accel: [f32; 3],
-    pub mag_temp: f32,
-    pub mag_sample: u32,
-    pub baro: f32,
-    pub baro_temp: f32,
-}
 
 fn main() {
     let mut args = std::env::args_os().skip(1);
@@ -24,11 +13,11 @@ fn main() {
     let mut input = input.as_slice();
 
     println!(
-        "ts,mag_x,mag_y,mag_z,gyro_x,gyro_y,gyro_z,accel_x,accel_y,accel_z,mag_temp,mag_sample,baro,baro_temp"
+        "ts,mag_x,mag_y,mag_z,gyro_x,gyro_y,gyro_z,accel_x,accel_y,accel_z,mag_temp,mag_sample,baro,baro_temp,vin,vbat,aux_current,rtc_vbat,cpu_temp"
     );
     while let Ok((record, remaining)) = Record::read_from_prefix(input) {
         println!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             record.ts,
             record.mag[0],
             record.mag[1],
@@ -42,7 +31,12 @@ fn main() {
             record.mag_temp,
             record.mag_sample,
             record.baro,
-            record.baro_temp
+            record.baro_temp,
+            record.vin,
+            record.vbat,
+            record.aux_current,
+            record.rtc_vbat,
+            record.cpu_temp
         );
         input = remaining;
     }
