@@ -14,7 +14,7 @@ jobs:
       - uses: "DeterminateSystems/nix-installer-action@main"
       - uses: "DeterminateSystems/flakehub-push@main"
         with:
-          name: "elodin-sys/paracosm"
+          name: "elodin-sys/elodin"
           rolling: true
           visibility: "private"
           directory: ./images/aleph

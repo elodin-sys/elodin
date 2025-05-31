@@ -46,7 +46,7 @@ exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 [workspace.package]
 version = "0.14.1"
 edition = "2024"
-repository = "https://github.com/elodin-sys/paracosm"
+repository = "https://github.com/elodin-sys/elodin"
 
 [profile.wasm-release]
 inherits = "release"

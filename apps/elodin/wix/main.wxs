@@ -172,7 +172,7 @@
         <!--<Icon Id='ProductICO' SourceFile='wix\Product.ico'/>-->
         <!--<Property Id='ARPPRODUCTICON' Value='ProductICO' />-->
 
-        <Property Id='ARPHELPLINK' Value='https://github.com/elodin-sys/paracosm'/>
+        <Property Id='ARPHELPLINK' Value='https://github.com/elodin-sys/elodin'/>
         
         <UI>
             <UIRef Id='WixUI_FeatureTree'/>
