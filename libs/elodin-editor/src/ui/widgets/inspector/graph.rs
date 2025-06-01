@@ -28,7 +28,7 @@ use crate::{
             button::{EButton, ECheckboxButton, EColorButton},
             label::{self, label_with_buttons},
             plot::GraphState,
-            sql_plot::{QueryType, SqlPlot},
+            query_plot::{QueryType, QueryPlot},
         },
     },
 };
@@ -41,7 +41,7 @@ pub struct InspectorGraph<'w, 's> {
     setting_modal_state: ResMut<'w, SettingModalState>,
     metadata_store: Res<'w, ComponentMetadataRegistry>,
     graph_states: Query<'w, 's, &'static mut GraphState>,
-    sql_plots: Query<'w, 's, &'static mut SqlPlot>,
+    query_plots: Query<'w, 's, &'static mut QueryPlot>,
     eql_context: Res<'w, EqlContext>,
 }
 
@@ -64,7 +64,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
             mut setting_modal_state,
             metadata_store,
             mut graph_states,
-            mut sql_plots,
+            mut query_plots,
             eql_context,
         } = state_mut;
 
@@ -73,9 +73,9 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
             return;
         };
         let graph_state = &mut *graph_state;
-        let sql_plot = sql_plots.get_mut(graph_id);
+        let query_plot = query_plots.get_mut(graph_id);
 
-        if sql_plot.is_ok() {
+        if query_plot.is_ok() {
             label::editable_label_with_buttons(
                 ui,
                 [],
@@ -140,7 +140,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
             &mut graph_state.auto_y_range,
             &mut graph_state.y_range,
         );
-        if sql_plot.is_ok() {
+        if query_plot.is_ok() {
             ui.separator();
             auto_range(
                 ui,
@@ -151,7 +151,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         }
         ui.separator();
 
-        if let Ok(mut sql_plot) = sql_plot {
+        if let Ok(mut query_plot) = query_plot {
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(0, 8))
                 .show(ui, |ui| {
@@ -161,44 +161,44 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     ui.scope(|ui| {
                         theme::configure_combo_box(ui.style_mut());
                         ui.style_mut().spacing.combo_width = ui.available_size().x;
-                        let prev_query_type = sql_plot.query_type;
+                        let prev_query_type = query_plot.query_type;
                         egui::ComboBox::from_id_salt("query_type")
-                            .selected_text(match sql_plot.query_type {
+                            .selected_text(match query_plot.query_type {
                                 QueryType::EQL => "EQL",
                                 QueryType::SQL => "SQL",
                             })
                             .show_ui(ui, |ui| {
                                 theme::configure_combo_item(ui.style_mut());
                                 ui.selectable_value(
-                                    &mut sql_plot.query_type,
+                                    &mut query_plot.query_type,
                                     QueryType::EQL,
                                     "EQL",
                                 );
                                 ui.selectable_value(
-                                    &mut sql_plot.query_type,
+                                    &mut query_plot.query_type,
                                     QueryType::SQL,
                                     "SQL",
                                 );
                             });
                         if let (QueryType::EQL, QueryType::SQL) =
-                            (prev_query_type, sql_plot.query_type)
+                            (prev_query_type, query_plot.query_type)
                         {
-                            if let Ok(sql) = eql_context.0.sql(&sql_plot.current_query) {
-                                sql_plot.current_query = sql;
+                            if let Ok(sql) = eql_context.0.sql(&query_plot.current_query) {
+                                query_plot.current_query = sql;
                             }
                         }
                     });
                     ui.separator();
                     ui.label(egui::RichText::new("Query").color(get_scheme().text_secondary));
                     configure_input_with_border(ui.style_mut());
-                    let query_type = sql_plot.query_type;
-                    let query_res = query(ui, &mut sql_plot.current_query, query_type);
+                    let query_type = query_plot.query_type;
+                    let query_res = query(ui, &mut query_plot.current_query, query_type);
                     if query_type == QueryType::EQL {
                         eql_autocomplete(
                             ui,
                             &eql_context.0,
                             &query_res,
-                            &mut sql_plot.current_query,
+                            &mut query_plot.current_query,
                         );
                     }
                     let enter_key = query_res.lost_focus()
@@ -206,12 +206,12 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     ui.separator();
                     ui.label(egui::RichText::new("Behavior").color(get_scheme().text_secondary));
                     ui.horizontal(|ui| {
-                        ui.checkbox(&mut sql_plot.auto_refresh, "Auto Refresh?");
+                        ui.checkbox(&mut query_plot.auto_refresh, "Auto Refresh?");
                         ui.add_space(8.0);
-                        let mut seconds = sql_plot.refresh_interval.as_secs_f64();
+                        let mut seconds = query_plot.refresh_interval.as_secs_f64();
                         if ui
                             .add_enabled(
-                                sql_plot.auto_refresh,
+                                query_plot.auto_refresh,
                                 egui::DragValue::new(&mut seconds)
                                     .suffix("s")
                                     .speed(0.5)
@@ -219,7 +219,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                             )
                             .changed()
                         {
-                            sql_plot.refresh_interval = Duration::from_secs_f64(seconds);
+                            query_plot.refresh_interval = Duration::from_secs_f64(seconds);
                         }
                     });
                     ui.add_space(8.0);
@@ -228,7 +228,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                         .clicked()
                         || enter_key
                     {
-                        sql_plot.last_refresh = None;
+                        query_plot.last_refresh = None;
                     }
                 });
         } else {

@@ -41,16 +41,16 @@ use crate::{
 use super::plot::{Line, gpu};
 
 #[derive(Clone)]
-pub struct SQLPlotPane {
+pub struct QueryPlotPane {
     pub entity: Entity,
     pub rect: Option<egui::Rect>,
     pub label: String,
 }
 
 #[derive(Component)]
-pub struct SqlPlot {
+pub struct QueryPlot {
     pub current_query: String,
-    pub state: SqlPlotState,
+    pub state: QueryPlotState,
     pub xy_line_handle: Option<Handle<XYLine>>,
     pub line_entity: Option<Entity>,
     pub x_offset: f64,
@@ -68,7 +68,7 @@ pub enum QueryType {
     SQL,
 }
 
-impl Default for SqlPlot {
+impl Default for QueryPlot {
     fn default() -> Self {
         Self {
             current_query: Default::default(),
@@ -86,7 +86,7 @@ impl Default for SqlPlot {
 }
 
 #[derive(Default)]
-pub enum SqlPlotState {
+pub enum QueryPlotState {
     #[default]
     None,
     Requested(Instant),
@@ -94,7 +94,7 @@ pub enum SqlPlotState {
     Error(ErrorResponse),
 }
 
-impl SqlPlot {
+impl QueryPlot {
     fn process_record_batch(&mut self, batch: RecordBatch, xy_lines: &mut Assets<XYLine>) {
         if batch.num_columns() < 2 || batch.num_rows() == 0 {
             return;
@@ -131,7 +131,7 @@ impl SqlPlot {
 
         let handle = xy_lines.add(xy_line);
         self.xy_line_handle = Some(handle);
-        self.state = SqlPlotState::Results;
+        self.state = QueryPlotState::Results;
     }
 
     fn offset(&self) -> DVec2 {
@@ -139,7 +139,7 @@ impl SqlPlot {
     }
 }
 
-pub fn sync_bounds_sql(
+pub fn sync_bounds_query(
     graph_state: &mut GraphState,
     data_bounds: PlotBounds,
     rect: egui::Rect,
@@ -156,8 +156,8 @@ pub fn sync_bounds_sql(
 }
 
 #[derive(SystemParam)]
-pub struct SqlPlotWidget<'w, 's> {
-    states: Query<'w, 's, &'static mut SqlPlot>,
+pub struct QueryPlotWidget<'w, 's> {
+    states: Query<'w, 's, &'static mut QueryPlot>,
     graphs_state: Query<'w, 's, &'static mut GraphState>,
     eql_context: Res<'w, EqlContext>,
     commands: Commands<'w, 's>,
@@ -173,15 +173,15 @@ impl Vec2Ext for egui::Vec2 {
     }
 }
 
-impl WidgetSystem for SqlPlotWidget<'_, '_> {
-    type Args = SQLPlotPane;
+impl WidgetSystem for QueryPlotWidget<'_, '_> {
+    type Args = QueryPlotPane;
     type Output = ();
 
     fn ui_system(
         world: &mut bevy::prelude::World,
         state: &mut bevy::ecs::system::SystemState<Self>,
         ui: &mut egui::Ui,
-        SQLPlotPane { entity, .. }: Self::Args,
+        QueryPlotPane { entity, .. }: Self::Args,
     ) -> Self::Output {
         let mut state = state.get_mut(world);
         let Ok(mut plot) = state.states.get_mut(entity) else {
@@ -195,14 +195,14 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
                 !plot.current_query.is_empty()
             };
             if should_refresh {
-                plot.state = SqlPlotState::Requested(Instant::now());
+                plot.state = QueryPlotState::Requested(Instant::now());
                 plot.last_refresh = Some(Instant::now());
                 let query = match plot.query_type {
                     QueryType::SQL => plot.current_query.to_string(),
                     QueryType::EQL => match state.eql_context.0.sql(&plot.current_query) {
                         Ok(sql) => sql,
                         Err(err) => {
-                            plot.state = SqlPlotState::Error(ErrorResponse {
+                            plot.state = QueryPlotState::Error(ErrorResponse {
                                 description: err.to_string(),
                             });
                             return;
@@ -212,7 +212,7 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
                 state.commands.send_req_reply(
                     SQLQuery(query),
                     move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
-                          mut states: Query<&mut SqlPlot>,
+                          mut states: Query<&mut QueryPlot>,
                           mut xy_lines: ResMut<Assets<XYLine>>| {
                         let Ok(mut plot) = states.get_mut(entity) else {
                             return true;
@@ -227,13 +227,13 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
                                         decoder.decode(&mut buffer).ok().and_then(|b| b)
                                     {
                                         plot.process_record_batch(batch, &mut xy_lines);
-                                        plot.state = SqlPlotState::Results;
+                                        plot.state = QueryPlotState::Results;
                                         return false;
                                     }
                                 }
                             }
                             Err(err) => {
-                                plot.state = SqlPlotState::Error(err);
+                                plot.state = QueryPlotState::Error(err);
                             }
                         }
                         true
@@ -255,7 +255,7 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
                 .offset(-plot.offset());
                 let rect = ui.max_rect();
                 let inner_rect = get_inner_rect(ui.max_rect());
-                let bounds = sync_bounds_sql(&mut graph_state, data_bounds, rect, inner_rect);
+                let bounds = sync_bounds_query(&mut graph_state, data_bounds, rect, inner_rect);
 
                 graph_state.widget_width = ui.max_rect().width() as f64;
 
@@ -308,20 +308,20 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
             }
 
             match &plot.state {
-                SqlPlotState::None => {
+                QueryPlotState::None => {
                     ui.centered_and_justified(|ui| {
                         ui.label("Enter a SQL query to plot data");
                     });
                 }
-                SqlPlotState::Requested(_) => {
+                QueryPlotState::Requested(_instant) => {
                     ui.centered_and_justified(|ui| {
                         if plot.line_entity.is_none() {
                             ui.label("Loading...");
                         }
                     });
                 }
-                SqlPlotState::Results => {}
-                SqlPlotState::Error(error_response) => {
+                QueryPlotState::Results => {}
+                QueryPlotState::Error(error_response) => {
                     ui.centered_and_justified(|ui| {
                         let label =
                             RichText::new(&error_response.description).color(get_scheme().error);
@@ -388,7 +388,7 @@ pub fn draw_x_axis(
 }
 
 pub fn auto_bounds(
-    mut graph_states: Query<(&mut GraphState, &mut SqlPlot)>,
+    mut graph_states: Query<(&mut GraphState, &mut QueryPlot)>,
     line_handles: Query<&LineHandle>,
     mut lines: ResMut<Assets<Line>>,
     mut xy_lines: ResMut<Assets<XYLine>>,
