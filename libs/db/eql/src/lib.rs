@@ -1,12 +1,13 @@
 use std::{
     borrow::Cow,
     collections::{BTreeSet, HashMap},
+    str::FromStr,
     sync::Arc,
 };
 
 use impeller2::{
     schema::Schema,
-    types::{ComponentId, EntityId},
+    types::{ComponentId, EntityId, Timestamp},
 };
 use peg::error::ParseError;
 
@@ -16,12 +17,14 @@ pub enum AstNode<'input> {
     Field(Box<AstNode<'input>>, Cow<'input, str>),
     MethodCall(Box<AstNode<'input>>, Cow<'input, str>, Vec<AstNode<'input>>),
     Tuple(Vec<AstNode<'input>>),
+    StringLiteral(Cow<'input, str>),
 }
 
 peg::parser! {
     grammar ast_parser() for str {
         rule _ = quiet!{[' ' | '\n' | '\t']*}
         rule ident_str() -> Cow<'input, str> = s:$(['a'..='z' | 'A'..='Z' | '0'..='9' | '_']+) { Cow::Borrowed(s) }
+        rule string_literal() -> Cow<'input, str> = "\"" s:$([^'"']*) "\"" { Cow::Borrowed(s) }
         rule comma() = ("," _?)
 
         pub rule expr() -> AstNode<'input> = precedence! {
@@ -30,6 +33,8 @@ peg::parser! {
         "(" e:expr() ** comma() ")" { AstNode::Tuple(e) }
         --
         e:(@) "." i:ident_str() { AstNode::Field(Box::new(e), i) }
+        --
+        s:string_literal() { AstNode::StringLiteral(s) }
         --
         s:ident_str() { AstNode::Ident(s) }
         }
@@ -43,6 +48,7 @@ pub enum Expr {
     Time(Arc<EntityComponent>),
     ArrayAccess(Box<Expr>, usize),
     Tuple(Vec<Expr>),
+    DurationLiteral(hifitime::Duration),
 
     // ffts
     Fft(Box<Expr>),
@@ -114,7 +120,7 @@ impl Expr {
     }
 
     /// Converts an EQL Expr to an SQL query string.
-    pub fn to_sql(&self) -> Result<String, Error> {
+    pub fn to_sql(&self, context: &Context) -> Result<String, Error> {
         match self {
             Expr::Entity(_entity) => {
                 // For bare entities, just return a placeholder or error
@@ -167,11 +173,29 @@ impl Expr {
                 }
             }
 
-            Expr::Last(_, _) => Err(Error::InvalidMethodCall(
-                "last not supported in SQL conversion".to_string(),
-            )),
-            Expr::First(_, _) => Err(Error::InvalidMethodCall(
-                "first not supported in SQL conversion".to_string(),
+            Expr::Last(expr, duration) => {
+                let sql = expr.to_sql(&context)?;
+                let duration_micros = (duration.total_nanoseconds() / 1000) as i64;
+                let lower_bound = context.last_timestamp.0 - duration_micros;
+                let lower_bound = lower_bound as f64 * 1e-6;
+                Ok(format!(
+                    "{} where time >= to_timestamp({})",
+                    sql, lower_bound
+                ))
+            }
+            Expr::First(expr, duration) => {
+                let sql = expr.to_sql(&context)?;
+                let duration_micros = (duration.total_nanoseconds() / 1000) as i64;
+                let upper_bound = context.earliest_timestamp.0 + duration_micros;
+                let upper_bound = upper_bound as f64 * 1e-6;
+                Ok(format!(
+                    "{} where time <= to_timestamp({})",
+                    sql, upper_bound
+                ))
+            }
+
+            Expr::DurationLiteral(_) => Err(Error::InvalidFieldAccess(
+                "cannot convert duration literal to SQL".to_string(),
             )),
 
             // For single expressions, use the helper functions
@@ -242,17 +266,27 @@ fn default_element_names(shape: &[u64]) -> Vec<String> {
 
 pub struct Context {
     pub entities: HashMap<String, Arc<Entity>>,
+    pub earliest_timestamp: Timestamp,
+    pub last_timestamp: Timestamp,
 }
 
 impl Context {
-    pub fn new(entities: HashMap<String, Arc<Entity>>) -> Self {
-        Self { entities }
+    pub fn new(
+        entities: HashMap<String, Arc<Entity>>,
+        earliest_timestamp: Timestamp,
+        last_timestamp: Timestamp,
+    ) -> Self {
+        Self {
+            entities,
+            earliest_timestamp,
+            last_timestamp,
+        }
     }
 
     pub fn sql(&self, query: &str) -> Result<String, Error> {
         let ast = ast_parser::expr(query)?;
         let expr = self.parse(&ast)?;
-        expr.to_sql()
+        expr.to_sql(self)
     }
 
     pub fn parse(&self, ast: &AstNode) -> Result<Expr, Error> {
@@ -295,6 +329,12 @@ impl Context {
                 match (cow.as_ref(), &recv, &args[..]) {
                     ("fft", Expr::ArrayAccess(_, _), &[]) => Ok(Expr::Fft(Box::new(recv))),
                     ("fftfreq", Expr::Time(_), &[]) => Ok(Expr::FftFreq(Box::new(recv))),
+                    ("last", _, &[Expr::DurationLiteral(duration)]) => {
+                        Ok(Expr::Last(Box::new(recv), duration))
+                    }
+                    ("first", _, &[Expr::DurationLiteral(duration)]) => {
+                        Ok(Expr::First(Box::new(recv), duration))
+                    }
                     _ => Err(Error::InvalidMethodCall(cow.to_string())),
                 }
             }
@@ -303,33 +343,21 @@ impl Context {
                 .map(|ast_node| self.parse(ast_node))
                 .collect::<Result<Vec<_>, _>>()
                 .map(Expr::Tuple),
+            AstNode::StringLiteral(s) => {
+                // Parse duration strings like "5m", "10s", "1h"
+                self.parse_duration(s.as_ref()).map(Expr::DurationLiteral)
+            }
         }
     }
-}
 
-// fn parse_swizzle(s: &str, shape: &[u64]) -> Result<usize, Error> {
-//     let mut offset = 0;
-//     for ((c, d), r) in s.chars().zip(shape.iter().cloned()).zip(
-//         shape
-//             .iter()
-//             .take(shape.len().saturating_sub(1))
-//             .cloned()
-//             .chain(std::iter::once(1)),
-//     ) {
-//         let i = match c.to_ascii_lowercase() {
-//             'x' => 0,
-//             'y' => 1,
-//             'z' => 2,
-//             'w' => 3,
-//             _ => return Err(Error::InvalidSwizzle(c)),
-//         };
-//         if i >= d {
-//             return Err(Error::InvalidSwizzle(c));
-//         }
-//         offset += i * r;
-//     }
-//     Ok(offset as usize)
-// }
+    fn parse_duration(&self, duration_str: &str) -> Result<hifitime::Duration, Error> {
+        let span = jiff::Span::from_str(duration_str)
+            .map_err(|err| Error::InvalidMethodCall(err.to_string()))?;
+        Ok(hifitime::Duration::from_nanoseconds(
+            span.total(jiff::Unit::Nanosecond).unwrap(),
+        ))
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -402,32 +430,39 @@ mod tests {
             Schema::new(PrimType::F64, vec![3u64]).unwrap(), // 3D vector schema
         ));
 
+        // Create a test context with dummy timestamps
+        let context = Context::new(
+            HashMap::new(),
+            Timestamp(0),    // earliest_timestamp
+            Timestamp(1000), // last_timestamp
+        );
+
         // Test Component -> select component from entity_component
         let expr = Expr::Component(entity_component.clone());
-        let result = expr.to_sql();
+        let result = expr.to_sql(&context);
         assert_eq!(result.unwrap(), "select world_pos from a_world_pos");
 
         // Test Time -> select time from entity_component
         let expr = Expr::Time(entity_component.clone());
-        let result = expr.to_sql();
+        let result = expr.to_sql(&context);
         assert_eq!(result.unwrap(), "select time from a_world_pos");
 
         // Test fftfreq
         let expr = Expr::FftFreq(Box::new(expr));
-        let result = expr.to_sql();
+        let result = expr.to_sql(&context);
         assert_eq!(result.unwrap(), "select fftfreq(time) from a_world_pos");
 
         // Test ArrayAccess -> select component[index] from entity_component
         let expr = Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 0);
-        let result = expr.to_sql();
+        let result = expr.to_sql(&context);
         assert_eq!(result.unwrap(), "select world_pos[1] from a_world_pos");
 
         let expr = Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 1);
-        let result = expr.to_sql();
+        let result = expr.to_sql(&context);
         assert_eq!(result.unwrap(), "select world_pos[2] from a_world_pos");
 
         let expr = Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 2);
-        let result = expr.to_sql();
+        let result = expr.to_sql(&context);
         assert_eq!(result.unwrap(), "select world_pos[3] from a_world_pos");
 
         // Test Tuple with Time and ArrayAccess -> select time, component[index] from entity_component
@@ -435,7 +470,7 @@ mod tests {
             Expr::Time(entity_component.clone()),
             Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 0),
         ]);
-        let result = expr.to_sql();
+        let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
             "select time, world_pos[1] from a_world_pos"
@@ -447,7 +482,7 @@ mod tests {
             Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 1),
             Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 2),
         ]);
-        let result = expr.to_sql();
+        let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
             "select world_pos[1], world_pos[2], world_pos[3] from a_world_pos"
@@ -467,7 +502,7 @@ mod tests {
             Expr::Component(entity_component.clone()),
             Expr::Component(entity_component2.clone()),
         ]);
-        let result = expr.to_sql();
+        let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
             "select a_world_pos.world_pos, b_velocity.velocity from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time"
@@ -478,7 +513,7 @@ mod tests {
             Expr::Time(entity_component.clone()),
             Expr::Component(entity_component2.clone()),
         ]);
-        let result = expr.to_sql();
+        let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
             "select a_world_pos.time, b_velocity.velocity from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time"
@@ -489,7 +524,7 @@ mod tests {
             Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 0),
             Expr::ArrayAccess(Box::new(Expr::Component(entity_component2.clone())), 1),
         ]);
-        let result = expr.to_sql();
+        let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
             "select a_world_pos.world_pos[1], b_velocity.velocity[2] from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time"
@@ -509,7 +544,7 @@ mod tests {
             Expr::Component(entity_component2.clone()),
             Expr::Component(entity_component3.clone()),
         ]);
-        let result = expr.to_sql();
+        let result = expr.to_sql(&context);
         let result_str = result.unwrap();
         assert_eq!(
             result_str,

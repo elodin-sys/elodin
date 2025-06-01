@@ -194,6 +194,7 @@ impl Plugin for EditorPlugin {
             .add_systems(PreUpdate, set_selected_range)
             .add_systems(PreUpdate, set_floating_origin.after(sync_pos))
             .add_systems(PreUpdate, update_eql_context)
+            .add_systems(PreUpdate, set_eql_context_range.after(update_eql_context))
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
             .add_systems(PostUpdate, set_clear_color)
@@ -216,8 +217,6 @@ impl Plugin for EditorPlugin {
 
         #[cfg(target_os = "macos")]
         app.add_systems(Update, setup_titlebar);
-
-        //app.insert_resource(Msaa::default());
 
         // For adding features incompatible with wasm:
         embedded_asset!(app, "./assets/diffuse.ktx2");
@@ -1074,7 +1073,11 @@ pub struct EqlContext(pub eql::Context);
 
 impl Default for EqlContext {
     fn default() -> Self {
-        Self(eql::Context::new(HashMap::new()))
+        Self(eql::Context::new(
+            HashMap::new(),
+            Timestamp(i64::MIN),
+            Timestamp(i64::MAX),
+        ))
     }
 }
 
@@ -1086,6 +1089,8 @@ pub fn update_eql_context(
     component_value_query: Query<&ComponentValueMap>,
     entity_metadata_query: Query<&EntityMetadata>,
     mut eql_context: ResMut<EqlContext>,
+    earliest: Res<EarliestTimestamp>,
+    latest: Res<LastUpdated>,
 ) {
     if !eql_context.0.entities.is_empty() {
         return;
@@ -1137,7 +1142,12 @@ pub fn update_eql_context(
         }
     }
 
-    eql_context.0 = eql::Context::new(entities);
+    eql_context.0 = eql::Context::new(entities, earliest.0, latest.0);
+}
+
+pub fn set_eql_context_range(time_range: Res<SelectedTimeRange>, mut eql: ResMut<EqlContext>) {
+    eql.0.earliest_timestamp = time_range.0.start;
+    eql.0.last_timestamp = time_range.0.end;
 }
 
 pub fn dirs() -> directories::ProjectDirs {

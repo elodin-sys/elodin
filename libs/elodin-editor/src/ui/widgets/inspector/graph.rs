@@ -16,17 +16,20 @@ use egui::{
 use impeller2::types::{ComponentId, EntityId};
 use impeller2_bevy::ComponentMetadataRegistry;
 
-use crate::ui::{
-    EntityData, SettingModal, SettingModalState,
-    colors::{self, ColorExt, get_scheme},
-    theme::{self, configure_input_with_border},
-    utils::MarginSides,
-    widgets::{
-        WidgetSystem,
-        button::{EButton, ECheckboxButton, EColorButton},
-        label::{self, label_with_buttons},
-        plot::GraphState,
-        sql_plot::{QueryType, SqlPlot},
+use crate::{
+    EqlContext,
+    ui::{
+        EntityData, SettingModal, SettingModalState,
+        colors::{self, ColorExt, get_scheme},
+        theme::{self, configure_input_with_border},
+        utils::MarginSides,
+        widgets::{
+            WidgetSystem,
+            button::{EButton, ECheckboxButton, EColorButton},
+            label::{self, label_with_buttons},
+            plot::GraphState,
+            sql_plot::{QueryType, SqlPlot},
+        },
     },
 };
 
@@ -39,6 +42,7 @@ pub struct InspectorGraph<'w, 's> {
     metadata_store: Res<'w, ComponentMetadataRegistry>,
     graph_states: Query<'w, 's, &'static mut GraphState>,
     sql_plots: Query<'w, 's, &'static mut SqlPlot>,
+    eql_context: Res<'w, EqlContext>,
 }
 
 impl WidgetSystem for InspectorGraph<'_, '_> {
@@ -61,6 +65,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
             metadata_store,
             mut graph_states,
             mut sql_plots,
+            eql_context,
         } = state_mut;
 
         let graph_label_margin = egui::Margin::same(0).top(10.0).bottom(14.0);
@@ -152,12 +157,11 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                 .show(ui, |ui| {
                     let max_width = ui.available_width();
                     ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 8.0);
-
                     ui.label(egui::RichText::new("QUERY TYPE").color(get_scheme().text_secondary));
-                    ui.add_space(8.0);
                     ui.scope(|ui| {
                         theme::configure_combo_box(ui.style_mut());
                         ui.style_mut().spacing.combo_width = ui.available_size().x;
+                        let prev_query_type = sql_plot.query_type;
                         egui::ComboBox::from_id_salt("query_type")
                             .selected_text(match sql_plot.query_type {
                                 QueryType::EQL => "EQL",
@@ -176,11 +180,19 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                                     "SQL",
                                 );
                             });
+                        if let (QueryType::EQL, QueryType::SQL) =
+                            (prev_query_type, sql_plot.query_type)
+                        {
+                            if let Ok(sql) = eql_context.0.sql(&sql_plot.current_query) {
+                                sql_plot.current_query = sql;
+                            }
+                        }
                     });
                     ui.separator();
                     ui.label(egui::RichText::new("Query").color(get_scheme().text_secondary));
                     configure_input_with_border(ui.style_mut());
-                    let query_res = query(ui, &mut sql_plot.current_query);
+                    let query_type = sql_plot.query_type;
+                    let query_res = query(ui, &mut sql_plot.current_query, query_type);
                     let enter_key = query_res.lost_focus()
                         && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter));
                     ui.separator();
@@ -193,8 +205,9 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                             .add_enabled(
                                 sql_plot.auto_refresh,
                                 egui::DragValue::new(&mut seconds)
+                                    .suffix("s")
                                     .speed(0.5)
-                                    .range(0.02..=120.0),
+                                    .range(0.001..=120.0),
                             )
                             .changed()
                         {
@@ -297,7 +310,7 @@ pub fn auto_range(ui: &mut egui::Ui, label: &str, auto_range: &mut bool, range: 
         });
 }
 
-pub fn query(ui: &mut egui::Ui, query: &mut String) -> egui::Response {
+pub fn query(ui: &mut egui::Ui, query: &mut String, ty: QueryType) -> egui::Response {
     let scheme = get_scheme();
     ui.scope(|ui| {
         ui.style_mut().visuals.widgets.inactive = egui::style::WidgetVisuals {
@@ -321,7 +334,11 @@ pub fn query(ui: &mut egui::Ui, query: &mut String) -> egui::Response {
         ui.add(
             egui::TextEdit::singleline(query)
                 .font(font_id)
-                .hint_text("SQL Query (i.e select * from table)")
+                .hint_text(match ty {
+                    QueryType::EQL => "EQL Query (i.e a.world_pos.x)",
+                    QueryType::SQL => "SQL Query (i.e select * from table)",
+                })
+                .desired_width(ui.available_width() - 16.0)
                 .margin(8.0),
         )
     })
