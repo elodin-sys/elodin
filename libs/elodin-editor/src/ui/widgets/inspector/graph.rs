@@ -21,7 +21,7 @@ use crate::{
     ui::{
         EntityData, SettingModal, SettingModalState,
         colors::{self, ColorExt, get_scheme},
-        theme::{self, configure_input_with_border},
+        theme::{self, configure_combo_box, configure_input_with_border},
         utils::MarginSides,
         widgets::{
             WidgetSystem,
@@ -192,7 +192,121 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     ui.label(egui::RichText::new("Query").color(get_scheme().text_secondary));
                     configure_input_with_border(ui.style_mut());
                     let query_type = sql_plot.query_type;
+                    let tab_pressed = ui
+                        .ctx()
+                        .input_mut(|i| i.consume_key(Default::default(), egui::Key::Tab));
                     let query_res = query(ui, &mut sql_plot.current_query, query_type);
+                    if query_type == QueryType::EQL {
+                        let suggestions = eql_context
+                            .0
+                            .get_string_suggestions(&mut sql_plot.current_query);
+                        let id = ui.next_auto_id();
+                        let suggestion_memory_id = ui.id().with("eql_suggestion_index");
+
+                        if tab_pressed && !suggestions.is_empty() && query_res.has_focus() {
+                            let selected_index = ui.memory(|mem| {
+                                mem.data
+                                    .get_temp::<usize>(suggestion_memory_id)
+                                    .unwrap_or_default()
+                            });
+                            if let Some((_, patch)) = suggestions.get(selected_index) {
+                                sql_plot.current_query = patch.clone();
+                                if let Some(mut state) =
+                                    egui::TextEdit::load_state(ui.ctx(), query_res.id)
+                                {
+                                    let ccursor = egui::text::CCursor::new(
+                                        sql_plot.current_query.chars().count(),
+                                    );
+                                    state.cursor.set_char_range(Some(
+                                        egui::text::CCursorRange::one(ccursor),
+                                    ));
+                                    state.store(ui.ctx(), query_res.id);
+                                    ui.memory_mut(|memory| memory.request_focus(query_res.id));
+                                }
+                                ui.memory_mut(|mem| {
+                                    mem.data.remove::<usize>(suggestion_memory_id);
+                                    mem.close_popup();
+                                });
+                            }
+                        }
+
+                        if query_res.has_focus() {
+                            // Handle keyboard navigation
+                            let mut selected_index = ui.memory_mut(|mem| {
+                                *mem.data
+                                    .get_temp::<usize>(suggestion_memory_id)
+                                    .get_or_insert(0)
+                            });
+
+                            // Handle arrow key navigation
+                            if ui.ctx().input(|i| i.key_pressed(egui::Key::ArrowDown))
+                                && !suggestions.is_empty()
+                            {
+                                selected_index = (selected_index + 1) % suggestions.len();
+                                ui.memory_mut(|mem| {
+                                    mem.data.insert_temp(suggestion_memory_id, selected_index);
+                                });
+                            }
+                            if ui.ctx().input(|i| i.key_pressed(egui::Key::ArrowUp))
+                                && !suggestions.is_empty()
+                            {
+                                selected_index = selected_index.saturating_sub(1);
+                                ui.memory_mut(|mem| {
+                                    mem.data.insert_temp(suggestion_memory_id, selected_index);
+                                });
+                            }
+
+                            ui.scope(|ui| {
+                                configure_combo_box(ui.style_mut());
+                                ui.style_mut().spacing.menu_margin = egui::Margin::same(4);
+                                egui::popup::popup_below_widget(
+                                    ui,
+                                    id,
+                                    &query_res.clone().with_new_rect(query_res.rect.expand(8.0)),
+                                    egui::PopupCloseBehavior::IgnoreClicks,
+                                    |ui| {
+                                        ui.vertical(|ui| {
+                                            ui.style_mut().spacing.item_spacing =
+                                                egui::vec2(0.0, 8.0);
+                                            for (i, (suggestion, patch)) in
+                                                suggestions.iter().enumerate()
+                                            {
+                                                let is_selected = i == selected_index;
+                                                let response = if is_selected {
+                                                    ui.colored_label(
+                                                        get_scheme().highlight,
+                                                        suggestion,
+                                                    )
+                                                } else {
+                                                    ui.label(suggestion)
+                                                };
+
+                                                // Handle mouse click to apply suggestion
+                                                if response.clicked() {
+                                                    sql_plot.current_query = patch.clone();
+                                                    ui.memory_mut(|mem| {
+                                                        mem.data
+                                                            .remove::<usize>(suggestion_memory_id);
+                                                        mem.close_popup();
+                                                    });
+                                                }
+                                            }
+                                        })
+                                    },
+                                );
+                            });
+                            if !suggestions.is_empty() {
+                                ui.memory_mut(|mem| mem.open_popup(id));
+                            } else {
+                                ui.memory_mut(|mem| {
+                                    mem.data.remove::<usize>(suggestion_memory_id);
+                                    if mem.is_popup_open(id) {
+                                        mem.close_popup()
+                                    }
+                                });
+                            }
+                        }
+                    }
                     let enter_key = query_res.lost_focus()
                         && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter));
                     ui.separator();
@@ -334,6 +448,7 @@ pub fn query(ui: &mut egui::Ui, query: &mut String, ty: QueryType) -> egui::Resp
         ui.add(
             egui::TextEdit::singleline(query)
                 .font(font_id)
+                .lock_focus(true)
                 .hint_text(match ty {
                     QueryType::EQL => "EQL Query (i.e a.world_pos.x)",
                     QueryType::SQL => "SQL Query (i.e select * from table)",

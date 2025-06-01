@@ -198,7 +198,6 @@ impl Expr {
                 "cannot convert duration literal to SQL".to_string(),
             )),
 
-            // For single expressions, use the helper functions
             expr => {
                 let field = expr.to_field()?;
                 let table = expr.to_table()?;
@@ -357,6 +356,111 @@ impl Context {
             span.total(jiff::Unit::Nanosecond).unwrap(),
         ))
     }
+
+    /// Get suggestions for the given expression
+    pub fn get_suggestions(&self, expr: &Expr) -> Vec<String> {
+        match expr {
+            Expr::Entity(entity) => {
+                let mut suggestions = entity.componnets.keys().cloned().collect::<Vec<_>>();
+                suggestions.sort();
+                suggestions.push("time".to_string());
+                suggestions
+            }
+            Expr::Component(component) => component
+                .element_names
+                .iter()
+                .cloned()
+                .chain(["last".to_string(), "first".to_string(), "time".to_string()])
+                .collect(),
+            Expr::Time(_) => {
+                vec!["fftfreq".to_string()]
+            }
+            Expr::ArrayAccess(_, _) => {
+                vec!["fft".to_string(), "last".to_string(), "first".to_string()]
+            }
+            Expr::Tuple(_) => {
+                vec!["last".to_string(), "first".to_string()]
+            }
+            Expr::DurationLiteral(_) => {
+                vec![]
+            }
+            Expr::Fft(_) => {
+                vec!["last".to_string(), "first".to_string()]
+            }
+            Expr::FftFreq(_) => {
+                vec!["last".to_string(), "first".to_string()]
+            }
+            Expr::Last(_, _) => {
+                vec![]
+            }
+            Expr::First(_, _) => {
+                vec![]
+            }
+        }
+    }
+
+    pub fn get_string_suggestions(&self, input: &str) -> Vec<(String, String)> {
+        if input.is_empty() {
+            let mut entity_names = self.entities.keys().cloned().collect::<Vec<_>>();
+            entity_names.sort();
+            return entity_names
+                .into_iter()
+                .map(|n| (n.clone(), n.clone()))
+                .collect();
+        }
+
+        fn apply_suggestions(
+            suggestions: &[String],
+            input: &str,
+            start: &str,
+        ) -> Vec<(String, String)> {
+            suggestions
+                .iter()
+                .map(|s| (s.clone(), format!("{start}{input}.{s}")))
+                .collect()
+        }
+
+        // strip tuple
+        let valid_ast = ast_parser::expr(input.trim().trim_end_matches('.')).is_ok();
+        let (start, input) = if valid_ast {
+            ("", input)
+        } else if input.contains(',') {
+            let comma_pos = input.rfind(',').unwrap();
+            input.split_at(comma_pos + 1)
+        } else if input.starts_with('(') {
+            let paren_pos = input.rfind('(').unwrap();
+            input.split_at(paren_pos + 1)
+        } else {
+            ("", input)
+        };
+
+        if input.ends_with('.') {
+            let query = &input[..input.len() - 1];
+
+            let Ok(ast) = ast_parser::expr(query.trim()) else {
+                return vec![];
+            };
+            if let Ok(expr) = self.parse(&ast) {
+                return apply_suggestions(&self.get_suggestions(&expr), query, start);
+            }
+        } else {
+            let Some(last_dot) = input.rfind('.') else {
+                return vec![];
+            };
+            let query = &input[..last_dot];
+            let trailing = &input.get(last_dot + 1..).unwrap_or_default();
+            let Ok(ast) = ast_parser::expr(query.trim()) else {
+                return vec![];
+            };
+            if let Ok(expr) = self.parse(&ast) {
+                let mut suggestions = self.get_suggestions(&expr);
+                suggestions.retain(|s| s.contains(trailing));
+                return apply_suggestions(&suggestions, query, start);
+            }
+        }
+
+        vec![]
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -413,59 +517,97 @@ mod tests {
         )
     }
 
-    #[test]
-    fn test_sql_from_expr() {
+    fn create_test_entity_component() -> Arc<EntityComponent> {
         use impeller2::types::{ComponentId, EntityId, PrimType};
 
-        // Set up test data
-        let entity_id = EntityId(1);
-        let component_id = ComponentId::new("world_pos");
-
-        // Create a test EntityComponent with name fields
-        let entity_component = Arc::new(EntityComponent::new(
+        Arc::new(EntityComponent::new(
             "world_pos".to_string(),
             "a".to_string(),
-            entity_id,
-            component_id,
+            EntityId(1),
+            ComponentId::new("world_pos"),
             Schema::new(PrimType::F64, vec![3u64]).unwrap(), // 3D vector schema
-        ));
+        ))
+    }
 
-        // Create a test context with dummy timestamps
-        let context = Context::new(
-            HashMap::new(),
+    fn create_test_context() -> Context {
+        let mut entities = HashMap::new();
+
+        let component = create_test_entity_component();
+        let mut components = HashMap::new();
+        components.insert("component".to_string(), component);
+
+        let entity = Arc::new(Entity {
+            name: "test_entity".to_string(),
+            componnets: components,
+        });
+
+        entities.insert("test_entity".to_string(), entity);
+
+        Context::new(
+            entities,
             Timestamp(0),    // earliest_timestamp
             Timestamp(1000), // last_timestamp
-        );
+        )
+    }
 
-        // Test Component -> select component from entity_component
-        let expr = Expr::Component(entity_component.clone());
+    #[test]
+    fn test_component_sql() {
+        let entity_component = create_test_entity_component();
+        let context = create_test_context();
+
+        let expr = Expr::Component(entity_component);
         let result = expr.to_sql(&context);
         assert_eq!(result.unwrap(), "select world_pos from a_world_pos");
+    }
 
-        // Test Time -> select time from entity_component
-        let expr = Expr::Time(entity_component.clone());
+    #[test]
+    fn test_time_sql() {
+        let entity_component = create_test_entity_component();
+        let context = create_test_context();
+
+        let expr = Expr::Time(entity_component);
         let result = expr.to_sql(&context);
         assert_eq!(result.unwrap(), "select time from a_world_pos");
+    }
 
-        // Test fftfreq
-        let expr = Expr::FftFreq(Box::new(expr));
+    #[test]
+    fn test_fftfreq_sql() {
+        let entity_component = create_test_entity_component();
+        let context = create_test_context();
+
+        let time_expr = Expr::Time(entity_component);
+        let expr = Expr::FftFreq(Box::new(time_expr));
         let result = expr.to_sql(&context);
         assert_eq!(result.unwrap(), "select fftfreq(time) from a_world_pos");
+    }
 
-        // Test ArrayAccess -> select component[index] from entity_component
+    #[test]
+    fn test_array_access_sql() {
+        let entity_component = create_test_entity_component();
+        let context = create_test_context();
+
+        // Test first element
         let expr = Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 0);
         let result = expr.to_sql(&context);
         assert_eq!(result.unwrap(), "select world_pos[1] from a_world_pos");
 
+        // Test second element
         let expr = Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 1);
         let result = expr.to_sql(&context);
         assert_eq!(result.unwrap(), "select world_pos[2] from a_world_pos");
 
+        // Test third element
         let expr = Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 2);
         let result = expr.to_sql(&context);
         assert_eq!(result.unwrap(), "select world_pos[3] from a_world_pos");
+    }
 
-        // Test Tuple with Time and ArrayAccess -> select time, component[index] from entity_component
+    #[test]
+    fn test_single_table_tuple_sql() {
+        let entity_component = create_test_entity_component();
+        let context = create_test_context();
+
+        // Test Tuple with Time and ArrayAccess
         let expr = Expr::Tuple(vec![
             Expr::Time(entity_component.clone()),
             Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 0),
@@ -476,7 +618,7 @@ mod tests {
             "select time, world_pos[1] from a_world_pos"
         );
 
-        // Test Tuple with multiple ArrayAccess -> select component[1], component[2], component[3] from entity_component
+        // Test Tuple with multiple ArrayAccess
         let expr = Expr::Tuple(vec![
             Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 0),
             Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 1),
@@ -487,8 +629,15 @@ mod tests {
             result.unwrap(),
             "select world_pos[1], world_pos[2], world_pos[3] from a_world_pos"
         );
+    }
 
-        // Test JOIN functionality with multiple tables
+    #[test]
+    fn test_two_table_join_sql() {
+        use impeller2::types::{ComponentId, EntityId, PrimType};
+
+        let entity_component = create_test_entity_component();
+        let context = create_test_context();
+
         let entity_component2 = Arc::new(EntityComponent::new(
             "velocity".to_string(),
             "b".to_string(),
@@ -497,7 +646,7 @@ mod tests {
             Schema::new(PrimType::F64, vec![3u64]).unwrap(),
         ));
 
-        // Test Tuple with elements from different tables -> JOIN
+        // Test Tuple with components from different tables
         let expr = Expr::Tuple(vec![
             Expr::Component(entity_component.clone()),
             Expr::Component(entity_component2.clone()),
@@ -508,7 +657,7 @@ mod tests {
             "select a_world_pos.world_pos, b_velocity.velocity from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time"
         );
 
-        // Test Tuple with Time from one table and Component from another -> JOIN
+        // Test Tuple with Time from one table and Component from another
         let expr = Expr::Tuple(vec![
             Expr::Time(entity_component.clone()),
             Expr::Component(entity_component2.clone()),
@@ -519,7 +668,7 @@ mod tests {
             "select a_world_pos.time, b_velocity.velocity from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time"
         );
 
-        // Test Tuple with ArrayAccess from different tables -> JOIN
+        // Test Tuple with ArrayAccess from different tables
         let expr = Expr::Tuple(vec![
             Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 0),
             Expr::ArrayAccess(Box::new(Expr::Component(entity_component2.clone())), 1),
@@ -529,8 +678,23 @@ mod tests {
             result.unwrap(),
             "select a_world_pos.world_pos[1], b_velocity.velocity[2] from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time"
         );
+    }
 
-        // Test Tuple with three different tables
+    #[test]
+    fn test_three_table_join_sql() {
+        use impeller2::types::{ComponentId, EntityId, PrimType};
+
+        let entity_component = create_test_entity_component();
+        let context = create_test_context();
+
+        let entity_component2 = Arc::new(EntityComponent::new(
+            "velocity".to_string(),
+            "b".to_string(),
+            EntityId(2),
+            ComponentId::new("velocity"),
+            Schema::new(PrimType::F64, vec![3u64]).unwrap(),
+        ));
+
         let entity_component3 = Arc::new(EntityComponent::new(
             "acceleration".to_string(),
             "c".to_string(),
@@ -556,5 +720,93 @@ mod tests {
     fn test_element_names() {
         assert_eq!(default_element_names(&[4]), vec!["x", "y", "z", "w"]);
         assert_eq!(default_element_names(&[2, 2]), vec!["xx", "xy", "yx", "yy"]);
+    }
+
+    #[test]
+    fn test_entity_suggestions() {
+        let context = create_test_context();
+        let entity = context.entities.get("test_entity").unwrap();
+        let expr = Expr::Entity(entity.clone());
+
+        let suggestions = context.get_suggestions(&expr);
+        assert!(suggestions.contains(&"component".to_string()));
+        assert!(suggestions.contains(&"time".to_string()));
+        assert_eq!(suggestions.len(), 2);
+    }
+
+    #[test]
+    fn test_component_suggestions() {
+        let context = create_test_context();
+        let entity = context.entities.get("test_entity").unwrap();
+        let component = entity.componnets.get("component").unwrap();
+        let expr = Expr::Component(component.clone());
+
+        let suggestions = context.get_suggestions(&expr);
+        assert!(suggestions.contains(&"first".to_string()));
+        assert!(suggestions.contains(&"last".to_string()));
+        assert!(suggestions.contains(&"time".to_string()));
+        assert!(suggestions.contains(&"x".to_string()));
+        assert!(suggestions.contains(&"y".to_string()));
+        assert!(suggestions.contains(&"z".to_string()));
+        assert!(!suggestions.contains(&"w".to_string()));
+    }
+
+    #[test]
+    fn test_time_suggestions() {
+        let component = create_test_entity_component();
+        let expr = Expr::Time(component);
+        let context = create_test_context();
+
+        let suggestions = context.get_suggestions(&expr);
+        assert_eq!(suggestions, vec!["fftfreq"]);
+    }
+
+    #[test]
+    fn test_array_access_suggestions() {
+        let component = create_test_entity_component();
+        let expr = Expr::ArrayAccess(Box::new(Expr::Component(component)), 0);
+        let context = create_test_context();
+
+        let suggestions = context.get_suggestions(&expr);
+        assert!(suggestions.contains(&"fft".to_string()));
+        assert!(suggestions.contains(&"first".to_string()));
+        assert!(suggestions.contains(&"last".to_string()));
+    }
+
+    #[test]
+    fn test_string_suggestions_empty() {
+        let context = create_test_context();
+        let suggestions = context.get_string_suggestions("");
+
+        assert!(suggestions.contains(&"test_entity".to_string()));
+        assert_eq!(suggestions.len(), 1);
+    }
+
+    #[test]
+    fn test_string_suggestions_with_period() {
+        let context = create_test_context();
+        let suggestions = context.get_string_suggestions("test_entity.");
+
+        assert!(suggestions.contains(&"component".to_string()));
+        assert!(suggestions.contains(&"time".to_string()));
+    }
+
+    #[test]
+    fn test_string_suggestions_component_with_period() {
+        let context = create_test_context();
+        let suggestions = context.get_string_suggestions("test_entity.component.");
+
+        assert!(suggestions.contains(&"first".to_string()));
+        assert!(suggestions.contains(&"last".to_string()));
+        assert!(suggestions.contains(&"time".to_string()));
+        assert!(suggestions.contains(&"x".to_string()));
+    }
+
+    #[test]
+    fn test_string_suggestions_invalid_input() {
+        let context = create_test_context();
+        let suggestions = context.get_string_suggestions("invalid_entity.");
+
+        assert!(suggestions.is_empty());
     }
 }

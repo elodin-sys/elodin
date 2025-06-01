@@ -4899,6 +4899,7 @@ version = "0.1.0"
 dependencies = [
  "hifitime",
  "impeller2",
+ "jiff",
  "peg",
  "smallvec",
  "smol_str 0.3.2",
