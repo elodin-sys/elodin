@@ -1,5 +1,8 @@
 pub mod data;
-use bevy::app::{Plugin, PostUpdate, Startup, Update};
+use bevy::{
+    app::{Plugin, PostUpdate, Startup, Update},
+    ecs::schedule::IntoScheduleConfigs,
+};
 pub use data::*;
 pub mod gpu;
 mod widget;
@@ -18,6 +21,8 @@ impl Plugin for PlotPlugin {
             .add_systems(Update, reset_graph)
             .add_systems(PostUpdate, queue_timestamp_read)
             .add_systems(Update, collect_garbage)
+            .add_systems(Update, sync_graphs)
+            .add_systems(Update, auto_y_bounds.after(sync_graphs))
             .add_plugins(gpu::PlotGpuPlugin);
     }
 }

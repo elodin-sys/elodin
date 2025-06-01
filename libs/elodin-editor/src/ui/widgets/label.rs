@@ -126,9 +126,9 @@ pub fn editable_label_with_buttons<const N: usize>(
 
             ui.allocate_new_ui(UiBuilder::new().max_rect(label_rect), |ui| {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.text_edit_singleline(label);
-                    // let text = egui::RichText::new(label.to_string()).color(color);
-                    // ui.add(egui::Label::new(text));
+                    let mut font_id = egui::TextStyle::Button.resolve(ui.style());
+                    font_id.size = 12.0;
+                    ui.add(egui::TextEdit::singleline(label).font(font_id).margin(8.0))
                 });
             });
 

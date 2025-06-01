@@ -9,10 +9,11 @@ use bevy::prelude::*;
 use bevy::render::view::RenderLayers;
 use bevy_egui::egui::{self, Color32};
 
-use impeller2::types::{ComponentId, EntityId};
+use impeller2::types::{ComponentId, EntityId, Timestamp};
 use impeller2_bevy::ComponentValue;
 use impeller2_wkt::GraphType;
 
+use super::gpu::LineVisibleRange;
 use crate::MainCamera;
 use crate::plugins::navigation_gizmo::RenderLayerAlloc;
 use crate::ui::{ViewportRect, colors};
@@ -44,6 +45,10 @@ pub struct GraphState {
     pub label: String,
     pub auto_y_range: bool,
     pub y_range: Range<f64>,
+    pub auto_x_range: bool,
+    pub x_range: Range<f64>,
+    pub widget_width: f64,
+    pub visible_range: LineVisibleRange,
 }
 
 impl GraphBundle {
@@ -66,7 +71,11 @@ impl GraphBundle {
             graph_type: GraphType::Line,
             label,
             y_range: 0.0..1.0,
+            x_range: 0.0..1.0,
             auto_y_range: true,
+            auto_x_range: true,
+            widget_width: 1920.0,
+            visible_range: LineVisibleRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)),
         };
         GraphBundle {
             camera: Camera {

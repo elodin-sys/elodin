@@ -24,7 +24,10 @@ use crate::{
     ui::{
         self, EntityData, HdrEnabled, colors,
         tiles::{self, SyncViewportParams},
-        widgets::plot::{GraphBundle, default_component_values},
+        widgets::{
+            plot::{GraphBundle, default_component_values},
+            sql_plot::SqlPlot,
+        },
     },
 };
 
@@ -496,6 +499,17 @@ pub fn create_sql(tile_id: Option<TileId>) -> PaletteItem {
     )
 }
 
+pub fn create_sql_plot(tile_id: Option<TileId>) -> PaletteItem {
+    PaletteItem::new(
+        "Create SQL Plot",
+        TILES_LABEL,
+        move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
+            tile_state.create_sql_plot_tile(tile_id);
+            PaletteEvent::Exit
+        },
+    )
+}
+
 pub fn create_hierarchy(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Hierarchy",
@@ -668,6 +682,7 @@ pub fn save_preset_inner() -> PaletteItem {
               entity_id: Query<&impeller2::types::EntityId>,
               action_tiles: Query<&ui::actions::ActionTile>,
               graph_states: Query<&ui::widgets::plot::GraphState>,
+              sql_plots: Query<&SqlPlot>,
               ui_state: Res<tiles::TileState>| {
             if let Some(tile_id) = ui_state.tree.root() {
                 let panel = crate::ui::preset::tile_to_panel(
@@ -676,6 +691,7 @@ pub fn save_preset_inner() -> PaletteItem {
                     &entity_id,
                     &action_tiles,
                     &graph_states,
+                    &sql_plots,
                     tile_id,
                     &ui_state,
                 );
@@ -792,6 +808,7 @@ pub fn create_tiles(tile_id: TileId) -> PalettePage {
         create_monitor(Some(tile_id)),
         create_viewport(Some(tile_id)),
         create_sql(Some(tile_id)),
+        create_sql_plot(Some(tile_id)),
         create_video_stream(Some(tile_id)),
         create_hierarchy(Some(tile_id)),
         create_inspector(Some(tile_id)),
@@ -858,6 +875,7 @@ impl Default for PalettePage {
             create_monitor(None),
             create_viewport(None),
             create_sql(None),
+            create_sql_plot(None),
             create_video_stream(None),
             create_hierarchy(None),
             create_inspector(None),
