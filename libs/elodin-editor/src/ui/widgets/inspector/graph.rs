@@ -26,7 +26,7 @@ use crate::ui::{
         button::{EButton, ECheckboxButton, EColorButton},
         label::{self, label_with_buttons},
         plot::GraphState,
-        sql_plot::SqlPlot,
+        sql_plot::{QueryType, SqlPlot},
     },
 };
 
@@ -152,6 +152,32 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                 .show(ui, |ui| {
                     let max_width = ui.available_width();
                     ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 8.0);
+
+                    ui.label(egui::RichText::new("QUERY TYPE").color(get_scheme().text_secondary));
+                    ui.add_space(8.0);
+                    ui.scope(|ui| {
+                        theme::configure_combo_box(ui.style_mut());
+                        ui.style_mut().spacing.combo_width = ui.available_size().x;
+                        egui::ComboBox::from_id_salt("query_type")
+                            .selected_text(match sql_plot.query_type {
+                                QueryType::EQL => "EQL",
+                                QueryType::SQL => "SQL",
+                            })
+                            .show_ui(ui, |ui| {
+                                theme::configure_combo_item(ui.style_mut());
+                                ui.selectable_value(
+                                    &mut sql_plot.query_type,
+                                    QueryType::EQL,
+                                    "EQL",
+                                );
+                                ui.selectable_value(
+                                    &mut sql_plot.query_type,
+                                    QueryType::SQL,
+                                    "SQL",
+                                );
+                            });
+                    });
+                    ui.separator();
                     ui.label(egui::RichText::new("Query").color(get_scheme().text_secondary));
                     configure_input_with_border(ui.style_mut());
                     let query_res = query(ui, &mut sql_plot.current_query);

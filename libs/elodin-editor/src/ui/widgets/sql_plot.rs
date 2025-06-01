@@ -13,7 +13,7 @@ use bevy::{
     asset::{Assets, Handle},
     ecs::{hierarchy::ChildOf, system::SystemParam},
     math::DVec2,
-    prelude::{Commands, Component, Entity, In, Query, ResMut},
+    prelude::{Commands, Component, Entity, In, Query, Res, ResMut},
     render::camera::Projection,
 };
 use egui::RichText;
@@ -21,16 +21,19 @@ use impeller2_bevy::CommandsExt;
 use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery};
 use itertools::Itertools;
 
-use crate::ui::{
-    colors::{ColorExt, get_scheme},
-    utils::format_num,
-    widgets::{
-        WidgetSystem,
-        plot::{
-            AXIS_LABEL_MARGIN, GraphState, NOTCH_LENGTH, PlotBounds, STEPS_X_WIDTH_DIVISOR,
-            STEPS_Y_HEIGHT_DIVISOR, XYLine, draw_borders, draw_y_axis, get_inner_rect,
-            gpu::{LineBundle, LineConfig, LineHandle, LineUniform, LineWidgetWidth},
-            pretty_round,
+use crate::{
+    EqlContext,
+    ui::{
+        colors::{ColorExt, get_scheme},
+        utils::format_num,
+        widgets::{
+            WidgetSystem,
+            plot::{
+                AXIS_LABEL_MARGIN, GraphState, NOTCH_LENGTH, PlotBounds, STEPS_X_WIDTH_DIVISOR,
+                STEPS_Y_HEIGHT_DIVISOR, XYLine, draw_borders, draw_y_axis, get_inner_rect,
+                gpu::{LineBundle, LineConfig, LineHandle, LineUniform, LineWidgetWidth},
+                pretty_round,
+            },
         },
     },
 };
@@ -55,6 +58,13 @@ pub struct SqlPlot {
     pub last_refresh: Option<Instant>,
     pub refresh_interval: Duration,
     pub auto_refresh: bool,
+    pub query_type: QueryType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum QueryType {
+    SQL,
+    EQL,
 }
 
 impl Default for SqlPlot {
@@ -69,6 +79,7 @@ impl Default for SqlPlot {
             last_refresh: Some(Instant::now()),
             refresh_interval: Duration::from_millis(500),
             auto_refresh: Default::default(),
+            query_type: QueryType::EQL,
         }
     }
 }
@@ -147,6 +158,7 @@ pub fn sync_bounds_sql(
 pub struct SqlPlotWidget<'w, 's> {
     states: Query<'w, 's, &'static mut SqlPlot>,
     graphs_state: Query<'w, 's, &'static mut GraphState>,
+    eql_context: Res<'w, EqlContext>,
     commands: Commands<'w, 's>,
 }
 
@@ -184,8 +196,20 @@ impl WidgetSystem for SqlPlotWidget<'_, '_> {
             if should_refresh {
                 plot.state = SqlPlotState::Requested(Instant::now());
                 plot.last_refresh = Some(Instant::now());
+                let query = match plot.query_type {
+                    QueryType::SQL => plot.current_query.to_string(),
+                    QueryType::EQL => match state.eql_context.0.sql(&plot.current_query) {
+                        Ok(sql) => sql,
+                        Err(err) => {
+                            plot.state = SqlPlotState::Error(ErrorResponse {
+                                description: err.to_string(),
+                            });
+                            return;
+                        }
+                    },
+                };
                 state.commands.send_req_reply(
-                    SQLQuery(plot.current_query.clone()),
+                    SQLQuery(query),
                     move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
                           mut states: Query<&mut SqlPlot>,
                           mut xy_lines: ResMut<Assets<XYLine>>| {
