@@ -61,10 +61,11 @@ pub struct SqlPlot {
     pub query_type: QueryType,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum QueryType {
-    SQL,
+    #[default]
     EQL,
+    SQL,
 }
 
 impl Default for SqlPlot {

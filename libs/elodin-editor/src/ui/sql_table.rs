@@ -6,16 +6,20 @@ use arrow::{
 };
 use bevy::{
     ecs::system::SystemParam,
-    prelude::{Commands, Component, Entity, In, Query},
+    prelude::{Commands, Component, Entity, In, Query, Res},
 };
 use egui::{RichText, Stroke};
 use impeller2_bevy::CommandsExt;
 use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery};
 
+use crate::EqlContext;
+
 use super::{
     colors::{ColorExt, get_scheme},
     theme,
-    widgets::{WidgetSystem, button::EButton},
+    widgets::{
+        WidgetSystem, button::EButton, inspector::graph::eql_autocomplete, sql_plot::QueryType,
+    },
 };
 
 #[derive(Clone)]
@@ -27,6 +31,7 @@ pub struct SQLTablePane {
 pub struct SqlTable {
     pub current_query: String,
     pub state: SqlTableState,
+    pub query_type: QueryType,
 }
 
 #[derive(Default)]
@@ -133,6 +138,7 @@ impl egui_table::TableDelegate for SqlTableResults<'_> {
 #[derive(SystemParam)]
 pub struct SqlTableWidget<'w, 's> {
     states: Query<'w, 's, &'static mut SqlTable>,
+    eql_context: Res<'w, EqlContext>,
     commands: Commands<'w, 's>,
 }
 
@@ -147,8 +153,12 @@ impl WidgetSystem for SqlTableWidget<'_, '_> {
         ui: &mut egui::Ui,
         SQLTablePane { entity }: Self::Args,
     ) -> Self::Output {
-        let mut state = state.get_mut(world);
-        let Ok(mut table) = state.states.get_mut(entity) else {
+        let SqlTableWidget {
+            mut states,
+            eql_context,
+            mut commands,
+        } = state.get_mut(world);
+        let Ok(mut table) = states.get_mut(entity) else {
             return;
         };
         ui.horizontal_top(|ui| {
@@ -180,22 +190,73 @@ impl WidgetSystem for SqlTableWidget<'_, '_> {
                     style.visuals.widgets.hovered.weak_bg_fill = get_scheme().bg_primary;
                     style.visuals.widgets.active.fg_stroke =
                         Stroke::new(1.0, get_scheme().text_primary);
-                    let text_edit_width = ui.max_rect().width() - 104.0;
+                    let text_edit_width = ui.max_rect().width() - 160.0;
                     let text_edit_res = ui.add(
                         egui::TextEdit::singleline(&mut table.current_query)
                             .hint_text("Enter an SQL query - like `show tables`")
+                            .lock_focus(true)
                             .desired_width(text_edit_width)
                             .background_color(get_scheme().bg_primary)
                             .margin(egui::Margin::symmetric(16, 8)),
                     );
-                    ui.add_space(16.0);
-                    let query_res = ui.add_sized([55., 32.], EButton::green("QUERY"));
+
+                    ui.add_space(8.0);
+
+                    ui.scope(|ui| {
+                        theme::configure_combo_box(ui.style_mut());
+                        ui.style_mut().spacing.combo_width = ui.available_size().x;
+                        let prev_query_type = table.query_type;
+                        egui::ComboBox::from_id_salt("query_type")
+                            .width(55.)
+                            .selected_text(match table.query_type {
+                                QueryType::EQL => "EQL",
+                                QueryType::SQL => "SQL",
+                            })
+                            .show_ui(ui, |ui| {
+                                theme::configure_combo_item(ui.style_mut());
+                                ui.selectable_value(&mut table.query_type, QueryType::EQL, "EQL");
+                                ui.selectable_value(&mut table.query_type, QueryType::SQL, "SQL");
+                            });
+                        if let (QueryType::EQL, QueryType::SQL) =
+                            (prev_query_type, table.query_type)
+                        {
+                            if let Ok(sql) = eql_context.0.sql(&table.current_query) {
+                                table.current_query = sql;
+                            }
+                        }
+                    });
+                    ui.add_space(8.0);
+                    let query_res = ui.add_sized([55., 32.], EButton::highlight("QUERY"));
+
+                    if table.query_type == QueryType::EQL {
+                        eql_autocomplete(
+                            ui,
+                            &eql_context.0,
+                            &text_edit_res
+                                .clone()
+                                .with_new_rect(text_edit_res.rect.expand2(egui::vec2(0.0, 8.0))),
+                            &mut table.current_query,
+                        );
+                    }
+
                     let enter_key = text_edit_res.lost_focus()
                         && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter));
                     if query_res.clicked() || enter_key {
                         table.state = SqlTableState::Requested(Instant::now());
-                        state.commands.send_req_reply(
-                            SQLQuery(table.current_query.clone()),
+                        let query = match table.query_type {
+                            QueryType::SQL => table.current_query.to_string(),
+                            QueryType::EQL => match eql_context.0.sql(&table.current_query) {
+                                Ok(sql) => sql,
+                                Err(err) => {
+                                    table.state = SqlTableState::Error(ErrorResponse {
+                                        description: err.to_string(),
+                                    });
+                                    return;
+                                }
+                            },
+                        };
+                        commands.send_req_reply(
+                            SQLQuery(query),
                             move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
                                   mut states: Query<&mut SqlTable>| {
                                 let Ok(mut entity) = states.get_mut(entity) else {

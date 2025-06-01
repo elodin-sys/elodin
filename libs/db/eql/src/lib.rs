@@ -370,13 +370,21 @@ impl Context {
                 .element_names
                 .iter()
                 .cloned()
-                .chain(["last".to_string(), "first".to_string(), "time".to_string()])
+                .chain([
+                    "last(".to_string(),
+                    "first(".to_string(),
+                    "time".to_string(),
+                ])
                 .collect(),
             Expr::Time(_) => {
-                vec!["fftfreq".to_string()]
+                vec!["fftfreq()".to_string()]
             }
             Expr::ArrayAccess(_, _) => {
-                vec!["fft".to_string(), "last".to_string(), "first".to_string()]
+                vec![
+                    "fft()".to_string(),
+                    "last(".to_string(),
+                    "first(".to_string(),
+                ]
             }
             Expr::Tuple(_) => {
                 vec!["last".to_string(), "first".to_string()]

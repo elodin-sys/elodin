@@ -1071,6 +1071,11 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
+                            *state_mut.selected_object = SelectedObject::Graph {
+                                tile_id,
+                                label: "SQL Plot".to_string(),
+                                graph_id: entity,
+                            };
                             ui_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
