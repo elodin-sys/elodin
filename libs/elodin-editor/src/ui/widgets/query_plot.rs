@@ -301,16 +301,11 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                 draw_x_axis(ui, axis_bounds, steps_x, rect, inner_rect);
 
                 plot.line_entity = Some(line_entity);
-            } else {
-                ui.centered_and_justified(|ui| {
-                    ui.label("No data to plot");
-                });
             }
-
             match &plot.state {
                 QueryPlotState::None => {
                     ui.centered_and_justified(|ui| {
-                        ui.label("Enter a SQL query to plot data");
+                        ui.label("Enter a query to plot data");
                     });
                 }
                 QueryPlotState::Requested(_instant) => {

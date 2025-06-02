@@ -25,7 +25,7 @@ use super::{
     colors::{self, EColor, get_scheme, with_opacity},
     images,
     monitor::{MonitorPane, MonitorWidget},
-    query_table::{QueryTablePane, QueryTable, QueryTableWidget},
+    query_table::{QueryTable, QueryTablePane, QueryTableWidget},
     video_stream::{IsTileVisible, VideoDecoderHandle},
     widgets::{
         WidgetSystem, WidgetSystemExt,
@@ -1056,7 +1056,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         let graph_bundle = GraphBundle::new(
                             &mut state_mut.render_layer_alloc,
                             BTreeMap::default(),
-                            "SQL Plot".to_string(),
+                            "Query Plot".to_string(),
                         );
                         let entity = state_mut
                             .commands
@@ -1066,14 +1066,14 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         let pane = Pane::QueryPlot(super::widgets::query_plot::QueryPlotPane {
                             entity,
                             rect: None,
-                            label: "SQL Plot".to_string(),
+                            label: "Query Plot".to_string(),
                         });
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
                             *state_mut.selected_object = SelectedObject::Graph {
                                 tile_id,
-                                label: "SQL Plot".to_string(),
+                                label: "Query Plot".to_string(),
                                 graph_id: entity,
                             };
                             ui_state.tree.make_active(|id, _| id == tile_id);
@@ -1150,7 +1150,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             if let Ok(mut cam) = state_mut.commands.get_entity(query_plot.entity) {
                                 cam.try_insert(ViewportRect(query_plot.rect));
                             }
-                        } else if let Ok(mut cam) = state_mut.commands.get_entity(query_plot.entity) {
+                        } else if let Ok(mut cam) = state_mut.commands.get_entity(query_plot.entity)
+                        {
                             cam.try_insert(ViewportRect(None));
                         }
                     }
@@ -1432,7 +1433,7 @@ pub fn spawn_panel(
             let graph_bundle = GraphBundle::new(
                 render_layer_alloc,
                 BTreeMap::default(),
-                "SQL Plot".to_string(),
+                "Query Plot".to_string(),
             );
             let entity = commands
                 .spawn(QueryPlot {
@@ -1446,7 +1447,7 @@ pub fn spawn_panel(
             let pane = Pane::QueryPlot(super::widgets::query_plot::QueryPlotPane {
                 entity,
                 rect: None,
-                label: "SQL Plot".to_string(),
+                label: "Query Plot".to_string(),
             });
             ui_state.insert_tile(Tile::Pane(pane), parent_id, true)
         }
