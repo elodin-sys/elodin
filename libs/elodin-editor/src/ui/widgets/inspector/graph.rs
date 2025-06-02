@@ -230,6 +230,26 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     {
                         query_plot.last_refresh = None;
                     }
+                    ui.separator();
+                    ui.label(egui::RichText::new("Color").color(get_scheme().text_secondary));
+                    let color_id = ui.auto_id_with("color");
+                    let btn_resp = ui.add(EButton::new("Set Color"));
+                    if btn_resp.clicked() {
+                        ui.memory_mut(|m| m.toggle_popup(color_id));
+                    }
+
+                    if ui.memory(|mem| mem.is_popup_open(color_id)) {
+                        let mut color = query_plot.color.unwrap_or_else(|| get_scheme().highlight);
+                        let popup_response =
+                            color_popup(ui, &mut color, color_id, btn_resp.rect.min);
+                        if !btn_resp.clicked()
+                            && (ui.input(|i| i.key_pressed(egui::Key::Escape))
+                                || popup_response.clicked_elsewhere())
+                        {
+                            ui.memory_mut(|mem| mem.close_popup());
+                        }
+                        query_plot.color = Some(color);
+                    }
                 });
         } else {
             let mut remove_list: SmallVec<[(EntityId, ComponentId); 1]> = SmallVec::new();
@@ -489,32 +509,7 @@ fn component_value(
                 ui.memory_mut(|mem| mem.toggle_popup(color_id));
             }
             if ui.memory(|mem| mem.is_popup_open(color_id)) {
-                let popup_response = egui::Area::new(color_id)
-                    .kind(egui::UiKind::Picker)
-                    .order(egui::Order::Foreground)
-                    .fixed_pos(value_toggle.rect.min)
-                    .default_width(300.0)
-                    .show(ui.ctx(), |ui| {
-                        theme::configure_input_with_border(ui.style_mut());
-                        ui.spacing_mut().slider_width = 275.;
-                        ui.spacing_mut().button_padding = egui::vec2(6.0, 4.0);
-                        ui.spacing_mut().item_spacing = egui::vec2(8.0, 4.0);
-
-                        ui.add_space(8.0);
-                        egui::Frame::popup(ui.style()).show(ui, |ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                for elem_color in &colors::ALL_COLORS_DARK[..24] {
-                                    if ui.add(EColorButton::new(*elem_color)).clicked() {
-                                        *color = *elem_color;
-                                    }
-                                }
-                            });
-                            ui.add_space(8.0);
-                            color_picker_color32(ui, color, Alpha::Opaque);
-                        });
-                    })
-                    .response;
-
+                let popup_response = color_popup(ui, color, color_id, value_toggle.rect.min);
                 if !value_toggle.secondary_clicked()
                     && (ui.input(|i| i.key_pressed(egui::Key::Escape))
                         || popup_response.clicked_elsewhere())
@@ -524,4 +519,37 @@ fn component_value(
             }
         }
     });
+}
+
+fn color_popup(
+    ui: &mut egui::Ui,
+    color: &mut egui::Color32,
+    color_id: egui::Id,
+    pos: egui::Pos2,
+) -> egui::Response {
+    egui::Area::new(color_id)
+        .kind(egui::UiKind::Picker)
+        .order(egui::Order::Foreground)
+        .fixed_pos(pos)
+        .default_width(300.0)
+        .show(ui.ctx(), |ui| {
+            theme::configure_input_with_border(ui.style_mut());
+            ui.spacing_mut().slider_width = 275.;
+            ui.spacing_mut().button_padding = egui::vec2(6.0, 4.0);
+            ui.spacing_mut().item_spacing = egui::vec2(8.0, 4.0);
+
+            ui.add_space(8.0);
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    for elem_color in &colors::ALL_COLORS_DARK[..24] {
+                        if ui.add(EColorButton::new(*elem_color)).clicked() {
+                            *color = *elem_color;
+                        }
+                    }
+                });
+                ui.add_space(8.0);
+                color_picker_color32(ui, color, Alpha::OnlyBlend);
+            });
+        })
+        .response
 }

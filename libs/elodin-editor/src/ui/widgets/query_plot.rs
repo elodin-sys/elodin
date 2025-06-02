@@ -59,6 +59,7 @@ pub struct QueryPlot {
     pub refresh_interval: Duration,
     pub auto_refresh: bool,
     pub query_type: QueryType,
+    pub color: Option<egui::Color32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -81,6 +82,7 @@ impl Default for QueryPlot {
             refresh_interval: Duration::from_millis(500),
             auto_refresh: Default::default(),
             query_type: QueryType::EQL,
+            color: None,
         }
     }
 }
@@ -276,7 +278,9 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                         line: LineHandle::XY(xy_line_handle.clone()),
                         uniform: LineUniform::new(
                             graph_state.line_width,
-                            get_scheme().highlight.into_bevy(),
+                            plot.color
+                                .unwrap_or_else(|| get_scheme().highlight)
+                                .into_bevy(),
                         ),
                         config: LineConfig {
                             render_layers: graph_state.render_layers.clone(),
