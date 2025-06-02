@@ -4,6 +4,7 @@ use std::{
     str::FromStr,
     sync::Arc,
 };
+use unicode_ident::*;
 
 use impeller2::{
     schema::Schema,
@@ -16,23 +17,50 @@ pub enum AstNode<'input> {
     Ident(Cow<'input, str>),
     Field(Box<AstNode<'input>>, Cow<'input, str>),
     MethodCall(Box<AstNode<'input>>, Cow<'input, str>, Vec<AstNode<'input>>),
+    BinaryOp(Box<AstNode<'input>>, Box<AstNode<'input>>, BinaryOp),
     Tuple(Vec<AstNode<'input>>),
     StringLiteral(Cow<'input, str>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+pub enum BinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+impl BinaryOp {
+    pub fn to_str(&self) -> &'static str {
+        match self {
+            BinaryOp::Add => "+",
+            BinaryOp::Sub => "-",
+            BinaryOp::Mul => "*",
+            BinaryOp::Div => "/",
+        }
+    }
 }
 
 peg::parser! {
     grammar ast_parser() for str {
         rule _ = quiet!{[' ' | '\n' | '\t']*}
-        rule ident_str() -> Cow<'input, str> = s:$(['a'..='z' | 'A'..='Z' | '0'..='9' | '_']+) { Cow::Borrowed(s) }
+
+        rule ident_str() -> Cow<'input, str>
+            = i:$([c if is_xid_start(c)] [c if is_xid_continue(c)]*) { Cow::Borrowed(i) }
         rule string_literal() -> Cow<'input, str> = "\"" s:$([^'"']*) "\"" { Cow::Borrowed(s) }
         rule comma() = ("," _?)
+        rule binary_op() -> BinaryOp = "+" { BinaryOp::Add } / "-" { BinaryOp::Sub } / "*" { BinaryOp::Mul } / "/" { BinaryOp::Div }
 
         pub rule expr() -> AstNode<'input> = precedence! {
+        a:(@) comma() b:@ { AstNode::Tuple(vec![a, b]) }
+        --
+        a:(@) _ op:binary_op() _ b:@ { AstNode::BinaryOp(Box::new(a), Box::new(b), op) }
+        --
         e:(@) "." i:ident_str() "(" args:expr() ** comma() ")" { AstNode::MethodCall(Box::new(e), i,  args) }
         --
-        "(" e:expr() ** comma() ")" { AstNode::Tuple(e) }
-        --
         e:(@) "." i:ident_str() { AstNode::Field(Box::new(e), i) }
+        --
+        "(" _ e:expr() _ ")" { e }
         --
         s:string_literal() { AstNode::StringLiteral(s) }
         --
@@ -41,6 +69,7 @@ peg::parser! {
     }
 }
 
+#[derive(Clone, Debug)]
 pub enum Expr {
     // core
     Entity(Arc<Entity>),
@@ -57,6 +86,9 @@ pub enum Expr {
     // time limits
     Last(Box<Expr>, hifitime::Duration),
     First(Box<Expr>, hifitime::Duration),
+
+    // infix
+    BinaryOp(Box<Expr>, Box<Expr>, BinaryOp),
 }
 
 impl Expr {
@@ -67,6 +99,12 @@ impl Expr {
             Expr::Time(_) => Ok("time".to_string()),
             Expr::Fft(e) => Ok(format!("fft({})", e.to_field()?)),
             Expr::FftFreq(e) => Ok(format!("fftfreq({})", e.to_field()?)),
+            Expr::BinaryOp(left, right, op) => Ok(format!(
+                "({} {} {})",
+                left.to_field()?,
+                op.to_str(),
+                right.to_field()?
+            )),
 
             Expr::ArrayAccess(inner_expr, index) => match inner_expr.as_ref() {
                 Expr::Component(component) => Ok(format!("{}[{}]", component.name, index + 1)),
@@ -75,9 +113,9 @@ impl Expr {
                 )),
             },
 
-            _ => Err(Error::InvalidFieldAccess(
-                "unsupported expression type for field".to_string(),
-            )),
+            expr => Err(Error::InvalidFieldAccess(format!(
+                "unsupported expression type for field {expr:?}"
+            ))),
         }
     }
 
@@ -90,6 +128,7 @@ impl Expr {
             Expr::Time(component) => Ok(format!("{}_{}", component.entity_name, component.name)),
             Expr::FftFreq(e) => e.to_table(),
             Expr::Fft(e) => e.to_table(),
+            Expr::BinaryOp(left, _, _) => left.to_table(),
 
             Expr::ArrayAccess(inner_expr, _) => match inner_expr.as_ref() {
                 Expr::Component(component) => {
@@ -100,9 +139,9 @@ impl Expr {
                 )),
             },
 
-            _ => Err(Error::InvalidFieldAccess(
-                "unsupported expression type for table".to_string(),
-            )),
+            expr => Err(Error::InvalidFieldAccess(format!(
+                "unsupported expression type for table {expr:?}"
+            ))),
         }
     }
 
@@ -111,11 +150,57 @@ impl Expr {
         match self {
             Expr::Fft(e) => Ok(format!("fft({})", e.to_qualified_field()?)),
             Expr::FftFreq(e) => Ok(format!("fftfreq({})", e.to_qualified_field()?)),
+            Expr::BinaryOp(left, right, op) => Ok(format!(
+                "({} {} {})",
+                left.to_qualified_field()?,
+                op.to_str(),
+                right.to_qualified_field()?
+            )),
             _ => {
                 let table = self.to_table()?;
                 let field = self.to_field()?;
                 Ok(format!("{}.{}", table, field))
             }
+        }
+    }
+
+    fn to_column_name(&self) -> Option<String> {
+        match self {
+            Expr::Fft(e) => Some(format!("fft({})", e.to_column_name()?)),
+            Expr::FftFreq(e) => Some(format!("fftfreq({})", e.to_column_name()?)),
+            Expr::Component(e) => Some(format!("{}.{}", e.entity_name, e.name)),
+            Expr::ArrayAccess(expr, index) => match expr.as_ref() {
+                Expr::Component(c) => c
+                    .element_names
+                    .get(*index)
+                    .map(|name| format!("{}.{}.{}", c.entity_name, c.name, name)),
+                expr => Some(format!("{}[{}]", expr.to_column_name()?, index,)),
+            },
+            _ => None,
+        }
+    }
+
+    fn to_select_part(&self) -> Result<String, Error> {
+        if let Some(column_name) = self.to_column_name() {
+            Ok(format!(
+                "{} as '{}'",
+                self.to_qualified_field()?,
+                column_name
+            ))
+        } else {
+            self.to_qualified_field()
+        }
+    }
+
+    fn to_sql_time_field(&self) -> Result<String, Error> {
+        match self {
+            Expr::Tuple(elements) => {
+                let Some(first) = elements.first() else {
+                    return Err(Error::InvalidFieldAccess("empty tuple".to_string()));
+                };
+                first.to_sql_time_field()
+            }
+            expr => expr.to_table().map(|table| format!("{}.time", table)),
         }
     }
 
@@ -143,7 +228,7 @@ impl Expr {
                 if table_names.len() == 1 {
                     let mut select_parts = Vec::new();
                     for element in elements {
-                        select_parts.push(element.to_field()?);
+                        select_parts.push(element.to_select_part()?);
                     }
                     Ok(format!(
                         "select {} from {}",
@@ -153,7 +238,7 @@ impl Expr {
                 } else {
                     let mut select_parts = Vec::new();
                     for element in elements {
-                        select_parts.push(element.to_qualified_field()?);
+                        select_parts.push(element.to_select_part()?);
                     }
                     let first_table = table_names.first().unwrap();
                     let mut from_clause = table_names.first().unwrap().clone();
@@ -172,15 +257,41 @@ impl Expr {
                     ))
                 }
             }
+            Expr::BinaryOp(left, right, op) => {
+                let left_table_name = left.to_table()?;
+                let right_table_name = right.to_table()?;
+                let left_select_part = left.to_qualified_field()?;
+                let right_select_part = right.to_qualified_field()?;
+                if left_table_name == right_table_name {
+                    Ok(format!(
+                        "select {} {} {} from {}",
+                        left_select_part,
+                        op.to_str(),
+                        right_select_part,
+                        left_table_name
+                    ))
+                } else {
+                    Ok(format!(
+                        "select {} {} {} from {} join {} on {}.time = {}.time",
+                        left_select_part,
+                        op.to_str(),
+                        right_select_part,
+                        left_table_name,
+                        right_table_name,
+                        left_table_name,
+                        right_table_name
+                    ))
+                }
+            }
 
             Expr::Last(expr, duration) => {
                 let sql = expr.to_sql(&context)?;
                 let duration_micros = (duration.total_nanoseconds() / 1000) as i64;
                 let lower_bound = context.last_timestamp.0 - duration_micros;
                 let lower_bound = lower_bound as f64 * 1e-6;
+                let time_field = expr.to_sql_time_field()?;
                 Ok(format!(
-                    "{} where time >= to_timestamp({})",
-                    sql, lower_bound
+                    "{sql} where {time_field} >= to_timestamp({lower_bound})",
                 ))
             }
             Expr::First(expr, duration) => {
@@ -188,9 +299,9 @@ impl Expr {
                 let duration_micros = (duration.total_nanoseconds() / 1000) as i64;
                 let upper_bound = context.earliest_timestamp.0 + duration_micros;
                 let upper_bound = upper_bound as f64 * 1e-6;
+                let time_field = expr.to_sql_time_field()?;
                 Ok(format!(
-                    "{} where time <= to_timestamp({})",
-                    sql, upper_bound
+                    "{sql} where {time_field} <= to_timestamp({upper_bound})",
                 ))
             }
 
@@ -198,20 +309,22 @@ impl Expr {
                 "cannot convert duration literal to SQL".to_string(),
             )),
 
-            expr => {
-                let field = expr.to_field()?;
-                let table = expr.to_table()?;
-                Ok(format!("select {} from {}", field, table))
-            }
+            expr => Ok(format!(
+                "select {} from {}",
+                expr.to_select_part()?,
+                expr.to_table()?
+            )),
         }
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct Entity {
     pub name: String,
     pub componnets: HashMap<String, Arc<EntityComponent>>,
 }
 
+#[derive(Clone, Debug)]
 pub struct EntityComponent {
     pub name: String,
     pub entity_name: String,
@@ -346,6 +459,11 @@ impl Context {
                 // Parse duration strings like "5m", "10s", "1h"
                 self.parse_duration(s.as_ref()).map(Expr::DurationLiteral)
             }
+            AstNode::BinaryOp(left, right, op) => {
+                let left = self.parse(left)?;
+                let right = self.parse(right)?;
+                Ok(Expr::BinaryOp(Box::new(left), Box::new(right), *op))
+            }
         }
     }
 
@@ -398,25 +516,11 @@ impl Context {
             Expr::FftFreq(_) => {
                 vec!["last".to_string(), "first".to_string()]
             }
-            Expr::Last(_, _) => {
-                vec![]
-            }
-            Expr::First(_, _) => {
-                vec![]
-            }
+            _ => vec![],
         }
     }
 
     pub fn get_string_suggestions(&self, input: &str) -> Vec<(String, String)> {
-        if input.is_empty() {
-            let mut entity_names = self.entities.keys().cloned().collect::<Vec<_>>();
-            entity_names.sort();
-            return entity_names
-                .into_iter()
-                .map(|n| (n.clone(), n.clone()))
-                .collect();
-        }
-
         fn apply_suggestions(
             suggestions: &[String],
             input: &str,
@@ -430,17 +534,35 @@ impl Context {
 
         // strip tuple
         let valid_ast = ast_parser::expr(input.trim().trim_end_matches('.')).is_ok();
-        let (start, input) = if valid_ast {
-            ("", input)
-        } else if input.contains(',') {
-            let comma_pos = input.rfind(',').unwrap();
-            input.split_at(comma_pos + 1)
-        } else if input.starts_with('(') {
-            let paren_pos = input.rfind('(').unwrap();
-            input.split_at(paren_pos + 1)
-        } else {
-            ("", input)
+        let last_comma_pos = input.rfind(',');
+        let last_paren_pos = input.rfind('(');
+        let last_end_paren_pos = input.rfind(')');
+
+        let (start, input) = match (
+            valid_ast,
+            last_comma_pos,
+            last_paren_pos,
+            last_end_paren_pos,
+        ) {
+            (true, Some(_), Some(start), Some(end)) if start < end => ("", input),
+            (false, Some(comma_pos), Some(paren_pos), None) if comma_pos > paren_pos => {
+                let comma_pos = input.rfind(',').unwrap();
+                input.split_at(comma_pos + 1)
+            }
+            (_, Some(comma_pos), _, _) => input.split_at(comma_pos + 1),
+            (_, _, Some(paren_pos), _) => input.split_at(paren_pos + 1),
+            _ => ("", input),
         };
+
+        if !input.contains(".") {
+            let mut entity_names = self.entities.keys().cloned().collect::<Vec<_>>();
+            entity_names.sort();
+            return entity_names
+                .into_iter()
+                .filter(|n| n.contains(input.trim()))
+                .map(|n| (n.clone(), format!("{start}{n}")))
+                .collect();
+        }
 
         if input.ends_with('.') {
             let query = &input[..input.len() - 1];
@@ -750,8 +872,8 @@ mod tests {
         let expr = Expr::Component(component.clone());
 
         let suggestions = context.get_suggestions(&expr);
-        assert!(suggestions.contains(&"first".to_string()));
-        assert!(suggestions.contains(&"last".to_string()));
+        assert!(suggestions.contains(&"first(".to_string()));
+        assert!(suggestions.contains(&"last(".to_string()));
         assert!(suggestions.contains(&"time".to_string()));
         assert!(suggestions.contains(&"x".to_string()));
         assert!(suggestions.contains(&"y".to_string()));
@@ -766,7 +888,7 @@ mod tests {
         let context = create_test_context();
 
         let suggestions = context.get_suggestions(&expr);
-        assert_eq!(suggestions, vec!["fftfreq"]);
+        assert_eq!(suggestions, vec!["fftfreq()"]);
     }
 
     #[test]
@@ -776,15 +898,19 @@ mod tests {
         let context = create_test_context();
 
         let suggestions = context.get_suggestions(&expr);
-        assert!(suggestions.contains(&"fft".to_string()));
-        assert!(suggestions.contains(&"first".to_string()));
-        assert!(suggestions.contains(&"last".to_string()));
+        assert!(suggestions.contains(&"fft()".to_string()));
+        assert!(suggestions.contains(&"first(".to_string()));
+        assert!(suggestions.contains(&"last(".to_string()));
     }
 
     #[test]
     fn test_string_suggestions_empty() {
         let context = create_test_context();
-        let suggestions = context.get_string_suggestions("");
+        let suggestions = context
+            .get_string_suggestions("")
+            .into_iter()
+            .map(|(s, _)| s)
+            .collect::<Vec<_>>();
 
         assert!(suggestions.contains(&"test_entity".to_string()));
         assert_eq!(suggestions.len(), 1);
@@ -793,7 +919,11 @@ mod tests {
     #[test]
     fn test_string_suggestions_with_period() {
         let context = create_test_context();
-        let suggestions = context.get_string_suggestions("test_entity.");
+        let suggestions = context
+            .get_string_suggestions("test_entity.")
+            .into_iter()
+            .map(|(s, _)| s)
+            .collect::<Vec<_>>();
 
         assert!(suggestions.contains(&"component".to_string()));
         assert!(suggestions.contains(&"time".to_string()));
@@ -802,10 +932,14 @@ mod tests {
     #[test]
     fn test_string_suggestions_component_with_period() {
         let context = create_test_context();
-        let suggestions = context.get_string_suggestions("test_entity.component.");
+        let suggestions = context
+            .get_string_suggestions("test_entity.component.")
+            .into_iter()
+            .map(|(s, _)| s)
+            .collect::<Vec<_>>();
 
-        assert!(suggestions.contains(&"first".to_string()));
-        assert!(suggestions.contains(&"last".to_string()));
+        assert!(suggestions.contains(&"first(".to_string()));
+        assert!(suggestions.contains(&"last(".to_string()));
         assert!(suggestions.contains(&"time".to_string()));
         assert!(suggestions.contains(&"x".to_string()));
     }
