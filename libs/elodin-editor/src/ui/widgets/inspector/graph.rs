@@ -28,7 +28,7 @@ use crate::{
             button::{EButton, ECheckboxButton, EColorButton},
             label::{self, label_with_buttons},
             plot::GraphState,
-            query_plot::{QueryType, QueryPlot},
+            query_plot::{QueryPlot, QueryType},
         },
     },
 };
@@ -347,26 +347,28 @@ pub fn eql_autocomplete(
                 &query_res.clone().with_new_rect(query_res.rect.expand(8.0)),
                 egui::PopupCloseBehavior::IgnoreClicks,
                 |ui| {
-                    ui.vertical(|ui| {
-                        ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 8.0);
-                        for (i, (suggestion, patch)) in suggestions.iter().enumerate() {
-                            let is_selected = i == selected_index;
-                            let response = if is_selected {
-                                ui.colored_label(get_scheme().highlight, suggestion)
-                            } else {
-                                ui.label(suggestion)
-                            };
+                    egui::ScrollArea::vertical()
+                        .max_height(200.)
+                        .show(ui, |ui| {
+                            ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 8.0);
+                            for (i, (suggestion, patch)) in suggestions.iter().enumerate() {
+                                let is_selected = i == selected_index;
+                                let response = if is_selected {
+                                    ui.colored_label(get_scheme().highlight, suggestion)
+                                } else {
+                                    ui.label(suggestion)
+                                };
 
-                            // Handle mouse click to apply suggestion
-                            if response.clicked() {
-                                *current_query = patch.clone();
-                                ui.memory_mut(|mem| {
-                                    mem.data.remove::<usize>(suggestion_memory_id);
-                                    mem.close_popup();
-                                });
+                                // Handle mouse click to apply suggestion
+                                if response.clicked() {
+                                    *current_query = patch.clone();
+                                    ui.memory_mut(|mem| {
+                                        mem.data.remove::<usize>(suggestion_memory_id);
+                                        mem.close_popup();
+                                    });
+                                }
                             }
-                        }
-                    })
+                        })
                 },
             );
         });

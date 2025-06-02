@@ -367,24 +367,33 @@ pub fn draw_x_axis(
         return;
     }
 
-    let step_size = pretty_round((bounds.max_x - bounds.min_x) / steps_x as f64);
-    if !step_size.is_normal() {
-        return;
-    }
-    let mut i = 0.0;
+    if bounds.min_x <= 0.0 {
+        let step_size = pretty_round((bounds.max_x - bounds.min_x) / steps_x as f64);
+        if !step_size.is_normal() {
+            return;
+        }
+        let mut i = 0.0;
 
-    while i < bounds.max_x {
+        while i < bounds.max_x {
+            draw_tick(i);
+            i += step_size;
+        }
         draw_tick(i);
-        i += step_size;
-    }
-    draw_tick(i);
 
-    let mut i = 0.0;
-    while i > bounds.min_x {
+        let mut i = 0.0;
+        while i > bounds.min_x {
+            draw_tick(i);
+            i -= step_size;
+        }
         draw_tick(i);
-        i -= step_size;
+    } else {
+        let step_size = pretty_round(bounds.width() / steps_x as f64);
+        let steps_x = (0..=steps_x).map(|i| bounds.min_x + (i as f64) * step_size);
+
+        for x_step in steps_x {
+            draw_tick(x_step);
+        }
     }
-    draw_tick(i);
 }
 
 pub fn auto_bounds(
