@@ -10,7 +10,7 @@ use embedded_hal_compat::ForwardCompat;
 use fugit::{ExtU32 as _, RateExtU32 as _};
 use hal::{i2c, pac, usart};
 
-use sensor_fw::bsp::aleph as bsp;
+use sensor_fw::bsp::aleph::{self as bsp};
 use sensor_fw::{dma::*, i2c_dma::*, peripheral::*, *};
 
 const ELRS_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(8000);
@@ -29,22 +29,23 @@ fn main() -> ! {
 
     let pins = bsp::Pins::take().unwrap();
     let bsp::Pins {
-        pd11: led_sr0,
-        pd10: led_sg0,
-        pb15: mut _led_sb0,
-        pb14: mut led_sa0,
-        mut gpio_connector,
+        red_led,
+        green_led,
+        blue_led,
+        mut amber_led,
+
+        // GPIO connector pins
+        mut gpio,
         ..
     } = pins;
     defmt::info!("Configured peripherals");
-    led_sa0.set_high();
+    sensor_fw::set_panic_led(red_led);
+    amber_led.set_high();
 
     let mut cp = cortex_m::Peripherals::take().unwrap();
     let mut dp = pac::Peripherals::take().unwrap();
 
-    // Enable tracing and debugging in general
     cp.DCB.enable_trace();
-    // Enable the cycle counter
     cp.DWT.enable_cycle_counter();
 
     let clock_cfg = bsp::clock_cfg(dp.PWR);
@@ -55,10 +56,10 @@ fn main() -> ! {
     let mut monotonic = monotonic::Monotonic::new(dp.TIM2, &clock_cfg);
     defmt::info!("Configured monotonic timer");
 
-    let mut running_led = led::PeriodicLed::new(led_sg0, 100u32.millis());
+    let mut blue_led = led::PeriodicLed::new(blue_led, 200u32.millis());
 
     let elrs_uart = Box::new(healing_usart::HealingUsart::new(usart::Usart::new(
-        dp.USART3,
+        dp.USART2,
         crsf::CRSF_BAUDRATE,
         usart::UsartConfig::default(),
         &clock_cfg,
@@ -67,8 +68,8 @@ fn main() -> ! {
     let mut crsf = crsf::CrsfReceiver::new(elrs_uart);
 
     let uart_bridge = Box::new(healing_usart::HealingUsart::new(usart::Usart::new(
-        dp.UART8,
-        115200,
+        dp.USART1,
+        1000000,
         usart::UsartConfig::default(),
         &clock_cfg,
     )));
@@ -78,22 +79,22 @@ fn main() -> ! {
     let pwm_timer = dp.TIM3.timer(600.kHz(), Default::default(), &clock_cfg);
     defmt::info!("Configured PWM timer");
 
-    let [i2c1_rx, i2c2_rx, dshot_tx, ..] = dp.DMA1.split();
+    let [i2c1_rx, i2c2_rx, i2c3_rx, dshot_tx, ..] = dp.DMA1.split();
 
     let sd = sdmmc::Sdmmc::new(&dp.RCC, dp.SDMMC1, &clock_cfg).unwrap();
     defmt::info!("Configured SDMMC");
-    let mut sdmmc_fs = sd.fatfs(led_sr0);
+    let mut sdmmc_fs = sd.fatfs(green_led);
     let mut blackbox = sdmmc_fs.blackbox(monotonic.now());
     defmt::info!("Configured blackbox");
 
     defmt::debug!("Initializing I2C + DMA");
-    let mut i2c1_dma = I2cDma::new(
-        dp.I2C1,
+    let mut i2c3_dma = I2cDma::new(
+        dp.I2C3,
         i2c::I2cConfig {
             speed: i2c::I2cSpeed::FastPlus1M,
             ..Default::default()
         },
-        i2c1_rx,
+        i2c3_rx,
         &clock_cfg,
         &mut dp.DMAMUX1,
         &mut dp.DMAMUX2,
@@ -109,12 +110,26 @@ fn main() -> ! {
         &mut dp.DMAMUX1,
         &mut dp.DMAMUX2,
     );
-    let mut bmm350 = bmm350::Bmm350::new(&mut i2c1_dma, bmm350::Address::Low, &mut delay).unwrap();
+    let mut i2c1_dma = I2cDma::new(
+        dp.I2C1,
+        i2c::I2cConfig {
+            speed: i2c::I2cSpeed::FastPlus1M,
+            ..Default::default()
+        },
+        i2c1_rx,
+        &clock_cfg,
+        &mut dp.DMAMUX1,
+        &mut dp.DMAMUX2,
+    );
+    let mut bmm350 = bmm350::Bmm350::new(&mut i2c3_dma, bmm350::Address::Low, &mut delay).unwrap();
     defmt::info!("Configured BMM350");
-    let mut bmp581 = bmp581::Bmp581::new(&mut i2c1_dma, bmp581::Address::Low, &mut delay).unwrap();
+    let mut bmp581 = bmp581::Bmp581::new(&mut i2c3_dma, bmp581::Address::Low, &mut delay).unwrap();
     defmt::info!("Configured BMP581");
     let mut bmi270 = bmi270::Bmi270::new(&mut i2c2_dma, bmi270::Address::Low, &mut delay).unwrap();
     defmt::info!("Configured BMI270");
+
+    let mut fram = fm24cl16b::Fm24cl16b::new(&mut i2c1_dma).unwrap();
+    defmt::info!("Configured FRAM");
 
     let can = can::setup_can(dp.FDCAN1, &dp.RCC);
     let mut can = dronecan::DroneCan::new(can);
@@ -123,6 +138,23 @@ fn main() -> ! {
     let mut dshot_driver = dshot::Driver::new(pwm_timer, dshot_tx, &mut dp.DMAMUX1);
     defmt::info!("Configured DSHOT driver");
 
+    // Initialize monitor for voltage and current readings
+    let mut monitor = monitor::Monitor::new(
+        dp.ADC1,
+        dp.ADC3,
+        &dp.RCC,
+        bsp::monitor::VIN_CHANNEL,
+        bsp::monitor::VBAT_CHANNEL,
+        bsp::monitor::AUX_CURRENT_CHANNEL,
+        bsp::monitor::VIN_DIVIDER,
+        bsp::monitor::VBAT_DIVIDER,
+        bsp::monitor::AUX_CURRENT_GAIN,
+    );
+    defmt::info!("Configured voltage/current monitor");
+
+    // Run FRAM self-test - will panic if there's an issue
+    fram.self_test(&mut i2c1_dma);
+
     let mut cmd_bridge = command::CommandBridge::new(uart_bridge);
 
     let mut last_elrs_update = monotonic.now();
@@ -130,9 +162,8 @@ fn main() -> ! {
     let mut last_can_update = monotonic.now();
     let mut last_usb_log = monotonic.now();
 
-    led_sa0.set_low();
+    amber_led.set_low();
     loop {
-        // usb_serial.poll();
         let now = monotonic.now();
         let ts = now.duration_since_epoch();
 
@@ -167,19 +198,25 @@ fn main() -> ! {
                 mag_sample: bmm350.data.sample,
                 baro: bmp581.data.pressure_pascal,
                 baro_temp: bmp581.data.temp_c,
+                vin: monitor.data.vin,
+                vbat: monitor.data.vbat,
+                aux_current: monitor.data.aux_current,
+                rtc_vbat: monitor.data.rtc_vbat,
+                cpu_temp: monitor.data.cpu_temp,
             };
             cmd_bridge.write_record(&record);
         }
 
         if let Some(command) = cmd_bridge.read() {
             defmt::info!("Received command: {:?}", command);
-            command.apply(gpio_connector.each_mut())
+            command.apply(&mut gpio)
         }
 
-        running_led.update(now);
-        let mag_updated = bmm350.update(&mut i2c1_dma, now);
+        blue_led.update(now);
+        let mag_updated = bmm350.update(&mut i2c3_dma, now);
         let _ = bmi270.update(&mut i2c2_dma, now);
-        let _ = bmp581.update(&mut i2c1_dma, now);
+        let _ = bmp581.update(&mut i2c3_dma, now);
+        let _ = monitor.update(now);
 
         if mag_updated {
             let record = blackbox::Record {
@@ -191,16 +228,34 @@ fn main() -> ! {
                 mag_sample: bmm350.data.sample,
                 baro: bmp581.data.pressure_pascal,
                 baro_temp: bmp581.data.temp_c,
+                vin: monitor.data.vin,
+                vbat: monitor.data.vbat,
+                aux_current: monitor.data.aux_current,
+                rtc_vbat: monitor.data.rtc_vbat,
+                cpu_temp: monitor.data.cpu_temp,
             };
             blackbox.write_record(record);
         }
 
         if mag_updated && bmm350.data.sample % 400 == 0 {
             defmt::info!(
-                "{}: BMM350 sample {}: {}",
+                "{}: mag: {}, mag_temp: {}, gyro: {}, accel: {}, baro: {}, baro_temp: {}°C",
                 ts,
-                bmm350.data.sample,
-                bmm350.data
+                bmm350.data.mag,
+                bmm350.data.temp,
+                bmi270.gyro_dps,
+                bmi270.accel_g,
+                bmp581.data.pressure_pascal,
+                bmp581.data.temp_c,
+            );
+            defmt::info!(
+                "{}: vin: {}V, vbat: {}V, current: {}A, rtc_vbat: {}V, cpu_temp: {}°C",
+                ts,
+                monitor.data.vin,
+                monitor.data.vbat,
+                monitor.data.aux_current,
+                monitor.data.rtc_vbat,
+                monitor.data.cpu_temp,
             );
         }
         delay.delay_ns(0);

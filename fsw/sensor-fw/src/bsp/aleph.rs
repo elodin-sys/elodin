@@ -5,94 +5,117 @@ use hal::{
 };
 
 static mut PINS_TAKEN: bool = false;
-pub const HSE_FREQ: fugit::Hertz<u32> = fugit::Hertz::<u32>::MHz(16);
+pub const HSE_FREQ: fugit::Hertz<u32> = fugit::Hertz::<u32>::MHz(24);
+
+// Monitor configuration constants
+pub mod monitor {
+    // Voltage divider for VIN: (147kΩ + 10kΩ) / 10kΩ = 15.7
+    pub const VIN_DIVIDER: f32 = 15.7;
+
+    // Voltage divider for VBAT: (147kΩ + 10kΩ) / 10kΩ = 15.7
+    pub const VBAT_DIVIDER: f32 = 15.7;
+
+    // Current gain for 5V AUX with TPS2521 and RILM = 1kΩ
+    pub const AUX_CURRENT_GAIN: f32 = 5.49; // A/V
+
+    // ADC channel mappings for specific ADCs
+    pub const VIN_CHANNEL: u8 = 0; // PC2_C -> ADC3_INP0
+    pub const VBAT_CHANNEL: u8 = 0; // PA0_C -> ADC12_INP0
+    pub const AUX_CURRENT_CHANNEL: u8 = 1; // PC3_C -> ADC3_INP1
+}
 
 pub struct Pins {
     // I2C1, AF: 4
-    pub pb6: Pin, // SCL
-    pub pb7: Pin, // SDA
+    pub pb8: Pin, // SCL
+    pub pb9: Pin, // SDA
 
     // I2C2, AF: 4
-    pub pf0: Pin, // SDA
     pub pf1: Pin, // SCL
+    pub pf0: Pin, // SDA
+
+    // I2C3, AF: 4
+    pub ph7: Pin, // SCL
+    pub ph8: Pin, // SDA
 
     // I2C4, AF: 4
-    pub pf14: Pin, // SCL
-    pub pf15: Pin, // SDA
+    pub ph11: Pin, // SCL
+    pub ph12: Pin, // SDA
 
-    // TIM1, AF: 1
+    // TIM1
     pub pe9: Pin,  // CH1
     pub pe11: Pin, // CH2
     pub pe13: Pin, // CH3
     pub pe14: Pin, // CH4
 
-    // TIM2, AF: 1
+    // TIM2
     pub pa5: Pin, // CH1
-    pub pa1: Pin, // CH2
+    pub pb3: Pin, // CH2
     pub pa2: Pin, // CH3
     pub pa3: Pin, // CH4
 
-    // TIM3, AF: 2
-    pub pa6: Pin, // CH1
-    pub pa7: Pin, // CH2
-    pub pb0: Pin, // CH3
-    pub pb1: Pin, // CH4
-
-    // TIM4, AF: 2
+    // TIM4
     pub pd12: Pin, // CH1
     pub pd13: Pin, // CH2
     pub pd14: Pin, // CH3
     pub pd15: Pin, // CH4
 
-    // USART1, AF: 7
-    pub pa9: Pin,  // TX
+    // TIM8
+    pub pi5: Pin, // CH1
+    pub pi6: Pin, // CH2
+    pub pi7: Pin, // CH3
+    pub pi2: Pin, // CH4
+
+    // UART1
     pub pa10: Pin, // RX
+    pub pa9: Pin,  // TX
 
-    // USART2, AF: 7
-    pub pd5: Pin, // TX
+    // UART2
     pub pd6: Pin, // RX
+    pub pd5: Pin, // TX
 
-    // USART3, AF: 7
-    pub pd8: Pin, // TX
+    // UART3
     pub pd9: Pin, // RX
+    pub pd8: Pin, // TX
 
-    // UART4, AF: 8
-    pub pb8: Pin, // RX
-    pub pb9: Pin, // TX
+    // UART6
+    pub pc7: Pin, // RX
+    pub pc6: Pin, // TX
 
-    // UART7, AF: 11
-    pub pb4: Pin, // TX
+    // UART7
+    pub pf6: Pin, // RX
+    pub pf7: Pin, // TX
 
-    // USART6, AF: 7
-    pub pg14: Pin, // TX
-
-    // UART8, AF: 8
+    // UART8
     pub pe0: Pin, // RX
     pub pe1: Pin, // TX
 
-    // SPI 1, AF: 5
+    // SPI1
     pub pg11: Pin, // SCK
-    pub pd7: Pin,  // MOSI
     pub pg9: Pin,  // MISO
+    pub pd7: Pin,  // MOSI
     pub pg10: Pin, // CS
 
-    // SPI 4, AF: 5
-    pub pe2: Pin, // SCK
-    pub pe6: Pin, // MOSI
-    pub pe5: Pin, // MISO
-    pub pe4: Pin, // CS
+    // SPI5
+    pub pk0: Pin,  // CLK
+    pub pj11: Pin, // MISO
+    pub pj10: Pin, // MOSI
+    pub pk1: Pin,  // CS
 
-    // CAN 1, AF: 9
-    pub pd0: Pin, // RX
-    pub pd1: Pin, // TX
+    // CAN1
+    pub ph14: Pin, // RX
+    pub ph13: Pin, // TX
 
-    // CAN 2, AF: 9
-    pub pb12: Pin, // RX
-    pub pb13: Pin, // TX
+    // CAN2
+    pub pb5: Pin, // RX
+    pub pb6: Pin, // TX
 
-    // USB, AF: 10
+    // USB_FS
     pub pa11: Pin, // DM
     pub pa12: Pin, // DP
+
+    // USB_HS
+    pub pb14: Pin, // DM
+    pub pb15: Pin, // DP
 
     // SDMMC1, AF: 12
     pub pd2: Pin,  // CMD
@@ -103,19 +126,21 @@ pub struct Pins {
     pub pc11: Pin, // D3
 
     // LEDs
-    pub pd11: Pin, // Red 0
-    pub pd10: Pin, // Green 0
-    pub pb15: Pin, // Blue 0
-    pub pb14: Pin, // Orange 0
+    pub red_led: Pin,
+    pub green_led: Pin,
+    pub blue_led: Pin,
+    pub amber_led: Pin,
 
     // ADC
-    pub pf11: Pin, // ADC1 IN2 (current)
-    pub pf12: Pin, // ADC1 IN6 (voltage)
-    pub pc4: Pin,  // ADC2 IN4 (gpio0)
-    pub pc5: Pin,  // ADC2 IN8 (gpio1)
+    pub vmon_vbat: Pin,
+    pub vmon_vin: Pin,
+    pub imon_5v_aux: Pin,
 
-    // GPIO:
-    pub gpio_connector: [Pin; 8], // PF13, PA0, PG2, PG3, PG4, PG5, PG6, PG7
+    // GPIO
+    pub gpio: [Pin; 8],
+
+    // AUX
+    pub aux_5v_en: Pin,
 }
 
 impl Pins {
@@ -132,73 +157,99 @@ impl Pins {
     unsafe fn steal() -> Self {
         unsafe { PINS_TAKEN = true };
         let mut pins = Self {
-            pb6: Pin::new(Port::B, 6, PinMode::Alt(4)),
-            pb7: Pin::new(Port::B, 7, PinMode::Alt(4)),
+            // I2C1, AF: 4
+            pb8: Pin::new(Port::B, 8, PinMode::Alt(4)),
+            pb9: Pin::new(Port::B, 9, PinMode::Alt(4)),
 
-            pf0: Pin::new(Port::F, 0, PinMode::Alt(4)),
+            // I2C2, AF: 4
             pf1: Pin::new(Port::F, 1, PinMode::Alt(4)),
+            pf0: Pin::new(Port::F, 0, PinMode::Alt(4)),
 
-            pf14: Pin::new(Port::F, 14, PinMode::Alt(4)),
-            pf15: Pin::new(Port::F, 15, PinMode::Alt(4)),
+            // I2C3, AF: 4
+            ph7: Pin::new(Port::H, 7, PinMode::Alt(4)),
+            ph8: Pin::new(Port::H, 8, PinMode::Alt(4)),
 
+            // I2C4, AF: 4
+            ph11: Pin::new(Port::H, 11, PinMode::Alt(4)),
+            ph12: Pin::new(Port::H, 12, PinMode::Alt(4)),
+
+            // TIM1, AF: 1
             pe9: Pin::new(Port::E, 9, PinMode::Alt(1)),
             pe11: Pin::new(Port::E, 11, PinMode::Alt(1)),
             pe13: Pin::new(Port::E, 13, PinMode::Alt(1)),
             pe14: Pin::new(Port::E, 14, PinMode::Alt(1)),
 
+            // TIM2, AF: 1
             pa5: Pin::new(Port::A, 5, PinMode::Alt(1)),
-            pa1: Pin::new(Port::A, 1, PinMode::Alt(1)),
+            pb3: Pin::new(Port::B, 3, PinMode::Alt(1)),
             pa2: Pin::new(Port::A, 2, PinMode::Alt(1)),
             pa3: Pin::new(Port::A, 3, PinMode::Alt(1)),
 
-            pa6: Pin::new(Port::A, 6, PinMode::Alt(2)),
-            pa7: Pin::new(Port::A, 7, PinMode::Alt(2)),
-            pb0: Pin::new(Port::B, 0, PinMode::Alt(2)),
-            pb1: Pin::new(Port::B, 1, PinMode::Alt(2)),
-
+            // TIM4, AF: 2
             pd12: Pin::new(Port::D, 12, PinMode::Alt(2)),
             pd13: Pin::new(Port::D, 13, PinMode::Alt(2)),
             pd14: Pin::new(Port::D, 14, PinMode::Alt(2)),
             pd15: Pin::new(Port::D, 15, PinMode::Alt(2)),
 
-            pa9: Pin::new(Port::A, 9, PinMode::Alt(7)),
+            // TIM8, AF: 3
+            pi5: Pin::new(Port::I, 5, PinMode::Alt(3)),
+            pi6: Pin::new(Port::I, 6, PinMode::Alt(3)),
+            pi7: Pin::new(Port::I, 7, PinMode::Alt(3)),
+            pi2: Pin::new(Port::I, 2, PinMode::Alt(3)),
+
+            // UART1, AF: 7
             pa10: Pin::new(Port::A, 10, PinMode::Alt(7)),
+            pa9: Pin::new(Port::A, 9, PinMode::Alt(7)),
 
-            pd5: Pin::new(Port::D, 5, PinMode::Alt(7)),
+            // UART2, AF: 7
             pd6: Pin::new(Port::D, 6, PinMode::Alt(7)),
+            pd5: Pin::new(Port::D, 5, PinMode::Alt(7)),
 
-            pd8: Pin::new(Port::D, 8, PinMode::Alt(7)),
+            // UART3, AF: 7
             pd9: Pin::new(Port::D, 9, PinMode::Alt(7)),
+            pd8: Pin::new(Port::D, 8, PinMode::Alt(7)),
 
-            pb8: Pin::new(Port::B, 8, PinMode::Alt(8)),
-            pb9: Pin::new(Port::B, 9, PinMode::Alt(8)),
+            // UART6, AF: 7
+            pc7: Pin::new(Port::C, 7, PinMode::Alt(7)),
+            pc6: Pin::new(Port::C, 6, PinMode::Alt(7)),
 
-            pb4: Pin::new(Port::B, 4, PinMode::Alt(11)),
+            // UART7, AF: 7
+            pf6: Pin::new(Port::F, 6, PinMode::Alt(7)),
+            pf7: Pin::new(Port::F, 7, PinMode::Alt(7)),
 
-            pg14: Pin::new(Port::G, 14, PinMode::Alt(7)),
-
+            // UART8, AF: 8
             pe0: Pin::new(Port::E, 0, PinMode::Alt(8)),
             pe1: Pin::new(Port::E, 1, PinMode::Alt(8)),
 
+            // SPI1, AF: 5
             pg11: Pin::new(Port::G, 11, PinMode::Alt(5)),
-            pd7: Pin::new(Port::D, 7, PinMode::Alt(5)),
             pg9: Pin::new(Port::G, 9, PinMode::Alt(5)),
-            pg10: Pin::new(Port::G, 10, PinMode::Alt(5)),
+            pd7: Pin::new(Port::D, 7, PinMode::Alt(5)),
+            pg10: Pin::new(Port::G, 10, PinMode::Alt(5)), // CS pin typically used as GPIO
 
-            pe2: Pin::new(Port::E, 2, PinMode::Alt(5)),
-            pe6: Pin::new(Port::E, 6, PinMode::Alt(5)),
-            pe5: Pin::new(Port::E, 5, PinMode::Alt(5)),
-            pe4: Pin::new(Port::E, 4, PinMode::Alt(5)),
+            // SPI5, AF: 5
+            pk0: Pin::new(Port::K, 0, PinMode::Alt(5)),
+            pj11: Pin::new(Port::J, 11, PinMode::Alt(5)),
+            pj10: Pin::new(Port::J, 10, PinMode::Alt(5)),
+            pk1: Pin::new(Port::K, 1, PinMode::Alt(5)), // CS pin typically used as GPIO
 
-            pd0: Pin::new(Port::D, 0, PinMode::Alt(9)),
-            pd1: Pin::new(Port::D, 1, PinMode::Alt(9)),
+            // CAN1, AF: 9
+            ph14: Pin::new(Port::H, 14, PinMode::Alt(9)),
+            ph13: Pin::new(Port::H, 13, PinMode::Alt(9)),
 
-            pb12: Pin::new(Port::B, 12, PinMode::Alt(9)),
-            pb13: Pin::new(Port::B, 13, PinMode::Alt(9)),
+            // CAN2, AF: 9
+            pb5: Pin::new(Port::B, 5, PinMode::Alt(9)),
+            pb6: Pin::new(Port::B, 6, PinMode::Alt(9)),
 
+            // USB_FS, AF: 10
             pa11: Pin::new(Port::A, 11, PinMode::Alt(10)),
             pa12: Pin::new(Port::A, 12, PinMode::Alt(10)),
 
+            // USB_HS, AF: 10
+            pb14: Pin::new(Port::B, 14, PinMode::Alt(10)),
+            pb15: Pin::new(Port::B, 15, PinMode::Alt(10)),
+
+            // SDMMC1, AF: 12
             pd2: Pin::new(Port::D, 2, PinMode::Alt(12)),
             pc12: Pin::new(Port::C, 12, PinMode::Alt(12)),
             pc8: Pin::new(Port::C, 8, PinMode::Alt(12)),
@@ -206,58 +257,81 @@ impl Pins {
             pc10: Pin::new(Port::C, 10, PinMode::Alt(12)),
             pc11: Pin::new(Port::C, 11, PinMode::Alt(12)),
 
-            pd11: Pin::new(Port::D, 11, PinMode::Output),
-            pd10: Pin::new(Port::D, 10, PinMode::Output),
-            pb15: Pin::new(Port::B, 15, PinMode::Output),
-            pb14: Pin::new(Port::B, 14, PinMode::Output),
-            pf11: Pin::new(Port::F, 11, PinMode::Analog),
-            pf12: Pin::new(Port::F, 12, PinMode::Analog),
-            pc4: Pin::new(Port::C, 4, PinMode::Analog),
-            pc5: Pin::new(Port::C, 5, PinMode::Analog),
+            // LEDs
+            red_led: Pin::new(Port::E, 5, PinMode::Output),
+            green_led: Pin::new(Port::A, 15, PinMode::Output),
+            blue_led: Pin::new(Port::I, 0, PinMode::Output),
+            amber_led: Pin::new(Port::I, 9, PinMode::Output),
 
-            gpio_connector: [
-                Pin::new(Port::F, 13, PinMode::Output),
-                Pin::new(Port::A, 0, PinMode::Output),
+            // ADC
+            vmon_vbat: Pin::new(Port::A, 0, PinMode::Analog),
+            vmon_vin: Pin::new(Port::C, 2, PinMode::Analog),
+            imon_5v_aux: Pin::new(Port::C, 3, PinMode::Analog),
+
+            // GPIO
+            gpio: [
+                Pin::new(Port::K, 2, PinMode::Output),
                 Pin::new(Port::G, 2, PinMode::Output),
                 Pin::new(Port::G, 3, PinMode::Output),
                 Pin::new(Port::G, 4, PinMode::Output),
                 Pin::new(Port::G, 5, PinMode::Output),
                 Pin::new(Port::G, 6, PinMode::Output),
                 Pin::new(Port::G, 7, PinMode::Output),
+                Pin::new(Port::G, 8, PinMode::Output),
             ],
+
+            // AUX
+            aux_5v_en: Pin::new(Port::H, 15, PinMode::Output),
         };
-        // Enable open drain for I2C
-        pins.pb6.output_type(OutputType::OpenDrain);
-        pins.pb7.output_type(OutputType::OpenDrain);
+        // Enable open drain for I2C and add pull-ups
+        pins.pb8.output_type(OutputType::OpenDrain);
+        pins.pb8.pull(Pull::Up);
+        pins.pb9.output_type(OutputType::OpenDrain);
+        pins.pb9.pull(Pull::Up);
         pins.pf0.output_type(OutputType::OpenDrain);
+        pins.pf0.pull(Pull::Up);
         pins.pf1.output_type(OutputType::OpenDrain);
-        pins.pf14.output_type(OutputType::OpenDrain);
-        pins.pf15.output_type(OutputType::OpenDrain);
+        pins.pf1.pull(Pull::Up);
+        pins.ph7.output_type(OutputType::OpenDrain);
+        pins.ph7.pull(Pull::Up);
+        pins.ph8.output_type(OutputType::OpenDrain);
+        pins.ph8.pull(Pull::Up);
+        pins.ph11.output_type(OutputType::OpenDrain);
+        pins.ph11.pull(Pull::Up);
+        pins.ph12.output_type(OutputType::OpenDrain);
+        pins.ph12.pull(Pull::Up);
 
-        // For SDIO, set to high speed and enable internal pull-ups for D0-D3 and CMD
-        pins.pd2.output_speed(OutputSpeed::High);
-        pins.pc12.output_speed(OutputSpeed::High);
-        pins.pc8.output_speed(OutputSpeed::High);
-        pins.pc9.output_speed(OutputSpeed::High);
-        pins.pc10.output_speed(OutputSpeed::High);
-        pins.pc11.output_speed(OutputSpeed::High);
-        pins.pd2.pull(Pull::Up);
-        pins.pc8.pull(Pull::Up);
-        pins.pc9.pull(Pull::Up);
-        pins.pc10.pull(Pull::Up);
-        pins.pc11.pull(Pull::Up);
-
-        // Set CAN pins to very high speed
-        pins.pd0.output_speed(OutputSpeed::VeryHigh);
-        pins.pd1.output_speed(OutputSpeed::VeryHigh);
-        pins.pb12.output_speed(OutputSpeed::VeryHigh);
-        pins.pb13.output_speed(OutputSpeed::VeryHigh);
+        // Set pull-up for UART pins
+        pins.pa10.pull(Pull::Up);
+        pins.pd6.pull(Pull::Up);
+        pins.pd9.pull(Pull::Up);
+        pins.pc7.pull(Pull::Up);
+        pins.pf6.pull(Pull::Up);
+        pins.pe0.pull(Pull::Up);
 
         // Set LED pins to low speed
-        pins.pd11.output_speed(OutputSpeed::Low);
-        pins.pd10.output_speed(OutputSpeed::Low);
-        pins.pb15.output_speed(OutputSpeed::Low);
-        pins.pb14.output_speed(OutputSpeed::Low);
+        pins.red_led.output_speed(OutputSpeed::Low);
+        pins.green_led.output_speed(OutputSpeed::Low);
+        pins.blue_led.output_speed(OutputSpeed::Low);
+        pins.amber_led.output_speed(OutputSpeed::Low);
+
+        // Set high speed for SPI
+        pins.pg11.output_speed(OutputSpeed::VeryHigh);
+        pins.pg9.output_speed(OutputSpeed::VeryHigh);
+        pins.pd7.output_speed(OutputSpeed::VeryHigh);
+        pins.pk0.output_speed(OutputSpeed::VeryHigh);
+        pins.pj11.output_speed(OutputSpeed::VeryHigh);
+        pins.pj10.output_speed(OutputSpeed::VeryHigh);
+
+        // Set high speed for SDMMC
+        pins.pd2.output_speed(OutputSpeed::VeryHigh);
+        pins.pc12.output_speed(OutputSpeed::VeryHigh);
+        pins.pc8.output_speed(OutputSpeed::VeryHigh);
+        pins.pc9.output_speed(OutputSpeed::VeryHigh);
+        pins.pc10.output_speed(OutputSpeed::VeryHigh);
+        pins.pc11.output_speed(OutputSpeed::VeryHigh);
+
+        pins.aux_5v_en.set_high();
 
         pins
     }
@@ -273,16 +347,26 @@ pub fn clock_cfg(pwr: pac::PWR) -> clocks::Clocks {
     });
 
     let clock_cfg = clocks::Clocks {
-        pll_src: clocks::PllSrc::Hse(HSE_FREQ.to_Hz()), // 16 MHz
+        pll_src: clocks::PllSrc::Hse(HSE_FREQ.to_Hz()), // 24 MHz
         pll1: clocks::PllCfg {
             enabled: true,
             pllp_en: true,
             pllq_en: true,
             pllr_en: false,
-            divm: 2,   // pll_input_speed = 8 MHz
+            divm: 3,   // pll_input_speed = 8 MHz
             divn: 100, // vco_speed = 800 MHz
             divp: 2,   // sysclk = 400 MHz
             divq: 8,   // 100 MHz
+            ..Default::default()
+        },
+        pll2: clocks::PllCfg {
+            enabled: true,
+            pllp_en: true,
+            pllq_en: false,
+            pllr_en: false,
+            divm: 3,  // pll_input_speed = 8 MHz (24 MHz / 3)
+            divn: 25, // vco_speed = 200 MHz (8 MHz * 25)
+            divp: 8,  // pll2_p_ck = 25 MHz (200 MHz / 8) - max for 16-bit ADC
             ..Default::default()
         },
         hsi48_on: true,
@@ -294,6 +378,7 @@ pub fn clock_cfg(pwr: pac::PWR) -> clocks::Clocks {
         d3_prescaler: clocks::ApbPrescaler::Div2, // 100 MHz
         vos_range: clocks::VosRange::VOS1,
         can_src: clocks::CanSrc::Hse,
+        hse_bypass: true,
         ..Default::default()
     };
 

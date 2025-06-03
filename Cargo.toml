@@ -37,6 +37,7 @@ members = [
     "fsw/aleph-status",
     "fsw/tegrastats-bridge",
     "fsw/aleph-setup",
+    "fsw/blackbox",
     "apps/inscriber",
     "fsw/video-streamer",
     "fsw/gstreamer"

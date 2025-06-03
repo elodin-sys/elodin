@@ -18,18 +18,7 @@ type File<'a> =
 const RESET_PERIOD: fugit::MicrosDuration<u32> = fugit::MicrosDuration::<u32>::millis(100);
 const MIN_CLUSTER_SIZE: usize = 512 * 8;
 
-#[derive(zerocopy::FromBytes, zerocopy::IntoBytes, zerocopy::Immutable, Clone)]
-#[repr(C)]
-pub struct Record {
-    pub ts: u32, // in milliseconds
-    pub mag: [f32; 3],
-    pub gyro: [f32; 3],
-    pub accel: [f32; 3],
-    pub mag_temp: f32,
-    pub mag_sample: u32,
-    pub baro: f32,
-    pub baro_temp: f32,
-}
+pub use ::blackbox::Record;
 
 pub struct SdmmcFs {
     sdmmc: sdmmc::Sdmmc,

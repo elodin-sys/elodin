@@ -14,7 +14,7 @@ pub struct HealingUsart<R> {
 
 impl<R> HealingUsart<R>
 where
-    R: Deref<Target = pac::usart1::RegisterBlock>,
+    R: Deref<Target = pac::usart1::RegisterBlock> + hal::RccPeriph,
 {
     pub fn new(usart: usart::Usart<R>) -> Self {
         Self {
@@ -54,7 +54,7 @@ impl<R> ErrorType for HealingUsart<R> {
 
 impl<R> Read for HealingUsart<R>
 where
-    R: Deref<Target = pac::usart1::RegisterBlock>,
+    R: Deref<Target = pac::usart1::RegisterBlock> + hal::RccPeriph,
     usart::Usart<R>: Read<Error = Self::Error>,
 {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
@@ -66,7 +66,7 @@ where
 
 impl<R> ReadReady for HealingUsart<R>
 where
-    R: Deref<Target = pac::usart1::RegisterBlock>,
+    R: Deref<Target = pac::usart1::RegisterBlock> + hal::RccPeriph,
     usart::Usart<R>: ReadReady<Error = Self::Error>,
 {
     fn read_ready(&mut self) -> Result<bool, Self::Error> {
