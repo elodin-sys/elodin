@@ -12,7 +12,7 @@ use impeller2::{
 };
 use peg::error::ParseError;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AstNode<'input> {
     Ident(Cow<'input, str>),
     Field(Box<AstNode<'input>>, Cow<'input, str>),
@@ -20,6 +20,7 @@ pub enum AstNode<'input> {
     BinaryOp(Box<AstNode<'input>>, Box<AstNode<'input>>, BinaryOp),
     Tuple(Vec<AstNode<'input>>),
     StringLiteral(Cow<'input, str>),
+    FloatLiteral(f64),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
@@ -47,6 +48,9 @@ peg::parser! {
 
         rule ident_str() -> Cow<'input, str>
             = i:$([c if is_xid_start(c)] [c if is_xid_continue(c)]*) { Cow::Borrowed(i) }
+        rule num() -> f64
+            = s:$("-"? ['0'..='9']+ ("." ['0'..='9']*)?) { s.parse().unwrap() }
+
         rule string_literal() -> Cow<'input, str> = "\"" s:$([^'"']*) "\"" { Cow::Borrowed(s) }
         rule comma() = ("," _?)
         rule binary_op() -> BinaryOp = "+" { BinaryOp::Add } / "-" { BinaryOp::Sub } / "*" { BinaryOp::Mul } / "/" { BinaryOp::Div }
@@ -61,6 +65,8 @@ peg::parser! {
         e:(@) "." i:ident_str() { AstNode::Field(Box::new(e), i) }
         --
         "(" _ e:expr() _ ")" { e }
+        --
+        f:num() { AstNode::FloatLiteral(f) }
         --
         s:string_literal() { AstNode::StringLiteral(s) }
         --
@@ -78,6 +84,7 @@ pub enum Expr {
     ArrayAccess(Box<Expr>, usize),
     Tuple(Vec<Expr>),
     DurationLiteral(hifitime::Duration),
+    FloatLiteral(f64),
 
     // ffts
     Fft(Box<Expr>),
@@ -112,6 +119,7 @@ impl Expr {
                     "array access on non-component".to_string(),
                 )),
             },
+            Expr::FloatLiteral(f) => Ok(format!("{}", f)),
 
             expr => Err(Error::InvalidFieldAccess(format!(
                 "unsupported expression type for field {expr:?}"
@@ -156,6 +164,7 @@ impl Expr {
                 op.to_str(),
                 right.to_qualified_field()?
             )),
+            Expr::FloatLiteral(f) => Ok(format!("{}", f)),
             _ => {
                 let table = self.to_table()?;
                 let field = self.to_field()?;
@@ -401,6 +410,11 @@ impl Context {
         expr.to_sql(self)
     }
 
+    pub fn parse_str(&self, query: &str) -> Result<Expr, Error> {
+        let ast = ast_parser::expr(query)?;
+        self.parse(&ast)
+    }
+
     pub fn parse(&self, ast: &AstNode) -> Result<Expr, Error> {
         match ast {
             AstNode::Ident(cow) => self
@@ -464,6 +478,7 @@ impl Context {
                 let right = self.parse(right)?;
                 Ok(Expr::BinaryOp(Box::new(left), Box::new(right), *op))
             }
+            AstNode::FloatLiteral(f) => Ok(Expr::FloatLiteral(*f)),
         }
     }
 
@@ -687,7 +702,10 @@ mod tests {
 
         let expr = Expr::Component(entity_component);
         let result = expr.to_sql(&context);
-        assert_eq!(result.unwrap(), "select world_pos from a_world_pos");
+        assert_eq!(
+            result.unwrap(),
+            "select a_world_pos.world_pos as 'a.world_pos' from a_world_pos"
+        );
     }
 
     #[test]
@@ -697,7 +715,7 @@ mod tests {
 
         let expr = Expr::Time(entity_component);
         let result = expr.to_sql(&context);
-        assert_eq!(result.unwrap(), "select time from a_world_pos");
+        assert_eq!(result.unwrap(), "select a_world_pos.time from a_world_pos");
     }
 
     #[test]
@@ -708,7 +726,10 @@ mod tests {
         let time_expr = Expr::Time(entity_component);
         let expr = Expr::FftFreq(Box::new(time_expr));
         let result = expr.to_sql(&context);
-        assert_eq!(result.unwrap(), "select fftfreq(time) from a_world_pos");
+        assert_eq!(
+            result.unwrap(),
+            "select fftfreq(a_world_pos.time) from a_world_pos"
+        );
     }
 
     #[test]
@@ -719,17 +740,26 @@ mod tests {
         // Test first element
         let expr = Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 0);
         let result = expr.to_sql(&context);
-        assert_eq!(result.unwrap(), "select world_pos[1] from a_world_pos");
+        assert_eq!(
+            result.unwrap(),
+            "select a_world_pos.world_pos[1] as 'a.world_pos.x' from a_world_pos"
+        );
 
         // Test second element
         let expr = Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 1);
         let result = expr.to_sql(&context);
-        assert_eq!(result.unwrap(), "select world_pos[2] from a_world_pos");
+        assert_eq!(
+            result.unwrap(),
+            "select a_world_pos.world_pos[2] as 'a.world_pos.y' from a_world_pos"
+        );
 
         // Test third element
         let expr = Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 2);
         let result = expr.to_sql(&context);
-        assert_eq!(result.unwrap(), "select world_pos[3] from a_world_pos");
+        assert_eq!(
+            result.unwrap(),
+            "select a_world_pos.world_pos[3] as 'a.world_pos.z' from a_world_pos"
+        );
     }
 
     #[test]
@@ -745,7 +775,7 @@ mod tests {
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select time, world_pos[1] from a_world_pos"
+            "select a_world_pos.time, a_world_pos.world_pos[1] as 'a.world_pos.x' from a_world_pos"
         );
 
         // Test Tuple with multiple ArrayAccess
@@ -757,7 +787,7 @@ mod tests {
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select world_pos[1], world_pos[2], world_pos[3] from a_world_pos"
+            "select a_world_pos.world_pos[1] as 'a.world_pos.x', a_world_pos.world_pos[2] as 'a.world_pos.y', a_world_pos.world_pos[3] as 'a.world_pos.z' from a_world_pos"
         );
     }
 
@@ -784,7 +814,7 @@ mod tests {
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select a_world_pos.world_pos, b_velocity.velocity from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time"
+            "select a_world_pos.world_pos as 'a.world_pos', b_velocity.velocity as 'b.velocity' from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time"
         );
 
         // Test Tuple with Time from one table and Component from another
@@ -795,7 +825,7 @@ mod tests {
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select a_world_pos.time, b_velocity.velocity from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time"
+            "select a_world_pos.time, b_velocity.velocity as 'b.velocity' from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time"
         );
 
         // Test Tuple with ArrayAccess from different tables
@@ -806,7 +836,7 @@ mod tests {
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select a_world_pos.world_pos[1], b_velocity.velocity[2] from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time"
+            "select a_world_pos.world_pos[1] as 'a.world_pos.x', b_velocity.velocity[2] as 'b.velocity.y' from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time"
         );
     }
 
@@ -842,7 +872,7 @@ mod tests {
         let result_str = result.unwrap();
         assert_eq!(
             result_str,
-            "select a_world_pos.world_pos, b_velocity.velocity, c_acceleration.acceleration from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time JOIN c_acceleration ON a_world_pos.time = c_acceleration.time"
+            "select a_world_pos.world_pos as 'a.world_pos', b_velocity.velocity as 'b.velocity', c_acceleration.acceleration as 'c.acceleration' from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time JOIN c_acceleration ON a_world_pos.time = c_acceleration.time"
         );
     }
 

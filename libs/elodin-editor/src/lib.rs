@@ -3,7 +3,7 @@ use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 use crate::plugins::editor_cam_touch;
 use bevy::{
     DefaultPlugins,
-    asset::embedded_asset,
+    asset::{UnapprovedPathMode, embedded_asset},
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
     log::LogPlugin,
@@ -45,6 +45,7 @@ use ui::{
     widgets::plot::{CollectedGraphData, gpu::LineHandle},
 };
 
+pub mod ghosts;
 mod offset_parse;
 mod plugins;
 pub mod ui;
@@ -152,6 +153,10 @@ impl Plugin for EditorPlugin {
                         }),
                         ..default()
                     })
+                    .set(AssetPlugin {
+                        unapproved_path_mode: UnapprovedPathMode::Allow,
+                        ..default()
+                    })
                     .disable::<TransformPlugin>()
                     .disable::<DiagnosticsPlugin>()
                     .disable::<LogPlugin>()
@@ -207,7 +212,8 @@ impl Plugin for EditorPlugin {
             .insert_resource(ClearColor(get_scheme().bg_secondary.into_bevy()))
             .insert_resource(TimeRangeBehavior::default())
             .insert_resource(SelectedTimeRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)))
-            .init_resource::<EqlContext>();
+            .init_resource::<EqlContext>()
+            .add_plugins(ghosts::GhostsPlugin);
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
         }

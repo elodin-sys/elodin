@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, str::FromStr, time::Duration};
 
 use bevy::{
+    asset::AssetServer,
     ecs::{
         entity::Entity,
         query::With,
@@ -19,7 +20,7 @@ use impeller2_bevy::{ComponentMetadataRegistry, CurrentStreamId, PacketTx};
 use impeller2_wkt::{BodyAxes, EntityMetadata, IsRecording, SetDbSettings, SetStreamState};
 
 use crate::{
-    Offset, SelectedTimeRange, TimeRangeBehavior,
+    EqlContext, Offset, SelectedTimeRange, TimeRangeBehavior,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
         self, EntityData, HdrEnabled, colors,
@@ -801,6 +802,56 @@ pub fn set_color_scheme() -> PaletteItem {
     })
 }
 
+pub fn create_ghost() -> PaletteItem {
+    PaletteItem::new("Create Ghost", TILES_LABEL, move |_: In<String>| {
+        PalettePage::new(vec![
+            PaletteItem::new(
+                LabelSource::placeholder("Enter EQL expression (e.g., 'entity.position')"),
+                "Enter an EQL expression that resolves to a 7-component array [qx, qy, qz, qw, px, py, pz]",
+                move |In(eql): In<String>, eql_context: Res<EqlContext>| {
+                    let expr = match eql_context.0.parse_str(&eql) {
+                        Ok(expr) => expr,
+                        Err(err) => {
+                            return PaletteEvent::Error(err.to_string())
+                        }
+                    };
+                    PalettePage::new(vec![
+                        PaletteItem::new(
+                            LabelSource::placeholder("Enter GLTF path (optional)"),
+                            "Enter path to GLTF file for the ghost visualization (leave empty for no visual)",
+                            move |In(gltf_path): In<String>,
+                                  mut commands: Commands,
+                                  asset_server: Res<AssetServer>,
+                                  | {
+                                let gltf_path = if gltf_path.trim().is_empty() {
+                                    None
+                                } else {
+                                    Some(gltf_path.trim().to_string())
+                                };
+
+
+                                crate::ghosts::create_ghost_entity(
+                                    &mut commands,
+                                    eql.clone(),
+                                    expr.clone(),
+                                    gltf_path,
+                                    &asset_server,
+                                );
+
+                                PaletteEvent::Exit
+                            },
+                        ).default()
+                    ])
+                    .prompt("Enter GLTF path for ghost visualization")
+                    .into()
+                },
+            ).default()
+        ])
+        .prompt("Enter EQL expression for ghost positioning")
+        .into()
+    })
+}
+
 pub fn create_tiles(tile_id: TileId) -> PalettePage {
     PalettePage::new(vec![
         create_graph(Some(tile_id)),
@@ -880,6 +931,7 @@ impl Default for PalettePage {
             create_hierarchy(None),
             create_inspector(None),
             create_sidebars(),
+            create_ghost(),
             save_preset(),
             load_preset(),
             set_color_scheme(),

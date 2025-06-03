@@ -18,23 +18,27 @@ use crate::{
     ui::{
         EntityData, EntityPair,
         colors::get_scheme,
+        theme::configure_input_with_border,
         tiles::TreeAction,
         utils::{MarginSides, format_num},
         widgets::{
             WidgetSystem, label,
             plot::{GraphBundle, default_component_values},
+            query_plot::QueryType,
         },
     },
 };
 
-use super::{InspectorIcons, empty_inspector};
+use super::{InspectorIcons, empty_inspector, graph::eql_autocomplete, graph::query};
 
 #[derive(SystemParam)]
 pub struct InspectorEntity<'w, 's> {
     entities: Query<'w, 's, EntityData<'static>>,
+    ghost: Query<'w, 's, &'static mut crate::ghosts::Ghost>,
     metadata_store: Res<'w, ComponentMetadataRegistry>,
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     filter: ResMut<'w, ComponentFilter>,
+    eql_context: ResMut<'w, crate::EqlContext>,
 }
 
 impl WidgetSystem for InspectorEntity<'_, '_> {
@@ -94,6 +98,29 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                     });
                 });
             });
+
+        if let Ok(mut ghost) = state_mut.ghost.get_mut(pair.bevy) {
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(8, 8))
+                .show(ui, |ui| {
+                    ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 8.0);
+                    ui.separator();
+                    ui.label(egui::RichText::new("Query").color(get_scheme().text_secondary));
+                    configure_input_with_border(ui.style_mut());
+                    let query_res = query(ui, &mut ghost.eql, QueryType::EQL);
+                    eql_autocomplete(ui, &state_mut.eql_context.0, &query_res, &mut ghost.eql);
+                    if query_res.changed() {
+                        match state_mut.eql_context.0.parse_str(&ghost.eql) {
+                            Ok(expr) => {
+                                ghost.expr = expr;
+                            }
+                            Err(err) => {
+                                ui.colored_label(get_scheme().error, err.to_string());
+                            }
+                        }
+                    }
+                });
+        }
 
         search(ui, &mut state_mut.filter.0, icons.search);
 
