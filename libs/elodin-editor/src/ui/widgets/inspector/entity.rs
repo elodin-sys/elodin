@@ -56,7 +56,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) -> Self::Output {
-        let width = dbg!(ui.available_width());
+        let width = ui.available_width();
         let mut tree_actions = SmallVec::new();
         let mut state_mut = state.get_mut(world);
 
@@ -120,7 +120,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                 if query_res.changed() {
                     match state_mut.eql_context.0.parse_str(&ghost.eql) {
                         Ok(expr) => {
-                            ghost.expr = expr;
+                            ghost.compiled_expr = crate::ghosts::compile_eql_expr(expr);
                         }
                         Err(err) => {
                             ui.colored_label(get_scheme().error, err.to_string());
@@ -243,9 +243,9 @@ pub fn search(
 
                     let mut font_id = egui::TextStyle::Button.resolve(ui.style());
                     font_id.size = 12.0;
-                    ui.add_sized(
-                        ui.available_size(),
+                    ui.add(
                         egui::TextEdit::singleline(filter)
+                            .desired_width(ui.available_width())
                             .frame(false)
                             .font(font_id),
                     );

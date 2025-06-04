@@ -1073,7 +1073,6 @@ pub fn clamp_current_time(
     }
 }
 
-/// Resource containing the EQL context for generating SQL queries
 #[derive(Resource)]
 pub struct EqlContext(pub eql::Context);
 
@@ -1087,7 +1086,6 @@ impl Default for EqlContext {
     }
 }
 
-/// System that updates the EQL context when EntityMap or ComponentMetadataRegistry change
 pub fn update_eql_context(
     entity_map: Res<EntityMap>,
     component_metadata_registry: Res<ComponentMetadataRegistry>,
@@ -1095,12 +1093,7 @@ pub fn update_eql_context(
     component_value_query: Query<&ComponentValueMap>,
     entity_metadata_query: Query<&EntityMetadata>,
     mut eql_context: ResMut<EqlContext>,
-    earliest: Res<EarliestTimestamp>,
-    latest: Res<LastUpdated>,
 ) {
-    if !eql_context.0.entities.is_empty() {
-        return;
-    }
     let mut entities = HashMap::new();
     for (entity_id, bevy_entity) in entity_map.iter() {
         let entity_name = if let Ok(entity_metadata) = entity_metadata_query.get(*bevy_entity) {
@@ -1141,14 +1134,14 @@ pub fn update_eql_context(
 
             let entity = Arc::new(eql::Entity {
                 name: entity_name.clone(),
-                componnets: components,
+                components,
             });
 
             entities.insert(entity_name, entity);
         }
     }
 
-    eql_context.0 = eql::Context::new(entities, earliest.0, latest.0);
+    eql_context.0 = eql::Context::new(entities, Timestamp(i64::MIN), Timestamp(i64::MAX));
 }
 
 pub fn set_eql_context_range(time_range: Res<SelectedTimeRange>, mut eql: ResMut<EqlContext>) {

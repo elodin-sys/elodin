@@ -18,8 +18,8 @@ use super::{
     colors::{ColorExt, get_scheme},
     theme,
     widgets::{
-    WidgetSystem, button::EButton, inspector::graph::eql_autocomplete, query_plot::QueryType,
-},
+        WidgetSystem, button::EButton, inspector::graph::eql_autocomplete, query_plot::QueryType,
+    },
 };
 
 #[derive(Clone)]

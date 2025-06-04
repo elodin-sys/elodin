@@ -294,7 +294,7 @@ impl Expr {
             }
 
             Expr::Last(expr, duration) => {
-                let sql = expr.to_sql(&context)?;
+                let sql = expr.to_sql(context)?;
                 let duration_micros = (duration.total_nanoseconds() / 1000) as i64;
                 let lower_bound = context.last_timestamp.0 - duration_micros;
                 let lower_bound = lower_bound as f64 * 1e-6;
@@ -304,7 +304,7 @@ impl Expr {
                 ))
             }
             Expr::First(expr, duration) => {
-                let sql = expr.to_sql(&context)?;
+                let sql = expr.to_sql(context)?;
                 let duration_micros = (duration.total_nanoseconds() / 1000) as i64;
                 let upper_bound = context.earliest_timestamp.0 + duration_micros;
                 let upper_bound = upper_bound as f64 * 1e-6;
@@ -330,7 +330,7 @@ impl Expr {
 #[derive(Clone, Debug)]
 pub struct Entity {
     pub name: String,
-    pub componnets: HashMap<String, Arc<EntityComponent>>,
+    pub components: HashMap<String, Arc<EntityComponent>>,
 }
 
 #[derive(Clone, Debug)]
@@ -427,7 +427,7 @@ impl Context {
                 let expr = self.parse(ast_node)?;
                 match &expr {
                     Expr::Entity(entity) => entity
-                        .componnets
+                        .components
                         .get(cow.as_ref())
                         .ok_or(Error::ComponentNotFound(cow.to_string()))
                         .cloned()
@@ -449,7 +449,7 @@ impl Context {
             AstNode::MethodCall(recv, cow, ast_nodes) => {
                 let recv = self.parse(recv)?;
                 let args = ast_nodes
-                    .into_iter()
+                    .iter()
                     .map(|ast_node| self.parse(ast_node))
                     .collect::<Result<Vec<_>, _>>()?;
                 match (cow.as_ref(), &recv, &args[..]) {
@@ -465,7 +465,7 @@ impl Context {
                 }
             }
             AstNode::Tuple(ast_nodes) => ast_nodes
-                .into_iter()
+                .iter()
                 .map(|ast_node| self.parse(ast_node))
                 .collect::<Result<Vec<_>, _>>()
                 .map(Expr::Tuple),
@@ -494,7 +494,7 @@ impl Context {
     pub fn get_suggestions(&self, expr: &Expr) -> Vec<String> {
         match expr {
             Expr::Entity(entity) => {
-                let mut suggestions = entity.componnets.keys().cloned().collect::<Vec<_>>();
+                let mut suggestions = entity.components.keys().cloned().collect::<Vec<_>>();
                 suggestions.sort();
                 suggestions.push("time".to_string());
                 suggestions
@@ -579,9 +579,7 @@ impl Context {
                 .collect();
         }
 
-        if input.ends_with('.') {
-            let query = &input[..input.len() - 1];
-
+        if let Some(query) = input.strip_suffix('.') {
             let Ok(ast) = ast_parser::expr(query.trim()) else {
                 return vec![];
             };
@@ -654,10 +652,10 @@ mod tests {
             AstNode::MethodCall(
                 Box::new(AstNode::Ident(Cow::Borrowed("a"))),
                 Cow::Borrowed("bar"),
-                vec![
+                vec![AstNode::Tuple(vec![
                     AstNode::Ident(Cow::Borrowed("b")),
                     AstNode::Ident(Cow::Borrowed("c")),
-                ]
+                ])]
             )
         )
     }
@@ -683,7 +681,7 @@ mod tests {
 
         let entity = Arc::new(Entity {
             name: "test_entity".to_string(),
-            componnets: components,
+            components,
         });
 
         entities.insert("test_entity".to_string(), entity);
@@ -898,7 +896,7 @@ mod tests {
     fn test_component_suggestions() {
         let context = create_test_context();
         let entity = context.entities.get("test_entity").unwrap();
-        let component = entity.componnets.get("component").unwrap();
+        let component = entity.components.get("component").unwrap();
         let expr = Expr::Component(component.clone());
 
         let suggestions = context.get_suggestions(&expr);
