@@ -444,6 +444,20 @@ pub fn auto_range(ui: &mut egui::Ui, label: &str, auto_range: &mut bool, range: 
 }
 
 pub fn query(ui: &mut egui::Ui, query: &mut String, ty: QueryType) -> egui::Response {
+    inspector_text_field(
+        ui,
+        query,
+        match ty {
+            QueryType::EQL => "EQL Query (i.e a.world_pos.x)",
+            QueryType::SQL => "SQL Query (i.e select * from table)",
+        },
+    )
+}
+pub fn inspector_text_field(
+    ui: &mut egui::Ui,
+    query: &mut String,
+    hint_text: &str,
+) -> egui::Response {
     let scheme = get_scheme();
     ui.scope(|ui| {
         ui.style_mut().visuals.widgets.inactive = egui::style::WidgetVisuals {
@@ -468,10 +482,7 @@ pub fn query(ui: &mut egui::Ui, query: &mut String, ty: QueryType) -> egui::Resp
             egui::TextEdit::singleline(query)
                 .font(font_id)
                 .lock_focus(true)
-                .hint_text(match ty {
-                    QueryType::EQL => "EQL Query (i.e a.world_pos.x)",
-                    QueryType::SQL => "SQL Query (i.e select * from table)",
-                })
+                .hint_text(hint_text)
                 .desired_width(ui.available_width() - 16.0)
                 .margin(8.0),
         )

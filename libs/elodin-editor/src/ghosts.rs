@@ -3,7 +3,7 @@ use big_space::GridCell;
 use eql::{Context as EqlContext, Expr};
 use impeller2::{component::Component, types::EntityId};
 use impeller2_bevy::{ComponentValueMap, EntityMap};
-use impeller2_wkt::{ComponentValue, EntityMetadata, WorldPos};
+use impeller2_wkt::{ComponentValue, EntityMetadata, Glb, WorldPos};
 use nox::Array;
 use smallvec::smallvec;
 
@@ -159,12 +159,12 @@ pub fn update_ghost_system(
             Ok(component_value) => {
                 if let ComponentValue::F64(array) = component_value {
                     use nox::ArrayBuf;
-                    let data = dbg!(array.buf.as_buf());
+                    let data = array.buf.as_buf();
                     if data.len() >= 7 {
-                        *pos = dbg!(impeller2_wkt::WorldPos {
+                        *pos = impeller2_wkt::WorldPos {
                             att: nox::Quaternion::new(data[3], data[0], data[1], data[2]),
                             pos: nox::Vector3::new(data[4], data[5], data[6]),
-                        });
+                        };
                         value_map
                             .insert(WorldPos::COMPONENT_ID, ComponentValue::F64(array.to_dyn()));
                     }
@@ -180,16 +180,14 @@ pub fn update_ghost_system(
     }
 }
 
-/// Creates a new ghost entity with the given expression and optional GLTF asset
 pub fn create_ghost_entity(
     commands: &mut Commands,
     eql: String,
     expr: eql::Expr,
     gltf_path: Option<String>,
-    asset_server: &AssetServer,
 ) -> Entity {
     let entity_id = EntityId(fastrand::u64(..));
-    let mut entity_commands = commands.spawn((
+    let mut entity = commands.spawn((
         Ghost::new(eql, expr),
         Transform::default(),
         GlobalTransform::default(),
@@ -207,16 +205,14 @@ pub fn create_ghost_entity(
         },
     ));
 
-    // If a GLTF path is provided, load and attach the asset
     if let Some(path) = gltf_path {
-        let scene = asset_server.load_override::<Scene>(format!("{}#Scene0", path));
-        entity_commands.insert(SceneRoot(scene));
+        entity.insert(impeller2_bevy::AssetHandle::<Glb>::new(fastrand::u64(..)));
+        entity.insert(Glb(path));
     }
 
-    entity_commands.id()
+    entity.id()
 }
 
-/// Plugin for the ghosts system
 pub struct GhostsPlugin;
 
 impl Plugin for GhostsPlugin {

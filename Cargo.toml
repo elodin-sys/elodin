@@ -41,7 +41,6 @@ members = [
     "apps/inscriber",
     "fsw/video-streamer",
     "fsw/gstreamer",
-    "fsw/eeprom-flash",
     "libs/db/eql"
  ]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]

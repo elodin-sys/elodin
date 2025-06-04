@@ -1,7 +1,6 @@
 use std::{collections::BTreeMap, str::FromStr, time::Duration};
 
 use bevy::{
-    asset::AssetServer,
     ecs::{
         entity::Entity,
         query::With,
@@ -803,7 +802,7 @@ pub fn set_color_scheme() -> PaletteItem {
 }
 
 pub fn create_ghost() -> PaletteItem {
-    PaletteItem::new("Create Ghost", TILES_LABEL, move |_: In<String>| {
+    PaletteItem::new("Create Ghost Entity", TILES_LABEL, move |_: In<String>| {
         PalettePage::new(vec![
             PaletteItem::new(
                 LabelSource::placeholder("Enter EQL expression (e.g., 'entity.position')"),
@@ -820,9 +819,7 @@ pub fn create_ghost() -> PaletteItem {
                             LabelSource::placeholder("Enter GLTF path (optional)"),
                             "Enter path to GLTF file for the ghost visualization (leave empty for no visual)",
                             move |In(gltf_path): In<String>,
-                                  mut commands: Commands,
-                                  asset_server: Res<AssetServer>,
-                                  | {
+                                  mut commands: Commands| {
                                 let gltf_path = if gltf_path.trim().is_empty() {
                                     None
                                 } else {
@@ -835,7 +832,6 @@ pub fn create_ghost() -> PaletteItem {
                                     eql.clone(),
                                     expr.clone(),
                                     gltf_path,
-                                    &asset_server,
                                 );
 
                                 PaletteEvent::Exit
