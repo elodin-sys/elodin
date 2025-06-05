@@ -40,8 +40,9 @@ members = [
     "fsw/blackbox",
     "apps/inscriber",
     "fsw/video-streamer",
-    "fsw/gstreamer"
-]
+    "fsw/gstreamer",
+    "libs/db/eql"
+ ]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 
 [workspace.package]

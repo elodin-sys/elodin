@@ -294,6 +294,13 @@ impl EButton {
             .stroke(Stroke::new(1.0, get_scheme().success.opacity(0.4)))
     }
 
+    pub fn highlight(label: impl ToString) -> Self {
+        EButton::new(label)
+            .color(get_scheme().highlight)
+            .bg_color(get_scheme().highlight.opacity(0.04))
+            .stroke(Stroke::new(1.0, get_scheme().highlight.opacity(0.4)))
+    }
+
     pub fn red(label: impl ToString) -> Self {
         EButton::new(label)
             .color(get_scheme().error)

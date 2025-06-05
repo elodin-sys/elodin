@@ -2,10 +2,10 @@ use std::collections::HashMap;
 
 use super::CameraQuery;
 use super::actions::ActionTile;
-use super::sql_table::SqlTable;
+use super::query_table::QueryTable;
 use super::tiles::{Pane, TileState};
 use super::widgets::plot::GraphState;
-use super::widgets::sql_plot::SqlPlot;
+use super::widgets::query_plot::QueryPlot;
 use bevy::prelude::*;
 use egui_tiles::{Tile, TileId};
 use impeller2::types::EntityId;
@@ -16,12 +16,12 @@ use nox::{Quaternion, Vector3};
 
 #[allow(clippy::too_many_arguments)]
 pub fn tile_to_panel(
-    sql_tables: &Query<&SqlTable>,
+    query_tables: &Query<&QueryTable>,
     cameras: &Query<CameraQuery>,
     entity_id: &Query<&EntityId>,
     action_tiles: &Query<&ActionTile>,
     graph_states: &Query<&GraphState>,
-    sql_plots: &Query<&SqlPlot>,
+    query_plots: &Query<&QueryPlot>,
     tile_id: TileId,
     ui_state: &TileState,
 ) -> Option<Panel> {
@@ -97,19 +97,19 @@ pub fn tile_to_panel(
                 component_id: monitor.component_id,
                 entity_id: monitor.entity_id,
             })),
-            Pane::SQLTable(sql_table) => {
-                let sql_table = sql_tables.get(sql_table.entity).ok()?;
+            Pane::QueryTable(query_table) => {
+                let query_table = query_tables.get(query_table.entity).ok()?;
 
                 Some(Panel::SQLTable(SQLTable {
-                    query: sql_table.current_query.clone(),
+                    query: query_table.current_query.clone(),
                 }))
             }
-            Pane::SqlPlot(plot) => {
-                let sql_plot = sql_plots.get(plot.entity).ok()?;
+            Pane::QueryPlot(plot) => {
+                let query_plot = query_plots.get(plot.entity).ok()?;
                 Some(Panel::SQLPlot(SQLPlot {
-                    query: sql_plot.current_query.clone(),
-                    auto_refresh: sql_plot.auto_refresh,
-                    refresh_interval: sql_plot.refresh_interval,
+                    query: query_plot.current_query.clone(),
+                    auto_refresh: query_plot.auto_refresh,
+                    refresh_interval: query_plot.refresh_interval,
                 }))
             }
             Pane::ActionTile(action) => {
@@ -129,12 +129,12 @@ pub fn tile_to_panel(
                 let mut tabs = vec![];
                 for tile_id in &t.children {
                     if let Some(tab) = tile_to_panel(
-                        sql_tables,
+                        query_tables,
                         cameras,
                         entity_id,
                         action_tiles,
                         graph_states,
-                        sql_plots,
+                        query_plots,
                         *tile_id,
                         ui_state,
                     ) {
@@ -148,12 +148,12 @@ pub fn tile_to_panel(
                 let mut shares = HashMap::new();
                 for child_id in &linear.children {
                     if let Some(panel) = tile_to_panel(
-                        sql_tables,
+                        query_tables,
                         cameras,
                         entity_id,
                         action_tiles,
                         graph_states,
-                        sql_plots,
+                        query_plots,
                         *child_id,
                         ui_state,
                     ) {

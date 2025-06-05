@@ -40,7 +40,7 @@ pub mod colors;
 pub mod images;
 pub mod monitor;
 pub mod preset;
-pub mod sql_table;
+pub mod query_table;
 mod theme;
 pub mod tiles;
 pub mod utils;
@@ -183,7 +183,7 @@ impl Plugin for UiPlugin {
             .add_systems(Update, tiles::shortcuts)
             .add_systems(Update, set_camera_viewport.after(render_layout))
             .add_systems(Update, sync_camera_grid_cell.after(render_layout))
-            .add_systems(Update, widgets::sql_plot::auto_bounds);
+            .add_systems(Update, widgets::query_plot::auto_bounds);
     }
 }
 

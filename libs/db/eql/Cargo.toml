@@ -1,0 +1,14 @@
+[package]
+name = "eql"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+peg = "0.8.5"
+smol_str = "0.3"
+smallvec = "1.15"
+impeller2.path = "../../impeller2"
+hifitime = "4"
+thiserror = "1"
+jiff = "0.2"
+unicode-ident = "1.0.18"
