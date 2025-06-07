@@ -73,7 +73,7 @@ pub enum State {
 }
 
 pub struct I2cDma {
-    i2c: i2c::I2c<I2cRegs>,
+    pub i2c: i2c::I2c<I2cRegs>,
     dma: DmaChannel,
     read_buf: Box<[u8]>,
     read_len: usize,
@@ -110,17 +110,26 @@ impl I2cDma {
     pub fn new<R: Into<I2cRegs> + hal::RccPeriph + Deref<Target = pac::i2c1::RegisterBlock>>(
         i2c: R,
         config: i2c::I2cConfig,
-        mut dma_channel: DmaChannel,
+        dma_channel: DmaChannel,
         clocks: &clocks::Clocks,
         mux1: &mut pac::DMAMUX1,
         mux2: &mut pac::DMAMUX2,
     ) -> Self {
-        let i2c = i2c::I2c::new(i2c, config.clone(), clocks);
+        let i2c = i2c::I2c::new(i2c, config, clocks);
         let i2c::I2c { regs, cfg } = i2c;
-        let i2c = i2c::I2c {
+        let i2c_erased = i2c::I2c {
             regs: regs.into(),
             cfg,
         };
+        Self::from_i2c(i2c_erased, dma_channel, mux1, mux2)
+    }
+
+    pub fn from_i2c(
+        i2c: i2c::I2c<I2cRegs>,
+        mut dma_channel: DmaChannel,
+        mux1: &mut pac::DMAMUX1,
+        mux2: &mut pac::DMAMUX2,
+    ) -> Self {
         match i2c.regs.peripheral {
             I2cPperipheral::I2C1 => dma_channel.mux_dma1(dma::DmaInput::I2c1Rx, mux1),
             I2cPperipheral::I2C2 => dma_channel.mux_dma1(dma::DmaInput::I2c2Rx, mux1),

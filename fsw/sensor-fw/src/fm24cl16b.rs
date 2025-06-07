@@ -1,6 +1,5 @@
-use crate::i2c_dma;
-use core::ops::DerefMut;
-use embedded_hal::i2c::I2c as I2cTrait;
+use crate::i2c_dma::I2cRegs;
+use embedded_hal::i2c::{I2c as I2cTrait, Operation};
 use hal::i2c;
 
 const BASE_ADDRESS: u8 = 0x50; // Base address for FM24CL16B
@@ -9,7 +8,7 @@ const PAGE_SIZE: usize = 256; // 256 bytes per page
 
 #[derive(Debug, defmt::Format)]
 pub enum Error {
-    I2cDma(i2c_dma::Error),
+    I2c(i2c::Error),
     CommunicationFailed,
     AddressOutOfRange,
     InvalidLength,
@@ -17,13 +16,7 @@ pub enum Error {
 
 impl From<i2c::Error> for Error {
     fn from(err: i2c::Error) -> Self {
-        Error::I2cDma(i2c_dma::Error::I2c(err))
-    }
-}
-
-impl From<i2c_dma::Error> for Error {
-    fn from(err: i2c_dma::Error) -> Self {
-        Error::I2cDma(err)
+        Error::I2c(err)
     }
 }
 
@@ -33,25 +26,32 @@ pub struct Fm24cl16b {
 }
 
 impl Fm24cl16b {
-    pub fn new(i2c_dma: &mut i2c_dma::I2cDma) -> Result<Self, Error> {
+    pub fn new(i2c: &mut i2c::I2c<I2cRegs>) -> Result<Self, Error> {
         let fram = Self {
             i2c_address: BASE_ADDRESS,
             current_page: 0,
         };
+
+        defmt::debug!("Starting FM24CL16B initialization");
+        defmt::debug!("I2C peripheral status check...");
 
         // Validate communication by directly using embedded_hal I2C trait
         defmt::debug!(
             "Validating FM24CL16B communication at address 0x{:02x}",
             fram.i2c_address
         );
-        match I2cTrait::write(i2c_dma.deref_mut(), fram.i2c_address, &[]) {
+
+        // Test basic communication with a transaction (write address only)
+        let mut ops = [Operation::Write(&[])];
+        match i2c.transaction(fram.i2c_address, &mut ops) {
             Ok(_) => {
                 defmt::info!("FM24CL16B initialized successfully");
                 Ok(fram)
             }
             Err(e) => {
                 defmt::error!("FM24CL16B initialization failed: {:?}", e);
-                Err(Error::I2cDma(i2c_dma::Error::I2c(e)))
+                defmt::error!("I2C address attempted: 0x{:02x}", fram.i2c_address);
+                Err(Error::I2c(e))
             }
         }
     }
@@ -74,11 +74,7 @@ impl Fm24cl16b {
         Ok((page, word_address))
     }
 
-    pub fn read_byte(
-        &mut self,
-        i2c_dma: &mut i2c_dma::I2cDma,
-        address: usize,
-    ) -> Result<u8, Error> {
+    pub fn read_byte(&mut self, i2c: &mut i2c::I2c<I2cRegs>, address: usize) -> Result<u8, Error> {
         let (page, word_address) = self.calculate_address(address)?;
 
         // Set correct page if needed
@@ -86,17 +82,18 @@ impl Fm24cl16b {
             self.set_page(page);
         }
 
-        // Set word address then read byte using direct I2C calls
-        I2cTrait::write(i2c_dma.deref_mut(), self.i2c_address, &[word_address])?;
+        // Set word address then read byte using I2C transaction
+        let word_addr_buf = [word_address];
         let mut data = [0u8];
-        I2cTrait::read(i2c_dma.deref_mut(), self.i2c_address, &mut data)?;
+        let mut ops = [Operation::Write(&word_addr_buf), Operation::Read(&mut data)];
+        i2c.transaction(self.i2c_address, &mut ops)?;
 
         Ok(data[0])
     }
 
     pub fn write_byte(
         &mut self,
-        i2c_dma: &mut i2c_dma::I2cDma,
+        i2c: &mut i2c::I2c<I2cRegs>,
         address: usize,
         value: u8,
     ) -> Result<(), Error> {
@@ -106,19 +103,17 @@ impl Fm24cl16b {
             self.set_page(page);
         }
 
-        // Write using direct I2C call
-        I2cTrait::write(
-            i2c_dma.deref_mut(),
-            self.i2c_address,
-            &[word_address, value],
-        )?;
+        // Write using I2C transaction
+        let write_buf = [word_address, value];
+        let mut ops = [Operation::Write(&write_buf)];
+        i2c.transaction(self.i2c_address, &mut ops)?;
 
         Ok(())
     }
 
     pub fn read(
         &mut self,
-        i2c_dma: &mut i2c_dma::I2cDma,
+        i2c: &mut i2c::I2c<I2cRegs>,
         start_address: usize,
         buffer: &mut [u8],
     ) -> Result<(), Error> {
@@ -140,13 +135,13 @@ impl Fm24cl16b {
             let bytes_left_in_page = PAGE_SIZE - (word_address as usize);
             let bytes_to_read = core::cmp::min(bytes_left_in_page, buffer.len() - buffer_offset);
 
-            // Set word address and read data using direct I2C calls
-            I2cTrait::write(i2c_dma.deref_mut(), self.i2c_address, &[word_address])?;
-            I2cTrait::read(
-                i2c_dma.deref_mut(),
-                self.i2c_address,
-                &mut buffer[buffer_offset..(buffer_offset + bytes_to_read)],
-            )?;
+            // Set word address and read data using I2C transaction
+            let word_addr_buf = [word_address];
+            let mut ops = [
+                Operation::Write(&word_addr_buf),
+                Operation::Read(&mut buffer[buffer_offset..(buffer_offset + bytes_to_read)]),
+            ];
+            i2c.transaction(self.i2c_address, &mut ops)?;
 
             address += bytes_to_read;
             buffer_offset += bytes_to_read;
@@ -157,7 +152,7 @@ impl Fm24cl16b {
 
     pub fn write(
         &mut self,
-        i2c_dma: &mut i2c_dma::I2cDma,
+        i2c: &mut i2c::I2c<I2cRegs>,
         start_address: usize,
         data: &[u8],
     ) -> Result<(), Error> {
@@ -188,12 +183,11 @@ impl Fm24cl16b {
             write_buffer[1..(safe_bytes_to_write + 1)]
                 .copy_from_slice(&data[data_offset..(data_offset + safe_bytes_to_write)]);
 
-            // Write using direct I2C call
-            I2cTrait::write(
-                i2c_dma.deref_mut(),
-                self.i2c_address,
+            // Write using I2C transaction
+            let mut ops = [Operation::Write(
                 &write_buffer[0..(safe_bytes_to_write + 1)],
-            )?;
+            )];
+            i2c.transaction(self.i2c_address, &mut ops)?;
 
             address += safe_bytes_to_write;
             data_offset += safe_bytes_to_write;
@@ -206,7 +200,7 @@ impl Fm24cl16b {
         TOTAL_SIZE
     }
 
-    pub fn self_test(&mut self, i2c: &mut i2c_dma::I2cDma) {
+    pub fn self_test(&mut self, i2c: &mut i2c::I2c<I2cRegs>) {
         defmt::info!("Running FRAM self-test");
 
         // Test pattern at the beginning of memory

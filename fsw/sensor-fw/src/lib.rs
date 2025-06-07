@@ -30,6 +30,7 @@ pub mod monitor;
 pub mod monotonic;
 pub mod peripheral;
 pub mod sdmmc;
+pub mod usb2513b;
 pub mod usb_serial;
 
 #[global_allocator]
