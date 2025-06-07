@@ -7,6 +7,7 @@ This is the firmware for the STM32H747 MCU on the Aleph FC. It reads sensor data
 - [`rust` + `cargo`](https://rustup.rs/)
 - [`probe-rs`](https://probe.rs/docs/getting-started/installation/) or [`openocd`](https://openocd.org/)
 - [`flip-link`](https://github.com/knurling-rs/flip-link#installation)
+- [`defmt-print`](https://github.com/knurling-rs/defmt/tree/main/print) for RTT logging: `cargo binstall defmt-print`
 
 ## Flashing instructions
 
@@ -35,7 +36,12 @@ Debug Port: DPv2, Designer: STMicroelectronics, Part: 0x4500, Revision: 0x0, Ins
 ```
 3. Build and flash the firmware from the `fsw/sensor-fw` directory:
 ```sh
+# Option 1: Using probe-rs (quick)
 cargo rrb fw
+
+# Option 2: Using OpenOCD with RTT logging (includes live logs)
+cargo build --release --bin fw
+./openocd/flash.sh target/thumbv7em-none-eabihf/release/fw
 ```
 
 
@@ -67,22 +73,13 @@ cargo build --release --bin fw
 probe-rs run --chip STM32H747IITx target/thumbv7em-none-eabihf/release/fw
 ```
 
-### Flash manually using `openocd`
+### Flash + RTT using `openocd`
 
 ```sh
 # build the firmware:
 cargo build --release --bin fw
-# flash the firmware:
-openocd -f openocd/aleph.cfg -c "program target/thumbv7em-none-eabihf/release/fw verify reset exit"
-```
-
-### Attach to MCU's RTT output
-
-The same ELF file that was flashed to the MCU must be provided to `probe-rs` in order to attach to the RTT output.
-This is because the firmware uses [`defmt`](https://github.com/knurling-rs/defmt) for RTT logging, which uses deferred formatting and string compression.
-
-```sh
-probe-rs attach --chip STM32H747IITx --log-format "{L} {s} @ {F}:{l}" target/thumbv7em-none-eabihf/release/fw
+# flash the firmware + attach to RTT
+../openocd/flash.sh target/thumbv7em-none-eabihf/release/fw --defmt
 ```
 
 ### Erase all internal flash memory
