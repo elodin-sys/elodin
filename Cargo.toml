@@ -41,8 +41,9 @@ members = [
     "apps/inscriber",
     "fsw/video-streamer",
     "fsw/gstreamer",
-    "libs/db/eql"
- ]
+    "libs/db/eql",
+    "libs/db/py",
+]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 
 [workspace.package]

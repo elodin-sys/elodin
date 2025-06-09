@@ -158,7 +158,7 @@ where
     F: Future<Output = R> + 'static,
     R: 'static,
 {
-    let mut handle = Executor::enter();
+    let handle = Executor::enter();
     let res = handle.block_on(func);
     drop(handle);
     res
@@ -200,7 +200,7 @@ pub struct ExecutorHandle {
 }
 
 impl ExecutorHandle {
-    pub fn block_on<R, F>(&mut self, func: impl FnOnce() -> F) -> R
+    pub fn block_on<R, F>(&self, func: impl FnOnce() -> F) -> R
     where
         F: Future<Output = R> + 'static,
         R: 'static,

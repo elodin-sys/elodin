@@ -4603,6 +4603,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "elodin-db-py"
+version = "0.1.0"
+dependencies = [
+ "fastrand 2.2.0",
+ "impeller2",
+ "impeller2-stellar",
+ "impeller2-wkt",
+ "numpy",
+ "postcard",
+ "pyo3",
+ "smallvec",
+ "stellarator",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "elodin-db-tests"
 version = "0.1.0"
 dependencies = [

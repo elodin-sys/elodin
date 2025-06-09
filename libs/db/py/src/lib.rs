@@ -1,0 +1,140 @@
+use impeller2::types::{ComponentId, EntityId, LenPacket, PrimType};
+use impeller2::vtable::builder::{pair, raw_field, schema, vtable};
+use impeller2_stellar::Client;
+use impeller2_wkt::VTableMsg;
+use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods, dtype};
+use pyo3::exceptions::PyRuntimeError;
+use pyo3::prelude::*;
+use smallvec::SmallVec;
+use std::cell::RefCell;
+use std::net::SocketAddr;
+use std::rc::Rc;
+use stellarator::ExecutorHandle;
+
+#[pyclass(unsendable)]
+pub struct ElodinClient {
+    client: Rc<RefCell<Client>>,
+    handle: ExecutorHandle,
+}
+
+#[pymethods]
+impl ElodinClient {
+    #[new]
+    fn new(addr: &str) -> PyResult<Self> {
+        let addr: SocketAddr = addr
+            .parse()
+            .map_err(|e| PyRuntimeError::new_err(format!("invalid address: {}", e)))?;
+
+        let handle = stellarator::Executor::enter();
+        let client = handle
+            .block_on(move || async move { Client::connect(addr).await })
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to connect: {}", e)))?;
+
+        Ok(ElodinClient {
+            client: Rc::new(RefCell::new(client)),
+            handle,
+        })
+    }
+
+    fn send_table(
+        &self,
+        entity_id: u64,
+        component_id: &str,
+        data: &Bound<'_, PyUntypedArray>,
+    ) -> PyResult<()> {
+        let entity_id = EntityId(entity_id);
+        let component_id = ComponentId::new(component_id);
+
+        let packet_id = fastrand::u16(..).to_le_bytes();
+
+        let shape: SmallVec<[u64; 4]> = data.shape().iter().map(|&x| x as u64).collect();
+
+        let dtype = data.dtype();
+        let elem_size = dtype.itemsize();
+        let prim_type = dtype_to_prim_type(data.py(), dtype)?;
+
+        let buf = unsafe { data.buf(elem_size) };
+
+        let vtable_msg = VTableMsg {
+            id: packet_id,
+            vtable: vtable([raw_field(
+                0,
+                buf.len() as u16,
+                schema(prim_type, &shape, pair(entity_id.0, component_id)),
+            )]),
+        };
+
+        let mut table_packet = LenPacket::table(packet_id, buf.len());
+        table_packet.extend_aligned(buf);
+
+        let client = self.client.clone();
+        self.handle.block_on(move || async move {
+            let mut client = client.borrow_mut();
+            client
+                .send(&vtable_msg)
+                .await
+                .0
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to send vtable: {}", e)))?;
+
+            client
+                .send(table_packet)
+                .await
+                .0
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to send table: {}", e)))?;
+
+            Ok::<(), PyErr>(())
+        })
+    }
+}
+
+fn dtype_to_prim_type(py: Python, d: Bound<'_, PyArrayDescr>) -> PyResult<PrimType> {
+    if d.is_equiv_to(&dtype::<f32>(py)) {
+        Ok(PrimType::F32)
+    } else if d.is_equiv_to(&dtype::<f64>(py)) {
+        Ok(PrimType::F64)
+    } else if d.is_equiv_to(&dtype::<i8>(py)) {
+        Ok(PrimType::I8)
+    } else if d.is_equiv_to(&dtype::<i16>(py)) {
+        Ok(PrimType::I16)
+    } else if d.is_equiv_to(&dtype::<i32>(py)) {
+        Ok(PrimType::I32)
+    } else if d.is_equiv_to(&dtype::<i64>(py)) {
+        Ok(PrimType::I64)
+    } else if d.is_equiv_to(&dtype::<u8>(py)) {
+        Ok(PrimType::U8)
+    } else if d.is_equiv_to(&dtype::<u16>(py)) {
+        Ok(PrimType::U16)
+    } else if d.is_equiv_to(&dtype::<u32>(py)) {
+        Ok(PrimType::U32)
+    } else if d.is_equiv_to(&dtype::<u64>(py)) {
+        Ok(PrimType::U64)
+    } else if d.is_equiv_to(&dtype::<bool>(py)) {
+        Ok(PrimType::Bool)
+    } else {
+        Err(PyRuntimeError::new_err("Unsupported dtype"))
+    }
+}
+
+trait PyUntypedArrayExt {
+    unsafe fn buf(&self, elem_size: usize) -> &[u8];
+}
+
+impl PyUntypedArrayExt for Bound<'_, PyUntypedArray> {
+    unsafe fn buf(&self, elem_size: usize) -> &[u8] {
+        use numpy::PyUntypedArrayMethods;
+        unsafe {
+            if !self.is_c_contiguous() {
+                panic!("array must be c-style contiguous")
+            }
+            let len = self.shape().iter().product::<usize>() * elem_size;
+            let obj = &*self.as_array_ptr();
+            std::slice::from_raw_parts(obj.data as *const u8, len)
+        }
+    }
+}
+
+#[pymodule]
+fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<ElodinClient>()?;
+    Ok(())
+}

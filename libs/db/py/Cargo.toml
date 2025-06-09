@@ -1,0 +1,20 @@
+[package]
+name = "elodin-db-py"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "elodin"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23.0", features = ["extension-module"] }
+numpy = "0.23.0"
+stellarator = { path = "../../stellarator" }
+impeller2 = { path = "../../impeller2" }
+impeller2-stellar = { path = "../../impeller2/stellar" }
+impeller2-wkt = { path = "../../impeller2/wkt" }
+postcard = "1.0"
+thiserror = "1.0"
+fastrand = "2.2"
+smallvec = "1.15"
