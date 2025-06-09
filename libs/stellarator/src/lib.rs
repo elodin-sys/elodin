@@ -1,6 +1,7 @@
 use std::{
     cell::{RefCell, UnsafeCell},
     future::Future,
+    marker::PhantomData,
     pin::pin,
     task::{Context, Poll, Waker},
     time::Duration,
@@ -129,20 +130,6 @@ impl<R: Reactor> Executor<R> {
                     .wait_for_io(turn.and_then(|turn| turn.time_to_next_deadline()))?;
             }
         };
-        unsafe {
-            EXEC.with(|exec| {
-                let exec = &mut *exec.get();
-                if let Some(exec) = &exec {
-                    exec.scheduler.cancel_all();
-                }
-            });
-            let mut io_states = self.reactor.borrow_mut().drain_io();
-            io_states.cancel();
-            EXEC.with(|exec| {
-                let exec = &mut *exec.get();
-                drop(exec.take().expect("missing reactor"));
-            })
-        }
         Ok(out)
     }
 }
@@ -171,10 +158,23 @@ where
     F: Future<Output = R> + 'static,
     R: 'static,
 {
-    Executor::with(|e| e.run(func).unwrap())
+    let mut handle = Executor::enter();
+    let res = handle.block_on(func);
+    drop(handle);
+    res
 }
 
 impl Executor<DefaultReactor> {
+    pub fn enter() -> ExecutorHandle {
+        EXEC.with(|exec| {
+            let exec = unsafe { &mut *exec.get() };
+            let _ = exec.get_or_insert_default();
+        });
+        ExecutorHandle {
+            _unsend: PhantomData,
+        }
+    }
+
     pub(crate) fn with<R>(f: impl for<'a> FnOnce(&'a Self) -> R) -> R {
         EXEC.with(|exec| {
             // safety: We only ever gain mutable access to the executor when `run` is complete,
@@ -192,6 +192,35 @@ impl Executor<DefaultReactor> {
                 .expect("attempted nested reactor access");
             f(&mut reactor)
         })
+    }
+}
+
+pub struct ExecutorHandle {
+    _unsend: PhantomData<*const ()>, // prevents ExecutorHandle from being send
+}
+
+impl ExecutorHandle {
+    pub fn block_on<R, F>(&mut self, func: impl FnOnce() -> F) -> R
+    where
+        F: Future<Output = R> + 'static,
+        R: 'static,
+    {
+        Executor::with(|e| e.run(func).unwrap())
+    }
+}
+
+impl Drop for ExecutorHandle {
+    fn drop(&mut self) {
+        unsafe {
+            EXEC.with(|exec| {
+                let exec = &mut *exec.get();
+                let exec = exec.take().expect("missing reactor");
+                exec.scheduler.cancel_all();
+                let mut io_states = exec.reactor.borrow_mut().drain_io();
+                io_states.cancel();
+                drop(exec);
+            });
+        }
     }
 }
 
