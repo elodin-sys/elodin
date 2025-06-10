@@ -115,13 +115,19 @@ impl QueryPlot {
             self.y_offset = 0.0;
         }
 
-        let mut xy_line = XYLine {
-            label: "SQL Data".to_string(),
-            x_shard_alloc: None,
-            y_shard_alloc: None,
-            x_values: vec![],
-            y_values: vec![],
+        let line_handle = if let Some(line) = &mut self.xy_line_handle {
+            line
+        } else {
+            let xy_line = XYLine {
+                label: "SQL Data".to_string(),
+                x_shard_alloc: None,
+                y_shard_alloc: None,
+                x_values: vec![],
+                y_values: vec![],
+            };
+            self.xy_line_handle.insert(xy_lines.add(xy_line))
         };
+        let xy_line = xy_lines.get_mut(line_handle).unwrap();
 
         for value in array_iter(x_col) {
             xy_line.push_x_value((value - self.x_offset) as f32);
@@ -130,9 +136,6 @@ impl QueryPlot {
         for value in array_iter(y_col) {
             xy_line.push_y_value((value - self.y_offset) as f32);
         }
-
-        let handle = xy_lines.add(xy_line);
-        self.xy_line_handle = Some(handle);
         self.state = QueryPlotState::Results;
     }
 
@@ -197,6 +200,7 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                 !plot.current_query.is_empty()
             };
             if should_refresh {
+                plot.xy_line_handle = None;
                 plot.state = QueryPlotState::Requested(Instant::now());
                 plot.last_refresh = Some(Instant::now());
                 let query = match plot.query_type {
