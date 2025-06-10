@@ -9,6 +9,7 @@ def main():
     # connects to elodin db
     client = elodin_db.ElodinDB.start()
     print(client.addr)
+    client.set_entity_metadata(2, "sensor")
 
     # send a world pos as a table
     print("Sending position data...")
@@ -17,9 +18,13 @@ def main():
 
     print("sending sensor data...")
     
+    client.set_component_metadata("temps")
+    t = 0
     while True:
-        reading = np.random.rand(3)
-        client.send_table(entity_id=2, component_id="temp", data=reading)
+        noise = np.random.rand(3)
+        t += 1.0 / 500.0
+        reading = np.array([np.sin(t * 2 * 3.14 / 100) + np.sin(t * 2 * 3.14 / 20), np.cos(t), np.sin(t * 2 * 3.14 / 200) + np.sin(t * 2 * 3.14 / 10)]) + noise
+        client.send_table(entity_id=2, component_id="temps", data=reading)
         time.sleep(1.0 / 500)        
 
 

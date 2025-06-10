@@ -1,7 +1,7 @@
 use impeller2::types::{ComponentId, EntityId, LenPacket, PrimType};
 use impeller2::vtable::builder::{pair, raw_field, schema, vtable};
 use impeller2_stellar::Client;
-use impeller2_wkt::VTableMsg;
+use impeller2_wkt::{SetComponentMetadata, SetEntityMetadata, VTableMsg};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods, dtype};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
@@ -124,6 +124,86 @@ impl ElodinDB {
                 .0
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to send table: {}", e)))?;
 
+            Ok::<(), PyErr>(())
+        })
+    }
+
+    /// Set metadata for a component.
+    ///
+    /// Args:
+    ///     component_id: The component identifier
+    ///     name: Human-readable name for the component
+    ///     metadata: Optional dictionary of metadata key-value pairs
+    ///     asset: Optional flag indicating if this component is an asset
+    ///
+    /// Example:
+    ///     ```python
+    ///     db.set_component_metadata("position", "position",
+    ///                               metadata={"element_names": "x,y,z"},
+    ///                               asset=False)
+    ///     ```
+    #[pyo3(signature = (component_id, name = None, metadata=None, asset=None))]
+    fn set_component_metadata(
+        &self,
+        component_id: &str,
+        name: Option<&str>,
+        metadata: Option<std::collections::HashMap<String, String>>,
+        asset: Option<bool>,
+    ) -> PyResult<()> {
+        let name = name.unwrap_or(component_id);
+        let component_id = ComponentId::new(component_id);
+        let mut msg = SetComponentMetadata::new(component_id, name);
+
+        if let Some(metadata) = metadata {
+            msg = msg.metadata(metadata);
+        }
+
+        if let Some(asset) = asset {
+            msg = msg.asset(asset);
+        }
+
+        let client = self.client.clone();
+        self.handle.block_on(move || async move {
+            let mut client = client.borrow_mut();
+            client.send(&msg).await.0.map_err(|e| {
+                PyRuntimeError::new_err(format!("Failed to set component metadata: {}", e))
+            })?;
+            Ok::<(), PyErr>(())
+        })
+    }
+
+    /// Set metadata for an entity.
+    ///
+    /// Args:
+    ///     entity_id: The numeric entity identifier
+    ///     name: Human-readable name for the entity
+    ///     metadata: Optional dictionary of metadata key-value pairs
+    ///
+    /// Example:
+    ///     ```python
+    ///     db.set_entity_metadata(42, "Satellite Alpha",
+    ///                            metadata={"type": "LEO", "mission": "Earth observation"})
+    ///     ```
+    #[pyo3(signature = (entity_id, name, metadata=None))]
+    fn set_entity_metadata(
+        &self,
+        entity_id: u64,
+        name: &str,
+        metadata: Option<std::collections::HashMap<String, String>>,
+    ) -> PyResult<()> {
+        let entity_id = EntityId(entity_id);
+        let mut msg = SetEntityMetadata::new(entity_id, name);
+
+        if let Some(metadata) = metadata {
+            msg = msg.metadata(metadata);
+        }
+
+        let client = self.client.clone();
+        self.handle.block_on(move || async move {
+            let mut client = client.borrow_mut();
+            client.send(&msg).await.0.map_err(|e| {
+                PyRuntimeError::new_err(format!("Failed to set entity metadata: {}", e))
+            })?;
             Ok::<(), PyErr>(())
         })
     }
