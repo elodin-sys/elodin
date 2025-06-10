@@ -4606,6 +4606,7 @@ dependencies = [
 name = "elodin-db-py"
 version = "0.1.0"
 dependencies = [
+ "elodin-db",
  "fastrand 2.2.0",
  "impeller2",
  "impeller2-stellar",
@@ -4615,6 +4616,7 @@ dependencies = [
  "pyo3",
  "smallvec",
  "stellarator",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 
@@ -11624,14 +11626,14 @@ dependencies = [
 
 [[package]]
 name = "tempfile"
-version = "3.13.0"
+version = "3.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0f2c9fc62d0beef6951ccffd757e241266a2c833136efbe35af6cd2567dca5b"
+checksum = "e8a64e3985349f2441a1a9ef0b853f869006c3855f2cda6862a94d26ebb9d6a1"
 dependencies = [
- "cfg-if",
  "fastrand 2.2.0",
+ "getrandom 0.3.1",
  "once_cell",
- "rustix 0.38.37",
+ "rustix 1.0.5",
  "windows-sys 0.59.0",
 ]
 

@@ -8,30 +8,71 @@ use pyo3::prelude::*;
 use smallvec::SmallVec;
 use std::cell::RefCell;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::rc::Rc;
 use stellarator::ExecutorHandle;
 
 #[pyclass(unsendable)]
-pub struct ElodinClient {
+pub struct ElodinDB {
     client: Rc<RefCell<Client>>,
+    #[pyo3(get)]
+    addr: String,
     handle: ExecutorHandle,
 }
 
 #[pymethods]
-impl ElodinClient {
-    #[new]
-    fn new(addr: &str) -> PyResult<Self> {
+impl ElodinDB {
+    #[staticmethod]
+    #[pyo3(signature = (addr = "[::]:0", path = None))]
+    fn start(addr: &str, path: Option<PathBuf>) -> PyResult<Self> {
+        let path = if let Some(path) = path {
+            path
+        } else {
+            let tmp_dir =
+                tempfile::tempdir().map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+            tmp_dir.keep()
+        };
+        let addr: SocketAddr = addr
+            .parse()
+            .map_err(|e| PyRuntimeError::new_err(format!("invalid address: {}", e)))?;
+
+        let listener = stellarator::net::TcpListener::bind(addr)
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to bind listener: {}", e)))?;
+        let local_addr = listener
+            .local_addr()
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to get local address: {}", e)))?;
+        let server = ::elodin_db::Server::from_listener(listener, path)
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to start server: {}", e)))?;
+
+        stellarator::struc_con::stellar(move || server.run());
+
+        let handle = stellarator::Executor::enter();
+        let client = handle
+            .block_on(move || async move { Client::connect(local_addr).await })
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to connect: {}", e)))?;
+
+        Ok(ElodinDB {
+            client: Rc::new(RefCell::new(client)),
+            addr: local_addr.to_string(),
+            handle,
+        })
+    }
+
+    #[staticmethod]
+    fn connect(addr: &str) -> PyResult<Self> {
         let addr: SocketAddr = addr
             .parse()
             .map_err(|e| PyRuntimeError::new_err(format!("invalid address: {}", e)))?;
 
         let handle = stellarator::Executor::enter();
         let client = handle
-            .block_on(move || async move { Client::connect(addr).await })
+            .block_on(move || Client::connect(addr.clone()))
             .map_err(|e| PyRuntimeError::new_err(format!("failed to connect: {}", e)))?;
 
-        Ok(ElodinClient {
+        let addr = addr.to_string();
+        Ok(ElodinDB {
             client: Rc::new(RefCell::new(client)),
+            addr,
             handle,
         })
     }
@@ -136,6 +177,6 @@ impl PyUntypedArrayExt for Bound<'_, PyUntypedArray> {
 
 #[pymodule]
 fn elodin_db(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<ElodinClient>()?;
+    m.add_class::<ElodinDB>()?;
     Ok(())
 }

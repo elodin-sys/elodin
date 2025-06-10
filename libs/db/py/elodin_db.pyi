@@ -3,12 +3,21 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-class ElodinClient:
+class ElodinDB:
     """Client for connecting to and sending data to an Elodin database server."""
 
-    def __init__(self, addr: str) -> None:
+    @staticmethod
+    def start(addr: str = "[::]:0", path = "/tmp/db") -> ElodinDB:
         """
-        Create a new ElodinClient connection.
+        Starts a new instance of elodin-db and returns a client connected to it
+        """
+        ...
+
+
+    @staticmethod
+    def connect(addr: str) -> ElodinDB:
+        """
+        Create a new ElodinDB connection.
 
         Args:
             addr: Socket address in format "host:port" (e.g., "127.0.0.1:8080")
