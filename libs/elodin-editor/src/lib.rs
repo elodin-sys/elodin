@@ -497,7 +497,7 @@ fn setup_titlebar(
                     | NSWindowStyleMask::NSMiniaturizableWindowMask
                     | NSWindowStyleMask::NSUnifiedTitleAndToolbarWindowMask,
             );
-            window.setToolbarStyle_(NSWindowToolbarStyle::NSWindowToolbarStyleUnified);
+            window.setToolbarStyle_(NSWindowToolbarStyle::NSWindowToolbarStyleUnifiedCompact);
             window.setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
             window.setToolbar_(toolbar);
             commands.entity(id).insert(SetupTitlebar);

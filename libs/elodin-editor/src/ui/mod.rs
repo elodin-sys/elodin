@@ -242,7 +242,7 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
         } = args;
 
         let titlebar_height = if cfg!(target_os = "macos") {
-            52.0
+            42.0
         } else if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             45.0
         } else {
