@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 
 import numpy as np
-import elodin
+import elodin_db
 
 
 def main():
     # connects to elodin db
-    client = elodin.ElodinClient("127.0.0.1:2240")
+    client = elodin_db.ElodinClient("127.0.0.1:2240")
 
     # send a world pos as a table
     print("Sending position data...")

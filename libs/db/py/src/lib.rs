@@ -135,7 +135,7 @@ impl PyUntypedArrayExt for Bound<'_, PyUntypedArray> {
 }
 
 #[pymodule]
-fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn elodin_db(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ElodinClient>()?;
     Ok(())
 }

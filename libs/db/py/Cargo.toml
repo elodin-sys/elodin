@@ -3,12 +3,19 @@ name = "elodin-db-py"
 version = "0.1.0"
 edition = "2024"
 
+
+[features]
+publish = ["pyo3/extension-module", "pyo3/abi3-py310"]
+
+[package.metadata.maturin]
+name = "elodin-db"
+
 [lib]
-name = "elodin"
-crate-type = ["cdylib"]
+name = "elodin_db"
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-pyo3 = { version = "0.23.0", features = ["extension-module"] }
+pyo3 = "0.23.0"
 numpy = "0.23.0"
 stellarator = { path = "../../stellarator" }
 impeller2 = { path = "../../impeller2" }
