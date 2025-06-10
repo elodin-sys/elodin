@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 from collections.abc import Sequence
 from typing import (
     Any,
@@ -16,6 +17,52 @@ import jax
 import polars as pl
 
 from elodin import Archetype
+
+__version__: str
+
+__all__ = [
+    "__version__",
+    "_get_cache_dir",
+    "Archetype",
+    "Asset",
+    "BodyAxes",
+    "Color",
+    "Component",
+    "ComponentType",
+    "Edge",
+    "EntityId",
+    "Exec",
+    "Gizmo",
+    "Glb",
+    "GraphEntity",
+    "GraphQueryInner",
+    "Handle",
+    "Impeller",
+    "Integrator",
+    "Line3d",
+    "Material",
+    "Mesh",
+    "Panel",
+    "Pbr",
+    "PrimitiveType",
+    "PyFnSystem",
+    "Quaternion",
+    "QueryInner",
+    "s10",
+    "ShapeIndexer",
+    "six_dof",
+    "skew",
+    "SpatialForce",
+    "SpatialInertia",
+    "SpatialMotion",
+    "SpatialTransform",
+    "System",
+    "SystemBuilder",
+    "Texture",
+    "ukf",
+    "VectorArrow",
+    "WorldBuilder",
+]
 
 class PrimitiveType:
     F64: PrimitiveType
@@ -43,7 +90,7 @@ class SystemBuilder:
 
 class Asset(Protocol):
     def asset_name(self) -> str: ...
-    def bytes(self) -> bytes: ...
+    def bytes(self) -> builtins.bytes: ...
 
 class WorldBuilder:
     def spawn(
@@ -196,13 +243,13 @@ class Mesh:
     @staticmethod
     def sphere(radius: float) -> Mesh: ...
     def asset_name(self) -> str: ...
-    def bytes(self) -> bytes: ...
+    def bytes(self) -> builtins.bytes: ...
 
 class Material:
     @staticmethod
     def color(r: float, g: float, b: float) -> Material: ...
     def asset_name(self) -> str: ...
-    def bytes(self) -> bytes: ...
+    def bytes(self) -> builtins.bytes: ...
 
 class Texture: ...
 
@@ -219,7 +266,7 @@ class Pbr:
     @staticmethod
     def from_path(path: str) -> Pbr: ...
     def asset_name(self) -> str: ...
-    def bytes(self) -> bytes: ...
+    def bytes(self) -> builtins.bytes: ...
 
 class QueryInner:
     def join_query(self, other: QueryInner) -> QueryInner: ...
@@ -325,19 +372,19 @@ class Panel:
     @staticmethod
     def graph(*entities: GraphEntity, name: Optional[str] = None) -> Panel: ...
     def asset_name(self) -> str: ...
-    def bytes(self) -> bytes: ...
+    def bytes(self) -> builtins.bytes: ...
 
 class GraphEntity:
     def __init__(self, entity_id: EntityId, *components: ShapeIndexer | Any): ...
 
 class Glb:
     def __init__(self, path: str): ...
-    def bytes(self) -> bytes: ...
+    def bytes(self) -> builtins.bytes: ...
 
 class BodyAxes:
     def __init__(self, entity: EntityId, scale: float = 1.0): ...
     def asset_name(self) -> str: ...
-    def bytes(self) -> bytes: ...
+    def bytes(self) -> builtins.bytes: ...
 
 class VectorArrow:
     def __init__(
@@ -351,7 +398,7 @@ class VectorArrow:
         scale: float = 1.0,
     ): ...
     def asset_name(self) -> str: ...
-    def bytes(self) -> bytes: ...
+    def bytes(self) -> builtins.bytes: ...
 
 class Line3d:
     def __init__(
@@ -364,7 +411,7 @@ class Line3d:
         perspective: bool = False,
     ): ...
     def asset_name(self) -> str: ...
-    def bytes(self) -> bytes: ...
+    def bytes(self) -> builtins.bytes: ...
 
 def six_dof(
     time_step: float | None = None,
@@ -372,6 +419,7 @@ def six_dof(
     integrator: Integrator = Integrator.Rk4,
 ) -> System: ...
 def skew(arr: jax.Array) -> jax.Array: ...
+def _get_cache_dir() -> str: ...
 
 class System:
     def pipe(self, other: System) -> System: ...

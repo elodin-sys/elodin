@@ -468,7 +468,7 @@ class World(WorldBuilder):
         obj, ins, outs, state, dictionary, entity_dict, component_entity_dict = super().to_jax_func(
             system, sim_time_step, run_time_step, default_playback_speed, max_ticks
         )
-        sim_object = jaxsim.JaxSim(
+        sim_object = elodin.jaxsim.JaxSim(
             obj, ins, outs, state, dictionary, entity_dict, component_entity_dict
         )
         return sim_object
