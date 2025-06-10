@@ -68,6 +68,7 @@ impl ElodinClient {
         table_packet.extend_aligned(buf);
 
         let client = self.client.clone();
+        #[allow(clippy::await_holding_refcell_ref)]
         self.handle.block_on(move || async move {
             let mut client = client.borrow_mut();
             client

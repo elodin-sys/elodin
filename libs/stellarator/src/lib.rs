@@ -216,6 +216,7 @@ impl Drop for ExecutorHandle {
                 let exec = &mut *exec.get();
                 let exec = exec.take().expect("missing reactor");
                 exec.scheduler.cancel_all();
+                #[allow(clippy::let_unit_value)]
                 let mut io_states = exec.reactor.borrow_mut().drain_io();
                 io_states.cancel();
                 drop(exec);
