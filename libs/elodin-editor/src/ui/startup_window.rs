@@ -332,18 +332,20 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
             .frame(egui::Frame::NONE.fill(get_scheme().bg_secondary))
             .resizable(false)
             .show(ctx, |ui| {
-                for item in state.recent_files.recent_files.clone().into_values().rev() {
-                    if ui.add(recent_item_button(item.clone(), arrow)).clicked() {
-                        match item {
-                            RecentItem::File(path) => {
-                                state.open_file(path.clone());
-                            }
-                            RecentItem::Addr(addr) => {
-                                state.start_connect(addr);
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for item in state.recent_files.recent_files.clone().into_values().rev() {
+                        if ui.add(recent_item_button(item.clone(), arrow)).clicked() {
+                            match item {
+                                RecentItem::File(path) => {
+                                    state.open_file(path.clone());
+                                }
+                                RecentItem::Addr(addr) => {
+                                    state.start_connect(addr);
+                                }
                             }
                         }
                     }
-                }
+                });
             });
         match state.modal_state.clone() {
             ModalState::None => {}
