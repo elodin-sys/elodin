@@ -1,3 +1,5 @@
+#![allow(clippy::await_holding_refcell_ref)]
+
 use impeller2::types::{ComponentId, EntityId, LenPacket, PrimType};
 use impeller2::vtable::builder::{pair, raw_field, schema, vtable};
 use impeller2_stellar::Client;
@@ -66,7 +68,7 @@ impl ElodinDB {
 
         let handle = stellarator::Executor::enter();
         let client = handle
-            .block_on(move || Client::connect(addr.clone()))
+            .block_on(move || Client::connect(addr))
             .map_err(|e| PyRuntimeError::new_err(format!("failed to connect: {}", e)))?;
 
         let addr = addr.to_string();
