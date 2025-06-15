@@ -13,7 +13,7 @@ use impeller2::{
         ComponentView, IntoLenPacket, LenPacket, Msg, PACKET_HEADER_LEN, PacketId, PrimType,
         RequestId,
     },
-    vtable::{Op, RealizedOp, RealizedPair, VTable},
+    vtable::{Op, RealizedComponent, RealizedOp, VTable},
 };
 use impeller2_stellar::PacketSink;
 use impeller2_wkt::{ComponentValue, FixedRateBehavior, FixedRateOp, MeanOp, VTableMsg};
@@ -53,12 +53,9 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
         // loops until a pair is found, or the maximum number of iterations is reached
         'find: for _ in 0..u16::MAX {
             match realized_op {
-                RealizedOp::Pair(RealizedPair {
-                    entity_id,
-                    component_id,
-                }) => {
+                RealizedOp::Component(RealizedComponent { component_id }) => {
                     let component = db
-                        .with_state(|s| s.get_component(entity_id, component_id).cloned())
+                        .with_state(|s| s.get_component(component_id).cloned())
                         .ok_or(Error::ComponentNotFound(component_id))?
                         .clone();
                     plan.insert(0, StreamStage::RealTime(RealTimeStage { component }));
@@ -85,15 +82,13 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
                         stream_id,
                         behavior,
                     } = postcard::from_bytes(ext.data)?;
-                    let RealizedOp::Pair(RealizedPair {
-                        entity_id,
-                        component_id,
-                    }) = vtable.realize(ext.arg, None)?
+                    let RealizedOp::Component(RealizedComponent { component_id }) =
+                        vtable.realize(ext.arg, None)?
                     else {
                         return Err(Error::Impeller(impeller2::error::Error::InvalidOp));
                     };
                     let component = db
-                        .with_state(|s| s.get_component(entity_id, component_id).cloned())
+                        .with_state(|s| s.get_component(component_id).cloned())
                         .ok_or(Error::ComponentNotFound(component_id))?
                         .clone();
 

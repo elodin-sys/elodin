@@ -2,7 +2,7 @@ use axum::extract::{Json, Path, State};
 use axum::routing::{get, post};
 use axum::{Router, response::IntoResponse};
 use futures_lite::StreamExt;
-use impeller2::types::{EntityId, Timestamp};
+use impeller2::types::Timestamp;
 use impeller2_wkt::{ComponentValue, ErrorResponse, MsgMetadata};
 use miette::IntoDiagnostic;
 use serde::Serialize;
@@ -16,11 +16,8 @@ use crate::{Component, DB, Error};
 
 pub async fn serve(addr: SocketAddr, db: Arc<DB>) -> miette::Result<()> {
     let app = Router::new()
-        .route("/component/stream/{component_id}/{entity_id}", get(stream))
-        .route(
-            "/component/{component_id}/{entity_id}",
-            post(push_entity_table),
-        )
+        .route("/component/stream/{component_id}", get(stream))
+        .route("/component/{component_id}", post(push_entity_table))
         .route("/msg/stream/{msg_id}", get(stream_msgs))
         .route("/msg/{msg_id}", post(push_msg))
         .with_state(db);
@@ -61,16 +58,13 @@ pub async fn push_msg(
 }
 
 pub async fn push_entity_table(
-    Path((component_id, entity_id)): Path<(String, i64)>,
+    Path(component_id): Path<String>,
     db: State<Arc<DB>>,
     body: Json<ComponentValue>,
 ) -> Result<impl IntoResponse, Json<ErrorResponse>> {
     let component_id = impeller2::types::ComponentId::new(&component_id);
     let component = db
-        .with_state(|s| {
-            s.get_component(EntityId(entity_id as u64), component_id)
-                .cloned()
-        })
+        .with_state(|s| s.get_component(component_id).cloned())
         .ok_or(Error::ComponentNotFound(component_id))
         .map_err(ErrorResponse::from)
         .map_err(Json)?;
@@ -135,15 +129,12 @@ pub fn msg_stream(
 }
 
 pub async fn stream(
-    Path((component_id, entity_id)): Path<(String, i64)>,
+    Path(component_id): Path<String>,
     db: State<Arc<DB>>,
 ) -> Result<impl IntoResponse, Json<ErrorResponse>> {
     let component_id = impeller2::types::ComponentId::new(&component_id);
     let component = db
-        .with_state(|s| {
-            s.get_component(EntityId(entity_id as u64), component_id)
-                .cloned()
-        })
+        .with_state(|s| s.get_component(component_id).cloned())
         .ok_or(Error::ComponentNotFound(component_id))
         .map_err(ErrorResponse::from)
         .map_err(Json)?;

@@ -4,12 +4,12 @@ mod tests {
     use arrow::{array::AsArray, datatypes::Float64Type};
     use elodin_db::{DB, Error, Server};
     use impeller2::{
-        types::{ComponentId, EntityId, IntoLenPacket, LenPacket, Msg, PrimType, Timestamp},
-        vtable::builder::{pair, raw_field, raw_table, schema, timestamp, vtable},
+        types::{ComponentId, IntoLenPacket, LenPacket, Msg, PrimType, Timestamp},
+        vtable::builder::{component, raw_field, raw_table, schema, timestamp, vtable},
     };
     use impeller2_stellar::Client;
     use postcard_schema::{Schema, schema::owned::OwnedNamedType};
-    use std::{borrow::Cow, collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
+    use std::{borrow::Cow, net::SocketAddr, sync::Arc, time::Duration};
     use stellarator::{net::TcpListener, sleep, spawn, struc_con::stellar, test};
     use zerocopy::FromBytes;
     use zerocopy::IntoBytes;
@@ -27,7 +27,6 @@ mod tests {
         if temp_dir.exists() {
             std::fs::remove_dir_all(&temp_dir).unwrap();
         }
-        std::fs::create_dir_all(&temp_dir).unwrap();
 
         let server = Server::from_listener(listener, temp_dir)?;
         let db = server.db.clone();
@@ -49,7 +48,7 @@ mod tests {
         let vtable = vtable([raw_field(
             0,
             16,
-            schema(PrimType::F64, &[2], pair(1, "test")),
+            schema(PrimType::F64, &[2], component("test")),
         )]);
         client
             .send(&VTableMsg {
@@ -66,7 +65,7 @@ mod tests {
         sleep(Duration::from_millis(100)).await;
         db.with_state(|state| {
             let c = state
-                .get_component(EntityId(1), ComponentId::new("test"))
+                .get_component(ComponentId::new("test"))
                 .expect("missing component");
             let (_, data) = c.time_series.latest().expect("missing latest value");
             assert_eq!(data, floats.as_bytes());
@@ -75,17 +74,16 @@ mod tests {
 
     #[test]
     async fn test_vtable_stream() {
-        let (addr, _) = setup_test_db().await.unwrap();
+        let (addr, _db) = setup_test_db().await.unwrap();
         let mut tx_client = Client::connect(addr).await.unwrap();
         let mut rx_client = Client::connect(addr).await.unwrap();
 
-        let entity_id = EntityId(42);
         let component_id = ComponentId::new("temperature");
 
         let vtable = vtable([raw_field(
             0,
             8,
-            schema(PrimType::F64, &[1], pair(entity_id, component_id)),
+            schema(PrimType::F64, &[1], component(component_id)),
         )]);
 
         let vtable_id = 1u16.to_le_bytes();
@@ -123,12 +121,6 @@ mod tests {
     async fn test_dump_metadata() {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut client = Client::connect(addr).await.unwrap();
-        let entity_id = EntityId(42);
-        let entity_metadata = SetEntityMetadata::new(entity_id, "test_entity").metadata(
-            [("foo".to_string(), "bar".to_string())]
-                .into_iter()
-                .collect(),
-        );
         let component_id = ComponentId::new("test_component");
         let component_metadata = SetComponentMetadata::new(component_id.clone(), "Test Component")
             .metadata(
@@ -137,21 +129,9 @@ mod tests {
                     .collect(),
             );
 
-        client.send(&entity_metadata).await.0.unwrap();
         client.send(&component_metadata).await.0.unwrap();
         sleep(Duration::from_millis(100)).await;
         let mut response = client.request(&DumpMetadata).await.unwrap();
-        response.entity_metadata.sort_by_key(|e| e.entity_id);
-        assert_eq!(
-            response.entity_metadata,
-            &[EntityMetadata {
-                entity_id,
-                name: "test_entity".to_string(),
-                metadata: [("foo".to_string(), "bar".to_string())]
-                    .into_iter()
-                    .collect(),
-            },]
-        );
         response.component_metadata.sort_by_key(|c| c.component_id);
         assert_eq!(
             response.component_metadata,
@@ -171,22 +151,16 @@ mod tests {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut client = Client::connect(addr).await.unwrap();
 
-        let entity_id = EntityId(42);
-        let component_id = ComponentId::new("temperature");
+        let component_id = ComponentId::new("cpu_temperature");
 
         let vtable = vtable([raw_field(
             0,
             8,
-            schema(PrimType::F64, &[1], pair(entity_id, component_id)),
+            schema(PrimType::F64, &[1], component(component_id)),
         )]);
 
         client
-            .send(&SetComponentMetadata::new(component_id, "temperature"))
-            .await
-            .0
-            .unwrap();
-        client
-            .send(&SetEntityMetadata::new(entity_id, "cpu"))
+            .send(&SetComponentMetadata::new(component_id, "cpu_temperature"))
             .await
             .0
             .unwrap();
@@ -226,7 +200,7 @@ mod tests {
         }
         let batch = &batches[0];
         let arr = batch
-            .column_by_name("temperature")
+            .column_by_name("cpu_temperature")
             .unwrap()
             .as_fixed_size_list();
         let arr = arr.values();
@@ -239,7 +213,6 @@ mod tests {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut client = Client::connect(addr).await.unwrap();
 
-        let entity_id = EntityId(42);
         let component_id = ComponentId::new("sensor_data");
 
         let vtable = vtable([raw_field(
@@ -247,7 +220,7 @@ mod tests {
             8,
             timestamp(
                 raw_table(8, 8),
-                schema(PrimType::F64, &[], pair(entity_id, component_id)),
+                schema(PrimType::F64, &[], component(component_id)),
             ),
         )]);
 
@@ -283,9 +256,8 @@ mod tests {
         let query = GetTimeSeries {
             id: vtable_id,
             range: Timestamp(0)..Timestamp(10000),
-            entity_id,
             component_id,
-            limit: Some(10),
+            limit: Some(256),
         };
 
         let time_series = client.request(&query).await.unwrap();
@@ -304,7 +276,7 @@ mod tests {
         let vtable = vtable([raw_field(
             0,
             8,
-            schema(PrimType::F64, &[1], pair(1, component_id)),
+            schema(PrimType::F64, &[1], component(component_id)),
         )]);
 
         client
@@ -338,8 +310,8 @@ mod tests {
                     .collect(),
             )
             .asset(false);
-
         client.send(&metadata).await.0.unwrap();
+
         sleep(Duration::from_millis(50)).await;
 
         let get_metadata = GetComponentMetadata { component_id };
@@ -349,29 +321,6 @@ mod tests {
         assert_eq!(component_metadata.name, "Temperature Sensor");
         assert_eq!(component_metadata.metadata.get("unit").unwrap(), "celsius");
         assert_eq!(component_metadata.asset, false);
-    }
-
-    #[test]
-    async fn test_get_entity_metadata() {
-        let (addr, _db) = setup_test_db().await.unwrap();
-        let mut client = Client::connect(addr).await.unwrap();
-
-        let entity_id = EntityId(42);
-        let metadata = SetEntityMetadata::new(entity_id, "Test Robot").metadata(
-            [("type".to_string(), "mobile".to_string())]
-                .into_iter()
-                .collect(),
-        );
-
-        client.send(&metadata).await.0.unwrap();
-        sleep(Duration::from_millis(50)).await;
-
-        let get_metadata = GetEntityMetadata { entity_id };
-        let entity_metadata = client.request(&get_metadata).await.unwrap();
-
-        assert_eq!(entity_metadata.entity_id, entity_id);
-        assert_eq!(entity_metadata.name, "Test Robot");
-        assert_eq!(entity_metadata.metadata.get("type").unwrap(), "mobile");
     }
 
     #[test]
@@ -440,13 +389,13 @@ mod tests {
         let vtable1 = vtable([raw_field(
             0,
             8,
-            schema(PrimType::F64, &[1], pair(1, component_id1)),
+            schema(PrimType::F64, &[1], component(component_id1)),
         )]);
 
         let vtable2 = vtable([raw_field(
             0,
             4,
-            schema(PrimType::F32, &[2, 2], pair(2, component_id2)),
+            schema(PrimType::F32, &[2, 2], component(component_id2)),
         )]);
 
         client
@@ -544,16 +493,9 @@ mod tests {
         let mut client = Client::connect(addr).await.unwrap();
 
         // Create some test data
-        let entity_id = EntityId(42);
         let component_id = ComponentId::new("archive_test");
 
         // Set metadata for our test data
-        client
-            .send(&SetEntityMetadata::new(entity_id, "TestEntity"))
-            .await
-            .0
-            .unwrap();
-
         client
             .send(&SetComponentMetadata::new(component_id, "TestComponent"))
             .await
@@ -563,7 +505,7 @@ mod tests {
         let vtable = vtable([raw_field(
             0,
             8,
-            schema(PrimType::F64, &[1], pair(entity_id, component_id)),
+            schema(PrimType::F64, &[1], component(component_id)),
         )]);
 
         let vtable_id = 1u16.to_le_bytes();
@@ -599,14 +541,13 @@ mod tests {
         assert_eq!(response.path, archive_path);
         assert!(archive_path.exists());
 
-        let file =
-            std::fs::File::open(&archive_path.join("TestEntity_TestComponent.arrow")).unwrap();
+        let file = std::fs::File::open(&archive_path.join("TestComponent.arrow")).unwrap();
         let mut reader = arrow::ipc::reader::FileReader::try_new(file, None).unwrap();
         let batch = reader.next().unwrap().unwrap();
         assert_eq!(batch.num_columns(), 2);
         assert_eq!(batch.num_rows(), 3);
         let _ = batch.column_by_name("time").unwrap();
-        let component = batch.column_by_name("TestEntity_TestComponent").unwrap();
+        let component = batch.column_by_name("TestComponent").unwrap();
         let values = component
             .as_fixed_size_list()
             .values()
@@ -633,7 +574,6 @@ mod tests {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut client = Client::connect(addr).await.unwrap();
 
-        let non_existent_entity_id = EntityId(9999);
         let component_id = ComponentId::new("test_component");
 
         client
@@ -642,7 +582,7 @@ mod tests {
                 vtable: vtable([raw_field(
                     0,
                     4,
-                    schema(PrimType::F32, &[], pair(2, component_id)),
+                    schema(PrimType::F32, &[], component(component_id)),
                 )]),
             })
             .await
@@ -652,31 +592,22 @@ mod tests {
         let query = GetTimeSeries {
             id: 1u16.to_le_bytes(),
             range: Timestamp(0)..Timestamp(10000),
-            entity_id: non_existent_entity_id,
             component_id,
-            limit: Some(10),
+            limit: None,
         };
 
         let result = client.request(&query).await;
 
-        let Err(impeller2_stellar::Error::Response(resp)) = result else {
-            panic!("invalid error");
-        };
-        assert_eq!(
-            elodin_db::Error::EntityNotFound(non_existent_entity_id).to_string(),
-            resp.description
-        );
+        result.unwrap_err();
 
-        // Try with existing entity but non-existent component
-        let existing_entity_id = EntityId(0); // Global entity always exists
+        // Now try with non-existent component
         let non_existent_component_id = ComponentId::new("non_existent_component");
 
         let query = GetTimeSeries {
             id: 1u16.to_le_bytes(),
             range: Timestamp(0)..Timestamp(10000),
-            entity_id: existing_entity_id,
             component_id: non_existent_component_id,
-            limit: Some(10),
+            limit: None,
         };
 
         // Should return an error for non-existent component
@@ -726,27 +657,6 @@ mod tests {
         };
         assert_eq!(
             elodin_db::Error::ComponentNotFound(non_existent_component_id).to_string(),
-            resp.description
-        );
-    }
-
-    #[test]
-    async fn test_get_entity_metadata_not_found() {
-        let (addr, _db) = setup_test_db().await.unwrap();
-        let mut client = Client::connect(addr).await.unwrap();
-
-        let non_existent_entity_id = EntityId(9999);
-
-        let get_metadata = GetEntityMetadata {
-            entity_id: non_existent_entity_id,
-        };
-
-        let result = client.request(&get_metadata).await.unwrap_err();
-        let impeller2_stellar::Error::Response(resp) = result else {
-            panic!("invalid error");
-        };
-        assert_eq!(
-            elodin_db::Error::EntityNotFound(non_existent_entity_id).to_string(),
             resp.description
         );
     }
@@ -815,14 +725,13 @@ mod tests {
     async fn test_concurrent_clients() {
         let (addr, _db) = setup_test_db().await.unwrap();
 
-        let entity_id = EntityId(99);
         let component_id = ComponentId::new("concurrent_test");
 
         // Define a vtable that will be used by all clients
         let vtable = vtable([raw_field(
             0,
             8,
-            schema(PrimType::F64, &[1], pair(entity_id, component_id)),
+            schema(PrimType::F64, &[1], component(component_id)),
         )]);
         let vtable_id = 1u16.to_le_bytes();
 
@@ -841,11 +750,6 @@ mod tests {
                 component_id,
                 "Concurrent Test Component",
             ))
-            .await
-            .0
-            .unwrap();
-        setup_client
-            .send(&SetEntityMetadata::new(entity_id, "Concurrent Test Entity"))
             .await
             .0
             .unwrap();
@@ -888,7 +792,6 @@ mod tests {
         let query = GetTimeSeries {
             id: vtable_id,
             range: Timestamp(0)..Timestamp(i64::MAX),
-            entity_id,
             component_id,
             limit: Some(NUM_CLIENTS * WRITES_PER_CLIENT),
         };
@@ -900,11 +803,8 @@ mod tests {
 
     #[test]
     async fn test_database_restart() {
-        let entity_id = EntityId(123);
-
         let temp_dir =
             std::env::temp_dir().join(format!("elodin_db_restart_test_{}", fastrand::u64(..)));
-        std::fs::create_dir_all(&temp_dir).unwrap();
         let vtable_id = 1u16.to_le_bytes();
         let test_value = 42.0;
         let component_id = ComponentId::new("restart_test");
@@ -920,11 +820,6 @@ mod tests {
             let mut client = Client::connect(addr).await.unwrap();
 
             client
-                .send(&SetEntityMetadata::new(entity_id, "Restart Test Entity"))
-                .await
-                .0
-                .unwrap();
-            client
                 .send(&SetComponentMetadata::new(
                     component_id,
                     "Restart Test Component",
@@ -936,7 +831,7 @@ mod tests {
             let vtable = vtable([raw_field(
                 0,
                 8,
-                schema(PrimType::F64, &[1], pair(entity_id, component_id)),
+                schema(PrimType::F64, &[1], component(component_id)),
             )]);
             client
                 .send(&VTableMsg {
@@ -956,9 +851,8 @@ mod tests {
             let query = GetTimeSeries {
                 id: vtable_id,
                 range: Timestamp(0)..Timestamp(i64::MAX),
-                entity_id,
                 component_id,
-                limit: Some(10),
+                limit: Some(256),
             };
             let time_series = client.request(&query).await.unwrap();
             let data_before = <[f64]>::ref_from_bytes(time_series.data().unwrap()).unwrap();
@@ -975,12 +869,6 @@ mod tests {
         let mut new_client = Client::connect(new_addr).await.unwrap();
         sleep(Duration::from_millis(100)).await;
 
-        let entity_metadata = new_client
-            .request(&GetEntityMetadata { entity_id })
-            .await
-            .unwrap();
-        assert_eq!(entity_metadata.name, "Restart Test Entity");
-
         let component_metadata = new_client
             .request(&GetComponentMetadata { component_id })
             .await
@@ -992,14 +880,13 @@ mod tests {
         assert_eq!(schema.prim_type(), PrimType::F64);
         assert_eq!(schema.shape(), &[1]);
 
-        let new_query = GetTimeSeries {
+        let query = GetTimeSeries {
             id: vtable_id,
             range: Timestamp(0)..Timestamp(i64::MAX),
-            entity_id,
             component_id,
-            limit: Some(10),
+            limit: Some(256),
         };
-        let new_time_series = new_client.request(&new_query).await.unwrap();
+        let new_time_series = new_client.request(&query).await.unwrap();
         let data_after = <[f64]>::ref_from_bytes(new_time_series.data().unwrap()).unwrap();
         assert_eq!(data_after, &[test_value]);
 
@@ -1013,13 +900,12 @@ mod tests {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut client = Client::connect(addr).await.unwrap();
 
-        let entity_id = EntityId(789);
-        let component_id = ComponentId::new("large_data");
+        let component_id = ComponentId::new("large_dataset");
 
         let vtable = vtable([raw_field(
             0,
             800,
-            schema(PrimType::F64, &[100], pair(entity_id, component_id)),
+            schema(PrimType::F64, &[100], component(component_id)),
         )]);
 
         let vtable_id = 1u16.to_le_bytes();
@@ -1028,12 +914,6 @@ mod tests {
                 id: vtable_id,
                 vtable,
             })
-            .await
-            .0
-            .unwrap();
-
-        client
-            .send(&SetEntityMetadata::new(entity_id, "Performance Test"))
             .await
             .0
             .unwrap();
@@ -1063,7 +943,6 @@ mod tests {
         let query_limited = GetTimeSeries {
             id: vtable_id,
             range: Timestamp(0)..Timestamp(i64::MAX),
-            entity_id,
             component_id,
             limit: Some(10),
         };
@@ -1074,7 +953,6 @@ mod tests {
         let query_all = GetTimeSeries {
             id: vtable_id,
             range: Timestamp(0)..Timestamp(i64::MAX),
-            entity_id,
             component_id,
             limit: None,
         };
@@ -1092,22 +970,14 @@ mod tests {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut client = Client::connect(addr).await.unwrap();
 
-        let entity_id1 = EntityId(601);
-        let entity_id2 = EntityId(602);
-        let component_id = ComponentId::new("temperature");
+        client
+            .send(&SetComponentMetadata::new("sensor1.temp", "sensor1.temp"))
+            .await
+            .0
+            .unwrap();
 
         client
-            .send(&SetEntityMetadata::new(entity_id1, "Sensor1"))
-            .await
-            .0
-            .unwrap();
-        client
-            .send(&SetEntityMetadata::new(entity_id2, "Sensor2"))
-            .await
-            .0
-            .unwrap();
-        client
-            .send(&SetComponentMetadata::new(component_id, "Temperature"))
+            .send(&SetComponentMetadata::new("sensor2.temp", "sensor2.temp"))
             .await
             .0
             .unwrap();
@@ -1116,13 +986,13 @@ mod tests {
         let vtable1 = vtable([raw_field(
             0,
             8,
-            schema(PrimType::F64, &[], pair(entity_id1, component_id)),
+            schema(PrimType::F64, &[], component("sensor1.temp")),
         )]);
 
         let vtable2 = vtable([raw_field(
             0,
             8,
-            schema(PrimType::F64, &[], pair(entity_id2, component_id)),
+            schema(PrimType::F64, &[], component("sensor2.temp")),
         )]);
 
         let vtable_id1 = 1u16.to_le_bytes();
@@ -1163,7 +1033,7 @@ mod tests {
 
         sleep(Duration::from_millis(100)).await;
 
-        let sql = "SELECT * FROM sensor_1_temperature, sensor_2_temperature WHERE sensor_1_temperature.temperature > 22.0";
+        let sql = "SELECT * FROM `sensor_1_temp`, `sensor_2_temp` WHERE `sensor_1_temp`.`sensor_1_temp` > 22.0";
         let mut stream = client.stream(&SQLQuery(sql.to_string())).await.unwrap();
 
         let mut batches = vec![];
@@ -1179,8 +1049,7 @@ mod tests {
             }
         }
 
-        let sql_simple =
-            "SELECT * FROM sensor_1_temperature UNION ALL SELECT * FROM sensor_2_temperature";
+        let sql_simple = "SELECT * FROM `sensor_1_temp` UNION ALL SELECT * FROM `sensor_2_temp`";
         let mut stream_simple = client
             .stream(&SQLQuery(sql_simple.to_string()))
             .await
@@ -1211,13 +1080,12 @@ mod tests {
         // we subscribe first to ensure we dont miss any last updates
         let mut stream = sub_client.stream(&SubscribeLastUpdated).await.unwrap();
 
-        let entity_id = EntityId(42);
         let component_id = ComponentId::new("test_component");
 
         let vtable = vtable([raw_field(
             0,
             8,
-            schema(PrimType::F64, &[], pair(entity_id, component_id)),
+            schema(PrimType::F64, &[], component(component_id)),
         )]);
 
         let vtable_id = 1u16.to_le_bytes();
@@ -1255,13 +1123,12 @@ mod tests {
         let (addr, _) = setup_test_db().await.unwrap();
         let mut client = Client::connect(addr).await.unwrap();
 
-        let entity_id = EntityId(42);
         let component_id = ComponentId::new("test_component");
         {
             let vtable = vtable([raw_field(
                 0,
                 8,
-                schema(PrimType::F64, &[1], pair(entity_id, component_id)),
+                schema(PrimType::F64, &[1], component(component_id)),
             )]);
 
             client
@@ -1283,7 +1150,7 @@ mod tests {
         let vtable_different_type = vtable([raw_field(
             0,
             4,
-            schema(PrimType::F32, &[1], pair(entity_id, component_id)),
+            schema(PrimType::F32, &[1], component(component_id)),
         )]);
 
         let vtable_id = 2u16.to_le_bytes();
@@ -1310,17 +1177,16 @@ mod tests {
 
     #[test]
     async fn test_time_travel() {
-        let (addr, _) = setup_test_db().await.unwrap();
+        let (addr, _db) = setup_test_db().await.unwrap();
         let mut client = Client::connect(addr).await.unwrap();
 
-        let entity_id = EntityId(42);
-        let component_id = ComponentId::new("test_component");
+        let component_id = ComponentId::new("time_travel_test");
         let vtable = vtable([raw_field(
             0,
             8,
             timestamp(
                 raw_table(8, 8),
-                schema(PrimType::F64, &[1], pair(entity_id, component_id)),
+                schema(PrimType::F64, &[1], component(component_id)),
             ),
         )]);
 
@@ -1354,11 +1220,8 @@ mod tests {
     async fn test_db_reopen() {
         let temp_dir =
             std::env::temp_dir().join(format!("elodin_db_persistence_test_{}", fastrand::u64(..)));
-        std::fs::create_dir_all(&temp_dir).unwrap();
 
-        // Create entity and component identifiers
-        let entity_id = EntityId(55);
-        let component_id = ComponentId::new("persistence_test");
+        let component_id = ComponentId::new("subscription_test");
         let vtable_id = 1u16.to_le_bytes();
         let test_value = 123.45f64;
         let asset_id = 77;
@@ -1397,18 +1260,6 @@ mod tests {
 
             client
                 .send(
-                    &SetEntityMetadata::new(entity_id, "Persistence Test Entity").metadata(
-                        [("type".to_string(), "test".to_string())]
-                            .into_iter()
-                            .collect(),
-                    ),
-                )
-                .await
-                .0
-                .unwrap();
-
-            client
-                .send(
                     &SetComponentMetadata::new(component_id, "Persistence Test Component")
                         .metadata(
                             [("unit".to_string(), "test_unit".to_string())]
@@ -1423,7 +1274,7 @@ mod tests {
             let vtable = vtable([raw_field(
                 0,
                 8,
-                schema(PrimType::F64, &[1], pair(entity_id, component_id)),
+                schema(PrimType::F64, &[1], component(component_id)),
             )]);
 
             client
@@ -1455,13 +1306,6 @@ mod tests {
 
         let db = elodin_db::DB::open(temp_dir.clone()).unwrap();
         db.with_state_mut(|state| {
-            let entity = state.get_entity_metadata(entity_id).unwrap();
-            assert_eq!(
-                entity.metadata.clone(),
-                [("type".to_string(), "test".to_string())]
-                    .into_iter()
-                    .collect::<HashMap<_, _>>(),
-            );
             let component = state.get_component_metadata(component_id).unwrap();
             assert_eq!(&component.name, "Persistence Test Component");
             assert_eq!(
