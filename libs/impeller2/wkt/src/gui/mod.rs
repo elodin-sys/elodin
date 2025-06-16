@@ -111,7 +111,6 @@ pub enum GraphType {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Line3d {
-    pub entity: EntityId,
     pub component_id: ComponentId,
     pub index: [usize; 3],
     pub line_width: f32,
@@ -131,7 +130,6 @@ pub struct Camera;
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct VectorArrow {
     pub id: ComponentId,
-    pub entity_id: EntityId,
     pub range: Range<usize>,
     pub color: Color,
     pub attached: bool,
