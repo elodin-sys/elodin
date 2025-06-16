@@ -1,5 +1,6 @@
 use elodin_db::{DB, State, handle_conn};
-use impeller2::types::Timestamp;
+use impeller2::types::{ComponentId, Timestamp};
+use impeller2_wkt::ComponentMetadata;
 use nox_ecs::Error;
 use std::{
     sync::{Arc, atomic},
@@ -70,16 +71,24 @@ pub fn init_db(
             let size = schema.size();
             let entity_ids =
                 bytemuck::try_cast_slice::<_, u64>(column.entity_ids.as_slice()).unwrap();
-            state.set_component_metadata(component_metadata.clone(), &db.path)?;
             for (i, entity_id) in entity_ids.iter().enumerate() {
                 let offset = i * size;
                 let entity_id = impeller2::types::EntityId(*entity_id);
-                if let Some(entity_metadata) = world.entity_metadata().get(&entity_id) {
-                    state.set_entity_metadata(entity_metadata.clone(), &db.path)?;
-                }
+                let Some(entity_metadata) = world.entity_metadata().get(&entity_id) else {
+                    continue;
+                };
+                let pair_name = format!("{}.{}", entity_metadata.name, component_metadata.name);
+                let pair_id = ComponentId::new(&pair_name);
+                let pair_metadata = ComponentMetadata {
+                    component_id: pair_id,
+                    name: pair_name,
+                    metadata: component_metadata.metadata.clone(),
+                    asset: component_metadata.asset,
+                };
 
-                state.insert_component(*component_id, schema.clone(), entity_id, &db.path)?;
-                let component = state.get_component(entity_id, *component_id).unwrap();
+                state.set_component_metadata(pair_metadata, &db.path)?;
+                state.insert_component(pair_id, schema.clone(), &db.path)?;
+                let component = state.get_component(pair_id).unwrap();
                 let buf = &column.buffer[offset..offset + size];
                 component.time_series.push_buf(start_timestamp, buf)?;
             }
@@ -104,8 +113,9 @@ pub fn init_db(
 }
 
 pub fn copy_db_to_world(state: &State, world: &mut WorldExec<Compiled>) {
-    for (component_id, (schema, _)) in world.world.metadata.component_map.iter() {
-        let Some(column) = world.world.host.get_mut(component_id) else {
+    let world = &mut world.world;
+    for (component_id, (schema, _)) in world.metadata.component_map.iter() {
+        let Some(column) = world.host.get_mut(component_id) else {
             continue;
         };
         let entity_ids = bytemuck::try_cast_slice::<_, u64>(column.entity_ids.as_slice()).unwrap();
@@ -113,7 +123,17 @@ pub fn copy_db_to_world(state: &State, world: &mut WorldExec<Compiled>) {
         for (i, entity_id) in entity_ids.iter().enumerate() {
             let offset = i * size;
             let entity_id = impeller2::types::EntityId(*entity_id);
-            let Some(component) = state.get_component(entity_id, *component_id) else {
+            let Some(entity_metadata) = world.metadata.entity_metadata.get(&entity_id) else {
+                continue;
+            };
+            let Some((_, component_metadata)) = world.metadata.component_map.get(component_id)
+            else {
+                continue;
+            };
+
+            let pair_name = format!("{}.{}", entity_metadata.name, component_metadata.name);
+            let pair_id = ComponentId::new(&pair_name);
+            let Some(component) = state.get_component(pair_id) else {
                 continue;
             };
             let (_, head) = component.time_series.latest().unwrap();
@@ -136,7 +156,17 @@ pub fn commit_world_head(
         for (i, entity_id) in entity_ids.iter().enumerate() {
             let offset = i * size;
             let entity_id = impeller2::types::EntityId(*entity_id);
-            let Some(component) = state.get_component(entity_id, *component_id) else {
+            let Some(entity_metadata) = world.world.metadata.entity_metadata.get(&entity_id) else {
+                continue;
+            };
+            let Some((_, component_metadata)) =
+                world.world.metadata.component_map.get(component_id)
+            else {
+                continue;
+            };
+            let pair_name = format!("{}.{}", entity_metadata.name, component_metadata.name);
+            let pair_id = ComponentId::new(&pair_name);
+            let Some(component) = state.get_component(pair_id) else {
                 continue;
             };
             let buf = &column.buffer[offset..offset + size];
