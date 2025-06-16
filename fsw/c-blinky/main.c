@@ -1,4 +1,5 @@
 typedef unsigned int U32;
+typedef unsigned long long U64;
 
 // Base addresses
 #define RCC_BASE     0x58024400UL
@@ -8,14 +9,15 @@ typedef unsigned int U32;
 #define SYSTICK_BASE 0xE000E010UL
 
 // RCC registers
-#define RCC_CR       (*(volatile U32*) (RCC_BASE + 0x00))
-#define RCC_CFGR     (*(volatile U32*) (RCC_BASE + 0x10))
-#define RCC_D1CFGR   (*(volatile U32*) (RCC_BASE + 0x18))
-#define RCC_D2CFGR   (*(volatile U32*) (RCC_BASE + 0x1C))
-#define RCC_D3CFGR   (*(volatile U32*) (RCC_BASE + 0x20))
-#define RCC_PLL1CFGR (*(volatile U32*) (RCC_BASE + 0x28))
-#define RCC_PLL1DIVR (*(volatile U32*) (RCC_BASE + 0x30))
-#define RCC_AHB4ENR  (*(volatile U32*) (RCC_BASE + 0xE0))
+#define RCC_CR        (*(volatile U32*) (RCC_BASE + 0x00))
+#define RCC_CFGR      (*(volatile U32*) (RCC_BASE + 0x10))
+#define RCC_D1CFGR    (*(volatile U32*) (RCC_BASE + 0x18))
+#define RCC_D2CFGR    (*(volatile U32*) (RCC_BASE + 0x1C))
+#define RCC_D3CFGR    (*(volatile U32*) (RCC_BASE + 0x20))
+#define RCC_PLLCKSELR (*(volatile U32*) (RCC_BASE + 0x24))
+#define RCC_PLL1CFGR  (*(volatile U32*) (RCC_BASE + 0x28))
+#define RCC_PLL1DIVR  (*(volatile U32*) (RCC_BASE + 0x30))
+#define RCC_AHB4ENR   (*(volatile U32*) (RCC_BASE + 0xE0))
 
 // PWR registers
 #define PWR_CSR1 (*(volatile U32*) (PWR_BASE + 0x04))
@@ -44,12 +46,14 @@ typedef unsigned int U32;
 #define RCC_CFGR_SWS_PLL1        (0x3 << 3)
 #define RCC_D1CFGR_D1CPRE_DIV1   (0x0 << 8)
 #define RCC_D1CFGR_HPRE_DIV2     (0x8 << 0)
+#define RCC_D1CFGR_D1PPRE_DIV2   (0x4 << 4)
 #define RCC_D2CFGR_D2PPRE1_DIV2  (0x4 << 4)
 #define RCC_D2CFGR_D2PPRE2_DIV2  (0x4 << 8)
 #define RCC_D3CFGR_D3PPRE_DIV2   (0x4 << 4)
-#define RCC_PLL1CFGR_PLL1SRC_HSE (0x2 << 0)
+#define RCC_PLLCKSELR_PLLSRC_HSE (0x2 << 0)
 #define RCC_PLL1CFGR_PLL1PEN     (1 << 16)
 #define RCC_PLL1CFGR_PLL1QEN     (1 << 17)
+#define RCC_PLL1CFGR_PLL1RGE     (0x2 << 2)   // Input frequency range: 8-16MHz
 #define RCC_AHB4ENR_GPIOEEN      (1 << 4)
 #define PWR_CR3_LDOEN            (1 << 1)
 #define PWR_CR3_BYPASS           (1 << 0)
@@ -66,6 +70,14 @@ typedef unsigned int U32;
 
 // Constants
 #define RED_LED_PIN        5
+
+// Timeout helper macro
+#define WAIT_FOR(condition, error_msg) do { \
+    U32 timeout = 1000000; \
+    while (!(condition) && timeout--); \
+    if (!timeout) { panic(error_msg); } \
+} while(0)
+
 // PLL1 configuration: 24MHz HSE ÷ M × N ÷ P = SYSCLK
 // 24MHz ÷ 3 × 100 ÷ 2 = 400MHz SYSCLK
 // VCO = 24MHz ÷ 3 × 100 = 800MHz
@@ -74,6 +86,8 @@ typedef unsigned int U32;
 #define PLL1_P             2    // SYSCLK divider (400MHz)
 #define PLL1_Q             8    // Other outputs divider (100MHz)
 #define RTT_BUFFER_SIZE_UP 1024
+
+static const U32 SYSTICK_FREQ = 400000000;  // 400MHz d1cpreclk
 
 /*
  * RTT (Real-Time Transfer) structures based on SEGGER RTT protocol
@@ -136,7 +150,7 @@ __attribute__((section(".isr_vector"))) void (*const vectors[])(void) = {
     Default_Handler,      // 12: Debug Monitor
     0,                    // 13: Reserved
     Default_Handler,      // 14: PendSV
-    SysTick_Handler,      // 15: SysTick Timer
+    0,                    // 15: SysTick Timer (not used - polling mode)
 };
 
 static inline void rtt_init(void) {
@@ -156,14 +170,22 @@ static inline void rtt_write(const char* s) {
     }
 }
 
+static void panic(const char* msg) {
+    // Turn on red LED to indicate fault
+    GPIOE_ODR |= (1 << RED_LED_PIN);
+    rtt_write(msg);
+    rtt_write("\r\n");
+    __asm("bkpt #0");
+    while (1);
+}
+
 static void system_init(void) {
     PWR_CR3 &= ~PWR_CR3_BYPASS;       // Use internal regulator (not external supply)
     PWR_CR3 &= ~PWR_CR3_SDEN;         // For internal regulator, use LDO (not SMPS)
     PWR_CR3 |= PWR_CR3_LDOEN;         // Enable the internal LDO
     PWR_D3CR |= PWR_D3CR_VOS_SCALE1;  // Set voltage scale to 1
 
-    U32 vos_timeout = 1000000;
-    while (!(PWR_CSR1 & PWR_CSR1_ACTVOSRDY) && vos_timeout--);  // Wait for voltage ready
+    WAIT_FOR(PWR_CSR1 & PWR_CSR1_ACTVOSRDY, "FAULT: VOS failed to stabilize");
 
     FLASH_ACR = FLASH_ACR_LATENCY_4WS | FLASH_ACR_PRFTEN | FLASH_ACR_ICEN | FLASH_ACR_DCEN;  // 4 wait states, enable caches
 }
@@ -171,27 +193,29 @@ static void system_init(void) {
 static void clock_config(void) {
     // Enable 24MHz HSE (external clock, bypass mode)
     RCC_CR |= RCC_CR_HSEBYP | RCC_CR_HSEON;
-    U32 hse_timeout = 1000000;
-    while (!(RCC_CR & RCC_CR_HSERDY) && hse_timeout--);
+    WAIT_FOR(RCC_CR & RCC_CR_HSERDY, "FAULT: HSE failed to start");
 
-    // Configure bus prescalers: SYSCLK=400MHz, HCLK=SYSCLK/2=200MHz, APB1/2/3=HCLK/2=100MHz
-    RCC_D1CFGR = RCC_D1CFGR_D1CPRE_DIV1 | RCC_D1CFGR_HPRE_DIV2;
-    RCC_D2CFGR = RCC_D2CFGR_D2PPRE1_DIV2 | RCC_D2CFGR_D2PPRE2_DIV2;
-    RCC_D3CFGR = RCC_D3CFGR_D3PPRE_DIV2;
-
-    RCC_PLL1CFGR = RCC_PLL1CFGR_PLL1SRC_HSE | RCC_PLL1CFGR_PLL1PEN | RCC_PLL1CFGR_PLL1QEN |
-                   ((PLL1_M - 1) << 4);
+    // Disable PLL1 before configuration
+    RCC_CR &= ~RCC_CR_PLL1ON;
+    WAIT_FOR(!(RCC_CR & RCC_CR_PLL1RDY), "FAULT: PLL1 failed to turn off");
+    // Configure PLL source and input divider: HSE + DIVM
+    RCC_PLLCKSELR = RCC_PLLCKSELR_PLLSRC_HSE | (PLL1_M << 4);
+    // Configure PLL1: enable outputs + set input frequency range
+    // PLL1RGE: 8-16MHz input range (our input is 8MHz)
+    // PLL1VCOSEL: Wide VCO range (default bit=0 for VCO=800MHz)
+    RCC_PLL1CFGR = RCC_PLL1CFGR_PLL1PEN | RCC_PLL1CFGR_PLL1QEN | RCC_PLL1CFGR_PLL1RGE;
+    // Configure PLL1 dividers: 24MHz ÷ 3 × 100 ÷ 2 = 400MHz
     RCC_PLL1DIVR = ((PLL1_P - 1) << 9) | ((PLL1_Q - 1) << 16) | ((PLL1_N - 1) << 0);
-
     // Enable PLL1 and wait for lock
     RCC_CR |= RCC_CR_PLL1ON;
-    U32 pll_timeout = 1000000;
-    while (!(RCC_CR & RCC_CR_PLL1RDY) && pll_timeout--);
+    WAIT_FOR(RCC_CR & RCC_CR_PLL1RDY, "FAULT: PLL1 failed to lock");
 
-    // Switch SYSCLK to PLL1-P (400MHz)
-    RCC_CFGR           = (RCC_CFGR & ~0x7) | RCC_CFGR_SW_PLL1;
-    U32 switch_timeout = 1000000;
-    while ((RCC_CFGR & 0x38) != RCC_CFGR_SWS_PLL1 && switch_timeout--);
+    // Switch SYSCLK to PLL1-P
+    RCC_CFGR |= RCC_CFGR_SW_PLL1;
+    // SYSCLK=400MHz, HCLK=SYSCLK/2=200MHz, APB1/2/3=HCLK/2=100MHz
+    RCC_D1CFGR = RCC_D1CFGR_D1CPRE_DIV1 | RCC_D1CFGR_HPRE_DIV2 | RCC_D1CFGR_D1PPRE_DIV2;
+    RCC_D2CFGR = RCC_D2CFGR_D2PPRE1_DIV2 | RCC_D2CFGR_D2PPRE2_DIV2;
+    RCC_D3CFGR = RCC_D3CFGR_D3PPRE_DIV2;
 }
 
 static void gpio_config(void) {
@@ -203,19 +227,24 @@ static void gpio_config(void) {
     GPIOE_OSPEEDR &= ~(3 << (RED_LED_PIN * 2));
 }
 
-static void systick_init(void) {
-    SYSTICK_RVR = 400000 - 1;
-    SYSTICK_CVR = 0;
-    SYSTICK_CSR = SYSTICK_CSR_CLKSOURCE | SYSTICK_CSR_TICKINT | SYSTICK_CSR_ENABLE;
-}
-
-void SysTick_Handler(void) {
-    systick_ms++;
+static void delay_us(U32 us) {
+    U32 ticks = ((U64)us * SYSTICK_FREQ) / 1000000;
+    if (ticks > 1) {
+        SYSTICK_RVR = ticks - 1;
+        SYSTICK_CVR = 0;
+        SYSTICK_CSR = SYSTICK_CSR_CLKSOURCE | SYSTICK_CSR_ENABLE;
+        while (!(SYSTICK_CSR & (1 << 16)));  // Poll until counter wraps (COUNTFLAG set)
+        SYSTICK_CSR = 0;  // Disable counter
+    }
 }
 
 static void delay_ms(U32 ms) {
-    U32 start = systick_ms;
-    while ((systick_ms - start) < ms);
+    // Handle large delays by breaking into smaller chunks
+    while (ms > 4294) {
+        delay_us(4294000);  // ~4.3 seconds max per chunk
+        ms -= 4294;
+    }
+    delay_us(ms * 1000);
 }
 
 void Reset_Handler(void) {
@@ -231,15 +260,11 @@ void Reset_Handler(void) {
 }
 
 void Default_Handler(void) {
-    rtt_write("ERROR: Unhandled interrupt\r\n");
-    __asm("bkpt #0");
-    while (1);
+    panic("ERROR: Unhandled interrupt");
 }
 
 void Fault_Handler(void) {
-    rtt_write("FAULT: System exception occurred\r\n");
-    __asm("bkpt #0");
-    while (1);
+    panic("FAULT: System exception occurred");
 }
 
 int main(void) {
@@ -247,7 +272,6 @@ int main(void) {
     system_init();
     clock_config();
     gpio_config();
-    systick_init();
     while (1) {
         GPIOE_ODR |= (1 << RED_LED_PIN);
         rtt_write("LED:  ON\r\n");
