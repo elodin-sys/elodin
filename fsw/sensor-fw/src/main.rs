@@ -129,7 +129,6 @@ fn main() -> ! {
     };
 
     let usb_hub = usb2513b::Usb2513b::default();
-    defmt::debug!("Starting USB hub configuration...");
     usb_hub
         .configure_if_needed(&mut i2c1_low_speed_erased)
         .unwrap();

@@ -6,7 +6,6 @@ use hal::i2c;
 const ADDR: u8 = 0b0101100;
 
 #[bitfield(u8)]
-#[derive(defmt::Format)]
 pub struct ConfigByte1 {
     pub power_switching: bool,
     #[bits(2)]
@@ -19,7 +18,6 @@ pub struct ConfigByte1 {
 }
 
 #[bitfield(u8)]
-#[derive(defmt::Format)]
 pub struct ConfigByte2 {
     #[bits(3)]
     pub reserved_low: u8,
@@ -30,14 +28,14 @@ pub struct ConfigByte2 {
     pub dynamic_power: bool,
 }
 
-#[derive(Debug, Clone, Copy, defmt::Format)]
+#[derive(Debug, Clone, Copy)]
 pub struct UsbIds {
     pub vid: u16,
     pub pid: u16,
     pub did: u16,
 }
 
-#[derive(Debug, Clone, Copy, defmt::Format)]
+#[derive(Debug, Clone, Copy)]
 pub struct PowerSettings {
     pub max_power_self: u16,   // in mA
     pub max_power_bus: u16,    // in mA
@@ -64,7 +62,7 @@ pub const SELF_POWERED_CONFIG: [u8; 13] = [
 ];
 
 /// Register addresses for the USB2513B hub
-#[derive(Debug, Clone, Copy, defmt::Format)]
+#[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum UsbHubRegister {
     VendorIdLsb = 0x00,
@@ -159,7 +157,7 @@ impl Usb2513b {
 
     /// Read and dump the current configuration registers for debugging
     pub fn dump_config(&self, i2c_dev: &mut i2c::I2c<I2cRegs>) -> Result<(), Error> {
-        defmt::info!("USB HUB: Reading current configuration...");
+        defmt::debug!("USB HUB: Reading current configuration...");
 
         // We access registers up to 0x10 (power_on_time), so need at least 0x10 + 1 bytes + 1 for byte count
         const MIN_REQUIRED_BYTES: usize = 0x10 + 1 + 1;
@@ -176,18 +174,18 @@ impl Usb2513b {
         i2c_dev.transaction(self.address, &mut ops)?;
 
         // Raw hex dump first
-        defmt::info!("USB HUB: Raw config: {:02X}", config_buffer);
+        defmt::trace!("USB HUB: Raw config: {:02X}", config_buffer);
 
         // Skip the first byte (byte count) and use actual register data
         let byte_count = config_buffer[0];
-        defmt::info!("USB HUB: Byte count: {}", byte_count);
+        defmt::trace!("USB HUB: Byte count: {}", byte_count);
 
         // Validate we have enough data for all parsing operations
-        if config_buffer.len() < MIN_REQUIRED_BYTES {
+        if (byte_count as usize) < (MIN_REQUIRED_BYTES - 1) {
             defmt::warn!(
                 "USB HUB: Insufficient data - got {} bytes, need at least {} for full parsing",
-                config_buffer.len(),
-                MIN_REQUIRED_BYTES
+                byte_count,
+                MIN_REQUIRED_BYTES - 1
             );
             return Err(Error::InvalidData);
         }
@@ -200,7 +198,7 @@ impl Usb2513b {
             pid: u16::from_le_bytes([regs[2], regs[3]]),
             did: u16::from_le_bytes([regs[4], regs[5]]),
         };
-        defmt::info!(
+        defmt::debug!(
             "USB HUB: IDs - VID=0x{:04X}, PID=0x{:04X}, DID=0x{:04X}",
             usb_ids.vid,
             usb_ids.pid,
@@ -209,7 +207,7 @@ impl Usb2513b {
 
         // Parse config bytes with proper bitfields
         let cfg1 = ConfigByte1::from(regs[6]);
-        defmt::info!(
+        defmt::debug!(
             "USB HUB: Config1(0x{:02X}): self_powered={}, hs_disable={}, multi_tt={}, eop_disable={}",
             regs[6],
             cfg1.self_powered(),
@@ -219,7 +217,7 @@ impl Usb2513b {
         );
 
         let cfg2 = ConfigByte2::from(regs[7]);
-        defmt::info!(
+        defmt::debug!(
             "USB HUB: Config2(0x{:02X}): dynamic_power={}, compound_device={}",
             regs[7],
             cfg2.dynamic_power(),
@@ -234,7 +232,7 @@ impl Usb2513b {
             hub_current_bus: regs[0x0F] as u16 * 2,
             power_on_time: regs[0x10] as u16 * 2,
         };
-        defmt::info!(
+        defmt::debug!(
             "USB HUB: Power - Self={}mA, Bus={}mA, HubSelf={}mA, HubBus={}mA, PowerOn={}ms",
             power.max_power_self,
             power.max_power_bus,
@@ -248,7 +246,7 @@ impl Usb2513b {
 
     /// Configure the USB hub if needed, with config dump for debugging
     pub fn configure_if_needed(&self, i2c_dev: &mut i2c::I2c<I2cRegs>) -> Result<(), Error> {
-        defmt::info!("USB HUB: Starting configuration check and setup...");
+        defmt::debug!("USB HUB: Starting configuration check and setup...");
 
         // Dump current config for debugging
         if let Err(e) = self.dump_config(i2c_dev) {
@@ -262,20 +260,17 @@ impl Usb2513b {
         }
 
         // Configure with standard self-powered config
-        defmt::info!("USB HUB: Writing configuration...");
-        defmt::info!("USB HUB: Config payload: {:02X}", SELF_POWERED_CONFIG);
+        defmt::debug!("USB HUB: Writing configuration...");
         let mut ops = [Operation::Write(&SELF_POWERED_CONFIG)];
         i2c_dev.transaction(self.address, &mut ops)?;
-        defmt::info!("USB HUB: Configuration written successfully");
+        defmt::debug!("USB HUB: Configuration written successfully");
 
         // Finalize with USB_ATTACH
-        defmt::info!("USB HUB: Finalizing with USB_ATTACH...");
+        defmt::debug!("USB HUB: Finalizing with USB_ATTACH...");
         let attach_payload = [UsbHubRegister::StatusCmd as u8, 0x01, 0x01];
-        defmt::info!("USB HUB: Attach payload: {:02X}", attach_payload);
         let mut ops = [Operation::Write(&attach_payload)];
         i2c_dev.transaction(self.address, &mut ops)?;
-        defmt::info!("USB HUB: Hub now visible to USB host, registers write-protected");
-        defmt::info!("USB HUB: Configuration complete");
+        defmt::debug!("USB HUB: Hub now visible to USB host, registers write-protected");
         Ok(())
     }
 }
