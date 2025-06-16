@@ -66,10 +66,13 @@ typedef unsigned int U32;
 
 // Constants
 #define RED_LED_PIN        5
-#define PLL1_M             3
-#define PLL1_N             100
-#define PLL1_P             2
-#define PLL1_Q             8
+// PLL1 configuration: 24MHz HSE ÷ M × N ÷ P = SYSCLK
+// 24MHz ÷ 3 × 100 ÷ 2 = 400MHz SYSCLK
+// VCO = 24MHz ÷ 3 × 100 = 800MHz
+#define PLL1_M             3    // Input divider
+#define PLL1_N             100  // VCO multiplier
+#define PLL1_P             2    // SYSCLK divider (400MHz)
+#define PLL1_Q             8    // Other outputs divider (100MHz)
 #define RTT_BUFFER_SIZE_UP 1024
 
 /*
@@ -154,35 +157,38 @@ static inline void rtt_write(const char* s) {
 }
 
 static void system_init(void) {
-    PWR_CR3 &= ~PWR_CR3_BYPASS;
-    PWR_CR3 &= ~PWR_CR3_SDEN;
-    PWR_CR3 |= PWR_CR3_LDOEN;
-    PWR_D3CR |= PWR_D3CR_VOS_SCALE1;
+    PWR_CR3 &= ~PWR_CR3_BYPASS;       // Use internal regulator (not external supply)
+    PWR_CR3 &= ~PWR_CR3_SDEN;         // For internal regulator, use LDO (not SMPS)
+    PWR_CR3 |= PWR_CR3_LDOEN;         // Enable the internal LDO
+    PWR_D3CR |= PWR_D3CR_VOS_SCALE1;  // Set voltage scale to 1
 
     U32 vos_timeout = 1000000;
-    while (!(PWR_CSR1 & PWR_CSR1_ACTVOSRDY) && vos_timeout--);
+    while (!(PWR_CSR1 & PWR_CSR1_ACTVOSRDY) && vos_timeout--);  // Wait for voltage ready
 
-    FLASH_ACR = FLASH_ACR_LATENCY_4WS | FLASH_ACR_PRFTEN | FLASH_ACR_ICEN | FLASH_ACR_DCEN;
+    FLASH_ACR = FLASH_ACR_LATENCY_4WS | FLASH_ACR_PRFTEN | FLASH_ACR_ICEN | FLASH_ACR_DCEN;  // 4 wait states, enable caches
 }
 
 static void clock_config(void) {
+    // Enable 24MHz HSE (external clock, bypass mode)
     RCC_CR |= RCC_CR_HSEBYP | RCC_CR_HSEON;
     U32 hse_timeout = 1000000;
     while (!(RCC_CR & RCC_CR_HSERDY) && hse_timeout--);
 
+    // Configure bus prescalers: SYSCLK=400MHz, HCLK=SYSCLK/2=200MHz, APB1/2/3=HCLK/2=100MHz
     RCC_D1CFGR = RCC_D1CFGR_D1CPRE_DIV1 | RCC_D1CFGR_HPRE_DIV2;
     RCC_D2CFGR = RCC_D2CFGR_D2PPRE1_DIV2 | RCC_D2CFGR_D2PPRE2_DIV2;
     RCC_D3CFGR = RCC_D3CFGR_D3PPRE_DIV2;
 
     RCC_PLL1CFGR = RCC_PLL1CFGR_PLL1SRC_HSE | RCC_PLL1CFGR_PLL1PEN | RCC_PLL1CFGR_PLL1QEN |
                    ((PLL1_M - 1) << 4);
-
     RCC_PLL1DIVR = ((PLL1_P - 1) << 9) | ((PLL1_Q - 1) << 16) | ((PLL1_N - 1) << 0);
 
+    // Enable PLL1 and wait for lock
     RCC_CR |= RCC_CR_PLL1ON;
     U32 pll_timeout = 1000000;
     while (!(RCC_CR & RCC_CR_PLL1RDY) && pll_timeout--);
 
+    // Switch SYSCLK to PLL1-P (400MHz)
     RCC_CFGR           = (RCC_CFGR & ~0x7) | RCC_CFGR_SW_PLL1;
     U32 switch_timeout = 1000000;
     while ((RCC_CFGR & 0x38) != RCC_CFGR_SWS_PLL1 && switch_timeout--);
