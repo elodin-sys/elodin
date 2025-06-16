@@ -72,6 +72,12 @@ typedef unsigned int U32;
 #define PLL1_Q             8
 #define RTT_BUFFER_SIZE_UP 1024
 
+/*
+ * RTT (Real-Time Transfer) structures based on SEGGER RTT protocol
+ * Copyright (c) SEGGER Microcontroller GmbH
+ * Used under BSD-style license - see https://github.com/SEGGERMicro/RTT/blob/master/RTT/SEGGER_RTT.h
+ */
+
 // RTT structures
 typedef struct {
     const char*       sName;
@@ -107,26 +113,27 @@ extern U32 _sidata, _sdata, _edata, _sbss, _ebss;
 int  main(void);
 void Reset_Handler(void);
 void Default_Handler(void);
+void Fault_Handler(void);
 void SysTick_Handler(void);
 
-// Vector table
+// Vector table - ARM Cortex-M7 exception handlers
 __attribute__((section(".isr_vector"))) void (*const vectors[])(void) = {
-    (void*) &_stack_end,
-    Reset_Handler,
-    Default_Handler,
-    Default_Handler,
-    Default_Handler,
-    Default_Handler,
-    Default_Handler,
-    0,
-    0,
-    0,
-    0,
-    Default_Handler,
-    Default_Handler,
-    0,
-    Default_Handler,
-    SysTick_Handler,
+    (void*) &_stack_end,  // 0: Initial stack pointer
+    Reset_Handler,        // 1: Reset
+    Fault_Handler,        // 2: NMI
+    Fault_Handler,        // 3: Hard Fault
+    Fault_Handler,        // 4: Memory Management Fault
+    Fault_Handler,        // 5: Bus Fault
+    Fault_Handler,        // 6: Usage Fault
+    0,                    // 7: Reserved
+    0,                    // 8: Reserved
+    0,                    // 9: Reserved
+    0,                    // 10: Reserved
+    Default_Handler,      // 11: SVCall
+    Default_Handler,      // 12: Debug Monitor
+    0,                    // 13: Reserved
+    Default_Handler,      // 14: PendSV
+    SysTick_Handler,      // 15: SysTick Timer
 };
 
 static inline void rtt_init(void) {
@@ -218,6 +225,14 @@ void Reset_Handler(void) {
 }
 
 void Default_Handler(void) {
+    rtt_write("ERROR: Unhandled interrupt\r\n");
+    __asm("bkpt #0");
+    while (1);
+}
+
+void Fault_Handler(void) {
+    rtt_write("FAULT: System exception occurred\r\n");
+    __asm("bkpt #0");
     while (1);
 }
 
