@@ -2,26 +2,16 @@
 
 Simple LED blink firmware for Aleph written in bare metal C.
 
-## Toolchain Setup
-
-### Linux (Ubuntu/Debian)
-```bash
-sudo apt update
-sudo apt install gcc-arm-none-eabi binutils-arm-none-eabi
-```
-
-### macOS (Homebrew)
-```bash
-brew install --cask gcc-arm-embedded
-brew install openocd
-```
-
 ## Build + Flash
 
 ```bash
-# Build firmware.elf
+# Build firmware.elf (downloads toolchain automatically)
 ./build.sh
-# Flash using opnocd
+
+# Use system toolchain instead
+./build.sh --system
+
+# Flash using openocd
 ../openocd/flash.sh firmware.elf
 ```
 
