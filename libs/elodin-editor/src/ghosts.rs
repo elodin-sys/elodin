@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use big_space::GridCell;
 use eql::Expr;
-use impeller2::{component::Component, types::EntityId};
+use impeller2::component::Component;
 use impeller2_bevy::{ComponentValueMap, EntityMap};
 use impeller2_wkt::{ComponentValue, EntityMetadata, Glb, WorldPos};
 use nox::Array;
@@ -230,7 +230,6 @@ pub fn create_ghost_entity(
     expr: eql::Expr,
     gltf_path: Option<String>,
 ) -> Entity {
-    let entity_id = EntityId(fastrand::u64(..));
     let mut entity = commands.spawn((
         Ghost::new(eql, expr),
         Transform::default(),
@@ -240,13 +239,7 @@ pub fn create_ghost_entity(
         ViewVisibility::default(),
         GridCell::<i128>::default(),
         impeller2_wkt::WorldPos::default(),
-        entity_id,
         ComponentValueMap(Default::default()),
-        EntityMetadata {
-            entity_id,
-            name: "Ghost".to_string(),
-            metadata: Default::default(),
-        },
     ));
 
     if let Some(path) = gltf_path {

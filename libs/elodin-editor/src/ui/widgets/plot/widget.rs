@@ -23,7 +23,7 @@ use bevy::{
 };
 use bevy_egui::egui::{self, Align, Layout};
 use egui::{CornerRadius, Frame, Margin, RichText, Stroke};
-use impeller2::types::{ComponentId, EntityId, Timestamp};
+use impeller2::types::{ComponentId, Timestamp};
 use impeller2_bevy::{ComponentMetadataRegistry, EntityMap};
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, EntityMetadata};
 use std::time::{Duration, Instant};
@@ -309,7 +309,7 @@ impl TimeseriesPlot {
                     (timestamp.0 - self.selected_range.start.0) as f64,
                 );
                 ui.label(PrettyDuration(offset).to_string());
-                let mut current_entity_id: Option<EntityId> = None;
+                let mut current_entity_id: Option<ComponentId> = None;
                 let mut current_component_id: Option<ComponentId> = None;
                 for ((entity_id, component_id, line_index), (entity, color)) in
                     graph_state.enabled_lines.iter()

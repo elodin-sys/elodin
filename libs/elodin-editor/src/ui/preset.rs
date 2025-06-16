@@ -8,7 +8,7 @@ use super::widgets::plot::GraphState;
 use super::widgets::query_plot::QueryPlot;
 use bevy::prelude::*;
 use egui_tiles::{Tile, TileId};
-use impeller2::types::EntityId;
+use impeller2::types::ComponentId;
 use impeller2_wkt::{
     ActionPane, Color, ComponentMonitor, Panel, SQLPlot, SQLTable, Split, Viewport,
 };
@@ -18,7 +18,7 @@ use nox::{Quaternion, Vector3};
 pub fn tile_to_panel(
     query_tables: &Query<&QueryTable>,
     cameras: &Query<CameraQuery>,
-    entity_id: &Query<&EntityId>,
+    entity_id: &Query<&ComponentId>,
     action_tiles: &Query<&ActionTile>,
     graph_states: &Query<&GraphState>,
     query_plots: &Query<&QueryPlot>,
@@ -65,7 +65,7 @@ pub fn tile_to_panel(
             }
             Pane::Graph(graph) => {
                 let graph_state = graph_states.get(graph.id).ok()?;
-                let mut entities: HashMap<EntityId, impeller2_wkt::GraphEntity> = HashMap::new();
+                let mut entities: HashMap<ComponentId, impeller2_wkt::GraphEntity> = HashMap::new();
                 for ((entity_id, component_id, index), (_, color)) in
                     graph_state.enabled_lines.iter()
                 {

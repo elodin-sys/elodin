@@ -4,6 +4,7 @@ use bevy::ecs::{
 };
 use bevy_egui::egui;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
+use impeller2_bevy::ComponentPathRegistry;
 use impeller2_wkt::EntityMetadata;
 
 use crate::ui::{EntityData, EntityFilter, EntityPair, SelectedObject, colors::get_scheme, utils};
@@ -15,6 +16,7 @@ pub struct HierarchyContent<'w, 's> {
     entity_filter: ResMut<'w, EntityFilter>,
     selected_object: ResMut<'w, SelectedObject>,
     entities: Query<'w, 's, EntityData<'static>>,
+    path_reg: ResMut<'w, ComponentPathRegistry>,
 }
 
 impl WidgetSystem for HierarchyContent<'_, '_> {
@@ -33,16 +35,18 @@ impl WidgetSystem for HierarchyContent<'_, '_> {
             get_scheme().bg_primary,
         );
 
-        let state_mut = state.get_mut(world);
+        let HierarchyContent {
+            entity_filter,
+            mut selected_object,
+            entities,
+            path_reg,
+        } = state.get_mut(world);
 
         let icon_search = args;
-        let entity_filter = state_mut.entity_filter;
-        let mut selected_object = state_mut.selected_object;
-        let entities = state_mut.entities;
 
         let search_text = entity_filter.0.clone();
         header(ui, entity_filter, icon_search);
-        entity_list(ui, &entities, &mut selected_object, &search_text);
+        entity_list(ui, &entities, &mut selected_object, &path_reg, &search_text);
     }
 }
 
@@ -63,6 +67,7 @@ pub fn entity_list(
     ui: &mut egui::Ui,
     entities: &Query<EntityData>,
     selected_object: &mut ResMut<SelectedObject>,
+    path_reg: &ComponentPathRegistry,
     entity_filter: &str,
 ) -> egui::Response {
     egui::ScrollArea::both()
@@ -73,6 +78,10 @@ pub fn entity_list(
                 let mut filtered_entities = entities
                     .into_iter()
                     .filter_map(|(id, entity, value_map, metadata)| {
+                        let path = path_reg.0.get(&id)?;
+                        if !path.is_top_level() {
+                            return None;
+                        };
                         if entity_filter.is_empty() {
                             Some((id.0 as i64, id, entity, value_map, metadata))
                         } else {

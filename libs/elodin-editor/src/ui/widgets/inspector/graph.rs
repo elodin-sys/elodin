@@ -252,50 +252,50 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     }
                 });
         } else {
-            let mut remove_list: SmallVec<[(EntityId, ComponentId); 1]> = SmallVec::new();
-            for (entity_id, components) in &mut graph_state.entities {
-                let entity = entities.iter().find(|(eid, _, _, _)| *eid == entity_id);
+            //     let mut remove_list: SmallVec<[(EntityId, ComponentId); 1]> = SmallVec::new();
+            //     for (entity_id, components) in &mut graph_state.entities {
+            //         let entity = entities.iter().find(|(eid, _, _, _)| *eid == entity_id);
 
-                if let Some((_, _, _, entity_metadata)) = entity {
-                    let entity_label_margin = egui::Margin::same(0).top(18.0).bottom(4.0);
-                    let [add_clicked] = label_with_buttons(
-                        ui,
-                        [icons.add],
-                        &entity_metadata.name,
-                        get_scheme().text_primary,
-                        entity_label_margin,
-                    );
-                    if add_clicked {
-                        setting_modal_state.0 =
-                            Some(SettingModal::Graph(graph_id, Some(*entity_id), None));
-                    }
+            //         if let Some((_, _, _, entity_metadata)) = entity {
+            //             let entity_label_margin = egui::Margin::same(0).top(18.0).bottom(4.0);
+            //             let [add_clicked] = label_with_buttons(
+            //                 ui,
+            //                 [icons.add],
+            //                 &entity_metadata.name,
+            //                 get_scheme().text_primary,
+            //                 entity_label_margin,
+            //             );
+            //             if add_clicked {
+            //                 setting_modal_state.0 =
+            //                     Some(SettingModal::Graph(graph_id, Some(*entity_id), None));
+            //             }
 
-                    for (component_id, component_values) in components.iter_mut() {
-                        let Some(metadata) = metadata_store.get_metadata(component_id) else {
-                            continue;
-                        };
-                        let component_label = metadata.name.clone();
-                        let element_names = metadata.element_names();
+            //             for (component_id, component_values) in components.iter_mut() {
+            //                 let Some(metadata) = metadata_store.get_metadata(component_id) else {
+            //                     continue;
+            //                 };
+            //                 let component_label = metadata.name.clone();
+            //                 let element_names = metadata.element_names();
 
-                        let component_label_margin = egui::Margin::symmetric(0, 18);
-                        let [subtract_clicked] = label_with_buttons(
-                            ui,
-                            [icons.subtract],
-                            component_label,
-                            get_scheme().text_tertiary,
-                            component_label_margin,
-                        );
-                        if subtract_clicked {
-                            remove_list.push((*entity_id, *component_id));
-                        }
+            //                 let component_label_margin = egui::Margin::symmetric(0, 18);
+            //                 let [subtract_clicked] = label_with_buttons(
+            //                     ui,
+            //                     [icons.subtract],
+            //                     component_label,
+            //                     get_scheme().text_tertiary,
+            //                     component_label_margin,
+            //                 );
+            //                 if subtract_clicked {
+            //                     remove_list.push((*entity_id, *component_id));
+            //                 }
 
-                        component_value(ui, component_values, element_names);
-                    }
-                }
-            }
-            for (entity_id, component_id) in remove_list.into_iter() {
-                graph_state.remove_component(&entity_id, &component_id);
-            }
+            //                 component_value(ui, component_values, element_names);
+            //             }
+            //         }
+            //     }
+            //     for (entity_id, component_id) in remove_list.into_iter() {
+            //         graph_state.remove_component(&entity_id, &component_id);
+            //     }
         }
     }
 }

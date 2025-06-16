@@ -12,7 +12,7 @@ use big_space::GridCell;
 use big_space::propagation::NoPropagateRot;
 use egui::UiBuilder;
 use egui_tiles::{Container, Tile, TileId, Tiles};
-use impeller2::types::{ComponentId, EntityId};
+use impeller2::types::ComponentId;
 use impeller2_bevy::{ComponentMetadataRegistry, ComponentSchemaRegistry, EntityMap};
 use impeller2_wkt::{EntityMetadata, Graph, Panel, Viewport};
 use nox::Tensor;
@@ -127,7 +127,7 @@ impl TileState {
 
     pub fn create_viewport_tile(
         &mut self,
-        focus_entity: Option<EntityId>,
+        focus_entity: Option<ComponentId>,
         tile_id: Option<TileId>,
     ) {
         self.tree_actions

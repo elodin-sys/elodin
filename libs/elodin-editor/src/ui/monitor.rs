@@ -1,6 +1,6 @@
 use bevy::{ecs::system::SystemParam, prelude::*};
 use bevy_egui::egui::{self, Frame, RichText, Stroke};
-use impeller2::types::{ComponentId, EntityId};
+use impeller2::types::ComponentId;
 use impeller2_bevy::ComponentValueExt;
 use impeller2_bevy::{ComponentMetadataRegistry, ComponentValueMap, EntityMap};
 use impeller2_wkt::EntityMetadata;
@@ -10,15 +10,13 @@ use super::{colors::get_scheme, widgets::WidgetSystem};
 #[derive(Clone)]
 pub struct MonitorPane {
     pub label: String,
-    pub entity_id: EntityId,
     pub component_id: ComponentId,
 }
 
 impl MonitorPane {
-    pub fn new(label: String, entity_id: EntityId, component_id: ComponentId) -> Self {
+    pub fn new(label: String, component_id: ComponentId) -> Self {
         Self {
             label,
-            entity_id,
             component_id,
         }
     }
@@ -44,7 +42,7 @@ impl WidgetSystem for MonitorWidget<'_, '_> {
         pane: Self::Args,
     ) -> Self::Output {
         let mut state = state.get_mut(world);
-        let Some(entity) = state.entity_map.get(&pane.entity_id) else {
+        let Some(entity) = state.entity_map.get(&pane.component_id) else {
             return;
         };
         let Ok(mut component_value_map) = state.component_value_query.get_mut(*entity) else {

@@ -9,7 +9,7 @@ use bevy::{
 };
 use bevy_render::render_resource::{Buffer, BufferDescriptor, BufferSlice, BufferUsages};
 use bevy_render::renderer::{RenderDevice, RenderQueue};
-use impeller2::types::{ComponentId, ComponentView, EntityId, OwnedPacket, PrimType, Timestamp};
+use impeller2::types::{ComponentId, ComponentView, OwnedPacket, PrimType, Timestamp};
 use impeller2_bevy::{
     CommandsExt, ComponentSchemaRegistry, ComponentValueMap, CurrentStreamId, EntityMap,
     PacketGrantR, PacketHandlerInput, PacketHandlers,
@@ -99,49 +99,30 @@ impl PlotDataComponent {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct PlotDataEntity {
-    pub label: String,
+#[derive(Resource, Clone, Default)]
+pub struct CollectedGraphData {
     pub components: BTreeMap<ComponentId, PlotDataComponent>,
 }
 
-#[derive(Resource, Clone, Default)]
-pub struct CollectedGraphData {
-    pub entities: BTreeMap<EntityId, PlotDataEntity>,
-}
-
 impl CollectedGraphData {
-    pub fn get_entity(&self, entity_id: &EntityId) -> Option<&PlotDataEntity> {
-        self.entities.get(entity_id)
-    }
-    pub fn get_component(
-        &self,
-        entity_id: &EntityId,
-        component_id: &ComponentId,
-    ) -> Option<&PlotDataComponent> {
-        self.entities
-            .get(entity_id)
-            .and_then(|entity| entity.components.get(component_id))
+    pub fn get_component(&self, component_id: &ComponentId) -> Option<&PlotDataComponent> {
+        self.components.get(component_id)
     }
     pub fn get_component_mut(
         &mut self,
-        entity_id: &EntityId,
         component_id: &ComponentId,
     ) -> Option<&mut PlotDataComponent> {
-        self.entities
-            .get_mut(entity_id)
-            .and_then(|entity| entity.components.get_mut(component_id))
+        self.components.get_mut(component_id)
     }
 
     pub fn get_line(
         &self,
-        entity_id: &EntityId,
+        entity_id: &ComponentId,
         component_id: &ComponentId,
         index: usize,
     ) -> Option<&Handle<Line>> {
-        self.entities
-            .get(entity_id)
-            .and_then(|entity| entity.components.get(component_id))
+        self.components
+            .get(component_id)
             .and_then(|component| component.lines.get(&index))
     }
 }
@@ -164,13 +145,8 @@ pub fn pkt_handler(
         }
         if let Err(err) = table.sink(
             registry,
-            &mut |component_id,
-                  entity_id,
-                  view: ComponentView<'_>,
-                  timestamp: Option<Timestamp>| {
-                let Some(plot_data) =
-                    collected_graph_data.get_component_mut(&entity_id, &component_id)
-                else {
+            &mut |component_id, view: ComponentView<'_>, timestamp: Option<Timestamp>| {
+                let Some(plot_data) = collected_graph_data.get_component_mut(&component_id) else {
                     return;
                 };
                 if let Some(timestamp) = timestamp {
@@ -229,7 +205,7 @@ pub fn handle_time_series(
     mut lines: ResMut<Assets<Line>>,
     mut commands: Commands,
     mut range: Range<Timestamp>,
-    entity_id: EntityId,
+    entity_id: ComponentId,
     component_id: ComponentId,
     earliest_timestamp: Res<EarliestTimestamp>,
     schema_reg: Res<ComponentSchemaRegistry>,
@@ -388,7 +364,6 @@ pub fn handle_time_series(
             let msg = GetTimeSeries {
                 id: packet_id,
                 range,
-                entity_id,
                 component_id,
                 limit: Some(CHUNK_LEN),
             };
@@ -479,7 +454,6 @@ pub fn queue_timestamp_read(
                 let msg = GetTimeSeries {
                     id: packet_id,
                     range: range.clone(),
-                    entity_id,
                     component_id,
                     limit: Some(CHUNK_LEN),
                 };

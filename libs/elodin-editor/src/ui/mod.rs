@@ -19,8 +19,8 @@ use self::colors::get_scheme;
 use egui::CornerRadius;
 use egui_tiles::TileId;
 use impeller2::types::{ComponentId, EntityId};
-use impeller2_bevy::ComponentValueMap;
-use impeller2_wkt::EntityMetadata;
+use impeller2_bevy::{ComponentPath, ComponentValueMap};
+use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 use widgets::{
     command_palette::CommandPaletteState,
     timeline::{self, timeline_slider},
@@ -77,7 +77,7 @@ pub enum SelectedObject {
 }
 
 impl SelectedObject {
-    pub fn is_entity_selected(&self, id: impeller2::types::EntityId) -> bool {
+    pub fn is_entity_selected(&self, id: impeller2::types::ComponentId) -> bool {
         matches!(self, SelectedObject::Entity(pair) if pair.impeller == id)
     }
 
@@ -111,7 +111,7 @@ pub struct ViewportRect(pub Option<egui::Rect>);
 #[derive(Clone, Copy, Debug)]
 pub struct EntityPair {
     pub bevy: Entity,
-    pub impeller: EntityId,
+    pub impeller: ComponentId,
 }
 
 pub fn shortcuts(
@@ -131,17 +131,17 @@ pub fn shortcuts(
 }
 
 pub type EntityData<'a> = (
-    &'a EntityId,
+    &'a ComponentId,
     Entity,
     &'a mut ComponentValueMap,
-    &'a EntityMetadata,
+    &'a ComponentMetadata,
 );
 
 pub type EntityDataReadOnly<'a> = (
-    &'a EntityId,
+    &'a ComponentId,
     Entity,
     &'a ComponentValueMap,
-    &'a EntityMetadata,
+    &'a ComponentMetadata,
 );
 
 #[derive(QueryData)]

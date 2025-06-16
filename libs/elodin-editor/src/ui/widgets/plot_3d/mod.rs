@@ -35,18 +35,11 @@ pub fn sync_line_plot_3d(
     mut commands: Commands,
 ) {
     for (entity, metadata, line_plot) in line_plot_3d_query.iter() {
-        let line = collected_graph_data
-            .entities
-            .entry(line_plot.entity)
-            .or_insert_with(|| PlotDataEntity {
-                label: metadata.name.clone(),
-                components: BTreeMap::new(),
-            });
         let Some(metadata) = metadata_store.get_metadata(&line_plot.component_id) else {
             continue;
         };
 
-        let data_component = line
+        let data_component = collected_graph_data
             .components
             .entry(line_plot.component_id)
             .or_insert_with(|| {

@@ -9,8 +9,8 @@ use bevy::prelude::*;
 use bevy::render::view::RenderLayers;
 use bevy_egui::egui::{self, Color32};
 
-use impeller2::types::{ComponentId, EntityId, Timestamp};
-use impeller2_bevy::ComponentValue;
+use impeller2::types::{ComponentId, Timestamp};
+use impeller2_bevy::{ComponentPath, ComponentValue};
 use impeller2_wkt::GraphType;
 
 use super::gpu::LineVisibleRange;
@@ -35,8 +35,8 @@ pub struct GraphBundle {
 
 #[derive(Clone, Debug, Component)]
 pub struct GraphState {
-    pub entities: BTreeMap<EntityId, GraphStateEntity>,
-    pub enabled_lines: BTreeMap<(EntityId, ComponentId, usize), (Entity, Color32)>,
+    pub components: BTreeMap<ComponentPath, GraphStateComponent>,
+    pub enabled_lines: BTreeMap<(ComponentPath, usize), (Entity, Color32)>,
     pub render_layers: RenderLayers,
     pub line_width: f32,
     pub zoom_factor: Vec2,
@@ -54,7 +54,7 @@ pub struct GraphState {
 impl GraphBundle {
     pub fn new(
         render_layer_alloc: &mut RenderLayerAlloc,
-        entities: BTreeMap<EntityId, GraphStateEntity>,
+        components: BTreeMap<ComponentPath, GraphStateComponent>,
         label: String,
     ) -> Self {
         let Some(layer) = render_layer_alloc.alloc() else {
@@ -62,7 +62,7 @@ impl GraphBundle {
         };
         let render_layers = RenderLayers::layer(layer);
         let graph_state = GraphState {
-            entities,
+            components,
             enabled_lines: BTreeMap::new(),
             render_layers: render_layers.clone(),
             line_width: 2.0,
@@ -105,7 +105,7 @@ impl GraphBundle {
 }
 
 impl GraphState {
-    pub fn remove_component(&mut self, entity_id: &EntityId, component_id: &ComponentId) {
+    pub fn remove_component(&mut self, entity_id: &ComponentId, component_id: &ComponentId) {
         let Some(components) = self.entities.get_mut(entity_id) else {
             return;
         };
@@ -119,7 +119,7 @@ impl GraphState {
 
     pub fn insert_component(
         &mut self,
-        entity_id: &EntityId,
+        entity_id: &ComponentId,
         component_id: &ComponentId,
         component_values: Vec<(bool, egui::Color32)>,
     ) {
@@ -130,7 +130,7 @@ impl GraphState {
 }
 
 pub fn default_component_values(
-    entity_id: &EntityId,
+    entity_id: &ComponentId,
     component_id: &ComponentId,
     component_value: &ComponentValue,
 ) -> GraphStateComponent {
