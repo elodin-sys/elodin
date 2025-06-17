@@ -7,6 +7,7 @@ use alloc::boxed::Box;
 use cortex_m::delay::Delay;
 use embedded_hal::delay::DelayNs;
 use embedded_hal_compat::ForwardCompat;
+use embedded_io::Write;
 use fugit::{ExtU32 as _, RateExtU32 as _};
 use hal::{i2c, pac, usart};
 
@@ -74,6 +75,14 @@ fn main() -> ! {
         &clock_cfg,
     )));
     defmt::info!("Configured UART bridge");
+
+    let mut debug_uart = Box::new(healing_usart::HealingUsart::new(usart::Usart::new(
+        dp.USART6,
+        115200,
+        usart::UsartConfig::default(),
+        &clock_cfg,
+    )));
+    defmt::info!("Configured debug UART");
 
     // Generate a 600kHz PWM signal on TIM3
     let pwm_timer = dp.TIM3.timer(600.kHz(), Default::default(), &clock_cfg);
@@ -291,6 +300,7 @@ fn main() -> ! {
                 monitor.data.rtc_vbat,
                 monitor.data.cpu_temp,
             );
+            debug_uart.write_fmt(format_args!("{}\r\n", ts)).unwrap();
         }
         delay.delay_ns(0);
     }
