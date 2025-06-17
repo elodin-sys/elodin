@@ -25,7 +25,7 @@ use super::{
     colors::{self, EColor, get_scheme, with_opacity},
     images,
     monitor::{MonitorPane, MonitorWidget},
-    sql_table::{SQLTablePane, SqlTable, SqlTableWidget},
+    query_table::{QueryTable, QueryTablePane, QueryTableWidget},
     video_stream::{IsTileVisible, VideoDecoderHandle},
     widgets::{
         WidgetSystem, WidgetSystemExt,
@@ -34,7 +34,7 @@ use super::{
         hierarchy::HierarchyContent,
         inspector::{InspectorContent, InspectorIcons},
         plot::{GraphBundle, GraphState, PlotWidget},
-        sql_plot::SqlPlot,
+        query_plot::QueryPlot,
     },
 };
 use crate::{
@@ -158,12 +158,12 @@ impl TileState {
             .push(TreeAction::AddActionTile(tile_id, button_name, lua_code));
     }
 
-    pub fn create_sql_tile(&mut self, tile_id: Option<TileId>) {
-        self.tree_actions.push(TreeAction::AddSQLTable(tile_id));
+    pub fn create_query_table_tile(&mut self, tile_id: Option<TileId>) {
+        self.tree_actions.push(TreeAction::AddQueryTable(tile_id));
     }
 
-    pub fn create_sql_plot_tile(&mut self, tile_id: Option<TileId>) {
-        self.tree_actions.push(TreeAction::AddSqlPlot(tile_id));
+    pub fn create_query_plot_tile(&mut self, tile_id: Option<TileId>) {
+        self.tree_actions.push(TreeAction::AddQueryPlot(tile_id));
     }
 
     pub fn create_video_stream_tile(
@@ -217,7 +217,7 @@ impl TileState {
                 Tile::Pane(Pane::VideoStream(pane)) => {
                     commands.entity(pane.entity).despawn();
                 }
-                Tile::Pane(Pane::SqlPlot(pane)) => {
+                Tile::Pane(Pane::QueryPlot(pane)) => {
                     commands.entity(pane.entity).despawn();
                 }
                 _ => {}
@@ -241,8 +241,8 @@ pub enum Pane {
     Viewport(ViewportPane),
     Graph(GraphPane),
     Monitor(MonitorPane),
-    SQLTable(SQLTablePane),
-    SqlPlot(super::widgets::sql_plot::SQLPlotPane),
+    QueryTable(QueryTablePane),
+    QueryPlot(super::widgets::query_plot::QueryPlotPane),
     ActionTile(ActionTilePane),
     VideoStream(super::video_stream::VideoStreamPane),
     Hierarchy,
@@ -260,12 +260,12 @@ impl Pane {
             }
             Pane::Viewport(viewport) => viewport.label.to_string(),
             Pane::Monitor(monitor) => monitor.label.to_string(),
-            Pane::SQLTable(..) => "SQL".to_string(),
-            Pane::SqlPlot(sql_plot) => {
-                if let Ok(graph_state) = graph_states.get(sql_plot.entity) {
+            Pane::QueryTable(..) => "Query".to_string(),
+            Pane::QueryPlot(query_plot) => {
+                if let Ok(graph_state) = graph_states.get(query_plot.entity) {
                     return graph_state.label.to_string();
                 }
-                "SQL PLOT".to_string()
+                "Query Plot".to_string()
             }
             Pane::ActionTile(action) => action.label.to_string(),
             Pane::VideoStream(video_stream) => video_stream.label.to_string(),
@@ -300,15 +300,15 @@ impl Pane {
                 ui.add_widget_with::<MonitorWidget>(world, "monitor", pane.clone());
                 egui_tiles::UiResponse::None
             }
-            Pane::SQLTable(pane) => {
-                ui.add_widget_with::<SqlTableWidget>(world, "sql", pane.clone());
+            Pane::QueryTable(pane) => {
+                ui.add_widget_with::<QueryTableWidget>(world, "sql", pane.clone());
                 egui_tiles::UiResponse::None
             }
-            Pane::SqlPlot(pane) => {
+            Pane::QueryPlot(pane) => {
                 pane.rect = Some(content_rect);
-                ui.add_widget_with::<super::widgets::sql_plot::SqlPlotWidget>(
+                ui.add_widget_with::<super::widgets::query_plot::QueryPlotWidget>(
                     world,
-                    "sql_plot",
+                    "query_plot",
                     pane.clone(),
                 );
                 egui_tiles::UiResponse::None
@@ -424,8 +424,8 @@ pub enum TreeAction {
     AddViewport(Option<TileId>, Option<EntityId>),
     AddGraph(Option<TileId>, Option<GraphBundle>),
     AddMonitor(Option<TileId>, EntityId, ComponentId),
-    AddSQLTable(Option<TileId>),
-    AddSqlPlot(Option<TileId>),
+    AddQueryTable(Option<TileId>),
+    AddQueryPlot(Option<TileId>),
     AddActionTile(Option<TileId>, String, String),
     AddVideoStream(Option<TileId>, [u8; 2], String),
     AddHierarchy(Option<TileId>),
@@ -581,7 +581,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                     };
                 }
 
-                Tile::Pane(Pane::SqlPlot(pane)) => {
+                Tile::Pane(Pane::QueryPlot(pane)) => {
                     *layout.selected_object = SelectedObject::Graph {
                         tile_id,
                         label: pane.label.to_string(),
@@ -889,11 +889,11 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             state_mut.commands.entity(pane.entity).despawn();
                         };
 
-                        if let egui_tiles::Tile::Pane(Pane::SqlPlot(pane)) = tile {
+                        if let egui_tiles::Tile::Pane(Pane::QueryPlot(pane)) = tile {
                             state_mut.commands.entity(pane.entity).despawn();
                         };
 
-                        if let egui_tiles::Tile::Pane(Pane::SQLTable(pane)) = tile {
+                        if let egui_tiles::Tile::Pane(Pane::QueryTable(pane)) = tile {
                             state_mut.commands.entity(pane.entity).despawn();
                         };
 
@@ -1043,34 +1043,39 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             ui_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
-                    TreeAction::AddSQLTable(parent_tile_id) => {
-                        let entity = state_mut.commands.spawn(SqlTable::default()).id();
-                        let pane = Pane::SQLTable(SQLTablePane { entity });
+                    TreeAction::AddQueryTable(parent_tile_id) => {
+                        let entity = state_mut.commands.spawn(QueryTable::default()).id();
+                        let pane = Pane::QueryTable(QueryTablePane { entity });
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
                             ui_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
-                    TreeAction::AddSqlPlot(parent_tile_id) => {
+                    TreeAction::AddQueryPlot(parent_tile_id) => {
                         let graph_bundle = GraphBundle::new(
                             &mut state_mut.render_layer_alloc,
                             BTreeMap::default(),
-                            "SQL Plot".to_string(),
+                            "Query Plot".to_string(),
                         );
                         let entity = state_mut
                             .commands
-                            .spawn(SqlPlot::default())
+                            .spawn(QueryPlot::default())
                             .insert(graph_bundle)
                             .id();
-                        let pane = Pane::SqlPlot(super::widgets::sql_plot::SQLPlotPane {
+                        let pane = Pane::QueryPlot(super::widgets::query_plot::QueryPlotPane {
                             entity,
                             rect: None,
-                            label: "SQL Plot".to_string(),
+                            label: "Query Plot".to_string(),
                         });
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
+                            *state_mut.selected_object = SelectedObject::Graph {
+                                tile_id,
+                                label: "Query Plot".to_string(),
+                                graph_id: entity,
+                            };
                             ui_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
@@ -1139,13 +1144,14 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         }
                     }
                     Pane::Monitor(_) => {}
-                    Pane::SQLTable(_) => {}
-                    Pane::SqlPlot(sql_plot) => {
+                    Pane::QueryTable(_) => {}
+                    Pane::QueryPlot(query_plot) => {
                         if active_tiles.contains(tile_id) {
-                            if let Ok(mut cam) = state_mut.commands.get_entity(sql_plot.entity) {
-                                cam.try_insert(ViewportRect(sql_plot.rect));
+                            if let Ok(mut cam) = state_mut.commands.get_entity(query_plot.entity) {
+                                cam.try_insert(ViewportRect(query_plot.rect));
                             }
-                        } else if let Ok(mut cam) = state_mut.commands.get_entity(sql_plot.entity) {
+                        } else if let Ok(mut cam) = state_mut.commands.get_entity(query_plot.entity)
+                        {
                             cam.try_insert(ViewportRect(None));
                         }
                     }
@@ -1398,13 +1404,13 @@ pub fn spawn_panel(
         Panel::SQLTable(sql) => {
             // Create a new SQL table entity
             let entity = commands
-                .spawn(super::sql_table::SqlTable {
+                .spawn(super::query_table::QueryTable {
                     current_query: sql.query.clone(),
                     ..Default::default()
                 })
                 .id();
-            let pane = super::sql_table::SQLTablePane { entity };
-            ui_state.insert_tile(Tile::Pane(Pane::SQLTable(pane)), parent_id, false)
+            let pane = super::query_table::QueryTablePane { entity };
+            ui_state.insert_tile(Tile::Pane(Pane::QueryTable(pane)), parent_id, false)
         }
         Panel::ActionPane(action) => {
             // Create a new action tile entity
@@ -1427,10 +1433,10 @@ pub fn spawn_panel(
             let graph_bundle = GraphBundle::new(
                 render_layer_alloc,
                 BTreeMap::default(),
-                "SQL Plot".to_string(),
+                "Query Plot".to_string(),
             );
             let entity = commands
-                .spawn(SqlPlot {
+                .spawn(QueryPlot {
                     current_query: plot.query.clone(),
                     auto_refresh: plot.auto_refresh,
                     refresh_interval: plot.refresh_interval,
@@ -1438,10 +1444,10 @@ pub fn spawn_panel(
                 })
                 .insert(graph_bundle)
                 .id();
-            let pane = Pane::SqlPlot(super::widgets::sql_plot::SQLPlotPane {
+            let pane = Pane::QueryPlot(super::widgets::query_plot::QueryPlotPane {
                 entity,
                 rect: None,
-                label: "SQL Plot".to_string(),
+                label: "Query Plot".to_string(),
             });
             ui_state.insert_tile(Tile::Pane(pane), parent_id, true)
         }

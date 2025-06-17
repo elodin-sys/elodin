@@ -459,6 +459,15 @@ pub struct AssetHandle<T> {
     phantom_data: PhantomData<T>,
 }
 
+impl<T> AssetHandle<T> {
+    pub fn new(id: u64) -> Self {
+        Self {
+            id,
+            phantom_data: PhantomData,
+        }
+    }
+}
+
 impl<T> PartialEq for AssetHandle<T> {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
@@ -507,7 +516,7 @@ impl<T: DeserializeOwned + Asset + Send + Sync + Component> AssetAdapter
             entity_map.0.insert(entity_id, e.id());
             e
         };
-        e.insert(asset).insert(AssetHandle::<T> {
+        e.insert_if_new(asset).insert_if_new(AssetHandle::<T> {
             id: asset_id,
             phantom_data: PhantomData,
         });

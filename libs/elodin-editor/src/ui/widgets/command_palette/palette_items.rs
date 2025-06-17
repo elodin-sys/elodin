@@ -19,14 +19,14 @@ use impeller2_bevy::{ComponentMetadataRegistry, CurrentStreamId, PacketTx};
 use impeller2_wkt::{BodyAxes, EntityMetadata, IsRecording, SetDbSettings, SetStreamState};
 
 use crate::{
-    Offset, SelectedTimeRange, TimeRangeBehavior,
+    EqlContext, Offset, SelectedTimeRange, TimeRangeBehavior,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
         self, EntityData, HdrEnabled, colors,
         tiles::{self, SyncViewportParams},
         widgets::{
             plot::{GraphBundle, default_component_values},
-            sql_plot::SqlPlot,
+            query_plot::QueryPlot,
         },
     },
 };
@@ -488,23 +488,23 @@ pub fn create_viewport(tile_id: Option<TileId>) -> PaletteItem {
     )
 }
 
-pub fn create_sql(tile_id: Option<TileId>) -> PaletteItem {
+pub fn create_query_table(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
-        "Create SQL Table",
+        "Create Query Table",
         TILES_LABEL,
         move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
-            tile_state.create_sql_tile(tile_id);
+            tile_state.create_query_table_tile(tile_id);
             PaletteEvent::Exit
         },
     )
 }
 
-pub fn create_sql_plot(tile_id: Option<TileId>) -> PaletteItem {
+pub fn create_query_plot(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
-        "Create SQL Plot",
+        "Create Query Plot",
         TILES_LABEL,
         move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
-            tile_state.create_sql_plot_tile(tile_id);
+            tile_state.create_query_plot_tile(tile_id);
             PaletteEvent::Exit
         },
     )
@@ -677,21 +677,21 @@ pub fn save_preset_inner() -> PaletteItem {
         LabelSource::placeholder("Enter a name for the preset"),
         "",
         move |name: In<String>,
-              sql_tables: Query<&ui::sql_table::SqlTable>,
+              query_tables: Query<&ui::query_table::QueryTable>,
               cameras: Query<ui::CameraQuery>,
               entity_id: Query<&impeller2::types::EntityId>,
               action_tiles: Query<&ui::actions::ActionTile>,
               graph_states: Query<&ui::widgets::plot::GraphState>,
-              sql_plots: Query<&SqlPlot>,
+              query_plots: Query<&QueryPlot>,
               ui_state: Res<tiles::TileState>| {
             if let Some(tile_id) = ui_state.tree.root() {
                 let panel = crate::ui::preset::tile_to_panel(
-                    &sql_tables,
+                    &query_tables,
                     &cameras,
                     &entity_id,
                     &action_tiles,
                     &graph_states,
-                    &sql_plots,
+                    &query_plots,
                     tile_id,
                     &ui_state,
                 );
@@ -801,14 +801,61 @@ pub fn set_color_scheme() -> PaletteItem {
     })
 }
 
+pub fn create_ghost() -> PaletteItem {
+    PaletteItem::new("Create Ghost Entity", TILES_LABEL, move |_: In<String>| {
+        PalettePage::new(vec![
+            PaletteItem::new(
+                LabelSource::placeholder("Enter EQL expression (e.g., 'entity.position')"),
+                "Enter an EQL expression that resolves to a 7-component array [qx, qy, qz, qw, px, py, pz]",
+                move |In(eql): In<String>, eql_context: Res<EqlContext>| {
+                    let expr = match eql_context.0.parse_str(&eql) {
+                        Ok(expr) => expr,
+                        Err(err) => {
+                            return PaletteEvent::Error(err.to_string())
+                        }
+                    };
+                    PalettePage::new(vec![
+                        PaletteItem::new(
+                            LabelSource::placeholder("Enter GLTF path (optional)"),
+                            "Enter path to GLTF file for the ghost visualization (leave empty for no visual)",
+                            move |In(gltf_path): In<String>,
+                                  mut commands: Commands| {
+                                let gltf_path = if gltf_path.trim().is_empty() {
+                                    None
+                                } else {
+                                    Some(gltf_path.trim().to_string())
+                                };
+
+
+                                crate::ghosts::create_ghost_entity(
+                                    &mut commands,
+                                    eql.clone(),
+                                    expr.clone(),
+                                    gltf_path,
+                                );
+
+                                PaletteEvent::Exit
+                            },
+                        ).default()
+                    ])
+                    .prompt("Enter GLTF path for ghost visualization")
+                    .into()
+                },
+            ).default()
+        ])
+        .prompt("Enter EQL expression for ghost positioning")
+        .into()
+    })
+}
+
 pub fn create_tiles(tile_id: TileId) -> PalettePage {
     PalettePage::new(vec![
         create_graph(Some(tile_id)),
         create_action(Some(tile_id)),
         create_monitor(Some(tile_id)),
         create_viewport(Some(tile_id)),
-        create_sql(Some(tile_id)),
-        create_sql_plot(Some(tile_id)),
+        create_query_table(Some(tile_id)),
+        create_query_plot(Some(tile_id)),
         create_video_stream(Some(tile_id)),
         create_hierarchy(Some(tile_id)),
         create_inspector(Some(tile_id)),
@@ -874,12 +921,13 @@ impl Default for PalettePage {
             create_action(None),
             create_monitor(None),
             create_viewport(None),
-            create_sql(None),
-            create_sql_plot(None),
+            create_query_table(None),
+            create_query_plot(None),
             create_video_stream(None),
             create_hierarchy(None),
             create_inspector(None),
             create_sidebars(),
+            create_ghost(),
             save_preset(),
             load_preset(),
             set_color_scheme(),

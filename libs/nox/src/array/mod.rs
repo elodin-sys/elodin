@@ -1313,6 +1313,18 @@ impl<D1: Dim, D2: Dim> MappableDim for (D1, D2) {
     type ElemDim = D2;
 }
 
+pub fn can_broadcast(left: &[usize], right: &[usize]) -> bool {
+    for (left, right) in left.iter().rev().zip(right.iter().rev()) {
+        if *left == *right || *right == 1 {
+            continue;
+        }
+        if *left != 1 {
+            return false;
+        }
+    }
+    true
+}
+
 pub(crate) fn cobroadcast_dims(output: &mut [usize], other: &[usize]) -> bool {
     for (output, other) in output.iter_mut().rev().zip(other.iter().rev()) {
         if *output == *other || *other == 1 {
@@ -1556,6 +1568,12 @@ impl<T: Field, const D1: usize, const D2: usize, const D3: usize> From<[[[T; D3]
 {
     fn from(buf: [[[T; D3]; D2]; D1]) -> Self {
         Array { buf }
+    }
+}
+
+impl<T: Field> Array<T, Dyn> {
+    pub fn from_shape_vec(shape: SmallVec<[usize; 4]>, storage: Vec<T>) -> Option<Self> {
+        dynamic::DynArray::from_shape_vec(shape, storage).map(|buf| Array { buf })
     }
 }
 

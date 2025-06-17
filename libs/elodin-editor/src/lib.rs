@@ -1,9 +1,9 @@
-use std::{collections::HashMap, ops::Range, time::Duration};
+use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use crate::plugins::editor_cam_touch;
 use bevy::{
     DefaultPlugins,
-    asset::embedded_asset,
+    asset::{UnapprovedPathMode, embedded_asset},
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
     log::LogPlugin,
@@ -24,13 +24,16 @@ use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::prelude::OrbitConstraint;
 use bevy_egui::{EguiContextSettings, EguiPlugin};
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
+use convert_case::Casing;
 use impeller2::types::OwnedPacket;
 use impeller2::types::{Msg, Timestamp};
 use impeller2_bevy::{
-    AssetHandle, ComponentValueMap, CurrentStreamId, EntityMap, PacketHandlerInput, PacketHandlers,
-    PacketTx,
+    AssetHandle, ComponentMetadataRegistry, ComponentSchemaRegistry, ComponentValueMap,
+    CurrentStreamId, EntityMap, PacketHandlerInput, PacketHandlers, PacketTx,
 };
-use impeller2_wkt::{CurrentTimestamp, NewConnection, SetStreamState, Viewport, WorldPos};
+use impeller2_wkt::{
+    CurrentTimestamp, EntityMetadata, NewConnection, SetStreamState, Viewport, WorldPos,
+};
 use impeller2_wkt::{EarliestTimestamp, Glb, LastUpdated};
 use nox::Tensor;
 use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc, spawn_gizmo};
@@ -42,6 +45,7 @@ use ui::{
     widgets::plot::{CollectedGraphData, gpu::LineHandle},
 };
 
+pub mod ghosts;
 mod offset_parse;
 mod plugins;
 pub mod ui;
@@ -149,6 +153,10 @@ impl Plugin for EditorPlugin {
                         }),
                         ..default()
                     })
+                    .set(AssetPlugin {
+                        unapproved_path_mode: UnapprovedPathMode::Allow,
+                        ..default()
+                    })
                     .disable::<TransformPlugin>()
                     .disable::<DiagnosticsPlugin>()
                     .disable::<LogPlugin>()
@@ -190,6 +198,8 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, sync_paused)
             .add_systems(PreUpdate, set_selected_range)
             .add_systems(PreUpdate, set_floating_origin.after(sync_pos))
+            .add_systems(PreUpdate, update_eql_context)
+            .add_systems(PreUpdate, set_eql_context_range.after(update_eql_context))
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
             .add_systems(PostUpdate, set_clear_color)
@@ -201,7 +211,9 @@ impl Plugin for EditorPlugin {
             .init_resource::<SyncedGlbs>()
             .insert_resource(ClearColor(get_scheme().bg_secondary.into_bevy()))
             .insert_resource(TimeRangeBehavior::default())
-            .insert_resource(SelectedTimeRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)));
+            .insert_resource(SelectedTimeRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)))
+            .init_resource::<EqlContext>()
+            .add_plugins(ghosts::GhostsPlugin);
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
         }
@@ -211,8 +223,6 @@ impl Plugin for EditorPlugin {
 
         #[cfg(target_os = "macos")]
         app.add_systems(Update, setup_titlebar);
-
-        //app.insert_resource(Msaa::default());
 
         // For adding features incompatible with wasm:
         embedded_asset!(app, "./assets/diffuse.ktx2");
@@ -885,12 +895,14 @@ fn clear_state_new_connection(
     mut graph_data: ResMut<CollectedGraphData>,
     lines: Query<Entity, With<LineHandle>>,
     mut glbs: ResMut<SyncedGlbs>,
+    mut eql_context: ResMut<EqlContext>,
     mut commands: Commands,
 ) {
     match packet {
         OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
         _ => return,
     }
+    eql_context.0.entities.clear();
     entity_map.0.retain(|_, entity| {
         if let Ok(mut entity_commands) = commands.get_entity(*entity) {
             entity_commands.despawn();
@@ -1059,6 +1071,82 @@ pub fn clamp_current_time(
     if new_timestamp != current_timestamp.0 {
         packet_tx.send_msg(SetStreamState::rewind(**current_stream_id, new_timestamp))
     }
+}
+
+#[derive(Resource)]
+pub struct EqlContext(pub eql::Context);
+
+impl Default for EqlContext {
+    fn default() -> Self {
+        Self(eql::Context::new(
+            HashMap::new(),
+            Timestamp(i64::MIN),
+            Timestamp(i64::MAX),
+        ))
+    }
+}
+
+pub fn update_eql_context(
+    entity_map: Res<EntityMap>,
+    component_metadata_registry: Res<ComponentMetadataRegistry>,
+    component_schema_registry: Res<ComponentSchemaRegistry>,
+    component_value_query: Query<&ComponentValueMap>,
+    entity_metadata_query: Query<&EntityMetadata>,
+    mut eql_context: ResMut<EqlContext>,
+) {
+    let mut entities = HashMap::new();
+    for (entity_id, bevy_entity) in entity_map.iter() {
+        let entity_name = if let Ok(entity_metadata) = entity_metadata_query.get(*bevy_entity) {
+            entity_metadata.name.to_case(convert_case::Case::Snake)
+        } else {
+            entity_id.to_string()
+        };
+
+        if let Ok(component_value_map) = component_value_query.get(*bevy_entity) {
+            let mut components = HashMap::new();
+
+            for (component_id, _component_value) in component_value_map.iter() {
+                let Some(component_metadata) =
+                    component_metadata_registry.get_metadata(component_id)
+                else {
+                    continue;
+                };
+                let Some(schema) = component_schema_registry.get(component_id) else {
+                    continue;
+                };
+                let mut entity_component = eql::EntityComponent::new(
+                    component_metadata.name.to_case(convert_case::Case::Snake),
+                    entity_name.clone(),
+                    *entity_id,
+                    *component_id,
+                    schema.clone(),
+                );
+                if !component_metadata.element_names().is_empty() {
+                    entity_component.element_names = component_metadata
+                        .element_names()
+                        .split(",")
+                        .map(str::to_string)
+                        .collect();
+                }
+
+                components.insert(entity_component.name.clone(), Arc::new(entity_component));
+            }
+
+            let entity = Arc::new(eql::Entity {
+                name: entity_name.clone(),
+                components,
+            });
+
+            entities.insert(entity_name, entity);
+        }
+    }
+
+    eql_context.0 = eql::Context::new(entities, Timestamp(i64::MIN), Timestamp(i64::MAX));
+}
+
+pub fn set_eql_context_range(time_range: Res<SelectedTimeRange>, mut eql: ResMut<EqlContext>) {
+    eql.0.earliest_timestamp = time_range.0.start;
+    eql.0.last_timestamp = time_range.0.end;
 }
 
 pub fn dirs() -> directories::ProjectDirs {

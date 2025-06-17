@@ -109,14 +109,19 @@ s10.path = "../s10"
 # async
 stellarator.path = "../../libs/stellarator"
 stellarator.features = ["miette"]
+
 # errors
 miette.version = "7.2"
 miette.features = ["fancy"]
+
 # impeller
 impeller2-bevy.path = "../../libs/impeller2/bevy"
 impeller2-bevy.features = ["tcp"]
 impeller2-bevy.default-features = false
 
+# eql
+eql.path = "../db/eql"
+convert_case = "0.6.0"
 
 # macos
 [target.'cfg(target_os = "macos")'.dependencies]

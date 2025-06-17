@@ -3,8 +3,13 @@ use zerocopy::{FromBytes, IntoBytes};
 
 use crate::{buf::Buf, error::Error, types::PrimType};
 
+#[cfg(feature = "alloc")]
+pub type DefaultSizeBuf = Vec<u64>;
+#[cfg(not(feature = "alloc"))]
+pub type DefaultSizeBuf = heapless::Vec<u64, 6>;
+
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct Schema<S: Buf<u64>> {
+pub struct Schema<S: Buf<u64> = DefaultSizeBuf> {
     prim_type: PrimType,
     #[serde(bound(deserialize = ""))]
     shape: S,

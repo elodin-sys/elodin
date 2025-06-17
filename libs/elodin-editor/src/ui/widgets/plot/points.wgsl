@@ -61,6 +61,6 @@ struct FragmentOutput {
 {
     let dist = length((in.point - in.center) / in.width / 2);
     let alpha = 1.0 - smoothstep(0.82, 1.0, dist);
-    let color = vec4(in.color.xyz, alpha);
+    let color = vec4(in.color.xyz, alpha * in.color.w);
     return FragmentOutput(color);
 }

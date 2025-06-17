@@ -4,13 +4,13 @@ use bevy::ecs::{
     system::{Query, Res, ResMut, SystemParam, SystemState},
     world::World,
 };
-use bevy::prelude::Resource;
+use bevy::prelude::{Commands, Resource};
 use bevy_egui::egui::{self, Align, Color32, Layout, RichText, emath};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2_bevy::{
     ComponentMetadataRegistry, ComponentValue, ComponentValueExt, ElementValueMut,
 };
-use impeller2_wkt::MetadataExt;
+use impeller2_wkt::{Glb, MetadataExt};
 use smallvec::SmallVec;
 
 use crate::{
@@ -18,23 +18,32 @@ use crate::{
     ui::{
         EntityData, EntityPair,
         colors::get_scheme,
+        theme::configure_input_with_border,
         tiles::TreeAction,
         utils::{MarginSides, format_num},
         widgets::{
             WidgetSystem, label,
             plot::{GraphBundle, default_component_values},
+            query_plot::QueryType,
         },
     },
 };
 
-use super::{InspectorIcons, empty_inspector};
+use super::{
+    InspectorIcons, empty_inspector,
+    graph::{eql_autocomplete, inspector_text_field, query},
+};
 
 #[derive(SystemParam)]
 pub struct InspectorEntity<'w, 's> {
     entities: Query<'w, 's, EntityData<'static>>,
+    ghost: Query<'w, 's, &'static mut crate::ghosts::Ghost>,
+    glb: Query<'w, 's, &'static mut Glb>,
     metadata_store: Res<'w, ComponentMetadataRegistry>,
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     filter: ResMut<'w, ComponentFilter>,
+    eql_context: ResMut<'w, crate::EqlContext>,
+    commands: Commands<'w, 's>,
 }
 
 impl WidgetSystem for InspectorEntity<'_, '_> {
@@ -47,6 +56,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) -> Self::Output {
+        let width = ui.available_width();
         let mut tree_actions = SmallVec::new();
         let mut state_mut = state.get_mut(world);
 
@@ -76,7 +86,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                                 width: 1.0,
                                 color: get_scheme().border_primary,
                             })
-                            .margin(egui::Margin::same(0).bottom(26.)),
+                            .margin(egui::Margin::same(0).bottom(8.)),
                     );
 
                     ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
@@ -96,6 +106,44 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
             });
 
         search(ui, &mut state_mut.filter.0, icons.search);
+        ui.add_space(4.0);
+
+        egui::Frame::NONE.show(ui, |ui| {
+            if let Ok(mut ghost) = state_mut.ghost.get_mut(pair.bevy) {
+                ui.separator();
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new("EQL").color(get_scheme().text_secondary));
+                ui.add_space(8.0);
+                configure_input_with_border(ui.style_mut());
+                let query_res = query(ui, &mut ghost.eql, QueryType::EQL);
+                eql_autocomplete(ui, &state_mut.eql_context.0, &query_res, &mut ghost.eql);
+                if query_res.changed() {
+                    match state_mut.eql_context.0.parse_str(&ghost.eql) {
+                        Ok(expr) => {
+                            ghost.compiled_expr = crate::ghosts::compile_eql_expr(expr);
+                        }
+                        Err(err) => {
+                            ui.colored_label(get_scheme().error, err.to_string());
+                        }
+                    }
+                }
+                ui.add_space(8.0);
+            }
+            if let Ok(mut glb) = state_mut.glb.get_mut(pair.bevy) {
+                ui.separator();
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new("GLB").color(get_scheme().text_secondary));
+                ui.add_space(8.0);
+                if inspector_text_field(ui, &mut glb.0, "Enter a path to a glb").changed() {
+                    state_mut
+                        .commands
+                        .entity(pair.bevy)
+                        .remove::<crate::SyncedGlb>()
+                        .insert(impeller2_bevy::AssetHandle::<Glb>::new(fastrand::u64(..)));
+                }
+                ui.add_space(8.0);
+            }
+        });
 
         let matcher = SkimMatcherV2::default().smart_case().use_cache(true);
 
@@ -121,14 +169,12 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
             .collect::<Vec<_>>();
         components.sort_by_key(|(id, priority, _)| (*priority, *id));
 
-        ui.add_space(10.0);
-
         for (component_id, _, metadata) in components.into_iter().rev() {
             let component_value = component_value_map.0.get_mut(&component_id).unwrap();
             let label = metadata.name.clone();
             let element_names = metadata.element_names();
 
-            ui.add(egui::Separator::default().spacing(32.0));
+            ui.add(egui::Separator::default().spacing(16.0));
 
             let mut create_graph = false;
 
@@ -139,6 +185,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                 component_value,
                 icon_chart,
                 &mut create_graph,
+                width,
             );
             if res.changed() {
                 // if let Ok(payload) = ColumnPayload::try_from_value_iter(
@@ -196,9 +243,9 @@ pub fn search(
 
                     let mut font_id = egui::TextStyle::Button.resolve(ui.style());
                     font_id.size = 12.0;
-                    ui.add_sized(
-                        ui.available_size(),
+                    ui.add(
                         egui::TextEdit::singleline(filter)
+                            .desired_width(ui.available_width())
                             .frame(false)
                             .font(font_id),
                     );
@@ -275,6 +322,7 @@ fn inspector_item_multi(
     values: &mut ComponentValue,
     icon_chart: egui::TextureId,
     create_graph: &mut bool,
+    line_width: f32,
 ) -> egui::Response {
     let element_names = element_names
         .split(',')
@@ -282,6 +330,7 @@ fn inspector_item_multi(
         .map(Option::Some)
         .chain(std::iter::repeat(None));
     let resp = ui.vertical(|ui| {
+        ui.set_width(line_width);
         let [graph_clicked] = label::label_with_buttons(
             ui,
             [icon_chart],
@@ -293,7 +342,6 @@ fn inspector_item_multi(
 
         let item_spacing = egui::vec2(8.0, 8.0);
 
-        let line_width = ui.available_size().x;
         let line_height = ui.spacing().interact_size.y * 1.4;
 
         let item_width_min = ui.spacing().interact_size.x * 2.4;
