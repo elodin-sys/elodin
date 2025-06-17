@@ -1,14 +1,16 @@
 # Changelog
 
 ## unreleased
+
+## v0.14
+
+### v0.14.2
 - **(feat)** Add a new plot type called SQL plot that allows you to graph arbitrary sql expressions
-- **(feat)** Add fft and fftfreq functions to elodin-db's sql dialect. 
+- **(feat)** Add fft and fftfreq functions to elodin-db's sql dialect.
   These functions allow you to perform an fft over some time series data for example:
   ```sql
   select fftfreq(time), fft(gyro[0]) from gyro_vehicle
   ```
-
-## v0.14
 
 ### v0.14.1
 - **(feat)** Add new two plot types: point and bar. You can change the plot type by selecting the graph, and modifying the plot type in the inspector panel.
