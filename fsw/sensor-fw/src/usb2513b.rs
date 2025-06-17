@@ -61,6 +61,14 @@ pub const SELF_POWERED_CONFIG: [u8; 13] = [
     0x64, // Power-on time = 200ms
 ];
 
+/// Port swap configuration to fix hardware DP/DM reversal
+/// Register 0xFA (PRTSP) - Port Swap register
+pub const PORT_SWAP_CONFIG: [u8; 3] = [
+    0xFA,        // CMD: PRTSP register (Port Swap)
+    0x01,        // BYTE_COUNT: 1 byte
+    0b0000_0100, // PRTSP: Bit 2 = 1 (swap downstream port 2 DM/DP)
+];
+
 /// Register addresses for the USB2513B hub
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
@@ -82,6 +90,7 @@ pub enum UsbHubRegister {
     HubControllerCurrentSelf = 0x0E,
     HubControllerCurrentBus = 0x0F,
     PowerOnTime = 0x10,
+    PortSwap = 0xFA, // PRTSP register for DP/DM swapping
     StatusCmd = 0xFF,
 }
 
@@ -264,6 +273,12 @@ impl Usb2513b {
         let mut ops = [Operation::Write(&SELF_POWERED_CONFIG)];
         i2c_dev.transaction(self.address, &mut ops)?;
         defmt::debug!("USB HUB: Configuration written successfully");
+
+        // Apply port swap to fix hardware DP/DM reversal
+        defmt::debug!("USB HUB: Swapping downstream port 2 DP/DM...");
+        let mut ops = [Operation::Write(&PORT_SWAP_CONFIG)];
+        i2c_dev.transaction(self.address, &mut ops)?;
+        defmt::debug!("USB HUB: Downstream port 2 DP/DM swapped");
 
         // Finalize with USB_ATTACH
         defmt::debug!("USB HUB: Finalizing with USB_ATTACH...");
