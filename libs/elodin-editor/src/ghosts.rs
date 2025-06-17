@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use big_space::GridCell;
 use eql::Expr;
 use impeller2_bevy::EntityMap;
-use impeller2_wkt::{ComponentValue, Glb};
+use impeller2_wkt::{ComponentValue, Glb, Material, Mesh, Object3D};
 use nox::Array;
 use smallvec::smallvec;
 
@@ -216,7 +216,7 @@ pub fn create_ghost_entity(
     commands: &mut Commands,
     eql: String,
     expr: eql::Expr,
-    gltf_path: Option<String>,
+    mesh_source: Option<Object3D>,
 ) -> Entity {
     let mut entity = commands.spawn((
         Ghost::new(eql, expr),
@@ -229,9 +229,21 @@ pub fn create_ghost_entity(
         impeller2_wkt::WorldPos::default(),
     ));
 
-    if let Some(path) = gltf_path {
-        entity.insert(impeller2_bevy::AssetHandle::<Glb>::new(fastrand::u64(..)));
-        entity.insert(Glb(path));
+    if let Some(source) = mesh_source {
+        match source {
+            Object3D::Glb(path) => {
+                entity.insert(impeller2_bevy::AssetHandle::<Glb>::new(fastrand::u64(..)));
+                entity.insert(Glb(path));
+            }
+            Object3D::Mesh { mesh, material } => {
+                entity.insert(impeller2_bevy::AssetHandle::<Mesh>::new(fastrand::u64(..)));
+                entity.insert(mesh);
+                entity.insert(impeller2_bevy::AssetHandle::<Material>::new(fastrand::u64(
+                    ..,
+                )));
+                entity.insert(material);
+            }
+        }
     }
 
     entity.id()

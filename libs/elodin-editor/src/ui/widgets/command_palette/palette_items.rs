@@ -7,7 +7,7 @@ use std::{
 use bevy::{
     ecs::{
         entity::Entity,
-        query::With,
+        query::{With, Without},
         system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
         world::World,
     },
@@ -23,12 +23,14 @@ use impeller2_bevy::{
     ComponentMetadataRegistry, ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx,
 };
 use impeller2_wkt::{
-    BodyAxes, ComponentMetadata, ComponentPath, ComponentValue, IsRecording, SetDbSettings,
-    SetStreamState,
+    BodyAxes, ComponentMetadata, ComponentPath, ComponentValue, IsRecording, Material, Mesh,
+    Object3D, SetDbSettings, SetStreamState,
 };
+use nox::ArrayBuf;
 
 use crate::{
     EqlContext, Offset, SelectedTimeRange, TimeRangeBehavior,
+    ghosts::{CompiledExpr, Ghost},
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
         self, EntityData, HdrEnabled, colors,
@@ -749,6 +751,60 @@ pub fn set_color_scheme() -> PaletteItem {
     })
 }
 
+fn create_ghost_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> PaletteEvent {
+    PalettePage::new(vec![
+        PaletteItem::new(
+            LabelSource::placeholder("Enter color (hex or name, default: #cccccc)"),
+            "Enter color as rgb",
+            move |In(color_str): In<String>, mut commands: Commands,
+            eql_ctx: Res<EqlContext>,
+            entity_map: Res<EntityMap>,
+            component_value_maps: Query<&'static ComponentValue, Without<Ghost>>,
+            | {
+                let color_str = color_str.trim();
+                let (r, g, b) = parse_color(color_str, &eql_ctx.0, &entity_map, component_value_maps).unwrap_or((0.8, 0.8, 0.8));
+
+                let mesh_source = Some(Object3D::Mesh {
+                    mesh: mesh.clone(),
+                    material: Material::color(r, g, b),
+                });
+
+                crate::ghosts::create_ghost_entity(
+                    &mut commands,
+                    eql.clone(),
+                    expr.clone(),
+                    mesh_source,
+                );
+
+                PaletteEvent::Exit
+            },
+        )
+        .default(),
+    ])
+    .prompt("Enter color for mesh")
+    .into()
+}
+
+fn parse_color(
+    expr: &str,
+    ctx: &eql::Context,
+    entity_map: &EntityMap,
+    component_value_maps: Query<&'static ComponentValue, Without<Ghost>>,
+) -> Option<(f32, f32, f32)> {
+    let expr = ctx.parse_str(expr).ok()?;
+    let expr = crate::ghosts::compile_eql_expr(expr);
+    let val = expr.execute(&entity_map, &component_value_maps).ok()?;
+
+    let ComponentValue::F64(array) = val else {
+        return None;
+    };
+    let buf = array.buf.as_buf();
+    match buf {
+        [r, g, b, ..] => Some((*r as f32, *g as f32, *b as f32)),
+        _ => None,
+    }
+}
+
 pub fn create_ghost() -> PaletteItem {
     PaletteItem::new("Create Ghost Entity", TILES_LABEL, move |_: In<String>| {
         PalettePage::new(vec![
@@ -764,29 +820,159 @@ pub fn create_ghost() -> PaletteItem {
                     };
                     PalettePage::new(vec![
                         PaletteItem::new(
-                            LabelSource::placeholder("Enter GLTF path (optional)"),
-                            "Enter path to GLTF file for the ghost visualization (leave empty for no visual)",
-                            move |In(gltf_path): In<String>,
+                            "GLTF",
+                            "",
+                            {
+                                let eql = eql.clone();
+                                let expr = expr.clone();
+                                move |_: In<String>| {
+                                    let eql = eql.clone();
+                                    let expr = expr.clone();
+                                    PalettePage::new(vec![
+                                        PaletteItem::new(
+                                            LabelSource::placeholder("Enter GLTF path"),
+                                            "Enter path to GLTF file for the ghost visualization",
+                                            move |In(gltf_path): In<String>,
+                                                  mut commands: Commands| {
+                                                let obj = Object3D::Glb(gltf_path.trim().to_string());
+
+                                                crate::ghosts::create_ghost_entity(
+                                                    &mut commands,
+                                                    eql.clone(),
+                                                    expr.clone(),
+                                                    Some(obj)
+                                                );
+
+                                                PaletteEvent::Exit
+                                            },
+                                        ).default()
+                                    ])
+                                    .prompt("Enter GLTF path")
+                                    .into()
+                                }
+                            },
+                        ),
+                        PaletteItem::new(
+                            "Sphere",
+                            "",
+                            {
+                                let eql = eql.clone();
+                                let expr = expr.clone();
+                                move |_: In<String>| {
+                                    let eql = eql.clone();
+                                    let expr = expr.clone();
+                                    PalettePage::new(vec![
+                                        PaletteItem::new(
+                                            LabelSource::placeholder("Enter radius (default: 1.0)"),
+                                            "Enter the radius for the sphere",
+                                            move |In(radius_str): In<String>| {
+                                                let radius = radius_str.trim().parse::<f32>().unwrap_or(1.0);
+                                                create_ghost_with_color(
+                                                    eql.clone(),
+                                                    expr.clone(),
+                                                    Mesh::sphere(radius)
+                                                )
+                                            },
+                                        ).default()
+                                    ])
+                                    .prompt("Enter sphere radius")
+                                    .into()
+                                }
+                            },
+                        ),
+                        PaletteItem::new(
+                            "Cylinder",
+                            "",
+                            {
+                                let eql = eql.clone();
+                                let expr = expr.clone();
+                                move |_: In<String>| {
+                                    let eql = eql.clone();
+                                    let expr = expr.clone();
+                                    PalettePage::new(vec![
+                                        PaletteItem::new(
+                                            LabelSource::placeholder("Enter radius and height (default: 1.0 2.0)"),
+                                            "Enter the radius and height for the cylinder",
+                                            move |In(dimensions_str): In<String>| {
+                                                let parts: Vec<f32> = dimensions_str
+                                                    .split_whitespace()
+                                                    .filter_map(|s| s.parse().ok())
+                                                    .collect();
+
+                                                let (radius, height) = match parts.as_slice() {
+                                                    [r, h] => (*r, *h),
+                                                    [r] => (*r, *r * 2.0),
+                                                    _ => (1.0, 2.0),
+                                                };
+
+                                                create_ghost_with_color(
+                                                    eql.clone(),
+                                                    expr.clone(),
+                                                    Mesh::Cylinder { radius, height }
+                                                )
+                                            },
+                                        ).default()
+                                    ])
+                                    .prompt("Enter cylinder dimensions")
+                                    .into()
+                                }
+                            },
+                        ),
+                        PaletteItem::new(
+                            "Cuboid",
+                            "Create a box mesh",
+                            {
+                                let eql = eql.clone();
+                                let expr = expr.clone();
+                                move |_: In<String>| {
+                                    let eql = eql.clone();
+                                    let expr = expr.clone();
+                                    PalettePage::new(vec![
+                                        PaletteItem::new(
+                                            LabelSource::placeholder("Enter dimensions (x y z, default: 1 1 1)"),
+                                            "Enter the dimensions for the cuboid (width height depth)",
+                                            move |In(dimensions): In<String>| {
+                                                let parts: Vec<f32> = dimensions
+                                                    .split_whitespace()
+                                                    .filter_map(|s| s.parse().ok())
+                                                    .collect();
+
+                                                let (x, y, z) = match parts.as_slice() {
+                                                    [x, y, z] => (*x, *y, *z),
+                                                    [x] => (*x, *x, *x),
+                                                    _ => (1.0, 1.0, 1.0),
+                                                };
+
+                                                create_ghost_with_color(
+                                                    eql.clone(),
+                                                    expr.clone(),
+                                                    Mesh::cuboid(x, y, z)
+                                                )
+                                            },
+                                        ).default()
+                                    ])
+                                    .prompt("Enter cuboid dimensions")
+                                    .into()
+                                }
+                            },
+                        ),
+                        PaletteItem::new(
+                            "No Visual",
+                            "Create ghost without visual representation",
+                            move |_: In<String>,
                                   mut commands: Commands| {
-                                let gltf_path = if gltf_path.trim().is_empty() {
-                                    None
-                                } else {
-                                    Some(gltf_path.trim().to_string())
-                                };
-
-
                                 crate::ghosts::create_ghost_entity(
                                     &mut commands,
                                     eql.clone(),
                                     expr.clone(),
-                                    gltf_path,
+                                    None,
                                 );
 
                                 PaletteEvent::Exit
                             },
-                        ).default()
+                        ),
                     ])
-                    .prompt("Enter GLTF path for ghost visualization")
+                    .prompt("Choose ghost visualization type")
                     .into()
                 },
             ).default()

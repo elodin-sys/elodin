@@ -196,6 +196,17 @@ impl Asset for Material {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub enum Object3D {
+    Glb(String),
+    Mesh { mesh: Mesh, material: Material },
+}
+
+impl Asset for Object3D {
+    const NAME: &'static str = "mesh_source";
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct ComponentMonitor {
     pub component_id: ComponentId,
 }

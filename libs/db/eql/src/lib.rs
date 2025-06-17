@@ -378,6 +378,16 @@ pub struct Context {
     pub last_timestamp: Timestamp,
 }
 
+impl Default for Context {
+    fn default() -> Self {
+        Context {
+            component_parts: HashMap::new(),
+            earliest_timestamp: Timestamp(i64::MIN),
+            last_timestamp: Timestamp(i64::MAX),
+        }
+    }
+}
+
 impl Context {
     pub fn from_leafs(
         components: impl IntoIterator<Item = Arc<Component>>,
