@@ -331,6 +331,10 @@ impl Pins {
         pins.pc10.output_speed(OutputSpeed::VeryHigh);
         pins.pc11.output_speed(OutputSpeed::VeryHigh);
 
+        // Set high speed for USB
+        pins.pa11.output_speed(OutputSpeed::VeryHigh);
+        pins.pa12.output_speed(OutputSpeed::VeryHigh);
+
         pins.aux_5v_en.set_high();
 
         pins
@@ -369,7 +373,16 @@ pub fn clock_cfg(pwr: pac::PWR) -> clocks::Clocks {
             divp: 8,  // pll2_p_ck = 25 MHz (200 MHz / 8) - max for 16-bit ADC
             ..Default::default()
         },
-        hsi48_on: true,
+        pll3: clocks::PllCfg {
+            enabled: true,
+            pllq_en: true,
+            pllr_en: false,
+            divm: 3,  // pll_input_speed = 8 MHz (24 MHz / 3)
+            divn: 12, // vco_speed = 96 MHz (8 MHz * 12)
+            divq: 2,  // pll3_q_ck = 48 MHz (96 MHz / 2) - for USB
+            ..Default::default()
+        },
+        hsi48_on: false,
         input_src: clocks::InputSrc::Pll1, // 400 MHz (sysclk)
         d1_core_prescaler: clocks::HclkPrescaler::Div1, // 400 MHz (M7 core)
         hclk_prescaler: clocks::HclkPrescaler::Div2, // 200 MHz (hclk, M4 core)
@@ -378,6 +391,7 @@ pub fn clock_cfg(pwr: pac::PWR) -> clocks::Clocks {
         d3_prescaler: clocks::ApbPrescaler::Div2, // 100 MHz
         vos_range: clocks::VosRange::VOS1,
         can_src: clocks::CanSrc::Hse,
+        usb_src: clocks::UsbSrc::Pll3Q,
         hse_bypass: true,
         ..Default::default()
     };

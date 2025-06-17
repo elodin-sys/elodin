@@ -187,10 +187,19 @@ fn main() -> ! {
     let mut last_can_update = monotonic.now();
     let mut last_usb_log = monotonic.now();
 
+    let usb_alloc = usb_serial::usb_bus(
+        dp.OTG2_HS_GLOBAL,
+        dp.OTG2_HS_DEVICE,
+        dp.OTG2_HS_PWRCLK,
+        &clock_cfg,
+    );
+    let mut usb = usb_serial::UsbSerial::new(&usb_alloc);
+
     amber_led.set_low();
     loop {
         let now = monotonic.now();
         let ts = now.duration_since_epoch();
+        usb.poll();
 
         if now.checked_duration_since(last_elrs_update).unwrap() > ELRS_PERIOD {
             last_elrs_update = now;

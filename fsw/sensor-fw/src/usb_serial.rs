@@ -1,6 +1,6 @@
 use core::mem::MaybeUninit;
 use hal::{
-    clocks, gpio, pac,
+    clocks, pac,
     usb_otg::{Usb2, UsbBus},
 };
 use usb_device::bus::UsbBusAllocator;
@@ -22,12 +22,7 @@ pub fn usb_bus(
     otg_hs_dev: pac::OTG2_HS_DEVICE,
     otg2_hs_pwclk: pac::OTG2_HS_PWRCLK,
     clocks: &clocks::Clocks,
-    mut pin_dm: gpio::Pin,
-    mut pin_dp: gpio::Pin,
 ) -> UsbBusAllocator<UsbBus<Usb2>> {
-    pin_dm.mode(gpio::PinMode::Alt(10));
-    pin_dp.mode(gpio::PinMode::Alt(10));
-
     // Initialise EP_MEMORY to zero
     unsafe {
         let buf: &mut [MaybeUninit<u32>; 1024] =
@@ -36,7 +31,7 @@ pub fn usb_bus(
             value.as_mut_ptr().write(0);
         }
     }
-    // Create USB bus allocator using high-speed peripheral
+    // Create USB bus allocator using full-speed peripheral
     UsbBus::new(
         Usb2::new(otg_hs, otg_hs_dev, otg2_hs_pwclk, clocks.hclk()),
         #[allow(static_mut_refs)]
