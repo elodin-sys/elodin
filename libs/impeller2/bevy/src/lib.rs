@@ -12,7 +12,6 @@ use bevy::{
     ecs::system::SystemState,
     prelude::{Commands, Component, Deref, DerefMut, Entity, Query, ResMut, Resource},
 };
-use compact_str::CompactString;
 use impeller2::types::IntoLenPacket;
 use impeller2::types::RequestId;
 use impeller2::{
@@ -27,15 +26,14 @@ use impeller2::{
 };
 use impeller2_bbq::{AsyncArcQueueRx, RxExt};
 use impeller2_wkt::{
-    AssetId, BodyAxes, ComponentMetadata, CurrentTimestamp, DbSettings, DumpAssets, DumpMetadata,
-    DumpMetadataResp, DumpSchema, DumpSchemaResp, EarliestTimestamp, EntityMetadata, ErrorResponse,
-    FixedRateBehavior, GetDbSettings, GetEarliestTimestamp, Glb, IsRecording, LastUpdated, Line3d,
-    Material, Mesh, Panel, Stream, StreamBehavior, StreamId, StreamTimestamp, SubscribeLastUpdated,
-    VTableMsg, VectorArrow, WorldPos,
+    AssetId, BodyAxes, ComponentMetadata, ComponentPart, ComponentPath, CurrentTimestamp,
+    DbSettings, DumpAssets, DumpMetadata, DumpMetadataResp, DumpSchema, DumpSchemaResp,
+    EarliestTimestamp, ErrorResponse, FixedRateBehavior, GetDbSettings, GetEarliestTimestamp, Glb,
+    IsRecording, LastUpdated, Line3d, Material, Mesh, Panel, Stream, StreamBehavior, StreamId,
+    StreamTimestamp, SubscribeLastUpdated, VTableMsg, VectorArrow, WorldPos,
 };
 use nox::array::ArrayViewExt;
 use serde::de::DeserializeOwned;
-use smallvec::SmallVec;
 use std::{
     collections::{BTreeMap, HashMap},
     convert::Infallible,
@@ -293,67 +291,8 @@ impl ComponentMetadataRegistry {
 #[derive(Resource, Default, Deref, DerefMut)]
 pub struct ComponentSchemaRegistry(pub HashMap<ComponentId, Schema<Vec<u64>>>);
 
-#[derive(PartialEq, Eq, Debug, Clone, Component)]
-pub struct ComponentPart {
-    id: ComponentId,
-    name: CompactString,
-}
-
-impl ComponentPart {
-    pub fn new(name: &str) -> Self {
-        Self {
-            id: ComponentId::new(name),
-            name: name.into(),
-        }
-    }
-}
-
 #[derive(Resource, Default, Deref, DerefMut)]
 pub struct ComponentPathRegistry(pub HashMap<ComponentId, ComponentPath>);
-
-#[derive(PartialEq, Eq, Debug, Clone, Component)]
-pub struct ComponentPath {
-    pub id: ComponentId,
-    pub path: SmallVec<[ComponentPart; 2]>,
-}
-
-impl std::hash::Hash for ComponentPath {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
-
-impl PartialOrd for ComponentPath {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for ComponentPath {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.id.cmp(&other.id)
-    }
-}
-
-impl ComponentPath {
-    pub fn from_name(name: &str) -> Self {
-        let id = ComponentId::new(name);
-        let path = name
-            .match_indices('.')
-            .map(|(i, _)| ComponentPart::new(&name[..i]))
-            .chain([ComponentPart::new(&name)])
-            .collect();
-        Self { id, path }
-    }
-
-    pub fn tail(&self) -> ComponentPart {
-        self.path.last().expect("empty path").clone()
-    }
-
-    pub fn is_top_level(&self) -> bool {
-        self.path.len() == 1
-    }
-}
 
 #[derive(SystemParam)]
 pub struct WorldSink<'w, 's> {
