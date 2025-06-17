@@ -1,9 +1,8 @@
 use bevy::prelude::*;
 use big_space::GridCell;
 use eql::Expr;
-use impeller2::component::Component;
-use impeller2_bevy::{ComponentValueMap, EntityMap};
-use impeller2_wkt::{ComponentValue, Glb, WorldPos};
+use impeller2_bevy::EntityMap;
+use impeller2_wkt::{ComponentValue, Glb};
 use nox::Array;
 use smallvec::smallvec;
 
@@ -25,7 +24,7 @@ impl Ghost {
 
 type ExprFn = dyn for<'a, 'b> Fn(
         &'a EntityMap,
-        &'a Query<'b, 'b, &'static ComponentValueMap, Without<Ghost>>,
+        &'a Query<'b, 'b, &'static ComponentValue, Without<Ghost>>,
     ) -> Result<ComponentValue, String>
     + Send
     + Sync;
@@ -40,7 +39,7 @@ impl CompiledExpr {
     where
         F: for<'a, 'b> Fn(
                 &'a EntityMap,
-                &'a Query<'b, 'b, &'static ComponentValueMap, Without<Ghost>>,
+                &'a Query<'b, 'b, &'static ComponentValue, Without<Ghost>>,
             ) -> Result<ComponentValue, String>
             + Send
             + Sync
@@ -53,10 +52,10 @@ impl CompiledExpr {
     pub fn execute<'a, 'b>(
         &'a self,
         entity_map: &'a EntityMap,
-        component_value_maps: &'a Query<'b, 'b, &'static ComponentValueMap, Without<Ghost>>,
+        values: &'a Query<'b, 'b, &'static ComponentValue, Without<Ghost>>,
     ) -> Result<ComponentValue, String> {
         match self {
-            Self::Closure(c) => (c)(entity_map, component_value_maps),
+            Self::Closure(c) => (c)(entity_map, values),
             Self::Value(value) => Ok(value.clone()),
         }
     }
@@ -65,24 +64,22 @@ impl CompiledExpr {
 /// Compiles an EQL expression into a closure-based form
 pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
     match expression {
-        Expr::Component(component) => {
+        Expr::ComponentPart(component) => {
             let component_id = component.id;
-            CompiledExpr::closure(move |entity_map, component_value_maps| {
+            CompiledExpr::closure(move |entity_map, component_value| {
                 let entity_id = entity_map.get(&component_id).ok_or_else(|| {
                     format!("component '{}' not found in entity map", component.name)
                 })?;
 
-                let component_map = component_value_maps.get(*entity_id).map_err(|_| {
-                    format!(
-                        "no component value map found for component '{}'",
-                        component.name
-                    )
-                })?;
-
-                component_map
-                    .get(&component_id)
+                component_value
+                    .get(*entity_id)
+                    .map_err(|_| {
+                        format!(
+                            "no component value map found for component '{}'",
+                            component.name
+                        )
+                    })
                     .cloned()
-                    .ok_or_else(|| format!("component '{}' not found for entity", component.name))
             })
         }
         Expr::ArrayAccess(expr, index) => {
@@ -184,16 +181,11 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
 
 /// System that updates ghost entities based on their EQL expressions
 pub fn update_ghost_system(
-    mut ghosts_query: Query<(
-        Entity,
-        &Ghost,
-        &mut impeller2_wkt::WorldPos,
-        &mut ComponentValueMap,
-    )>,
+    mut ghosts_query: Query<(Entity, &Ghost, &mut impeller2_wkt::WorldPos)>,
     entity_map: Res<EntityMap>,
-    component_value_maps: Query<&'static ComponentValueMap, Without<Ghost>>,
+    component_value_maps: Query<&'static ComponentValue, Without<Ghost>>,
 ) {
-    for (entity, ghost, mut pos, mut value_map) in ghosts_query.iter_mut() {
+    for (entity, ghost, mut pos) in ghosts_query.iter_mut() {
         match ghost
             .compiled_expr
             .execute(&entity_map, &component_value_maps)
@@ -207,8 +199,6 @@ pub fn update_ghost_system(
                             att: nox::Quaternion::new(data[3], data[0], data[1], data[2]),
                             pos: nox::Vector3::new(data[4], data[5], data[6]),
                         };
-                        value_map
-                            .insert(WorldPos::COMPONENT_ID, ComponentValue::F64(array.to_dyn()));
                     }
                 }
             }
@@ -237,7 +227,6 @@ pub fn create_ghost_entity(
         ViewVisibility::default(),
         GridCell::<i128>::default(),
         impeller2_wkt::WorldPos::default(),
-        ComponentValueMap(Default::default()),
     ));
 
     if let Some(path) = gltf_path {

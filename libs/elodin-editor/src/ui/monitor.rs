@@ -1,6 +1,7 @@
 use bevy::{ecs::system::SystemParam, prelude::*};
 use bevy_egui::egui::{self, Frame, RichText, Stroke};
 use impeller2::types::ComponentId;
+use impeller2_bevy::ComponentValue;
 use impeller2_bevy::ComponentValueExt;
 use impeller2_bevy::{ComponentMetadataRegistry, ComponentValueMap, EntityMap};
 use impeller2_wkt::EntityMetadata;
@@ -25,8 +26,7 @@ impl MonitorPane {
 #[derive(SystemParam)]
 pub struct MonitorWidget<'w, 's> {
     metadata_store: Res<'w, ComponentMetadataRegistry>,
-    component_value_query: Query<'w, 's, &'static mut ComponentValueMap>,
-    entity_metadata: Query<'w, 's, &'static EntityMetadata>,
+    component_value_query: Query<'w, 's, &'static mut ComponentValue>,
     entity_map: Res<'w, EntityMap>,
 }
 
@@ -41,29 +41,26 @@ impl WidgetSystem for MonitorWidget<'_, '_> {
         ui: &mut egui::Ui,
         pane: Self::Args,
     ) -> Self::Output {
-        let mut state = state.get_mut(world);
-        let Some(entity) = state.entity_map.get(&pane.component_id) else {
+        let MonitorWidget {
+            metadata_store,
+            mut component_value_query,
+            entity_map,
+        } = state.get_mut(world);
+        let Some(entity) = entity_map.get(&pane.component_id) else {
             return;
         };
-        let Ok(mut component_value_map) = state.component_value_query.get_mut(*entity) else {
-            return;
-        };
-        let Some(metadata) = state.metadata_store.get_metadata(&pane.component_id) else {
+        let Some(metadata) = metadata_store.get_metadata(&pane.component_id) else {
             return;
         };
 
-        let Some(value) = component_value_map.get_mut(&pane.component_id) else {
+        let Ok(mut value) = component_value_query.get_mut(*entity) else {
             return;
         };
-        let Ok(entity_metadata) = state.entity_metadata.get(*entity) else {
-            return;
-        };
+
         egui::Frame::NONE
             .inner_margin(egui::Margin::same(8))
             .show(ui, |ui| {
-                let label = RichText::new(format!("{}.{}", entity_metadata.name, metadata.name))
-                    .monospace()
-                    .size(25.);
+                let label = RichText::new(&metadata.name).monospace().size(25.);
                 ui.label(label);
                 ui.add_space(20.0);
                 let width = ui.max_rect().width();

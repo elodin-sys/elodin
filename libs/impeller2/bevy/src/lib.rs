@@ -26,11 +26,11 @@ use impeller2::{
 };
 use impeller2_bbq::{AsyncArcQueueRx, RxExt};
 use impeller2_wkt::{
-    AssetId, BodyAxes, ComponentMetadata, ComponentPart, ComponentPath, CurrentTimestamp,
-    DbSettings, DumpAssets, DumpMetadata, DumpMetadataResp, DumpSchema, DumpSchemaResp,
-    EarliestTimestamp, ErrorResponse, FixedRateBehavior, GetDbSettings, GetEarliestTimestamp, Glb,
-    IsRecording, LastUpdated, Line3d, Material, Mesh, Panel, Stream, StreamBehavior, StreamId,
-    StreamTimestamp, SubscribeLastUpdated, VTableMsg, VectorArrow, WorldPos,
+    AssetId, BodyAxes, ComponentMetadata, CurrentTimestamp, DbSettings, DumpAssets, DumpMetadata,
+    DumpMetadataResp, DumpSchema, DumpSchemaResp, EarliestTimestamp, ErrorResponse,
+    FixedRateBehavior, GetDbSettings, GetEarliestTimestamp, Glb, IsRecording, LastUpdated, Line3d,
+    Material, Mesh, Panel, Stream, StreamBehavior, StreamId, StreamTimestamp, SubscribeLastUpdated,
+    VTableMsg, VectorArrow, WorldPos,
 };
 use nox::array::ArrayViewExt;
 use serde::de::DeserializeOwned;
@@ -45,6 +45,7 @@ use stellarator_buf::Slice;
 pub use impeller2_bbq::PacketGrantR;
 pub use impeller2_wkt::ComponentValue;
 pub use impeller2_wkt::ElementValueMut;
+pub use impeller2_wkt::{ComponentPart, ComponentPath};
 
 #[cfg(feature = "tcp")]
 mod tcp;

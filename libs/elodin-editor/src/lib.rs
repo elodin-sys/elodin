@@ -24,12 +24,12 @@ use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::prelude::OrbitConstraint;
 use bevy_egui::{EguiContextSettings, EguiPlugin};
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
-use convert_case::Casing;
+use convert_case::{Case, Casing};
 use impeller2::types::OwnedPacket;
 use impeller2::types::{Msg, Timestamp};
 use impeller2_bevy::{
-    AssetHandle, ComponentMetadataRegistry, ComponentSchemaRegistry, ComponentValueMap,
-    CurrentStreamId, EntityMap, PacketHandlerInput, PacketHandlers, PacketTx,
+    AssetHandle, ComponentMetadataRegistry, ComponentPathRegistry, ComponentSchemaRegistry,
+    ComponentValueMap, CurrentStreamId, EntityMap, PacketHandlerInput, PacketHandlers, PacketTx,
 };
 use impeller2_wkt::{CurrentTimestamp, NewConnection, SetStreamState, Viewport, WorldPos};
 use impeller2_wkt::{EarliestTimestamp, Glb, LastUpdated};
@@ -196,8 +196,8 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, sync_paused)
             .add_systems(PreUpdate, set_selected_range)
             .add_systems(PreUpdate, set_floating_origin.after(sync_pos))
-            //.add_systems(PreUpdate, update_eql_context)
-            //.add_systems(PreUpdate, set_eql_context_range.after(update_eql_context))
+            .add_systems(PreUpdate, update_eql_context)
+            .add_systems(PreUpdate, set_eql_context_range.after(update_eql_context))
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
             .add_systems(PostUpdate, set_clear_color)
@@ -900,7 +900,7 @@ fn clear_state_new_connection(
         OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
         _ => return,
     }
-    eql_context.0.entities.clear();
+    eql_context.0.component_parts.clear();
     entity_map.0.retain(|_, entity| {
         if let Ok(mut entity_commands) = commands.get_entity(*entity) {
             entity_commands.despawn();
@@ -1084,62 +1084,31 @@ impl Default for EqlContext {
     }
 }
 
-// pub fn update_eql_context(
-//     entity_map: Res<EntityMap>,
-//     component_metadata_registry: Res<ComponentMetadataRegistry>,
-//     component_schema_registry: Res<ComponentSchemaRegistry>,
-//     component_value_query: Query<&ComponentValueMap>,
-//     mut eql_context: ResMut<EqlContext>,
-// ) {
-//     let mut entities = HashMap::new();
-//     for (entity_id, bevy_entity) in entity_map.iter() {
-//         let entity_name = if let Ok(entity_metadata) = entity_metadata_query.get(*bevy_entity) {
-//             entity_metadata.name.to_case(convert_case::Case::Snake)
-//         } else {
-//             entity_id.to_string()
-//         };
-
-//         if let Ok(component_value_map) = component_value_query.get(*bevy_entity) {
-//             let mut components = HashMap::new();
-
-//             for (component_id, _component_value) in component_value_map.iter() {
-//                 let Some(component_metadata) =
-//                     component_metadata_registry.get_metadata(component_id)
-//                 else {
-//                     continue;
-//                 };
-//                 let Some(schema) = component_schema_registry.get(component_id) else {
-//                     continue;
-//                 };
-//                 let mut entity_component = eql::EntityComponent::new(
-//                     component_metadata.name.to_case(convert_case::Case::Snake),
-//                     entity_name.clone(),
-//                     *entity_id,
-//                     *component_id,
-//                     schema.clone(),
-//                 );
-//                 if !component_metadata.element_names().is_empty() {
-//                     entity_component.element_names = component_metadata
-//                         .element_names()
-//                         .split(",")
-//                         .map(str::to_string)
-//                         .collect();
-//                 }
-
-//                 components.insert(entity_component.name.clone(), Arc::new(entity_component));
-//             }
-
-//             let entity = Arc::new(eql::Entity {
-//                 name: entity_name.clone(),
-//                 components,
-//             });
-
-//             entities.insert(entity_name, entity);
-//         }
-//     }
-
-//     eql_context.0 = eql::Context::new(entities, Timestamp(i64::MIN), Timestamp(i64::MAX));
-// }
+pub fn update_eql_context(
+    component_metadata_registry: Res<ComponentMetadataRegistry>,
+    component_schema_registry: Res<ComponentSchemaRegistry>,
+    path_reg: Res<ComponentPathRegistry>,
+    mut eql_context: ResMut<EqlContext>,
+) {
+    eql_context.0 = eql::Context::from_leafs(
+        path_reg.0.iter().filter_map(|(id, path)| {
+            let schema = component_schema_registry.0.get(id)?;
+            let metadata = component_metadata_registry.0.get(id)?;
+            let mut component =
+                eql::Component::new(metadata.name.to_case(Case::Snake), path.id, schema.clone());
+            if !metadata.element_names().is_empty() {
+                component.element_names = metadata
+                    .element_names()
+                    .split(",")
+                    .map(str::to_string)
+                    .collect();
+            }
+            Some(Arc::new(component))
+        }),
+        Timestamp(i64::MIN),
+        Timestamp(i64::MAX),
+    );
+}
 
 pub fn set_eql_context_range(time_range: Res<SelectedTimeRange>, mut eql: ResMut<EqlContext>) {
     eql.0.earliest_timestamp = time_range.0.start;

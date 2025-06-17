@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, str::FromStr, time::Duration};
+use std::{
+    collections::{BTreeMap, HashMap},
+    str::FromStr,
+    time::Duration,
+};
 
 use bevy::{
     ecs::{
@@ -16,9 +20,12 @@ use egui_tiles::TileId;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::{ComponentId, msg_id};
 use impeller2_bevy::{
-    ComponentMetadataRegistry, ComponentPath, ComponentPathRegistry, CurrentStreamId, PacketTx,
+    ComponentMetadataRegistry, ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx,
 };
-use impeller2_wkt::{BodyAxes, ComponentMetadata, IsRecording, SetDbSettings, SetStreamState};
+use impeller2_wkt::{
+    BodyAxes, ComponentMetadata, ComponentPath, ComponentValue, IsRecording, SetDbSettings,
+    SetStreamState,
+};
 
 use crate::{
     EqlContext, Offset, SelectedTimeRange, TimeRangeBehavior,
@@ -279,152 +286,99 @@ pub fn create_graph(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Graph",
         TILES_LABEL,
-        move |_: In<String>, entities: Query<EntityData>| {
-            PalettePage::new(
-                entities
-                    .iter()
-                    .map(|(component_id, entity, _, metadata)| {
-                        todo!()
-                        //graph_entity_item(component_id, metadata, entity, tile_id)
-                    })
-                    .collect(),
-            )
-            .prompt("Select a component to graph")
-            .into()
+        move |_: In<String>, context: Res<EqlContext>| {
+            PalettePage::new(graph_parts(&context.0.component_parts, tile_id))
+                .prompt("Select a component to graph")
+                .into()
         },
     )
 }
 
-// fn graph_entity_item(
-//     component_id: &ComponentId,
-//     component_metadata: &ComponentMetadata,
-//     entity: Entity,
-//     tile_id: Option<TileId>,
-// ) -> PaletteItem {
-//     PaletteItem::new(
-//         component_metadata.name.clone(),
-//         "Components",
-//         move |_: In<String>,
-//               entities: Query<EntityData>,
-//               metadata: Res<ComponentMetadataRegistry>,
-//               path_reg: Res<ComponentPathRegistry>| {
-//             let (component_id, entity, components, component_metadata) =
-//                 entities.get(entity).unwrap();
-//             let items = components
-//                 .0
-//                 .keys()
-//                 .filter_map(|id| metadata.get_metadata(id).cloned())
-//                 .map(move |item| {
-//                     PaletteItem::new(
-//                         item.name.clone(),
-//                         "Components",
-//                         move |_: In<String>,
-//                               entities: Query<EntityData>,
-//                               mut render_layer_alloc: ResMut<RenderLayerAlloc>,
-//                               mut tile_state: ResMut<tiles::TileState>,
-//                               path_reg: Res<ComponentPathRegistry>| {
-//                             let component_id = item.component_id;
-//                             let Ok((parent_component_id, _, component_value_map, _)) =
-//                                 entities.get(entity)
-//                             else {
-//                                 return PaletteEvent::Exit;
-//                             };
+fn graph_parts(
+    parts: &HashMap<String, eql::ComponentPart>,
+    tile_id: Option<TileId>,
+) -> Vec<PaletteItem> {
+    parts
+        .iter()
+        .map(|(name, part)| {
+            let part = part.clone();
+            PaletteItem::new(
+                name.clone(),
+                "Component",
+                move |_: In<String>,
+                      query: Query<(&ComponentMetadata, &ComponentValue)>,
+                      entity_map: Res<EntityMap>,
+                      mut render_layer_alloc: ResMut<RenderLayerAlloc>,
+                      mut tile_state: ResMut<tiles::TileState>,
+                      path_reg: Res<ComponentPathRegistry>| {
+                    if let Some(component) = &part.component {
+                        let component_id = component.id;
+                        let Some(entity) = entity_map.get(&component_id) else {
+                            return PaletteEvent::Exit;
+                        };
+                        let Ok((metadata, value)) = query.get(*entity) else {
+                            return PaletteEvent::Exit;
+                        };
 
-//                             let component_value = component_value_map.0.get(&component_id).unwrap();
-//                             let values = default_component_values(
-//                                 parent_component_id,
-//                                 &component_id,
-//                                 component_value,
-//                             );
+                        let values = default_component_values(&component_id, value);
 
-//                             let component_path = path_reg
-//                                 .get(&component_id)
-//                                 .cloned()
-//                                 .unwrap_or_else(|| ComponentPath::from_name(&item.name));
+                        let component_path = path_reg
+                            .get(&component_id)
+                            .cloned()
+                            .unwrap_or_else(|| ComponentPath::from_name(&component.name));
 
-//                             let components = BTreeMap::from_iter(std::iter::once((
-//                                 component_path,
-//                                 values.clone(),
-//                             )));
-//                             let bundle = GraphBundle::new(
-//                                 &mut render_layer_alloc,
-//                                 components,
-//                                 "Graph".to_string(),
-//                             );
-//                             tile_state.create_graph_tile(tile_id, bundle);
-//                             PaletteEvent::Exit
-//                         },
-//                     )
-//                 })
-//                 .collect();
-//             PaletteEvent::NextPage {
-//                 prev_page_label: Some(component_metadata.name.clone()),
-//                 next_page: PalettePage::new(items).prompt("Select a component to graph"),
-//             }
-//         },
-//     )
-// }
+                        let components =
+                            BTreeMap::from_iter(std::iter::once((component_path, values.clone())));
+                        let bundle = GraphBundle::new(
+                            &mut render_layer_alloc,
+                            components,
+                            "Graph".to_string(),
+                        );
+                        tile_state.create_graph_tile(tile_id, bundle);
+                        PaletteEvent::Exit
+                    } else {
+                        PalettePage::new(graph_parts(&part.children, tile_id)).into()
+                    }
+                },
+            )
+        })
+        .collect()
+}
 
 pub fn create_monitor(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Monitor",
         TILES_LABEL,
-        move |_: In<String>, entities: Query<EntityData>| {
-            PalettePage::new(
-                entities
-                    .iter()
-                    .map(|(component_id, entity, _, metadata)| {
-                        monitor_entity_item(component_id, metadata, entity, tile_id)
-                    })
-                    .collect(),
-            )
-            .prompt("Select a component to monitor")
-            .into()
+        move |_: In<String>, eql: Res<EqlContext>| {
+            PalettePage::new(monitor_parts(&eql.0.component_parts, tile_id))
+                .prompt("Select a component to monitor")
+                .into()
         },
     )
 }
 
-fn monitor_entity_item(
-    component_id: &ComponentId,
-    component_metadata: &ComponentMetadata,
-    entity: Entity,
+fn monitor_parts(
+    parts: &HashMap<String, eql::ComponentPart>,
     tile_id: Option<TileId>,
-) -> PaletteItem {
-    PaletteItem::new(
-        component_metadata.name.clone(),
-        "Components",
-        move |_: In<String>,
-              entities: Query<EntityData>,
-              metadata: Res<ComponentMetadataRegistry>| {
-            let (component_id, entity, components, component_metadata) =
-                entities.get(entity).unwrap();
-            // let items = components
-            //     .0
-            //     .keys()
-            //     .filter_map(|id| metadata.get_metadata(id).cloned())
-            //     .map(move |item| {
-            //         PaletteItem::new(
-            //             item.name.clone(),
-            //             "Components",
-            //             move |_: In<String>,
-            //                   entities: Query<EntityData>,
-            //                   mut tile_state: ResMut<tiles::TileState>| {
-            //                 let component_id = item.component_id;
-            //                 let Ok((entity_id, _, _, _)) = entities.get(entity) else {
-            //                     return PaletteEvent::Exit;
-            //                 };
-            //                 tile_state.create_monitor_tile(component_id, tile_id);
-            //                 PaletteEvent::Exit
-            //             },
-            //         )
-            //     })
-            //     .collect();
-            PaletteEvent::NextPage {
-                prev_page_label: Some(component_metadata.name.clone()),
-                next_page: PalettePage::new(vec![]).prompt("Select a component to monitor"),
-            }
-        },
-    )
+) -> Vec<PaletteItem> {
+    parts
+        .iter()
+        .map(|(name, part)| {
+            let part = part.clone();
+            PaletteItem::new(
+                name.clone(),
+                "Component",
+                move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
+                    if let Some(component) = &part.component {
+                        tile_state.create_monitor_tile(component.id, tile_id);
+                        PaletteEvent::Exit
+                    } else {
+                        PalettePage::new(monitor_parts(&part.children, tile_id)).into()
+                    }
+                },
+            )
+        })
+        .collect()
 }
 
 fn toggle_body_axes() -> PaletteItem {

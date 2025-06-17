@@ -241,7 +241,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
             }
 
             if create_graph {
-                let values = default_component_values(&entity_id, &component_id, &component_value);
+                let values = default_component_values(&component_id, &component_value);
                 let component_path = path_reg
                     .get(&component_id)
                     .cloned()

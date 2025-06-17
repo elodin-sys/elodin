@@ -541,6 +541,7 @@ impl Context {
                     suggestions.push("first(".to_string());
                 }
                 suggestions.push("time".to_string());
+                suggestions.sort();
                 suggestions
             }
             Expr::Time(_) => {
