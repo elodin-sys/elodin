@@ -79,7 +79,7 @@ fn main() -> ! {
     let pwm_timer = dp.TIM3.timer(600.kHz(), Default::default(), &clock_cfg);
     defmt::info!("Configured PWM timer");
 
-    let [i2c1_rx, i2c2_rx, i2c3_rx, dshot_tx, ..] = dp.DMA1.split();
+    let [_i2c1_rx, i2c2_rx, i2c3_rx, dshot_tx, ..] = dp.DMA1.split();
 
     let sd = sdmmc::Sdmmc::new(&dp.RCC, dp.SDMMC1, &clock_cfg).unwrap();
     defmt::info!("Configured SDMMC");
@@ -110,17 +110,42 @@ fn main() -> ! {
         &mut dp.DMAMUX1,
         &mut dp.DMAMUX2,
     );
-    let mut i2c1_dma = I2cDma::new(
+    // Create I2C1 at 100kHz for USB hub configuration
+    let i2c1_low_speed = i2c::I2c::new(
         dp.I2C1,
         i2c::I2cConfig {
+            speed: i2c::I2cSpeed::Standard100K,
+            ..Default::default()
+        },
+        &clock_cfg,
+    );
+    defmt::info!("Configured I2C1 at 100kHz for USB hub");
+
+    // Convert to type-erased for USB hub
+    let i2c::I2c { regs, cfg } = i2c1_low_speed;
+    let mut i2c1_low_speed_erased = i2c::I2c {
+        regs: regs.into(),
+        cfg,
+    };
+
+    let usb_hub = usb2513b::Usb2513b::default();
+    usb_hub
+        .configure_if_needed(&mut i2c1_low_speed_erased)
+        .unwrap();
+    defmt::info!("USB2513B hub configuration complete");
+
+    // Extract and reconfigure I2C1 with higher speed for FRAM
+    let i2c::I2c { regs, .. } = i2c1_low_speed_erased;
+
+    let mut i2c1_high_speed = i2c::I2c {
+        regs,
+        cfg: i2c::I2cConfig {
             speed: i2c::I2cSpeed::FastPlus1M,
             ..Default::default()
         },
-        i2c1_rx,
-        &clock_cfg,
-        &mut dp.DMAMUX1,
-        &mut dp.DMAMUX2,
-    );
+    };
+    defmt::info!("Reconfigured I2C1 to 1MHz for FRAM");
+
     let mut bmm350 = bmm350::Bmm350::new(&mut i2c3_dma, bmm350::Address::Low, &mut delay).unwrap();
     defmt::info!("Configured BMM350");
     let mut bmp581 = bmp581::Bmp581::new(&mut i2c3_dma, bmp581::Address::Low, &mut delay).unwrap();
@@ -128,7 +153,7 @@ fn main() -> ! {
     let mut bmi270 = bmi270::Bmi270::new(&mut i2c2_dma, bmi270::Address::Low, &mut delay).unwrap();
     defmt::info!("Configured BMI270");
 
-    let mut fram = fm24cl16b::Fm24cl16b::new(&mut i2c1_dma).unwrap();
+    let mut fram = fm24cl16b::Fm24cl16b::new(&mut i2c1_high_speed).unwrap();
     defmt::info!("Configured FRAM");
 
     let can = can::setup_can(dp.FDCAN1, &dp.RCC);
@@ -153,7 +178,7 @@ fn main() -> ! {
     defmt::info!("Configured voltage/current monitor");
 
     // Run FRAM self-test - will panic if there's an issue
-    fram.self_test(&mut i2c1_dma);
+    fram.self_test(&mut i2c1_high_speed);
 
     let mut cmd_bridge = command::CommandBridge::new(uart_bridge);
 

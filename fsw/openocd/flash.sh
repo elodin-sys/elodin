@@ -53,9 +53,14 @@ trap cleanup EXIT
 # Find the directory of this script:
 SCRIPT_DIR=$(dirname "$0")
 
-# Launch OpenOCD in background, tee only the initial logs (exclude RTT spam)
+# Flash firmware first
+echo "Flashing firmware..."
+openocd -f "$SCRIPT_DIR/aleph.cfg" -c "program $ELF reset exit"
+
+# Launch OpenOCD for RTT monitoring
+echo "Starting RTT server..."
 openocd -f "$SCRIPT_DIR/aleph.cfg" \
-  -c "program $ELF reset" \
+  -c "init" \
   -c "rtt setup $ADDR_HEX 4096 \"SEGGER RTT\"" \
   -c "rtt start" \
   -c "rtt server start 19021 0" \
