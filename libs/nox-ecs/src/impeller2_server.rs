@@ -93,6 +93,17 @@ pub fn init_db(
                 component.time_series.push_buf(start_timestamp, buf)?;
             }
         }
+        for entity_metadata in world.entity_metadata().values() {
+            state.set_component_metadata(
+                ComponentMetadata {
+                    component_id: ComponentId::new(&entity_metadata.name),
+                    name: entity_metadata.name.clone(),
+                    metadata: entity_metadata.metadata.clone(),
+                    asset: false,
+                },
+                &db.path,
+            )?;
+        }
         Ok::<_, elodin_db::Error>(())
     })?;
 

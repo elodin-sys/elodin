@@ -15,8 +15,10 @@ use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::TileId;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::{ComponentId, msg_id};
-use impeller2_bevy::{ComponentMetadataRegistry, CurrentStreamId, PacketTx};
-use impeller2_wkt::{BodyAxes, EntityMetadata, IsRecording, SetDbSettings, SetStreamState};
+use impeller2_bevy::{
+    ComponentMetadataRegistry, ComponentPath, ComponentPathRegistry, CurrentStreamId, PacketTx,
+};
+use impeller2_wkt::{BodyAxes, ComponentMetadata, IsRecording, SetDbSettings, SetStreamState};
 
 use crate::{
     EqlContext, Offset, SelectedTimeRange, TimeRangeBehavior,
@@ -281,73 +283,87 @@ pub fn create_graph(tile_id: Option<TileId>) -> PaletteItem {
             PalettePage::new(
                 entities
                     .iter()
-                    .map(|(_, entity, _, metadata)| graph_entity_item(metadata, entity, tile_id))
+                    .map(|(component_id, entity, _, metadata)| {
+                        todo!()
+                        //graph_entity_item(component_id, metadata, entity, tile_id)
+                    })
                     .collect(),
             )
-            .prompt("Select an entity to graph")
+            .prompt("Select a component to graph")
             .into()
         },
     )
 }
 
-fn graph_entity_item(
-    entity_metadata: &EntityMetadata,
-    entity: Entity,
-    tile_id: Option<TileId>,
-) -> PaletteItem {
-    PaletteItem::new(
-        entity_metadata.name.clone(),
-        "Entities",
-        move |_: In<String>,
-              entities: Query<EntityData>,
-              metadata: Res<ComponentMetadataRegistry>| {
-            let (_, entity, components, entity_metadata) = entities.get(entity).unwrap();
-            let items = components
-                .0
-                .keys()
-                .filter_map(|id| metadata.get_metadata(id).cloned())
-                .map(move |item| {
-                    PaletteItem::new(
-                        item.name.clone(),
-                        "Components",
-                        move |_: In<String>,
-                              entities: Query<EntityData>,
-                              mut render_layer_alloc: ResMut<RenderLayerAlloc>,
-                              mut tile_state: ResMut<tiles::TileState>| {
-                            let component_id = item.component_id;
-                            let Ok((entity_id, _, component_value_map, _)) = entities.get(entity)
-                            else {
-                                return PaletteEvent::Exit;
-                            };
+// fn graph_entity_item(
+//     component_id: &ComponentId,
+//     component_metadata: &ComponentMetadata,
+//     entity: Entity,
+//     tile_id: Option<TileId>,
+// ) -> PaletteItem {
+//     PaletteItem::new(
+//         component_metadata.name.clone(),
+//         "Components",
+//         move |_: In<String>,
+//               entities: Query<EntityData>,
+//               metadata: Res<ComponentMetadataRegistry>,
+//               path_reg: Res<ComponentPathRegistry>| {
+//             let (component_id, entity, components, component_metadata) =
+//                 entities.get(entity).unwrap();
+//             let items = components
+//                 .0
+//                 .keys()
+//                 .filter_map(|id| metadata.get_metadata(id).cloned())
+//                 .map(move |item| {
+//                     PaletteItem::new(
+//                         item.name.clone(),
+//                         "Components",
+//                         move |_: In<String>,
+//                               entities: Query<EntityData>,
+//                               mut render_layer_alloc: ResMut<RenderLayerAlloc>,
+//                               mut tile_state: ResMut<tiles::TileState>,
+//                               path_reg: Res<ComponentPathRegistry>| {
+//                             let component_id = item.component_id;
+//                             let Ok((parent_component_id, _, component_value_map, _)) =
+//                                 entities.get(entity)
+//                             else {
+//                                 return PaletteEvent::Exit;
+//                             };
 
-                            let component_value = component_value_map.0.get(&component_id).unwrap();
-                            let values =
-                                default_component_values(entity_id, &component_id, component_value);
-                            let entities = BTreeMap::from_iter(std::iter::once((
-                                entity_id.to_owned(),
-                                BTreeMap::from_iter(std::iter::once((
-                                    component_id,
-                                    values.clone(),
-                                ))),
-                            )));
-                            let bundle = GraphBundle::new(
-                                &mut render_layer_alloc,
-                                entities,
-                                "Graph".to_string(),
-                            );
-                            tile_state.create_graph_tile(tile_id, bundle);
-                            PaletteEvent::Exit
-                        },
-                    )
-                })
-                .collect();
-            PaletteEvent::NextPage {
-                prev_page_label: Some(entity_metadata.name.clone()),
-                next_page: PalettePage::new(items).prompt("Select a component to graph"),
-            }
-        },
-    )
-}
+//                             let component_value = component_value_map.0.get(&component_id).unwrap();
+//                             let values = default_component_values(
+//                                 parent_component_id,
+//                                 &component_id,
+//                                 component_value,
+//                             );
+
+//                             let component_path = path_reg
+//                                 .get(&component_id)
+//                                 .cloned()
+//                                 .unwrap_or_else(|| ComponentPath::from_name(&item.name));
+
+//                             let components = BTreeMap::from_iter(std::iter::once((
+//                                 component_path,
+//                                 values.clone(),
+//                             )));
+//                             let bundle = GraphBundle::new(
+//                                 &mut render_layer_alloc,
+//                                 components,
+//                                 "Graph".to_string(),
+//                             );
+//                             tile_state.create_graph_tile(tile_id, bundle);
+//                             PaletteEvent::Exit
+//                         },
+//                     )
+//                 })
+//                 .collect();
+//             PaletteEvent::NextPage {
+//                 prev_page_label: Some(component_metadata.name.clone()),
+//                 next_page: PalettePage::new(items).prompt("Select a component to graph"),
+//             }
+//         },
+//     )
+// }
 
 pub fn create_monitor(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
@@ -357,51 +373,55 @@ pub fn create_monitor(tile_id: Option<TileId>) -> PaletteItem {
             PalettePage::new(
                 entities
                     .iter()
-                    .map(|(_, entity, _, metadata)| monitor_entity_item(metadata, entity, tile_id))
+                    .map(|(component_id, entity, _, metadata)| {
+                        monitor_entity_item(component_id, metadata, entity, tile_id)
+                    })
                     .collect(),
             )
-            .prompt("Select an entity to monitor")
+            .prompt("Select a component to monitor")
             .into()
         },
     )
 }
 
 fn monitor_entity_item(
-    entity_metadata: &EntityMetadata,
+    component_id: &ComponentId,
+    component_metadata: &ComponentMetadata,
     entity: Entity,
     tile_id: Option<TileId>,
 ) -> PaletteItem {
     PaletteItem::new(
-        entity_metadata.name.clone(),
-        "Entities",
+        component_metadata.name.clone(),
+        "Components",
         move |_: In<String>,
               entities: Query<EntityData>,
               metadata: Res<ComponentMetadataRegistry>| {
-            let (_, entity, components, entity_metadata) = entities.get(entity).unwrap();
-            let items = components
-                .0
-                .keys()
-                .filter_map(|id| metadata.get_metadata(id).cloned())
-                .map(move |item| {
-                    PaletteItem::new(
-                        item.name.clone(),
-                        "Components",
-                        move |_: In<String>,
-                              entities: Query<EntityData>,
-                              mut tile_state: ResMut<tiles::TileState>| {
-                            let component_id = item.component_id;
-                            let Ok((entity_id, _, _, _)) = entities.get(entity) else {
-                                return PaletteEvent::Exit;
-                            };
-                            tile_state.create_monitor_tile(*entity_id, component_id, tile_id);
-                            PaletteEvent::Exit
-                        },
-                    )
-                })
-                .collect();
+            let (component_id, entity, components, component_metadata) =
+                entities.get(entity).unwrap();
+            // let items = components
+            //     .0
+            //     .keys()
+            //     .filter_map(|id| metadata.get_metadata(id).cloned())
+            //     .map(move |item| {
+            //         PaletteItem::new(
+            //             item.name.clone(),
+            //             "Components",
+            //             move |_: In<String>,
+            //                   entities: Query<EntityData>,
+            //                   mut tile_state: ResMut<tiles::TileState>| {
+            //                 let component_id = item.component_id;
+            //                 let Ok((entity_id, _, _, _)) = entities.get(entity) else {
+            //                     return PaletteEvent::Exit;
+            //                 };
+            //                 tile_state.create_monitor_tile(component_id, tile_id);
+            //                 PaletteEvent::Exit
+            //             },
+            //         )
+            //     })
+            //     .collect();
             PaletteEvent::NextPage {
-                prev_page_label: Some(entity_metadata.name.clone()),
-                next_page: PalettePage::new(items).prompt("Select a component to monitor"),
+                prev_page_label: Some(component_metadata.name.clone()),
+                next_page: PalettePage::new(vec![]).prompt("Select a component to monitor"),
             }
         },
     )
@@ -412,38 +432,11 @@ fn toggle_body_axes() -> PaletteItem {
         "Toggle Body Axes",
         VIEWPORT_LABEL,
         |_: In<String>, entities: Query<EntityData>| {
-            PalettePage::new(
-                entities
-                    .iter()
-                    .filter_map(|(&entity_id, _, value_map, metadata)| {
-                        if value_map.0.contains_key(&ComponentId::new("world_pos")) {
-                            Some(PaletteItem::new(
-                                metadata.name.clone(),
-                                "Entities",
-                                move |_: In<String>, mut commands: Commands, query: Query<(Entity, &BodyAxes)>| {
-                                    let mut found = false;
-                                    for (e, axes) in query.iter() {
-                                        if axes.entity_id == entity_id {
-                                            found = true;
-                                            commands.entity(e).remove::<BodyAxes>();
-                                        }
-                                    }
-                                    if !found {
-                                        commands.spawn(BodyAxes {
-                                            entity_id,
-                                            scale: 1.0,
-                                        });
-                                    }
-                                    PaletteEvent::Exit
-                                },
-                            ))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect(),
-            )
-            .into()
+            // TODO: This functionality needs to be updated once BodyAxes is migrated from EntityId to ComponentId
+            // For now, return an empty page
+            PalettePage::new(vec![])
+                .prompt("Body axes functionality is temporarily disabled during refactor")
+                .into()
         },
     )
 }
@@ -466,18 +459,19 @@ pub fn create_viewport(tile_id: Option<TileId>) -> PaletteItem {
                     entities
                         .iter()
                         .filter_map(|(&entity_id, _, value_map, metadata)| {
-                            if value_map.0.contains_key(&ComponentId::new("world_pos")) {
-                                Some(PaletteItem::new(
-                                    metadata.name.clone(),
-                                    "Entities",
-                                    move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
-                                        tile_state.create_viewport_tile(Some(entity_id), tile_id);
-                                        PaletteEvent::Exit
-                                    },
-                                ))
-                            } else {
-                                None
-                            }
+                            None
+                            // if value_map.0.contains_key(&ComponentId::new("world_pos")) {
+                            //     Some(PaletteItem::new(
+                            //         metadata.name.clone(),
+                            //         "Entities",
+                            //         move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
+                            //             tile_state.create_viewport_tile(Some(entity_id), tile_id);
+                            //             PaletteEvent::Exit
+                            //         },
+                            //     ))
+                            // } else {
+                            //     None
+                            // }
                         }),
                 )
                 .collect(),
@@ -679,7 +673,7 @@ pub fn save_preset_inner() -> PaletteItem {
         move |name: In<String>,
               query_tables: Query<&ui::query_table::QueryTable>,
               cameras: Query<ui::CameraQuery>,
-              entity_id: Query<&impeller2::types::EntityId>,
+              component_id: Query<&impeller2::types::ComponentId>,
               action_tiles: Query<&ui::actions::ActionTile>,
               graph_states: Query<&ui::widgets::plot::GraphState>,
               query_plots: Query<&QueryPlot>,
@@ -688,7 +682,7 @@ pub fn save_preset_inner() -> PaletteItem {
                 let panel = crate::ui::preset::tile_to_panel(
                     &query_tables,
                     &cameras,
-                    &entity_id,
+                    &component_id,
                     &action_tiles,
                     &graph_states,
                     &query_plots,

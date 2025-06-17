@@ -92,7 +92,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                 graph_label_margin,
             );
             if add_clicked {
-                setting_modal_state.0 = Some(SettingModal::Graph(graph_id, None, None));
+                setting_modal_state.0 = Some(SettingModal::Graph(graph_id, None));
             }
         }
 

@@ -3,7 +3,7 @@ use big_space::GridCell;
 use eql::Expr;
 use impeller2::component::Component;
 use impeller2_bevy::{ComponentValueMap, EntityMap};
-use impeller2_wkt::{ComponentValue, EntityMetadata, Glb, WorldPos};
+use impeller2_wkt::{ComponentValue, Glb, WorldPos};
 use nox::Array;
 use smallvec::smallvec;
 
@@ -66,25 +66,23 @@ impl CompiledExpr {
 pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
     match expression {
         Expr::Component(component) => {
-            let entity = component.entity;
+            let component_id = component.id;
             CompiledExpr::closure(move |entity_map, component_value_maps| {
-                let entity_id = entity_map.get(&entity).ok_or_else(|| {
-                    format!("entity '{}' not found in entity map", component.entity_name)
+                let entity_id = entity_map.get(&component_id).ok_or_else(|| {
+                    format!("component '{}' not found in entity map", component.name)
                 })?;
 
                 let component_map = component_value_maps.get(*entity_id).map_err(|_| {
                     format!(
-                        "no component value map found for entity '{}'",
-                        component.entity_name
+                        "no component value map found for component '{}'",
+                        component.name
                     )
                 })?;
 
-                component_map.get(&component.id).cloned().ok_or_else(|| {
-                    format!(
-                        "component '{}' not found for entity '{}'",
-                        component.name, component.entity_name
-                    )
-                })
+                component_map
+                    .get(&component_id)
+                    .cloned()
+                    .ok_or_else(|| format!("component '{}' not found for entity", component.name))
             })
         }
         Expr::ArrayAccess(expr, index) => {

@@ -115,12 +115,7 @@ impl CollectedGraphData {
         self.components.get_mut(component_id)
     }
 
-    pub fn get_line(
-        &self,
-        entity_id: &ComponentId,
-        component_id: &ComponentId,
-        index: usize,
-    ) -> Option<&Handle<Line>> {
+    pub fn get_line(&self, component_id: &ComponentId, index: usize) -> Option<&Handle<Line>> {
         self.components
             .get(component_id)
             .and_then(|component| component.lines.get(&index))
@@ -240,8 +235,7 @@ pub fn handle_time_series(
             let Ok(buf) = time_series.data() else {
                 return;
             };
-            let Some(plot_data) = collected_graph_data.get_component_mut(&entity_id, &component_id)
-            else {
+            let Some(plot_data) = collected_graph_data.get_component_mut(&component_id) else {
                 return;
             };
             plot_data.request_states.insert(
@@ -406,97 +400,95 @@ pub fn queue_timestamp_read(
     if selected_range.0.end.0 == i64::MIN || selected_range.0.start.0 == i64::MAX {
         return;
     }
-    for (&entity_id, entity) in graph_data.entities.iter_mut() {
-        for (&component_id, component) in entity.components.iter_mut() {
-            let mut line = component
-                .lines
-                .first_key_value()
-                .and_then(|(_k, v)| lines.get_mut(v));
+    for (&component_id, component) in graph_data.components.iter_mut() {
+        let mut line = component
+            .lines
+            .first_key_value()
+            .and_then(|(_k, v)| lines.get_mut(v));
 
-            if let Some(last_queried) = line.as_ref().and_then(|l| l.last_queried.as_ref()) {
-                if last_queried.elapsed() <= Duration::from_millis(250) {
+        if let Some(last_queried) = line.as_ref().and_then(|l| l.last_queried.as_ref()) {
+            if last_queried.elapsed() <= Duration::from_millis(250) {
+                continue;
+            }
+        }
+
+        let mut process_range = |range: Range<Timestamp>| {
+            let packet_id = fastrand::u16(..).to_le_bytes();
+
+            match component.request_states.get(&range.start) {
+                // Rerequest chunks if we have not received a response for 10 seconds
+                Some(RequestState::Requested(time)) if time.elapsed() > Duration::from_secs(10) => {
+                }
+
+                // Recheck if we have a potentially incomplete chunk.
+                // We first check if the chunk is not full, indicating that it existed at the end of available data
+                // or at the end of the previously requested time range. We check if it was the chunk at the end of the previously requested
+                // range by checking if the last time stamp is less than the end of the range
+                Some(RequestState::Returned {
+                    len,
+                    last_timestamp,
+                }) if *len < CHUNK_LEN
+                    && last_timestamp
+                        .map(|t| t < selected_range.0.end)
+                        .unwrap_or_default() => {}
+                // Skip the chunk if it was already requested
+                Some(RequestState::Returned { .. }) | Some(RequestState::Requested(_)) => {
                     return;
                 }
+                None => {}
             }
 
-            let mut process_range = |range: Range<Timestamp>| {
-                let packet_id = fastrand::u16(..).to_le_bytes();
+            component
+                .request_states
+                .insert(range.start, RequestState::Requested(Instant::now()));
 
-                match component.request_states.get(&range.start) {
-                    // Rerequest chunks if we have not received a response for 10 seconds
-                    Some(RequestState::Requested(time))
-                        if time.elapsed() > Duration::from_secs(10) => {}
-
-                    // Recheck if we have a potentially incomplete chunk.
-                    // We first check if the chunk is not full, indicating that it existed at the end of available data
-                    // or at the end of the previously requested time range. We check if it was the chunk at the end of the previously requested
-                    // range by checking if the last time stamp is less than the end of the range
-                    Some(RequestState::Returned {
-                        len,
-                        last_timestamp,
-                    }) if *len < CHUNK_LEN
-                        && last_timestamp
-                            .map(|t| t < selected_range.0.end)
-                            .unwrap_or_default() => {}
-                    // Skip the chunk if it was already requested
-                    Some(RequestState::Returned { .. }) | Some(RequestState::Requested(_)) => {
-                        return;
-                    }
-                    None => {}
-                }
-
-                component
-                    .request_states
-                    .insert(range.start, RequestState::Requested(Instant::now()));
-
-                let start = range.start;
-                let end = range.end;
-                let msg = GetTimeSeries {
-                    id: packet_id,
-                    range: range.clone(),
-                    component_id,
-                    limit: Some(CHUNK_LEN),
-                };
-                commands.send_req_with_handler(
-                    msg,
-                    packet_id,
-                    move |pkt: InRef<OwnedPacket<PacketGrantR>>,
-                          collected_graph_data: ResMut<CollectedGraphData>,
-                          entity_map: Res<EntityMap>,
-                          component_values: Query<&ComponentValueMap>,
-                          lines: ResMut<Assets<Line>>,
-                          earliest_timestamp: Res<EarliestTimestamp>,
-                          schema_reg: Res<ComponentSchemaRegistry>,
-                          commands: Commands| {
-                        handle_time_series(
-                            pkt,
-                            collected_graph_data,
-                            entity_map,
-                            component_values,
-                            lines,
-                            commands,
-                            start..end,
-                            entity_id,
-                            component_id,
-                            earliest_timestamp,
-                            schema_reg,
-                        );
-                    },
-                );
+            let start = range.start;
+            let end = range.end;
+            let msg = GetTimeSeries {
+                id: packet_id,
+                range: range.clone(),
+                component_id,
+                limit: Some(CHUNK_LEN),
             };
-            if let Some(line) = line.as_mut() {
-                line.last_queried = Some(Instant::now());
-                line.data
-                    .tree
-                    .gaps_trimmed(nodit::interval::ie(
-                        selected_range.0.start.0,
-                        selected_range.0.end.0,
-                    ))
-                    .map(|i| Timestamp(i.start())..Timestamp(i.end()))
-                    .for_each(process_range)
-            } else {
-                process_range(selected_range.0.clone())
-            };
+            commands.send_req_with_handler(
+                msg,
+                packet_id,
+                move |pkt: InRef<OwnedPacket<PacketGrantR>>,
+                      collected_graph_data: ResMut<CollectedGraphData>,
+                      entity_map: Res<EntityMap>,
+                      component_values: Query<&ComponentValueMap>,
+                      lines: ResMut<Assets<Line>>,
+                      earliest_timestamp: Res<EarliestTimestamp>,
+                      schema_reg: Res<ComponentSchemaRegistry>,
+                      commands: Commands| {
+                    handle_time_series(
+                        pkt,
+                        collected_graph_data,
+                        entity_map,
+                        component_values,
+                        lines,
+                        commands,
+                        start..end,
+                        component_id,
+                        component_id,
+                        earliest_timestamp,
+                        schema_reg,
+                    );
+                },
+            );
+        };
+        if let Some(line) = line.as_mut() {
+            line.last_queried = Some(Instant::now());
+            line.data
+                .tree
+                .gaps_trimmed(nodit::interval::ie(
+                    selected_range.0.start.0,
+                    selected_range.0.end.0,
+                ))
+                .map(|i| Timestamp(i.start())..Timestamp(i.end()))
+                .for_each(process_range)
+        } else {
+            process_range(selected_range.0.clone());
         }
     }
 }
@@ -1061,14 +1053,12 @@ pub fn collect_garbage(
     if !behavior.is_changed() {
         return;
     }
-    for entity in graph_data.entities.values() {
-        for component in entity.components.values() {
-            for line in component.lines.values() {
-                let Some(line) = lines.get_mut(line) else {
-                    continue;
-                };
-                line.data.garbage_collect(selected_range.0.clone());
-            }
+    for component in graph_data.components.values() {
+        for line in component.lines.values() {
+            let Some(line) = lines.get_mut(line) else {
+                continue;
+            };
+            line.data.garbage_collect(selected_range.0.clone());
         }
     }
 }

@@ -55,14 +55,13 @@ impl Exec {
         &mut self,
         py: Python<'a>,
         component_name: String,
-        entity_id: EntityId,
+        entity_name: String,
     ) -> Result<Bound<'a, PyAny>, Error> {
-        let id = ComponentId::new(&component_name);
-        let entity_id = entity_id.inner;
+        let id = ComponentId::new(&format!("{entity_name}.{component_name}"));
 
         let component = self
             .db
-            .with_state(|state| state.get_component(entity_id, id).cloned())
+            .with_state(|state| state.get_component(id).cloned())
             .ok_or(elodin_db::Error::ComponentNotFound(id))?;
         let component_metadata = self
             .db

@@ -13,7 +13,9 @@ use big_space::propagation::NoPropagateRot;
 use egui::UiBuilder;
 use egui_tiles::{Container, Tile, TileId, Tiles};
 use impeller2::types::ComponentId;
-use impeller2_bevy::{ComponentMetadataRegistry, ComponentSchemaRegistry, EntityMap};
+use impeller2_bevy::{
+    ComponentMetadataRegistry, ComponentPath, ComponentSchemaRegistry, EntityMap,
+};
 use impeller2_wkt::{EntityMetadata, Graph, Panel, Viewport};
 use nox::Tensor;
 use smallvec::SmallVec;
@@ -22,7 +24,7 @@ use std::collections::{BTreeMap, HashMap};
 use super::{
     HdrEnabled, SelectedObject, ViewportRect,
     actions::ActionTileWidget,
-    colors::{self, EColor, get_scheme, with_opacity},
+    colors::{self, get_scheme, with_opacity},
     images,
     monitor::{MonitorPane, MonitorWidget},
     query_table::{QueryTable, QueryTablePane, QueryTableWidget},
@@ -41,7 +43,6 @@ use crate::{
     MainCamera,
     plugins::{LogicalKeyState, navigation_gizmo::RenderLayerAlloc},
     spawn_main_camera,
-    ui::widgets::plot::GraphStateEntity,
 };
 
 #[derive(Clone)]
@@ -138,14 +139,9 @@ impl TileState {
         self.tree_actions.push(TreeAction::AddViewport(None, None));
     }
 
-    pub fn create_monitor_tile(
-        &mut self,
-        entity_id: EntityId,
-        component_id: ComponentId,
-        tile_id: Option<TileId>,
-    ) {
+    pub fn create_monitor_tile(&mut self, component_id: ComponentId, tile_id: Option<TileId>) {
         self.tree_actions
-            .push(TreeAction::AddMonitor(tile_id, entity_id, component_id));
+            .push(TreeAction::AddMonitor(tile_id, component_id));
     }
 
     pub fn create_action_tile(
@@ -421,9 +417,9 @@ struct TreeBehavior<'w> {
 
 #[derive(Clone)]
 pub enum TreeAction {
-    AddViewport(Option<TileId>, Option<EntityId>),
+    AddViewport(Option<TileId>, Option<ComponentId>),
     AddGraph(Option<TileId>, Option<GraphBundle>),
-    AddMonitor(Option<TileId>, EntityId, ComponentId),
+    AddMonitor(Option<TileId>, ComponentId),
     AddQueryTable(Option<TileId>),
     AddQueryPlot(Option<TileId>),
     AddActionTile(Option<TileId>, String, String),
@@ -927,15 +923,17 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             label,
                         );
                         if let Some(camera) = viewport_pane.camera {
+                            #[allow(unused_variables, unused_mut)]
                             let mut camera = state_mut.commands.entity(camera);
-                            if let Some(parent) = viewport.track_entity {
-                                if let Some(parent) = state_mut.entity_map.0.get(&parent) {
-                                    if let Ok(grid_cell) = state_mut.grid_cell.get(*parent) {
-                                        camera.try_insert(*grid_cell);
-                                    }
-                                    camera.insert(ChildOf(*parent));
-                                }
-                            }
+                            // TODO: Re-enable viewport tracking once EntityId is fully migrated to ComponentId
+                            // if let Some(parent) = viewport.track_entity {
+                            //     if let Some(parent) = state_mut.entity_map.0.get(&parent) {
+                            //         if let Ok(grid_cell) = state_mut.grid_cell.get(*parent) {
+                            //             camera.try_insert(*grid_cell);
+                            //         }
+                            //         camera.insert(ChildOf(*parent));
+                            //     }
+                            // }
                         }
 
                         if let Some(tile_id) = ui_state.insert_tile(
@@ -980,9 +978,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             ui_state.graphs.insert(tile_id, graph_id);
                         }
                     }
-                    TreeAction::AddMonitor(parent_tile_id, entity_id, component_id) => {
-                        let monitor =
-                            MonitorPane::new("Monitor".to_string(), entity_id, component_id);
+                    TreeAction::AddMonitor(parent_tile_id, component_id) => {
+                        let monitor = MonitorPane::new("Monitor".to_string(), component_id);
 
                         let pane = Pane::Monitor(monitor);
                         if let Some(tile_id) =
@@ -1256,14 +1253,15 @@ pub fn spawn_panel(
             );
             let camera = pane.camera.expect("no camera spawned for viewport");
             let mut camera = commands.entity(camera);
-            if let Some(parent) = viewport.track_entity {
-                if let Some(parent) = entity_map.0.get(&parent) {
-                    if let Ok(grid_cell) = grid_cell.get(*parent) {
-                        camera.try_insert(*grid_cell);
-                    }
-                    camera.insert(ChildOf(*parent));
-                }
-            };
+            // TODO: Re-enable viewport tracking once EntityId is fully migrated to ComponentId
+            // if let Some(parent) = viewport.track_entity {
+            //     if let Some(parent) = entity_map.0.get(&parent) {
+            //         if let Ok(grid_cell) = grid_cell.get(*parent) {
+            //             camera.try_insert(*grid_cell);
+            //         }
+            //         camera.insert(ChildOf(*parent));
+            //     }
+            // };
             // Convert from Z-up to Y-up
             let pos = [viewport.pos.x(), viewport.pos.z(), -viewport.pos.y()].map(Tensor::into_buf);
             let [i, j, k, w] = viewport.rotation.parts().map(Tensor::into_buf);
@@ -1355,36 +1353,12 @@ pub fn spawn_panel(
             tile_id
         }
         Panel::Graph(graph) => {
-            let mut entities = BTreeMap::<EntityId, GraphStateEntity>::default();
-            for entity in graph.entities.iter() {
-                let mut components: BTreeMap<ComponentId, Vec<(bool, Color32)>> = BTreeMap::new();
-                for component in entity.components.iter() {
-                    if let Some(schema) = schema_reg.get(&component.component_id) {
-                        let len = schema.shape().iter().product::<usize>();
-                        let values =
-                            components.entry(component.component_id).or_insert_with(|| {
-                                (0..len)
-                                    .map(|i| {
-                                        (entity.entity_id.0 + component.component_id.0) as usize + i
-                                    })
-                                    .map(|i| (false, colors::get_color_by_index_all(i)))
-                                    .collect()
-                            });
-                        for (i, index) in component.indexes.iter().enumerate() {
-                            if let Some((enabled, color)) = values.get_mut(*index) {
-                                if let Some(c) = component.color.get(i) {
-                                    *color = c.into_color32();
-                                }
-                                *enabled = true;
-                            }
-                        }
-                    }
-                }
-                entities.insert(entity.entity_id, components);
-            }
+            // TODO: Graph preset loading needs to be updated to use ComponentPath instead of entity-based structure
+            // For now, create an empty graph
+            let components: BTreeMap<ComponentPath, Vec<(bool, Color32)>> = BTreeMap::new();
 
             let graph_label = graph_label(graph, entity_map, entity_metadata, metadata_store);
-            let mut bundle = GraphBundle::new(render_layer_alloc, entities, graph_label.clone());
+            let mut bundle = GraphBundle::new(render_layer_alloc, components, graph_label.clone());
             bundle.graph_state.auto_y_range = graph.auto_y_range;
             bundle.graph_state.y_range = graph.y_range.clone();
             bundle.graph_state.graph_type = graph.graph_type;
@@ -1394,11 +1368,8 @@ pub fn spawn_panel(
         }
         Panel::ComponentMonitor(monitor) => {
             // Create a MonitorPane and add it to the UI
-            let pane = super::monitor::MonitorPane::new(
-                "Monitor".to_string(),
-                monitor.entity_id,
-                monitor.component_id,
-            );
+            let pane =
+                super::monitor::MonitorPane::new("Monitor".to_string(), monitor.component_id);
             ui_state.insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
         }
         Panel::SQLTable(sql) => {
@@ -1496,56 +1467,27 @@ pub fn shortcuts(key_state: Res<LogicalKeyState>, mut ui_state: ResMut<TileState
 
 fn viewport_label(
     viewport: &Viewport,
-    entity_map: &EntityMap,
-    entity_metadata: &Query<&EntityMetadata>,
+    #[allow(unused_variables)] _entity_map: &EntityMap,
+    #[allow(unused_variables)] _entity_metadata: &Query<&EntityMetadata>,
 ) -> String {
-    viewport
-        .name
-        .clone()
-        .or_else(|| {
-            viewport
-                .track_entity
-                .and_then(|id| entity_map.0.get(&id))
-                .and_then(|entity| entity_metadata.get(*entity).ok())
-                .map(|metadata| metadata.name.clone())
-                .map(|name| format!("Track: {}", name))
-        })
-        .unwrap_or_else(|| {
-            let pos = viewport.pos;
-            format!(
-                "Viewport({},{},{})",
-                pos.x().into_buf(),
-                pos.y().into_buf(),
-                pos.z().into_buf(),
-            )
-        })
+    // TODO: Re-enable entity tracking labels once EntityId is fully migrated to ComponentId
+    viewport.name.clone().unwrap_or_else(|| {
+        let pos = viewport.pos;
+        format!(
+            "Viewport({},{},{})",
+            pos.x().into_buf(),
+            pos.y().into_buf(),
+            pos.z().into_buf(),
+        )
+    })
 }
 
 fn graph_label(
     graph: &Graph,
-    entity_map: &EntityMap,
-    entity_metadata: &Query<&EntityMetadata>,
-    metadata_store: &ComponentMetadataRegistry,
+    #[allow(unused_variables)] _entity_map: &EntityMap,
+    #[allow(unused_variables)] _entity_metadata: &Query<&EntityMetadata>,
+    #[allow(unused_variables)] _metadata_store: &ComponentMetadataRegistry,
 ) -> String {
-    graph
-        .name
-        .clone()
-        .or_else(|| {
-            let entity = graph.entities.first()?;
-            if graph.entities.len() > 1 {
-                return None;
-            }
-            let entity_name = entity_map
-                .0
-                .get(&entity.entity_id)
-                .and_then(|entity| entity_metadata.get(*entity).ok())
-                .map(|metadata| metadata.name.as_str())?;
-            let component = entity.components.first()?;
-            let component_name = &metadata_store.get_metadata(&component.component_id)?.name;
-            if entity.components.len() > 1 {
-                return Some(format!("{}: {}, ...", entity_name, component_name));
-            }
-            Some(format!("{}: {}", entity_name, component_name))
-        })
-        .unwrap_or_else(|| "Graph".to_string())
+    // TODO: Update graph labeling once Graph structure is migrated to use ComponentPath
+    graph.name.clone().unwrap_or_else(|| "Graph".to_string())
 }

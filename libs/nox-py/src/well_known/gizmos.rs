@@ -25,7 +25,7 @@ impl VectorArrow {
     ) -> Self {
         Self {
             inner: impeller2_wkt::VectorArrow {
-                entity_id: entity.inner,
+                //entity_id: entity.inner,
                 id: ComponentId::new(&component_name),
                 range: offset..offset + 2,
                 color: color.inner,

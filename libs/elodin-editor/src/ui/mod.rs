@@ -18,9 +18,10 @@ use big_space::GridCell;
 use self::colors::get_scheme;
 use egui::CornerRadius;
 use egui_tiles::TileId;
-use impeller2::types::{ComponentId, EntityId};
-use impeller2_bevy::{ComponentPath, ComponentValueMap};
-use impeller2_wkt::{ComponentMetadata, EntityMetadata};
+use impeller2::types::ComponentId;
+use impeller2_bevy::ComponentValueMap;
+use impeller2_wkt::ComponentMetadata;
+use impeller2_wkt::ComponentValue;
 use widgets::{
     command_palette::CommandPaletteState,
     timeline::{self, timeline_slider},
@@ -29,7 +30,7 @@ use widgets::{
 use crate::{GridHandle, MainCamera, plugins::LogicalKeyState};
 
 use self::widgets::inspector::entity::ComponentFilter;
-use self::widgets::modal::ModalWithSettings;
+//use self::widgets::modal::ModalWithSettings;
 
 use self::widgets::command_palette::{self, CommandPalette};
 use self::widgets::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystemExt};
@@ -133,7 +134,7 @@ pub fn shortcuts(
 pub type EntityData<'a> = (
     &'a ComponentId,
     Entity,
-    &'a mut ComponentValueMap,
+    &'a mut ComponentValue,
     &'a ComponentMetadata,
 );
 
@@ -189,7 +190,7 @@ impl Plugin for UiPlugin {
 
 #[derive(Clone, Debug)]
 pub enum SettingModal {
-    Graph(Entity, Option<EntityId>, Option<ComponentId>),
+    Graph(Entity, Option<ComponentId>),
     GraphRename(Entity, String),
 }
 
@@ -537,7 +538,7 @@ pub fn render_layout(world: &mut World) {
 
     world.add_root_widget::<ViewportOverlay>("viewport_overlay");
 
-    world.add_root_widget::<ModalWithSettings>("modal_graph");
+    //world.add_root_widget::<ModalWithSettings>("modal_graph");
 
     world.add_root_widget::<CommandPalette>("command_palette");
 }

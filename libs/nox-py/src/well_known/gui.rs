@@ -68,7 +68,7 @@ impl Panel {
             Vector3::new(5.0, 5.0, 10.0)
         };
         let mut viewport = impeller2_wkt::Viewport {
-            track_entity: track_entity.map(|x| x.inner),
+            //track_entity: track_entity.map(|x| x.inner),
             fov,
             active,
             pos,
@@ -141,17 +141,11 @@ impl Panel {
                 ));
             }
         };
-        let entities = entities
-            .into_iter()
-            .map(|x| impeller2_wkt::GraphEntity {
-                entity_id: x.entity.inner,
-                components: x.components,
-            })
-            .collect();
+        let components = entities.into_iter().flat_map(|x| x.components).collect();
         Ok(Self {
             inner: impeller2_wkt::Panel::Graph(Graph {
                 name,
-                entities,
+                components,
                 graph_type,
                 auto_y_range: true,
                 y_range: 0.0..1.0,
@@ -240,7 +234,7 @@ impl Line3d {
 
         Ok(Self {
             inner: impeller2_wkt::Line3d {
-                entity: entity.inner,
+                //entity: entity.inner,
                 component_id,
                 line_width,
                 color,

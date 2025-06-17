@@ -1,6 +1,9 @@
 use bevy::{
     app::Plugin,
-    ecs::system::{EntityCommands, SystemId},
+    ecs::{
+        hierarchy::ChildOf,
+        system::{EntityCommands, SystemId},
+    },
     log::warn,
     prelude::{Command, In, InRef, IntoSystem, Mut, System},
 };
@@ -153,6 +156,7 @@ fn sink_inner(
             OwnedPacket::Msg(m) if m.id == DumpMetadataResp::ID => {
                 let metadata = m.parse::<DumpMetadataResp>()?;
                 for metadata in metadata.component_metadata.into_iter() {
+                    let component_id = metadata.component_id;
                     world_sink.path_reg.0.insert(
                         metadata.component_id,
                         ComponentPath::from_name(&metadata.name),
@@ -160,6 +164,12 @@ fn sink_inner(
                     world_sink
                         .metadata_reg
                         .insert(metadata.component_id, metadata);
+                    try_insert_entity(
+                        &mut world_sink.entity_map,
+                        &world_sink.metadata_reg,
+                        &mut world_sink.commands,
+                        component_id,
+                    );
                 }
                 // for metadata in metadata.entity_metadata.into_iter() {
                 //     let mut e = if let Some(entity) = world_sink.entity_map.get(&metadata.entity_id)
@@ -303,8 +313,8 @@ pub struct ComponentPathRegistry(pub HashMap<ComponentId, ComponentPath>);
 
 #[derive(PartialEq, Eq, Debug, Clone, Component)]
 pub struct ComponentPath {
-    id: ComponentId,
-    path: SmallVec<[ComponentPart; 2]>,
+    pub id: ComponentId,
+    pub path: SmallVec<[ComponentPart; 2]>,
 }
 
 impl std::hash::Hash for ComponentPath {
@@ -313,10 +323,26 @@ impl std::hash::Hash for ComponentPath {
     }
 }
 
+impl PartialOrd for ComponentPath {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ComponentPath {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.id.cmp(&other.id)
+    }
+}
+
 impl ComponentPath {
     pub fn from_name(name: &str) -> Self {
         let id = ComponentId::new(name);
-        let path = name.split('.').map(ComponentPart::new).collect();
+        let path = name
+            .match_indices('.')
+            .map(|(i, _)| ComponentPart::new(&name[..i]))
+            .chain([ComponentPart::new(&name)])
+            .collect();
         Self { id, path }
     }
 
@@ -331,7 +357,7 @@ impl ComponentPath {
 
 #[derive(SystemParam)]
 pub struct WorldSink<'w, 's> {
-    query: Query<'w, 's, &'static mut ComponentValueMap>,
+    query: Query<'w, 's, &'static mut ComponentValue>,
     commands: Commands<'w, 's>,
     entity_map: ResMut<'w, EntityMap>,
     asset_store: ResMut<'w, AssetStore>,
@@ -346,6 +372,28 @@ pub struct WorldSink<'w, 's> {
     path_reg: ResMut<'w, ComponentPathRegistry>,
 }
 
+fn try_insert_entity<'a, 'w, 's>(
+    entity_map: &mut EntityMap,
+    metadata_reg: &ComponentMetadataRegistry,
+    commands: &'a mut Commands<'w, 's>,
+    component_id: ComponentId,
+) -> Option<EntityCommands<'a>> {
+    if let Some(entity) = entity_map.get(&component_id) {
+        let Ok(e) = commands.get_entity(*entity) else {
+            return None;
+        };
+        Some(e)
+    } else {
+        let mut e = commands.spawn((component_id, ComponentValueMap::default()));
+        if let Some(metadata) = metadata_reg.get(&component_id) {
+            e.insert(metadata.clone());
+        }
+
+        entity_map.insert(component_id, e.id());
+        Some(e)
+    }
+}
+
 impl Decomponentize for WorldSink<'_, '_> {
     type Error = core::convert::Infallible;
     fn apply_value(
@@ -354,46 +402,39 @@ impl Decomponentize for WorldSink<'_, '_> {
         view: ComponentView<'_>,
         _timestamp: Option<Timestamp>,
     ) -> Result<(), Infallible> {
-        fn try_insert_entity(
-            entity_map: &mut EntityMap,
-            commands: &mut Commands,
-            component_id: ComponentId,
-        ) -> Option<Entity> {
-            if let Some(entity) = entity_map.get(&component_id) {
-                let Ok(e) = commands.get_entity(*entity) else {
-                    return None;
-                };
-                Some(e.id())
-            } else {
-                let e = commands
-                    .spawn((component_id, ComponentValueMap::default()))
-                    .id();
-                entity_map.insert(component_id, e);
-                Some(e)
-            }
-        }
-        let Some(e) = try_insert_entity(&mut self.entity_map, &mut self.commands, component_id)
-        else {
+        let Some(mut e) = try_insert_entity(
+            &mut self.entity_map,
+            &self.metadata_reg,
+            &mut self.commands,
+            component_id,
+        ) else {
             return Ok(());
         };
 
-        let Ok(mut value_map) = self.query.get_mut(e) else {
-            return Ok(());
-        };
-        if let Some(value) = value_map.0.get_mut(&component_id) {
+        if let Ok(mut value) = self.query.get_mut(e.id()) {
             value.copy_from_view(view);
         } else {
-            value_map
-                .0
-                .insert(component_id, ComponentValue::from_view(view));
+            e.insert(ComponentValue::from_view(view));
         }
 
         let Some(path) = self.path_reg.get(&component_id) else {
             return Ok(());
         };
 
-        for parent in path.path.iter().rev().skip(1) {
-            let _ = try_insert_entity(&mut self.entity_map, &mut self.commands, parent.id);
+        let mut last_entity: Option<Entity> = None;
+        for parent in path.path.iter() {
+            let Some(mut e) = try_insert_entity(
+                &mut self.entity_map,
+                &self.metadata_reg,
+                &mut self.commands,
+                parent.id,
+            ) else {
+                continue;
+            };
+            if let Some(last_entity) = last_entity {
+                e.insert(ChildOf(last_entity));
+            }
+            last_entity = Some(e.id());
         }
 
         let tail_component = path.tail();
@@ -699,6 +740,7 @@ impl Plugin for Impeller2Plugin {
             .init_resource::<EntityMap>()
             .init_resource::<ComponentMetadataRegistry>()
             .init_resource::<ComponentSchemaRegistry>()
+            .init_resource::<ComponentPathRegistry>()
             .init_resource::<AssetStore>()
             .init_resource::<HashMapRegistry>()
             .init_resource::<PacketIdHandlers>()
@@ -948,5 +990,23 @@ impl ComponentValueExt for ComponentValue {
                     .map(|(i, x)| (i, ElementValueMut::F64(x))),
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_component_path() {
+        let path = ComponentPath::from_name("a.b.c");
+        assert_eq!(
+            &path.path[..],
+            &[
+                ComponentPart::new("a"),
+                ComponentPart::new("a.b"),
+                ComponentPart::new("a.b.c"),
+            ]
+        );
     }
 }

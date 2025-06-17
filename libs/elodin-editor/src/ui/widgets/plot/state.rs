@@ -105,27 +105,20 @@ impl GraphBundle {
 }
 
 impl GraphState {
-    pub fn remove_component(&mut self, entity_id: &ComponentId, component_id: &ComponentId) {
-        let Some(components) = self.entities.get_mut(entity_id) else {
-            return;
-        };
+    pub fn remove_component(&mut self, component_path: &ComponentPath) {
+        self.components.remove(component_path);
 
-        components.remove(component_id);
-
-        if components.is_empty() {
-            self.entities.remove(entity_id);
-        }
+        // Also remove from enabled_lines
+        self.enabled_lines
+            .retain(|(path, _), _| path != component_path);
     }
 
     pub fn insert_component(
         &mut self,
-        entity_id: &ComponentId,
-        component_id: &ComponentId,
+        component_path: ComponentPath,
         component_values: Vec<(bool, egui::Color32)>,
     ) {
-        let entity = self.entities.entry(*entity_id).or_default();
-
-        entity.insert(*component_id, component_values);
+        self.components.insert(component_path, component_values);
     }
 }
 

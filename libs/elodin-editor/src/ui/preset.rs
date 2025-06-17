@@ -65,28 +65,17 @@ pub fn tile_to_panel(
             }
             Pane::Graph(graph) => {
                 let graph_state = graph_states.get(graph.id).ok()?;
-                let mut entities: HashMap<ComponentId, impeller2_wkt::GraphEntity> = HashMap::new();
-                for ((entity_id, component_id, index), (_, color)) in
-                    graph_state.enabled_lines.iter()
-                {
-                    let entity_id = *entity_id;
-                    let entity =
-                        entities
-                            .entry(entity_id)
-                            .or_insert_with(|| impeller2_wkt::GraphEntity {
-                                entity_id,
-                                components: vec![],
-                            });
+                let mut components = vec![];
+                for ((component_id, index), (_, color)) in graph_state.enabled_lines.iter() {
                     let [r, g, b, _] = color.to_normalized_gamma_f32();
-                    entity.components.push(impeller2_wkt::GraphComponent {
-                        component_id: *component_id,
+                    components.push(impeller2_wkt::GraphComponent {
+                        component_id: component_id.id,
                         indexes: vec![*index],
                         color: vec![Color::rgb(r, g, b)],
                     });
                 }
-                let entities = entities.into_values().collect();
                 Some(Panel::Graph(impeller2_wkt::Graph {
-                    entities,
+                    components,
                     name: Some(graph_state.label.clone()),
                     graph_type: graph_state.graph_type,
                     auto_y_range: graph_state.auto_y_range,
@@ -95,7 +84,6 @@ pub fn tile_to_panel(
             }
             Pane::Monitor(monitor) => Some(Panel::ComponentMonitor(ComponentMonitor {
                 component_id: monitor.component_id,
-                entity_id: monitor.entity_id,
             })),
             Pane::QueryTable(query_table) => {
                 let query_table = query_tables.get(query_table.entity).ok()?;

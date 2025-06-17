@@ -1,13 +1,15 @@
+use crate::ui::ComponentId;
 use bevy::ecs::{
     system::{Query, ResMut, SystemParam, SystemState},
     world::World,
 };
+use bevy::prelude::Entity;
 use bevy_egui::egui;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2_bevy::ComponentPathRegistry;
-use impeller2_wkt::EntityMetadata;
+use impeller2_wkt::ComponentMetadata;
 
-use crate::ui::{EntityData, EntityFilter, EntityPair, SelectedObject, colors::get_scheme, utils};
+use crate::ui::{EntityFilter, EntityPair, SelectedObject, colors::get_scheme, utils};
 
 use super::{WidgetSystem, inspector::entity::search};
 
@@ -15,7 +17,7 @@ use super::{WidgetSystem, inspector::entity::search};
 pub struct HierarchyContent<'w, 's> {
     entity_filter: ResMut<'w, EntityFilter>,
     selected_object: ResMut<'w, SelectedObject>,
-    entities: Query<'w, 's, EntityData<'static>>,
+    entities: Query<'w, 's, (&'static ComponentId, Entity, &'static ComponentMetadata)>,
     path_reg: ResMut<'w, ComponentPathRegistry>,
 }
 
@@ -65,7 +67,7 @@ pub fn header(
 
 pub fn entity_list(
     ui: &mut egui::Ui,
-    entities: &Query<EntityData>,
+    entities: &Query<(&'static ComponentId, Entity, &'static ComponentMetadata)>,
     selected_object: &mut ResMut<SelectedObject>,
     path_reg: &ComponentPathRegistry,
     entity_filter: &str,
@@ -77,23 +79,23 @@ pub fn entity_list(
                 // TODO: Improve filter & sorting efficiency
                 let mut filtered_entities = entities
                     .into_iter()
-                    .filter_map(|(id, entity, value_map, metadata)| {
+                    .filter_map(|(id, entity, metadata)| {
                         let path = path_reg.0.get(&id)?;
                         if !path.is_top_level() {
                             return None;
                         };
                         if entity_filter.is_empty() {
-                            Some((id.0 as i64, id, entity, value_map, metadata))
+                            Some((id.0 as i64, id, entity, metadata))
                         } else {
                             matcher
                                 .fuzzy_match(&metadata.name, entity_filter)
-                                .map(|score| (score, id, entity, value_map, metadata))
+                                .map(|score| (score, id, entity, metadata))
                         }
                     })
                     .collect::<Vec<_>>();
                 filtered_entities.sort_by(|a, b| b.0.cmp(&a.0));
 
-                for (_, entity_id, entity, _, metadata) in filtered_entities {
+                for (_, entity_id, entity, metadata) in filtered_entities {
                     let selected = selected_object.is_entity_selected(*entity_id);
                     let list_item = ui.add(list_item(selected, metadata));
 
@@ -123,7 +125,7 @@ pub fn entity_list(
         .response
 }
 
-fn list_item_ui(ui: &mut egui::Ui, on: bool, metadata: &EntityMetadata) -> egui::Response {
+fn list_item_ui(ui: &mut egui::Ui, on: bool, metadata: &ComponentMetadata) -> egui::Response {
     let image_tint = get_scheme().text_primary;
     let image_tint_click = get_scheme().text_secondary;
     let background_color = if on {
@@ -203,6 +205,6 @@ fn list_item_ui(ui: &mut egui::Ui, on: bool, metadata: &EntityMetadata) -> egui:
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-pub fn list_item(on: bool, metadata: &EntityMetadata) -> impl egui::Widget + '_ {
+pub fn list_item(on: bool, metadata: &ComponentMetadata) -> impl egui::Widget + '_ {
     move |ui: &mut egui::Ui| list_item_ui(ui, on, metadata)
 }

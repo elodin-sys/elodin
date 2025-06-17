@@ -34,7 +34,7 @@ pub struct Split {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Viewport {
-    pub track_entity: Option<EntityId>,
+    pub track_entity: Option<ComponentId>,
     pub track_rotation: bool,
     pub fov: f32,
     pub active: bool,
@@ -78,18 +78,12 @@ impl Asset for Panel {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Graph {
-    pub entities: Vec<GraphEntity>,
+    pub components: Vec<GraphComponent>,
     pub name: Option<String>,
     #[serde(default)]
     pub graph_type: GraphType,
     pub auto_y_range: bool,
     pub y_range: Range<f64>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct GraphEntity {
-    pub entity_id: EntityId,
-    pub components: Vec<GraphComponent>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -204,7 +198,6 @@ impl Asset for Material {
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct ComponentMonitor {
     pub component_id: ComponentId,
-    pub entity_id: EntityId,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
