@@ -1,30 +1,36 @@
+use bevy::prelude::Mesh;
 use bevy::prelude::*;
 use big_space::GridCell;
 use eql::Expr;
 use impeller2_bevy::EntityMap;
-use impeller2_wkt::{ComponentValue, Glb, Material, Mesh, Object3D};
+use impeller2_wkt::ComponentValue;
 use nox::Array;
 use smallvec::smallvec;
 
-/// Ghost component that holds an EQL expression for dynamic positioning
-#[derive(Component)]
-pub struct Ghost {
+use crate::BevyExt;
+
+/// ExprObject3D component that holds an EQL expression for dynamic positioning
+#[derive(Component, Deref, DerefMut)]
+pub struct Object3D(EditableEQL);
+
+#[derive(Default)]
+pub struct EditableEQL {
     pub eql: String,
-    pub compiled_expr: CompiledExpr,
+    pub compiled_expr: Option<CompiledExpr>,
 }
 
-impl Ghost {
-    pub fn new(eql: String, expr: eql::Expr) -> Self {
+impl EditableEQL {
+    pub fn new(eql: String, compiled_expr: CompiledExpr) -> Self {
         Self {
             eql,
-            compiled_expr: compile_eql_expr(expr),
+            compiled_expr: Some(compiled_expr),
         }
     }
 }
 
 type ExprFn = dyn for<'a, 'b> Fn(
         &'a EntityMap,
-        &'a Query<'b, 'b, &'static ComponentValue, Without<Ghost>>,
+        &'a Query<'b, 'b, &'static ComponentValue, Without<Object3D>>,
     ) -> Result<ComponentValue, String>
     + Send
     + Sync;
@@ -39,7 +45,7 @@ impl CompiledExpr {
     where
         F: for<'a, 'b> Fn(
                 &'a EntityMap,
-                &'a Query<'b, 'b, &'static ComponentValue, Without<Ghost>>,
+                &'a Query<'b, 'b, &'static ComponentValue, Without<Object3D>>,
             ) -> Result<ComponentValue, String>
             + Send
             + Sync
@@ -52,7 +58,7 @@ impl CompiledExpr {
     pub fn execute<'a, 'b>(
         &'a self,
         entity_map: &'a EntityMap,
-        values: &'a Query<'b, 'b, &'static ComponentValue, Without<Ghost>>,
+        values: &'a Query<'b, 'b, &'static ComponentValue, Without<Object3D>>,
     ) -> Result<ComponentValue, String> {
         match self {
             Self::Closure(c) => (c)(entity_map, values),
@@ -179,32 +185,25 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
     }
 }
 
-/// System that updates ghost entities based on their EQL expressions
-pub fn update_ghost_system(
-    mut ghosts_query: Query<(Entity, &Ghost, &mut impeller2_wkt::WorldPos)>,
+/// System that updates 3D object entities based on their EQL expressions
+pub fn update_object_3d_system(
+    mut objects_query: Query<(Entity, &Object3D, &mut impeller2_wkt::WorldPos)>,
     entity_map: Res<EntityMap>,
-    component_value_maps: Query<&'static ComponentValue, Without<Ghost>>,
+    component_value_maps: Query<&'static ComponentValue, Without<Object3D>>,
 ) {
-    for (entity, ghost, mut pos) in ghosts_query.iter_mut() {
-        match ghost
-            .compiled_expr
-            .execute(&entity_map, &component_value_maps)
-        {
+    for (entity, object_3d, mut pos) in objects_query.iter_mut() {
+        let Some(compiled_expr) = &object_3d.compiled_expr else {
+            continue;
+        };
+        match compiled_expr.execute(&entity_map, &component_value_maps) {
             Ok(component_value) => {
-                if let ComponentValue::F64(array) = component_value {
-                    use nox::ArrayBuf;
-                    let data = array.buf.as_buf();
-                    if data.len() >= 7 {
-                        *pos = impeller2_wkt::WorldPos {
-                            att: nox::Quaternion::new(data[3], data[0], data[1], data[2]),
-                            pos: nox::Vector3::new(data[4], data[5], data[6]),
-                        };
-                    }
+                if let Some(world_pos) = component_value.as_world_pos() {
+                    *pos = world_pos;
                 }
             }
             Err(e) => {
                 println!(
-                    "failed to resolve ghost expression for entity {:?}: {}",
+                    "failed to resolve 3D object expression for entity {:?}: {}",
                     entity, e
                 );
             }
@@ -212,14 +211,37 @@ pub fn update_ghost_system(
     }
 }
 
-pub fn create_ghost_entity(
+pub trait ComponentArrayExt {
+    fn as_world_pos(&self) -> Option<impeller2_wkt::WorldPos>;
+}
+
+impl ComponentArrayExt for ComponentValue {
+    fn as_world_pos(&self) -> Option<impeller2_wkt::WorldPos> {
+        if let ComponentValue::F64(array) = self {
+            use nox::ArrayBuf;
+            let data = array.buf.as_buf();
+            if data.len() >= 7 {
+                return Some(impeller2_wkt::WorldPos {
+                    att: nox::Quaternion::new(data[3], data[0], data[1], data[2]),
+                    pos: nox::Vector3::new(data[4], data[5], data[6]),
+                });
+            }
+        }
+        None
+    }
+}
+
+pub fn create_object_3d_entity(
     commands: &mut Commands,
     eql: String,
     expr: eql::Expr,
-    mesh_source: Option<Object3D>,
+    mesh_source: Option<impeller2_wkt::Object3D>,
+    material_assets: &mut ResMut<Assets<StandardMaterial>>,
+    mesh_assets: &mut ResMut<Assets<Mesh>>,
+    assets: &Res<AssetServer>,
 ) -> Entity {
     let mut entity = commands.spawn((
-        Ghost::new(eql, expr),
+        Object3D(EditableEQL::new(eql, compile_eql_expr(expr))),
         Transform::default(),
         GlobalTransform::default(),
         Visibility::default(),
@@ -231,17 +253,18 @@ pub fn create_ghost_entity(
 
     if let Some(source) = mesh_source {
         match source {
-            Object3D::Glb(path) => {
-                entity.insert(impeller2_bevy::AssetHandle::<Glb>::new(fastrand::u64(..)));
-                entity.insert(Glb(path));
+            impeller2_wkt::Object3D::Glb(path) => {
+                let url = format!("{path}#Scene0");
+                let scene = assets.load(&url);
+                entity.insert(SceneRoot(scene));
             }
-            Object3D::Mesh { mesh, material } => {
-                entity.insert(impeller2_bevy::AssetHandle::<Mesh>::new(fastrand::u64(..)));
-                entity.insert(mesh);
-                entity.insert(impeller2_bevy::AssetHandle::<Material>::new(fastrand::u64(
-                    ..,
-                )));
-                entity.insert(material);
+            impeller2_wkt::Object3D::Mesh { mesh, material } => {
+                let material = material.clone().into_bevy();
+                let material = material_assets.add(material);
+                entity.insert(MeshMaterial3d(material));
+                let mesh = mesh.clone().into_bevy();
+                let mesh = mesh_assets.add(mesh);
+                entity.insert(Mesh3d(mesh));
             }
         }
     }
@@ -249,10 +272,10 @@ pub fn create_ghost_entity(
     entity.id()
 }
 
-pub struct GhostsPlugin;
+pub struct Object3DPlugin;
 
-impl Plugin for GhostsPlugin {
+impl Plugin for Object3DPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, update_ghost_system);
+        app.add_systems(Update, update_object_3d_system);
     }
 }

@@ -3187,6 +3187,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "convert_case"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baaaa0ecca5b51987b9423ccdc971514dd8b0bb7b4060b983d3664dad3f1f89f"
+dependencies = [
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "cordyceps"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4861,6 +4870,7 @@ checksum = "9343d356d7cac894dacafc161b4654e0881301097bdf32a122ed503d97cb94b6"
 name = "eql"
 version = "0.1.0"
 dependencies = [
+ "convert_case 0.8.0",
  "hifitime",
  "impeller2",
  "impeller2-wkt",

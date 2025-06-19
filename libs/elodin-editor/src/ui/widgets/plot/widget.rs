@@ -727,12 +727,12 @@ pub fn auto_y_bounds(
 }
 
 pub fn sync_graphs(
-    mut graph_states: Query<(Entity, &mut GraphState)>,
+    mut graph_states: Query<&mut GraphState>,
     metadata_store: Res<ComponentMetadataRegistry>,
     mut collected_graph_data: ResMut<CollectedGraphData>,
     mut commands: Commands,
 ) {
-    for (graph_id, mut graph_state) in &mut graph_states {
+    for mut graph_state in &mut graph_states {
         let graph_state = &mut *graph_state;
 
         for (component_path, component_values) in &graph_state.components {

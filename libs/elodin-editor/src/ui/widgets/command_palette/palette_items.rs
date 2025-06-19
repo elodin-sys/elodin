@@ -5,36 +5,33 @@ use std::{
 };
 
 use bevy::{
+    asset::{AssetServer, Assets},
     ecs::{
-        entity::Entity,
         query::{With, Without},
         system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
         world::World,
     },
-    pbr::wireframe::WireframeConfig,
+    pbr::{StandardMaterial, wireframe::WireframeConfig},
     prelude::In,
     render::view::Visibility,
 };
 use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::TileId;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
-use impeller2::types::{ComponentId, msg_id};
-use impeller2_bevy::{
-    ComponentMetadataRegistry, ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx,
-};
+use impeller2::types::msg_id;
+use impeller2_bevy::{ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
 use impeller2_wkt::{
-    BodyAxes, ComponentMetadata, ComponentPath, ComponentValue, IsRecording, Material, Mesh,
-    Object3D, SetDbSettings, SetStreamState,
+    ComponentPath, ComponentValue, IsRecording, Material, Mesh, SetDbSettings, SetStreamState,
 };
 use nox::ArrayBuf;
 
 use crate::{
     EqlContext, Offset, SelectedTimeRange, TimeRangeBehavior,
-    ghosts::{CompiledExpr, Ghost},
+    object_3d::Object3D,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        self, EntityData, HdrEnabled, colors,
-        tiles::{self, SyncViewportParams},
+        self, HdrEnabled, colors,
+        tiles::{self, SyncViewportParams, TileState},
         widgets::{
             plot::{GraphBundle, default_component_values},
             query_plot::QueryPlot,
@@ -308,7 +305,7 @@ fn graph_parts(
                 name.clone(),
                 "Component",
                 move |_: In<String>,
-                      query: Query<(&ComponentMetadata, &ComponentValue)>,
+                      query: Query<&ComponentValue>,
                       entity_map: Res<EntityMap>,
                       mut render_layer_alloc: ResMut<RenderLayerAlloc>,
                       mut tile_state: ResMut<tiles::TileState>,
@@ -318,7 +315,7 @@ fn graph_parts(
                         let Some(entity) = entity_map.get(&component_id) else {
                             return PaletteEvent::Exit;
                         };
-                        let Ok((metadata, value)) = query.get(*entity) else {
+                        let Ok(value) = query.get(*entity) else {
                             return PaletteEvent::Exit;
                         };
 
@@ -384,56 +381,22 @@ fn monitor_parts(
 }
 
 fn toggle_body_axes() -> PaletteItem {
-    PaletteItem::new(
-        "Toggle Body Axes",
-        VIEWPORT_LABEL,
-        |_: In<String>, entities: Query<EntityData>| {
-            // TODO: This functionality needs to be updated once BodyAxes is migrated from EntityId to ComponentId
-            // For now, return an empty page
-            PalettePage::new(vec![])
-                .prompt("Body axes functionality is temporarily disabled during refactor")
-                .into()
-        },
-    )
+    PaletteItem::new("Toggle Body Axes", VIEWPORT_LABEL, |_: In<String>| {
+        // TODO: This functionality needs to be updated once BodyAxes is migrated from EntityId to ComponentId
+        // For now, return an empty page
+        PalettePage::new(vec![])
+            .prompt("Body axes functionality is temporarily disabled during refactor")
+            .into()
+    })
 }
 
 pub fn create_viewport(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Viewport",
         TILES_LABEL,
-        move |_: In<String>, entities: Query<EntityData>| {
-            PalettePage::new(
-                std::iter::once(PaletteItem::new(
-                    "None",
-                    "Entities",
-                    move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
-                        tile_state.create_viewport_tile(None, tile_id);
-                        PaletteEvent::Exit
-                    },
-                ))
-                .chain(
-                    entities
-                        .iter()
-                        .filter_map(|(&entity_id, _, value_map, metadata)| {
-                            None
-                            // if value_map.0.contains_key(&ComponentId::new("world_pos")) {
-                            //     Some(PaletteItem::new(
-                            //         metadata.name.clone(),
-                            //         "Entities",
-                            //         move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
-                            //             tile_state.create_viewport_tile(Some(entity_id), tile_id);
-                            //             PaletteEvent::Exit
-                            //         },
-                            //     ))
-                            // } else {
-                            //     None
-                            // }
-                        }),
-                )
-                .collect(),
-            )
-            .prompt("Select the entity the viewport will track")
-            .into()
+        move |_: In<String>, mut tile_state: ResMut<TileState>| {
+            tile_state.create_viewport_tile(tile_id);
+            PaletteEvent::Exit
         },
     )
 }
@@ -628,20 +591,18 @@ pub fn save_preset_inner() -> PaletteItem {
         "",
         move |name: In<String>,
               query_tables: Query<&ui::query_table::QueryTable>,
-              cameras: Query<ui::CameraQuery>,
-              component_id: Query<&impeller2::types::ComponentId>,
               action_tiles: Query<&ui::actions::ActionTile>,
               graph_states: Query<&ui::widgets::plot::GraphState>,
               query_plots: Query<&QueryPlot>,
+              viewports: Query<&ui::widgets::inspector::viewport::Viewport>,
               ui_state: Res<tiles::TileState>| {
             if let Some(tile_id) = ui_state.tree.root() {
                 let panel = crate::ui::preset::tile_to_panel(
                     &query_tables,
-                    &cameras,
-                    &component_id,
                     &action_tiles,
                     &graph_states,
                     &query_plots,
+                    &viewports,
                     tile_id,
                     &ui_state,
                 );
@@ -698,12 +659,9 @@ pub fn load_preset_inner(name: String) -> PaletteItem {
                         mut meshes,
                         mut materials,
                         mut render_layer_alloc,
-                        entity_map,
-                        entity_metadata,
-                        grid_cell,
-                        metadata_store,
                         mut hdr_enabled,
                         schema_reg,
+                        eql,
                         ..
                     } = params;
                     render_layer_alloc.free_all();
@@ -717,12 +675,9 @@ pub fn load_preset_inner(name: String) -> PaletteItem {
                         &mut materials,
                         &mut render_layer_alloc,
                         &mut commands,
-                        &entity_map,
-                        &entity_metadata,
-                        &grid_cell,
-                        &metadata_store,
                         &mut hdr_enabled,
                         &schema_reg,
+                        &eql,
                     );
                 }
             }
@@ -751,29 +706,37 @@ pub fn set_color_scheme() -> PaletteItem {
     })
 }
 
-fn create_ghost_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> PaletteEvent {
+fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> PaletteEvent {
     PalettePage::new(vec![
         PaletteItem::new(
             LabelSource::placeholder("Enter color (hex or name, default: #cccccc)"),
             "Enter color as rgb",
-            move |In(color_str): In<String>, mut commands: Commands,
-            eql_ctx: Res<EqlContext>,
-            entity_map: Res<EntityMap>,
-            component_value_maps: Query<&'static ComponentValue, Without<Ghost>>,
-            | {
+            move |In(color_str): In<String>,
+                  mut commands: Commands,
+                  eql_ctx: Res<EqlContext>,
+                  entity_map: Res<EntityMap>,
+                  component_value_maps: Query<&'static ComponentValue, Without<Object3D>>,
+                  mut material_assets: ResMut<Assets<StandardMaterial>>,
+                  mut mesh_assets: ResMut<Assets<bevy::prelude::Mesh>>,
+                  assets: Res<AssetServer>| {
                 let color_str = color_str.trim();
-                let (r, g, b) = parse_color(color_str, &eql_ctx.0, &entity_map, component_value_maps).unwrap_or((0.8, 0.8, 0.8));
+                let (r, g, b) =
+                    parse_color(color_str, &eql_ctx.0, &entity_map, component_value_maps)
+                        .unwrap_or((0.8, 0.8, 0.8));
 
-                let mesh_source = Some(Object3D::Mesh {
+                let mesh_source = Some(impeller2_wkt::Object3D::Mesh {
                     mesh: mesh.clone(),
                     material: Material::color(r, g, b),
                 });
 
-                crate::ghosts::create_ghost_entity(
+                crate::object_3d::create_object_3d_entity(
                     &mut commands,
                     eql.clone(),
                     expr.clone(),
                     mesh_source,
+                    &mut material_assets,
+                    &mut mesh_assets,
+                    &assets,
                 );
 
                 PaletteEvent::Exit
@@ -789,11 +752,11 @@ fn parse_color(
     expr: &str,
     ctx: &eql::Context,
     entity_map: &EntityMap,
-    component_value_maps: Query<&'static ComponentValue, Without<Ghost>>,
+    component_value_maps: Query<&'static ComponentValue, Without<Object3D>>,
 ) -> Option<(f32, f32, f32)> {
     let expr = ctx.parse_str(expr).ok()?;
-    let expr = crate::ghosts::compile_eql_expr(expr);
-    let val = expr.execute(&entity_map, &component_value_maps).ok()?;
+    let expr = crate::object_3d::compile_eql_expr(expr);
+    let val = expr.execute(entity_map, &component_value_maps).ok()?;
 
     let ComponentValue::F64(array) = val else {
         return None;
@@ -805,8 +768,8 @@ fn parse_color(
     }
 }
 
-pub fn create_ghost() -> PaletteItem {
-    PaletteItem::new("Create Ghost Entity", TILES_LABEL, move |_: In<String>| {
+pub fn create_3d_object() -> PaletteItem {
+    PaletteItem::new("Create 3D Object", TILES_LABEL, move |_: In<String>| {
         PalettePage::new(vec![
             PaletteItem::new(
                 LabelSource::placeholder("Enter EQL expression (e.g., 'entity.position')"),
@@ -831,16 +794,23 @@ pub fn create_ghost() -> PaletteItem {
                                     PalettePage::new(vec![
                                         PaletteItem::new(
                                             LabelSource::placeholder("Enter GLTF path"),
-                                            "Enter path to GLTF file for the ghost visualization",
+                                            "Enter path to GLTF file for the 3D object visualization",
                                             move |In(gltf_path): In<String>,
-                                                  mut commands: Commands| {
-                                                let obj = Object3D::Glb(gltf_path.trim().to_string());
+                                                  mut commands: Commands,
+                                                  mut material_assets: ResMut<Assets<StandardMaterial>>,
+                                                  mut mesh_assets: ResMut<Assets<bevy::prelude::Mesh>>,
+                                                  assets: Res<AssetServer>,
+                                                  | {
+                                                let obj = impeller2_wkt::Object3D::Glb(gltf_path.trim().to_string());
 
-                                                crate::ghosts::create_ghost_entity(
+                                                crate::object_3d::create_object_3d_entity(
                                                     &mut commands,
                                                     eql.clone(),
                                                     expr.clone(),
-                                                    Some(obj)
+                                                    Some(obj),
+                                                    &mut material_assets,
+                                                    &mut mesh_assets,
+                                                    &assets
                                                 );
 
                                                 PaletteEvent::Exit
@@ -867,7 +837,7 @@ pub fn create_ghost() -> PaletteItem {
                                             "Enter the radius for the sphere",
                                             move |In(radius_str): In<String>| {
                                                 let radius = radius_str.trim().parse::<f32>().unwrap_or(1.0);
-                                                create_ghost_with_color(
+                                                create_object_3d_with_color(
                                                     eql.clone(),
                                                     expr.clone(),
                                                     Mesh::sphere(radius)
@@ -905,7 +875,7 @@ pub fn create_ghost() -> PaletteItem {
                                                     _ => (1.0, 2.0),
                                                 };
 
-                                                create_ghost_with_color(
+                                                create_object_3d_with_color(
                                                     eql.clone(),
                                                     expr.clone(),
                                                     Mesh::Cylinder { radius, height }
@@ -920,7 +890,7 @@ pub fn create_ghost() -> PaletteItem {
                         ),
                         PaletteItem::new(
                             "Cuboid",
-                            "Create a box mesh",
+                            "",
                             {
                                 let eql = eql.clone();
                                 let expr = expr.clone();
@@ -943,7 +913,7 @@ pub fn create_ghost() -> PaletteItem {
                                                     _ => (1.0, 1.0, 1.0),
                                                 };
 
-                                                create_ghost_with_color(
+                                                create_object_3d_with_color(
                                                     eql.clone(),
                                                     expr.clone(),
                                                     Mesh::cuboid(x, y, z)
@@ -956,28 +926,13 @@ pub fn create_ghost() -> PaletteItem {
                                 }
                             },
                         ),
-                        PaletteItem::new(
-                            "No Visual",
-                            "Create ghost without visual representation",
-                            move |_: In<String>,
-                                  mut commands: Commands| {
-                                crate::ghosts::create_ghost_entity(
-                                    &mut commands,
-                                    eql.clone(),
-                                    expr.clone(),
-                                    None,
-                                );
-
-                                PaletteEvent::Exit
-                            },
-                        ),
                     ])
-                    .prompt("Choose ghost visualization type")
+                    .prompt("Choose 3D object visualization type")
                     .into()
                 },
             ).default()
         ])
-        .prompt("Enter EQL expression for ghost positioning")
+        .prompt("Enter EQL expression for 3D object positioning")
         .into()
     })
 }
@@ -1061,7 +1016,7 @@ impl Default for PalettePage {
             create_hierarchy(None),
             create_inspector(None),
             create_sidebars(),
-            create_ghost(),
+            create_3d_object(),
             save_preset(),
             load_preset(),
             set_color_scheme(),

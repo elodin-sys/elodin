@@ -98,7 +98,7 @@ impl WidgetSystem for InspectorContent<'_> {
                                 ui.add_widget_with::<InspectorViewport>(
                                     world,
                                     "inspector_viewport",
-                                    (icons, camera),
+                                    camera,
                                 );
                                 Default::default()
                             }

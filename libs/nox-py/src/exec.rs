@@ -33,7 +33,7 @@ impl Exec {
                 ProgressStyle::with_template("{bar:50} {pos:>6}/{len:6} remaining: {eta}").unwrap(),
             );
         let mut timestamp = Timestamp::now();
-        nox_ecs::impeller2_server::init_db(&self.db, &self.exec.world, timestamp)?;
+        nox_ecs::impeller2_server::init_db(&self.db, &mut self.exec.world, timestamp)?;
         for _ in 0..ticks {
             self.exec.run()?;
             self.db.with_state(|state| {

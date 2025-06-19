@@ -1,3 +1,4 @@
+use convert_case::Casing;
 use std::{
     borrow::Cow,
     collections::{BTreeSet, HashMap},
@@ -17,6 +18,7 @@ use peg::error::ParseError;
 pub enum AstNode<'input> {
     Ident(Cow<'input, str>),
     Field(Box<AstNode<'input>>, Cow<'input, str>),
+    ArrayIndex(Box<AstNode<'input>>, usize),
     MethodCall(Box<AstNode<'input>>, Cow<'input, str>, Vec<AstNode<'input>>),
     BinaryOp(Box<AstNode<'input>>, Box<AstNode<'input>>, BinaryOp),
     Tuple(Vec<AstNode<'input>>),
@@ -49,7 +51,11 @@ peg::parser! {
 
         rule ident_str() -> Cow<'input, str>
             = i:$([c if is_xid_start(c)] [c if is_xid_continue(c)]*) { Cow::Borrowed(i) }
-        rule num() -> f64
+
+        rule uint() -> usize
+            = s:$(['0'..='9']+) { s.parse().unwrap() }
+
+        rule float() -> f64
             = s:$("-"? ['0'..='9']+ ("." ['0'..='9']*)?) { s.parse().unwrap() }
 
         rule string_literal() -> Cow<'input, str> = "\"" s:$([^'"']*) "\"" { Cow::Borrowed(s) }
@@ -65,9 +71,11 @@ peg::parser! {
         --
         e:(@) "." i:ident_str() { AstNode::Field(Box::new(e), i) }
         --
+        e:(@) "[" i:uint() "]" { AstNode::ArrayIndex(Box::new(e), i) }
+        --
         "(" _ e:expr() _ ")" { e }
         --
-        f:num() { AstNode::FloatLiteral(f) }
+        f:float() { AstNode::FloatLiteral(f) }
         --
         s:string_literal() { AstNode::StringLiteral(s) }
         --
@@ -405,20 +413,19 @@ impl Context {
                 .zip(nodes)
                 .take(path.path.len().saturating_sub(1))
             {
-                let part =
-                    component_parts
-                        .entry(node.to_string())
-                        .or_insert_with(|| ComponentPart {
-                            id: part.id,
-                            name: part.name.to_string(),
-                            children: HashMap::new(),
-                            component: None,
-                        });
+                let part = component_parts
+                    .entry(node.to_case(convert_case::Case::Snake))
+                    .or_insert_with(|| ComponentPart {
+                        id: part.id,
+                        name: part.name.to_string(),
+                        children: HashMap::new(),
+                        component: None,
+                    });
                 component_parts = &mut part.children;
             }
             let nodes = component.name.split('.');
             component_parts.insert(
-                nodes.last().unwrap().to_string(),
+                nodes.last().unwrap().to_case(convert_case::Case::Snake),
                 ComponentPart {
                     id: component.id,
                     name: component.name.clone(),
@@ -529,6 +536,15 @@ impl Context {
                 Ok(Expr::BinaryOp(Box::new(left), Box::new(right), *op))
             }
             AstNode::FloatLiteral(f) => Ok(Expr::FloatLiteral(*f)),
+            AstNode::ArrayIndex(ast_node, index) => {
+                let expr = self.parse(ast_node)?;
+                match &expr {
+                    Expr::ComponentPart(_) => Ok(Expr::ArrayAccess(Box::new(expr), *index)),
+                    _ => Err(Error::InvalidFieldAccess(
+                        "array access is only valid on a component".to_string(),
+                    )),
+                }
+            }
         }
     }
 
@@ -1035,5 +1051,13 @@ mod tests {
         let suggestions = context.get_string_suggestions("invalid_entity.");
 
         assert!(suggestions.is_empty());
+    }
+
+    #[test]
+    fn test_trailing_int_ident() {
+        assert_eq!(
+            ast_parser::expr("cow_0").unwrap(),
+            AstNode::Ident(Cow::Borrowed("cow_0"))
+        );
     }
 }

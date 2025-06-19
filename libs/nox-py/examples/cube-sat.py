@@ -628,22 +628,15 @@ w.spawn(
                 el.Panel.viewport(
                     track_entity=sat,
                     track_rotation=False,
-                    pos=[7.0, 0.0, 0.0],
-                    looking_at=[0.0, 0.0, 0.0],
+                    # pos=[7.0, 0.0, 0.0],
+                    # looking_at=[0.0, 0.0, 0.0],
                 ),
                 el.Panel.graph(
-                    *[
-                        el.GraphEntity(css, CssValue)
-                        for css in [css_0, css_1, css_2, css_3, css_4, css_5]
-                    ]
-                ),
+                    "course_sun_sensor_0.css_value, course_sun_sensor_1.css_value"
+                )
             ),
             el.Panel.graph(
-                el.GraphEntity(
-                    sat,
-                    AttEst,
-                    *el.Component.index(el.WorldPos)[:4],
-                )
+                "ore_sat.att_est"
             ),
             active=True,
         )

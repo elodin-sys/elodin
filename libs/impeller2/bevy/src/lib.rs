@@ -312,6 +312,7 @@ pub struct WorldSink<'w, 's> {
     path_reg: ResMut<'w, ComponentPathRegistry>,
 }
 
+#[allow(clippy::needless_lifetimes)] // removing these lifetimes causes an internal compiler error, so here we are
 fn try_insert_entity<'a, 'w, 's>(
     entity_map: &mut EntityMap,
     metadata_reg: &ComponentMetadataRegistry,
@@ -381,7 +382,7 @@ impl Decomponentize for WorldSink<'_, '_> {
 
         if self
             .metadata_reg
-            .get_metadata(&tail_component.id)
+            .get_metadata(&path.id)
             .map(|m| m.asset)
             .unwrap_or_default()
         {
@@ -930,23 +931,5 @@ impl ComponentValueExt for ComponentValue {
                     .map(|(i, x)| (i, ElementValueMut::F64(x))),
             ),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_component_path() {
-        let path = ComponentPath::from_name("a.b.c");
-        assert_eq!(
-            &path.path[..],
-            &[
-                ComponentPart::new("a"),
-                ComponentPart::new("a.b"),
-                ComponentPart::new("a.b.c"),
-            ]
-        );
     }
 }

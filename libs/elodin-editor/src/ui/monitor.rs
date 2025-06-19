@@ -3,8 +3,7 @@ use bevy_egui::egui::{self, Frame, RichText, Stroke};
 use impeller2::types::ComponentId;
 use impeller2_bevy::ComponentValue;
 use impeller2_bevy::ComponentValueExt;
-use impeller2_bevy::{ComponentMetadataRegistry, ComponentValueMap, EntityMap};
-use impeller2_wkt::EntityMetadata;
+use impeller2_bevy::{ComponentMetadataRegistry, EntityMap};
 
 use super::{colors::get_scheme, widgets::WidgetSystem};
 

@@ -4,7 +4,7 @@ use bevy::ecs::{
     system::{Query, Res, ResMut, SystemParam, SystemState},
     world::World,
 };
-use bevy::prelude::{Children, Commands, Resource};
+use bevy::prelude::{Children, Resource};
 use bevy_egui::egui::{self, Align, Color32, Layout, RichText, emath};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::ComponentId;
@@ -18,7 +18,7 @@ use smallvec::SmallVec;
 use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        EntityData, EntityPair,
+        EntityPair,
         colors::get_scheme,
         theme::configure_input_with_border,
         tiles::TreeAction,
@@ -42,14 +42,13 @@ pub struct InspectorEntity<'w, 's> {
     component_ids: Query<'w, 's, &'static ComponentId>,
     values: Query<'w, 's, &'static mut ComponentValue>,
     metadata_query: Query<'w, 's, &'static mut ComponentMetadata>,
-    ghost: Query<'w, 's, &'static mut crate::ghosts::Ghost>,
+    object_3d: Query<'w, 's, &'static mut crate::object_3d::Object3D>,
     glb: Query<'w, 's, &'static mut Glb>,
     metadata_store: Res<'w, ComponentMetadataRegistry>,
     path_reg: Res<'w, ComponentPathRegistry>,
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     filter: ResMut<'w, ComponentFilter>,
     eql_context: ResMut<'w, crate::EqlContext>,
-    commands: Commands<'w, 's>,
 }
 
 impl WidgetSystem for InspectorEntity<'_, '_> {
@@ -69,14 +68,13 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
             component_ids,
             metadata_query,
             mut values,
-            mut ghost,
+            mut object_3d,
             mut glb,
             metadata_store,
             path_reg,
             mut render_layer_alloc,
             mut filter,
             eql_context,
-            mut commands,
         } = state.get_mut(world);
 
         let (icons, pair) = args;
@@ -86,16 +84,6 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
             ui.add(empty_inspector());
             return tree_actions;
         };
-
-        // let mut entities = state_mut.entities;
-        // let metadata_store = state_mut.metadata_store;
-        // let mut render_layer_alloc = state_mut.render_layer_alloc;
-        // let path_reg = state_mut.path_reg;
-        // let Ok((entity_id, _, mut component_value_map, metadata)) = entities.get_mut(pair.bevy)
-        // else {
-        //     ui.add(empty_inspector());
-        //     return tree_actions;
-        // };
 
         let icon_chart = icons.chart;
 
@@ -134,18 +122,19 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
         ui.add_space(4.0);
 
         egui::Frame::NONE.show(ui, |ui| {
-            if let Ok(mut ghost) = ghost.get_mut(pair.bevy) {
+            if let Ok(mut object_3d) = object_3d.get_mut(pair.bevy) {
                 ui.separator();
                 ui.add_space(8.0);
                 ui.label(egui::RichText::new("EQL").color(get_scheme().text_secondary));
                 ui.add_space(8.0);
                 configure_input_with_border(ui.style_mut());
-                let query_res = query(ui, &mut ghost.eql, QueryType::EQL);
-                eql_autocomplete(ui, &eql_context.0, &query_res, &mut ghost.eql);
+                let query_res = query(ui, &mut object_3d.eql, QueryType::EQL);
+                eql_autocomplete(ui, &eql_context.0, &query_res, &mut object_3d.eql);
                 if query_res.changed() {
-                    match eql_context.0.parse_str(&ghost.eql) {
+                    match eql_context.0.parse_str(&object_3d.eql) {
                         Ok(expr) => {
-                            ghost.compiled_expr = crate::ghosts::compile_eql_expr(expr);
+                            object_3d.compiled_expr =
+                                Some(crate::object_3d::compile_eql_expr(expr));
                         }
                         Err(err) => {
                             ui.colored_label(get_scheme().error, err.to_string());
@@ -160,10 +149,10 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                 ui.label(egui::RichText::new("GLB").color(get_scheme().text_secondary));
                 ui.add_space(8.0);
                 if inspector_text_field(ui, &mut glb.0, "Enter a path to a glb").changed() {
-                    commands
-                        .entity(pair.bevy)
-                        .remove::<crate::SyncedGlb>()
-                        .insert(impeller2_bevy::AssetHandle::<Glb>::new(fastrand::u64(..)));
+                    // commands
+                    //     .entity(pair.bevy)
+                    //     .remove::<crate::SyncedGlb>()
+                    //     .insert(impeller2_bevy::AssetHandle::<Glb>::new(fastrand::u64(..)));
                 }
                 ui.add_space(8.0);
             }
@@ -215,7 +204,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
 
             let mut create_graph = false;
 
-            let res = inspector_item_multi(
+            inspector_item_multi(
                 ui,
                 &label,
                 element_names,
@@ -224,26 +213,11 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                 &mut create_graph,
                 width,
             );
-            if res.changed() {
-                // if let Ok(payload) = ColumnPayload::try_from_value_iter(
-                //     0,
-                //     std::iter::once(ColumnValue {
-                //         entity_id,
-                //         value: component_value.clone(),
-                //     }),
-                // ) {
-                //     column_payload_writer.send(ColumnPayloadMsg {
-                //         component_name: metadata.name.to_string(),
-                //         component_type: component_value.ty(),
-                //         payload,
-                //     });
-                // }
-            }
 
             if create_graph {
-                let values = default_component_values(&component_id, &component_value);
+                let values = default_component_values(component_id, &component_value);
                 let component_path = path_reg
-                    .get(&component_id)
+                    .get(component_id)
                     .cloned()
                     .unwrap_or_else(|| ComponentPath::from_name(&metadata.name));
                 let components =

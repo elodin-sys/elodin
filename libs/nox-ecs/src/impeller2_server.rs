@@ -1,6 +1,6 @@
 use elodin_db::{DB, State, handle_conn};
 use impeller2::types::{ComponentId, Timestamp};
-use impeller2_wkt::ComponentMetadata;
+use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 use nox_ecs::Error;
 use std::{
     sync::{Arc, atomic},
@@ -31,10 +31,10 @@ impl Server {
         is_cancelled: impl Fn() -> bool + 'static,
     ) -> Result<(), Error> {
         tracing::info!("running server with cancellation");
-        let Self { db, world } = self;
+        let Self { db, mut world } = self;
         let elodin_db::Server { listener, db } = db;
         let start_time = Timestamp::now();
-        init_db(&db, &world.world, start_time)?;
+        init_db(&db, &mut world.world, start_time)?;
         let tick_db = db.clone();
         let stream: Thread<Option<Result<(), Error>>> =
             stellarator::struc_con::stellar(move || async move {
@@ -56,7 +56,7 @@ impl Server {
 
 pub fn init_db(
     db: &elodin_db::DB,
-    world: &World,
+    world: &mut World,
     start_timestamp: Timestamp,
 ) -> Result<(), elodin_db::Error> {
     tracing::info!("initializing db");
@@ -74,9 +74,15 @@ pub fn init_db(
             for (i, entity_id) in entity_ids.iter().enumerate() {
                 let offset = i * size;
                 let entity_id = impeller2::types::EntityId(*entity_id);
-                let Some(entity_metadata) = world.entity_metadata().get(&entity_id) else {
-                    continue;
-                };
+                let entity_metadata = world
+                    .metadata
+                    .entity_metadata
+                    .entry(entity_id)
+                    .or_insert_with(|| EntityMetadata {
+                        entity_id,
+                        name: format!("entity{}", entity_id),
+                        metadata: Default::default(),
+                    });
                 let pair_name = format!("{}.{}", entity_metadata.name, component_metadata.name);
                 let pair_id = ComponentId::new(&pair_name);
                 let pair_metadata = ComponentMetadata {

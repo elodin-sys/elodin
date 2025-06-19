@@ -80,7 +80,7 @@ pub fn entity_list(
                 let mut filtered_entities = entities
                     .into_iter()
                     .filter_map(|(id, entity, metadata)| {
-                        let path = path_reg.0.get(&id)?;
+                        let path = path_reg.0.get(id)?;
                         if !path.is_top_level() {
                             return None;
                         };
