@@ -83,8 +83,7 @@ pub enum GraphType {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Line3d {
-    pub component_id: ComponentId,
-    pub index: [usize; 3],
+    pub eql: String,
     pub line_width: f32,
     pub color: Color,
     pub perspective: bool,

@@ -4,8 +4,6 @@ use impeller2::component::Asset;
 use impeller2_wkt::{Graph, GraphType, Split};
 use pyo3::exceptions::PyValueError;
 
-use crate::EntityId;
-
 #[pyclass]
 #[derive(Clone)]
 pub struct Panel {
@@ -134,50 +132,22 @@ pub struct Line3d {
 #[pymethods]
 impl Line3d {
     #[new]
-    #[pyo3(signature = ( component_name=None, line_width=None, color=None, index=None, perspective=None))]
+    #[pyo3(signature = (eql, line_width=None, color=None, perspective=None))]
     pub fn new(
-        component_name: Option<String>,
+        eql: String,
         line_width: Option<f32>,
         color: Option<Color>,
-        index: Option<Vec<usize>>,
         perspective: Option<bool>,
     ) -> PyResult<Self> {
         use impeller2_wkt::Color;
-        const COLORS: &[Color] = &[
-            Color::TURQUOISE,
-            Color::SLATE,
-            Color::PUMPKIN,
-            Color::YOLK,
-            Color::PEACH,
-            Color::REDDISH,
-            Color::HYPERBLUE,
-            Color::MINT,
-            Color::TURQUOISE,
-        ];
-        let component_name = component_name.unwrap_or_else(|| "world_pos".to_string());
         let line_width = line_width.unwrap_or(10.0);
-        let index = if let Some(index) = index {
-            if index.len() != 3 {
-                return Err(PyValueError::new_err("index must be 3"));
-            }
-            [index[0], index[1], index[2]]
-        } else if component_name == "world_pos" {
-            [4, 5, 6]
-        } else {
-            [0, 1, 2]
-        };
-        let component_id = ComponentId::new(&component_name);
-        let color = color
-            .map(|c| c.inner)
-            .unwrap_or_else(|| COLORS[component_id.0 as usize % COLORS.len()]);
+        let color = color.map(|c| c.inner).unwrap_or_else(|| Color::HYPERBLUE);
 
         Ok(Self {
             inner: impeller2_wkt::Line3d {
-                //entity: entity.inner,
-                component_id,
+                eql,
                 line_width,
                 color,
-                index,
                 perspective: perspective.unwrap_or_default(),
             },
         })

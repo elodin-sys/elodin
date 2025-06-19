@@ -626,10 +626,8 @@ w.spawn(
         el.Panel.vsplit(
             el.Panel.hsplit(
                 el.Panel.viewport(
-                    track_entity=sat,
-                    track_rotation=False,
-                    # pos=[7.0, 0.0, 0.0],
-                    # looking_at=[0.0, 0.0, 0.0],
+                    pos = "ore_sat.world_pos + (0,0,0,0, 5,0,0)",
+                    look_at = "earth.world_pos"
                 ),
                 el.Panel.graph(
                     "course_sun_sensor_0.css_value, course_sun_sensor_1.css_value"
@@ -657,8 +655,7 @@ w.spawn(
 
 w.spawn(
     el.Line3d(
-        sat,
-        "world_pos",
+        "ore_sat.world_pos",
         line_width=10.0,
         perspective=False,
     )
