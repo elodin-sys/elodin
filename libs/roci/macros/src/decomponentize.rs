@@ -37,14 +37,13 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
             .to_string()
             .to_case(Case::UpperSnake);
         let component_id = field.component_id();
+
         let component_id = if let Some(parent) = &parent {
-            let parent = proc_macro2::Ident::new(parent, proc_macro2::Span::call_site());
-            quote! {
-                #parent.#component_id
-            }
+            format!("{parent}.{component_id}")
         } else {
-            component_id
+            component_id.to_string()
         };
+        let component_id = quote! { #impeller::types::ComponentId::new(#component_id) };
         if !field.nest {
         let const_name = format!("{name}_ID");
             let const_name = syn::Ident::new(&const_name, Span::call_site());
@@ -67,7 +66,6 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
             type Error = core::convert::Infallible;
             fn apply_value(&mut self,
                             component_id: #impeller::types::ComponentId,
-                            entity_id: #impeller::types::EntityId,
                             view: #impeller::types::ComponentView<'_>,
                             timestamp: Option<#impeller::types::Timestamp>
             ) -> Result<(), Self::Error>{

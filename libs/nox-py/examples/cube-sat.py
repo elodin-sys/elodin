@@ -626,16 +626,11 @@ w.spawn(
         el.Panel.vsplit(
             el.Panel.hsplit(
                 el.Panel.viewport(
-                    pos = "ore_sat.world_pos + (0,0,0,0, 5,0,0)",
-                    look_at = "earth.world_pos"
+                    pos="ore_sat.world_pos + (0,0,0,0, 5,0,0)", look_at="earth.world_pos"
                 ),
-                el.Panel.graph(
-                    "course_sun_sensor_0.css_value, course_sun_sensor_1.css_value"
-                )
+                el.Panel.graph("course_sun_sensor_0.css_value, course_sun_sensor_1.css_value"),
             ),
-            el.Panel.graph(
-                "ore_sat.att_est"
-            ),
+            el.Panel.graph("ore_sat.att_est"),
             active=True,
         )
     )
