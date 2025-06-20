@@ -298,11 +298,11 @@ mod tests {
         );
 
         let m: Matrix3<f64, crate::ArrayRepr> =
-            Matrix3::look_at_rh(Vector3::new(0.0, 0.0, -1.0).normalize(), Vector3::y_axis());
+            Matrix3::look_at_rh(Vector3::new(0.0, 1.0, 0.0).normalize(), Vector3::z_axis());
         assert_eq!(m, Matrix3::eye());
 
         let m: Matrix3<f64, crate::ArrayRepr> =
             Matrix3::look_at_rh(Vector3::new(1.0, 0.0, 0.0).normalize(), Vector3::y_axis());
-        assert_eq!(m.dot(&tensor![0.0, 0.0, -1.0]), tensor![1.0, 0.0, 0.0]);
+        assert_eq!(m.dot(&tensor![0.0, 0.0, -1.0]), tensor![0.0, -1.0, 0.0]);
     }
 }

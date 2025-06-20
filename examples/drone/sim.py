@@ -130,24 +130,18 @@ def world() -> tuple[el.World, el.EntityId]:
         el.Panel.hsplit(
             el.Panel.vsplit(
                 el.Panel.viewport(
-                    track_entity=drone,
-                    track_rotation=False,
+                    pos="drone.world_pos + (0,0,0,0,2,2,2)",
+                    look_at="drone.world_pos",
                     active=True,
                     show_grid=True,
-                    pos=[-3.0, -0.5, 0.5],
-                    looking_at=[0.0, 0.0, 0.5],
                 ),
             ),
             el.Panel.vsplit(
-                el.Panel.graph(el.GraphEntity(drone, control.AngleDesired)),
+                el.Panel.graph("drone.angle_desired"),
                 el.Panel.graph(
-                    el.GraphEntity(
-                        drone,
-                        *el.Component.index(el.WorldPos)[:4],
-                        control.AttitudeTarget,
-                    )
+                    "drone.world_pos.q0, drone.world_pos.q1, drone.world_pos.q2, drone.world_pos.q3, drone.attitude_target",
                 ),
-                el.Panel.graph(el.GraphEntity(drone, control.AngVelSetpoint)),
+                el.Panel.graph("drone.ang_vel_setpoint"),
             ),
             active=True,
         ),
@@ -156,12 +150,12 @@ def world() -> tuple[el.World, el.EntityId]:
     world.spawn(
         el.Panel.hsplit(
             el.Panel.vsplit(
-                el.Panel.graph(el.GraphEntity(drone, motors.MotorInput)),
-                el.Panel.graph(el.GraphEntity(drone, motors.MotorPwm)),
-                el.Panel.graph(el.GraphEntity(drone, motors.MotorRpm)),
+                el.Panel.graph("drone.motor_input"),
+                el.Panel.graph("drone.motor_pwm"),
+                el.Panel.graph("drone.motor_rpm"),
             ),
             el.Panel.vsplit(
-                el.Panel.graph(el.GraphEntity(drone, Thrust)),
+                el.Panel.graph("drone.thrust"),
             ),
         ),
         name="Motor Panel",
@@ -169,15 +163,11 @@ def world() -> tuple[el.World, el.EntityId]:
     world.spawn(
         el.Panel.hsplit(
             el.Panel.vsplit(
-                el.Panel.graph(el.GraphEntity(drone, control.RatePIDState)),
+                el.Panel.graph("drone.rate_pid_state"),
             ),
             el.Panel.vsplit(
                 el.Panel.graph(
-                    el.GraphEntity(
-                        drone,
-                        sensors.Gyro,
-                        control.AngVelSetpoint,
-                    ),
+                    "drone.gyro, drone.ang_vel_setpoint",
                     name="Drone: rate_control",
                 ),
             ),
@@ -187,9 +177,9 @@ def world() -> tuple[el.World, el.EntityId]:
     world.spawn(
         el.Panel.hsplit(
             el.Panel.vsplit(
-                el.Panel.graph(el.GraphEntity(drone, sensors.Gyro)),
-                el.Panel.graph(el.GraphEntity(drone, sensors.Accel)),
-                el.Panel.graph(el.GraphEntity(drone, sensors.Magnetometer)),
+                el.Panel.graph("drone.gyro"),
+                el.Panel.graph("drone.accel"),
+                el.Panel.graph("drone.magnetometer"),
             ),
         ),
         name="Sensor Panel",
