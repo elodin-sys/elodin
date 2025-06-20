@@ -6,7 +6,7 @@
 
 use crate::{
     error::Error,
-    types::{ComponentId, ComponentView, EntityId, Timestamp},
+    types::{ComponentId, ComponentView, Timestamp},
 };
 use core::{convert::Infallible, slice};
 use nox_array::ArrayView;
@@ -69,7 +69,6 @@ pub trait Decomponentize {
     fn apply_value(
         &mut self,
         component_id: ComponentId,
-        entity_id: EntityId,
         value: ComponentView<'_>,
         timestamp: Option<Timestamp>,
     ) -> Result<(), Self::Error>;
@@ -80,7 +79,6 @@ impl Decomponentize for () {
     fn apply_value(
         &mut self,
         _component_id: ComponentId,
-        _entity_id: EntityId,
         _value: ComponentView<'_>,
         _timestamp: Option<Timestamp>,
     ) -> Result<(), Self::Error> {
@@ -90,17 +88,16 @@ impl Decomponentize for () {
 
 impl<F> Decomponentize for F
 where
-    F: for<'a> FnMut(ComponentId, EntityId, ComponentView<'_>, Option<Timestamp>),
+    F: for<'a> FnMut(ComponentId, ComponentView<'_>, Option<Timestamp>),
 {
     type Error = Infallible;
     fn apply_value(
         &mut self,
         component_id: ComponentId,
-        entity_id: EntityId,
         value: ComponentView<'_>,
         timestamp: Option<Timestamp>,
     ) -> Result<(), Self::Error> {
-        (self)(component_id, entity_id, value, timestamp);
+        (self)(component_id, value, timestamp);
         Ok(())
     }
 }
@@ -116,13 +113,12 @@ macro_rules! impl_decomponentize {
             fn apply_value(
                 &mut self,
                 component_id: ComponentId,
-                entity_id: EntityId,
                 value: ComponentView<'_>,
                 timestamp: Option<Timestamp>
             ) -> Result<(), Self::Error>{
                 let ($($ty,)*) = self;
                 $(
-                    $ty.apply_value(component_id, entity_id, value.clone(), timestamp)?;
+                    $ty.apply_value(component_id, value.clone(), timestamp)?;
                 )*
                 Ok(())
             }

@@ -1,6 +1,9 @@
 use bevy::{
     app::Plugin,
-    ecs::system::SystemId,
+    ecs::{
+        hierarchy::ChildOf,
+        system::{EntityCommands, SystemId},
+    },
     log::warn,
     prelude::{Command, In, InRef, IntoSystem, Mut, System},
 };
@@ -19,12 +22,12 @@ use impeller2::{
 };
 use impeller2::{
     schema::Schema,
-    types::{ComponentId, ComponentView, EntityId, LenPacket, Msg, Timestamp},
+    types::{ComponentId, ComponentView, LenPacket, Msg, Timestamp},
 };
 use impeller2_bbq::{AsyncArcQueueRx, RxExt};
 use impeller2_wkt::{
     AssetId, BodyAxes, ComponentMetadata, CurrentTimestamp, DbSettings, DumpAssets, DumpMetadata,
-    DumpMetadataResp, DumpSchema, DumpSchemaResp, EarliestTimestamp, EntityMetadata, ErrorResponse,
+    DumpMetadataResp, DumpSchema, DumpSchemaResp, EarliestTimestamp, ErrorResponse,
     FixedRateBehavior, GetDbSettings, GetEarliestTimestamp, Glb, IsRecording, LastUpdated, Line3d,
     Material, Mesh, Panel, Stream, StreamBehavior, StreamId, StreamTimestamp, SubscribeLastUpdated,
     VTableMsg, VectorArrow, WorldPos,
@@ -42,6 +45,7 @@ use stellarator_buf::Slice;
 pub use impeller2_bbq::PacketGrantR;
 pub use impeller2_wkt::ComponentValue;
 pub use impeller2_wkt::ElementValueMut;
+pub use impeller2_wkt::{ComponentPart, ComponentPath};
 
 #[cfg(feature = "tcp")]
 mod tcp;
@@ -151,26 +155,37 @@ fn sink_inner(
             OwnedPacket::Msg(m) if m.id == DumpMetadataResp::ID => {
                 let metadata = m.parse::<DumpMetadataResp>()?;
                 for metadata in metadata.component_metadata.into_iter() {
+                    let component_id = metadata.component_id;
+                    world_sink.path_reg.0.insert(
+                        metadata.component_id,
+                        ComponentPath::from_name(&metadata.name),
+                    );
                     world_sink
                         .metadata_reg
                         .insert(metadata.component_id, metadata);
+                    try_insert_entity(
+                        &mut world_sink.entity_map,
+                        &world_sink.metadata_reg,
+                        &mut world_sink.commands,
+                        component_id,
+                    );
                 }
-                for metadata in metadata.entity_metadata.into_iter() {
-                    let mut e = if let Some(entity) = world_sink.entity_map.get(&metadata.entity_id)
-                    {
-                        let Ok(e) = world_sink.commands.get_entity(*entity) else {
-                            continue;
-                        };
-                        e
-                    } else {
-                        let e = world_sink
-                            .commands
-                            .spawn((metadata.entity_id, ComponentValueMap::default()));
-                        world_sink.entity_map.insert(metadata.entity_id, e.id());
-                        e
-                    };
-                    e.insert(metadata.clone());
-                }
+                // for metadata in metadata.entity_metadata.into_iter() {
+                //     let mut e = if let Some(entity) = world_sink.entity_map.get(&metadata.entity_id)
+                //     {
+                //         let Ok(e) = world_sink.commands.get_entity(*entity) else {
+                //             continue;
+                //         };
+                //         e
+                //     } else {
+                //         let e = world_sink
+                //             .commands
+                //             .spawn((metadata.entity_id, ComponentValueMap::default()));
+                //         world_sink.entity_map.insert(metadata.entity_id, e.id());
+                //         e
+                //     };
+                //     e.insert(metadata.clone());
+                // }
             }
             OwnedPacket::Msg(m) if m.id == LastUpdated::ID => {
                 let m = m.parse::<LastUpdated>()?;
@@ -262,7 +277,7 @@ pub struct RequestIdHandlers(
 pub struct ComponentValueMap(pub BTreeMap<ComponentId, ComponentValue>);
 
 #[derive(Resource, Default, Deref, DerefMut)]
-pub struct EntityMap(pub HashMap<EntityId, Entity>);
+pub struct EntityMap(pub HashMap<ComponentId, Entity>);
 
 #[derive(Resource, Default, Deref, DerefMut)]
 pub struct ComponentMetadataRegistry(pub HashMap<ComponentId, ComponentMetadata>);
@@ -277,9 +292,12 @@ impl ComponentMetadataRegistry {
 #[derive(Resource, Default, Deref, DerefMut)]
 pub struct ComponentSchemaRegistry(pub HashMap<ComponentId, Schema<Vec<u64>>>);
 
+#[derive(Resource, Default, Deref, DerefMut)]
+pub struct ComponentPathRegistry(pub HashMap<ComponentId, ComponentPath>);
+
 #[derive(SystemParam)]
 pub struct WorldSink<'w, 's> {
-    query: Query<'w, 's, &'static mut ComponentValueMap>,
+    query: Query<'w, 's, &'static mut ComponentValue>,
     commands: Commands<'w, 's>,
     entity_map: ResMut<'w, EntityMap>,
     asset_store: ResMut<'w, AssetStore>,
@@ -291,6 +309,30 @@ pub struct WorldSink<'w, 's> {
     recording: ResMut<'w, IsRecording>,
     current_timestamp: ResMut<'w, CurrentTimestamp>,
     schema_reg: ResMut<'w, ComponentSchemaRegistry>,
+    path_reg: ResMut<'w, ComponentPathRegistry>,
+}
+
+#[allow(clippy::needless_lifetimes)] // removing these lifetimes causes an internal compiler error, so here we are
+fn try_insert_entity<'a, 'w, 's>(
+    entity_map: &mut EntityMap,
+    metadata_reg: &ComponentMetadataRegistry,
+    commands: &'a mut Commands<'w, 's>,
+    component_id: ComponentId,
+) -> Option<EntityCommands<'a>> {
+    if let Some(entity) = entity_map.get(&component_id) {
+        let Ok(e) = commands.get_entity(*entity) else {
+            return None;
+        };
+        Some(e)
+    } else {
+        let mut e = commands.spawn((component_id, ComponentValueMap::default()));
+        if let Some(metadata) = metadata_reg.get(&component_id) {
+            e.insert(metadata.clone());
+        }
+
+        entity_map.insert(component_id, e.id());
+        Some(e)
+    }
 }
 
 impl Decomponentize for WorldSink<'_, '_> {
@@ -298,48 +340,53 @@ impl Decomponentize for WorldSink<'_, '_> {
     fn apply_value(
         &mut self,
         component_id: ComponentId,
-        entity_id: impeller2::types::EntityId,
         view: ComponentView<'_>,
         _timestamp: Option<Timestamp>,
     ) -> Result<(), Infallible> {
-        let e = if let Some(entity) = self.entity_map.get(&entity_id) {
-            let Ok(e) = self.commands.get_entity(*entity) else {
-                return Ok(());
-            };
-            e.id()
-        } else {
-            let e = self
-                .commands
-                .spawn((
-                    entity_id,
-                    ComponentValueMap::default(),
-                    EntityMetadata {
-                        entity_id,
-                        name: entity_id.to_string(),
-                        metadata: Default::default(),
-                    },
-                ))
-                .id();
-            self.entity_map.insert(entity_id, e);
-            e
-        };
-        let Ok(mut value_map) = self.query.get_mut(e) else {
+        let Some(mut e) = try_insert_entity(
+            &mut self.entity_map,
+            &self.metadata_reg,
+            &mut self.commands,
+            component_id,
+        ) else {
             return Ok(());
         };
-        if let Some(value) = value_map.0.get_mut(&component_id) {
+
+        if let Ok(mut value) = self.query.get_mut(e.id()) {
             value.copy_from_view(view);
         } else {
-            value_map
-                .0
-                .insert(component_id, ComponentValue::from_view(view));
+            e.insert(ComponentValue::from_view(view));
         }
+
+        let Some(path) = self.path_reg.get(&component_id) else {
+            return Ok(());
+        };
+
+        let mut last_entity: Option<Entity> = None;
+        for parent in path.path.iter() {
+            let Some(mut e) = try_insert_entity(
+                &mut self.entity_map,
+                &self.metadata_reg,
+                &mut self.commands,
+                parent.id,
+            ) else {
+                continue;
+            };
+            if let Some(last_entity) = last_entity {
+                e.insert(ChildOf(last_entity));
+            }
+            last_entity = Some(e.id());
+        }
+
+        let tail_component = path.tail();
+
         if self
             .metadata_reg
-            .get_metadata(&component_id)
+            .get_metadata(&path.id)
             .map(|m| m.asset)
             .unwrap_or_default()
         {
-            let Some(adapter) = self.asset_adapters.get(&component_id) else {
+            let Some(adapter) = self.asset_adapters.get(&tail_component.id) else {
                 return Ok(());
             };
             let Some(asset_id) = view.as_asset_id() else {
@@ -351,15 +398,15 @@ impl Decomponentize for WorldSink<'_, '_> {
             adapter.insert(
                 &mut self.commands,
                 &mut self.entity_map,
-                entity_id,
+                component_id,
                 asset,
                 asset_id,
             );
         } else {
-            let Some(adapter) = self.component_adapters.get(&component_id) else {
+            let Some(adapter) = self.component_adapters.get(&tail_component.id) else {
                 return Ok(());
             };
-            adapter.insert(&mut self.commands, &mut self.entity_map, entity_id, view);
+            adapter.insert(&mut self.commands, &mut self.entity_map, component_id, view);
         }
         Ok(())
     }
@@ -402,7 +449,7 @@ pub trait AssetAdapter: Send + Sync {
         &self,
         commands: &mut Commands,
         map: &mut EntityMap,
-        entity_id: EntityId,
+        component_id: ComponentId,
         asset: &[u8],
         asset_id: AssetId,
     );
@@ -413,7 +460,7 @@ pub trait ComponentAdapter: Send + Sync {
         &self,
         commands: &mut Commands,
         map: &mut EntityMap,
-        entity_id: EntityId,
+        component_id: ComponentId,
         value: ComponentView<'_>,
     );
 }
@@ -436,12 +483,12 @@ where
         &self,
         commands: &mut Commands,
         entity_map: &mut EntityMap,
-        entity_id: EntityId,
+        component_id: ComponentId,
         value: ComponentView<'_>,
     ) {
         let mut val = C::default();
-        let _ = val.apply_value(C::COMPONENT_ID, entity_id, value, None);
-        let mut e = if let Some(entity) = entity_map.0.get(&entity_id) {
+        let _ = val.apply_value(C::COMPONENT_ID, value, None);
+        let mut e = if let Some(entity) = entity_map.0.get(&component_id) {
             let Ok(e) = commands.get_entity(*entity) else {
                 return;
             };
@@ -497,7 +544,7 @@ impl<T: DeserializeOwned + Asset + Send + Sync + Component> AssetAdapter
         &self,
         commands: &mut Commands,
         entity_map: &mut EntityMap,
-        entity_id: EntityId,
+        entity_id: ComponentId,
         asset: &[u8],
         asset_id: AssetId,
     ) {
@@ -634,6 +681,7 @@ impl Plugin for Impeller2Plugin {
             .init_resource::<EntityMap>()
             .init_resource::<ComponentMetadataRegistry>()
             .init_resource::<ComponentSchemaRegistry>()
+            .init_resource::<ComponentPathRegistry>()
             .init_resource::<AssetStore>()
             .init_resource::<HashMapRegistry>()
             .init_resource::<PacketIdHandlers>()

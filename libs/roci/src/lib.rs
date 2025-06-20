@@ -17,7 +17,6 @@ pub mod combinators;
 #[cfg(feature = "csv")]
 pub mod csv;
 pub mod drivers;
-pub mod types;
 mod vtable;
 
 #[cfg(feature = "stellar")]

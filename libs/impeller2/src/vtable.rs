@@ -30,7 +30,7 @@
 //!                 schema(
 //!                     PrimType::F64,
 //!                     &[3],
-//!                     timestamp(time.clone(), pair(1, "gyro")),
+//!                     timestamp(time.clone(), component("gyro")),
 //!                 ),
 //!             ),
 //!             field!(
@@ -38,7 +38,7 @@
 //!                 schema(
 //!                     PrimType::F64,
 //!                     &[3],
-//!                     timestamp(time.clone(), pair(1, "accel")),
+//!                     timestamp(time.clone(), component("accel")),
 //!                 ),
 //!             ),
 //!         ])
@@ -55,7 +55,7 @@ use crate::{
     buf::Buf,
     com_de::Decomponentize,
     error::Error,
-    types::{ComponentId, ComponentView, EntityId, PacketId, PrimType, Timestamp},
+    types::{ComponentId, ComponentView, PacketId, PrimType, Timestamp},
 };
 
 /// Operations that can be performed in a VTable
@@ -73,8 +73,7 @@ pub enum Op {
         len: u16,
     },
     None,
-    Pair {
-        entity_id: OpRef,
+    Component {
         component_id: OpRef,
     },
     Schema {
@@ -173,10 +172,9 @@ pub struct VTable<
     pub data: Data,
 }
 
-/// A pair of entity ID and component ID realized from an operation
+/// A component ID realized from an operation
 #[derive(Clone, Copy, Debug)]
-pub struct RealizedPair {
-    pub entity_id: EntityId,
+pub struct RealizedComponent {
     pub component_id: ComponentId,
 }
 
@@ -211,7 +209,7 @@ pub struct RealizedExt<'a> {
 pub enum RealizedOp<'a> {
     Data(&'a [u8]),
     Table(RealizedTableSlice<'a>),
-    Pair(RealizedPair),
+    Component(RealizedComponent),
     Schema(RealizedSchema<'a>),
     Timestamp(RealizedTimestamp),
     Ext(RealizedExt<'a>),
@@ -221,7 +219,6 @@ pub enum RealizedOp<'a> {
 /// A field realized from a VTable, containing entity and component IDs,
 /// shape, type, component view, and timestamp information
 pub struct RealizedField<'a> {
-    pub entity_id: EntityId,
     pub component_id: ComponentId,
     pub shape: &'a [usize],
     pub ty: PrimType,
@@ -244,13 +241,6 @@ impl<'a> RealizedOp<'a> {
         let data = self.as_slice()?;
         let data: [u8; 8] = data.try_into().ok()?;
         Some(ComponentId(u64::from_le_bytes(data)))
-    }
-
-    /// Attempts to interpret the operation as an entity ID
-    pub fn as_entity_id(&self) -> Option<EntityId> {
-        let data = self.as_slice()?;
-        let data: [u8; 8] = data.try_into().ok()?;
-        Some(EntityId(u64::from_le_bytes(data)))
     }
 
     /// Attempts to interpret the operation as a primitive type
@@ -318,22 +308,12 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
                     range,
                 }))
             }
-            Op::Pair {
-                entity_id,
-                component_id,
-            } => {
-                let entity_id = self
-                    .realize(*entity_id, table)?
-                    .as_entity_id()
-                    .ok_or(Error::InvalidOp)?;
+            Op::Component { component_id } => {
                 let component_id = self
                     .realize(*component_id, table)?
                     .as_component_id()
                     .ok_or(Error::InvalidOp)?;
-                Ok(RealizedOp::Pair(RealizedPair {
-                    entity_id,
-                    component_id,
-                }))
+                Ok(RealizedOp::Component(RealizedComponent { component_id }))
             }
             Op::Schema { ty, dim, arg } => {
                 let ty = self
@@ -391,11 +371,8 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
             let mut schema: Option<RealizedSchema<'_>> = None;
             loop {
                 match realized_op {
-                    RealizedOp::Pair(ref pair) => {
-                        let RealizedPair {
-                            component_id,
-                            entity_id,
-                        } = *pair;
+                    RealizedOp::Component(ref component) => {
+                        let RealizedComponent { component_id } = *component;
 
                         let schema = schema.as_ref().ok_or(Error::SchemaNotFound)?;
                         // NOTE(sphw): bogan version of zerocopy::transmute_ref
@@ -412,7 +389,6 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
                             None
                         };
                         return Ok(RealizedField {
-                            entity_id,
                             component_id,
                             view,
                             timestamp: timestamp.and_then(|t| t.timestamp),
@@ -449,14 +425,13 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
     ) -> Result<Result<(), D::Error>, Error> {
         for res in self.realize_fields(Some(table)) {
             let RealizedField {
-                entity_id,
                 component_id,
                 view,
                 timestamp,
                 ..
             } = res?;
             let view = view.expect("table not found");
-            if let Err(err) = sink.apply_value(component_id, entity_id, view, timestamp) {
+            if let Err(err) = sink.apply_value(component_id, view, timestamp) {
                 return Ok(Err(err));
             }
         }
@@ -483,8 +458,7 @@ pub mod builder {
             offset: Offset,
             len: u16,
         },
-        Pair {
-            entity_id: Arc<OpBuilder>,
+        Component {
             component_id: Arc<OpBuilder>,
         },
         Schema {
@@ -528,19 +502,11 @@ pub mod builder {
         })
     }
 
-    /// Creates a pair operation builder from an entity ID and component ID
-    pub fn pair(
-        entity_id: impl Into<EntityId>,
-        component_id: impl Into<ComponentId>,
-    ) -> Arc<OpBuilder> {
+    /// Creates a component operation builder from a component ID
+    pub fn component(component_id: impl Into<ComponentId>) -> Arc<OpBuilder> {
         let component_id = component_id.into();
-        let entity_id = entity_id.into();
-        let entity_id = data(&entity_id);
         let component_id = data(&component_id);
-        Arc::new(OpBuilder::Pair {
-            entity_id,
-            component_id,
-        })
+        Arc::new(OpBuilder::Component { component_id })
     }
 
     /// Creates a schema operation builder from a primitive type, dimensions, and an argument
@@ -596,7 +562,7 @@ pub mod builder {
     /// ```rust
     /// use impeller2::vtable::builder::*;
     /// struct Foo { bar: [f64; 3] }
-    /// vtable([field!(Foo::bar, pair(1, "bar"))]);
+    /// vtable([field!(Foo::bar, component("bar"))]);
     /// ```
     #[macro_export]
     macro_rules! field {
@@ -671,16 +637,9 @@ pub mod builder {
                     offset: *offset,
                     len: *len,
                 },
-                OpBuilder::Pair {
-                    entity_id,
-                    component_id,
-                } => {
-                    let entity_id = self.visit(entity_id);
+                OpBuilder::Component { component_id } => {
                     let component_id = self.visit(component_id);
-                    Op::Pair {
-                        entity_id,
-                        component_id,
-                    }
+                    Op::Component { component_id }
                 }
                 OpBuilder::Schema { ty, dim, arg } => {
                     let ty = self.visit(ty);
@@ -734,14 +693,14 @@ mod tests {
 
     use crate::{
         com_de::Decomponentize,
-        types::{ComponentId, ComponentView, EntityId, PrimType, Timestamp},
+        types::{ComponentId, ComponentView, PrimType, Timestamp},
     };
 
     #[derive(Default)]
     struct TestSink {
         timestamp: Option<Timestamp>,
-        f32_entities: HashMap<(ComponentId, EntityId), Array<f32, Dyn>>,
-        f64_entities: HashMap<(ComponentId, EntityId), Array<f64, Dyn>>,
+        f32_components: HashMap<ComponentId, Array<f32, Dyn>>,
+        f64_components: HashMap<ComponentId, Array<f64, Dyn>>,
     }
 
     impl Decomponentize for TestSink {
@@ -749,7 +708,6 @@ mod tests {
         fn apply_value(
             &mut self,
             component_id: ComponentId,
-            entity_id: EntityId,
             value: ComponentView<'_>,
             timestamp: Option<Timestamp>,
         ) -> Result<(), Self::Error> {
@@ -758,13 +716,13 @@ mod tests {
             }
             match value {
                 ComponentView::F32(view) => {
-                    self.f32_entities
-                        .insert((component_id, entity_id), view.to_dyn_owned());
+                    self.f32_components
+                        .insert(component_id, view.to_dyn_owned());
                 }
 
                 ComponentView::F64(view) => {
-                    self.f64_entities
-                        .insert((component_id, entity_id), view.to_dyn_owned());
+                    self.f64_components
+                        .insert(component_id, view.to_dyn_owned());
                 }
                 _ => todo!(),
             }
@@ -790,12 +748,12 @@ mod tests {
                 schema(
                     PrimType::F32,
                     &[4],
-                    timestamp(time.clone(), pair(1, "test")),
+                    timestamp(time.clone(), component("test")),
                 ),
             ),
             field!(
                 Foo::bar,
-                schema(PrimType::F64, &[], timestamp(time, pair(1, "bar")))
+                schema(PrimType::F64, &[], timestamp(time, component("bar")))
             ),
         ]);
 
@@ -806,16 +764,10 @@ mod tests {
         };
         let mut sink = TestSink::default();
         v.apply(foo.as_bytes(), &mut sink).unwrap().unwrap();
-        let test = sink
-            .f32_entities
-            .get(&(ComponentId::new("test"), EntityId(1)))
-            .unwrap();
+        let test = sink.f32_components.get(&ComponentId::new("test")).unwrap();
         assert_eq!(test.buf.as_buf(), &[1.0, 2.0, 3.0, 4.0]);
 
-        let bar = sink
-            .f64_entities
-            .get(&(ComponentId::new("bar"), EntityId(1)))
-            .unwrap();
+        let bar = sink.f64_components.get(&ComponentId::new("bar")).unwrap();
         assert_eq!(bar.buf.as_buf(), &[5.0]);
         assert_eq!(sink.timestamp, Some(foo.timestamp));
     }

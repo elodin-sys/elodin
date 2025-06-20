@@ -10,7 +10,7 @@ pub struct Metadatatize {
     ident: Ident,
     generics: Generics,
     data: ast::Data<(), crate::Field>,
-    entity_id: Option<u64>,
+    parent: Option<String>,
 }
 
 pub fn metadatatize(input: TokenStream) -> TokenStream {
@@ -20,7 +20,7 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
         ident,
         generics,
         data,
-        entity_id,
+        parent,
     } = Metadatatize::from_derive_input(&input).unwrap();
     let where_clause = &generics.where_clause;
     let impeller = quote! { #crate_name::impeller2 };
@@ -29,28 +29,23 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
 
     let metadata_items = fields.fields.iter().map(|field| {
         let ty = &field.ty;
-        let entity_id = field.entity_id.or(entity_id);
-        if entity_id.is_some() {
+        if !field.nest {
             let name = field
                 .ident
                 .as_ref()
                 .expect("only named field allowed")
                 .to_string();
-            let ident = &field.ident.as_ref().expect("field must have ident");
-            let component_id = match &field.component_id {
-                Some(c) => quote! {
-                    #impeller::types::ComponentId::new(#c)
-                },
-                None => {
-                    quote! {
-                        #impeller::types::ComponentId::new(stringify!(#ident))
-                    }
-                }
+            let component_id = field.component_id();
+
+            let component_id = if let Some(parent) = &parent {
+                format!("{parent}.{component_id}")
+            } else {
+                component_id.to_string()
             };
             let asset = field.asset.unwrap_or_default();
             quote! {
                 .chain(core::iter::once(#impeller_wkt::ComponentMetadata {
-                    component_id: #component_id,
+                    component_id: #impeller::types::ComponentId::new(#component_id),
                     name: #name.to_string(),
                     metadata: Default::default(),
                     asset: #asset,

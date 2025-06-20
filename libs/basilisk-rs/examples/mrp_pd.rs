@@ -11,7 +11,7 @@ use roci::{
 use roci_macros::{Componentize, Decomponentize};
 
 #[derive(Debug, Default, Componentize, Decomponentize)]
-#[roci(entity_id = 3)]
+#[roci(parent = "mrp")]
 struct World {
     world_pos: SpatialTransform<f64, ArrayRepr>,
     ang_vel_est: Vector<f64, 3, ArrayRepr>,

@@ -1,30 +1,33 @@
 use bevy::{
+    core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     ecs::system::{SystemParam, SystemState},
     input::keyboard::Key,
     prelude::*,
 };
-use bevy_editor_cam::prelude::{EditorCam, EnabledMotion};
+use bevy_editor_cam::prelude::{EditorCam, EnabledMotion, OrbitConstraint};
 use bevy_egui::{
     EguiContexts,
     egui::{self, Color32, CornerRadius, Frame, RichText, Stroke, Ui, Visuals, vec2},
 };
-use big_space::GridCell;
-use big_space::propagation::NoPropagateRot;
+use bevy_render::{
+    camera::{Exposure, PhysicalCameraParameters},
+    view::RenderLayers,
+};
 use egui::UiBuilder;
 use egui_tiles::{Container, Tile, TileId, Tiles};
-use impeller2::types::{ComponentId, EntityId};
-use impeller2_bevy::{ComponentMetadataRegistry, ComponentSchemaRegistry, EntityMap};
-use impeller2_wkt::{EntityMetadata, Graph, Panel, Viewport};
-use nox::Tensor;
+use impeller2::types::ComponentId;
+use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
+use impeller2_wkt::{Graph, Panel, Viewport};
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, HashMap};
 
 use super::{
     HdrEnabled, SelectedObject, ViewportRect,
     actions::ActionTileWidget,
-    colors::{self, EColor, get_scheme, with_opacity},
+    colors::{self, get_scheme, with_opacity},
     images,
     monitor::{MonitorPane, MonitorWidget},
+    preset::EqlExt,
     query_table::{QueryTable, QueryTablePane, QueryTableWidget},
     video_stream::{IsTileVisible, VideoDecoderHandle},
     widgets::{
@@ -38,10 +41,12 @@ use super::{
     },
 };
 use crate::{
-    MainCamera,
-    plugins::{LogicalKeyState, navigation_gizmo::RenderLayerAlloc},
-    spawn_main_camera,
-    ui::widgets::plot::GraphStateEntity,
+    EqlContext, GridHandle, MainCamera,
+    object_3d::{EditableEQL, compile_eql_expr},
+    plugins::{
+        LogicalKeyState,
+        navigation_gizmo::{RenderLayerAlloc, spawn_gizmo},
+    },
 };
 
 #[derive(Clone)]
@@ -125,27 +130,17 @@ impl TileState {
         self.tree_actions.push(TreeAction::AddGraph(None, None));
     }
 
-    pub fn create_viewport_tile(
-        &mut self,
-        focus_entity: Option<EntityId>,
-        tile_id: Option<TileId>,
-    ) {
-        self.tree_actions
-            .push(TreeAction::AddViewport(tile_id, focus_entity));
+    pub fn create_viewport_tile(&mut self, tile_id: Option<TileId>) {
+        self.tree_actions.push(TreeAction::AddViewport(tile_id));
     }
 
     pub fn create_viewport_tile_empty(&mut self) {
-        self.tree_actions.push(TreeAction::AddViewport(None, None));
+        self.tree_actions.push(TreeAction::AddViewport(None));
     }
 
-    pub fn create_monitor_tile(
-        &mut self,
-        entity_id: EntityId,
-        component_id: ComponentId,
-        tile_id: Option<TileId>,
-    ) {
+    pub fn create_monitor_tile(&mut self, component_id: ComponentId, tile_id: Option<TileId>) {
         self.tree_actions
-            .push(TreeAction::AddMonitor(tile_id, entity_id, component_id));
+            .push(TreeAction::AddMonitor(tile_id, component_id));
     }
 
     pub fn create_action_tile(
@@ -359,23 +354,128 @@ pub struct ViewportPane {
 }
 
 impl ViewportPane {
+    #[allow(clippy::too_many_arguments)]
     fn spawn(
         commands: &mut Commands,
         asset_server: &Res<AssetServer>,
         meshes: &mut ResMut<Assets<Mesh>>,
         materials: &mut ResMut<Assets<StandardMaterial>>,
         render_layer_alloc: &mut ResMut<RenderLayerAlloc>,
+        eql_ctx: &eql::Context,
         viewport: &Viewport,
         label: String,
     ) -> Self {
-        let (camera, nav_gizmo, nav_gizmo_camera) = spawn_main_camera(
-            commands,
-            asset_server,
-            meshes,
-            materials,
-            render_layer_alloc,
-            viewport,
-        );
+        let mut main_camera_layers = RenderLayers::default();
+        let mut grid_layers = RenderLayers::none();
+        if let Some(grid_layer) = render_layer_alloc.alloc() {
+            main_camera_layers = main_camera_layers.with(grid_layer);
+            grid_layers = grid_layers.with(grid_layer);
+        }
+
+        let grid_visibility = if viewport.show_grid {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        let grid_id = commands
+            .spawn((
+                bevy_infinite_grid::InfiniteGridBundle {
+                    settings: bevy_infinite_grid::InfiniteGridSettings {
+                        minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
+                        major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
+                        z_axis_color: crate::ui::colors::bevy::GREEN,
+                        x_axis_color: crate::ui::colors::bevy::RED,
+                        fadeout_distance: 50_000.0,
+                        scale: 0.1,
+                        ..Default::default()
+                    },
+                    visibility: grid_visibility,
+                    ..Default::default()
+                },
+                grid_layers,
+            ))
+            .id();
+
+        let parent = commands
+            .spawn((
+                GlobalTransform::default(),
+                Transform::from_translation(Vec3::new(5.0, 5.0, 10.0))
+                    .looking_at(Vec3::ZERO, Vec3::Y),
+                impeller2_wkt::WorldPos::default(),
+            ))
+            .id();
+        let pos = viewport
+            .pos
+            .as_ref()
+            .and_then(|eql| {
+                let expr = eql_ctx.parse_str(eql).ok()?;
+                Some(EditableEQL {
+                    eql: eql.to_string(),
+                    compiled_expr: Some(compile_eql_expr(expr)),
+                })
+            })
+            .unwrap_or_default();
+        let look_at = viewport
+            .look_at
+            .as_ref()
+            .and_then(|eql| {
+                let expr = eql_ctx.parse_str(eql).ok()?;
+                Some(EditableEQL {
+                    eql: eql.to_string(),
+                    compiled_expr: Some(compile_eql_expr(expr)),
+                })
+            })
+            .unwrap_or_default();
+
+        let mut camera = commands.spawn((
+            Transform::default(),
+            Camera3d::default(),
+            Camera {
+                hdr: false,
+                clear_color: ClearColorConfig::Default,
+                order: 1,
+                ..Default::default()
+            },
+            Projection::Perspective(PerspectiveProjection {
+                fov: viewport.fov.to_radians(),
+                ..Default::default()
+            }),
+            Tonemapping::TonyMcMapface,
+            Exposure::from_physical_camera(PhysicalCameraParameters {
+                aperture_f_stops: 2.8,
+                shutter_speed_s: 1.0 / 200.0,
+                sensitivity_iso: 400.0,
+                // full frame sensor height
+                sensor_height: 24.0 / 1000.0,
+            }),
+            main_camera_layers,
+            MainCamera,
+            big_space::GridCell::<i128>::default(),
+            EditorCam {
+                orbit_constraint: OrbitConstraint::Fixed {
+                    up: Vec3::Y,
+                    can_pass_tdc: false,
+                },
+                last_anchor_depth: 2.0,
+                ..Default::default()
+            },
+            GridHandle { grid: grid_id },
+            crate::ui::widgets::inspector::viewport::Viewport::new(parent, pos, look_at),
+            ChildOf(parent),
+        ));
+
+        camera.insert(Bloom { ..default() });
+        camera.insert(EnvironmentMapLight {
+            diffuse_map: asset_server.load("embedded://elodin_editor/assets/diffuse.ktx2"),
+            specular_map: asset_server.load("embedded://elodin_editor/assets/specular.ktx2"),
+            intensity: 2000.0,
+            ..Default::default()
+        });
+
+        let camera = camera.id();
+
+        let (nav_gizmo, nav_gizmo_camera) =
+            spawn_gizmo(camera, commands, meshes, materials, render_layer_alloc);
         Self {
             camera: Some(camera),
             nav_gizmo,
@@ -421,9 +521,9 @@ struct TreeBehavior<'w> {
 
 #[derive(Clone)]
 pub enum TreeAction {
-    AddViewport(Option<TileId>, Option<EntityId>),
+    AddViewport(Option<TileId>),
     AddGraph(Option<TileId>, Option<GraphBundle>),
-    AddMonitor(Option<TileId>, EntityId, ComponentId),
+    AddMonitor(Option<TileId>, ComponentId),
     AddQueryTable(Option<TileId>),
     AddQueryPlot(Option<TileId>),
     AddActionTile(Option<TileId>, String, String),
@@ -813,13 +913,10 @@ pub struct TileLayout<'w, 's> {
     meshes: ResMut<'w, Assets<Mesh>>,
     materials: ResMut<'w, Assets<StandardMaterial>>,
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
-    entity_map: Res<'w, EntityMap>,
-    entity_metadata: Query<'w, 's, &'static EntityMetadata>,
-    metadata_store: Res<'w, ComponentMetadataRegistry>,
     viewport_contains_pointer: ResMut<'w, ViewportContainsPointer>,
     editor_cam: Query<'w, 's, &'static mut EditorCam, With<MainCamera>>,
-    grid_cell: Query<'w, 's, &'static GridCell<i128>, Without<MainCamera>>,
     cmd_palette_state: ResMut<'w, CommandPaletteState>,
+    eql_ctx: Res<'w, EqlContext>,
 }
 
 impl WidgetSystem for TileLayout<'_, '_> {
@@ -907,36 +1004,19 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             }
                         }
                     }
-                    TreeAction::AddViewport(parent_tile_id, track_entity) => {
-                        let viewport = Viewport {
-                            track_entity,
-                            ..Viewport::default()
-                        };
-                        let label = viewport_label(
-                            &viewport,
-                            &state_mut.entity_map,
-                            &state_mut.entity_metadata,
-                        );
+                    TreeAction::AddViewport(parent_tile_id) => {
+                        let viewport = Viewport::default();
+                        let label = viewport_label(&viewport);
                         let viewport_pane = ViewportPane::spawn(
                             &mut state_mut.commands,
                             &state_mut.asset_server,
                             &mut state_mut.meshes,
                             &mut state_mut.materials,
                             &mut state_mut.render_layer_alloc,
+                            &state_mut.eql_ctx.0,
                             &viewport,
                             label,
                         );
-                        if let Some(camera) = viewport_pane.camera {
-                            let mut camera = state_mut.commands.entity(camera);
-                            if let Some(parent) = viewport.track_entity {
-                                if let Some(parent) = state_mut.entity_map.0.get(&parent) {
-                                    if let Ok(grid_cell) = state_mut.grid_cell.get(*parent) {
-                                        camera.try_insert(*grid_cell);
-                                    }
-                                    camera.insert(ChildOf(*parent));
-                                }
-                            }
-                        }
 
                         if let Some(tile_id) = ui_state.insert_tile(
                             Tile::Pane(Pane::Viewport(viewport_pane)),
@@ -947,12 +1027,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         }
                     }
                     TreeAction::AddGraph(parent_tile_id, graph_bundle) => {
-                        let graph_label = graph_label(
-                            &Graph::default(),
-                            &state_mut.entity_map,
-                            &state_mut.entity_metadata,
-                            &state_mut.metadata_store,
-                        );
+                        let graph_label = graph_label(&Graph::default());
 
                         let graph_bundle = if let Some(graph_bundle) = graph_bundle {
                             graph_bundle
@@ -980,9 +1055,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             ui_state.graphs.insert(tile_id, graph_id);
                         }
                     }
-                    TreeAction::AddMonitor(parent_tile_id, entity_id, component_id) => {
-                        let monitor =
-                            MonitorPane::new("Monitor".to_string(), entity_id, component_id);
+                    TreeAction::AddMonitor(parent_tile_id, component_id) => {
+                        let monitor = MonitorPane::new("Monitor".to_string(), component_id);
 
                         let pane = Pane::Monitor(monitor);
                         if let Some(tile_id) =
@@ -1179,12 +1253,9 @@ pub struct SyncViewportParams<'w, 's> {
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub materials: ResMut<'w, Assets<StandardMaterial>>,
     pub render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
-    pub entity_map: Res<'w, EntityMap>,
-    pub entity_metadata: Query<'w, 's, &'static EntityMetadata>,
-    pub grid_cell: Query<'w, 's, &'static GridCell<i128>>,
-    pub metadata_store: Res<'w, ComponentMetadataRegistry>,
     pub hdr_enabled: ResMut<'w, HdrEnabled>,
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
+    pub eql: Res<'w, EqlContext>,
 }
 
 pub fn sync_viewports(params: SyncViewportParams) {
@@ -1196,12 +1267,9 @@ pub fn sync_viewports(params: SyncViewportParams) {
         mut meshes,
         mut materials,
         mut render_layer_alloc,
-        entity_map,
-        entity_metadata,
-        grid_cell,
-        metadata_store,
         mut hdr_enabled,
         schema_reg,
+        eql,
     } = params;
     for (entity, panel) in panels.iter() {
         spawn_panel(
@@ -1213,12 +1281,9 @@ pub fn sync_viewports(params: SyncViewportParams) {
             &mut materials,
             &mut render_layer_alloc,
             &mut commands,
-            &entity_map,
-            &entity_metadata,
-            &grid_cell,
-            &metadata_store,
             &mut hdr_enabled,
             &schema_reg,
+            &eql,
         );
 
         commands.entity(entity).try_insert(SyncedViewport);
@@ -1235,48 +1300,23 @@ pub fn spawn_panel(
     materials: &mut ResMut<Assets<StandardMaterial>>,
     render_layer_alloc: &mut ResMut<RenderLayerAlloc>,
     commands: &mut Commands,
-    entity_map: &Res<EntityMap>,
-    entity_metadata: &Query<&EntityMetadata>,
-    grid_cell: &Query<&GridCell<i128>>,
-    metadata_store: &Res<ComponentMetadataRegistry>,
     hdr_enabled: &mut ResMut<HdrEnabled>,
     schema_reg: &Res<ComponentSchemaRegistry>,
+    eql: &EqlContext,
 ) -> Option<TileId> {
     match panel {
         Panel::Viewport(viewport) => {
-            let label = viewport_label(viewport, entity_map, entity_metadata);
+            let label = viewport_label(viewport);
             let pane = ViewportPane::spawn(
                 commands,
                 asset_server,
                 meshes,
                 materials,
                 render_layer_alloc,
+                &eql.0,
                 viewport,
                 label,
             );
-            let camera = pane.camera.expect("no camera spawned for viewport");
-            let mut camera = commands.entity(camera);
-            if let Some(parent) = viewport.track_entity {
-                if let Some(parent) = entity_map.0.get(&parent) {
-                    if let Ok(grid_cell) = grid_cell.get(*parent) {
-                        camera.try_insert(*grid_cell);
-                    }
-                    camera.insert(ChildOf(*parent));
-                }
-            };
-            // Convert from Z-up to Y-up
-            let pos = [viewport.pos.x(), viewport.pos.z(), -viewport.pos.y()].map(Tensor::into_buf);
-            let [i, j, k, w] = viewport.rotation.parts().map(Tensor::into_buf);
-            camera.try_insert(Transform {
-                translation: Vec3::from_array(pos),
-                rotation: Quat::from_xyzw(i, j, k, w),
-                ..Default::default()
-            });
-            if !viewport.track_rotation {
-                camera.try_insert(NoPropagateRot);
-            } else {
-                camera.remove::<NoPropagateRot>();
-            }
             hdr_enabled.0 |= viewport.hdr;
             ui_state.insert_tile(Tile::Pane(Pane::Viewport(pane)), parent_id, viewport.active)
         }
@@ -1301,12 +1341,9 @@ pub fn spawn_panel(
                     materials,
                     render_layer_alloc,
                     commands,
-                    entity_map,
-                    entity_metadata,
-                    grid_cell,
-                    metadata_store,
                     hdr_enabled,
                     schema_reg,
+                    eql,
                 );
                 let Some(tile_id) = tile_id else {
                     continue;
@@ -1344,47 +1381,44 @@ pub fn spawn_panel(
                     materials,
                     render_layer_alloc,
                     commands,
-                    entity_map,
-                    entity_metadata,
-                    grid_cell,
-                    metadata_store,
                     hdr_enabled,
                     schema_reg,
+                    eql,
                 );
             });
             tile_id
         }
         Panel::Graph(graph) => {
-            let mut entities = BTreeMap::<EntityId, GraphStateEntity>::default();
-            for entity in graph.entities.iter() {
-                let mut components: BTreeMap<ComponentId, Vec<(bool, Color32)>> = BTreeMap::new();
-                for component in entity.components.iter() {
-                    if let Some(schema) = schema_reg.get(&component.component_id) {
-                        let len = schema.shape().iter().product::<usize>();
-                        let values =
-                            components.entry(component.component_id).or_insert_with(|| {
-                                (0..len)
-                                    .map(|i| {
-                                        (entity.entity_id.0 + component.component_id.0) as usize + i
-                                    })
-                                    .map(|i| (false, colors::get_color_by_index_all(i)))
-                                    .collect()
-                            });
-                        for (i, index) in component.indexes.iter().enumerate() {
-                            if let Some((enabled, color)) = values.get_mut(*index) {
-                                if let Some(c) = component.color.get(i) {
-                                    *color = c.into_color32();
-                                }
-                                *enabled = true;
-                            }
-                        }
-                    }
+            let eql = eql
+                .0
+                .parse_str(&graph.eql)
+                .inspect_err(|err| {
+                    warn!(?err, "error parsing graph eql");
+                })
+                .ok()?;
+            let mut component_vec = eql.to_graph_components();
+            component_vec.sort();
+            let mut components_tree: BTreeMap<ComponentPath, Vec<(bool, Color32)>> =
+                BTreeMap::new();
+            for (j, (component, i)) in component_vec.iter().enumerate() {
+                if let Some(elements) = components_tree.get_mut(component) {
+                    elements[*i] = (true, colors::get_color_by_index_all(j));
+                } else {
+                    let Some(schema) = schema_reg.0.get(&component.id) else {
+                        continue;
+                    };
+                    let len: usize = schema.shape().iter().copied().product();
+                    let mut elements: Vec<(bool, Color32)> = (0..len)
+                        .map(|_| (false, colors::get_color_by_index_all(j)))
+                        .collect();
+                    elements[*i] = (true, colors::get_color_by_index_all(j));
+                    components_tree.insert(component.clone(), elements);
                 }
-                entities.insert(entity.entity_id, components);
             }
 
-            let graph_label = graph_label(graph, entity_map, entity_metadata, metadata_store);
-            let mut bundle = GraphBundle::new(render_layer_alloc, entities, graph_label.clone());
+            let graph_label = graph_label(graph);
+            let mut bundle =
+                GraphBundle::new(render_layer_alloc, components_tree, graph_label.clone());
             bundle.graph_state.auto_y_range = graph.auto_y_range;
             bundle.graph_state.y_range = graph.y_range.clone();
             bundle.graph_state.graph_type = graph.graph_type;
@@ -1394,11 +1428,8 @@ pub fn spawn_panel(
         }
         Panel::ComponentMonitor(monitor) => {
             // Create a MonitorPane and add it to the UI
-            let pane = super::monitor::MonitorPane::new(
-                "Monitor".to_string(),
-                monitor.entity_id,
-                monitor.component_id,
-            );
+            let pane =
+                super::monitor::MonitorPane::new("Monitor".to_string(), monitor.component_id);
             ui_state.insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
         }
         Panel::SQLTable(sql) => {
@@ -1494,58 +1525,14 @@ pub fn shortcuts(key_state: Res<LogicalKeyState>, mut ui_state: ResMut<TileState
     }
 }
 
-fn viewport_label(
-    viewport: &Viewport,
-    entity_map: &EntityMap,
-    entity_metadata: &Query<&EntityMetadata>,
-) -> String {
+fn viewport_label(viewport: &Viewport) -> String {
     viewport
         .name
         .clone()
-        .or_else(|| {
-            viewport
-                .track_entity
-                .and_then(|id| entity_map.0.get(&id))
-                .and_then(|entity| entity_metadata.get(*entity).ok())
-                .map(|metadata| metadata.name.clone())
-                .map(|name| format!("Track: {}", name))
-        })
-        .unwrap_or_else(|| {
-            let pos = viewport.pos;
-            format!(
-                "Viewport({},{},{})",
-                pos.x().into_buf(),
-                pos.y().into_buf(),
-                pos.z().into_buf(),
-            )
-        })
+        .unwrap_or_else(|| "Viewport".to_string())
 }
 
-fn graph_label(
-    graph: &Graph,
-    entity_map: &EntityMap,
-    entity_metadata: &Query<&EntityMetadata>,
-    metadata_store: &ComponentMetadataRegistry,
-) -> String {
-    graph
-        .name
-        .clone()
-        .or_else(|| {
-            let entity = graph.entities.first()?;
-            if graph.entities.len() > 1 {
-                return None;
-            }
-            let entity_name = entity_map
-                .0
-                .get(&entity.entity_id)
-                .and_then(|entity| entity_metadata.get(*entity).ok())
-                .map(|metadata| metadata.name.as_str())?;
-            let component = entity.components.first()?;
-            let component_name = &metadata_store.get_metadata(&component.component_id)?.name;
-            if entity.components.len() > 1 {
-                return Some(format!("{}: {}, ...", entity_name, component_name));
-            }
-            Some(format!("{}: {}", entity_name, component_name))
-        })
-        .unwrap_or_else(|| "Graph".to_string())
+fn graph_label(graph: &Graph) -> String {
+    // TODO: Update graph labeling once Graph structure is migrated to use ComponentPath
+    graph.name.clone().unwrap_or_else(|| "Graph".to_string())
 }

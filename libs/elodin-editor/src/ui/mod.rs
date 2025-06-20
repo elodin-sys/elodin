@@ -18,9 +18,10 @@ use big_space::GridCell;
 use self::colors::get_scheme;
 use egui::CornerRadius;
 use egui_tiles::TileId;
-use impeller2::types::{ComponentId, EntityId};
+use impeller2::types::ComponentId;
 use impeller2_bevy::ComponentValueMap;
-use impeller2_wkt::EntityMetadata;
+use impeller2_wkt::ComponentMetadata;
+use impeller2_wkt::ComponentValue;
 use widgets::{
     command_palette::CommandPaletteState,
     timeline::{self, timeline_slider},
@@ -29,7 +30,7 @@ use widgets::{
 use crate::{GridHandle, MainCamera, plugins::LogicalKeyState};
 
 use self::widgets::inspector::entity::ComponentFilter;
-use self::widgets::modal::ModalWithSettings;
+//use self::widgets::modal::ModalWithSettings;
 
 use self::widgets::command_palette::{self, CommandPalette};
 use self::widgets::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystemExt};
@@ -77,7 +78,7 @@ pub enum SelectedObject {
 }
 
 impl SelectedObject {
-    pub fn is_entity_selected(&self, id: impeller2::types::EntityId) -> bool {
+    pub fn is_entity_selected(&self, id: impeller2::types::ComponentId) -> bool {
         matches!(self, SelectedObject::Entity(pair) if pair.impeller == id)
     }
 
@@ -111,7 +112,7 @@ pub struct ViewportRect(pub Option<egui::Rect>);
 #[derive(Clone, Copy, Debug)]
 pub struct EntityPair {
     pub bevy: Entity,
-    pub impeller: EntityId,
+    pub impeller: ComponentId,
 }
 
 pub fn shortcuts(
@@ -131,17 +132,17 @@ pub fn shortcuts(
 }
 
 pub type EntityData<'a> = (
-    &'a EntityId,
+    &'a ComponentId,
     Entity,
-    &'a mut ComponentValueMap,
-    &'a EntityMetadata,
+    &'a mut ComponentValue,
+    &'a ComponentMetadata,
 );
 
 pub type EntityDataReadOnly<'a> = (
-    &'a EntityId,
+    &'a ComponentId,
     Entity,
     &'a ComponentValueMap,
-    &'a EntityMetadata,
+    &'a ComponentMetadata,
 );
 
 #[derive(QueryData)]
@@ -189,7 +190,7 @@ impl Plugin for UiPlugin {
 
 #[derive(Clone, Debug)]
 pub enum SettingModal {
-    Graph(Entity, Option<EntityId>, Option<ComponentId>),
+    Graph(Entity, Option<ComponentId>),
     GraphRename(Entity, String),
 }
 
@@ -537,7 +538,7 @@ pub fn render_layout(world: &mut World) {
 
     world.add_root_widget::<ViewportOverlay>("viewport_overlay");
 
-    world.add_root_widget::<ModalWithSettings>("modal_graph");
+    //world.add_root_widget::<ModalWithSettings>("modal_graph");
 
     world.add_root_widget::<CommandPalette>("command_palette");
 }

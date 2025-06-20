@@ -1,6 +1,6 @@
 use std::io;
 
-use impeller2::types::{ComponentId, EntityId, PacketId};
+use impeller2::types::{ComponentId, PacketId};
 use impeller2_wkt::{AssetId, ErrorResponse, StreamId};
 use thiserror::Error;
 #[derive(Debug, Error)]
@@ -17,8 +17,6 @@ pub enum Error {
     Impeller(#[from] impeller2::error::Error),
     #[error("component not found {0}")]
     ComponentNotFound(ComponentId),
-    #[error("entity not found {0}")]
-    EntityNotFound(EntityId),
     #[error("postcard error {0}")]
     Postcard(#[from] postcard::Error),
     #[error("invalid component id")]

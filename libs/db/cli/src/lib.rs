@@ -7,9 +7,7 @@ use arrow::{
 use impeller2::{
     com_de::Decomponentize,
     schema::Schema,
-    types::{
-        ComponentId, EntityId, Msg, OwnedTimeSeries, PacketId, PrimType, Request, Timestamp, msg_id,
-    },
+    types::{ComponentId, Msg, OwnedTimeSeries, PacketId, PrimType, Request, Timestamp, msg_id},
     vtable::{
         self, VTable,
         builder::{FieldBuilder, OpBuilder, schema},
@@ -83,7 +81,6 @@ impl Client {
         &mut self,
         lua: &Lua,
         component_id: Value,
-        entity_id: u64,
         start: Option<i64>,
         stop: Option<i64>,
     ) -> anyhow::Result<()> {
@@ -98,7 +95,6 @@ impl Client {
         let msg = GetTimeSeries {
             id: id.to_le_bytes(),
             range: start..stop,
-            entity_id: EntityId(entity_id),
             component_id,
             limit: Some(256),
         };
@@ -183,19 +179,17 @@ impl Client {
         &mut self,
         lua: &Lua,
         component_id: u64,
-        entity_id: u64,
         prim_type: PrimType,
         shape: Vec<u64>,
         buf: Value,
     ) -> anyhow::Result<()> {
         use vtable::builder::*;
         let component_id = ComponentId(component_id);
-        let entity_id = EntityId(entity_id);
         let size = shape.iter().product::<u64>() as usize * prim_type.size();
         let vtable = vtable([raw_field(
             0,
             size as u16,
-            schema(prim_type, &shape, pair(entity_id, component_id)),
+            schema(prim_type, &shape, component(component_id)),
         )]);
         let id: [u8; 2] = fastrand::u16(..).to_le_bytes();
         let msg = VTableMsg { id, vtable };
@@ -450,9 +444,7 @@ impl UserData for Client {
     fn add_methods<M: mlua::UserDataMethods<Self>>(methods: &mut M) {
         methods.add_async_method_mut(
             "send_table",
-            |lua,
-             mut this,
-             (component_id, entity_id, ty, shape, buf): (Value, _, _, Vec<u64>, _)| async move {
+            |lua, mut this, (component_id, ty, shape, buf): (Value, _, Vec<u64>, _)| async move {
                 let component_id =
                     if let Ok(id) = lua.from_value::<ComponentId>(component_id.clone()) {
                         id
@@ -461,11 +453,10 @@ impl UserData for Client {
                     } else if let Ok(id) = lua.from_value::<i64>(component_id) {
                         ComponentId(id as u64)
                     } else {
-                        return Err(anyhow!("msg id must be a PacketId or String").into());
+                        return Err(anyhow!("component id must be a ComponentId or String").into());
                     };
                 let ty: PrimType = lua.from_value(ty)?;
-                this.send(&lua, component_id.0, entity_id, ty, shape, buf)
-                    .await?;
+                this.send(&lua, component_id.0, ty, shape, buf).await?;
                 Ok(())
             },
         );
@@ -521,8 +512,8 @@ impl UserData for Client {
         });
         methods.add_async_method_mut(
             "get_time_series",
-            |lua, mut this, (c_id, e_id, start, stop)| async move {
-                this.get_time_series(&lua, c_id, e_id, start, stop).await?;
+            |lua, mut this, (c_id, start, stop)| async move {
+                this.get_time_series(&lua, c_id, start, stop).await?;
                 Ok(())
             },
         );
@@ -600,7 +591,6 @@ impl UserData for Client {
             ComponentMetadata
         );
         add_req_reply_method!(dump_metadata, DumpMetadata, DumpMetadataResp);
-        add_req_reply_method!(get_entity_metadata, GetEntityMetadata, EntityMetadata);
         add_req_reply_method!(get_schema, GetSchema, SchemaMsg);
     }
 }
@@ -689,10 +679,7 @@ pub fn lua() -> anyhow::Result<Lua> {
         "Stream",
         lua.create_function(|lua, m: Stream| lua.create_ser_userdata(m))?,
     )?;
-    lua.globals().set(
-        "SetEntityMetadata",
-        lua.create_function(|lua, m: SetEntityMetadata| lua.create_ser_userdata(m))?,
-    )?;
+
     lua.globals().set(
         "Stream",
         lua.create_function(|lua, m: Stream| lua.create_ser_userdata(m))?,
@@ -735,8 +722,8 @@ pub fn lua() -> anyhow::Result<Lua> {
         )?,
     )?;
     lua.globals().set(
-        "pair",
-        lua.create_function(|lua, (entity_id, component_id): (u64, Value)| {
+        "component",
+        lua.create_function(|lua, component_id: Value| {
             let component_id = if let Ok(id) = lua.from_value::<ComponentId>(component_id.clone()) {
                 id
             } else if let Ok(name) = lua.from_value::<String>(component_id.clone()) {
@@ -744,10 +731,9 @@ pub fn lua() -> anyhow::Result<Lua> {
             } else if let Ok(id) = lua.from_value::<i64>(component_id) {
                 ComponentId(id as u64)
             } else {
-                return Err(anyhow!("msg id must be a PacketId or String").into());
+                return Err(anyhow!("component id must be a ComponentId or String").into());
             };
-            let entity_id = EntityId(entity_id);
-            Ok(LuaOpBuilder(vtable::builder::pair(entity_id, component_id)))
+            Ok(LuaOpBuilder(vtable::builder::component(component_id)))
         })?,
     )?;
     lua.globals().set(
@@ -883,7 +869,7 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                     );
                     print_message("udp_vtable_stream(id, addr) -> UdpVTableStream");
                     print_usage_line(
-                        "Client:send_table(component_id, entity_id, ty, shape, data)",
+                        "Client:send_table(component_id, ty, shape, data)",
                         "Sends a new ComponentValue to the db",
                     );
                     print_usage_line("Client:send_msg(msg)", "Sends a raw message to the db");
@@ -898,13 +884,7 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                             Color::Blue.bold().paint("GetComponentMetadata")
                         ),
                     );
-                    print_usage_line(
-                        "Client:get_entity_metadata(GetEntityMetadata)",
-                        format!(
-                            "Gets a entity's metadata using {} {{ id }}",
-                            Color::Blue.bold().paint("GetEntityMetadata")
-                        ),
-                    );
+
                     print_usage_line(
                         "Client:get_asset(GetAsset)",
                         format!(
@@ -928,9 +908,8 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                     );
                     println!("{}", Color::Yellow.bold().paint("Messages"));
                     print_message("SetComponentMetadata { component_id, name, metadata, asset }");
-                    print_message("SetEntityMetadata { entity_id, name, metadata }");
                     print_message(
-                        "UdpUnicast { stream = { filter = { component_id, entity_id }, id }, addr }",
+                        "UdpUnicast { stream = { filter = { component_id }, id }, addr }",
                     );
                     print_message("SetStreamState { id, playing, tick, time_step }");
                     print_message("SetAsset { id, buf }");
@@ -1018,12 +997,11 @@ impl Decomponentize for DebugSink {
     fn apply_value(
         &mut self,
         component_id: ComponentId,
-        entity_id: EntityId,
         value: impeller2::types::ComponentView<'_>,
         timestamp: Option<Timestamp>,
     ) -> Result<(), Self::Error> {
         let epoch = timestamp.map(hifitime::Epoch::from);
-        println!("({component_id:?},{entity_id:?}) @ {epoch:?} = {value:?}");
+        println!("{component_id:?} @ {epoch:?} = {value:?}");
         Ok(())
     }
 }

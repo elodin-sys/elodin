@@ -18,7 +18,7 @@ pub mod command_palette;
 pub mod hierarchy;
 pub mod inspector;
 pub mod label;
-pub mod modal;
+//pub mod modal;
 pub mod plot;
 pub mod plot_3d;
 pub mod query_plot;

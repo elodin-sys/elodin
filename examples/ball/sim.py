@@ -17,26 +17,25 @@ def world(seed: int = 0) -> el.World:
     # world.spawn(WindData(seed=jnp.int64(seed)), name="WindData")
     ball_mesh = world.insert_asset(el.Mesh.sphere(BALL_RADIUS))
     ball_color = world.insert_asset(el.Material.color(12.7, 9.2, 0.5))
-    ball = world.spawn(
+    world.spawn(
         [
             el.Body(world_pos=el.SpatialTransform(linear=jnp.array([0.0, 0.0, 6.0]))),
             el.Shape(ball_mesh, ball_color),
             WindData(seed=jnp.int64(seed)),
         ],
-        name="Ball",
+        name="ball",
     )
     world.spawn(
         el.Panel.viewport(
-            track_rotation=False,
             active=True,
-            pos=[8.0, 2.0, 4.0],
-            looking_at=[0.0, 0.0, 3.0],
+            pos="(0.0,0.0,0.0, 0.0, 8.0, 2.0, 4.0)",
+            look_at="(0.0,0.0,0.0,0.0, 0.0, 0.0, 3.0)",
             show_grid=True,
             hdr=True,
         ),
         name="Viewport",
     )
-    world.spawn(el.Line3d(ball, "world_pos", index=[4, 5, 6], line_width=2.0))
+    world.spawn(el.Line3d("ball.world_pos", line_width=2.0))
     return world
 
 

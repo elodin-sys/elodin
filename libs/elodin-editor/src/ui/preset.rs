@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use super::CameraQuery;
 use super::actions::ActionTile;
 use super::query_table::QueryTable;
 use super::tiles::{Pane, TileState};
@@ -8,20 +7,17 @@ use super::widgets::plot::GraphState;
 use super::widgets::query_plot::QueryPlot;
 use bevy::prelude::*;
 use egui_tiles::{Tile, TileId};
-use impeller2::types::EntityId;
 use impeller2_wkt::{
-    ActionPane, Color, ComponentMonitor, Panel, SQLPlot, SQLTable, Split, Viewport,
+    ActionPane, ComponentMonitor, ComponentPath, Panel, SQLPlot, SQLTable, Split, Viewport,
 };
-use nox::{Quaternion, Vector3};
 
 #[allow(clippy::too_many_arguments)]
 pub fn tile_to_panel(
     query_tables: &Query<&QueryTable>,
-    cameras: &Query<CameraQuery>,
-    entity_id: &Query<&EntityId>,
     action_tiles: &Query<&ActionTile>,
     graph_states: &Query<&GraphState>,
     query_plots: &Query<&QueryPlot>,
+    viewports: &Query<&crate::ui::widgets::inspector::viewport::Viewport>,
     tile_id: TileId,
     ui_state: &TileState,
 ) -> Option<Panel> {
@@ -31,62 +27,28 @@ pub fn tile_to_panel(
     match tile {
         Tile::Pane(pane) => match pane {
             Pane::Viewport(viewport) => {
-                let camera = viewport.camera?;
-                let cam = cameras.get(camera).ok()?;
-
-                let pos = Vector3::new(
-                    cam.transform.translation.x,
-                    -cam.transform.translation.z,
-                    cam.transform.translation.y,
-                );
-
-                let quat = cam.transform.rotation;
-
-                let rotation = Quaternion::new(quat.w, quat.x, quat.y, quat.z);
-
-                let track_entity = cam
-                    .parent
-                    .and_then(|e| entity_id.get(e.parent()).ok())
-                    .copied();
-
-                let track_rotation = cam.no_propagate_rot.is_none();
+                let cam_entity = viewport.camera?;
+                let viewport_data = viewports.get(cam_entity).ok()?;
 
                 Some(Panel::Viewport(Viewport {
-                    track_entity,
-                    track_rotation,
                     fov: 45.0,
                     active: false,
-                    pos,
-                    rotation,
                     show_grid: false,
                     hdr: false,
                     name: Some(viewport.label.clone()),
+                    pos: Some(viewport_data.pos.eql.clone()),
+                    look_at: Some(viewport_data.look_at.eql.clone()),
                 }))
             }
             Pane::Graph(graph) => {
                 let graph_state = graph_states.get(graph.id).ok()?;
-                let mut entities: HashMap<EntityId, impeller2_wkt::GraphEntity> = HashMap::new();
-                for ((entity_id, component_id, index), (_, color)) in
-                    graph_state.enabled_lines.iter()
-                {
-                    let entity_id = *entity_id;
-                    let entity =
-                        entities
-                            .entry(entity_id)
-                            .or_insert_with(|| impeller2_wkt::GraphEntity {
-                                entity_id,
-                                components: vec![],
-                            });
-                    let [r, g, b, _] = color.to_normalized_gamma_f32();
-                    entity.components.push(impeller2_wkt::GraphComponent {
-                        component_id: *component_id,
-                        indexes: vec![*index],
-                        color: vec![Color::rgb(r, g, b)],
-                    });
+                let mut eql = vec![];
+                for ((path, index), (_, _color)) in graph_state.enabled_lines.iter() {
+                    // TODO(sphw): add back color support
+                    eql.push(format!("{}[{}]", path, index));
                 }
-                let entities = entities.into_values().collect();
                 Some(Panel::Graph(impeller2_wkt::Graph {
-                    entities,
+                    eql: eql.join(","),
                     name: Some(graph_state.label.clone()),
                     graph_type: graph_state.graph_type,
                     auto_y_range: graph_state.auto_y_range,
@@ -95,7 +57,6 @@ pub fn tile_to_panel(
             }
             Pane::Monitor(monitor) => Some(Panel::ComponentMonitor(ComponentMonitor {
                 component_id: monitor.component_id,
-                entity_id: monitor.entity_id,
             })),
             Pane::QueryTable(query_table) => {
                 let query_table = query_tables.get(query_table.entity).ok()?;
@@ -130,11 +91,10 @@ pub fn tile_to_panel(
                 for tile_id in &t.children {
                     if let Some(tab) = tile_to_panel(
                         query_tables,
-                        cameras,
-                        entity_id,
                         action_tiles,
                         graph_states,
                         query_plots,
+                        viewports,
                         *tile_id,
                         ui_state,
                     ) {
@@ -149,11 +109,10 @@ pub fn tile_to_panel(
                 for child_id in &linear.children {
                     if let Some(panel) = tile_to_panel(
                         query_tables,
-                        cameras,
-                        entity_id,
                         action_tiles,
                         graph_states,
                         query_plots,
+                        viewports,
                         *child_id,
                         ui_state,
                     ) {
@@ -183,5 +142,35 @@ pub fn tile_to_panel(
             }
             _ => None,
         },
+    }
+}
+
+pub trait EqlExt {
+    fn to_graph_components(&self) -> Vec<(ComponentPath, usize)>;
+}
+
+impl EqlExt for eql::Expr {
+    fn to_graph_components(&self) -> Vec<(ComponentPath, usize)> {
+        match self {
+            eql::Expr::ComponentPart(component_part) => {
+                let Some(component) = &component_part.component else {
+                    return vec![];
+                };
+                (0..component.element_names.len())
+                    .map(|i| (ComponentPath::from_name(&component_part.name), i))
+                    .collect()
+            }
+            eql::Expr::ArrayAccess(expr, i) => {
+                let eql::Expr::ComponentPart(component_part) = &**expr else {
+                    return vec![];
+                };
+                vec![(ComponentPath::from_name(&component_part.name), *i)]
+            }
+            eql::Expr::Tuple(exprs) => exprs
+                .iter()
+                .flat_map(|expr| expr.to_graph_components().into_iter())
+                .collect(),
+            _ => vec![],
+        }
     }
 }

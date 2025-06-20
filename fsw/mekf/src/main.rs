@@ -8,33 +8,23 @@ use nox::{
     tensor,
 };
 use roci::{
-    AsVTable, Componentize, Decomponentize, Metadatatize,
+    AsVTable, Metadatatize,
     tcp::{SinkExt, StreamExt},
 };
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, path::PathBuf};
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
-#[derive(
-    Componentize,
-    Decomponentize,
-    AsVTable,
-    Default,
-    Debug,
-    Clone,
-    TryFromBytes,
-    Immutable,
-    KnownLayout,
-)]
-#[roci(entity_id = 1)]
+#[derive(AsVTable, Default, Debug, Clone, TryFromBytes, Immutable, KnownLayout)]
+#[roci(parent = "aleph")]
 pub struct Input {
     pub mag: Vec3<f32>,
     pub accel: Vec3<f32>,
     pub gyro: Vec3<f32>,
 }
 
-#[derive(Componentize, AsVTable, Metadatatize, IntoBytes, Immutable, Debug)]
-#[roci(entity_id = 1)]
+#[derive(AsVTable, Metadatatize, IntoBytes, Immutable, Debug)]
+#[roci(parent = "aleph")]
 pub struct Output {
     pub q_hat: Quat<f64>,
     pub b_hat: Vec3<f64>,

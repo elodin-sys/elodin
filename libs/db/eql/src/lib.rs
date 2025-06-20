@@ -1,3 +1,4 @@
+use convert_case::Casing;
 use std::{
     borrow::Cow,
     collections::{BTreeSet, HashMap},
@@ -8,14 +9,16 @@ use unicode_ident::*;
 
 use impeller2::{
     schema::Schema,
-    types::{ComponentId, EntityId, Timestamp},
+    types::{ComponentId, Timestamp},
 };
+use impeller2_wkt::ComponentPath;
 use peg::error::ParseError;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AstNode<'input> {
     Ident(Cow<'input, str>),
     Field(Box<AstNode<'input>>, Cow<'input, str>),
+    ArrayIndex(Box<AstNode<'input>>, usize),
     MethodCall(Box<AstNode<'input>>, Cow<'input, str>, Vec<AstNode<'input>>),
     BinaryOp(Box<AstNode<'input>>, Box<AstNode<'input>>, BinaryOp),
     Tuple(Vec<AstNode<'input>>),
@@ -48,7 +51,11 @@ peg::parser! {
 
         rule ident_str() -> Cow<'input, str>
             = i:$([c if is_xid_start(c)] [c if is_xid_continue(c)]*) { Cow::Borrowed(i) }
-        rule num() -> f64
+
+        rule uint() -> usize
+            = s:$(['0'..='9']+) { s.parse().unwrap() }
+
+        rule float() -> f64
             = s:$("-"? ['0'..='9']+ ("." ['0'..='9']*)?) { s.parse().unwrap() }
 
         rule string_literal() -> Cow<'input, str> = "\"" s:$([^'"']*) "\"" { Cow::Borrowed(s) }
@@ -64,9 +71,11 @@ peg::parser! {
         --
         e:(@) "." i:ident_str() { AstNode::Field(Box::new(e), i) }
         --
+        e:(@) "[" i:uint() "]" { AstNode::ArrayIndex(Box::new(e), i) }
+        --
         "(" _ e:expr() _ ")" { e }
         --
-        f:num() { AstNode::FloatLiteral(f) }
+        f:float() { AstNode::FloatLiteral(f) }
         --
         s:string_literal() { AstNode::StringLiteral(s) }
         --
@@ -78,9 +87,8 @@ peg::parser! {
 #[derive(Clone, Debug)]
 pub enum Expr {
     // core
-    Entity(Arc<Entity>),
-    Component(Arc<EntityComponent>),
-    Time(Arc<EntityComponent>),
+    ComponentPart(Arc<ComponentPart>),
+    Time(Arc<Component>),
     ArrayAccess(Box<Expr>, usize),
     Tuple(Vec<Expr>),
     DurationLiteral(hifitime::Duration),
@@ -101,7 +109,7 @@ pub enum Expr {
 impl Expr {
     fn to_field(&self) -> Result<String, Error> {
         match self {
-            Expr::Component(component) => Ok(component.name.clone()),
+            Expr::ComponentPart(component) => Ok(component.name.replace(".", "_")),
 
             Expr::Time(_) => Ok("time".to_string()),
             Expr::Fft(e) => Ok(format!("fft({})", e.to_field()?)),
@@ -114,7 +122,9 @@ impl Expr {
             )),
 
             Expr::ArrayAccess(inner_expr, index) => match inner_expr.as_ref() {
-                Expr::Component(component) => Ok(format!("{}[{}]", component.name, index + 1)),
+                Expr::ComponentPart(part) if part.component.is_some() => {
+                    Ok(format!("{}[{}]", part.name.replace(".", "_"), index + 1))
+                }
                 _ => Err(Error::InvalidFieldAccess(
                     "array access on non-component".to_string(),
                 )),
@@ -129,19 +139,15 @@ impl Expr {
 
     fn to_table(&self) -> Result<String, Error> {
         match self {
-            Expr::Component(component) => {
-                Ok(format!("{}_{}", component.entity_name, component.name))
-            }
+            Expr::ComponentPart(component) => Ok(component.name.replace(".", "_")),
 
-            Expr::Time(component) => Ok(format!("{}_{}", component.entity_name, component.name)),
+            Expr::Time(component) => Ok(component.name.replace(".", "_")),
             Expr::FftFreq(e) => e.to_table(),
             Expr::Fft(e) => e.to_table(),
             Expr::BinaryOp(left, _, _) => left.to_table(),
 
             Expr::ArrayAccess(inner_expr, _) => match inner_expr.as_ref() {
-                Expr::Component(component) => {
-                    Ok(format!("{}_{}", component.entity_name, component.name))
-                }
+                Expr::ComponentPart(_) => inner_expr.to_table(),
                 _ => Err(Error::InvalidFieldAccess(
                     "array access on non-component".to_string(),
                 )),
@@ -177,12 +183,17 @@ impl Expr {
         match self {
             Expr::Fft(e) => Some(format!("fft({})", e.to_column_name()?)),
             Expr::FftFreq(e) => Some(format!("fftfreq({})", e.to_column_name()?)),
-            Expr::Component(e) => Some(format!("{}.{}", e.entity_name, e.name)),
+            Expr::ComponentPart(e) => Some(e.name.clone()),
             Expr::ArrayAccess(expr, index) => match expr.as_ref() {
-                Expr::Component(c) => c
-                    .element_names
-                    .get(*index)
-                    .map(|name| format!("{}.{}.{}", c.entity_name, c.name, name)),
+                Expr::ComponentPart(c) => {
+                    if let Some(c) = &c.component {
+                        c.element_names
+                            .get(*index)
+                            .map(|name| format!("{}.{}", c.name, name))
+                    } else {
+                        None
+                    }
+                }
                 expr => Some(format!("{}[{}]", expr.to_column_name()?, index,)),
             },
             _ => None,
@@ -216,14 +227,6 @@ impl Expr {
     /// Converts an EQL Expr to an SQL query string.
     pub fn to_sql(&self, context: &Context) -> Result<String, Error> {
         match self {
-            Expr::Entity(_entity) => {
-                // For bare entities, just return a placeholder or error
-                // This matches the AstNode::Ident behavior which just returns the name
-                Err(Error::InvalidFieldAccess(
-                    "cannot convert bare entity to SQL".to_string(),
-                ))
-            }
-
             Expr::Tuple(elements) => {
                 if elements.is_empty() {
                     return Err(Error::InvalidFieldAccess("empty tuple".to_string()));
@@ -328,34 +331,26 @@ impl Expr {
 }
 
 #[derive(Clone, Debug)]
-pub struct Entity {
+pub struct ComponentPart {
     pub name: String,
-    pub components: HashMap<String, Arc<EntityComponent>>,
+    pub id: ComponentId,
+    pub component: Option<Arc<Component>>,
+    pub children: HashMap<String, ComponentPart>,
 }
 
 #[derive(Clone, Debug)]
-pub struct EntityComponent {
+pub struct Component {
     pub name: String,
-    pub entity_name: String,
-    pub entity: EntityId,
     pub id: ComponentId,
     pub schema: Schema,
     pub element_names: Vec<String>,
 }
 
-impl EntityComponent {
-    pub fn new(
-        name: String,
-        entity_name: String,
-        entity: EntityId,
-        id: ComponentId,
-        schema: Schema,
-    ) -> Self {
+impl Component {
+    pub fn new(name: String, id: ComponentId, schema: Schema) -> Self {
         let element_names = default_element_names(schema.dim());
         Self {
             name,
-            entity_name,
-            entity,
             id,
             schema,
             element_names,
@@ -386,19 +381,77 @@ fn default_element_names(shape: &[u64]) -> Vec<String> {
 }
 
 pub struct Context {
-    pub entities: HashMap<String, Arc<Entity>>,
+    pub component_parts: HashMap<String, ComponentPart>,
     pub earliest_timestamp: Timestamp,
     pub last_timestamp: Timestamp,
 }
 
+impl Default for Context {
+    fn default() -> Self {
+        Context {
+            component_parts: HashMap::new(),
+            earliest_timestamp: Timestamp(i64::MIN),
+            last_timestamp: Timestamp(i64::MAX),
+        }
+    }
+}
+
 impl Context {
+    pub fn from_leaves(
+        components: impl IntoIterator<Item = Arc<Component>>,
+        earliest_timestamp: Timestamp,
+        last_timestamp: Timestamp,
+    ) -> Self {
+        let mut component_parts = HashMap::new();
+        for component in components.into_iter() {
+            let path = ComponentPath::from_name(&component.name);
+            let nodes = component.name.split('.');
+            let mut component_parts = &mut component_parts;
+            for (part, node) in path
+                .path
+                .iter()
+                .zip(nodes)
+                .take(path.path.len().saturating_sub(1))
+            {
+                let part = component_parts
+                    .entry(node.to_case(convert_case::Case::Snake))
+                    .or_insert_with(|| ComponentPart {
+                        id: part.id,
+                        name: part.name.to_string(),
+                        children: HashMap::new(),
+                        component: None,
+                    });
+                component_parts = &mut part.children;
+            }
+            let nodes = component.name.split('.');
+            component_parts.insert(
+                nodes.last().unwrap().to_case(convert_case::Case::Snake),
+                ComponentPart {
+                    id: component.id,
+                    name: component.name.clone(),
+                    children: HashMap::new(),
+                    component: Some(component),
+                },
+            );
+        }
+        // let mut component_parts = HashMap::new();
+        // for component in components {
+        //     component_parts.insert(component.name.clone(), component);
+        // }
+        Self {
+            component_parts,
+            earliest_timestamp,
+            last_timestamp,
+        }
+    }
+
     pub fn new(
-        entities: HashMap<String, Arc<Entity>>,
+        component_parts: HashMap<String, ComponentPart>,
         earliest_timestamp: Timestamp,
         last_timestamp: Timestamp,
     ) -> Self {
         Self {
-            entities,
+            component_parts,
             earliest_timestamp,
             last_timestamp,
         }
@@ -418,31 +471,35 @@ impl Context {
     pub fn parse(&self, ast: &AstNode) -> Result<Expr, Error> {
         match ast {
             AstNode::Ident(cow) => self
-                .entities
+                .component_parts
                 .get(cow.as_ref())
-                .ok_or(Error::EntityNotFound(cow.to_string()))
+                .ok_or(Error::ComponentNotFound(cow.to_string()))
                 .cloned()
-                .map(Expr::Entity),
+                .map(Arc::new)
+                .map(Expr::ComponentPart),
             AstNode::Field(ast_node, cow) => {
                 let expr = self.parse(ast_node)?;
                 match &expr {
-                    Expr::Entity(entity) => entity
-                        .components
-                        .get(cow.as_ref())
-                        .ok_or(Error::ComponentNotFound(cow.to_string()))
-                        .cloned()
-                        .map(Expr::Component),
-                    Expr::Component(c) => match cow.as_ref() {
-                        "time" => Ok(Expr::Time(c.clone())),
-                        _ => {
-                            let offset = c
-                                .element_names
-                                .iter()
-                                .position(|name| name == cow.as_ref())
-                                .ok_or(Error::InvalidSwizzle(cow.to_string()))?;
-                            Ok(Expr::ArrayAccess(Box::new(expr), offset))
+                    Expr::ComponentPart(part) => {
+                        if let Some(c) = &part.component {
+                            match cow.as_ref() {
+                                "time" => return Ok(Expr::Time(c.clone())),
+                                _ => {
+                                    if let Some(offset) =
+                                        c.element_names.iter().position(|name| name == cow.as_ref())
+                                    {
+                                        return Ok(Expr::ArrayAccess(Box::new(expr), offset));
+                                    }
+                                }
+                            }
                         }
-                    },
+                        part.children
+                            .get(cow.as_ref())
+                            .ok_or(Error::ComponentNotFound(cow.to_string()))
+                            .cloned()
+                            .map(Arc::new)
+                            .map(Expr::ComponentPart)
+                    }
                     _ => Err(Error::InvalidFieldAccess(cow.to_string())),
                 }
             }
@@ -479,6 +536,15 @@ impl Context {
                 Ok(Expr::BinaryOp(Box::new(left), Box::new(right), *op))
             }
             AstNode::FloatLiteral(f) => Ok(Expr::FloatLiteral(*f)),
+            AstNode::ArrayIndex(ast_node, index) => {
+                let expr = self.parse(ast_node)?;
+                match &expr {
+                    Expr::ComponentPart(_) => Ok(Expr::ArrayAccess(Box::new(expr), *index)),
+                    _ => Err(Error::InvalidFieldAccess(
+                        "array access is only valid on a component".to_string(),
+                    )),
+                }
+            }
         }
     }
 
@@ -493,22 +559,17 @@ impl Context {
     /// Get suggestions for the given expression
     pub fn get_suggestions(&self, expr: &Expr) -> Vec<String> {
         match expr {
-            Expr::Entity(entity) => {
-                let mut suggestions = entity.components.keys().cloned().collect::<Vec<_>>();
-                suggestions.sort();
+            Expr::ComponentPart(part) => {
+                let mut suggestions: Vec<String> = part.children.keys().cloned().collect();
+                if let Some(component) = &part.component {
+                    suggestions.extend(component.element_names.iter().map(|name| name.to_string()));
+                    suggestions.push("last(".to_string());
+                    suggestions.push("first(".to_string());
+                }
                 suggestions.push("time".to_string());
+                suggestions.sort();
                 suggestions
             }
-            Expr::Component(component) => component
-                .element_names
-                .iter()
-                .cloned()
-                .chain([
-                    "last(".to_string(),
-                    "first(".to_string(),
-                    "time".to_string(),
-                ])
-                .collect(),
             Expr::Time(_) => {
                 vec!["fftfreq()".to_string()]
             }
@@ -570,9 +631,9 @@ impl Context {
         };
 
         if !input.contains(".") {
-            let mut entity_names = self.entities.keys().cloned().collect::<Vec<_>>();
-            entity_names.sort();
-            return entity_names
+            let mut component_names = self.component_parts.keys().cloned().collect::<Vec<_>>();
+            component_names.sort();
+            return component_names
                 .into_iter()
                 .filter(|n| n.contains(input.trim()))
                 .map(|n| (n.clone(), format!("{start}{n}")))
@@ -609,8 +670,6 @@ impl Context {
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("entity not found: {0}")]
-    EntityNotFound(String),
-    #[error("component not found: {0}")]
     ComponentNotFound(String),
     #[error("invalid field access: {0}")]
     InvalidFieldAccess(String),
@@ -660,34 +719,28 @@ mod tests {
         )
     }
 
-    fn create_test_entity_component() -> Arc<EntityComponent> {
-        use impeller2::types::{ComponentId, EntityId, PrimType};
+    fn create_test_entity_component() -> Arc<Component> {
+        use impeller2::types::{ComponentId, PrimType};
 
-        Arc::new(EntityComponent::new(
-            "world_pos".to_string(),
-            "a".to_string(),
-            EntityId(1),
-            ComponentId::new("world_pos"),
+        Arc::new(Component::new(
+            "a.world_pos".to_string(),
+            ComponentId::new("a.world_pos"),
             Schema::new(PrimType::F64, vec![3u64]).unwrap(), // 3D vector schema
         ))
     }
 
+    fn create_test_component_part() -> Arc<ComponentPart> {
+        Arc::new(ComponentPart {
+            name: "a.world_pos".to_string(),
+            id: ComponentId::new("a.world_pos"),
+            component: Some(create_test_entity_component()),
+            children: Default::default(),
+        })
+    }
+
     fn create_test_context() -> Context {
-        let mut entities = HashMap::new();
-
-        let component = create_test_entity_component();
-        let mut components = HashMap::new();
-        components.insert("component".to_string(), component);
-
-        let entity = Arc::new(Entity {
-            name: "test_entity".to_string(),
-            components,
-        });
-
-        entities.insert("test_entity".to_string(), entity);
-
-        Context::new(
-            entities,
+        Context::from_leaves(
+            [create_test_entity_component()],
             Timestamp(0),    // earliest_timestamp
             Timestamp(1000), // last_timestamp
         )
@@ -698,11 +751,16 @@ mod tests {
         let entity_component = create_test_entity_component();
         let context = create_test_context();
 
-        let expr = Expr::Component(entity_component);
+        let expr = Expr::ComponentPart(Arc::new(ComponentPart {
+            name: "a.world_pos".to_string(),
+            id: ComponentId::new("a.world_pos"),
+            component: Some(entity_component),
+            children: Default::default(),
+        }));
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select a_world_pos.world_pos as 'a.world_pos' from a_world_pos"
+            "select a_world_pos.a_world_pos as 'a.world_pos' from a_world_pos"
         );
     }
 
@@ -732,145 +790,160 @@ mod tests {
 
     #[test]
     fn test_array_access_sql() {
-        let entity_component = create_test_entity_component();
+        let part = create_test_component_part();
         let context = create_test_context();
 
         // Test first element
-        let expr = Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 0);
+        let expr = Expr::ArrayAccess(Box::new(Expr::ComponentPart(part.clone())), 0);
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select a_world_pos.world_pos[1] as 'a.world_pos.x' from a_world_pos"
+            "select a_world_pos.a_world_pos[1] as 'a.world_pos.x' from a_world_pos"
         );
 
         // Test second element
-        let expr = Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 1);
+        let expr = Expr::ArrayAccess(Box::new(Expr::ComponentPart(part.clone())), 1);
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select a_world_pos.world_pos[2] as 'a.world_pos.y' from a_world_pos"
+            "select a_world_pos.a_world_pos[2] as 'a.world_pos.y' from a_world_pos"
         );
 
         // Test third element
-        let expr = Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 2);
+        let expr = Expr::ArrayAccess(Box::new(Expr::ComponentPart(part.clone())), 2);
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select a_world_pos.world_pos[3] as 'a.world_pos.z' from a_world_pos"
+            "select a_world_pos.a_world_pos[3] as 'a.world_pos.z' from a_world_pos"
         );
     }
 
     #[test]
     fn test_single_table_tuple_sql() {
-        let entity_component = create_test_entity_component();
+        let part = create_test_component_part();
         let context = create_test_context();
 
         // Test Tuple with Time and ArrayAccess
         let expr = Expr::Tuple(vec![
-            Expr::Time(entity_component.clone()),
-            Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 0),
+            Expr::Time(part.component.clone().unwrap()),
+            Expr::ArrayAccess(Box::new(Expr::ComponentPart(part.clone())), 0),
         ]);
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select a_world_pos.time, a_world_pos.world_pos[1] as 'a.world_pos.x' from a_world_pos"
+            "select a_world_pos.time, a_world_pos.a_world_pos[1] as 'a.world_pos.x' from a_world_pos"
         );
 
         // Test Tuple with multiple ArrayAccess
         let expr = Expr::Tuple(vec![
-            Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 0),
-            Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 1),
-            Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 2),
+            Expr::ArrayAccess(Box::new(Expr::ComponentPart(part.clone())), 0),
+            Expr::ArrayAccess(Box::new(Expr::ComponentPart(part.clone())), 1),
+            Expr::ArrayAccess(Box::new(Expr::ComponentPart(part.clone())), 2),
         ]);
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select a_world_pos.world_pos[1] as 'a.world_pos.x', a_world_pos.world_pos[2] as 'a.world_pos.y', a_world_pos.world_pos[3] as 'a.world_pos.z' from a_world_pos"
+            "select a_world_pos.a_world_pos[1] as 'a.world_pos.x', a_world_pos.a_world_pos[2] as 'a.world_pos.y', a_world_pos.a_world_pos[3] as 'a.world_pos.z' from a_world_pos"
         );
     }
 
     #[test]
     fn test_two_table_join_sql() {
-        use impeller2::types::{ComponentId, EntityId, PrimType};
+        use impeller2::types::{ComponentId, PrimType};
 
-        let entity_component = create_test_entity_component();
+        let part1 = create_test_component_part();
         let context = create_test_context();
 
-        let entity_component2 = Arc::new(EntityComponent::new(
-            "velocity".to_string(),
-            "b".to_string(),
-            EntityId(2),
-            ComponentId::new("velocity"),
+        let component2 = Arc::new(Component::new(
+            "b.velocity".to_string(),
+            ComponentId::new("b.velocity"),
             Schema::new(PrimType::F64, vec![3u64]).unwrap(),
         ));
 
+        let part2 = Arc::new(ComponentPart {
+            name: "b.velocity".to_string(),
+            id: ComponentId::new("b.velocity"),
+            component: Some(component2),
+            children: HashMap::default(),
+        });
+
         // Test Tuple with components from different tables
         let expr = Expr::Tuple(vec![
-            Expr::Component(entity_component.clone()),
-            Expr::Component(entity_component2.clone()),
+            Expr::ComponentPart(part1.clone()),
+            Expr::ComponentPart(part2.clone()),
         ]);
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select a_world_pos.world_pos as 'a.world_pos', b_velocity.velocity as 'b.velocity' from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time"
+            "select a_world_pos.a_world_pos as 'a.world_pos', b_velocity.b_velocity as 'b.velocity' from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time"
         );
 
         // Test Tuple with Time from one table and Component from another
         let expr = Expr::Tuple(vec![
-            Expr::Time(entity_component.clone()),
-            Expr::Component(entity_component2.clone()),
+            Expr::Time(part1.component.clone().unwrap()),
+            Expr::ComponentPart(part2.clone()),
         ]);
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select a_world_pos.time, b_velocity.velocity as 'b.velocity' from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time"
+            "select a_world_pos.time, b_velocity.b_velocity as 'b.velocity' from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time"
         );
 
         // Test Tuple with ArrayAccess from different tables
         let expr = Expr::Tuple(vec![
-            Expr::ArrayAccess(Box::new(Expr::Component(entity_component.clone())), 0),
-            Expr::ArrayAccess(Box::new(Expr::Component(entity_component2.clone())), 1),
+            Expr::ArrayAccess(Box::new(Expr::ComponentPart(part1.clone())), 0),
+            Expr::ArrayAccess(Box::new(Expr::ComponentPart(part2.clone())), 1),
         ]);
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select a_world_pos.world_pos[1] as 'a.world_pos.x', b_velocity.velocity[2] as 'b.velocity.y' from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time"
+            "select a_world_pos.a_world_pos[1] as 'a.world_pos.x', b_velocity.b_velocity[2] as 'b.velocity.y' from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time"
         );
     }
 
     #[test]
     fn test_three_table_join_sql() {
-        use impeller2::types::{ComponentId, EntityId, PrimType};
+        use impeller2::types::{ComponentId, PrimType};
 
-        let entity_component = create_test_entity_component();
+        let part1 = create_test_component_part();
         let context = create_test_context();
 
-        let entity_component2 = Arc::new(EntityComponent::new(
-            "velocity".to_string(),
-            "b".to_string(),
-            EntityId(2),
-            ComponentId::new("velocity"),
+        let component2 = Arc::new(Component::new(
+            "b.velocity".to_string(),
+            ComponentId::new("b.velocity"),
             Schema::new(PrimType::F64, vec![3u64]).unwrap(),
         ));
 
-        let entity_component3 = Arc::new(EntityComponent::new(
-            "acceleration".to_string(),
-            "c".to_string(),
-            EntityId(3),
-            ComponentId::new("acceleration"),
+        let part2 = Arc::new(ComponentPart {
+            name: "b.velocity".to_string(),
+            id: ComponentId::new("b.velocity"),
+            component: Some(component2),
+            children: HashMap::default(),
+        });
+
+        let component3 = Arc::new(Component::new(
+            "c.acceleration".to_string(),
+            ComponentId::new("c.acceleration"),
             Schema::new(PrimType::F64, vec![3u64]).unwrap(),
         ));
+
+        let part3 = Arc::new(ComponentPart {
+            name: "c.acceleration".to_string(),
+            id: ComponentId::new("c.acceleration"),
+            component: Some(component3),
+            children: HashMap::default(),
+        });
 
         let expr = Expr::Tuple(vec![
-            Expr::Component(entity_component.clone()),
-            Expr::Component(entity_component2.clone()),
-            Expr::Component(entity_component3.clone()),
+            Expr::ComponentPart(part1.clone()),
+            Expr::ComponentPart(part2.clone()),
+            Expr::ComponentPart(part3.clone()),
         ]);
         let result = expr.to_sql(&context);
         let result_str = result.unwrap();
         assert_eq!(
             result_str,
-            "select a_world_pos.world_pos as 'a.world_pos', b_velocity.velocity as 'b.velocity', c_acceleration.acceleration as 'c.acceleration' from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time JOIN c_acceleration ON a_world_pos.time = c_acceleration.time"
+            "select a_world_pos.a_world_pos as 'a.world_pos', b_velocity.b_velocity as 'b.velocity', c_acceleration.c_acceleration as 'c.acceleration' from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time JOIN c_acceleration ON a_world_pos.time = c_acceleration.time"
         );
     }
 
@@ -883,11 +956,11 @@ mod tests {
     #[test]
     fn test_entity_suggestions() {
         let context = create_test_context();
-        let entity = context.entities.get("test_entity").unwrap();
-        let expr = Expr::Entity(entity.clone());
+        let part = context.component_parts.get("a").unwrap();
+        let expr = Expr::ComponentPart(Arc::new(part.clone()));
 
         let suggestions = context.get_suggestions(&expr);
-        assert!(suggestions.contains(&"component".to_string()));
+        assert!(suggestions.contains(&"world_pos".to_string()));
         assert!(suggestions.contains(&"time".to_string()));
         assert_eq!(suggestions.len(), 2);
     }
@@ -895,9 +968,9 @@ mod tests {
     #[test]
     fn test_component_suggestions() {
         let context = create_test_context();
-        let entity = context.entities.get("test_entity").unwrap();
-        let component = entity.components.get("component").unwrap();
-        let expr = Expr::Component(component.clone());
+        let entity = context.component_parts.get("a").unwrap();
+        let component = entity.children.get("world_pos").unwrap();
+        let expr = Expr::ComponentPart(Arc::new(component.clone()));
 
         let suggestions = context.get_suggestions(&expr);
         assert!(suggestions.contains(&"first(".to_string()));
@@ -921,8 +994,8 @@ mod tests {
 
     #[test]
     fn test_array_access_suggestions() {
-        let component = create_test_entity_component();
-        let expr = Expr::ArrayAccess(Box::new(Expr::Component(component)), 0);
+        let component = create_test_component_part();
+        let expr = Expr::ArrayAccess(Box::new(Expr::ComponentPart(component)), 0);
         let context = create_test_context();
 
         let suggestions = context.get_suggestions(&expr);
@@ -940,7 +1013,7 @@ mod tests {
             .map(|(s, _)| s)
             .collect::<Vec<_>>();
 
-        assert!(suggestions.contains(&"test_entity".to_string()));
+        assert!(suggestions.contains(&"a".to_string()));
         assert_eq!(suggestions.len(), 1);
     }
 
@@ -948,12 +1021,12 @@ mod tests {
     fn test_string_suggestions_with_period() {
         let context = create_test_context();
         let suggestions = context
-            .get_string_suggestions("test_entity.")
+            .get_string_suggestions("a.")
             .into_iter()
             .map(|(s, _)| s)
             .collect::<Vec<_>>();
 
-        assert!(suggestions.contains(&"component".to_string()));
+        assert!(suggestions.contains(&"world_pos".to_string()));
         assert!(suggestions.contains(&"time".to_string()));
     }
 
@@ -961,7 +1034,7 @@ mod tests {
     fn test_string_suggestions_component_with_period() {
         let context = create_test_context();
         let suggestions = context
-            .get_string_suggestions("test_entity.component.")
+            .get_string_suggestions("a.world_pos.")
             .into_iter()
             .map(|(s, _)| s)
             .collect::<Vec<_>>();
@@ -978,5 +1051,13 @@ mod tests {
         let suggestions = context.get_string_suggestions("invalid_entity.");
 
         assert!(suggestions.is_empty());
+    }
+
+    #[test]
+    fn test_trailing_int_ident() {
+        assert_eq!(
+            ast_parser::expr("cow_0").unwrap(),
+            AstNode::Ident(Cow::Borrowed("cow_0"))
+        );
     }
 }

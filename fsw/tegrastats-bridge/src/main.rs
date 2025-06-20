@@ -8,7 +8,7 @@ use sysinfo::CpuRefreshKind;
 use zerocopy::{Immutable, IntoBytes};
 
 #[derive(AsVTable, Metadatatize, IntoBytes, Immutable, Debug)]
-#[roci(entity_id = 1)]
+#[roci(parent = "aleph")]
 pub struct Output {
     pub cpu_usage: [f32; 8],
     pub cpu_freq: [f32; 8],

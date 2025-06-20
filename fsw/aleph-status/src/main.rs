@@ -150,7 +150,7 @@ fn print_os_info() {
 
 async fn print_sensor_info() -> anyhow::Result<()> {
     #[derive(AsVTable, Default, Debug, Clone, TryFromBytes, Immutable, KnownLayout)]
-    #[roci(entity_id = 1)]
+    #[roci(parent = "aleph")]
     struct SensorInfo {
         pub mag: [f32; 3],
         pub gyro: [f32; 3],
@@ -207,7 +207,7 @@ async fn print_sensor_info() -> anyhow::Result<()> {
 
 async fn print_soc_telem() -> anyhow::Result<()> {
     #[derive(AsVTable, Default, Debug, Clone, TryFromBytes, Immutable, KnownLayout)]
-    #[roci(entity_id = 1)]
+    #[roci(parent = "aleph")]
     struct HWTelem {
         pub cpu_usage: [f32; 8],
         pub cpu_freq: [f32; 8],

@@ -1,10 +1,11 @@
+#![recursion_limit = "256"]
+
 use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use crate::plugins::editor_cam_touch;
 use bevy::{
     DefaultPlugins,
     asset::{UnapprovedPathMode, embedded_asset},
-    core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
     log::LogPlugin,
     math::{DQuat, DVec3},
@@ -13,39 +14,35 @@ use bevy::{
         wireframe::{WireframeConfig, WireframePlugin},
     },
     prelude::*,
-    render::{
-        camera::{Exposure, PhysicalCameraParameters},
-        view::RenderLayers,
-    },
     window::{PresentMode, WindowResolution, WindowTheme},
     winit::WinitSettings,
 };
-use bevy_editor_cam::controller::component::EditorCam;
-use bevy_editor_cam::prelude::OrbitConstraint;
 use bevy_egui::{EguiContextSettings, EguiPlugin};
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
-use convert_case::Casing;
-use impeller2::types::OwnedPacket;
+use convert_case::{Case, Casing};
+use impeller2::types::{ComponentId, OwnedPacket};
 use impeller2::types::{Msg, Timestamp};
 use impeller2_bevy::{
-    AssetHandle, ComponentMetadataRegistry, ComponentSchemaRegistry, ComponentValueMap,
+    ComponentMetadataRegistry, ComponentPathRegistry, ComponentSchemaRegistry, ComponentValueMap,
     CurrentStreamId, EntityMap, PacketHandlerInput, PacketHandlers, PacketTx,
 };
-use impeller2_wkt::{
-    CurrentTimestamp, EntityMetadata, NewConnection, SetStreamState, Viewport, WorldPos,
-};
-use impeller2_wkt::{EarliestTimestamp, Glb, LastUpdated};
+use impeller2_wkt::{CurrentTimestamp, NewConnection, SetStreamState, WorldPos};
+use impeller2_wkt::{EarliestTimestamp, LastUpdated};
 use nox::Tensor;
-use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc, spawn_gizmo};
+use object_3d::create_object_3d_entity;
+use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc};
 use ui::{
     SelectedObject,
     colors::{ColorExt, get_scheme},
     tiles::{self, TileState},
     utils::FriendlyEpoch,
-    widgets::plot::{CollectedGraphData, gpu::LineHandle},
+    widgets::{
+        inspector::viewport::set_viewport_pos,
+        plot::{CollectedGraphData, gpu::LineHandle},
+    },
 };
 
-pub mod ghosts;
+pub mod object_3d;
 mod offset_parse;
 mod plugins;
 pub mod ui;
@@ -192,9 +189,7 @@ impl Plugin for EditorPlugin {
             .add_systems(PreUpdate, sync_res::<CurrentTimestamp>)
             .add_systems(PreUpdate, sync_res::<impeller2_wkt::SimulationTimeStep>)
             .add_systems(PreUpdate, sync_pos)
-            .add_systems(PreUpdate, sync_mesh_to_bevy)
-            .add_systems(PreUpdate, sync_material_to_bevy)
-            .add_systems(PreUpdate, sync_glb_to_bevy)
+            .add_systems(PreUpdate, sync_object_3d)
             .add_systems(Update, sync_paused)
             .add_systems(PreUpdate, set_selected_range)
             .add_systems(PreUpdate, set_floating_origin.after(sync_pos))
@@ -203,17 +198,18 @@ impl Plugin for EditorPlugin {
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
             .add_systems(PostUpdate, set_clear_color)
+            .add_systems(Update, set_viewport_pos)
             //.add_systems(Update, clamp_current_time)
             .insert_resource(WireframeConfig {
                 global: false,
                 default_color: Color::WHITE,
             })
-            .init_resource::<SyncedGlbs>()
             .insert_resource(ClearColor(get_scheme().bg_secondary.into_bevy()))
             .insert_resource(TimeRangeBehavior::default())
             .insert_resource(SelectedTimeRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)))
             .init_resource::<EqlContext>()
-            .add_plugins(ghosts::GhostsPlugin);
+            .init_resource::<SyncedObject3d>()
+            .add_plugins(object_3d::Object3DPlugin);
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
         }
@@ -298,95 +294,6 @@ fn set_clear_color(mut clear_color: ResMut<ClearColor>) {
 //                 .insert(BackgroundColor(bg_color));
 //         });
 // }
-
-fn spawn_main_camera(
-    commands: &mut Commands,
-    asset_server: &Res<AssetServer>,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    render_layer_alloc: &mut ResMut<RenderLayerAlloc>,
-    viewport: &Viewport,
-) -> (Entity, Option<Entity>, Option<Entity>) {
-    let mut main_camera_layers = RenderLayers::default();
-    let mut grid_layers = RenderLayers::none();
-    if let Some(grid_layer) = render_layer_alloc.alloc() {
-        main_camera_layers = main_camera_layers.with(grid_layer);
-        grid_layers = grid_layers.with(grid_layer);
-    }
-
-    let grid_visibility = if viewport.show_grid {
-        Visibility::Visible
-    } else {
-        Visibility::Hidden
-    };
-    let grid_id = commands
-        .spawn((
-            bevy_infinite_grid::InfiniteGridBundle {
-                settings: bevy_infinite_grid::InfiniteGridSettings {
-                    minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
-                    major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
-                    z_axis_color: crate::ui::colors::bevy::GREEN,
-                    x_axis_color: crate::ui::colors::bevy::RED,
-                    fadeout_distance: 50_000.0,
-                    scale: 0.1,
-                    ..Default::default()
-                },
-                visibility: grid_visibility,
-                ..Default::default()
-            },
-            grid_layers,
-        ))
-        .id();
-
-    let mut camera = commands.spawn((
-        Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)).looking_at(Vec3::ZERO, Vec3::Y),
-        Camera3d::default(),
-        Camera {
-            hdr: false,
-            clear_color: ClearColorConfig::Default,
-            order: 1,
-            ..Default::default()
-        },
-        Projection::Perspective(PerspectiveProjection {
-            fov: viewport.fov.to_radians(),
-            ..Default::default()
-        }),
-        Tonemapping::TonyMcMapface,
-        Exposure::from_physical_camera(PhysicalCameraParameters {
-            aperture_f_stops: 2.8,
-            shutter_speed_s: 1.0 / 200.0,
-            sensitivity_iso: 400.0,
-            // full frame sensor height
-            sensor_height: 24.0 / 1000.0,
-        }),
-        main_camera_layers,
-        MainCamera,
-        GridCell::<i128>::default(),
-        EditorCam {
-            orbit_constraint: OrbitConstraint::Fixed {
-                up: Vec3::Y,
-                can_pass_tdc: false,
-            },
-            last_anchor_depth: 2.0,
-            ..Default::default()
-        },
-        GridHandle { grid: grid_id },
-    ));
-
-    camera.insert(Bloom { ..default() });
-    camera.insert(EnvironmentMapLight {
-        diffuse_map: asset_server.load("embedded://elodin_editor/assets/diffuse.ktx2"),
-        specular_map: asset_server.load("embedded://elodin_editor/assets/specular.ktx2"),
-        intensity: 2000.0,
-        ..Default::default()
-    });
-
-    let camera = camera.id();
-
-    let (nav_gizmo, nav_gizmo_camera) =
-        spawn_gizmo(camera, commands, meshes, materials, render_layer_alloc);
-    (camera, nav_gizmo, nav_gizmo_camera)
-}
 
 #[allow(clippy::type_complexity)]
 fn set_floating_origin(
@@ -702,26 +609,6 @@ pub fn setup_cell(
     }
 }
 
-pub fn sync_pos(
-    mut query: Query<(&mut Transform, &mut GridCell<i128>, &WorldPos)>,
-    floating_origin: Res<FloatingOriginSettings>,
-) {
-    query
-        .iter_mut()
-        .for_each(|(mut transform, mut grid_cell, world_pos)| {
-            // Converts from Z-up to Y-up
-            let pos = world_pos.bevy_pos();
-            let att = world_pos.bevy_att();
-            let (new_grid_cell, translation) = floating_origin.translation_to_grid(pos);
-            *grid_cell = new_grid_cell;
-            *transform = bevy::prelude::Transform {
-                translation,
-                rotation: att.as_quat(),
-                ..Default::default()
-            }
-        });
-}
-
 pub trait WorldPosExt {
     fn bevy_pos(&self) -> DVec3;
     fn bevy_att(&self) -> DQuat;
@@ -758,31 +645,24 @@ pub fn sync_paused(
     }
 }
 
-#[derive(Default)]
-struct SyncedMeshes(HashMap<AssetHandle<impeller2_wkt::Mesh>, Handle<Mesh>>);
-
-fn sync_mesh_to_bevy(
-    mesh: Query<(
-        Entity,
-        &impeller2_wkt::Mesh,
-        &AssetHandle<impeller2_wkt::Mesh>,
-    )>,
-    mut mesh_assets: ResMut<Assets<Mesh>>,
-    mut commands: Commands,
-    mut cache: Local<SyncedMeshes>,
+pub fn sync_pos(
+    mut query: Query<(&mut Transform, &mut GridCell<i128>, &WorldPos)>,
+    floating_origin: Res<FloatingOriginSettings>,
 ) {
-    for (entity, mesh, handle) in mesh.iter() {
-        let mut entity = commands.entity(entity);
-        let mesh = if let Some(mesh) = cache.0.get(handle) {
-            mesh.clone()
-        } else {
-            let mesh = mesh.clone().into_bevy();
-            let mesh = mesh_assets.add(mesh);
-            cache.0.insert(handle.clone(), mesh.clone());
-            mesh
-        };
-        entity.insert(Mesh3d(mesh));
-    }
+    query
+        .iter_mut()
+        .for_each(|(mut transform, mut grid_cell, world_pos)| {
+            // Converts from Z-up to Y-up
+            let pos = world_pos.bevy_pos();
+            let att = world_pos.bevy_att();
+            let (new_grid_cell, translation) = floating_origin.translation_to_grid(pos);
+            *grid_cell = new_grid_cell;
+            *transform = bevy::prelude::Transform {
+                translation,
+                rotation: att.as_quat(),
+                ..Default::default()
+            }
+        });
 }
 
 pub trait BevyExt {
@@ -807,32 +687,6 @@ impl BevyExt for impeller2_wkt::Mesh {
     }
 }
 
-#[derive(Default)]
-struct SyncedMaterials(HashMap<AssetHandle<impeller2_wkt::Material>, Handle<StandardMaterial>>);
-fn sync_material_to_bevy(
-    material: Query<(
-        Entity,
-        &impeller2_wkt::Material,
-        &AssetHandle<impeller2_wkt::Material>,
-    )>,
-    mut material_assets: ResMut<Assets<StandardMaterial>>,
-    mut commands: Commands,
-    mut cache: Local<SyncedMaterials>,
-) {
-    for (entity, material, handle) in material.iter() {
-        let mut entity = commands.entity(entity);
-        let material = if let Some(material) = cache.0.get(handle) {
-            material.clone()
-        } else {
-            let material = material.clone().into_bevy();
-            let material = material_assets.add(material);
-            cache.0.insert(handle.clone(), material.clone());
-            material
-        };
-        entity.insert(MeshMaterial3d(material));
-    }
-}
-
 impl BevyExt for impeller2_wkt::Material {
     type Bevy = StandardMaterial;
 
@@ -844,38 +698,82 @@ impl BevyExt for impeller2_wkt::Material {
     }
 }
 
-fn sync_res<R: Component + Resource + Clone>(q: Query<&R>, mut res: ResMut<R>) {
-    for t in &q {
-        *res = t.clone();
+#[derive(Default, Resource)]
+struct SyncedObject3d(HashMap<Entity, Entity>);
+
+#[allow(clippy::too_many_arguments)]
+fn sync_object_3d(
+    query: Query<(Entity, &ComponentId), With<impeller2_wkt::WorldPos>>,
+    meshes: Query<&impeller2_wkt::Mesh>,
+    materials: Query<&impeller2_wkt::Material>,
+    glbs: Query<&impeller2_wkt::Glb>,
+    mut synced_object_3d: ResMut<SyncedObject3d>,
+    entity_map: ResMut<EntityMap>,
+    path_reg: Res<ComponentPathRegistry>,
+    ctx: Res<EqlContext>,
+    mut material_assets: ResMut<Assets<StandardMaterial>>,
+    mut mesh_assets: ResMut<Assets<Mesh>>,
+    mut commands: Commands,
+    assets: Res<AssetServer>,
+) {
+    for (entity, id) in &query {
+        if synced_object_3d.0.contains_key(&entity) {
+            continue;
+        }
+        let Some(path) = dbg!(path_reg.get(id)) else {
+            continue;
+        };
+        let parent = path.path.first().unwrap();
+
+        let glb = entity_map
+            .get(&ComponentId::new(&format!(
+                "{}.asset_handle_glb",
+                parent.name
+            )))
+            .and_then(|e| glbs.get(*e).ok());
+        let mesh = entity_map
+            .get(&ComponentId::new(&format!(
+                "{}.asset_handle_mesh",
+                parent.name
+            )))
+            .and_then(|e| meshes.get(*e).ok());
+        let material = entity_map
+            .get(&ComponentId::new(&format!(
+                "{}.asset_handle_material",
+                parent.name
+            )))
+            .and_then(|e| materials.get(*e).ok());
+
+        let mesh_source = match dbg!((glb, mesh, material)) {
+            (Some(glb), _, _) => impeller2_wkt::Object3D::Glb(glb.0.clone()),
+            (_, Some(mesh), Some(mat)) => impeller2_wkt::Object3D::Mesh {
+                mesh: mesh.clone(),
+                material: mat.clone(),
+            },
+            _ => continue,
+        };
+
+        let eql = format!("{}.world_pos", parent.name.to_case(Case::Snake));
+        let Ok(expr) = dbg!(ctx.0.parse_str(&eql)) else {
+            continue;
+        };
+
+        let object_entity = create_object_3d_entity(
+            &mut commands,
+            eql,
+            expr,
+            Some(mesh_source),
+            &mut material_assets,
+            &mut mesh_assets,
+            &assets,
+        );
+        synced_object_3d.0.insert(entity, object_entity);
     }
 }
 
-#[derive(Default, Resource)]
-struct SyncedGlbs(HashMap<AssetHandle<Glb>, Handle<Scene>>);
-
-#[derive(Component)]
-struct SyncedGlb;
-
-fn sync_glb_to_bevy(
-    mut commands: Commands,
-    mut cache: ResMut<SyncedGlbs>,
-    glb: Query<(Entity, &Glb, &AssetHandle<Glb>, Option<&SyncedGlb>)>,
-    assets: Res<AssetServer>,
-) {
-    for (entity, glb, handle, synced_glb) in glb.iter() {
-        let Glb(u) = glb;
-        let mut entity = commands.entity(entity);
-        let scene = if let Some(glb) = cache.0.get(handle) {
-            glb.clone()
-        } else {
-            let url = format!("{u}#Scene0");
-            let scene = assets.load(&url);
-            cache.0.insert(handle.clone(), scene.clone());
-            scene
-        };
-        if synced_glb.is_none() {
-            entity.insert((SceneRoot(scene), SyncedGlb));
-        }
+fn sync_res<R: Component + Resource + Clone>(q: Query<&R>, mut res: ResMut<R>) {
+    for t in &q {
+        *res = t.clone();
     }
 }
 
@@ -894,7 +792,7 @@ fn clear_state_new_connection(
     mut value_map: Query<&mut ComponentValueMap>,
     mut graph_data: ResMut<CollectedGraphData>,
     lines: Query<Entity, With<LineHandle>>,
-    mut glbs: ResMut<SyncedGlbs>,
+    mut synced_glbs: ResMut<SyncedObject3d>,
     mut eql_context: ResMut<EqlContext>,
     mut commands: Commands,
 ) {
@@ -902,7 +800,7 @@ fn clear_state_new_connection(
         OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
         _ => return,
     }
-    eql_context.0.entities.clear();
+    eql_context.0.component_parts.clear();
     entity_map.0.retain(|_, entity| {
         if let Ok(mut entity_commands) = commands.get_entity(*entity) {
             entity_commands.despawn();
@@ -917,7 +815,7 @@ fn clear_state_new_connection(
             entity_commands.despawn();
         }
     }
-    glbs.0.clear();
+    synced_glbs.0.clear();
     ui_state.clear(&mut commands, &mut selected_object);
     *graph_data = CollectedGraphData::default();
     render_layer_alloc.free_all();
@@ -1087,61 +985,28 @@ impl Default for EqlContext {
 }
 
 pub fn update_eql_context(
-    entity_map: Res<EntityMap>,
     component_metadata_registry: Res<ComponentMetadataRegistry>,
     component_schema_registry: Res<ComponentSchemaRegistry>,
-    component_value_query: Query<&ComponentValueMap>,
-    entity_metadata_query: Query<&EntityMetadata>,
+    path_reg: Res<ComponentPathRegistry>,
     mut eql_context: ResMut<EqlContext>,
 ) {
-    let mut entities = HashMap::new();
-    for (entity_id, bevy_entity) in entity_map.iter() {
-        let entity_name = if let Ok(entity_metadata) = entity_metadata_query.get(*bevy_entity) {
-            entity_metadata.name.to_case(convert_case::Case::Snake)
-        } else {
-            entity_id.to_string()
-        };
-
-        if let Ok(component_value_map) = component_value_query.get(*bevy_entity) {
-            let mut components = HashMap::new();
-
-            for (component_id, _component_value) in component_value_map.iter() {
-                let Some(component_metadata) =
-                    component_metadata_registry.get_metadata(component_id)
-                else {
-                    continue;
-                };
-                let Some(schema) = component_schema_registry.get(component_id) else {
-                    continue;
-                };
-                let mut entity_component = eql::EntityComponent::new(
-                    component_metadata.name.to_case(convert_case::Case::Snake),
-                    entity_name.clone(),
-                    *entity_id,
-                    *component_id,
-                    schema.clone(),
-                );
-                if !component_metadata.element_names().is_empty() {
-                    entity_component.element_names = component_metadata
-                        .element_names()
-                        .split(",")
-                        .map(str::to_string)
-                        .collect();
-                }
-
-                components.insert(entity_component.name.clone(), Arc::new(entity_component));
+    eql_context.0 = eql::Context::from_leaves(
+        path_reg.0.iter().filter_map(|(id, path)| {
+            let schema = component_schema_registry.0.get(id)?;
+            let metadata = component_metadata_registry.0.get(id)?;
+            let mut component = eql::Component::new(metadata.name.clone(), path.id, schema.clone());
+            if !metadata.element_names().is_empty() {
+                component.element_names = metadata
+                    .element_names()
+                    .split(",")
+                    .map(str::to_string)
+                    .collect();
             }
-
-            let entity = Arc::new(eql::Entity {
-                name: entity_name.clone(),
-                components,
-            });
-
-            entities.insert(entity_name, entity);
-        }
-    }
-
-    eql_context.0 = eql::Context::new(entities, Timestamp(i64::MIN), Timestamp(i64::MAX));
+            Some(Arc::new(component))
+        }),
+        Timestamp(i64::MIN),
+        Timestamp(i64::MAX),
+    );
 }
 
 pub fn set_eql_context_range(time_range: Res<SelectedTimeRange>, mut eql: ResMut<EqlContext>) {

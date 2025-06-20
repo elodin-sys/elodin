@@ -77,22 +77,18 @@ fn main() {
         }));
         world.spawn(panel);
         let asset = world.insert_asset(Line3d {
-            entity: b,
-            component_id: <WorldPos<ArrayRepr>>::COMPONENT_ID,
-            index: [4, 5, 6],
             line_width: 10.0,
             color: Color::YOLK,
             perspective: true,
+            eql: "a.world_pos".to_string(),
         });
         world.spawn(asset);
 
         let asset = world.insert_asset(Line3d {
-            entity: a,
-            component_id: <WorldPos<ArrayRepr>>::COMPONENT_ID,
-            index: [4, 5, 6],
             line_width: 10.0,
             color: Color::MINT,
             perspective: true,
+            eql: "b.world_pos".to_string(),
         });
         world.spawn(asset);
 

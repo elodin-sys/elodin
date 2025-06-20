@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use zerocopy::IntoBytes;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 #[serde(tag = "type")]
 pub enum ComponentValue {
     U8(Array<u8, Dyn>),

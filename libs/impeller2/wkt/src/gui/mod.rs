@@ -1,7 +1,6 @@
 use crate::Color;
 use impeller2::component::Asset;
 use impeller2::types::{ComponentId, EntityId};
-use nox::{ArrayRepr, Quaternion, Vector3};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::Range;
@@ -34,40 +33,26 @@ pub struct Split {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Viewport {
-    pub track_entity: Option<EntityId>,
-    pub track_rotation: bool,
     pub fov: f32,
     pub active: bool,
-    pub pos: Vector3<f32, ArrayRepr>,
-    pub rotation: Quaternion<f32, ArrayRepr>,
     pub show_grid: bool,
     pub hdr: bool,
     pub name: Option<String>,
-}
-
-impl Viewport {
-    pub fn looking_at(mut self, pos: Vector3<f32, ArrayRepr>) -> Self {
-        let dir = pos - self.pos;
-        let dir = Vector3::new(dir.x(), dir.z(), -dir.y());
-        self.rotation = Quaternion::look_at_rh(dir, Vector3::y_axis()).inverse();
-        self
-    }
+    pub pos: Option<String>,
+    pub look_at: Option<String>,
 }
 
 impl Default for Viewport {
     fn default() -> Self {
         Self {
-            track_entity: None,
             fov: 45.0,
             active: false,
-            pos: Vector3::new(5.0, 5.0, 10.0),
-            rotation: Quaternion::identity(),
-            track_rotation: true,
             show_grid: false,
             hdr: false,
             name: None,
+            pos: None,
+            look_at: None,
         }
-        .looking_at(Vector3::zeros())
     }
 }
 
@@ -78,25 +63,12 @@ impl Asset for Panel {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Graph {
-    pub entities: Vec<GraphEntity>,
+    pub eql: String,
     pub name: Option<String>,
     #[serde(default)]
     pub graph_type: GraphType,
     pub auto_y_range: bool,
     pub y_range: Range<f64>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct GraphEntity {
-    pub entity_id: EntityId,
-    pub components: Vec<GraphComponent>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct GraphComponent {
-    pub component_id: ComponentId,
-    pub indexes: Vec<usize>,
-    pub color: Vec<Color>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq, Debug, Default)]
@@ -111,9 +83,7 @@ pub enum GraphType {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Line3d {
-    pub entity: EntityId,
-    pub component_id: ComponentId,
-    pub index: [usize; 3],
+    pub eql: String,
     pub line_width: f32,
     pub color: Color,
     pub perspective: bool,
@@ -131,7 +101,6 @@ pub struct Camera;
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct VectorArrow {
     pub id: ComponentId,
-    pub entity_id: EntityId,
     pub range: Range<usize>,
     pub color: Color,
     pub attached: bool,
@@ -204,9 +173,19 @@ impl Asset for Material {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub enum Object3D {
+    Glb(String),
+    Mesh { mesh: Mesh, material: Material },
+}
+
+impl Asset for Object3D {
+    const NAME: &'static str = "mesh_source";
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct ComponentMonitor {
     pub component_id: ComponentId,
-    pub entity_id: EntityId,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

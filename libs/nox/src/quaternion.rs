@@ -408,5 +408,11 @@ mod tests {
             tensor![0.0, 0.0, 0.573576436351046, 0.8191520442889918],
             epsilon = 1e-8,
         );
+
+        assert_relative_eq!(
+            mat.dot(&tensor![1., 2., 3.]),
+            quat * tensor![1., 2., 3.],
+            epsilon = 1e-6,
+        );
     }
 }

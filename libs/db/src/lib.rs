@@ -4,7 +4,7 @@ use futures_lite::StreamExt;
 use impeller2::registry::VTableRegistry;
 use impeller2::types::{PacketHeader, PacketTy};
 use impeller2::vtable::builder::{
-    OpBuilder, pair, raw_field, raw_table, schema, timestamp, vtable,
+    OpBuilder, component, raw_field, raw_table, schema, timestamp, vtable,
 };
 use impeller2::vtable::{RealizedField, builder};
 use impeller2::{
@@ -12,8 +12,8 @@ use impeller2::{
     registry,
     schema::Schema,
     types::{
-        ComponentId, ComponentView, EntityId, IntoLenPacket, LenPacket, Msg, OwnedPacket as Packet,
-        PacketId, PrimType, RequestId, Timestamp,
+        ComponentId, ComponentView, IntoLenPacket, LenPacket, Msg, OwnedPacket as Packet, PacketId,
+        PrimType, RequestId, Timestamp,
     },
     vtable::VTable,
 };
@@ -75,9 +75,8 @@ pub struct DB {
 
 #[derive(Default)]
 pub struct State {
-    components: HashMap<(EntityId, ComponentId), Component>,
+    components: HashMap<ComponentId, Component>,
     component_metadata: HashMap<ComponentId, ComponentMetadata>,
-    entity_metadata: HashMap<EntityId, EntityMetadata>,
     assets: HashMap<AssetId, memmap2::Mmap>,
 
     msg_logs: HashMap<PacketId, MsgLog>,
@@ -96,7 +95,6 @@ impl DB {
     pub fn with_time_step(path: PathBuf, time_step: Duration) -> Result<Self, Error> {
         info!(?path, "created db");
 
-        std::fs::create_dir_all(path.join("entity_metadata"))?;
         let default_stream_time_step = AtomicU64::new(time_step.as_nanos() as u64);
         let time_step = AtomicU64::new(time_step.as_nanos() as u64);
         let state = State {
@@ -143,9 +141,8 @@ impl DB {
     }
 
     pub fn open(path: PathBuf) -> Result<Self, Error> {
-        let mut entity_metadata = HashMap::new();
         let mut component_metadata = HashMap::new();
-        let mut entity_components = HashMap::new();
+        let mut components = HashMap::new();
         let mut msg_logs = HashMap::new();
         let mut last_updated = i64::MIN;
         let mut start_timestamp = i64::MAX;
@@ -155,8 +152,7 @@ impl DB {
             let Ok(elem) = elem else { continue };
             let path = elem.path();
             if !path.is_dir()
-                || (path.file_name() == Some(OsStr::new("entity_metadata"))
-                    || path.file_name() == Some(OsStr::new("assets")))
+                || path.file_name() == Some(OsStr::new("assets"))
                 || path.file_name() == Some(OsStr::new("msgs"))
             {
                 trace!("Skipping non-component directory: {}", path.display());
@@ -175,35 +171,14 @@ impl DB {
             trace!("Read component metadata for {}", metadata.name);
             component_metadata.insert(component_id, metadata);
 
-            for elem in std::fs::read_dir(&path)? {
-                let Ok(elem) = elem else { continue };
+            trace!("Opening component file {}", path.display());
 
-                let path = elem.path();
-                if path
-                    .file_name()
-                    .and_then(|p| p.to_str())
-                    .map(|s| s == "schema" || s == "metadata")
-                    .unwrap_or(false)
-                {
-                    continue;
-                }
-
-                let entity_id = EntityId(
-                    path.file_name()
-                        .and_then(|p| p.to_str())
-                        .and_then(|p| p.parse().ok())
-                        .ok_or(Error::InvalidComponentId)?,
-                );
-
-                trace!("Opening entity file {}", path.display());
-
-                let entity = Component::open(path, component_id, entity_id, schema.clone())?;
-                if let Some((timestamp, _)) = entity.time_series.latest() {
-                    last_updated = timestamp.0.max(last_updated);
-                };
-                start_timestamp = start_timestamp.min(entity.time_series.start_timestamp().0);
-                entity_components.insert((entity_id, component_id), entity);
-            }
+            let component = Component::open(&path, component_id, schema.clone())?;
+            if let Some((timestamp, _)) = component.time_series.latest() {
+                last_updated = timestamp.0.max(last_updated);
+            };
+            start_timestamp = start_timestamp.min(component.time_series.start_timestamp().0);
+            components.insert(component_id, component);
         }
         if let Ok(msgs_dir) = std::fs::read_dir(path.join("msgs")) {
             for elem in msgs_dir {
@@ -227,24 +202,10 @@ impl DB {
             }
         }
 
-        for elem in std::fs::read_dir(path.join("entity_metadata"))? {
-            let Ok(elem) = elem else { continue };
-
-            let path = elem.path();
-            let entity_id = EntityId(
-                path.file_name()
-                    .and_then(|p| p.to_str())
-                    .and_then(|p| p.parse().ok())
-                    .ok_or(Error::InvalidComponentId)?,
-            );
-            let metadata = EntityMetadata::read(path)?;
-            entity_metadata.insert(entity_id, metadata);
-        }
         info!(db.path = ?path, "opened db");
         let db_state = DbSettings::read(path.join("db_state"))?;
         let state = State {
-            components: entity_components,
-            entity_metadata,
+            components,
             component_metadata,
             assets: open_assets(&path)?,
             msg_logs,
@@ -278,14 +239,13 @@ impl DB {
         self.with_state_mut(|state| {
             for res in vtable.vtable.realize_fields(None) {
                 let RealizedField {
-                    entity_id,
                     component_id,
                     shape,
                     ty,
                     ..
                 } = res?;
                 let component_schema = ComponentSchema::new(ty, shape);
-                state.insert_component(component_id, component_schema, entity_id, &self.path)?;
+                state.insert_component(component_id, component_schema, &self.path)?;
                 self.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
             }
             state.vtable_registry.map.insert(vtable.id, vtable.vtable);
@@ -348,39 +308,29 @@ impl State {
         &mut self,
         component_id: ComponentId,
         schema: ComponentSchema,
-        entity_id: EntityId,
         db_path: &Path,
     ) -> Result<(), Error> {
-        if let Some(existing_component) = self.components.get(&(entity_id, component_id)) {
+        if let Some(existing_component) = self.components.get(&component_id) {
             if existing_component.schema != schema {
                 warn!( ?existing_component.schema, new_component.schema = ?schema,
                        ?existing_component.component_id,
-                       ?existing_component.entity_id,
                       "schema mismatch");
                 return Err(Error::SchemaMismatch);
             }
             return Ok(());
         }
-        info!(entity.id = ?entity_id.0, component.id = ?component_id.0, "inserting");
+        info!(component.id = ?component_id.0, "inserting");
         let component_metadata = ComponentMetadata {
             component_id,
             name: component_id.to_string(),
             metadata: Default::default(),
             asset: false,
         };
-        let entity_metadata = EntityMetadata {
-            entity_id,
-            name: entity_id.to_string(),
-            metadata: Default::default(),
-        };
-        let entity = Component::create(db_path, component_id, entity_id, schema, Timestamp::now())?;
-        if !self.entity_metadata.contains_key(&entity_id) {
-            self.set_entity_metadata(entity_metadata.clone(), db_path)?;
-        }
+        let component = Component::create(db_path, component_id, schema, Timestamp::now())?;
         if !self.component_metadata.contains_key(&component_id) {
             self.set_component_metadata(component_metadata, db_path)?;
         }
-        self.components.insert((entity_id, component_id), entity);
+        self.components.insert(component_id, component);
         Ok(())
     }
 
@@ -388,34 +338,8 @@ impl State {
         self.component_metadata.get(&component_id)
     }
 
-    pub fn get_entity_metadata(&self, entity_id: EntityId) -> Option<&EntityMetadata> {
-        self.entity_metadata.get(&entity_id)
-    }
-
-    pub fn get_component(
-        &self,
-        entity_id: EntityId,
-        component_id: ComponentId,
-    ) -> Option<&Component> {
-        self.components.get(&(entity_id, component_id))
-    }
-
-    pub fn set_entity_metadata(
-        &mut self,
-        metadata: EntityMetadata,
-        db_path: &Path,
-    ) -> Result<(), Error> {
-        let entity_metadata_path = db_path.join("entity_metadata");
-        std::fs::create_dir_all(&entity_metadata_path)?;
-        let entity_metadata_path = entity_metadata_path.join(metadata.entity_id.to_string());
-        if entity_metadata_path.exists() && EntityMetadata::read(&entity_metadata_path)? == metadata
-        {
-            return Ok(());
-        }
-        info!(entity.name = ?metadata.name, entity.id = ?metadata.entity_id.0, "setting entity metadata");
-        metadata.write(entity_metadata_path)?;
-        self.entity_metadata.insert(metadata.entity_id, metadata);
-        Ok(())
+    pub fn get_component(&self, component_id: ComponentId) -> Option<&Component> {
+        self.components.get(&component_id)
     }
 
     pub fn set_component_metadata(
@@ -608,7 +532,6 @@ impl MetadataExt for MsgMetadata {}
 #[derive(Clone)]
 pub struct Component {
     pub component_id: ComponentId,
-    pub entity_id: EntityId,
     pub time_series: TimeSeries,
     pub schema: ComponentSchema,
 }
@@ -617,21 +540,22 @@ impl Component {
     pub fn create(
         db_path: &Path,
         component_id: ComponentId,
-        entity_id: EntityId,
         schema: ComponentSchema,
         start_timestamp: Timestamp,
     ) -> Result<Self, Error> {
         let component_path = db_path.join(component_id.to_string());
-        let entity_path = component_path.join(entity_id.to_string());
-        std::fs::create_dir_all(&entity_path)?;
+        std::fs::create_dir_all(&component_path)?;
         let component_schema_path = component_path.join("schema");
         if !component_schema_path.exists() {
             schema.write(component_schema_path)?;
         }
-        let time_series = TimeSeries::create(entity_path, start_timestamp, schema.size() as u64)?;
+        let time_series = TimeSeries::create(
+            component_path.clone(),
+            start_timestamp,
+            schema.size() as u64,
+        )?;
         Ok(Component {
             component_id,
-            entity_id,
             time_series,
             schema,
         })
@@ -640,13 +564,11 @@ impl Component {
     pub fn open(
         path: impl AsRef<Path>,
         component_id: ComponentId,
-        entity_id: EntityId,
         schema: ComponentSchema,
     ) -> Result<Self, Error> {
         let time_series = TimeSeries::open(path)?;
         Ok(Component {
             component_id,
-            entity_id,
             time_series,
             schema,
         })
@@ -656,7 +578,7 @@ impl Component {
         schema(
             self.schema.prim_type,
             &self.schema.shape(),
-            pair(self.entity_id, self.component_id),
+            component(self.component_id),
         )
     }
 
@@ -670,7 +592,7 @@ impl Component {
 }
 
 struct DBSink<'a> {
-    components: &'a HashMap<(EntityId, ComponentId), Component>,
+    components: &'a HashMap<ComponentId, Component>,
     last_updated: &'a AtomicCell<Timestamp>,
     sunk_new_time_series: bool,
     table_received: Timestamp,
@@ -681,22 +603,18 @@ impl Decomponentize for DBSink<'_> {
     fn apply_value(
         &mut self,
         component_id: ComponentId,
-        entity_id: EntityId,
         value: impeller2::types::ComponentView<'_>,
         timestamp: Option<Timestamp>,
     ) -> Result<(), Error> {
         let timestamp = timestamp.unwrap_or(self.table_received);
         let value_buf = value.as_bytes();
-        let Some(component) = self.components.get(&(entity_id, component_id)) else {
+        let Some(component) = self.components.get(&component_id) else {
             return Err(Error::ComponentNotFound(component_id));
         };
         let time_series_empty = component.time_series.index().is_empty();
         component.time_series.push_buf(timestamp, value_buf)?;
         if time_series_empty {
-            debug!(
-                "sunk new time series for component {} entity {}",
-                component_id, entity_id
-            );
+            debug!("sunk new time series for component {}", component_id);
             self.sunk_new_time_series = true;
         }
         self.last_updated.update_max(timestamp);
@@ -718,7 +636,7 @@ impl Server {
 
     pub fn from_listener(listener: TcpListener, path: impl AsRef<Path>) -> Result<Server, Error> {
         let path = path.as_ref().to_path_buf();
-        let db = if path.exists() && path.join("entity_metadata").exists() {
+        let db = if path.exists() {
             DB::open(path)?
         } else {
             DB::create(path)?
@@ -933,7 +851,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 state
                     .components
                     .iter()
-                    .filter(|((_, component_id), _)| component_id == &get_schema.component_id)
+                    .filter(|(component_id, _)| *component_id == &get_schema.component_id)
                     .map(|(_, component)| component.schema.to_schema())
                     .next()
                     .ok_or(Error::ComponentNotFound(get_schema.component_id))
@@ -942,29 +860,22 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         }
         Packet::Msg(m) if m.id == GetTimeSeries::ID => {
             let get_time_series = m.parse::<GetTimeSeries>()?;
-            debug!(msg = ?get_time_series, "get time series");
-            let db = db.clone();
             let GetTimeSeries {
                 component_id,
-                entity_id,
                 range,
                 limit,
                 id,
             } = get_time_series;
-            let entity = db.with_state(|state| {
-                let Some(component) = state.components.get(&(entity_id, component_id)) else {
-                    if state.component_metadata.contains_key(&component_id) {
-                        return Err(Error::EntityNotFound(entity_id));
-                    } else {
-                        return Err(Error::ComponentNotFound(component_id));
-                    }
+            let component = db.with_state(|state| {
+                let Some(component) = state.components.get(&component_id) else {
+                    return Err(Error::ComponentNotFound(component_id));
                 };
                 Ok(component.clone())
             })?;
-            let Some((timestamps, data)) = entity.get_range(range) else {
+            let Some((timestamps, data)) = component.get_range(range) else {
                 return Err(Error::TimeRangeOutOfBounds);
             };
-            let size = entity.schema.size();
+            let size = component.schema.size();
             let (timestamps, data) = if let Some(limit) = limit {
                 let len = timestamps.len().min(limit);
                 (&timestamps[..len], &data[..len * size])
@@ -991,32 +902,6 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 db.with_state(|state| {
                     let Some(metadata) = state.component_metadata.get(&component_id) else {
                         return Err(Error::ComponentNotFound(component_id));
-                    };
-                    postcard::serialize_with_flavor(&metadata, pkt).map_err(Error::from)
-                })
-            })
-            .await?;
-        }
-
-        Packet::Msg(m) if m.id == SetEntityMetadata::ID => {
-            let SetEntityMetadata(metadata) = m.parse::<SetEntityMetadata>()?;
-            db.with_state_mut(|state| state.set_entity_metadata(metadata, &db.path))?;
-        }
-
-        Packet::Msg(m) if m.id == GetEntityMetadata::ID => {
-            let GetEntityMetadata { entity_id } = m.parse::<GetEntityMetadata>()?;
-
-            tx.send_with_builder(|pkt| {
-                let header = PacketHeader {
-                    packet_ty: impeller2::types::PacketTy::Msg,
-                    id: EntityMetadata::ID,
-                    req_id: m.req_id,
-                };
-                pkt.as_mut_packet().header = header;
-                pkt.clear();
-                db.with_state(|state| {
-                    let Some(metadata) = state.entity_metadata.get(&entity_id) else {
-                        return Err(Error::EntityNotFound(entity_id));
                     };
                     postcard::serialize_with_flavor(&metadata, pkt).map_err(Error::from)
                 })
@@ -1055,7 +940,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         Packet::Msg(m) if m.id == DumpMetadata::ID => {
             let msg = db.with_state(|state| {
                 let component_metadata = state.component_metadata.values().cloned().collect();
-                let entity_metadata = state.entity_metadata.values().cloned().collect();
+
                 let msg_metadata = state
                     .msg_logs
                     .values()
@@ -1064,7 +949,6 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     .collect();
                 DumpMetadataResp {
                     component_metadata,
-                    entity_metadata,
                     msg_metadata,
                 }
             });
@@ -1530,10 +1414,10 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
     loop {
         db.with_state(|state| {
             DBVisitor.visit(&state.components, |component| {
-                if visited_ids.contains(&(component.component_id, component.entity_id)) {
+                if visited_ids.contains(&component.component_id) {
                     return Ok(());
                 }
-                visited_ids.insert((component.component_id, component.entity_id));
+                visited_ids.insert(component.component_id);
                 let sink = sink.clone();
                 let component = component.clone();
                 stellarator::spawn(handle_real_time_component(sink, component, req_id));
@@ -1644,13 +1528,10 @@ async fn handle_fixed_stream<A: AsyncWrite>(
     }
 }
 
-pub struct DBVisitor;
+struct DBVisitor;
 
 impl DBVisitor {
-    fn vtable(
-        &self,
-        components: &HashMap<(EntityId, ComponentId), Component>,
-    ) -> Result<VTable, Error> {
+    fn vtable(&self, components: &HashMap<ComponentId, Component>) -> Result<VTable, Error> {
         let mut fields = vec![];
         let mut offset = 0;
         self.visit(components, |entity| {
@@ -1671,7 +1552,7 @@ impl DBVisitor {
 
     fn populate_table(
         &self,
-        components: &HashMap<(EntityId, ComponentId), Component>,
+        components: &HashMap<ComponentId, Component>,
         table: &mut LenPacket,
         timestamp: Timestamp,
     ) -> Result<(), Error> {
@@ -1689,7 +1570,7 @@ impl DBVisitor {
 
     fn visit(
         &self,
-        components: &HashMap<(EntityId, ComponentId), Component>,
+        components: &HashMap<ComponentId, Component>,
         mut f: impl for<'a> FnMut(&'a Component) -> Result<(), Error>,
     ) -> Result<(), Error> {
         components

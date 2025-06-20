@@ -6,7 +6,7 @@ use bevy::{
     window::Window,
 };
 use bevy_egui::{EguiContexts, egui};
-use impeller2_bevy::ComponentMetadataRegistry;
+use impeller2_bevy::{ComponentMetadataRegistry, ComponentPath, ComponentPathRegistry};
 
 use crate::ui::{
     EntityData, InspectorAnchor, SettingModal, SettingModalState, colors::get_scheme, images,
@@ -81,7 +81,7 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
                 .fixed_rect(modal_rect)
                 .show(ctx, |ui| {
                     match setting_modal_state {
-                        SettingModal::Graph(_, _, _) => {
+                        SettingModal::Graph(_, _) => {
                             ui.add_widget_with::<ModalUpdateGraph>(
                                 world,
                                 "modal_update_graph",
@@ -102,6 +102,7 @@ pub struct ModalUpdateGraph<'w, 's> {
     entities_meta: Query<'w, 's, EntityData<'static>>,
     setting_modal_state: ResMut<'w, SettingModalState>,
     metadata_store: Res<'w, ComponentMetadataRegistry>,
+    path_reg: Res<'w, ComponentPathRegistry>,
     graph_states: Query<'w, 's, &'static mut GraphState>,
 }
 
@@ -122,13 +123,14 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
             entities_meta,
             mut setting_modal_state,
             metadata_store,
+            path_reg,
             mut graph_states,
         } = state_mut;
 
         let Some(setting_modal) = setting_modal_state.0.as_mut() else {
             return;
         };
-        let SettingModal::Graph(m_graph_id, m_entity_id, m_component_id) = setting_modal else {
+        let SettingModal::Graph(m_graph_id, m_component_id) = setting_modal else {
             return;
         };
 
@@ -234,10 +236,14 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
                 let add_component_btn = ui.add(EButton::green("ADD COMPONENT"));
 
                 if add_component_btn.clicked() {
-                    let values = default_component_values(entity_id, component_id, component);
-                    graph_state.insert_component(entity_id, component_id, values);
+                    // let values = default_component_values(entity_id, component_id, component);
+                    // let component_path = path_reg
+                    //     .get(component_id)
+                    //     .cloned()
+                    //     .unwrap_or_else(|| ComponentPath::from_name(&metadata.name));
+                    // graph_state.insert_component(component_path, values);
 
-                    setting_modal_state.0 = None;
+                    // setting_modal_state.0 = None;
                 }
             }
         }

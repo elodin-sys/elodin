@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Schema)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct ComponentMetadata {
     pub component_id: ComponentId,
     pub name: String,

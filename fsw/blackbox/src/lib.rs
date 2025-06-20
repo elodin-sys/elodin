@@ -4,7 +4,7 @@
     zerocopy::FromBytes, zerocopy::IntoBytes, zerocopy::Immutable, zerocopy::KnownLayout, Clone,
 )]
 #[cfg_attr(feature = "roci", derive(roci::AsVTable, roci::Metadatatize))]
-#[cfg_attr(feature = "roci", roci(entity_id = 1))]
+#[cfg_attr(feature = "roci", roci(parent = "aleph"))]
 #[repr(C)]
 pub struct Record {
     pub ts: u32, // in milliseconds

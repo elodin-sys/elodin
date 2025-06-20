@@ -7,7 +7,6 @@ use bevy::{
     ecs::{
         entity::Entity,
         event::EventReader,
-        hierarchy::ChildOf,
         query::With,
         system::{Commands, Local, Query, Res, SystemParam},
     },
@@ -23,9 +22,9 @@ use bevy::{
 };
 use bevy_egui::egui::{self, Align, Layout};
 use egui::{CornerRadius, Frame, Margin, RichText, Stroke};
-use impeller2::types::{ComponentId, EntityId, Timestamp};
-use impeller2_bevy::{ComponentMetadataRegistry, EntityMap};
-use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, EntityMetadata};
+use impeller2::types::Timestamp;
+use impeller2_bevy::{ComponentMetadataRegistry, ComponentPath};
+use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp};
 use std::time::{Duration, Instant};
 use std::{
     fmt::Debug,
@@ -51,7 +50,7 @@ use crate::{
 };
 
 use super::{
-    PlotDataComponent, PlotDataEntity, XYLine,
+    PlotDataComponent, XYLine,
     gpu::{self, LineHandle, LineVisibleRange, LineWidgetWidth},
 };
 
@@ -309,9 +308,8 @@ impl TimeseriesPlot {
                     (timestamp.0 - self.selected_range.start.0) as f64,
                 );
                 ui.label(PrettyDuration(offset).to_string());
-                let mut current_entity_id: Option<EntityId> = None;
-                let mut current_component_id: Option<ComponentId> = None;
-                for ((entity_id, component_id, line_index), (entity, color)) in
+                let mut current_component_path: Option<&ComponentPath> = None;
+                for ((component_path, line_index), (entity, color)) in
                     graph_state.enabled_lines.iter()
                 {
                     let Ok(line_handle) = line_handles.get(*entity) else {
@@ -323,21 +321,13 @@ impl TimeseriesPlot {
                     let Some(line) = lines.get(line_handle) else {
                         continue;
                     };
-                    if current_entity_id.as_ref() != Some(entity_id) {
+                    if current_component_path != Some(component_path) {
                         ui.add_space(8.0);
                         ui.add(egui::Separator::default().grow(16.0 * 2.0));
                         ui.add_space(8.0);
-                        current_entity_id = Some(*entity_id);
-                        current_component_id = None;
-                        if let Some(entity_data) = collected_graph_data.get_entity(entity_id) {
-                            ui.label(egui::RichText::new(entity_data.label.to_owned()).size(13.0));
-                        }
-                    }
-
-                    if current_component_id.as_ref() != Some(component_id) {
-                        current_component_id = Some(*component_id);
+                        current_component_path = Some(component_path);
                         if let Some(component_data) =
-                            collected_graph_data.get_component(entity_id, component_id)
+                            collected_graph_data.get_component(&component_path.id)
                         {
                             ui.add_space(8.0);
                             ui.label(
@@ -350,7 +340,7 @@ impl TimeseriesPlot {
                     }
 
                     let Some(line_data) = collected_graph_data
-                        .get_line(entity_id, component_id, *line_index)
+                        .get_line(&component_path.id, *line_index)
                         .and_then(|h| lines.get(h))
                     else {
                         continue;
@@ -415,7 +405,7 @@ impl TimeseriesPlot {
 
         let mut font_id = egui::TextStyle::Monospace.resolve(ui.style());
 
-        if graph_state.enabled_lines.is_empty() {
+        if graph_state.components.is_empty() {
             ui.painter().text(
                 self.rect.center(),
                 egui::Align2::CENTER_CENTER,
@@ -456,9 +446,7 @@ impl TimeseriesPlot {
 
                 // Draw highlight circles on lines
 
-                for ((_entity_id, _component_id, _line_index), (entity, color)) in
-                    graph_state.enabled_lines.iter()
-                {
+                for ((_, _), (entity, color)) in graph_state.enabled_lines.iter() {
                     let Ok(line_handle) = line_handles.get(*entity) else {
                         continue;
                     };
@@ -739,40 +727,25 @@ pub fn auto_y_bounds(
 }
 
 pub fn sync_graphs(
-    mut graph_states: Query<(Entity, &mut GraphState)>,
-    entity_map: Res<EntityMap>,
-    entity_metadata: Query<&EntityMetadata>,
+    mut graph_states: Query<&mut GraphState>,
     metadata_store: Res<ComponentMetadataRegistry>,
     mut collected_graph_data: ResMut<CollectedGraphData>,
     mut commands: Commands,
 ) {
-    for (graph_id, mut graph_state) in &mut graph_states {
+    for mut graph_state in &mut graph_states {
         let graph_state = &mut *graph_state;
 
-        for (entity_id, components) in &graph_state.entities {
-            let entity = collected_graph_data
-                .entities
-                .entry(*entity_id)
+        for (component_path, component_values) in &graph_state.components {
+            let component_id = &component_path.id;
+            let Some(component_metadata) = metadata_store.get_metadata(component_id) else {
+                continue;
+            };
+            let component_label = component_metadata.name.clone();
+            let element_names = component_metadata.element_names();
+            let component = collected_graph_data
+                .components
+                .entry(*component_id)
                 .or_insert_with(|| {
-                    let label = entity_map
-                        .get(entity_id)
-                        .and_then(|id| entity_metadata.get(*id).ok())
-                        .map_or(format!("[{}]", entity_id.0), |metadata| {
-                            metadata.name.to_owned()
-                        });
-                    PlotDataEntity {
-                        label,
-                        components: Default::default(),
-                    }
-                });
-
-            for (component_id, component_values) in components {
-                let Some(component_metadata) = metadata_store.get_metadata(component_id) else {
-                    continue;
-                };
-                let component_label = component_metadata.name.clone();
-                let element_names = component_metadata.element_names();
-                let component = entity.components.entry(*component_id).or_insert_with(|| {
                     PlotDataComponent::new(
                         component_label,
                         element_names
@@ -783,73 +756,62 @@ pub fn sync_graphs(
                     )
                 });
 
-                for (value_index, (enabled, color)) in component_values.iter().enumerate() {
-                    let entity = graph_state.enabled_lines.get_mut(&(
-                        *entity_id,
-                        *component_id,
-                        value_index,
-                    ));
+            for (value_index, (enabled, color)) in component_values.iter().enumerate() {
+                let entity = graph_state
+                    .enabled_lines
+                    .get_mut(&(component_path.clone(), value_index));
 
-                    let Some(line) = component.lines.get(&value_index) else {
-                        continue;
-                    };
+                let Some(line) = component.lines.get(&value_index) else {
+                    continue;
+                };
 
-                    match (entity, enabled) {
-                        (None, true) => {
-                            let entity = commands
-                                .spawn(LineBundle {
-                                    line: LineHandle::Timeseries(line.clone()),
-                                    uniform: LineUniform::new(
-                                        graph_state.line_width,
-                                        color.into_bevy(),
-                                    ),
-                                    config: LineConfig {
-                                        render_layers: graph_state.render_layers.clone(),
-                                    },
-                                    line_visible_range: graph_state.visible_range.clone(),
-
-                                    graph_type: graph_state.graph_type,
-                                })
-                                .insert(ChildOf(graph_id))
-                                .insert(LineWidgetWidth(graph_state.widget_width as usize))
-                                .id();
-                            graph_state
-                                .enabled_lines
-                                .insert((*entity_id, *component_id, value_index), (entity, *color));
-                        }
-                        (Some((entity, _)), false) => {
-                            commands.entity(*entity).despawn();
-                            graph_state.enabled_lines.remove(&(
-                                *entity_id,
-                                *component_id,
-                                value_index,
-                            ));
-                        }
-                        (Some((entity, graph_state_color)), true) => {
-                            *graph_state_color = *color;
-                            commands
-                                .entity(*entity)
-                                .try_insert(LineUniform::new(
+                match (entity, enabled) {
+                    (None, true) => {
+                        let entity = commands
+                            .spawn(LineBundle {
+                                line: LineHandle::Timeseries(line.clone()),
+                                uniform: LineUniform::new(
                                     graph_state.line_width,
                                     color.into_bevy(),
-                                ))
-                                .try_insert(graph_state.graph_type)
-                                .try_insert(LineWidgetWidth(graph_state.widget_width as usize))
-                                .try_insert(graph_state.visible_range.clone());
-                        }
-                        (None, false) => {}
+                                ),
+                                config: LineConfig {
+                                    render_layers: graph_state.render_layers.clone(),
+                                },
+                                line_visible_range: graph_state.visible_range.clone(),
+                                graph_type: graph_state.graph_type,
+                            })
+                            .insert(LineWidgetWidth(graph_state.widget_width as usize))
+                            .id();
+                        graph_state
+                            .enabled_lines
+                            .insert((component_path.clone(), value_index), (entity, *color));
                     }
+                    (Some((entity, _)), false) => {
+                        commands.entity(*entity).despawn();
+                        graph_state
+                            .enabled_lines
+                            .remove(&(component_path.clone(), value_index));
+                    }
+                    (Some((entity, graph_state_color)), true) => {
+                        *graph_state_color = *color;
+                        commands
+                            .entity(*entity)
+                            .try_insert(LineUniform::new(graph_state.line_width, color.into_bevy()))
+                            .try_insert(graph_state.graph_type)
+                            .try_insert(LineWidgetWidth(graph_state.widget_width as usize))
+                            .try_insert(graph_state.visible_range.clone());
+                    }
+                    (None, false) => {}
                 }
             }
         }
 
         graph_state
             .enabled_lines
-            .retain(|(entity_id, component_id, index), _| {
+            .retain(|(component_path, index), _| {
                 graph_state
-                    .entities
-                    .get(entity_id)
-                    .and_then(|entity| entity.get(component_id))
+                    .components
+                    .get(component_path)
                     .and_then(|component| component.get(*index))
                     .is_some()
             });

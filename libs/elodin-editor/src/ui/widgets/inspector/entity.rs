@@ -4,19 +4,21 @@ use bevy::ecs::{
     system::{Query, Res, ResMut, SystemParam, SystemState},
     world::World,
 };
-use bevy::prelude::{Commands, Resource};
+use bevy::prelude::{Children, Resource};
 use bevy_egui::egui::{self, Align, Color32, Layout, RichText, emath};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
+use impeller2::types::ComponentId;
 use impeller2_bevy::{
-    ComponentMetadataRegistry, ComponentValue, ComponentValueExt, ElementValueMut,
+    ComponentMetadataRegistry, ComponentPath, ComponentPathRegistry, ComponentValue,
+    ComponentValueExt, ElementValueMut,
 };
-use impeller2_wkt::{Glb, MetadataExt};
+use impeller2_wkt::{ComponentMetadata, Glb, MetadataExt};
 use smallvec::SmallVec;
 
 use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        EntityData, EntityPair,
+        EntityPair,
         colors::get_scheme,
         theme::configure_input_with_border,
         tiles::TreeAction,
@@ -36,14 +38,17 @@ use super::{
 
 #[derive(SystemParam)]
 pub struct InspectorEntity<'w, 's> {
-    entities: Query<'w, 's, EntityData<'static>>,
-    ghost: Query<'w, 's, &'static mut crate::ghosts::Ghost>,
+    children: Query<'w, 's, &'static Children>,
+    component_ids: Query<'w, 's, &'static ComponentId>,
+    values: Query<'w, 's, &'static mut ComponentValue>,
+    metadata_query: Query<'w, 's, &'static mut ComponentMetadata>,
+    object_3d: Query<'w, 's, &'static mut crate::object_3d::Object3D>,
     glb: Query<'w, 's, &'static mut Glb>,
     metadata_store: Res<'w, ComponentMetadataRegistry>,
+    path_reg: Res<'w, ComponentPathRegistry>,
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     filter: ResMut<'w, ComponentFilter>,
     eql_context: ResMut<'w, crate::EqlContext>,
-    commands: Commands<'w, 's>,
 }
 
 impl WidgetSystem for InspectorEntity<'_, '_> {
@@ -58,21 +63,29 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
     ) -> Self::Output {
         let width = ui.available_width();
         let mut tree_actions = SmallVec::new();
-        let mut state_mut = state.get_mut(world);
+        let InspectorEntity {
+            children,
+            component_ids,
+            metadata_query,
+            mut values,
+            mut object_3d,
+            mut glb,
+            metadata_store,
+            path_reg,
+            mut render_layer_alloc,
+            mut filter,
+            eql_context,
+        } = state.get_mut(world);
 
         let (icons, pair) = args;
 
-        let mut entities = state_mut.entities;
-        let metadata_store = state_mut.metadata_store;
-        let mut render_layer_alloc = state_mut.render_layer_alloc;
-        let Ok((entity_id, _, mut component_value_map, metadata)) = entities.get_mut(pair.bevy)
-        else {
+        let entity_id = pair.impeller;
+        let Ok(metadata) = metadata_query.get(pair.bevy) else {
             ui.add(empty_inspector());
             return tree_actions;
         };
 
         let icon_chart = icons.chart;
-        let entity_id = *entity_id;
 
         let mono_font = egui::TextStyle::Monospace.resolve(ui.style_mut());
         egui::Frame::NONE
@@ -105,22 +118,23 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                 });
             });
 
-        search(ui, &mut state_mut.filter.0, icons.search);
+        search(ui, &mut filter.0, icons.search);
         ui.add_space(4.0);
 
         egui::Frame::NONE.show(ui, |ui| {
-            if let Ok(mut ghost) = state_mut.ghost.get_mut(pair.bevy) {
+            if let Ok(mut object_3d) = object_3d.get_mut(pair.bevy) {
                 ui.separator();
                 ui.add_space(8.0);
                 ui.label(egui::RichText::new("EQL").color(get_scheme().text_secondary));
                 ui.add_space(8.0);
                 configure_input_with_border(ui.style_mut());
-                let query_res = query(ui, &mut ghost.eql, QueryType::EQL);
-                eql_autocomplete(ui, &state_mut.eql_context.0, &query_res, &mut ghost.eql);
+                let query_res = query(ui, &mut object_3d.eql, QueryType::EQL);
+                eql_autocomplete(ui, &eql_context.0, &query_res, &mut object_3d.eql);
                 if query_res.changed() {
-                    match state_mut.eql_context.0.parse_str(&ghost.eql) {
+                    match eql_context.0.parse_str(&object_3d.eql) {
                         Ok(expr) => {
-                            ghost.compiled_expr = crate::ghosts::compile_eql_expr(expr);
+                            object_3d.compiled_expr =
+                                Some(crate::object_3d::compile_eql_expr(expr));
                         }
                         Err(err) => {
                             ui.colored_label(get_scheme().error, err.to_string());
@@ -129,48 +143,60 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                 }
                 ui.add_space(8.0);
             }
-            if let Ok(mut glb) = state_mut.glb.get_mut(pair.bevy) {
+            if let Ok(mut glb) = glb.get_mut(pair.bevy) {
                 ui.separator();
                 ui.add_space(8.0);
                 ui.label(egui::RichText::new("GLB").color(get_scheme().text_secondary));
                 ui.add_space(8.0);
                 if inspector_text_field(ui, &mut glb.0, "Enter a path to a glb").changed() {
-                    state_mut
-                        .commands
-                        .entity(pair.bevy)
-                        .remove::<crate::SyncedGlb>()
-                        .insert(impeller2_bevy::AssetHandle::<Glb>::new(fastrand::u64(..)));
+                    // commands
+                    //     .entity(pair.bevy)
+                    //     .remove::<crate::SyncedGlb>()
+                    //     .insert(impeller2_bevy::AssetHandle::<Glb>::new(fastrand::u64(..)));
                 }
                 ui.add_space(8.0);
             }
         });
 
         let matcher = SkimMatcherV2::default().smart_case().use_cache(true);
+        let Ok(children) = children.get(pair.bevy) else {
+            return tree_actions;
+        };
 
-        let mut components = component_value_map
-            .0
-            .keys()
-            .filter_map(|id| {
+        // let mut components = component_value_map
+        //     .0
+        //     .keys()
+        //     .filter_map(|id| {
+        //         let metadata = metadata_store.get_metadata(id)?;
+        //         let priority = metadata.priority();
+        //         Some((*id, priority, metadata))
+        //     })
+        let mut components = children
+            .iter()
+            .filter_map(|&child| {
+                let id = component_ids.get(child).ok()?;
                 let metadata = metadata_store.get_metadata(id)?;
                 let priority = metadata.priority();
-                Some((*id, priority, metadata))
+                Some((id, child, priority, metadata))
             })
-            .filter_map(|(id, priority, metadata)| {
-                if state_mut.filter.0.is_empty() {
-                    Some((id, priority, metadata))
+            .filter_map(|(id, child, priority, metadata)| {
+                if filter.0.is_empty() {
+                    Some((id, child, priority, metadata))
                 } else {
                     matcher
-                        .fuzzy_match(&metadata.name, &state_mut.filter.0)
-                        .map(|score| (id, score, metadata))
+                        .fuzzy_match(&metadata.name, &filter.0)
+                        .map(|score| (id, child, score, metadata))
                 }
             })
-            .filter(|(_, _, metadata)| !metadata.asset)
-            .filter(|(_, priority, _)| *priority >= 0)
+            .filter(|(_, _, _, metadata)| !metadata.asset)
+            .filter(|(_, _, priority, _)| *priority >= 0)
             .collect::<Vec<_>>();
-        components.sort_by_key(|(id, priority, _)| (*priority, *id));
+        components.sort_by_key(|(_, _, priority, metadata)| (*priority, &metadata.name));
 
-        for (component_id, _, metadata) in components.into_iter().rev() {
-            let component_value = component_value_map.0.get_mut(&component_id).unwrap();
+        for (component_id, child, _, metadata) in components.into_iter().rev() {
+            let Ok(mut component_value) = values.get_mut(child) else {
+                continue;
+            };
             let label = metadata.name.clone();
             let element_names = metadata.element_names();
 
@@ -178,39 +204,26 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
 
             let mut create_graph = false;
 
-            let res = inspector_item_multi(
+            inspector_item_multi(
                 ui,
                 &label,
                 element_names,
-                component_value,
+                &mut component_value,
                 icon_chart,
                 &mut create_graph,
                 width,
             );
-            if res.changed() {
-                // if let Ok(payload) = ColumnPayload::try_from_value_iter(
-                //     0,
-                //     std::iter::once(ColumnValue {
-                //         entity_id,
-                //         value: component_value.clone(),
-                //     }),
-                // ) {
-                //     column_payload_writer.send(ColumnPayloadMsg {
-                //         component_name: metadata.name.to_string(),
-                //         component_type: component_value.ty(),
-                //         payload,
-                //     });
-                // }
-            }
 
             if create_graph {
-                let values = default_component_values(&entity_id, &component_id, component_value);
-                let entities = BTreeMap::from_iter(std::iter::once((
-                    entity_id,
-                    BTreeMap::from_iter(std::iter::once((component_id, values.clone()))),
-                )));
+                let values = default_component_values(component_id, &component_value);
+                let component_path = path_reg
+                    .get(component_id)
+                    .cloned()
+                    .unwrap_or_else(|| ComponentPath::from_name(&metadata.name));
+                let components =
+                    BTreeMap::from_iter(std::iter::once((component_path, values.clone())));
                 let bundle =
-                    GraphBundle::new(&mut render_layer_alloc, entities, metadata.name.clone());
+                    GraphBundle::new(&mut render_layer_alloc, components, metadata.name.clone());
                 tree_actions.push(TreeAction::AddGraph(None, Some(bundle)));
             }
         }

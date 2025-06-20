@@ -46,8 +46,8 @@ c = w.spawn(
 w.spawn(
     el.Panel.sidebars(
         el.Panel.viewport(
-            pos=[0.0, -3.0, 3.0],
-            looking_at=[0.0, 0.0, 0.0],
+            pos="(0,0,0,0,0,0,4)",
+            look_at="c.world_pos",
             hdr=True,
         ),
     )
@@ -102,9 +102,7 @@ w.spawn(GravityConstraint(b, c), name="B -> C")
 w.spawn(GravityConstraint(c, a), name="C -> A")
 w.spawn(GravityConstraint(c, b), name="C -> B")
 
-w.spawn(el.VectorArrow(a, "world_vel", offset=3, body_frame=False, scale=1.0))
-
-w.spawn(el.Line3d(b, "world_pos", index=[4, 5, 6], line_width=10.0))
+w.spawn(el.Line3d("b.world_pos", line_width=10.0))
 
 sys = el.six_dof(sys=gravity)
 sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 120.0)
