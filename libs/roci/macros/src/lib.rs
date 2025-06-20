@@ -15,8 +15,9 @@ mod metadatatize;
 struct Field {
     ident: Option<syn::Ident>,
     ty: syn::Type,
-    entity_id: Option<u64>,
     component_id: Option<String>,
+    #[darling(skip, default)]
+    nest: bool,
     asset: Option<bool>,
 }
 

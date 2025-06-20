@@ -990,7 +990,7 @@ pub fn update_eql_context(
     path_reg: Res<ComponentPathRegistry>,
     mut eql_context: ResMut<EqlContext>,
 ) {
-    eql_context.0 = eql::Context::from_leafs(
+    eql_context.0 = eql::Context::from_leaves(
         path_reg.0.iter().filter_map(|(id, path)| {
             let schema = component_schema_registry.0.get(id)?;
             let metadata = component_metadata_registry.0.get(id)?;

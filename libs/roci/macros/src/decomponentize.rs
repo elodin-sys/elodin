@@ -12,7 +12,7 @@ pub struct Decomponentize {
     ident: Ident,
     generics: Generics,
     data: ast::Data<(), crate::Field>,
-    entity_id: Option<u64>,
+    parent: Option<String>,
 }
 
 pub fn decomponentize(input: TokenStream) -> TokenStream {
@@ -22,14 +22,13 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
         ident,
         generics,
         data,
-        entity_id,
+        parent,
     } = Decomponentize::from_derive_input(&input).unwrap();
     let where_clause = &generics.where_clause;
     let impeller = quote! { #crate_name::impeller2 };
     let fields = data.take_struct().unwrap();
     let if_arms = fields.fields.iter().map(|field| {
         let ty = &field.ty;
-        let component_id = field.component_id();
         let ident = &field.ident;
         let name = field
             .ident
@@ -37,12 +36,21 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
             .expect("only named field allowed")
             .to_string()
             .to_case(Case::UpperSnake);
-        if let Some(id) = field.entity_id.or(entity_id) {
-            let const_name = format!("{name}_ID");
+        let component_id = field.component_id();
+        let component_id = if let Some(parent) = &parent {
+            let parent = proc_macro2::Ident::new(parent, proc_macro2::Span::call_site());
+            quote! {
+                #parent.#component_id
+            }
+        } else {
+            component_id
+        };
+        if !field.nest {
+        let const_name = format!("{name}_ID");
             let const_name = syn::Ident::new(&const_name, Span::call_site());
             quote! {
                 const #const_name: #impeller::types::ComponentId = #component_id;
-                if component_id == #const_name && entity_id == #impeller::types::EntityId(#id) {
+                if component_id == #const_name {
                     if let Ok(val) = <#ty as #impeller::com_de::FromComponentView>::from_component_view(view.clone()) {
                         self.#ident = val;
                     }
@@ -50,7 +58,7 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
             }
         } else {
             quote! {
-                self.#ident.apply_value(component_id, entity_id, value.clone(), timestamp.clone())?;
+                self.#ident.apply_value(component_id,  value.clone(), timestamp.clone())?;
             }
         }
     });

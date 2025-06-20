@@ -397,7 +397,7 @@ impl Default for Context {
 }
 
 impl Context {
-    pub fn from_leafs(
+    pub fn from_leaves(
         components: impl IntoIterator<Item = Arc<Component>>,
         earliest_timestamp: Timestamp,
         last_timestamp: Timestamp,
@@ -739,7 +739,7 @@ mod tests {
     }
 
     fn create_test_context() -> Context {
-        Context::from_leafs(
+        Context::from_leaves(
             [create_test_entity_component()],
             Timestamp(0),    // earliest_timestamp
             Timestamp(1000), // last_timestamp

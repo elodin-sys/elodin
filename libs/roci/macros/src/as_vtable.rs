@@ -10,7 +10,7 @@ pub struct AsVTable {
     ident: Ident,
     generics: Generics,
     data: ast::Data<(), crate::Field>,
-    entity_id: Option<u64>,
+    parent: Option<String>,
 }
 
 pub fn as_vtable(input: TokenStream) -> TokenStream {
@@ -20,7 +20,7 @@ pub fn as_vtable(input: TokenStream) -> TokenStream {
         ident,
         generics,
         data,
-        entity_id,
+        parent,
     } = AsVTable::from_derive_input(&input).unwrap();
     let where_clause = &generics.where_clause;
     let impeller = quote! { #crate_name::impeller2 };
@@ -28,8 +28,14 @@ pub fn as_vtable(input: TokenStream) -> TokenStream {
     let vtable_items = fields.fields.iter().map(|field| {
         let ty = &field.ty;
         let component_id = field.component_id();
+        let component_id =
+            if let Some(parent) = &parent {
+                format!("{parent}.{component_id}")
+            }else {
+                component_id.to_string()
+            };
         let ident = &field.ident;
-        if let Some(id) = field.entity_id.or(entity_id) {
+        if !field.nest {
             quote! {
                 {
 
@@ -41,7 +47,7 @@ pub fn as_vtable(input: TokenStream) -> TokenStream {
                             #impeller::vtable::builder::schema(
                                 schema.prim_type(),
                                 schema.dim(),
-                                #impeller::vtable::builder::pair(#id, #component_id)
+                                #impeller::vtable::builder::component(#component_id)
                             )
                         )
                     );
