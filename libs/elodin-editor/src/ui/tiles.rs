@@ -32,9 +32,9 @@ use super::{
     inspector::{InspectorContent, InspectorIcons},
     monitor::{MonitorPane, MonitorWidget},
     plot::{GraphBundle, GraphState, PlotWidget},
-    preset::EqlExt,
     query_plot::QueryPlotData,
     query_table::{QueryTableData, QueryTablePane, QueryTableWidget},
+    schematic::EqlExt,
     video_stream::{IsTileVisible, VideoDecoderHandle},
     widgets::{WidgetSystem, WidgetSystemExt},
 };
