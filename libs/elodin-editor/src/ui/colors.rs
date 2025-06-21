@@ -108,6 +108,7 @@ pub fn with_opacity(color: Color32, opacity: f32) -> Color32 {
 
 pub trait EColor {
     fn into_color32(self) -> Color32;
+    fn from_color32(color: egui::Color32) -> Self;
 }
 
 impl EColor for Color {
@@ -117,6 +118,14 @@ impl EColor for Color {
             (255.0 * self.g) as u8,
             (255.0 * self.b) as u8,
         )
+    }
+
+    fn from_color32(color: egui::Color32) -> Self {
+        Self {
+            r: color.r() as f32 / 255.0,
+            g: color.g() as f32 / 255.0,
+            b: color.b() as f32 / 255.0,
+        }
     }
 }
 

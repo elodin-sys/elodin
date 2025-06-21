@@ -37,7 +37,7 @@ use super::{
         hierarchy::HierarchyContent,
         inspector::{InspectorContent, InspectorIcons},
         plot::{GraphBundle, GraphState, PlotWidget},
-        query_plot::QueryPlot,
+        query_plot::QueryPlotData,
     },
 };
 use crate::{
@@ -664,7 +664,6 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                 Tile::Pane(Pane::Graph(graph)) => {
                     *layout.selected_object = SelectedObject::Graph {
                         tile_id,
-                        label: graph.label.to_owned(),
                         graph_id: graph.id,
                     };
                 }
@@ -684,7 +683,6 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                 Tile::Pane(Pane::QueryPlot(pane)) => {
                     *layout.selected_object = SelectedObject::Graph {
                         tile_id,
-                        label: pane.label.to_string(),
                         graph_id: pane.entity,
                     };
                 }
@@ -1046,11 +1044,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
-                            *state_mut.selected_object = SelectedObject::Graph {
-                                tile_id,
-                                label: graph_label,
-                                graph_id,
-                            };
+                            *state_mut.selected_object =
+                                SelectedObject::Graph { tile_id, graph_id };
                             ui_state.tree.make_active(|id, _| id == tile_id);
                             ui_state.graphs.insert(tile_id, graph_id);
                         }
@@ -1134,20 +1129,18 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         );
                         let entity = state_mut
                             .commands
-                            .spawn(QueryPlot::default())
+                            .spawn(QueryPlotData::default())
                             .insert(graph_bundle)
                             .id();
                         let pane = Pane::QueryPlot(super::widgets::query_plot::QueryPlotPane {
                             entity,
                             rect: None,
-                            label: "Query Plot".to_string(),
                         });
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
                             *state_mut.selected_object = SelectedObject::Graph {
                                 tile_id,
-                                label: "Query Plot".to_string(),
                                 graph_id: entity,
                             };
                             ui_state.tree.make_active(|id, _| id == tile_id);
@@ -1432,7 +1425,7 @@ pub fn spawn_panel(
                 super::monitor::MonitorPane::new("Monitor".to_string(), monitor.component_id);
             ui_state.insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
         }
-        Panel::SQLTable(sql) => {
+        Panel::QueryTable(sql) => {
             // Create a new SQL table entity
             let entity = commands
                 .spawn(super::query_table::QueryTable {
@@ -1460,27 +1453,22 @@ pub fn spawn_panel(
         }
         Panel::Inspector => ui_state.insert_tile(Tile::Pane(Pane::Inspector), parent_id, false),
         Panel::Hierarchy => ui_state.insert_tile(Tile::Pane(Pane::Hierarchy), parent_id, false),
-        Panel::SQLPlot(plot) => {
+        Panel::QueryPlot(plot) => {
             let graph_bundle = GraphBundle::new(
                 render_layer_alloc,
                 BTreeMap::default(),
                 "Query Plot".to_string(),
             );
             let entity = commands
-                .spawn(QueryPlot {
-                    current_query: plot.query.clone(),
-                    auto_refresh: plot.auto_refresh,
-                    refresh_interval: plot.refresh_interval,
+                .spawn(QueryPlotData {
+                    data: plot.clone(),
                     ..Default::default()
                 })
                 .insert(graph_bundle)
                 .id();
-            let pane = Pane::QueryPlot(super::widgets::query_plot::QueryPlotPane {
-                entity,
-                rect: None,
-                label: "Query Plot".to_string(),
-            });
-            ui_state.insert_tile(Tile::Pane(pane), parent_id, true)
+            let pane =
+                Pane::QueryPlot(super::widgets::query_plot::QueryPlotPane { entity, rect: None });
+            ui_state.insert_tile(Tile::Pane(pane), parent_id, false)
         }
     }
 }

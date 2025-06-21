@@ -34,7 +34,7 @@ use crate::{
         tiles::{self, SyncViewportParams, TileState},
         widgets::{
             plot::{GraphBundle, default_component_values},
-            query_plot::QueryPlot,
+            query_plot::QueryPlotData,
         },
     },
 };
@@ -593,7 +593,7 @@ pub fn save_preset_inner() -> PaletteItem {
               query_tables: Query<&ui::query_table::QueryTable>,
               action_tiles: Query<&ui::actions::ActionTile>,
               graph_states: Query<&ui::widgets::plot::GraphState>,
-              query_plots: Query<&QueryPlot>,
+              query_plots: Query<&QueryPlotData>,
               viewports: Query<&ui::widgets::inspector::viewport::Viewport>,
               ui_state: Res<tiles::TileState>| {
             if let Some(tile_id) = ui_state.tree.root() {
