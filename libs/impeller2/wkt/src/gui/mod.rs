@@ -15,8 +15,8 @@ pub enum Panel {
     Graph(Graph),
     ComponentMonitor(ComponentMonitor),
     ActionPane(ActionPane),
-    SQLTable(SQLTable),
-    SQLPlot(SQLPlot),
+    QueryTable(QueryTable),
+    QueryPlot(QueryPlot),
     Tabs(Vec<Panel>),
     Inspector,
     Hierarchy,
@@ -190,7 +190,7 @@ pub struct ComponentMonitor {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct SQLTable {
+pub struct QueryTable {
     pub query: String,
 }
 
@@ -203,8 +203,10 @@ pub struct ActionPane {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct SQLPlot {
+pub struct QueryPlot {
+    pub label: String,
     pub query: String,
     pub refresh_interval: Duration,
     pub auto_refresh: bool,
+    pub color: Color,
 }

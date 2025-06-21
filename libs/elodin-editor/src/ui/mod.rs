@@ -68,7 +68,6 @@ pub enum SelectedObject {
     },
     Graph {
         tile_id: TileId,
-        label: String,
         graph_id: Entity,
     },
     Action {

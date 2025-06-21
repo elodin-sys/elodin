@@ -19,7 +19,7 @@ use crate::{
     EqlContext,
     ui::{
         SettingModal, SettingModalState,
-        colors::{self, ColorExt, get_scheme},
+        colors::{self, ColorExt, EColor, get_scheme},
         theme::{self, configure_combo_box, configure_input_with_border},
         utils::MarginSides,
         widgets::{
@@ -27,7 +27,7 @@ use crate::{
             button::{EButton, ECheckboxButton, EColorButton},
             label::{self, label_with_buttons},
             plot::GraphState,
-            query_plot::{QueryPlot, QueryType},
+            query_plot::{QueryPlotData, QueryType},
         },
     },
 };
@@ -39,7 +39,7 @@ pub struct InspectorGraph<'w, 's> {
     setting_modal_state: ResMut<'w, SettingModalState>,
     metadata_store: Res<'w, ComponentMetadataRegistry>,
     graph_states: Query<'w, 's, &'static mut GraphState>,
-    query_plots: Query<'w, 's, &'static mut QueryPlot>,
+    query_plots: Query<'w, 's, &'static mut QueryPlotData>,
     eql_context: Res<'w, EqlContext>,
 }
 
@@ -180,8 +180,8 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                         if let (QueryType::EQL, QueryType::SQL) =
                             (prev_query_type, query_plot.query_type)
                         {
-                            if let Ok(sql) = eql_context.0.sql(&query_plot.current_query) {
-                                query_plot.current_query = sql;
+                            if let Ok(sql) = eql_context.0.sql(&query_plot.data.query) {
+                                query_plot.data.query = sql;
                             }
                         }
                     });
@@ -189,13 +189,13 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     ui.label(egui::RichText::new("Query").color(get_scheme().text_secondary));
                     configure_input_with_border(ui.style_mut());
                     let query_type = query_plot.query_type;
-                    let query_res = query(ui, &mut query_plot.current_query, query_type);
+                    let query_res = query(ui, &mut query_plot.data.query, query_type);
                     if query_type == QueryType::EQL {
                         eql_autocomplete(
                             ui,
                             &eql_context.0,
                             &query_res,
-                            &mut query_plot.current_query,
+                            &mut query_plot.data.query,
                         );
                     }
                     let enter_key = query_res.lost_focus()
@@ -203,12 +203,12 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     ui.separator();
                     ui.label(egui::RichText::new("Behavior").color(get_scheme().text_secondary));
                     ui.horizontal(|ui| {
-                        ui.checkbox(&mut query_plot.auto_refresh, "Auto Refresh?");
+                        ui.checkbox(&mut query_plot.data.auto_refresh, "Auto Refresh?");
                         ui.add_space(8.0);
-                        let mut seconds = query_plot.refresh_interval.as_secs_f64();
+                        let mut seconds = query_plot.data.refresh_interval.as_secs_f64();
                         if ui
                             .add_enabled(
-                                query_plot.auto_refresh,
+                                query_plot.data.auto_refresh,
                                 egui::DragValue::new(&mut seconds)
                                     .suffix("s")
                                     .speed(0.5)
@@ -216,10 +216,11 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                             )
                             .changed()
                         {
-                            query_plot.refresh_interval = Duration::from_secs_f64(seconds);
+                            query_plot.data.refresh_interval = Duration::from_secs_f64(seconds);
                         }
                     });
                     ui.add_space(8.0);
+
                     if ui
                         .add_sized([max_width, 32.0], EButton::green("Refresh"))
                         .clicked()
@@ -236,7 +237,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     }
 
                     if ui.memory(|mem| mem.is_popup_open(color_id)) {
-                        let mut color = query_plot.color.unwrap_or_else(|| get_scheme().highlight);
+                        let mut color = query_plot.data.color.into_color32();
                         let popup_response =
                             color_popup(ui, &mut color, color_id, btn_resp.rect.min);
                         if !btn_resp.clicked()
@@ -245,7 +246,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                         {
                             ui.memory_mut(|mem| mem.close_popup());
                         }
-                        query_plot.color = Some(color);
+                        query_plot.data.color = impeller2_wkt::Color::from_color32(color);
                     }
                 });
         } else {

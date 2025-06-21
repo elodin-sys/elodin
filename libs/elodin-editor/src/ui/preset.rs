@@ -4,11 +4,12 @@ use super::actions::ActionTile;
 use super::query_table::QueryTable;
 use super::tiles::{Pane, TileState};
 use super::widgets::plot::GraphState;
-use super::widgets::query_plot::QueryPlot;
+use super::widgets::query_plot::QueryPlotData;
 use bevy::prelude::*;
 use egui_tiles::{Tile, TileId};
 use impeller2_wkt::{
-    ActionPane, ComponentMonitor, ComponentPath, Panel, SQLPlot, SQLTable, Split, Viewport,
+    ActionPane, ComponentMonitor, ComponentPath, Panel, QueryTable as WktQueryTable, Split,
+    Viewport,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -16,7 +17,7 @@ pub fn tile_to_panel(
     query_tables: &Query<&QueryTable>,
     action_tiles: &Query<&ActionTile>,
     graph_states: &Query<&GraphState>,
-    query_plots: &Query<&QueryPlot>,
+    query_plots: &Query<&QueryPlotData>,
     viewports: &Query<&crate::ui::widgets::inspector::viewport::Viewport>,
     tile_id: TileId,
     ui_state: &TileState,
@@ -61,17 +62,13 @@ pub fn tile_to_panel(
             Pane::QueryTable(query_table) => {
                 let query_table = query_tables.get(query_table.entity).ok()?;
 
-                Some(Panel::SQLTable(SQLTable {
+                Some(Panel::QueryTable(WktQueryTable {
                     query: query_table.current_query.clone(),
                 }))
             }
             Pane::QueryPlot(plot) => {
                 let query_plot = query_plots.get(plot.entity).ok()?;
-                Some(Panel::SQLPlot(SQLPlot {
-                    query: query_plot.current_query.clone(),
-                    auto_refresh: query_plot.auto_refresh,
-                    refresh_interval: query_plot.refresh_interval,
-                }))
+                Some(Panel::QueryPlot(query_plot.data.clone()))
             }
             Pane::ActionTile(action) => {
                 let action_tile = action_tiles.get(action.entity).ok()?;

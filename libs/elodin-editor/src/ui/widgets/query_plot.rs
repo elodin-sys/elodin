@@ -18,13 +18,13 @@ use bevy::{
 };
 use egui::RichText;
 use impeller2_bevy::CommandsExt;
-use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery};
+use impeller2_wkt::{ArrowIPC, ErrorResponse, QueryPlot, SQLQuery};
 use itertools::Itertools;
 
 use crate::{
     EqlContext,
     ui::{
-        colors::{ColorExt, get_scheme},
+        colors::{ColorExt, EColor, get_scheme},
         utils::format_num,
         widgets::{
             WidgetSystem,
@@ -44,22 +44,18 @@ use super::plot::{Line, gpu};
 pub struct QueryPlotPane {
     pub entity: Entity,
     pub rect: Option<egui::Rect>,
-    pub label: String,
 }
 
 #[derive(Component)]
-pub struct QueryPlot {
-    pub current_query: String,
+pub struct QueryPlotData {
+    pub data: QueryPlot,
     pub state: QueryPlotState,
     pub xy_line_handle: Option<Handle<XYLine>>,
     pub line_entity: Option<Entity>,
     pub x_offset: f64,
     pub y_offset: f64,
     pub last_refresh: Option<Instant>,
-    pub refresh_interval: Duration,
-    pub auto_refresh: bool,
     pub query_type: QueryType,
-    pub color: Option<egui::Color32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -69,20 +65,23 @@ pub enum QueryType {
     SQL,
 }
 
-impl Default for QueryPlot {
+impl Default for QueryPlotData {
     fn default() -> Self {
         Self {
-            current_query: Default::default(),
+            data: QueryPlot {
+                label: "Query Plot".to_string(),
+                query: Default::default(),
+                refresh_interval: Duration::from_millis(500),
+                auto_refresh: Default::default(),
+                color: impeller2_wkt::Color::from_color32(get_scheme().highlight),
+            },
             state: Default::default(),
             xy_line_handle: Default::default(),
             line_entity: Default::default(),
             x_offset: Default::default(),
             y_offset: Default::default(),
             last_refresh: Some(Instant::now()),
-            refresh_interval: Duration::from_millis(500),
-            auto_refresh: Default::default(),
             query_type: QueryType::EQL,
-            color: None,
         }
     }
 }
@@ -96,7 +95,7 @@ pub enum QueryPlotState {
     Error(ErrorResponse),
 }
 
-impl QueryPlot {
+impl QueryPlotData {
     fn process_record_batch(&mut self, batch: RecordBatch, xy_lines: &mut Assets<XYLine>) {
         if batch.num_columns() < 2 || batch.num_rows() == 0 {
             return;
@@ -159,7 +158,7 @@ pub fn sync_bounds_query(
 
 #[derive(SystemParam)]
 pub struct QueryPlotWidget<'w, 's> {
-    states: Query<'w, 's, &'static mut QueryPlot>,
+    states: Query<'w, 's, &'static mut QueryPlotData>,
     graphs_state: Query<'w, 's, &'static mut GraphState>,
     eql_context: Res<'w, EqlContext>,
     commands: Commands<'w, 's>,
@@ -192,16 +191,16 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
 
         ui.vertical(|ui| {
             let should_refresh = if let Some(last_refresh) = plot.last_refresh {
-                plot.auto_refresh && last_refresh.elapsed() > plot.refresh_interval
+                plot.data.auto_refresh && last_refresh.elapsed() > plot.data.refresh_interval
             } else {
-                !plot.current_query.is_empty()
+                !plot.data.query.is_empty()
             };
             if should_refresh {
                 plot.state = QueryPlotState::Requested(Instant::now());
                 plot.last_refresh = Some(Instant::now());
                 let query = match plot.query_type {
-                    QueryType::SQL => plot.current_query.to_string(),
-                    QueryType::EQL => match state.eql_context.0.sql(&plot.current_query) {
+                    QueryType::SQL => plot.data.query.to_string(),
+                    QueryType::EQL => match state.eql_context.0.sql(&plot.data.query) {
                         Ok(sql) => sql,
                         Err(err) => {
                             plot.state = QueryPlotState::Error(ErrorResponse {
@@ -214,7 +213,7 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                 state.commands.send_req_reply(
                     SQLQuery(query),
                     move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
-                          mut states: Query<&mut QueryPlot>,
+                          mut states: Query<&mut QueryPlotData>,
                           mut xy_lines: ResMut<Assets<XYLine>>| {
                         let Ok(mut plot) = states.get_mut(entity) else {
                             return true;
@@ -278,9 +277,7 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                         line: LineHandle::XY(xy_line_handle.clone()),
                         uniform: LineUniform::new(
                             graph_state.line_width,
-                            plot.color
-                                .unwrap_or_else(|| get_scheme().highlight)
-                                .into_bevy(),
+                            plot.data.color.into_color32().into_bevy(),
                         ),
                         config: LineConfig {
                             render_layers: graph_state.render_layers.clone(),
@@ -396,7 +393,7 @@ pub fn draw_x_axis(
 }
 
 pub fn auto_bounds(
-    mut graph_states: Query<(&mut GraphState, &mut QueryPlot)>,
+    mut graph_states: Query<(&mut GraphState, &mut QueryPlotData)>,
     line_handles: Query<&LineHandle>,
     mut lines: ResMut<Assets<Line>>,
     mut xy_lines: ResMut<Assets<XYLine>>,
