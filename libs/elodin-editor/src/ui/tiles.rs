@@ -24,21 +24,19 @@ use std::collections::{BTreeMap, HashMap};
 use super::{
     HdrEnabled, SelectedObject, ViewportRect,
     actions::ActionTileWidget,
+    button::{EImageButton, ETileButton},
     colors::{self, get_scheme, with_opacity},
+    command_palette::{CommandPaletteState, palette_items},
+    hierarchy::HierarchyContent,
     images,
+    inspector::{InspectorContent, InspectorIcons},
     monitor::{MonitorPane, MonitorWidget},
+    plot::{GraphBundle, GraphState, PlotWidget},
     preset::EqlExt,
-    query_table::{QueryTable, QueryTablePane, QueryTableWidget},
+    query_plot::QueryPlotData,
+    query_table::{QueryTableData, QueryTablePane, QueryTableWidget},
     video_stream::{IsTileVisible, VideoDecoderHandle},
-    widgets::{
-        WidgetSystem, WidgetSystemExt,
-        button::{EImageButton, ETileButton},
-        command_palette::{CommandPaletteState, palette_items},
-        hierarchy::HierarchyContent,
-        inspector::{InspectorContent, InspectorIcons},
-        plot::{GraphBundle, GraphState, PlotWidget},
-        query_plot::QueryPlotData,
-    },
+    widgets::{WidgetSystem, WidgetSystemExt},
 };
 use crate::{
     EqlContext, GridHandle, MainCamera,
@@ -237,7 +235,7 @@ pub enum Pane {
     Graph(GraphPane),
     Monitor(MonitorPane),
     QueryTable(QueryTablePane),
-    QueryPlot(super::widgets::query_plot::QueryPlotPane),
+    QueryPlot(super::query_plot::QueryPlotPane),
     ActionTile(ActionTilePane),
     VideoStream(super::video_stream::VideoStreamPane),
     Hierarchy,
@@ -301,7 +299,7 @@ impl Pane {
             }
             Pane::QueryPlot(pane) => {
                 pane.rect = Some(content_rect);
-                ui.add_widget_with::<super::widgets::query_plot::QueryPlotWidget>(
+                ui.add_widget_with::<super::query_plot::QueryPlotWidget>(
                     world,
                     "query_plot",
                     pane.clone(),
@@ -460,7 +458,7 @@ impl ViewportPane {
                 ..Default::default()
             },
             GridHandle { grid: grid_id },
-            crate::ui::widgets::inspector::viewport::Viewport::new(parent, pos, look_at),
+            crate::ui::inspector::viewport::Viewport::new(parent, pos, look_at),
             ChildOf(parent),
         ));
 
@@ -1113,7 +1111,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         }
                     }
                     TreeAction::AddQueryTable(parent_tile_id) => {
-                        let entity = state_mut.commands.spawn(QueryTable::default()).id();
+                        let entity = state_mut.commands.spawn(QueryTableData::default()).id();
                         let pane = Pane::QueryTable(QueryTablePane { entity });
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
@@ -1132,7 +1130,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             .spawn(QueryPlotData::default())
                             .insert(graph_bundle)
                             .id();
-                        let pane = Pane::QueryPlot(super::widgets::query_plot::QueryPlotPane {
+                        let pane = Pane::QueryPlot(super::query_plot::QueryPlotPane {
                             entity,
                             rect: None,
                         });
@@ -1425,11 +1423,11 @@ pub fn spawn_panel(
                 super::monitor::MonitorPane::new("Monitor".to_string(), monitor.component_id);
             ui_state.insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
         }
-        Panel::QueryTable(sql) => {
+        Panel::QueryTable(data) => {
             // Create a new SQL table entity
             let entity = commands
-                .spawn(super::query_table::QueryTable {
-                    current_query: sql.query.clone(),
+                .spawn(super::query_table::QueryTableData {
+                    data: data.clone(),
                     ..Default::default()
                 })
                 .id();
@@ -1466,8 +1464,7 @@ pub fn spawn_panel(
                 })
                 .insert(graph_bundle)
                 .id();
-            let pane =
-                Pane::QueryPlot(super::widgets::query_plot::QueryPlotPane { entity, rect: None });
+            let pane = Pane::QueryPlot(super::query_plot::QueryPlotPane { entity, rect: None });
             ui_state.insert_tile(Tile::Pane(pane), parent_id, false)
         }
     }

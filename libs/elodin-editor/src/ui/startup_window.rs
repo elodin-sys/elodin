@@ -22,10 +22,11 @@ use std::{
 use crate::{VERSION, dirs};
 
 use super::{
+    button::EButton,
     colors::{self, ColorExt, get_scheme},
     images,
     theme::{self, corner_radius_sm},
-    widgets::{RootWidgetSystem, RootWidgetSystemExt, button::EButton},
+    widgets::{RootWidgetSystem, RootWidgetSystemExt},
 };
 
 #[derive(Component)]

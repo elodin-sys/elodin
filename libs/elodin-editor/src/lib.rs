@@ -34,12 +34,10 @@ use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc};
 use ui::{
     SelectedObject,
     colors::{ColorExt, get_scheme},
+    inspector::viewport::set_viewport_pos,
+    plot::{CollectedGraphData, gpu::LineHandle},
     tiles::{self, TileState},
     utils::FriendlyEpoch,
-    widgets::{
-        inspector::viewport::set_viewport_pos,
-        plot::{CollectedGraphData, gpu::LineHandle},
-    },
 };
 
 pub mod object_3d;
@@ -177,7 +175,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(FrameTimeDiagnosticsPlugin::default())
             .add_plugins(WireframePlugin::default())
             .add_plugins(editor_cam_touch::EditorCamTouchPlugin)
-            .add_plugins(crate::ui::widgets::PlotPlugin)
+            .add_plugins(crate::ui::plot::PlotPlugin)
             .add_plugins(crate::plugins::LogicalKeyPlugin)
             .add_systems(Startup, setup_floating_origin)
             .add_systems(Startup, setup_window_icon)
