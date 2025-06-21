@@ -16,37 +16,47 @@ use bevy_egui::{
 use big_space::GridCell;
 
 use self::colors::get_scheme;
+use self::{command_palette::CommandPaletteState, timeline::timeline_slider};
 use egui::CornerRadius;
 use egui_tiles::TileId;
 use impeller2::types::ComponentId;
 use impeller2_bevy::ComponentValueMap;
 use impeller2_wkt::ComponentMetadata;
 use impeller2_wkt::ComponentValue;
-use widgets::{
-    command_palette::CommandPaletteState,
-    timeline::{self, timeline_slider},
-};
 
 use crate::{GridHandle, MainCamera, plugins::LogicalKeyState};
 
-use self::widgets::inspector::entity::ComponentFilter;
+use self::inspector::entity::ComponentFilter;
 //use self::widgets::modal::ModalWithSettings;
 
-use self::widgets::command_palette::{self, CommandPalette};
+use self::command_palette::CommandPalette;
 use self::widgets::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystemExt};
-use self::{utils::MarginSides, widgets::button::EImageButton};
+use self::{button::EImageButton, utils::MarginSides};
 
 pub mod actions;
+pub mod button;
 pub mod colors;
+pub mod command_palette;
+pub mod hierarchy;
 pub mod images;
+pub mod inspector;
+pub mod label;
 pub mod monitor;
+pub mod plot;
+pub mod plot_3d;
 pub mod preset;
+pub mod query_plot;
 pub mod query_table;
 mod theme;
 pub mod tiles;
+pub mod time_label;
+pub mod timeline;
 pub mod utils;
 pub mod video_stream;
 pub mod widgets;
+
+#[cfg(not(target_family = "wasm"))]
+pub mod status_bar;
 
 #[cfg(not(target_family = "wasm"))]
 pub mod startup_window;
@@ -183,7 +193,7 @@ impl Plugin for UiPlugin {
             .add_systems(Update, tiles::shortcuts)
             .add_systems(Update, set_camera_viewport.after(render_layout))
             .add_systems(Update, sync_camera_grid_cell.after(render_layout))
-            .add_systems(Update, widgets::query_plot::auto_bounds);
+            .add_systems(Update, query_plot::auto_bounds);
     }
 }
 
@@ -455,7 +465,7 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         world.add_root_widget_with::<Titlebar, With<PrimaryWindow>>("titlebar", titlebar_icons);
 
         #[cfg(not(target_family = "wasm"))]
-        world.add_root_widget::<widgets::status_bar::StatusBar>("status_bar");
+        world.add_root_widget::<status_bar::StatusBar>("status_bar");
 
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)

@@ -31,11 +31,9 @@ use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
         self, HdrEnabled, colors,
+        plot::{GraphBundle, default_component_values},
+        query_plot::QueryPlotData,
         tiles::{self, SyncViewportParams, TileState},
-        widgets::{
-            plot::{GraphBundle, default_component_values},
-            query_plot::QueryPlotData,
-        },
     },
 };
 
@@ -590,14 +588,14 @@ pub fn save_preset_inner() -> PaletteItem {
         LabelSource::placeholder("Enter a name for the preset"),
         "",
         move |name: In<String>,
-              query_tables: Query<&ui::query_table::QueryTable>,
+              query_tables: Query<&ui::query_table::QueryTableData>,
               action_tiles: Query<&ui::actions::ActionTile>,
-              graph_states: Query<&ui::widgets::plot::GraphState>,
+              graph_states: Query<&ui::plot::GraphState>,
               query_plots: Query<&QueryPlotData>,
-              viewports: Query<&ui::widgets::inspector::viewport::Viewport>,
+              viewports: Query<&ui::inspector::viewport::Viewport>,
               ui_state: Res<tiles::TileState>| {
             if let Some(tile_id) = ui_state.tree.root() {
-                let panel = crate::ui::preset::tile_to_panel(
+                let panel = crate::ui::schematic::tile_to_panel(
                     &query_tables,
                     &action_tiles,
                     &graph_states,

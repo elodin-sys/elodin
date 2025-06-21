@@ -6,7 +6,7 @@ use bevy::ecs::{
     world::World,
 };
 use bevy_egui::egui;
-use impeller2_wkt::{ComponentPath, GraphType};
+use impeller2_wkt::{ComponentPath, GraphType, QueryType};
 use smallvec::SmallVec;
 
 use egui::{
@@ -19,16 +19,14 @@ use crate::{
     EqlContext,
     ui::{
         SettingModal, SettingModalState,
+        button::{EButton, ECheckboxButton, EColorButton},
         colors::{self, ColorExt, EColor, get_scheme},
+        label::{self, label_with_buttons},
+        plot::GraphState,
+        query_plot::QueryPlotData,
         theme::{self, configure_combo_box, configure_input_with_border},
         utils::MarginSides,
-        widgets::{
-            WidgetSystem,
-            button::{EButton, ECheckboxButton, EColorButton},
-            label::{self, label_with_buttons},
-            plot::GraphState,
-            query_plot::{QueryPlotData, QueryType},
-        },
+        widgets::WidgetSystem,
     },
 };
 
@@ -158,27 +156,27 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     ui.scope(|ui| {
                         theme::configure_combo_box(ui.style_mut());
                         ui.style_mut().spacing.combo_width = ui.available_size().x;
-                        let prev_query_type = query_plot.query_type;
+                        let prev_query_type = query_plot.data.query_type;
                         egui::ComboBox::from_id_salt("query_type")
-                            .selected_text(match query_plot.query_type {
+                            .selected_text(match query_plot.data.query_type {
                                 QueryType::EQL => "EQL",
                                 QueryType::SQL => "SQL",
                             })
                             .show_ui(ui, |ui| {
                                 theme::configure_combo_item(ui.style_mut());
                                 ui.selectable_value(
-                                    &mut query_plot.query_type,
+                                    &mut query_plot.data.query_type,
                                     QueryType::EQL,
                                     "EQL",
                                 );
                                 ui.selectable_value(
-                                    &mut query_plot.query_type,
+                                    &mut query_plot.data.query_type,
                                     QueryType::SQL,
                                     "SQL",
                                 );
                             });
                         if let (QueryType::EQL, QueryType::SQL) =
-                            (prev_query_type, query_plot.query_type)
+                            (prev_query_type, query_plot.data.query_type)
                         {
                             if let Ok(sql) = eql_context.0.sql(&query_plot.data.query) {
                                 query_plot.data.query = sql;
@@ -188,7 +186,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     ui.separator();
                     ui.label(egui::RichText::new("Query").color(get_scheme().text_secondary));
                     configure_input_with_border(ui.style_mut());
-                    let query_type = query_plot.query_type;
+                    let query_type = query_plot.data.query_type;
                     let query_res = query(ui, &mut query_plot.data.query, query_type);
                     if query_type == QueryType::EQL {
                         eql_autocomplete(

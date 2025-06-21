@@ -1,24 +1,21 @@
 use std::collections::HashMap;
 
 use super::actions::ActionTile;
-use super::query_table::QueryTable;
+use super::plot::GraphState;
+use super::query_plot::QueryPlotData;
+use super::query_table::QueryTableData;
 use super::tiles::{Pane, TileState};
-use super::widgets::plot::GraphState;
-use super::widgets::query_plot::QueryPlotData;
 use bevy::prelude::*;
 use egui_tiles::{Tile, TileId};
-use impeller2_wkt::{
-    ActionPane, ComponentMonitor, ComponentPath, Panel, QueryTable as WktQueryTable, Split,
-    Viewport,
-};
+use impeller2_wkt::{ActionPane, ComponentMonitor, ComponentPath, Panel, Split, Viewport};
 
 #[allow(clippy::too_many_arguments)]
 pub fn tile_to_panel(
-    query_tables: &Query<&QueryTable>,
+    query_tables: &Query<&QueryTableData>,
     action_tiles: &Query<&ActionTile>,
     graph_states: &Query<&GraphState>,
     query_plots: &Query<&QueryPlotData>,
-    viewports: &Query<&crate::ui::widgets::inspector::viewport::Viewport>,
+    viewports: &Query<&crate::ui::inspector::viewport::Viewport>,
     tile_id: TileId,
     ui_state: &TileState,
 ) -> Option<Panel> {
@@ -62,9 +59,7 @@ pub fn tile_to_panel(
             Pane::QueryTable(query_table) => {
                 let query_table = query_tables.get(query_table.entity).ok()?;
 
-                Some(Panel::QueryTable(WktQueryTable {
-                    query: query_table.current_query.clone(),
-                }))
+                Some(Panel::QueryTable(query_table.data.clone()))
             }
             Pane::QueryPlot(plot) => {
                 let query_plot = query_plots.get(plot.entity).ok()?;

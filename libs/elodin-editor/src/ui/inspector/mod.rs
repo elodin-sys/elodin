@@ -15,7 +15,7 @@ use crate::ui::{
 
 use self::{entity::InspectorEntity, graph::InspectorGraph, viewport::InspectorViewport};
 
-use super::{WidgetSystem, WidgetSystemExt};
+use super::widgets::{WidgetSystem, WidgetSystemExt};
 
 pub mod action;
 pub mod entity;

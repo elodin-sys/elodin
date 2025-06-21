@@ -1,5 +1,4 @@
 use bevy::{
-    app::{App, Plugin, PreUpdate},
     ecs::{
         query::{QueryFilter, With},
         system::{SystemParam, SystemState},
@@ -10,23 +9,6 @@ use bevy::{
 };
 use bevy_egui::{EguiContext, egui};
 use std::collections::HashMap;
-
-use crate::set_floating_origin;
-
-pub mod button;
-pub mod command_palette;
-pub mod hierarchy;
-pub mod inspector;
-pub mod label;
-//pub mod modal;
-pub mod plot;
-pub mod plot_3d;
-pub mod query_plot;
-pub mod time_label;
-pub mod timeline;
-
-#[cfg(not(target_family = "wasm"))]
-pub mod status_bar;
 
 pub trait RootWidgetSystemExt {
     fn add_root_widget<S: RootWidgetSystem<Args = ()> + 'static>(&mut self, id: &str) -> S::Output {
@@ -167,14 +149,5 @@ pub struct WidgetId(pub u64);
 impl WidgetId {
     pub const fn new(str: &str) -> Self {
         Self(const_fnv1a_hash::fnv1a_hash_str_64(str))
-    }
-}
-
-pub struct PlotPlugin;
-impl Plugin for PlotPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_plugins((plot::PlotPlugin, plot_3d::LinePlot3dPlugin))
-            .add_systems(PreUpdate, set_floating_origin);
-        //.add_systems(PreUpdate, collect_entity_data.after(set_floating_origin));
     }
 }

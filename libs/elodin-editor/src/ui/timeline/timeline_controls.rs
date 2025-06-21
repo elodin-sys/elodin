@@ -14,9 +14,11 @@ use crate::{
     TimeRangeBehavior,
     ui::{
         Paused,
+        button::EImageButton,
         colors::{ColorExt, get_scheme},
         theme::configure_combo_box,
-        widgets::{WidgetSystem, button::EImageButton, time_label::time_label},
+        time_label::time_label,
+        widgets::WidgetSystem,
     },
 };
 

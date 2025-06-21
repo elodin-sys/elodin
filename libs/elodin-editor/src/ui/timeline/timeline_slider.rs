@@ -15,8 +15,9 @@ use std::ops::RangeInclusive;
 
 use crate::ui::{
     colors::get_scheme,
+    time_label::PrettyDuration,
     utils::{MarginSides, Shrink4},
-    widgets::{WidgetSystem, time_label::PrettyDuration},
+    widgets::WidgetSystem,
 };
 
 use super::{

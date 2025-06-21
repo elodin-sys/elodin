@@ -27,7 +27,7 @@ use super::plot::{CollectedGraphData, Line, PlotDataComponent, gpu::LineHandle};
 use crate::{
     EqlContext,
     object_3d::{CompiledExpr, EditableEQL, compile_eql_expr},
-    ui::preset::EqlExt,
+    ui::schematic::EqlExt,
 };
 
 pub mod gpu;

@@ -7,19 +7,18 @@ use bevy::{
 use bevy_egui::egui::{self, Align};
 use bevy_infinite_grid::InfiniteGrid;
 use impeller2_bevy::EntityMap;
-use impeller2_wkt::{ComponentValue, WorldPos};
+use impeller2_wkt::{ComponentValue, QueryType, WorldPos};
 
 use crate::EqlContext;
 use crate::object_3d::{ComponentArrayExt, EditableEQL, Object3D, compile_eql_expr};
 use crate::ui::CameraQuery;
+use crate::ui::button::EButton;
 use crate::ui::colors::get_scheme;
 use crate::ui::theme::configure_input_with_border;
 use crate::ui::widgets::WidgetSystem;
-use crate::ui::widgets::button::EButton;
-use crate::ui::widgets::query_plot::QueryType;
 use crate::{
     GridHandle, MainCamera,
-    ui::{theme, utils::MarginSides, widgets::label::ELabel},
+    ui::{label::ELabel, theme, utils::MarginSides},
 };
 
 use super::empty_inspector;

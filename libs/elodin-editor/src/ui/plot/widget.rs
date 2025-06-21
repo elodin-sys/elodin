@@ -36,16 +36,14 @@ use crate::{
     plugins::LogicalKeyState,
     ui::{
         colors::{ColorExt, get_scheme, with_opacity},
-        utils::format_num,
-        widgets::{
-            WidgetSystem,
-            plot::{
-                CollectedGraphData, GraphState, Line,
-                gpu::{LineBundle, LineConfig, LineUniform},
-            },
-            time_label::{PrettyDuration, time_label},
-            timeline::DurationExt,
+        plot::{
+            CollectedGraphData, GraphState, Line,
+            gpu::{LineBundle, LineConfig, LineUniform},
         },
+        time_label::{PrettyDuration, time_label},
+        timeline::DurationExt,
+        utils::format_num,
+        widgets::WidgetSystem,
     },
 };
 

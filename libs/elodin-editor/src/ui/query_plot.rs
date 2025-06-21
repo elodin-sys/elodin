@@ -18,23 +18,21 @@ use bevy::{
 };
 use egui::RichText;
 use impeller2_bevy::CommandsExt;
-use impeller2_wkt::{ArrowIPC, ErrorResponse, QueryPlot, SQLQuery};
+use impeller2_wkt::{ArrowIPC, ErrorResponse, QueryPlot, QueryType, SQLQuery};
 use itertools::Itertools;
 
 use crate::{
     EqlContext,
     ui::{
         colors::{ColorExt, EColor, get_scheme},
-        utils::format_num,
-        widgets::{
-            WidgetSystem,
-            plot::{
-                AXIS_LABEL_MARGIN, GraphState, NOTCH_LENGTH, PlotBounds, STEPS_X_WIDTH_DIVISOR,
-                STEPS_Y_HEIGHT_DIVISOR, XYLine, draw_borders, draw_y_axis, get_inner_rect,
-                gpu::{LineBundle, LineConfig, LineHandle, LineUniform, LineWidgetWidth},
-                pretty_round,
-            },
+        plot::{
+            AXIS_LABEL_MARGIN, GraphState, NOTCH_LENGTH, PlotBounds, STEPS_X_WIDTH_DIVISOR,
+            STEPS_Y_HEIGHT_DIVISOR, XYLine, draw_borders, draw_y_axis, get_inner_rect,
+            gpu::{LineBundle, LineConfig, LineHandle, LineUniform, LineWidgetWidth},
+            pretty_round,
         },
+        utils::format_num,
+        widgets::WidgetSystem,
     },
 };
 
@@ -55,14 +53,6 @@ pub struct QueryPlotData {
     pub x_offset: f64,
     pub y_offset: f64,
     pub last_refresh: Option<Instant>,
-    pub query_type: QueryType,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum QueryType {
-    #[default]
-    EQL,
-    SQL,
 }
 
 impl Default for QueryPlotData {
@@ -74,6 +64,7 @@ impl Default for QueryPlotData {
                 refresh_interval: Duration::from_millis(500),
                 auto_refresh: Default::default(),
                 color: impeller2_wkt::Color::from_color32(get_scheme().highlight),
+                query_type: QueryType::EQL,
             },
             state: Default::default(),
             xy_line_handle: Default::default(),
@@ -81,7 +72,6 @@ impl Default for QueryPlotData {
             x_offset: Default::default(),
             y_offset: Default::default(),
             last_refresh: Some(Instant::now()),
-            query_type: QueryType::EQL,
         }
     }
 }
@@ -198,7 +188,7 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
             if should_refresh {
                 plot.state = QueryPlotState::Requested(Instant::now());
                 plot.last_refresh = Some(Instant::now());
-                let query = match plot.query_type {
+                let query = match plot.data.query_type {
                     QueryType::SQL => plot.data.query.to_string(),
                     QueryType::EQL => match state.eql_context.0.sql(&plot.data.query) {
                         Ok(sql) => sql,

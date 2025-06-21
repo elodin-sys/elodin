@@ -11,7 +11,7 @@ use impeller2_wkt::ComponentMetadata;
 
 use crate::ui::{EntityFilter, EntityPair, SelectedObject, colors::get_scheme, utils};
 
-use super::{WidgetSystem, inspector::entity::search};
+use super::{inspector::entity::search, widgets::WidgetSystem};
 
 #[derive(SystemParam)]
 pub struct HierarchyContent<'w, 's> {

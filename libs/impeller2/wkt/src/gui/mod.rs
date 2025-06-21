@@ -188,10 +188,11 @@ pub struct ComponentMonitor {
     pub component_id: ComponentId,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct QueryTable {
     pub query: String,
+    pub query_type: QueryType,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -209,4 +210,12 @@ pub struct QueryPlot {
     pub refresh_interval: Duration,
     pub auto_refresh: bool,
     pub color: Color,
+    pub query_type: QueryType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize, Serialize)]
+pub enum QueryType {
+    #[default]
+    EQL,
+    SQL,
 }

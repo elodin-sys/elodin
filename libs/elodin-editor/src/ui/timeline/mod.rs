@@ -14,7 +14,7 @@ use crate::{
     ui::{colors::get_scheme, images},
 };
 
-use super::{WidgetSystem, WidgetSystemExt};
+use super::widgets::{WidgetSystem, WidgetSystemExt};
 
 pub mod timeline_controls;
 pub mod timeline_slider;

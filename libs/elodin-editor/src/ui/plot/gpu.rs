@@ -45,7 +45,7 @@ use impeller2_wkt::GraphType;
 use std::num::NonZeroU64;
 use std::ops::Range;
 
-use crate::ui::widgets::plot::{CHUNK_COUNT, CHUNK_LEN, Line, XYLine};
+use crate::ui::plot::{CHUNK_COUNT, CHUNK_LEN, Line, XYLine};
 
 use super::BufferShardAlloc;
 

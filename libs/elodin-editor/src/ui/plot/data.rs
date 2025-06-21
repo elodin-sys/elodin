@@ -30,7 +30,7 @@ use std::sync::atomic::{self, AtomicBool};
 use std::time::{Duration, Instant};
 use std::{collections::BTreeMap, fmt::Debug, ops::Range};
 
-use crate::ui::widgets::plot::gpu::INDEX_BUFFER_LEN;
+use crate::ui::plot::gpu::INDEX_BUFFER_LEN;
 use crate::{SelectedTimeRange, TimeRangeBehavior};
 
 use super::PlotBounds;

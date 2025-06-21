@@ -12,7 +12,7 @@ use impeller2_bevy::{
     ComponentMetadataRegistry, ComponentPath, ComponentPathRegistry, ComponentValue,
     ComponentValueExt, ElementValueMut,
 };
-use impeller2_wkt::{ComponentMetadata, Glb, MetadataExt};
+use impeller2_wkt::{ComponentMetadata, Glb, MetadataExt, QueryType};
 use smallvec::SmallVec;
 
 use crate::{
@@ -20,14 +20,12 @@ use crate::{
     ui::{
         EntityPair,
         colors::get_scheme,
+        label,
+        plot::{GraphBundle, default_component_values},
         theme::configure_input_with_border,
         tiles::TreeAction,
         utils::{MarginSides, format_num},
-        widgets::{
-            WidgetSystem, label,
-            plot::{GraphBundle, default_component_values},
-            query_plot::QueryType,
-        },
+        widgets::WidgetSystem,
     },
 };
 

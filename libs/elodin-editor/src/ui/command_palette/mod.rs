@@ -21,7 +21,10 @@ use crate::{
 
 use self::palette_items::{MatchedPaletteItem, PaletteEvent, PaletteIcon, PalettePage};
 
-use super::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystem, WidgetSystemExt};
+use super::{
+    RootWidgetSystem, RootWidgetSystemExt,
+    widgets::{WidgetSystem, WidgetSystemExt},
+};
 
 pub mod palette_items;
 

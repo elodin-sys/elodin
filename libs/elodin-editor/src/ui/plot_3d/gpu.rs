@@ -2,7 +2,7 @@ use std::mem;
 
 use crate::{
     SelectedTimeRange,
-    ui::widgets::plot::{
+    ui::plot::{
         Line,
         gpu::{INDEX_BUFFER_LEN, INDEX_BUFFER_SIZE, LineHandle, VALUE_BUFFER_SIZE},
     },
