@@ -14,11 +14,11 @@ use bevy_egui::{
 };
 
 use big_space::GridCell;
+use schematic::SchematicPlugin;
 
 use self::colors::get_scheme;
 use self::{command_palette::CommandPaletteState, timeline::timeline_slider};
 use egui::CornerRadius;
-use egui_tiles::TileId;
 use impeller2::types::ComponentId;
 use impeller2_bevy::ComponentValueMap;
 use impeller2_wkt::ComponentMetadata;
@@ -67,21 +67,18 @@ pub struct HdrEnabled(pub bool);
 #[derive(Resource, Default)]
 pub struct Paused(pub bool);
 
-#[derive(Resource, Default, Debug, Clone)]
+#[derive(Resource, Default, Debug, Clone, PartialEq, Eq, Copy)]
 pub enum SelectedObject {
     #[default]
     None,
     Entity(EntityPair),
     Viewport {
         camera: Entity,
-        tile_id: TileId,
     },
     Graph {
-        tile_id: TileId,
         graph_id: Entity,
     },
     Action {
-        tile_id: TileId,
         action_id: Entity,
     },
 }
@@ -91,17 +88,13 @@ impl SelectedObject {
         matches!(self, SelectedObject::Entity(pair) if pair.impeller == id)
     }
 
-    pub fn is_tile_selected(&self, tile_id: TileId) -> bool {
-        self.tile_id() == Some(tile_id)
-    }
-
-    pub fn tile_id(&self) -> Option<TileId> {
+    pub fn entity(&self) -> Option<Entity> {
         match self {
             SelectedObject::None => None,
-            SelectedObject::Entity(_) => None,
-            SelectedObject::Viewport { tile_id, .. } => Some(*tile_id),
-            SelectedObject::Graph { tile_id, .. } => Some(*tile_id),
-            SelectedObject::Action { tile_id, .. } => Some(*tile_id),
+            SelectedObject::Entity(pair) => Some(pair.bevy),
+            SelectedObject::Viewport { camera } => Some(*camera),
+            SelectedObject::Graph { graph_id } => Some(*graph_id),
+            SelectedObject::Action { action_id } => Some(*action_id),
         }
     }
 }
@@ -118,7 +111,7 @@ pub struct InspectorAnchor(pub Option<egui::Pos2>);
 #[derive(Component, Clone)]
 pub struct ViewportRect(pub Option<egui::Rect>);
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EntityPair {
     pub bevy: Entity,
     pub impeller: ComponentId,
@@ -193,7 +186,8 @@ impl Plugin for UiPlugin {
             .add_systems(Update, tiles::shortcuts)
             .add_systems(Update, set_camera_viewport.after(render_layout))
             .add_systems(Update, sync_camera_grid_cell.after(render_layout))
-            .add_systems(Update, query_plot::auto_bounds);
+            .add_systems(Update, query_plot::auto_bounds)
+            .add_plugins(SchematicPlugin);
     }
 }
 
@@ -252,7 +246,7 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
         } = args;
 
         let titlebar_height = if cfg!(target_os = "macos") {
-            52.0
+            45.0
         } else if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             45.0
         } else {

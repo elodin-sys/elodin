@@ -82,6 +82,10 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/logo-full.png");
         embedded_asset!(app, "assets/icons/chevron_right.png");
         embedded_asset!(app, "assets/icons/vertical-chevrons.png");
+        embedded_asset!(app, "assets/icons/container.png");
+        embedded_asset!(app, "assets/icons/plot.png");
+        embedded_asset!(app, "assets/icons/viewport.png");
+        embedded_asset!(app, "assets/icons/entity.png");
     }
 }
 
@@ -402,7 +406,7 @@ fn setup_titlebar(
                     | NSWindowStyleMask::NSMiniaturizableWindowMask
                     | NSWindowStyleMask::NSUnifiedTitleAndToolbarWindowMask,
             );
-            window.setToolbarStyle_(NSWindowToolbarStyle::NSWindowToolbarStyleUnified);
+            window.setToolbarStyle_(NSWindowToolbarStyle::NSWindowToolbarStyleUnifiedCompact);
             window.setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
             window.setToolbar_(toolbar);
             commands.entity(id).insert(SetupTitlebar);

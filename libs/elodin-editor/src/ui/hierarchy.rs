@@ -11,7 +11,7 @@ use impeller2_wkt::ComponentMetadata;
 
 use crate::ui::{EntityFilter, EntityPair, SelectedObject, colors::get_scheme, utils};
 
-use super::{inspector::entity::search, widgets::WidgetSystem};
+use super::{inspector::entity::search, schematic::branch, widgets::WidgetSystem};
 
 #[derive(SystemParam)]
 pub struct HierarchyContent<'w, 's> {
@@ -21,15 +21,21 @@ pub struct HierarchyContent<'w, 's> {
     path_reg: ResMut<'w, ComponentPathRegistry>,
 }
 
+pub struct HiearchyIcons {
+    pub search: egui::TextureId,
+    pub entity: egui::TextureId,
+    pub chevron: egui::TextureId,
+}
+
 impl WidgetSystem for HierarchyContent<'_, '_> {
-    type Args = egui::TextureId;
+    type Args = HiearchyIcons;
     type Output = ();
 
     fn ui_system(
         world: &mut World,
         state: &mut SystemState<Self>,
         ui: &mut egui::Ui,
-        args: Self::Args,
+        icons: Self::Args,
     ) {
         ui.painter().rect_filled(
             ui.max_rect(),
@@ -44,11 +50,16 @@ impl WidgetSystem for HierarchyContent<'_, '_> {
             path_reg,
         } = state.get_mut(world);
 
-        let icon_search = args;
-
         let search_text = entity_filter.0.clone();
-        header(ui, entity_filter, icon_search);
-        entity_list(ui, &entities, &mut selected_object, &path_reg, &search_text);
+        header(ui, entity_filter, icons.search);
+        entity_list(
+            ui,
+            &entities,
+            &mut selected_object,
+            &path_reg,
+            &search_text,
+            icons,
+        );
     }
 }
 
@@ -71,6 +82,7 @@ pub fn entity_list(
     selected_object: &mut ResMut<SelectedObject>,
     path_reg: &ComponentPathRegistry,
     entity_filter: &str,
+    icons: HiearchyIcons,
 ) -> egui::Response {
     egui::ScrollArea::both()
         .show(ui, |ui| {
@@ -97,7 +109,17 @@ pub fn entity_list(
 
                 for (_, entity_id, entity, metadata) in filtered_entities {
                     let selected = selected_object.is_entity_selected(*entity_id);
-                    let list_item = ui.add(list_item(selected, metadata));
+                    let list_item = branch(
+                        ui,
+                        &metadata.name,
+                        icons.entity,
+                        icons.chevron,
+                        true,
+                        ui.max_rect(),
+                        selected,
+                        |_| {},
+                    );
+                    //let list_item = ui.add(list_item(selected, metadata));
 
                     if list_item.clicked() {
                         if let SelectedObject::Entity(prev) = selected_object.as_ref() {

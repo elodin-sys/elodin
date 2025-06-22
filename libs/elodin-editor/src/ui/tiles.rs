@@ -27,7 +27,7 @@ use super::{
     button::{EImageButton, ETileButton},
     colors::{self, get_scheme, with_opacity},
     command_palette::{CommandPaletteState, palette_items},
-    hierarchy::HierarchyContent,
+    hierarchy::{HiearchyIcons, HierarchyContent},
     images,
     inspector::{InspectorContent, InspectorIcons},
     monitor::{MonitorPane, MonitorWidget},
@@ -58,6 +58,11 @@ pub struct TileIcons {
     pub setting: egui::TextureId,
     pub search: egui::TextureId,
     pub chart: egui::TextureId,
+    pub chevron: egui::TextureId,
+    pub plot: egui::TextureId,
+    pub viewport: egui::TextureId,
+    pub container: egui::TextureId,
+    pub entity: egui::TextureId,
 }
 
 #[derive(Resource, Clone)]
@@ -73,6 +78,11 @@ pub struct ViewportContainsPointer(pub bool);
 pub struct ActionTilePane {
     pub entity: Entity,
     pub label: String,
+}
+
+#[derive(Clone)]
+pub struct TreePane {
+    pub entity: Entity,
 }
 
 impl TileState {
@@ -177,6 +187,11 @@ impl TileState {
         self.tree_actions.push(TreeAction::AddInspector(tile_id));
     }
 
+    pub fn create_tree_tile(&mut self, tile_id: Option<TileId>) {
+        self.tree_actions
+            .push(TreeAction::AddSchematicTree(tile_id));
+    }
+
     pub fn create_sidebars_layout(&mut self) {
         self.tree_actions.push(TreeAction::AddSidebars);
     }
@@ -213,12 +228,15 @@ impl TileState {
                 Tile::Pane(Pane::QueryPlot(pane)) => {
                     commands.entity(pane.entity).despawn();
                 }
+                Tile::Pane(Pane::SchematicTree(pane)) => {
+                    commands.entity(pane.entity).despawn();
+                }
                 _ => {}
             }
 
-            if selected_object.is_tile_selected(*tile_id) {
-                *selected_object = SelectedObject::None;
-            }
+            // if selected_object.is_tile_selected(*tile_id) {
+            //     *selected_object = SelectedObject::None;
+            // }
         }
 
         if let Some(root_id) = self.tree.root() {
@@ -240,6 +258,7 @@ pub enum Pane {
     VideoStream(super::video_stream::VideoStreamPane),
     Hierarchy,
     Inspector,
+    SchematicTree(TreePane),
 }
 
 impl Pane {
@@ -264,6 +283,7 @@ impl Pane {
             Pane::VideoStream(video_stream) => video_stream.label.to_string(),
             Pane::Hierarchy => "Entities".to_string(),
             Pane::Inspector => "Inspector".to_string(),
+            Pane::SchematicTree(_) => "Tree".to_string(),
         }
     }
 
@@ -319,7 +339,15 @@ impl Pane {
                 egui_tiles::UiResponse::None
             }
             Pane::Hierarchy => {
-                ui.add_widget_with::<HierarchyContent>(world, "hierarchy_content", icons.search);
+                ui.add_widget_with::<HierarchyContent>(
+                    world,
+                    "hierarchy_content",
+                    HiearchyIcons {
+                        search: icons.search,
+                        entity: icons.entity,
+                        chevron: icons.chevron,
+                    },
+                );
                 egui_tiles::UiResponse::None
             }
             Pane::Inspector => {
@@ -336,6 +364,21 @@ impl Pane {
                     (inspector_icons, true),
                 );
                 tree_actions.extend(actions);
+                egui_tiles::UiResponse::None
+            }
+            Pane::SchematicTree(tree_pane) => {
+                let tree_icons = super::schematic::tree::TreeIcons {
+                    chevron: icons.chevron,
+                    search: icons.search,
+                    container: icons.container,
+                    plot: icons.plot,
+                    viewport: icons.viewport,
+                };
+                ui.add_widget_with::<super::schematic::tree::TreeWidget>(
+                    world,
+                    "tree",
+                    (tree_icons, tree_pane.entity),
+                );
                 egui_tiles::UiResponse::None
             }
         }
@@ -528,6 +571,7 @@ pub enum TreeAction {
     AddVideoStream(Option<TileId>, [u8; 2], String),
     AddHierarchy(Option<TileId>),
     AddInspector(Option<TileId>),
+    AddSchematicTree(Option<TileId>),
     AddSidebars,
     DeleteTab(TileId),
     SelectTile(TileId),
@@ -566,13 +610,8 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         tile_id: egui_tiles::TileId,
         state: &egui_tiles::TabState,
     ) -> egui::Response {
-        let mut layout = SystemState::<TileLayout>::new(self.world);
-        let layout = layout.get_mut(self.world);
-        let is_selected = layout.selected_object.is_tile_selected(tile_id);
-        let tab_state = if is_selected {
+        let tab_state = if state.active {
             TabState::Selected
-        } else if state.active {
-            TabState::Active
         } else {
             TabState::Inactive
         };
@@ -645,47 +684,13 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
     fn on_tab_button(
         &mut self,
-        tiles: &Tiles<Pane>,
+        _tiles: &Tiles<Pane>,
         tile_id: TileId,
         button_response: egui::Response,
     ) -> egui::Response {
-        let mut layout = SystemState::<TileLayout>::new(self.world);
-        let mut layout = layout.get_mut(self.world);
-
         if button_response.middle_clicked() {
             self.tree_actions.push(TreeAction::DeleteTab(tile_id));
         } else if button_response.clicked() {
-            let Some(tile) = tiles.get(tile_id) else {
-                return button_response;
-            };
-            match tile {
-                Tile::Pane(Pane::Graph(graph)) => {
-                    *layout.selected_object = SelectedObject::Graph {
-                        tile_id,
-                        graph_id: graph.id,
-                    };
-                }
-                Tile::Pane(Pane::Viewport(viewport)) => {
-                    let Some(camera) = viewport.camera else {
-                        return button_response;
-                    };
-                    *layout.selected_object = SelectedObject::Viewport { tile_id, camera };
-                }
-                Tile::Pane(Pane::ActionTile(action)) => {
-                    *layout.selected_object = SelectedObject::Action {
-                        tile_id,
-                        action_id: action.entity,
-                    };
-                }
-
-                Tile::Pane(Pane::QueryPlot(pane)) => {
-                    *layout.selected_object = SelectedObject::Graph {
-                        tile_id,
-                        graph_id: pane.entity,
-                    };
-                }
-                _ => {}
-            }
             self.tree_actions.push(TreeAction::SelectTile(tile_id));
         }
         button_response
@@ -796,6 +801,11 @@ impl WidgetSystem for TileSystem<'_, '_> {
             chart: contexts.add_image(images.icon_chart.clone_weak()),
             setting: contexts.add_image(images.icon_setting.clone_weak()),
             search: contexts.add_image(images.icon_search.clone_weak()),
+            chevron: contexts.add_image(images.icon_chevron_right.clone_weak()),
+            plot: contexts.add_image(images.icon_plot.clone_weak()),
+            viewport: contexts.add_image(images.icon_viewport.clone_weak()),
+            container: contexts.add_image(images.icon_container.clone_weak()),
+            entity: contexts.add_image(images.icon_entity.clone_weak()),
         };
 
         let is_empty_tile_tree = ui_state.is_empty() && ui_state.tree_actions.is_empty();
@@ -990,14 +1000,15 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             state_mut.commands.entity(pane.entity).despawn();
                         };
 
+                        if let egui_tiles::Tile::Pane(Pane::SchematicTree(pane)) = tile {
+                            state_mut.commands.entity(pane.entity).despawn();
+                        };
+
                         ui_state.tree.remove_recursively(tile_id);
 
                         if let Some(graph_id) = ui_state.graphs.get(&tile_id) {
                             state_mut.commands.entity(*graph_id).despawn();
                             ui_state.graphs.remove(&tile_id);
-                            if state_mut.selected_object.is_tile_selected(tile_id) {
-                                *state_mut.selected_object = SelectedObject::None;
-                            }
                         }
                     }
                     TreeAction::AddViewport(parent_tile_id) => {
@@ -1042,8 +1053,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
-                            *state_mut.selected_object =
-                                SelectedObject::Graph { tile_id, graph_id };
+                            *state_mut.selected_object = SelectedObject::Graph { graph_id };
                             ui_state.tree.make_active(|id, _| id == tile_id);
                             ui_state.graphs.insert(tile_id, graph_id);
                         }
@@ -1137,10 +1147,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
-                            *state_mut.selected_object = SelectedObject::Graph {
-                                tile_id,
-                                graph_id: entity,
-                            };
+                            *state_mut.selected_object = SelectedObject::Graph { graph_id: entity };
                             ui_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
@@ -1154,6 +1161,18 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     TreeAction::AddInspector(parent_tile_id) => {
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(Pane::Inspector), parent_tile_id, true)
+                        {
+                            ui_state.tree.make_active(|id, _| id == tile_id);
+                        }
+                    }
+                    TreeAction::AddSchematicTree(parent_tile_id) => {
+                        let entity = state_mut
+                            .commands
+                            .spawn(super::schematic::tree::TreeWidgetState::default())
+                            .id();
+                        let pane = Pane::SchematicTree(TreePane { entity });
+                        if let Some(tile_id) =
+                            ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
                             ui_state.tree.make_active(|id, _| id == tile_id);
                         }
@@ -1199,6 +1218,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     }
                     Pane::Hierarchy => {}
                     Pane::Inspector => {}
+                    Pane::SchematicTree(_) => {}
                     Pane::Graph(graph) => {
                         if active_tiles.contains(tile_id) {
                             if let Ok(mut cam) = state_mut.commands.get_entity(graph.id) {
@@ -1451,6 +1471,13 @@ pub fn spawn_panel(
         }
         Panel::Inspector => ui_state.insert_tile(Tile::Pane(Pane::Inspector), parent_id, false),
         Panel::Hierarchy => ui_state.insert_tile(Tile::Pane(Pane::Hierarchy), parent_id, false),
+        Panel::SchematicTree => {
+            let entity = commands
+                .spawn(super::schematic::tree::TreeWidgetState::default())
+                .id();
+            let pane = TreePane { entity };
+            ui_state.insert_tile(Tile::Pane(Pane::SchematicTree(pane)), parent_id, false)
+        }
         Panel::QueryPlot(plot) => {
             let graph_bundle = GraphBundle::new(
                 render_layer_alloc,

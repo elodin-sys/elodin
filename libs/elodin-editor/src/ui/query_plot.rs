@@ -65,6 +65,7 @@ impl Default for QueryPlotData {
                 auto_refresh: Default::default(),
                 color: impeller2_wkt::Color::from_color32(get_scheme().highlight),
                 query_type: QueryType::EQL,
+                aux: (),
             },
             state: Default::default(),
             xy_line_handle: Default::default(),

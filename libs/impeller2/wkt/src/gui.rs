@@ -1,38 +1,147 @@
 use crate::Color;
 use impeller2::component::Asset;
 use impeller2::types::{ComponentId, EntityId};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::Range;
 use std::time::Duration;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub enum Panel {
-    Viewport(Viewport),
-    VSplit(Split),
-    HSplit(Split),
-    Graph(Graph),
-    ComponentMonitor(ComponentMonitor),
-    ActionPane(ActionPane),
-    QueryTable(QueryTable),
-    QueryPlot(QueryPlot),
-    Tabs(Vec<Panel>),
-    Inspector,
-    Hierarchy,
+#[serde(bound = "T: Serialize + DeserializeOwned")]
+pub struct Schematic<T = ()> {
+    pub elems: Vec<SchematicElem<T>>,
+}
+
+impl<T> Default for Schematic<T> {
+    fn default() -> Self {
+        Self {
+            elems: Default::default(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(bound = "T: Serialize + DeserializeOwned")]
+pub enum SchematicElem<T = ()> {
+    Panel(Panel<T>),
+    Object3d(Object3D),
+    Line3d(Line3d<T>),
+}
+
+impl<T> SchematicElem<T> {
+    pub fn clear_aux(self) -> SchematicElem<()> {
+        match self {
+            SchematicElem::Panel(panel) => SchematicElem::Panel(panel.map_aux(|_| ())),
+            SchematicElem::Object3d(obj) => SchematicElem::Object3d(obj),
+            SchematicElem::Line3d(line) => SchematicElem::Line3d(line.map_aux(|_| ())),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(bound = "T: Serialize + DeserializeOwned")]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct Split {
-    pub panels: Vec<Panel>,
+pub enum Panel<T = ()> {
+    Viewport(Viewport<T>),
+    VSplit(Split<T>),
+    HSplit(Split<T>),
+    Graph(Graph<T>),
+    ComponentMonitor(ComponentMonitor),
+    ActionPane(ActionPane),
+    QueryTable(QueryTable),
+    QueryPlot(QueryPlot<T>),
+    Tabs(Vec<Panel<T>>),
+    Inspector,
+    Hierarchy,
+    SchematicTree,
+}
+
+impl<T> Panel<T> {
+    pub fn label(&self) -> &str {
+        match self {
+            Panel::Viewport(_) => "Viewport",
+            Panel::VSplit(_) => "Vertical Split",
+            Panel::HSplit(_) => "Horizontal Split",
+            Panel::Graph(_) => "Graph",
+            Panel::ComponentMonitor(_) => "Component Monitor",
+            Panel::ActionPane(_) => "Action Pane",
+            Panel::QueryTable(_) => "Query Table",
+            Panel::QueryPlot(query_plot) => &query_plot.label,
+            Panel::Tabs(_) => "Tabs",
+            Panel::Inspector => "Inspector",
+            Panel::Hierarchy => "Hierarchy",
+            Panel::SchematicTree => "Tree",
+        }
+    }
+
+    pub fn collapse(&self) -> &Panel<T> {
+        match self {
+            Panel::Tabs(panels) if panels.len() == 1 => panels[0].collapse(),
+            _ => self,
+        }
+    }
+
+    pub fn children(&self) -> &[Panel<T>] {
+        match self {
+            Panel::HSplit(split) | Panel::VSplit(split) => &split.panels,
+            Panel::Tabs(panels) => panels,
+            _ => &[],
+        }
+    }
+
+    pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> Panel<U> {
+        match self {
+            Panel::HSplit(split) => Panel::HSplit(split.map_aux(f)),
+            Panel::VSplit(split) => Panel::VSplit(split.map_aux(f)),
+            Panel::Tabs(panels) => Panel::Tabs(panels.iter().map(|p| p.map_aux(&f)).collect()),
+            Panel::Graph(graph) => Panel::Graph(graph.map_aux(f)),
+            Panel::ComponentMonitor(component_monitor) => {
+                Panel::ComponentMonitor(component_monitor.clone())
+            }
+            Panel::ActionPane(action_pane) => Panel::ActionPane(action_pane.clone()),
+            Panel::QueryTable(query_table) => Panel::QueryTable(query_table.clone()),
+            Panel::QueryPlot(query_plot) => Panel::QueryPlot(query_plot.map_aux(f)),
+            Panel::Hierarchy => Panel::Hierarchy,
+            Panel::SchematicTree => Panel::SchematicTree,
+            Panel::Inspector => Panel::Inspector,
+            Panel::Viewport(v) => Panel::Viewport(v.map_aux(f)),
+        }
+    }
+
+    pub fn aux(&self) -> Option<&T> {
+        match self {
+            Panel::Graph(graph) => Some(&graph.aux),
+            Panel::QueryPlot(query_plot) => Some(&query_plot.aux),
+            Panel::Viewport(v) => Some(&v.aux),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(bound = "T: Serialize + DeserializeOwned")]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct Split<T = ()> {
+    pub panels: Vec<Panel<T>>,
     pub shares: HashMap<usize, f32>,
     pub active: bool,
 }
 
+impl<T> Split<T> {
+    pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> Split<U> {
+        Split {
+            panels: self.panels.iter().map(|p| p.map_aux(&f)).collect(),
+            shares: self.shares.clone(),
+            active: self.active,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(bound = "T: Serialize + DeserializeOwned")]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct Viewport {
+pub struct Viewport<T = ()> {
     pub fov: f32,
     pub active: bool,
     pub show_grid: bool,
@@ -40,6 +149,22 @@ pub struct Viewport {
     pub name: Option<String>,
     pub pos: Option<String>,
     pub look_at: Option<String>,
+    pub aux: T,
+}
+
+impl<T> Viewport<T> {
+    pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> Viewport<U> {
+        Viewport {
+            fov: self.fov,
+            active: self.active,
+            show_grid: self.show_grid,
+            hdr: self.hdr,
+            name: self.name.clone(),
+            pos: self.pos.clone(),
+            look_at: self.look_at.clone(),
+            aux: f(&self.aux),
+        }
+    }
 }
 
 impl Default for Viewport {
@@ -52,6 +177,7 @@ impl Default for Viewport {
             name: None,
             pos: None,
             look_at: None,
+            aux: (),
         }
     }
 }
@@ -61,14 +187,29 @@ impl Asset for Panel {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(bound = "T: Serialize + DeserializeOwned")]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct Graph {
+pub struct Graph<T = ()> {
     pub eql: String,
     pub name: Option<String>,
     #[serde(default)]
     pub graph_type: GraphType,
     pub auto_y_range: bool,
     pub y_range: Range<f64>,
+    pub aux: T,
+}
+
+impl<T> Graph<T> {
+    pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> Graph<U> {
+        Graph {
+            eql: self.eql.clone(),
+            name: self.name.clone(),
+            graph_type: self.graph_type,
+            auto_y_range: self.auto_y_range,
+            y_range: self.y_range.clone(),
+            aux: f(&self.aux),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq, Debug, Default)]
@@ -81,15 +222,29 @@ pub enum GraphType {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "T: Serialize + DeserializeOwned")]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct Line3d {
+pub struct Line3d<T = ()> {
     pub eql: String,
     pub line_width: f32,
     pub color: Color,
     pub perspective: bool,
+    pub aux: T,
 }
 
-impl Asset for Line3d {
+impl<T> Line3d<T> {
+    pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> Line3d<U> {
+        Line3d {
+            eql: self.eql.clone(),
+            line_width: self.line_width,
+            color: self.color,
+            perspective: self.perspective,
+            aux: f(&self.aux),
+        }
+    }
+}
+
+impl<T: Serialize + DeserializeOwned> Asset for Line3d<T> {
     const NAME: &'static str = "line_3d";
 }
 
@@ -204,13 +359,29 @@ pub struct ActionPane {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct QueryPlot {
+#[serde(bound = "T: Serialize + DeserializeOwned")]
+pub struct QueryPlot<T = ()> {
     pub label: String,
     pub query: String,
     pub refresh_interval: Duration,
     pub auto_refresh: bool,
     pub color: Color,
     pub query_type: QueryType,
+    pub aux: T,
+}
+
+impl<T> QueryPlot<T> {
+    pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> QueryPlot<U> {
+        QueryPlot {
+            label: self.label.clone(),
+            query: self.query.clone(),
+            refresh_interval: self.refresh_interval,
+            auto_refresh: self.auto_refresh.clone(),
+            color: self.color,
+            query_type: self.query_type,
+            aux: f(&self.aux),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize, Serialize)]

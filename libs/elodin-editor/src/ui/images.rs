@@ -33,6 +33,10 @@ pub struct Images {
     pub icon_folder: Handle<Image>,
     pub icon_chevron_right: Handle<Image>,
     pub icon_vertical_chevrons: Handle<Image>,
+    pub icon_plot: Handle<Image>,
+    pub icon_viewport: Handle<Image>,
+    pub icon_container: Handle<Image>,
+    pub icon_entity: Handle<Image>,
 }
 
 impl FromWorld for Images {
@@ -80,6 +84,11 @@ impl FromWorld for Images {
                 .load("embedded://elodin_editor/assets/icons/chevron_right.png"),
             icon_vertical_chevrons: asset_server
                 .load("embedded://elodin_editor/assets/icons/vertical-chevrons.png"),
+            icon_plot: asset_server.load("embedded://elodin_editor/assets/icons/plot.png"),
+            icon_viewport: asset_server.load("embedded://elodin_editor/assets/icons/viewport.png"),
+            icon_container: asset_server
+                .load("embedded://elodin_editor/assets/icons/container.png"),
+            icon_entity: asset_server.load("embedded://elodin_editor/assets/icons/entity.png"),
         }
     }
 }

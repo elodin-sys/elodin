@@ -32,7 +32,7 @@ use crate::{
     ui::{
         self, HdrEnabled, colors,
         plot::{GraphBundle, default_component_values},
-        query_plot::QueryPlotData,
+        schematic::SchematicParam,
         tiles::{self, SyncViewportParams, TileState},
     },
 };
@@ -443,6 +443,17 @@ pub fn create_inspector(tile_id: Option<TileId>) -> PaletteItem {
     )
 }
 
+pub fn create_schematic_tree(tile_id: Option<TileId>) -> PaletteItem {
+    PaletteItem::new(
+        "Create Schematic Tree",
+        TILES_LABEL,
+        move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
+            tile_state.create_tree_tile(tile_id);
+            PaletteEvent::Exit
+        },
+    )
+}
+
 pub fn create_sidebars() -> PaletteItem {
     PaletteItem::new(
         "Create Sidebars",
@@ -587,23 +598,9 @@ pub fn save_preset_inner() -> PaletteItem {
     PaletteItem::new(
         LabelSource::placeholder("Enter a name for the preset"),
         "",
-        move |name: In<String>,
-              query_tables: Query<&ui::query_table::QueryTableData>,
-              action_tiles: Query<&ui::actions::ActionTile>,
-              graph_states: Query<&ui::plot::GraphState>,
-              query_plots: Query<&QueryPlotData>,
-              viewports: Query<&ui::inspector::viewport::Viewport>,
-              ui_state: Res<tiles::TileState>| {
-            if let Some(tile_id) = ui_state.tree.root() {
-                let panel = crate::ui::schematic::tile_to_panel(
-                    &query_tables,
-                    &action_tiles,
-                    &graph_states,
-                    &query_plots,
-                    &viewports,
-                    tile_id,
-                    &ui_state,
-                );
+        move |name: In<String>, param: SchematicParam| {
+            if let Some(tile_id) = param.ui_state.tree.root() {
+                let panel = param.get_panel(tile_id);
                 let dirs = crate::dirs();
                 let dir = dirs.data_dir().join("presets");
                 let _ = std::fs::create_dir(&dir);
@@ -945,6 +942,7 @@ pub fn create_tiles(tile_id: TileId) -> PalettePage {
         create_query_plot(Some(tile_id)),
         create_video_stream(Some(tile_id)),
         create_hierarchy(Some(tile_id)),
+        create_schematic_tree(Some(tile_id)),
         create_inspector(Some(tile_id)),
         create_sidebars(),
     ])
@@ -1013,6 +1011,7 @@ impl Default for PalettePage {
             create_video_stream(None),
             create_hierarchy(None),
             create_inspector(None),
+            create_schematic_tree(None),
             create_sidebars(),
             create_3d_object(),
             save_preset(),
