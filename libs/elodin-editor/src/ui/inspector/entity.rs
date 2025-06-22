@@ -108,7 +108,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                         );
                         ui.add_space(6.0);
                         ui.label(
-                            egui::RichText::new("ENTITY ID")
+                            egui::RichText::new("ID")
                                 .color(get_scheme().text_secondary)
                                 .font(mono_font.clone()),
                         );
@@ -157,20 +157,10 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
         });
 
         let matcher = SkimMatcherV2::default().smart_case().use_cache(true);
-        let Ok(children) = children.get(pair.bevy) else {
-            return tree_actions;
-        };
+        let children = children.get(pair.bevy).into_iter().flat_map(|c| c.iter());
 
-        // let mut components = component_value_map
-        //     .0
-        //     .keys()
-        //     .filter_map(|id| {
-        //         let metadata = metadata_store.get_metadata(id)?;
-        //         let priority = metadata.priority();
-        //         Some((*id, priority, metadata))
-        //     })
         let mut components = children
-            .iter()
+            .chain(std::iter::once(&pair.bevy))
             .filter_map(|&child| {
                 let id = component_ids.get(child).ok()?;
                 let metadata = metadata_store.get_metadata(id)?;

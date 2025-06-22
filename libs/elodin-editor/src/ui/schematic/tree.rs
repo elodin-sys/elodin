@@ -166,7 +166,7 @@ pub fn branch(
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
             let inner_rect = ui.max_rect();
-            let response = ui.interact(
+            let mut response = ui.interact(
                 egui::Rect::from_min_max(
                     egui::pos2(tree_rect.min.x, inner_rect.min.y),
                     egui::pos2(tree_rect.max.x, inner_rect.max.y),
@@ -206,6 +206,7 @@ pub fn branch(
 
                 if let Some(pos) = response.interact_pointer_pos() {
                     if response.clicked() && chevron_rect.contains(pos) {
+                        response.flags = response.flags & !egui::response::Flags::CLICKED;
                         state.toggle(ui);
                     }
                 }
