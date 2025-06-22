@@ -31,8 +31,7 @@ public:
         uint16_t len;
     };
 
-    struct Pair {
-        std::shared_ptr<OpBuilder> entity_id;
+    struct Component {
         std::shared_ptr<OpBuilder> component_id;
     };
 
@@ -53,7 +52,7 @@ public:
         std::shared_ptr<OpBuilder> arg;
     };
 
-    using ValueType = std::variant<Data, Table, Pair, Schema, Timestamp, Ext>;
+    using ValueType = std::variant<Data, Table, Component, Schema, Timestamp, Ext>;
     ValueType value;
 
     explicit OpBuilder(const Data& data)
@@ -66,8 +65,8 @@ public:
     {
     }
 
-    explicit OpBuilder(const Pair& pair)
-        : value(pair)
+    explicit OpBuilder(const Component& component)
+        : value(component)
     {
     }
 
@@ -150,15 +149,14 @@ namespace builder {
         return std::make_shared<OpBuilder>(table);
     }
 
-    /// Creates a pair operation builder from an entity ID and component ID
-    inline std::shared_ptr<OpBuilder> pair(uint64_t entity_id, std::string_view component_name)
+    /// Creates a operation builder from a component ID
+    inline std::shared_ptr<OpBuilder> component(std::string_view component_name)
     {
         auto id = component_id(component_name);
-        auto entity_id_op = data(entity_id);
         auto component_id_op = data(id);
 
-        OpBuilder::Pair pair { std::move(entity_id_op), std::move(component_id_op) };
-        return std::make_shared<OpBuilder>(pair);
+        OpBuilder::Component component { std::move(component_id_op) };
+        return std::make_shared<OpBuilder>(component);
     }
 
     /// Creates a schema operation builder from a primitive type, dimensions, and an argument
@@ -197,7 +195,7 @@ namespace builder {
     /// Creates a field builder from a class and its field
     /// ## Usage
     /// ```cpp
-    ///  builder::field<Foo, &Foo::time>(builder::schema(PrimType::F64(), {}, builder::pair(1, "time"))),
+    ///  builder::field<Foo, &Foo::time>(builder::schema(PrimType::F64(), {}, builder::component("time"))),
     /// ```
     template <typename Class, auto MemberPtr>
     inline FieldBuilder field(std::shared_ptr<OpBuilder> arg)
@@ -249,13 +247,11 @@ namespace builder {
                 } else if constexpr (std::is_same_v<T, OpBuilder::Table>) {
                     const auto& table_op = val;
                     result_op = Op::Table(OpTable { table_op.offset, table_op.len });
-                } else if constexpr (std::is_same_v<T, OpBuilder::Pair>) {
-                    const auto& pair_op = val;
-                    OpRef entity_id = visit(pair_op.entity_id);
-                    OpRef component_id = visit(pair_op.component_id);
+                } else if constexpr (std::is_same_v<T, OpBuilder::Component>) {
+                    const auto& component_op = val;
+                    OpRef component_id = visit(component_op.component_id);
 
-                    result_op = Op::Pair(OpPair {
-                        static_cast<uint16_t>(entity_id.value),
+                    result_op = Op::Component(OpComponent {
                         static_cast<uint16_t>(component_id.value) });
                 } else if constexpr (std::is_same_v<T, OpBuilder::Schema>) {
                     const auto& schema_op = val;
