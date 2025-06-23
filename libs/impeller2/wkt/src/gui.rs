@@ -1,8 +1,7 @@
 use crate::Color;
 use impeller2::component::Asset;
 use impeller2::types::{ComponentId, EntityId};
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::HashMap;
 use std::ops::Range;
 use std::time::Duration;
@@ -395,7 +394,7 @@ impl<T> QueryPlot<T> {
             label: self.label.clone(),
             query: self.query.clone(),
             refresh_interval: self.refresh_interval,
-            auto_refresh: self.auto_refresh.clone(),
+            auto_refresh: self.auto_refresh,
             color: self.color,
             query_type: self.query_type,
             aux: f(&self.aux),
