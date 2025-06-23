@@ -2,12 +2,10 @@ use impeller2::types::ComponentId;
 use impeller2_wkt::{Color, Schematic, SchematicElem};
 use kdl::{KdlDocument, KdlNode};
 use std::collections::HashMap;
+use std::default;
 use std::time::Duration;
 
-use impeller2_wkt::{
-    ActionPane, ComponentMonitor, Graph, GraphType, Line3d, Material, Mesh, Object3D, Object3DMesh,
-    Panel, QueryPlot, QueryTable, QueryType, Split, Viewport,
-};
+use impeller2_wkt::*;
 
 use crate::KdlSchematicError;
 
@@ -34,7 +32,7 @@ fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlS
     match node.name().value() {
         "tabs" | "hsplit" | "vsplit" | "viewport" | "graph" | "component_monitor"
         | "action_pane" | "query_table" | "query_plot" | "inspector" | "hierarchy"
-        | "schematic_tree" => Ok(SchematicElem::Panel(parse_panel(node, src)?)),
+        | "schematic_tree" | "dashboard" => Ok(SchematicElem::Panel(parse_panel(node, src)?)),
         "object_3d" => Ok(SchematicElem::Object3d(parse_object_3d(node, src)?)),
         "line_3d" => Ok(SchematicElem::Line3d(parse_line_3d(node, src)?)),
         _ => Err(KdlSchematicError::UnknownNode {
@@ -67,6 +65,7 @@ fn parse_panel(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
         "inspector" => Ok(Panel::Inspector),
         "hierarchy" => Ok(Panel::Hierarchy),
         "schematic_tree" => Ok(Panel::SchematicTree),
+        "dashboard" => parse_dashboard(node, src),
         _ => Err(KdlSchematicError::UnknownNode {
             node_type: node.name().to_string(),
             src: src.to_string(),
@@ -502,12 +501,18 @@ fn parse_line_3d(node: &KdlNode, src: &str) -> Result<Line3d, KdlSchematicError>
 }
 
 fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
-    if let (Some(r), Some(g), Some(b)) = (
+    if let (Some(r), Some(g), Some(b), a) = (
         node.get("r").and_then(|v| v.as_float()),
         node.get("g").and_then(|v| v.as_float()),
         node.get("b").and_then(|v| v.as_float()),
+        node.get("a").and_then(|v| v.as_float()),
     ) {
-        Some(Color::rgb(r as f32, g as f32, b as f32))
+        Some(Color::rgba(
+            r as f32,
+            g as f32,
+            b as f32,
+            a.unwrap_or(1.0) as f32,
+        ))
     } else if let Some(color_name) = node.get("color").and_then(|v| v.as_string()) {
         match color_name {
             "black" => Some(Color::BLACK),
@@ -529,6 +534,479 @@ fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
 
 fn parse_material_from_node(node: &KdlNode) -> Option<Material> {
     parse_color_from_node(node).map(|color| Material { base_color: color })
+}
+
+fn parse_dashboard(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
+    let title = node
+        .get("title")
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+
+    let root = parse_dashboard_node(node, src)?;
+
+    Ok(Panel::Dashboard(Dashboard {
+        title,
+        root,
+        aux: (),
+    }))
+}
+
+fn parse_dashboard_node(node: &KdlNode, src: &str) -> Result<DashboardNode<()>, KdlSchematicError> {
+    let display = node
+        .get("display")
+        .and_then(|v| v.as_string())
+        .map(|s| parse_display(s))
+        .unwrap_or_default();
+
+    let box_sizing = node
+        .get("box_sizing")
+        .and_then(|v| v.as_string())
+        .map(|s| parse_box_sizing(s))
+        .unwrap_or_default();
+
+    let position_type = node
+        .get("position_type")
+        .and_then(|v| v.as_string())
+        .map(|s| parse_position_type(s))
+        .unwrap_or_default();
+
+    let overflow = node
+        .get("overflow")
+        .and_then(|v| parse_overflow_from_value(v))
+        .unwrap_or(Overflow {
+            x: OverflowAxis::Visible,
+            y: OverflowAxis::Visible,
+        });
+
+    let overflow_clip_margin = node
+        .get("overflow_clip_margin")
+        .and_then(|v| parse_overflow_clip_margin_from_value(v))
+        .unwrap_or(OverflowClipMargin {
+            visual_box: OverflowClipBox::ContentBox,
+            margin: 0.0,
+        });
+
+    let left = node
+        .get("left")
+        .map(|v| parse_val_from_value(v))
+        .unwrap_or(Val::Auto);
+    let right = node
+        .get("right")
+        .map(|v| parse_val_from_value(v))
+        .unwrap_or(Val::Auto);
+    let top = node
+        .get("top")
+        .map(|v| parse_val_from_value(v))
+        .unwrap_or(Val::Auto);
+    let bottom = node
+        .get("bottom")
+        .map(|v| parse_val_from_value(v))
+        .unwrap_or(Val::Auto);
+    let width = node
+        .get("width")
+        .map(|v| parse_val_from_value(v))
+        .unwrap_or(Val::Auto);
+    let height = node
+        .get("height")
+        .map(|v| parse_val_from_value(v))
+        .unwrap_or(Val::Auto);
+    let min_width = node
+        .get("min_width")
+        .map(|v| parse_val_from_value(v))
+        .unwrap_or(Val::Auto);
+    let min_height = node
+        .get("min_height")
+        .map(|v| parse_val_from_value(v))
+        .unwrap_or(Val::Auto);
+    let max_width = node
+        .get("max_width")
+        .map(|v| parse_val_from_value(v))
+        .unwrap_or(Val::Auto);
+    let max_height = node
+        .get("max_height")
+        .map(|v| parse_val_from_value(v))
+        .unwrap_or(Val::Auto);
+
+    let aspect_ratio = node
+        .get("aspect_ratio")
+        .and_then(|v| v.as_float())
+        .map(|f| f as f32);
+
+    let align_items = node
+        .get("align_items")
+        .and_then(|v| v.as_string())
+        .map(|s| parse_align_items(s))
+        .unwrap_or_default();
+
+    let justify_items = node
+        .get("justify_items")
+        .and_then(|v| v.as_string())
+        .map(|s| parse_justify_items(s))
+        .unwrap_or_default();
+
+    let align_self = node
+        .get("align_self")
+        .and_then(|v| v.as_string())
+        .map(|s| parse_align_self(s))
+        .unwrap_or_default();
+
+    let justify_self = node
+        .get("justify_self")
+        .and_then(|v| v.as_string())
+        .map(|s| parse_justify_self(s))
+        .unwrap_or_default();
+
+    let align_content = node
+        .get("align_content")
+        .and_then(|v| v.as_string())
+        .map(|s| parse_align_content(s))
+        .unwrap_or_default();
+
+    let justify_content = node
+        .get("justify_content")
+        .and_then(|v| v.as_string())
+        .map(|s| parse_justify_content(s))
+        .unwrap_or_default();
+
+    let flex_direction = node
+        .get("flex_direction")
+        .and_then(|v| v.as_string())
+        .map(|s| parse_flex_direction(s))
+        .unwrap_or(FlexDirection::Row);
+
+    let flex_wrap = node
+        .get("flex_wrap")
+        .and_then(|v| v.as_string())
+        .map(|s| parse_flex_wrap(s))
+        .unwrap_or(FlexWrap::NoWrap);
+
+    let flex_grow = node
+        .get("flex_grow")
+        .and_then(|v| v.as_float())
+        .map(|f| f as f32)
+        .unwrap_or(0.0);
+    let flex_shrink = node
+        .get("flex_shrink")
+        .and_then(|v| v.as_float())
+        .map(|f| f as f32)
+        .unwrap_or(1.0);
+    let flex_basis = node
+        .get("flex_basis")
+        .map(|v| parse_val_from_value(v))
+        .unwrap_or(Val::Auto);
+
+    let row_gap = node
+        .get("row_gap")
+        .map(|v| parse_val_from_value(v))
+        .unwrap_or(Val::Auto);
+    let column_gap = node
+        .get("column_gap")
+        .map(|v| parse_val_from_value(v))
+        .unwrap_or(Val::Auto);
+
+    let text = node
+        .get("text")
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string());
+
+    let color = parse_color_from_node(node).unwrap_or(Color::TRANSPARENT);
+
+    let mut margin = UiRect::default();
+    let mut padding = UiRect::default();
+    let mut border = UiRect::default();
+
+    let mut children = Vec::new();
+    if let Some(child_nodes) = node.children() {
+        for child in child_nodes.nodes() {
+            match child.name().value() {
+                "margin" => {
+                    margin = parse_ui_rect_from_node(child).unwrap_or_default();
+                }
+                "padding" => {
+                    padding = parse_ui_rect_from_node(child).unwrap_or_default();
+                }
+                "border" => {
+                    border = parse_ui_rect_from_node(child).unwrap_or_default();
+                }
+                _ => {
+                    children.push(parse_dashboard_node(child, src)?);
+                }
+            }
+        }
+    }
+
+    Ok(DashboardNode {
+        display,
+        box_sizing,
+        position_type,
+        overflow,
+        overflow_clip_margin,
+        left,
+        right,
+        top,
+        bottom,
+        width,
+        height,
+        min_width,
+        min_height,
+        max_width,
+        max_height,
+        aspect_ratio,
+        align_items,
+        justify_items,
+        align_self,
+        justify_self,
+        align_content,
+        justify_content,
+        margin,
+        padding,
+        border,
+        flex_direction,
+        flex_wrap,
+        flex_grow,
+        flex_shrink,
+        flex_basis,
+        row_gap,
+        column_gap,
+        children,
+        color,
+        text,
+        aux: (),
+    })
+}
+
+fn parse_display(s: &str) -> Display {
+    match s {
+        "flex" => Display::Flex,
+        "grid" => Display::Grid,
+        "block" => Display::Block,
+        "none" => Display::None,
+        _ => Default::default(),
+    }
+}
+
+fn parse_box_sizing(s: &str) -> BoxSizing {
+    match s {
+        "border-box" => BoxSizing::BorderBox,
+        "content-box" => BoxSizing::ContentBox,
+        _ => Default::default(),
+    }
+}
+
+fn parse_position_type(s: &str) -> PositionType {
+    match s {
+        "relative" => PositionType::Relative,
+        "absolute" => PositionType::Absolute,
+        _ => Default::default(),
+    }
+}
+
+fn parse_align_items(s: &str) -> AlignItems {
+    match s {
+        "default" => AlignItems::Default,
+        "start" => AlignItems::Start,
+        "end" => AlignItems::End,
+        "flex-start" => AlignItems::FlexStart,
+        "flex-end" => AlignItems::FlexEnd,
+        "center" => AlignItems::Center,
+        "baseline" => AlignItems::Baseline,
+        "stretch" => AlignItems::Stretch,
+        _ => Default::default(),
+    }
+}
+
+fn parse_justify_items(s: &str) -> JustifyItems {
+    match s {
+        "default" => JustifyItems::Default,
+        "start" => JustifyItems::Start,
+        "end" => JustifyItems::End,
+        "center" => JustifyItems::Center,
+        "baseline" => JustifyItems::Baseline,
+        "stretch" => JustifyItems::Stretch,
+        _ => Default::default(),
+    }
+}
+
+fn parse_align_self(s: &str) -> AlignSelf {
+    match s {
+        "auto" => AlignSelf::Auto,
+        "start" => AlignSelf::Start,
+        "end" => AlignSelf::End,
+        "flex-start" => AlignSelf::FlexStart,
+        "flex-end" => AlignSelf::FlexEnd,
+        "center" => AlignSelf::Center,
+        "baseline" => AlignSelf::Baseline,
+        "stretch" => AlignSelf::Stretch,
+        _ => Default::default(),
+    }
+}
+
+fn parse_justify_self(s: &str) -> JustifySelf {
+    match s {
+        "auto" => JustifySelf::Auto,
+        "start" => JustifySelf::Start,
+        "end" => JustifySelf::End,
+        "center" => JustifySelf::Center,
+        "baseline" => JustifySelf::Baseline,
+        "stretch" => JustifySelf::Stretch,
+        _ => Default::default(),
+    }
+}
+
+fn parse_align_content(s: &str) -> AlignContent {
+    match s {
+        "default" => AlignContent::Default,
+        "start" => AlignContent::Start,
+        "end" => AlignContent::End,
+        "flex-start" => AlignContent::FlexStart,
+        "flex-end" => AlignContent::FlexEnd,
+        "center" => AlignContent::Center,
+        "stretch" => AlignContent::Stretch,
+        "space-between" => AlignContent::SpaceBetween,
+        "space-evenly" => AlignContent::SpaceEvenly,
+        "space-around" => AlignContent::SpaceAround,
+        _ => Default::default(),
+    }
+}
+
+fn parse_justify_content(s: &str) -> JustifyContent {
+    match s {
+        "default" => JustifyContent::Default,
+        "start" => JustifyContent::Start,
+        "end" => JustifyContent::End,
+        "flex-start" => JustifyContent::FlexStart,
+        "flex-end" => JustifyContent::FlexEnd,
+        "center" => JustifyContent::Center,
+        "stretch" => JustifyContent::Stretch,
+        "space-between" => JustifyContent::SpaceBetween,
+        "space-evenly" => JustifyContent::SpaceEvenly,
+        "space-around" => JustifyContent::SpaceAround,
+        _ => Default::default(),
+    }
+}
+
+fn parse_flex_direction(s: &str) -> FlexDirection {
+    match s {
+        "row" => FlexDirection::Row,
+        "column" => FlexDirection::Column,
+        "row-reverse" => FlexDirection::RowReverse,
+        "column-reverse" => FlexDirection::ColumnReverse,
+        _ => Default::default(),
+    }
+}
+
+fn parse_flex_wrap(s: &str) -> FlexWrap {
+    match s {
+        "no_wrap" => FlexWrap::NoWrap,
+        "wrap" => FlexWrap::Wrap,
+        "wrap-reverse" => FlexWrap::WrapReverse,
+        _ => Default::default(),
+    }
+}
+
+fn parse_overflow_axis(s: &str) -> OverflowAxis {
+    match s {
+        "visible" => OverflowAxis::Visible,
+        "clip" => OverflowAxis::Clip,
+        "hidden" => OverflowAxis::Hidden,
+        "scroll" => OverflowAxis::Scroll,
+        _ => Default::default(),
+    }
+}
+
+fn parse_overflow_clip_box(s: &str) -> OverflowClipBox {
+    match s {
+        "content-box" => OverflowClipBox::ContentBox,
+        "padding-box" => OverflowClipBox::PaddingBox,
+        "border-box" => OverflowClipBox::BorderBox,
+        _ => Default::default(),
+    }
+}
+
+fn parse_val_from_value(value: &kdl::KdlValue) -> Val {
+    if let Some(s) = value.as_string() {
+        match s {
+            "auto" => Val::Auto,
+            s if s.ends_with("px") => {
+                let px = s.trim_end_matches("px").trim();
+                Val::Px(px.to_string())
+            }
+            s if s.ends_with("%") => {
+                let percent = s.trim_end_matches("%").trim();
+                Val::Percent(percent.to_string())
+            }
+            s if s.ends_with("vw") => {
+                let vw = s.trim_end_matches("vw").trim();
+                Val::Vw(vw.to_string())
+            }
+            s if s.ends_with("vh") => {
+                let vh = s.trim_end_matches("vh").trim();
+                Val::Vh(vh.to_string())
+            }
+            s if s.ends_with("vmin") => {
+                let vmin = s.trim_end_matches("vmin").trim();
+                Val::VMin(vmin.to_string())
+            }
+            s if s.ends_with("vmax") => {
+                let vmax = s.trim_end_matches("vmax").trim();
+                Val::VMax(vmax.to_string())
+            }
+            _ => Val::Auto,
+        }
+    } else if let Some(f) = value.as_float() {
+        Val::Px((f as f32).to_string())
+    } else if let Some(i) = value.as_integer() {
+        Val::Px((i as f32).to_string())
+    } else {
+        Val::Auto
+    }
+}
+
+fn parse_overflow_from_value(value: &kdl::KdlValue) -> Option<Overflow> {
+    if let Some(s) = value.as_string() {
+        let axis = parse_overflow_axis(s);
+        Some(Overflow { x: axis, y: axis })
+    } else {
+        None
+    }
+}
+
+fn parse_overflow_clip_margin_from_value(value: &kdl::KdlValue) -> Option<OverflowClipMargin> {
+    if let Some(_) = value.as_string() {
+        Some(OverflowClipMargin {
+            visual_box: OverflowClipBox::ContentBox,
+            margin: 0.0,
+        })
+    } else {
+        None
+    }
+}
+
+fn parse_ui_rect_from_node(node: &kdl::KdlNode) -> Option<UiRect> {
+    let left = node
+        .get("left")
+        .map(|v| parse_val_from_value(v))
+        .unwrap_or_default();
+    let right = node
+        .get("right")
+        .map(|v| parse_val_from_value(v))
+        .unwrap_or_default();
+    let top = node
+        .get("top")
+        .map(|v| parse_val_from_value(v))
+        .unwrap_or_default();
+    let bottom = node
+        .get("bottom")
+        .map(|v| parse_val_from_value(v))
+        .unwrap_or_default();
+
+    Some(UiRect {
+        left,
+        right,
+        top,
+        bottom,
+    })
 }
 
 #[cfg(test)]
@@ -686,6 +1164,43 @@ object_3d "a.world_pos" {
             assert_eq!(monitor.component_id, ComponentId::new("a.world_pos"));
         } else {
             panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_dashboard() {
+        let kdl = r#"
+dashboard title="Test Dashboard" {
+    node display="flex" flex_direction="column" {
+        text "Hello World"
+        node width="100px" height="50px" {
+            text "Child Text"
+        }
+    }
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Panel(Panel::Dashboard(dashboard)) = &schematic.elems[0] {
+            assert_eq!(dashboard.title, "Test Dashboard".to_string());
+            assert_eq!(dashboard.children.len(), 1);
+
+            if let DashboardElement::Node(node) = &dashboard.children[0] {
+                assert!(matches!(node.display, Display::Flex));
+                assert!(matches!(node.flex_direction, FlexDirection::Column));
+                assert_eq!(node.children.len(), 2);
+
+                if let DashboardElement::Text(_text) = &node.children[0] {
+                    // Note: text field is private, can't test directly
+                } else {
+                    panic!("Expected text element");
+                }
+            } else {
+                panic!("Expected node element");
+            }
+        } else {
+            panic!("Expected dashboard panel");
         }
     }
 }

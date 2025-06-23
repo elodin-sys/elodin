@@ -116,6 +116,7 @@ fn panel(
         Panel::Inspector => icons.viewport,
         Panel::Hierarchy => icons.viewport,
         Panel::SchematicTree => icons.viewport,
+        Panel::Dashboard(_) => icons.viewport,
     };
     let children = p.children();
     let selected = if p.aux().copied() == selected_object.entity() {

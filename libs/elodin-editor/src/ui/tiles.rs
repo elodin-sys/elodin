@@ -26,6 +26,7 @@ use super::{
     button::{EImageButton, ETileButton},
     colors::{self, get_scheme, with_opacity},
     command_palette::{CommandPaletteState, palette_items},
+    dashboard::{DashboardWidget, spawn_dashboard},
     hierarchy::{HiearchyIcons, HierarchyContent},
     images,
     inspector::{InspectorContent, InspectorIcons},
@@ -82,6 +83,12 @@ pub struct ActionTilePane {
 #[derive(Clone)]
 pub struct TreePane {
     pub entity: Entity,
+}
+
+#[derive(Clone)]
+pub struct DashboardPane {
+    pub entity: Entity,
+    pub label: String,
 }
 
 impl TileState {
@@ -178,6 +185,16 @@ impl TileState {
             .push(TreeAction::AddVideoStream(tile_id, msg_id, label));
     }
 
+    pub fn create_dashboard_tile(
+        &mut self,
+        dashboard: impeller2_wkt::Dashboard,
+        label: String,
+        tile_id: Option<TileId>,
+    ) {
+        self.tree_actions
+            .push(TreeAction::AddDashboard(tile_id, dashboard, label));
+    }
+
     pub fn create_hierarchy_tile(&mut self, tile_id: Option<TileId>) {
         self.tree_actions.push(TreeAction::AddHierarchy(tile_id));
     }
@@ -230,6 +247,9 @@ impl TileState {
                 Tile::Pane(Pane::SchematicTree(pane)) => {
                     commands.entity(pane.entity).despawn();
                 }
+                Tile::Pane(Pane::Dashboard(dashboard)) => {
+                    commands.entity(dashboard.entity).despawn();
+                }
                 _ => {}
             }
 
@@ -255,6 +275,7 @@ pub enum Pane {
     QueryPlot(super::query_plot::QueryPlotPane),
     ActionTile(ActionTilePane),
     VideoStream(super::video_stream::VideoStreamPane),
+    Dashboard(DashboardPane),
     Hierarchy,
     Inspector,
     SchematicTree(TreePane),
@@ -280,6 +301,7 @@ impl Pane {
             }
             Pane::ActionTile(action) => action.label.to_string(),
             Pane::VideoStream(video_stream) => video_stream.label.to_string(),
+            Pane::Dashboard(dashboard) => dashboard.label.to_string(),
             Pane::Hierarchy => "Entities".to_string(),
             Pane::Inspector => "Inspector".to_string(),
             Pane::SchematicTree(_) => "Tree".to_string(),
@@ -335,6 +357,10 @@ impl Pane {
                     "video_stream",
                     pane.clone(),
                 );
+                egui_tiles::UiResponse::None
+            }
+            Pane::Dashboard(pane) => {
+                ui.add_widget_with::<DashboardWidget>(world, "dashboard", pane.entity);
                 egui_tiles::UiResponse::None
             }
             Pane::Hierarchy => {
@@ -568,6 +594,7 @@ pub enum TreeAction {
     AddQueryPlot(Option<TileId>),
     AddActionTile(Option<TileId>, String, String),
     AddVideoStream(Option<TileId>, [u8; 2], String),
+    AddDashboard(Option<TileId>, impeller2_wkt::Dashboard, String),
     AddHierarchy(Option<TileId>),
     AddInspector(Option<TileId>),
     AddSchematicTree(Option<TileId>),
@@ -1093,6 +1120,25 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             ui_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
+                    TreeAction::AddDashboard(parent_tile_id, dashboard, label) => {
+                        let entity = match spawn_dashboard(
+                            &dashboard,
+                            &state_mut.eql_ctx.0,
+                            &mut state_mut.commands,
+                        ) {
+                            Ok(entity) => entity,
+                            Err(_) => {
+                                // Handle error - create a default entity or show error message
+                                state_mut.commands.spawn(bevy::ui::Node::default()).id()
+                            }
+                        };
+                        let pane = Pane::Dashboard(DashboardPane { entity, label });
+                        if let Some(tile_id) =
+                            ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
+                        {
+                            ui_state.tree.make_active(|id, _| id == tile_id);
+                        }
+                    }
 
                     TreeAction::SelectTile(tile_id) => {
                         ui_state.tree.make_active(|id, _| id == tile_id);
@@ -1239,6 +1285,12 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     Pane::ActionTile(_) => {}
                     Pane::VideoStream(stream) => {
                         if let Ok(mut stream) = state_mut.commands.get_entity(stream.entity) {
+                            stream.try_insert(IsTileVisible(active_tiles.contains(tile_id)));
+                        }
+                    }
+
+                    Pane::Dashboard(dash) => {
+                        if let Ok(mut stream) = state_mut.commands.get_entity(dash.entity) {
                             stream.try_insert(IsTileVisible(active_tiles.contains(tile_id)));
                         }
                     }

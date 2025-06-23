@@ -10,14 +10,16 @@ use crate::{
 use bevy::{ecs::system::SystemParam, prelude::*};
 use egui_tiles::{Tile, TileId};
 use impeller2_wkt::{
-    ActionPane, ComponentMonitor, ComponentPath, Line3d, Panel, Schematic, SchematicElem, Split,
-    Viewport,
+    ActionPane, ComponentMonitor, ComponentPath, Dashboard, Line3d, Panel, Schematic,
+    SchematicElem, Split, Viewport,
 };
 
 pub mod tree;
 pub use tree::*;
 mod load;
 pub use load::*;
+mod asset;
+pub use asset::*;
 
 #[derive(Resource, Debug, Clone, Deref, DerefMut)]
 pub struct CurrentSchematic(pub Schematic<Entity>);
@@ -32,6 +34,7 @@ pub struct SchematicParam<'w, 's> {
     pub objects_3d: Query<'w, 's, (Entity, &'static Object3DState)>,
     pub lines_3d: Query<'w, 's, (Entity, &'static Line3d)>,
     pub ui_state: Res<'w, tiles::TileState>,
+    pub dashboards: Query<'w, 's, &'static Dashboard>,
 }
 
 impl SchematicParam<'_, '_> {
@@ -96,6 +99,11 @@ impl SchematicParam<'_, '_> {
                 Pane::Hierarchy => Some(Panel::Hierarchy),
                 Pane::Inspector => Some(Panel::Inspector),
                 Pane::SchematicTree(_) => Some(Panel::SchematicTree),
+                Pane::Dashboard(dash) => {
+                    let entity = dash.entity;
+                    let dashboard = self.dashboards.get(dash.entity).ok()?;
+                    Some(Panel::Dashboard(dashboard.clone()))
+                }
             },
             Tile::Container(container) => match container {
                 egui_tiles::Container::Tabs(t) => {

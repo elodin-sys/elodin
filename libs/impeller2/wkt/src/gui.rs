@@ -8,8 +8,18 @@ use std::time::Duration;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(bound = "T: Serialize + DeserializeOwned")]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::TypePath,))]
+#[cfg_attr(feature = "bevy", type_path = "impeller2::wkt::gui::Schematic")]
 pub struct Schematic<T = ()> {
     pub elems: Vec<SchematicElem<T>>,
+}
+
+#[cfg(feature = "bevy")]
+impl bevy::prelude::Asset for Schematic {}
+
+#[cfg(feature = "bevy")]
+impl bevy::asset::VisitAssetDependencies for Schematic {
+    fn visit_dependencies(&self, _visit: &mut impl FnMut(bevy::asset::UntypedAssetId)) {}
 }
 
 impl<T> Default for Schematic<T> {
@@ -54,6 +64,7 @@ pub enum Panel<T = ()> {
     Inspector,
     Hierarchy,
     SchematicTree,
+    Dashboard(Dashboard),
 }
 
 impl<T> Panel<T> {
@@ -71,6 +82,7 @@ impl<T> Panel<T> {
             Panel::Inspector => "Inspector",
             Panel::Hierarchy => "Hierarchy",
             Panel::SchematicTree => "Tree",
+            Panel::Dashboard(d) => &d.title,
         }
     }
 
@@ -105,6 +117,7 @@ impl<T> Panel<T> {
             Panel::SchematicTree => Panel::SchematicTree,
             Panel::Inspector => Panel::Inspector,
             Panel::Viewport(v) => Panel::Viewport(v.map_aux(f)),
+            Panel::Dashboard(d) => Panel::Dashboard(d.clone()),
         }
     }
 
@@ -316,7 +329,7 @@ pub struct Material {
 impl Material {
     pub fn color(r: f32, g: f32, b: f32) -> Self {
         Material {
-            base_color: Color { r, g, b },
+            base_color: Color::rgb(r, g, b),
         }
     }
 }
@@ -407,4 +420,305 @@ pub enum QueryType {
     #[default]
     EQL,
     SQL,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct Dashboard<T = ()> {
+    pub title: String,
+    pub root: DashboardNode<T>,
+    pub aux: T,
+}
+
+impl<T> Dashboard<T> {
+    pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> Dashboard<U> {
+        Dashboard {
+            title: self.title.clone(),
+            root: self.root.map_aux(&f),
+            aux: f(&self.aux),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct DashboardNode<T> {
+    pub display: Display,
+    pub box_sizing: BoxSizing,
+    pub position_type: PositionType,
+    pub overflow: Overflow,
+    pub overflow_clip_margin: OverflowClipMargin,
+    pub left: Val,
+    pub right: Val,
+    pub top: Val,
+    pub bottom: Val,
+    pub width: Val,
+    pub height: Val,
+    pub min_width: Val,
+    pub min_height: Val,
+    pub max_width: Val,
+    pub max_height: Val,
+    pub aspect_ratio: Option<f32>,
+    pub align_items: AlignItems,
+    pub justify_items: JustifyItems,
+    pub align_self: AlignSelf,
+    pub justify_self: JustifySelf,
+    pub align_content: AlignContent,
+    pub justify_content: JustifyContent,
+    pub margin: UiRect,
+    pub padding: UiRect,
+    pub border: UiRect,
+    pub flex_direction: FlexDirection,
+    pub flex_wrap: FlexWrap,
+    pub flex_grow: f32,
+    pub flex_shrink: f32,
+    pub flex_basis: Val,
+    pub row_gap: Val,
+    pub column_gap: Val,
+    // pub grid_auto_flow: GridAutoFlow,
+    // pub grid_template_rows: Vec<RepeatedGridTrack>,
+    // pub grid_template_columns: Vec<RepeatedGridTrack>,
+    // pub grid_auto_rows: Vec<GridTrack>,
+    // pub grid_auto_columns: Vec<GridTrack>,
+    // pub grid_row: GridPlacement,
+    // pub grid_column: GridPlacement,
+    pub children: Vec<DashboardNode<T>>,
+    pub color: Color,
+    pub text: Option<String>,
+    pub aux: T,
+}
+
+impl<T> DashboardNode<T> {
+    pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> DashboardNode<U> {
+        DashboardNode {
+            display: self.display,
+            box_sizing: self.box_sizing,
+            position_type: self.position_type,
+            overflow: self.overflow,
+            overflow_clip_margin: self.overflow_clip_margin.clone(),
+            left: self.left.clone(),
+            right: self.right.clone(),
+            top: self.top.clone(),
+            bottom: self.bottom.clone(),
+            width: self.width.clone(),
+            height: self.height.clone(),
+            min_width: self.min_width.clone(),
+            min_height: self.min_height.clone(),
+            max_width: self.max_width.clone(),
+            max_height: self.max_height.clone(),
+            aspect_ratio: self.aspect_ratio.clone(),
+            align_items: self.align_items.clone(),
+            justify_items: self.justify_items.clone(),
+            align_self: self.align_self.clone(),
+            justify_self: self.justify_self.clone(),
+            align_content: self.align_content.clone(),
+            justify_content: self.justify_content.clone(),
+            margin: self.margin.clone(),
+            padding: self.padding.clone(),
+            border: self.border.clone(),
+            flex_direction: self.flex_direction.clone(),
+            flex_wrap: self.flex_wrap.clone(),
+            flex_grow: self.flex_grow.clone(),
+            flex_shrink: self.flex_shrink.clone(),
+            flex_basis: self.flex_basis.clone(),
+            row_gap: self.row_gap.clone(),
+            column_gap: self.column_gap.clone(),
+            children: self.children.iter().map(|c| c.map_aux(&f)).collect(),
+            color: self.color.clone(),
+            text: self.text.clone(),
+            aux: (&f)(&self.aux),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+pub enum PositionType {
+    #[default]
+    Relative,
+    Absolute,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+pub enum AlignItems {
+    #[default]
+    Default,
+    Start,
+    End,
+    FlexStart,
+    FlexEnd,
+    Center,
+    Baseline,
+    Stretch,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+pub enum JustifyItems {
+    #[default]
+    Default,
+    Start,
+    End,
+    Center,
+    Baseline,
+    Stretch,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+pub enum Display {
+    #[default]
+    Flex,
+    Grid,
+    Block,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+pub enum BoxSizing {
+    #[default]
+    BorderBox,
+    ContentBox,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+pub struct Overflow {
+    pub x: OverflowAxis,
+    pub y: OverflowAxis,
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+pub struct OverflowClipMargin {
+    pub visual_box: OverflowClipBox,
+    pub margin: f32,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+pub enum OverflowClipBox {
+    #[default]
+    ContentBox,
+    PaddingBox,
+    BorderBox,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct UiRect {
+    pub left: Val,
+    pub right: Val,
+    pub top: Val,
+    pub bottom: Val,
+}
+
+impl Default for UiRect {
+    fn default() -> Self {
+        Self {
+            left: Val::Px("0.0".to_string()),
+            right: Val::Px("0.0".to_string()),
+            top: Val::Px("0.0".to_string()),
+            bottom: Val::Px("0.0".to_string()),
+        }
+    }
+}
+
+#[derive(Debug, Default, Copy, Clone, Deserialize, Serialize)]
+pub enum OverflowAxis {
+    #[default]
+    Visible,
+    Clip,
+    Hidden,
+    Scroll,
+}
+
+#[derive(Debug, Default, Copy, Clone, Deserialize, Serialize)]
+pub enum FlexDirection {
+    #[default]
+    Row,
+    Column,
+    RowReverse,
+    ColumnReverse,
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+pub enum FlexWrap {
+    #[default]
+    NoWrap,
+    Wrap,
+    WrapReverse,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub enum Val {
+    #[default]
+    Auto,
+    Px(String),
+    Percent(String),
+    Vw(String),
+    Vh(String),
+    VMin(String),
+    VMax(String),
+}
+
+#[derive(Debug, Default, Copy, Clone, Deserialize, Serialize)]
+pub enum AlignSelf {
+    #[default]
+    Auto,
+    Start,
+    End,
+    FlexStart,
+    FlexEnd,
+    Center,
+    Baseline,
+    Stretch,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+pub enum JustifySelf {
+    #[default]
+    Auto,
+    Start,
+    End,
+    Center,
+    Baseline,
+    Stretch,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+pub enum AlignContent {
+    #[default]
+    Default,
+    Start,
+    End,
+    FlexStart,
+    FlexEnd,
+    Center,
+    Stretch,
+    SpaceBetween,
+    SpaceEvenly,
+    SpaceAround,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+pub enum JustifyContent {
+    #[default]
+    Default,
+    Start,
+    End,
+    FlexStart,
+    FlexEnd,
+    Center,
+    Stretch,
+    SpaceBetween,
+    SpaceEvenly,
+    SpaceAround,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct DashboardText<T = ()> {
+    pub text: String,
+    pub aux: T,
+}
+
+impl<T> DashboardText<T> {
+    pub fn map_aux<U>(&self, f: impl FnOnce(&T) -> U) -> DashboardText<U> {
+        DashboardText {
+            text: self.text.clone(),
+            aux: f(&self.aux),
+        }
+    }
 }

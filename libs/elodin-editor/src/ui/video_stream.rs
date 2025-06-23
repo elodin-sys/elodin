@@ -343,7 +343,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
 pub fn set_visibility(mut query: Query<(&mut Node, &IsTileVisible)>) {
     for (mut ui_node, is_visible) in &mut query {
         if is_visible.0 {
-            ui_node.display = Display::Block;
+            ui_node.display = Display::Flex;
         } else {
             ui_node.display = Display::None;
         }

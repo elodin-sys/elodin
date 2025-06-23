@@ -6,14 +6,14 @@ use std::{
 };
 
 use bevy::{
-    asset::{AssetServer, Assets},
+    asset::{AssetServer, Assets, Handle},
     ecs::{
         entity::Entity,
         query::With,
         system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
         world::World,
     },
-    log::info,
+    log::{info, warn},
     pbr::{StandardMaterial, wireframe::WireframeConfig},
     prelude::In,
     render::view::Visibility,
@@ -23,11 +23,12 @@ use egui_tiles::TileId;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::msg_id;
 use impeller2_bevy::{ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
-use impeller2_kdl::{FromKdl, ToKdl};
+use impeller2_kdl::{FromKdl, KdlSchematicError, ToKdl};
 use impeller2_wkt::{
-    ComponentPath, ComponentValue, IsRecording, Material, Mesh, Object3D, SetDbSettings,
-    SetStreamState,
+    AssetHandle, ComponentPath, ComponentValue, IsRecording, Material, Mesh, Object3D, Schematic,
+    SetDbSettings, SetStreamState,
 };
+use miette::IntoDiagnostic;
 use nox::ArrayBuf;
 
 use crate::{
@@ -642,15 +643,19 @@ pub fn load_preset_picker() -> PaletteItem {
     PaletteItem::new(
         "From File",
         "",
-        move |_: In<String>,
-              params: LoadSchematicParams,
-              selected_object: ResMut<ui::SelectedObject>,
-              objects_3d: Query<Entity, With<Object3DState>>| {
+        move |_: In<String>, params: LoadSchematicParams| {
             if let Some(path) = rfd::FileDialog::new()
                 .add_filter("kdl", &["kdl"])
                 .pick_file()
             {
-                load_schematic(&path, params, selected_object, objects_3d);
+                if let Err(err) = load_schematic(&path, params)
+                    .inspect_err(|err| {
+                        dbg!(err);
+                    })
+                    .into_diagnostic()
+                {
+                    return PaletteEvent::Error(err.to_string());
+                }
             }
             PaletteEvent::Exit
         },
@@ -661,14 +666,14 @@ pub fn load_preset_inner(name: String) -> PaletteItem {
     PaletteItem::new(
         name.clone(),
         "",
-        move |_: In<String>,
-              params: LoadSchematicParams,
-              selected_object: ResMut<ui::SelectedObject>,
-              objects_3d: Query<Entity, With<Object3DState>>| {
+        move |_: In<String>, params: LoadSchematicParams| {
             let dirs = crate::dirs();
             let path = dirs.data_dir().join("presets").join(name.clone());
-            load_schematic(&path, params, selected_object, objects_3d);
-            PaletteEvent::Exit
+            if let Err(err) = load_schematic(&path, params) {
+                PaletteEvent::Error(err.to_string())
+            } else {
+                PaletteEvent::Exit
+            }
         },
     )
 }
@@ -676,32 +681,12 @@ pub fn load_preset_inner(name: String) -> PaletteItem {
 pub fn load_schematic(
     path: &Path,
     mut params: LoadSchematicParams,
-    mut selected_object: ResMut<ui::SelectedObject>,
-    objects_3d: Query<Entity, With<Object3DState>>,
-) {
+) -> Result<(), KdlSchematicError> {
     if let Ok(kdl) = std::fs::read_to_string(path) {
-        if let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(&kdl) {
-            // if let Ok(panel) = serde_json::from_str::<impeller2_wkt::Panel>(&json) {
-            params.render_layer_alloc.free_all();
-            params
-                .tile_state
-                .clear(&mut params.commands, &mut selected_object);
-            for entity in objects_3d.iter() {
-                params.commands.entity(entity).despawn();
-            }
-            for elem in schematic.elems {
-                match elem {
-                    impeller2_wkt::SchematicElem::Panel(p) => {
-                        params.spawn_panel(&p, None);
-                    }
-                    impeller2_wkt::SchematicElem::Object3d(object_3d) => {
-                        params.spawn_object_3d(object_3d);
-                    }
-                    _ => {}
-                }
-            }
-        }
+        let schematic = impeller2_wkt::Schematic::from_kdl(&kdl)?;
+        params.load_schematic(&schematic);
     }
+    Ok(())
 }
 
 pub fn set_color_scheme() -> PaletteItem {

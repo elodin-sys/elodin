@@ -60,6 +60,7 @@ impl Panel {
             name,
             pos,
             look_at,
+            aux: (),
         };
         Ok(Self {
             inner: impeller2_wkt::Panel::Viewport(viewport),
@@ -119,6 +120,7 @@ impl Panel {
                 graph_type,
                 auto_y_range: true,
                 y_range: 0.0..1.0,
+                aux: (),
             }),
         })
     }
@@ -149,12 +151,13 @@ impl Line3d {
                 line_width,
                 color,
                 perspective: perspective.unwrap_or_default(),
+                aux: (),
             },
         })
     }
 
     pub fn asset_name(&self) -> &'static str {
-        impeller2_wkt::Line3d::NAME
+        impeller2_wkt::Line3d::<()>::NAME
     }
 
     pub fn bytes(&self) -> Result<PyBufBytes, Error> {

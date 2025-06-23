@@ -1,21 +1,28 @@
-use bevy::{ecs::system::SystemParam, prelude::*};
+use bevy::{
+    asset::{AssetEvents, io::AssetSourceEvent},
+    ecs::system::SystemParam,
+    platform::collections::HashSet,
+    prelude::*,
+};
 use bevy_egui::egui::Color32;
 use egui_tiles::{Container, Tile, TileId};
 use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
-use impeller2_wkt::{Graph, Object3D, Panel, Viewport};
+use impeller2_wkt::{Graph, Object3D, Panel, Schematic, Viewport};
 use std::collections::BTreeMap;
 
 use crate::{
     EqlContext,
+    object_3d::Object3DState,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        HdrEnabled,
+        HdrEnabled, SelectedObject,
         colors::{self},
+        dashboard::spawn_dashboard,
         monitor::MonitorPane,
         plot::GraphBundle,
         query_plot::QueryPlotData,
         schematic::EqlExt,
-        tiles::{GraphPane, Pane, TileState, TreePane, ViewportPane},
+        tiles::{DashboardPane, GraphPane, Pane, TileState, TreePane, ViewportPane},
     },
 };
 
@@ -33,6 +40,8 @@ pub struct LoadSchematicParams<'w, 's> {
     pub hdr_enabled: ResMut<'w, HdrEnabled>,
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
     pub eql: Res<'w, EqlContext>,
+    pub selected_object: ResMut<'w, SelectedObject>,
+    objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
 }
 
 pub fn sync_panels(
@@ -46,6 +55,26 @@ pub fn sync_panels(
 }
 
 impl LoadSchematicParams<'_, '_> {
+    pub fn load_schematic(&mut self, schematic: &Schematic) {
+        self.render_layer_alloc.free_all();
+        self.tile_state
+            .clear(&mut self.commands, &mut self.selected_object);
+        for entity in self.objects_3d.iter() {
+            self.commands.entity(entity).despawn();
+        }
+        for elem in &schematic.elems {
+            match elem {
+                impeller2_wkt::SchematicElem::Panel(p) => {
+                    self.spawn_panel(&p, None);
+                }
+                impeller2_wkt::SchematicElem::Object3d(object_3d) => {
+                    self.spawn_object_3d(object_3d.clone());
+                }
+                _ => {}
+            }
+        }
+    }
+
     pub fn spawn_object_3d(&mut self, object_3d: Object3D) {
         let Ok(expr) = self.eql.0.parse_str(&object_3d.eql) else {
             return;
@@ -238,6 +267,23 @@ impl LoadSchematicParams<'_, '_> {
                 let pane = Pane::QueryPlot(super::query_plot::QueryPlotPane { entity, rect: None });
                 self.tile_state
                     .insert_tile(Tile::Pane(pane), parent_id, false)
+            }
+            Panel::Dashboard(dashboard) => {
+                let Ok(dashboard) = spawn_dashboard(&dashboard, &self.eql.0, &mut self.commands)
+                    .inspect_err(|err| {
+                        warn!(?err, "Failed to spawn dashboard");
+                    })
+                else {
+                    return None;
+                };
+                self.tile_state.insert_tile(
+                    Tile::Pane(Pane::Dashboard(DashboardPane {
+                        entity: dashboard,
+                        label: "dashboard".to_string(),
+                    })),
+                    parent_id,
+                    false,
+                )
             }
         }
     }

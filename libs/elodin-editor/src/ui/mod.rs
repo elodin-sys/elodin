@@ -37,6 +37,7 @@ pub mod actions;
 pub mod button;
 pub mod colors;
 pub mod command_palette;
+pub mod dashboard;
 pub mod hierarchy;
 pub mod images;
 pub mod inspector;
@@ -190,6 +191,7 @@ impl Plugin for UiPlugin {
             .add_systems(Update, set_camera_viewport.after(render_layout))
             .add_systems(Update, sync_camera_grid_cell.after(render_layout))
             .add_systems(Update, query_plot::auto_bounds)
+            .add_systems(Update, dashboard::update_nodes)
             .add_plugins(SchematicPlugin);
     }
 }

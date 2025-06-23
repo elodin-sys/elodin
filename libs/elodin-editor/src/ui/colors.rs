@@ -125,6 +125,7 @@ impl EColor for Color {
             r: color.r() as f32 / 255.0,
             g: color.g() as f32 / 255.0,
             b: color.b() as f32 / 255.0,
+            a: color.a() as f32 / 255.0,
         }
     }
 }

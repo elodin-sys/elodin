@@ -16,7 +16,7 @@ nox.default-features = false
 
 # bevy
 bevy.version = "0.16"
-bevy.features = ["wayland"]
+bevy.features = ["wayland", "file_watcher"]
 bevy_render.version = "0.16"
 bevy_color.version = "0.16"
 bevy_egui.version = "0.34.0-rc.2"
@@ -112,6 +112,7 @@ stellarator.path = "../../libs/stellarator"
 stellarator.features = ["miette"]
 
 # errors
+thiserror.version = "2"
 miette.version = "7.2"
 miette.features = ["fancy"]
 
