@@ -120,43 +120,6 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
         search(ui, &mut filter.0, icons.search);
         ui.add_space(4.0);
 
-        egui::Frame::NONE.show(ui, |ui| {
-            if let Ok(mut object_3d) = object_3d.get_mut(pair.bevy) {
-                ui.separator();
-                ui.add_space(8.0);
-                ui.label(egui::RichText::new("EQL").color(get_scheme().text_secondary));
-                ui.add_space(8.0);
-                configure_input_with_border(ui.style_mut());
-                let query_res = query(ui, &mut object_3d.data.eql, QueryType::EQL);
-                eql_autocomplete(ui, &eql_context.0, &query_res, &mut object_3d.data.eql);
-                if query_res.changed() {
-                    match eql_context.0.parse_str(&object_3d.data.eql) {
-                        Ok(expr) => {
-                            object_3d.compiled_expr =
-                                Some(crate::object_3d::compile_eql_expr(expr));
-                        }
-                        Err(err) => {
-                            ui.colored_label(get_scheme().error, err.to_string());
-                        }
-                    }
-                }
-                ui.add_space(8.0);
-            }
-            if let Ok(mut glb) = glb.get_mut(pair.bevy) {
-                ui.separator();
-                ui.add_space(8.0);
-                ui.label(egui::RichText::new("GLB").color(get_scheme().text_secondary));
-                ui.add_space(8.0);
-                if inspector_text_field(ui, &mut glb.0, "Enter a path to a glb").changed() {
-                    // commands
-                    //     .entity(pair.bevy)
-                    //     .remove::<crate::SyncedGlb>()
-                    //     .insert(impeller2_bevy::AssetHandle::<Glb>::new(fastrand::u64(..)));
-                }
-                ui.add_space(8.0);
-            }
-        });
-
         let matcher = SkimMatcherV2::default().smart_case().use_cache(true);
         let children = children.get(pair.bevy).into_iter().flat_map(|c| c.iter());
 

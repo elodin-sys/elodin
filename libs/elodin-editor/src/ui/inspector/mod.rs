@@ -13,13 +13,17 @@ use crate::ui::{
     tiles::TreeAction,
 };
 
-use self::{entity::InspectorEntity, graph::InspectorGraph, viewport::InspectorViewport};
+use self::{
+    entity::InspectorEntity, graph::InspectorGraph, object3d::InspectorObject3D,
+    viewport::InspectorViewport,
+};
 
 use super::widgets::{WidgetSystem, WidgetSystemExt};
 
 pub mod action;
 pub mod entity;
 pub mod graph;
+pub mod object3d;
 pub mod viewport;
 
 pub struct InspectorIcons {
@@ -115,6 +119,14 @@ impl WidgetSystem for InspectorContent<'_> {
                                     world,
                                     "inspector_action",
                                     action_id,
+                                );
+                                Default::default()
+                            }
+                            SelectedObject::Object3D { entity, .. } => {
+                                ui.add_widget_with::<InspectorObject3D>(
+                                    world,
+                                    "inspector_object3d",
+                                    (icons, entity),
                                 );
                                 Default::default()
                             }

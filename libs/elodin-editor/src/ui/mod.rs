@@ -81,6 +81,9 @@ pub enum SelectedObject {
     Action {
         action_id: Entity,
     },
+    Object3D {
+        entity: Entity,
+    },
 }
 
 impl SelectedObject {
@@ -95,6 +98,7 @@ impl SelectedObject {
             SelectedObject::Viewport { camera } => Some(*camera),
             SelectedObject::Graph { graph_id } => Some(*graph_id),
             SelectedObject::Action { action_id } => Some(*action_id),
+            SelectedObject::Object3D { entity } => Some(*entity),
         }
     }
 }

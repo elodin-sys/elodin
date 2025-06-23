@@ -256,7 +256,24 @@ pub fn create_object_3d_entity(
         impeller2_wkt::WorldPos::default(),
     ));
 
-    match data.mesh {
+    spawn_mesh(
+        &mut entity,
+        &data.mesh,
+        material_assets,
+        mesh_assets,
+        assets,
+    );
+
+    entity.id()
+}
+pub fn spawn_mesh(
+    entity: &mut EntityCommands,
+    mesh: &impeller2_wkt::Object3DMesh,
+    material_assets: &mut ResMut<Assets<StandardMaterial>>,
+    mesh_assets: &mut ResMut<Assets<Mesh>>,
+    assets: &Res<AssetServer>,
+) -> Entity {
+    match mesh {
         impeller2_wkt::Object3DMesh::Glb(path) => {
             let url = format!("{path}#Scene0");
             let scene = assets.load(&url);

@@ -510,7 +510,7 @@ fn component_value(
     });
 }
 
-fn color_popup(
+pub fn color_popup(
     ui: &mut egui::Ui,
     color: &mut egui::Color32,
     color_id: egui::Id,

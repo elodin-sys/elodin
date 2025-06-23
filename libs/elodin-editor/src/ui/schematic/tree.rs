@@ -7,7 +7,6 @@ use super::CurrentSchematic;
 use bevy::ecs::entity::Entity;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::{Component, Query, ResMut};
-use egui::RichText;
 use egui::collapsing_header::CollapsingState;
 use egui::load::SizedTexture;
 use impeller2_wkt::Panel;
@@ -75,7 +74,28 @@ impl WidgetSystem for TreeWidget<'_, '_> {
                     impeller2_wkt::SchematicElem::Panel(p) => {
                         panel(ui, max_rect, &icons, p, &mut selected_object)
                     }
-                    impeller2_wkt::SchematicElem::Object3d(_object3_d) => {}
+                    impeller2_wkt::SchematicElem::Object3d(object_3d) => {
+                        let selected = if Some(object_3d.aux) == selected_object.entity() {
+                            *selected_object != SelectedObject::None
+                        } else {
+                            false
+                        };
+                        let branch_res = branch(
+                            ui,
+                            &object_3d.eql,
+                            icons.viewport,
+                            icons.chevron,
+                            true,
+                            max_rect,
+                            selected,
+                            |_| {},
+                        );
+                        if branch_res.clicked() {
+                            *selected_object = SelectedObject::Object3D {
+                                entity: object_3d.aux,
+                            };
+                        }
+                    }
                     impeller2_wkt::SchematicElem::Line3d(_line3d) => {}
                 }
             }

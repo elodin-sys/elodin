@@ -279,5 +279,5 @@ fn filter_component_parts<'a, 'b>(
         })
         .collect();
     children.sort_by_key(|(score, _, child)| (*score, child.id.0));
-    (children, if trailing.is_empty() { start } else { trailing })
+    (children, trailing)
 }
