@@ -16,9 +16,11 @@ use impeller2_wkt::{
 
 pub mod tree;
 pub use tree::*;
+mod load;
+pub use load::*;
 
 #[derive(Resource, Debug, Clone, Deref, DerefMut)]
-pub struct CurrentSchematic(Schematic<Entity>);
+pub struct CurrentSchematic(pub Schematic<Entity>);
 
 #[derive(SystemParam)]
 pub struct SchematicParam<'w, 's> {
@@ -168,6 +170,7 @@ impl Plugin for SchematicPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(CurrentSchematic(Default::default()));
         app.add_systems(PostUpdate, tiles_to_schematic);
+        app.add_systems(PreUpdate, sync_panels);
     }
 }
 

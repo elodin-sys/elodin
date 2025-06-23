@@ -16,13 +16,12 @@ use bevy_render::{
 use egui::UiBuilder;
 use egui_tiles::{Container, Tile, TileId, Tiles};
 use impeller2::types::ComponentId;
-use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
-use impeller2_wkt::{Graph, Panel, Viewport};
+use impeller2_wkt::{Graph, Viewport};
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, HashMap};
 
 use super::{
-    HdrEnabled, SelectedObject, ViewportRect,
+    SelectedObject, ViewportRect,
     actions::ActionTileWidget,
     button::{EImageButton, ETileButton},
     colors::{self, get_scheme, with_opacity},
@@ -34,7 +33,7 @@ use super::{
     plot::{GraphBundle, GraphState, PlotWidget},
     query_plot::QueryPlotData,
     query_table::{QueryTableData, QueryTablePane, QueryTableWidget},
-    schematic::EqlExt,
+    schematic::{EqlExt, graph_label, viewport_label},
     video_stream::{IsTileVisible, VideoDecoderHandle},
     widgets::{WidgetSystem, WidgetSystemExt},
 };
@@ -86,7 +85,7 @@ pub struct TreePane {
 }
 
 impl TileState {
-    fn insert_tile(
+    pub fn insert_tile(
         &mut self,
         tile: Tile<Pane>,
         parent_id: Option<TileId>,
@@ -396,7 +395,7 @@ pub struct ViewportPane {
 
 impl ViewportPane {
     #[allow(clippy::too_many_arguments)]
-    fn spawn(
+    pub fn spawn(
         commands: &mut Commands,
         asset_server: &Res<AssetServer>,
         meshes: &mut ResMut<Assets<Mesh>>,
@@ -535,7 +534,7 @@ pub struct GraphPane {
 }
 
 impl GraphPane {
-    fn new(graph_id: Entity, label: String) -> Self {
+    pub fn new(graph_id: Entity, label: String) -> Self {
         Self {
             id: graph_id,
             label,
@@ -1252,251 +1251,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
     }
 }
 
-#[derive(Component)]
-pub struct SyncedViewport;
-
-#[derive(SystemParam)]
-pub struct SyncViewportParams<'w, 's> {
-    pub panels: Query<'w, 's, (Entity, &'static Panel), Without<SyncedViewport>>,
-    pub commands: Commands<'w, 's>,
-    pub tile_state: ResMut<'w, TileState>,
-    pub asset_server: Res<'w, AssetServer>,
-    pub meshes: ResMut<'w, Assets<Mesh>>,
-    pub materials: ResMut<'w, Assets<StandardMaterial>>,
-    pub render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
-    pub hdr_enabled: ResMut<'w, HdrEnabled>,
-    pub schema_reg: Res<'w, ComponentSchemaRegistry>,
-    pub eql: Res<'w, EqlContext>,
-}
-
-pub fn sync_viewports(params: SyncViewportParams) {
-    let SyncViewportParams {
-        panels,
-        mut commands,
-        mut tile_state,
-        asset_server,
-        mut meshes,
-        mut materials,
-        mut render_layer_alloc,
-        mut hdr_enabled,
-        schema_reg,
-        eql,
-    } = params;
-    for (entity, panel) in panels.iter() {
-        spawn_panel(
-            panel,
-            None,
-            &asset_server,
-            &mut tile_state,
-            &mut meshes,
-            &mut materials,
-            &mut render_layer_alloc,
-            &mut commands,
-            &mut hdr_enabled,
-            &schema_reg,
-            &eql,
-        );
-
-        commands.entity(entity).try_insert(SyncedViewport);
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn spawn_panel(
-    panel: &Panel,
-    parent_id: Option<TileId>,
-    asset_server: &Res<AssetServer>,
-    ui_state: &mut ResMut<TileState>,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    render_layer_alloc: &mut ResMut<RenderLayerAlloc>,
-    commands: &mut Commands,
-    hdr_enabled: &mut ResMut<HdrEnabled>,
-    schema_reg: &Res<ComponentSchemaRegistry>,
-    eql: &EqlContext,
-) -> Option<TileId> {
-    match panel {
-        Panel::Viewport(viewport) => {
-            let label = viewport_label(viewport);
-            let pane = ViewportPane::spawn(
-                commands,
-                asset_server,
-                meshes,
-                materials,
-                render_layer_alloc,
-                &eql.0,
-                viewport,
-                label,
-            );
-            hdr_enabled.0 |= viewport.hdr;
-            ui_state.insert_tile(Tile::Pane(Pane::Viewport(pane)), parent_id, viewport.active)
-        }
-        Panel::HSplit(split) | Panel::VSplit(split) => {
-            let linear = egui_tiles::Linear::new(
-                match panel {
-                    Panel::HSplit(_) => egui_tiles::LinearDir::Horizontal,
-                    Panel::VSplit(_) => egui_tiles::LinearDir::Vertical,
-                    _ => unreachable!(),
-                },
-                vec![],
-            );
-            let tile_id =
-                ui_state.insert_tile(Tile::Container(Container::Linear(linear)), parent_id, false);
-            for (i, panel) in split.panels.iter().enumerate() {
-                let child_id = spawn_panel(
-                    panel,
-                    tile_id,
-                    asset_server,
-                    ui_state,
-                    meshes,
-                    materials,
-                    render_layer_alloc,
-                    commands,
-                    hdr_enabled,
-                    schema_reg,
-                    eql,
-                );
-                let Some(tile_id) = tile_id else {
-                    continue;
-                };
-
-                let Some(child_id) = child_id else {
-                    continue;
-                };
-                let Some(share) = split.shares.get(&i) else {
-                    continue;
-                };
-                let Some(Tile::Container(Container::Linear(linear))) =
-                    ui_state.tree.tiles.get_mut(tile_id)
-                else {
-                    continue;
-                };
-                linear.shares.set_share(child_id, *share);
-            }
-            tile_id
-        }
-        Panel::Tabs(tabs) => {
-            let tile_id = ui_state.insert_tile(
-                Tile::Container(Container::new_tabs(vec![])),
-                parent_id,
-                false,
-            );
-
-            tabs.iter().for_each(|panel| {
-                spawn_panel(
-                    panel,
-                    tile_id,
-                    asset_server,
-                    ui_state,
-                    meshes,
-                    materials,
-                    render_layer_alloc,
-                    commands,
-                    hdr_enabled,
-                    schema_reg,
-                    eql,
-                );
-            });
-            tile_id
-        }
-        Panel::Graph(graph) => {
-            let eql = eql
-                .0
-                .parse_str(&graph.eql)
-                .inspect_err(|err| {
-                    warn!(?err, "error parsing graph eql");
-                })
-                .ok()?;
-            let mut component_vec = eql.to_graph_components();
-            component_vec.sort();
-            let mut components_tree: BTreeMap<ComponentPath, Vec<(bool, Color32)>> =
-                BTreeMap::new();
-            for (j, (component, i)) in component_vec.iter().enumerate() {
-                if let Some(elements) = components_tree.get_mut(component) {
-                    elements[*i] = (true, colors::get_color_by_index_all(j));
-                } else {
-                    let Some(schema) = schema_reg.0.get(&component.id) else {
-                        continue;
-                    };
-                    let len: usize = schema.shape().iter().copied().product();
-                    let mut elements: Vec<(bool, Color32)> = (0..len)
-                        .map(|_| (false, colors::get_color_by_index_all(j)))
-                        .collect();
-                    elements[*i] = (true, colors::get_color_by_index_all(j));
-                    components_tree.insert(component.clone(), elements);
-                }
-            }
-
-            let graph_label = graph_label(graph);
-            let mut bundle =
-                GraphBundle::new(render_layer_alloc, components_tree, graph_label.clone());
-            bundle.graph_state.auto_y_range = graph.auto_y_range;
-            bundle.graph_state.y_range = graph.y_range.clone();
-            bundle.graph_state.graph_type = graph.graph_type;
-            let graph_id = commands.spawn(bundle).id();
-            let graph = GraphPane::new(graph_id, graph_label);
-            ui_state.insert_tile(Tile::Pane(Pane::Graph(graph)), parent_id, false)
-        }
-        Panel::ComponentMonitor(monitor) => {
-            // Create a MonitorPane and add it to the UI
-            let pane =
-                super::monitor::MonitorPane::new("Monitor".to_string(), monitor.component_id);
-            ui_state.insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
-        }
-        Panel::QueryTable(data) => {
-            // Create a new SQL table entity
-            let entity = commands
-                .spawn(super::query_table::QueryTableData {
-                    data: data.clone(),
-                    ..Default::default()
-                })
-                .id();
-            let pane = super::query_table::QueryTablePane { entity };
-            ui_state.insert_tile(Tile::Pane(Pane::QueryTable(pane)), parent_id, false)
-        }
-        Panel::ActionPane(action) => {
-            // Create a new action tile entity
-            let entity = commands
-                .spawn(super::actions::ActionTile {
-                    button_name: action.label.clone(),
-                    lua: action.lua.clone(),
-                    status: Default::default(),
-                })
-                .id();
-            let pane = super::tiles::ActionTilePane {
-                entity,
-                label: "Action".to_string(),
-            };
-            ui_state.insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false)
-        }
-        Panel::Inspector => ui_state.insert_tile(Tile::Pane(Pane::Inspector), parent_id, false),
-        Panel::Hierarchy => ui_state.insert_tile(Tile::Pane(Pane::Hierarchy), parent_id, false),
-        Panel::SchematicTree => {
-            let entity = commands
-                .spawn(super::schematic::tree::TreeWidgetState::default())
-                .id();
-            let pane = TreePane { entity };
-            ui_state.insert_tile(Tile::Pane(Pane::SchematicTree(pane)), parent_id, false)
-        }
-        Panel::QueryPlot(plot) => {
-            let graph_bundle = GraphBundle::new(
-                render_layer_alloc,
-                BTreeMap::default(),
-                "Query Plot".to_string(),
-            );
-            let entity = commands
-                .spawn(QueryPlotData {
-                    data: plot.clone(),
-                    ..Default::default()
-                })
-                .insert(graph_bundle)
-                .id();
-            let pane = Pane::QueryPlot(super::query_plot::QueryPlotPane { entity, rect: None });
-            ui_state.insert_tile(Tile::Pane(pane), parent_id, false)
-        }
-    }
-}
-
 pub fn shortcuts(key_state: Res<LogicalKeyState>, mut ui_state: ResMut<TileState>) {
     // tab switching
     if key_state.pressed(&Key::Control) && key_state.just_pressed(&Key::Tab) {
@@ -1535,16 +1289,4 @@ pub fn shortcuts(key_state: Res<LogicalKeyState>, mut ui_state: ResMut<TileState
         };
         tabs.set_active(*new_active_id);
     }
-}
-
-fn viewport_label(viewport: &Viewport) -> String {
-    viewport
-        .name
-        .clone()
-        .unwrap_or_else(|| "Viewport".to_string())
-}
-
-fn graph_label(graph: &Graph) -> String {
-    // TODO: Update graph labeling once Graph structure is migrated to use ComponentPath
-    graph.name.clone().unwrap_or_else(|| "Graph".to_string())
 }

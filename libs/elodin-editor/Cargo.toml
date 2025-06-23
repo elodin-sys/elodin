@@ -55,6 +55,7 @@ impeller2.path = "../../libs/impeller2"
 impeller2.features = ["hifitime"]
 impeller2-wkt.path = "../../libs/impeller2/wkt"
 impeller2-wkt.features = ["bevy", "nox", "gui", "std"]
+impeller2-kdl.path = "../../libs/impeller2/kdl"
 toml.version = "0.8"
 serde = { version = "1.0.196", features = ["derive"] }
 serde_json = "1"

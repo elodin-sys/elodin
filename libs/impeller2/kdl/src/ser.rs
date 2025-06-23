@@ -5,7 +5,7 @@ use impeller2_wkt::{
 };
 use kdl::{KdlDocument, KdlEntry, KdlNode};
 
-pub fn serialize_schematic(schematic: &Schematic) -> String {
+pub fn serialize_schematic<T>(schematic: &Schematic<T>) -> String {
     let mut doc = KdlDocument::new();
 
     for elem in &schematic.elems {
@@ -13,10 +13,11 @@ pub fn serialize_schematic(schematic: &Schematic) -> String {
         doc.nodes_mut().push(node);
     }
 
+    doc.autoformat();
     doc.to_string()
 }
 
-fn serialize_schematic_elem(elem: &SchematicElem) -> KdlNode {
+fn serialize_schematic_elem<T>(elem: &SchematicElem<T>) -> KdlNode {
     match elem {
         SchematicElem::Panel(panel) => serialize_panel(panel),
         SchematicElem::Object3d(obj) => serialize_object_3d(obj),
@@ -24,7 +25,7 @@ fn serialize_schematic_elem(elem: &SchematicElem) -> KdlNode {
     }
 }
 
-fn serialize_panel(panel: &Panel) -> KdlNode {
+fn serialize_panel<T>(panel: &Panel<T>) -> KdlNode {
     match panel {
         Panel::Tabs(panels) => {
             let mut node = KdlNode::new("tabs");
@@ -51,7 +52,7 @@ fn serialize_panel(panel: &Panel) -> KdlNode {
     }
 }
 
-fn serialize_split(split: &Split, is_horizontal: bool) -> KdlNode {
+fn serialize_split<T>(split: &Split<T>, is_horizontal: bool) -> KdlNode {
     let node_name = if is_horizontal { "hsplit" } else { "vsplit" };
     let mut node = KdlNode::new(node_name);
 
@@ -77,7 +78,7 @@ fn serialize_split(split: &Split, is_horizontal: bool) -> KdlNode {
     node
 }
 
-fn serialize_viewport(viewport: &Viewport) -> KdlNode {
+fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
     let mut node = KdlNode::new("viewport");
 
     if let Some(ref name) = viewport.name {
@@ -116,7 +117,7 @@ fn serialize_viewport(viewport: &Viewport) -> KdlNode {
     node
 }
 
-fn serialize_graph(graph: &Graph) -> KdlNode {
+fn serialize_graph<T>(graph: &Graph<T>) -> KdlNode {
     let mut node = KdlNode::new("graph");
 
     // Add the EQL query as the first unnamed entry
@@ -194,7 +195,7 @@ fn serialize_query_table(query_table: &QueryTable) -> KdlNode {
     node
 }
 
-fn serialize_query_plot(query_plot: &QueryPlot) -> KdlNode {
+fn serialize_query_plot<T>(query_plot: &QueryPlot<T>) -> KdlNode {
     let mut node = KdlNode::new("query_plot");
 
     // Add the label as the first unnamed entry
@@ -229,7 +230,7 @@ fn serialize_query_plot(query_plot: &QueryPlot) -> KdlNode {
     node
 }
 
-fn serialize_object_3d(obj: &Object3D) -> KdlNode {
+fn serialize_object_3d<T>(obj: &Object3D<T>) -> KdlNode {
     let mut node = KdlNode::new("object_3d");
 
     // Add the EQL query as the first unnamed entry
@@ -280,7 +281,7 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> KdlNode {
     }
 }
 
-fn serialize_line_3d(line: &Line3d) -> KdlNode {
+fn serialize_line_3d<T>(line: &Line3d<T>) -> KdlNode {
     let mut node = KdlNode::new("line_3d");
 
     // Add the EQL query as the first unnamed entry

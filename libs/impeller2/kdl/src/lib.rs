@@ -54,18 +54,22 @@ pub enum KdlSchematicError {
     },
 }
 
-pub trait SchematicExt {
+pub trait ToKdl {
     fn to_kdl(&self) -> String;
+}
+pub trait FromKdl {
     fn from_kdl(src: &str) -> Result<Self, KdlSchematicError>
     where
         Self: Sized;
 }
 
-impl SchematicExt for impeller2_wkt::Schematic {
+impl<T> ToKdl for impeller2_wkt::Schematic<T> {
     fn to_kdl(&self) -> String {
         serialize_schematic(self)
     }
+}
 
+impl FromKdl for impeller2_wkt::Schematic {
     fn from_kdl(src: &str) -> Result<Self, KdlSchematicError>
     where
         Self: Sized,

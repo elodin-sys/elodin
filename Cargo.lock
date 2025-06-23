@@ -4680,6 +4680,7 @@ dependencies = [
  "impeller2",
  "impeller2-bevy",
  "impeller2-cli",
+ "impeller2-kdl",
  "impeller2-wkt",
  "itertools 0.12.1",
  "jiff",

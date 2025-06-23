@@ -81,16 +81,15 @@ impl WidgetSystem for TreeWidget<'_, '_> {
                         } else {
                             false
                         };
-                        let branch_res = branch(
-                            ui,
-                            &object_3d.eql,
+                        let branch_res = Branch::new(
+                            object_3d.eql.clone(),
                             icons.viewport,
                             icons.chevron,
-                            true,
                             max_rect,
-                            selected,
-                            |_| {},
-                        );
+                        )
+                        .leaf(true)
+                        .selected(selected)
+                        .show(ui, |_| {});
                         if branch_res.clicked() {
                             *selected_object = SelectedObject::Object3D {
                                 entity: object_3d.aux,
@@ -131,7 +130,7 @@ fn panel(
     } else {
         false
     };
-    let branch_res = Branch::new(p.label(), icon, icons.chevron, tree_rect)
+    let branch_res = Branch::new(p.label().to_string(), icon, icons.chevron, tree_rect)
         .leaf(children.is_empty())
         .selected(selected)
         .show(ui, |ui| {

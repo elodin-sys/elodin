@@ -186,7 +186,6 @@ impl Plugin for UiPlugin {
             .add_systems(Update, shortcuts)
             .add_systems(Update, render_layout)
             .add_systems(Update, sync_hdr)
-            .add_systems(Update, tiles::sync_viewports.after(render_layout))
             .add_systems(Update, tiles::shortcuts)
             .add_systems(Update, set_camera_viewport.after(render_layout))
             .add_systems(Update, sync_camera_grid_cell.after(render_layout))

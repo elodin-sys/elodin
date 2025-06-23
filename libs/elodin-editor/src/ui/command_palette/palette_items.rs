@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
+    path::Path,
     str::FromStr,
     time::Duration,
 };
@@ -7,10 +8,12 @@ use std::{
 use bevy::{
     asset::{AssetServer, Assets},
     ecs::{
-        query::{With, Without},
+        entity::Entity,
+        query::With,
         system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
         world::World,
     },
+    log::info,
     pbr::{StandardMaterial, wireframe::WireframeConfig},
     prelude::In,
     render::view::Visibility,
@@ -20,6 +23,7 @@ use egui_tiles::TileId;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::msg_id;
 use impeller2_bevy::{ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
+use impeller2_kdl::{FromKdl, ToKdl};
 use impeller2_wkt::{
     ComponentPath, ComponentValue, IsRecording, Material, Mesh, Object3D, SetDbSettings,
     SetStreamState,
@@ -28,12 +32,13 @@ use nox::ArrayBuf;
 
 use crate::{
     EqlContext, Offset, SelectedTimeRange, TimeRangeBehavior,
+    object_3d::Object3DState,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
         self, HdrEnabled, colors,
         plot::{GraphBundle, default_component_values},
-        schematic::SchematicParam,
-        tiles::{self, SyncViewportParams, TileState},
+        schematic::{CurrentSchematic, LoadSchematicParams},
+        tiles::{self, TileState},
     },
 };
 
@@ -589,26 +594,23 @@ fn set_time_range_behavior() -> PaletteItem {
 }
 
 pub fn save_preset() -> PaletteItem {
-    PaletteItem::new("Save Preset", PRESETS_LABEL, |_name: In<String>| {
+    PaletteItem::new("Save Schematic", PRESETS_LABEL, |_name: In<String>| {
         PalettePage::new(vec![save_preset_inner()]).into()
     })
 }
 
 pub fn save_preset_inner() -> PaletteItem {
     PaletteItem::new(
-        LabelSource::placeholder("Enter a name for the preset"),
+        LabelSource::placeholder("Enter a name for the schematic"),
         "",
-        move |name: In<String>, param: SchematicParam| {
-            if let Some(tile_id) = param.ui_state.tree.root() {
-                let panel = param.get_panel(tile_id);
-                let dirs = crate::dirs();
-                let dir = dirs.data_dir().join("presets");
-                let _ = std::fs::create_dir(&dir);
-                let _ = std::fs::write(
-                    dir.join(name.clone()),
-                    serde_json::to_string(&panel).unwrap(),
-                );
-            }
+        move |In(name): In<String>, schematic: Res<CurrentSchematic>| {
+            let dirs = crate::dirs();
+            let dir = dirs.data_dir().join("schematics");
+            let _ = std::fs::create_dir(&dir);
+            let kdl = schematic.0.to_kdl();
+            let path = dir.join(&name).with_extension("kdl");
+            info!(?path, "saving schematic");
+            let _ = std::fs::write(path, kdl);
             PaletteEvent::Exit
         },
     )
@@ -616,14 +618,14 @@ pub fn save_preset_inner() -> PaletteItem {
 }
 
 pub fn load_preset() -> PaletteItem {
-    PaletteItem::new("Load Preset", PRESETS_LABEL, |_: In<String>| {
+    PaletteItem::new("Load Schematic", PRESETS_LABEL, |_: In<String>| {
         let dirs = crate::dirs();
-        let dir = dirs.data_dir().join("presets");
+        let dir = dirs.data_dir().join("schematics");
         let Ok(elems) = std::fs::read_dir(dir) else {
             return PaletteEvent::Exit;
         };
 
-        let mut items = vec![];
+        let mut items = vec![load_preset_picker()];
         for elem in elems {
             let Ok(elem) = elem else { continue };
             let path = elem.path();
@@ -636,49 +638,70 @@ pub fn load_preset() -> PaletteItem {
     })
 }
 
+pub fn load_preset_picker() -> PaletteItem {
+    PaletteItem::new(
+        "From File",
+        "",
+        move |_: In<String>,
+              params: LoadSchematicParams,
+              selected_object: ResMut<ui::SelectedObject>,
+              objects_3d: Query<Entity, With<Object3DState>>| {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("kdl", &["kdl"])
+                .pick_file()
+            {
+                load_schematic(&path, params, selected_object, objects_3d);
+            }
+            PaletteEvent::Exit
+        },
+    )
+}
+
 pub fn load_preset_inner(name: String) -> PaletteItem {
     PaletteItem::new(
         name.clone(),
         "",
         move |_: In<String>,
-              params: SyncViewportParams,
-              mut selected_object: ResMut<ui::SelectedObject>| {
+              params: LoadSchematicParams,
+              selected_object: ResMut<ui::SelectedObject>,
+              objects_3d: Query<Entity, With<Object3DState>>| {
             let dirs = crate::dirs();
             let path = dirs.data_dir().join("presets").join(name.clone());
-            if let Ok(json) = std::fs::read_to_string(path) {
-                if let Ok(panel) = serde_json::from_str::<impeller2_wkt::Panel>(&json) {
-                    let SyncViewportParams {
-                        mut commands,
-                        mut tile_state,
-                        asset_server,
-                        mut meshes,
-                        mut materials,
-                        mut render_layer_alloc,
-                        mut hdr_enabled,
-                        schema_reg,
-                        eql,
-                        ..
-                    } = params;
-                    render_layer_alloc.free_all();
-                    tile_state.clear(&mut commands, &mut selected_object);
-                    tiles::spawn_panel(
-                        &panel,
-                        None,
-                        &asset_server,
-                        &mut tile_state,
-                        &mut meshes,
-                        &mut materials,
-                        &mut render_layer_alloc,
-                        &mut commands,
-                        &mut hdr_enabled,
-                        &schema_reg,
-                        &eql,
-                    );
-                }
-            }
+            load_schematic(&path, params, selected_object, objects_3d);
             PaletteEvent::Exit
         },
     )
+}
+
+pub fn load_schematic(
+    path: &Path,
+    mut params: LoadSchematicParams,
+    mut selected_object: ResMut<ui::SelectedObject>,
+    objects_3d: Query<Entity, With<Object3DState>>,
+) {
+    if let Ok(kdl) = std::fs::read_to_string(&path) {
+        if let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(&kdl) {
+            // if let Ok(panel) = serde_json::from_str::<impeller2_wkt::Panel>(&json) {
+            params.render_layer_alloc.free_all();
+            params
+                .tile_state
+                .clear(&mut params.commands, &mut selected_object);
+            for entity in objects_3d.iter() {
+                params.commands.entity(entity).despawn();
+            }
+            for elem in schematic.elems {
+                match elem {
+                    impeller2_wkt::SchematicElem::Panel(p) => {
+                        params.spawn_panel(&p, None);
+                    }
+                    impeller2_wkt::SchematicElem::Object3d(object_3d) => {
+                        params.spawn_object_3d(object_3d);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
 }
 
 pub fn set_color_scheme() -> PaletteItem {

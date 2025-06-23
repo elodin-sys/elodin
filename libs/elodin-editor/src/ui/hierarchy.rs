@@ -14,11 +14,7 @@ use std::collections::HashMap;
 
 use crate::ui::{EntityFilter, EntityPair, SelectedObject, colors::get_scheme, utils};
 
-use super::{
-    inspector::entity::search,
-    schematic::{Branch, branch},
-    widgets::WidgetSystem,
-};
+use super::{inspector::entity::search, schematic::Branch, widgets::WidgetSystem};
 
 #[derive(SystemParam)]
 pub struct HierarchyContent<'w, 's> {
