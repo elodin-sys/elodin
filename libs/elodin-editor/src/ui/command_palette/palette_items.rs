@@ -21,13 +21,13 @@ use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::msg_id;
 use impeller2_bevy::{ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
 use impeller2_wkt::{
-    ComponentPath, ComponentValue, IsRecording, Material, Mesh, SetDbSettings, SetStreamState,
+    ComponentPath, ComponentValue, IsRecording, Material, Mesh, Object3D, SetDbSettings,
+    SetStreamState,
 };
 use nox::ArrayBuf;
 
 use crate::{
     EqlContext, Offset, SelectedTimeRange, TimeRangeBehavior,
-    object_3d::Object3D,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
         self, HdrEnabled, colors,
@@ -710,7 +710,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                   mut commands: Commands,
                   eql_ctx: Res<EqlContext>,
                   entity_map: Res<EntityMap>,
-                  component_value_maps: Query<&'static ComponentValue, Without<Object3D>>,
+                  component_value_maps: Query<&'static ComponentValue>,
                   mut material_assets: ResMut<Assets<StandardMaterial>>,
                   mut mesh_assets: ResMut<Assets<bevy::prelude::Mesh>>,
                   assets: Res<AssetServer>| {
@@ -719,16 +719,19 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                     parse_color(color_str, &eql_ctx.0, &entity_map, component_value_maps)
                         .unwrap_or((0.8, 0.8, 0.8));
 
-                let mesh_source = Some(impeller2_wkt::Object3D::Mesh {
+                let mesh_source = impeller2_wkt::Object3DMesh::Mesh {
                     mesh: mesh.clone(),
                     material: Material::color(r, g, b),
-                });
+                };
 
                 crate::object_3d::create_object_3d_entity(
                     &mut commands,
-                    eql.clone(),
+                    Object3D {
+                        eql: eql.clone(),
+                        mesh: mesh_source,
+                        aux: (),
+                    },
                     expr.clone(),
-                    mesh_source,
                     &mut material_assets,
                     &mut mesh_assets,
                     &assets,
@@ -747,7 +750,7 @@ fn parse_color(
     expr: &str,
     ctx: &eql::Context,
     entity_map: &EntityMap,
-    component_value_maps: Query<&'static ComponentValue, Without<Object3D>>,
+    component_value_maps: Query<&'static ComponentValue>,
 ) -> Option<(f32, f32, f32)> {
     let expr = ctx.parse_str(expr).ok()?;
     let expr = crate::object_3d::compile_eql_expr(expr);
@@ -796,13 +799,12 @@ pub fn create_3d_object() -> PaletteItem {
                                                   mut mesh_assets: ResMut<Assets<bevy::prelude::Mesh>>,
                                                   assets: Res<AssetServer>,
                                                   | {
-                                                let obj = impeller2_wkt::Object3D::Glb(gltf_path.trim().to_string());
+                                                let obj = impeller2_wkt::Object3DMesh::Glb(gltf_path.trim().to_string());
 
                                                 crate::object_3d::create_object_3d_entity(
                                                     &mut commands,
-                                                    eql.clone(),
+                                                    Object3D { eql: eql.clone(), mesh: obj, aux: () },
                                                     expr.clone(),
-                                                    Some(obj),
                                                     &mut material_assets,
                                                     &mut mesh_assets,
                                                     &assets

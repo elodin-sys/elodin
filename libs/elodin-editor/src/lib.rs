@@ -26,7 +26,7 @@ use impeller2_bevy::{
     ComponentMetadataRegistry, ComponentPathRegistry, ComponentSchemaRegistry, ComponentValueMap,
     CurrentStreamId, EntityMap, PacketHandlerInput, PacketHandlers, PacketTx,
 };
-use impeller2_wkt::{CurrentTimestamp, NewConnection, SetStreamState, WorldPos};
+use impeller2_wkt::{CurrentTimestamp, NewConnection, Object3D, SetStreamState, WorldPos};
 use impeller2_wkt::{EarliestTimestamp, LastUpdated};
 use nox::Tensor;
 use object_3d::create_object_3d_entity;
@@ -747,8 +747,8 @@ fn sync_object_3d(
             .and_then(|e| materials.get(*e).ok());
 
         let mesh_source = match dbg!((glb, mesh, material)) {
-            (Some(glb), _, _) => impeller2_wkt::Object3D::Glb(glb.0.clone()),
-            (_, Some(mesh), Some(mat)) => impeller2_wkt::Object3D::Mesh {
+            (Some(glb), _, _) => impeller2_wkt::Object3DMesh::Glb(glb.0.clone()),
+            (_, Some(mesh), Some(mat)) => impeller2_wkt::Object3DMesh::Mesh {
                 mesh: mesh.clone(),
                 material: mat.clone(),
             },
@@ -762,9 +762,12 @@ fn sync_object_3d(
 
         let object_entity = create_object_3d_entity(
             &mut commands,
-            eql,
+            Object3D {
+                eql,
+                mesh: mesh_source,
+                aux: (),
+            },
             expr,
-            Some(mesh_source),
             &mut material_assets,
             &mut mesh_assets,
             &assets,

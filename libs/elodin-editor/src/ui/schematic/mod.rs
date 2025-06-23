@@ -1,14 +1,17 @@
 use std::collections::HashMap;
 
-use crate::ui::{
-    actions, inspector, plot, query_plot, query_table,
-    tiles::{self, Pane},
+use crate::{
+    object_3d::Object3DState,
+    ui::{
+        actions, inspector, plot, query_plot, query_table,
+        tiles::{self, Pane},
+    },
 };
 use bevy::{ecs::system::SystemParam, prelude::*};
 use egui_tiles::{Tile, TileId};
 use impeller2_wkt::{
-    ActionPane, ComponentMonitor, ComponentPath, Line3d, Object3D, Panel, Schematic, SchematicElem,
-    Split, Viewport,
+    ActionPane, ComponentMonitor, ComponentPath, Line3d, Object3DMesh, Panel, Schematic,
+    SchematicElem, Split, Viewport,
 };
 
 pub mod tree;
@@ -24,7 +27,7 @@ pub struct SchematicParam<'w, 's> {
     pub graph_states: Query<'w, 's, &'static plot::GraphState>,
     pub query_plots: Query<'w, 's, &'static query_plot::QueryPlotData>,
     pub viewports: Query<'w, 's, &'static inspector::viewport::Viewport>,
-    pub objects_3d: Query<'w, 's, &'static Object3D>,
+    pub objects_3d: Query<'w, 's, (Entity, &'static Object3DState)>,
     pub lines_3d: Query<'w, 's, (Entity, &'static Line3d)>,
     pub ui_state: Res<'w, tiles::TileState>,
 }
@@ -148,7 +151,7 @@ pub fn tiles_to_schematic(param: SchematicParam, mut schematic: ResMut<CurrentSc
         param
             .objects_3d
             .iter()
-            .cloned()
+            .map(|(entity, o)| o.data.map_aux(|_| entity))
             .map(SchematicElem::Object3d),
     );
     schematic.elems.extend(

@@ -16,6 +16,7 @@ use impeller2_wkt::{ComponentMetadata, Glb, MetadataExt, QueryType};
 use smallvec::SmallVec;
 
 use crate::{
+    object_3d::Object3DState,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
         EntityPair,
@@ -40,7 +41,7 @@ pub struct InspectorEntity<'w, 's> {
     component_ids: Query<'w, 's, &'static ComponentId>,
     values: Query<'w, 's, &'static mut ComponentValue>,
     metadata_query: Query<'w, 's, &'static mut ComponentMetadata>,
-    object_3d: Query<'w, 's, &'static mut crate::object_3d::Object3D>,
+    object_3d: Query<'w, 's, &'static mut Object3DState>,
     glb: Query<'w, 's, &'static mut Glb>,
     metadata_store: Res<'w, ComponentMetadataRegistry>,
     path_reg: Res<'w, ComponentPathRegistry>,
@@ -126,10 +127,10 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                 ui.label(egui::RichText::new("EQL").color(get_scheme().text_secondary));
                 ui.add_space(8.0);
                 configure_input_with_border(ui.style_mut());
-                let query_res = query(ui, &mut object_3d.eql, QueryType::EQL);
-                eql_autocomplete(ui, &eql_context.0, &query_res, &mut object_3d.eql);
+                let query_res = query(ui, &mut object_3d.data.eql, QueryType::EQL);
+                eql_autocomplete(ui, &eql_context.0, &query_res, &mut object_3d.data.eql);
                 if query_res.changed() {
-                    match eql_context.0.parse_str(&object_3d.eql) {
+                    match eql_context.0.parse_str(&object_3d.data.eql) {
                         Ok(expr) => {
                             object_3d.compiled_expr =
                                 Some(crate::object_3d::compile_eql_expr(expr));

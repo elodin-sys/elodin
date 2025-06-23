@@ -10,7 +10,7 @@ use impeller2_bevy::EntityMap;
 use impeller2_wkt::{ComponentValue, QueryType, WorldPos};
 
 use crate::EqlContext;
-use crate::object_3d::{ComponentArrayExt, EditableEQL, Object3D, compile_eql_expr};
+use crate::object_3d::{ComponentArrayExt, EditableEQL, Object3DState, compile_eql_expr};
 use crate::ui::CameraQuery;
 use crate::ui::button::EButton;
 use crate::ui::colors::get_scheme;
@@ -178,7 +178,7 @@ pub fn set_viewport_pos(
     viewports: Query<&Viewport>,
     mut pos: Query<&mut WorldPos>,
     entity_map: Res<EntityMap>,
-    values: Query<&'static ComponentValue, Without<Object3D>>,
+    values: Query<&'static ComponentValue>,
 ) {
     for viewport in viewports.iter() {
         let Ok(mut pos) = pos.get_mut(viewport.parent_entity) else {

@@ -25,7 +25,7 @@ impl<T> Default for Schematic<T> {
 #[serde(bound = "T: Serialize + DeserializeOwned")]
 pub enum SchematicElem<T = ()> {
     Panel(Panel<T>),
-    Object3d(Object3D),
+    Object3d(Object3D<T>),
     Line3d(Line3d<T>),
 }
 
@@ -33,7 +33,7 @@ impl<T> SchematicElem<T> {
     pub fn clear_aux(self) -> SchematicElem<()> {
         match self {
             SchematicElem::Panel(panel) => SchematicElem::Panel(panel.map_aux(|_| ())),
-            SchematicElem::Object3d(obj) => SchematicElem::Object3d(obj),
+            SchematicElem::Object3d(obj) => SchematicElem::Object3d(obj.map_aux(|_| ())),
             SchematicElem::Line3d(line) => SchematicElem::Line3d(line.map_aux(|_| ())),
         }
     }
@@ -328,13 +328,32 @@ impl Asset for Material {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub enum Object3D {
+pub enum Object3DMesh {
     Glb(String),
     Mesh { mesh: Mesh, material: Material },
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(bound = "T: Serialize + DeserializeOwned")]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct Object3D<T = ()> {
+    pub eql: String,
+    pub mesh: Object3DMesh,
+    pub aux: T,
+}
+
+impl<T> Object3D<T> {
+    pub fn map_aux<U>(&self, f: impl FnOnce(&T) -> U) -> Object3D<U> {
+        Object3D {
+            eql: self.eql.clone(),
+            mesh: self.mesh.clone(),
+            aux: f(&self.aux),
+        }
+    }
+}
+
 impl Asset for Object3D {
-    const NAME: &'static str = "mesh_source";
+    const NAME: &'static str = "object3d";
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
