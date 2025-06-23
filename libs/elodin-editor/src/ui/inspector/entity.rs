@@ -12,28 +12,23 @@ use impeller2_bevy::{
     ComponentMetadataRegistry, ComponentPath, ComponentPathRegistry, ComponentValue,
     ComponentValueExt, ElementValueMut,
 };
-use impeller2_wkt::{ComponentMetadata, Glb, MetadataExt, QueryType};
+use impeller2_wkt::{ComponentMetadata, MetadataExt};
 use smallvec::SmallVec;
 
 use crate::{
-    object_3d::Object3DState,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
         EntityPair,
         colors::get_scheme,
         label,
         plot::{GraphBundle, default_component_values},
-        theme::configure_input_with_border,
         tiles::TreeAction,
         utils::{MarginSides, format_num},
         widgets::WidgetSystem,
     },
 };
 
-use super::{
-    InspectorIcons, empty_inspector,
-    graph::{eql_autocomplete, inspector_text_field, query},
-};
+use super::{InspectorIcons, empty_inspector};
 
 #[derive(SystemParam)]
 pub struct InspectorEntity<'w, 's> {
@@ -41,13 +36,10 @@ pub struct InspectorEntity<'w, 's> {
     component_ids: Query<'w, 's, &'static ComponentId>,
     values: Query<'w, 's, &'static mut ComponentValue>,
     metadata_query: Query<'w, 's, &'static mut ComponentMetadata>,
-    object_3d: Query<'w, 's, &'static mut Object3DState>,
-    glb: Query<'w, 's, &'static mut Glb>,
     metadata_store: Res<'w, ComponentMetadataRegistry>,
     path_reg: Res<'w, ComponentPathRegistry>,
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     filter: ResMut<'w, ComponentFilter>,
-    eql_context: ResMut<'w, crate::EqlContext>,
 }
 
 impl WidgetSystem for InspectorEntity<'_, '_> {
@@ -67,13 +59,10 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
             component_ids,
             metadata_query,
             mut values,
-            mut object_3d,
-            mut glb,
             metadata_store,
             path_reg,
             mut render_layer_alloc,
             mut filter,
-            eql_context,
         } = state.get_mut(world);
 
         let (icons, pair) = args;

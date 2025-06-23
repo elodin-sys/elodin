@@ -10,7 +10,7 @@ use impeller2_bevy::EntityMap;
 use impeller2_wkt::{ComponentValue, QueryType, WorldPos};
 
 use crate::EqlContext;
-use crate::object_3d::{ComponentArrayExt, EditableEQL, Object3DState, compile_eql_expr};
+use crate::object_3d::{ComponentArrayExt, EditableEQL, compile_eql_expr};
 use crate::ui::CameraQuery;
 use crate::ui::button::EButton;
 use crate::ui::colors::get_scheme;

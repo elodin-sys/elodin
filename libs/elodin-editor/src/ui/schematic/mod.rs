@@ -10,8 +10,8 @@ use crate::{
 use bevy::{ecs::system::SystemParam, prelude::*};
 use egui_tiles::{Tile, TileId};
 use impeller2_wkt::{
-    ActionPane, ComponentMonitor, ComponentPath, Line3d, Object3DMesh, Panel, Schematic,
-    SchematicElem, Split, Viewport,
+    ActionPane, ComponentMonitor, ComponentPath, Line3d, Panel, Schematic, SchematicElem, Split,
+    Viewport,
 };
 
 pub mod tree;

@@ -1,3 +1,5 @@
+use std::f32;
+
 use crate::ui::SelectedObject;
 use crate::ui::colors::{ColorExt, get_scheme};
 use crate::ui::inspector::entity::search;
@@ -7,7 +9,6 @@ use super::CurrentSchematic;
 use bevy::ecs::entity::Entity;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::{Component, Query, ResMut};
-use egui::Widget;
 use egui::collapsing_header::CollapsingState;
 use egui::load::SizedTexture;
 use impeller2_wkt::Panel;
@@ -27,17 +28,9 @@ pub struct TreeIcons {
     pub container: egui::TextureId,
 }
 
-#[derive(Component)]
+#[derive(Component, Default)]
 pub struct TreeWidgetState {
     filter: String,
-}
-
-impl Default for TreeWidgetState {
-    fn default() -> Self {
-        Self {
-            filter: String::new(),
-        }
-    }
 }
 
 impl WidgetSystem for TreeWidget<'_, '_> {
@@ -241,7 +234,6 @@ impl Branch {
                         scheme.bg_primary
                     },
                 );
-                let chevron = chevron.clone();
                 let openness = state.openness(ui.ctx());
                 let icon_color = if selected {
                     scheme.bg_primary
@@ -256,13 +248,13 @@ impl Branch {
 
                     if let Some(pos) = response.interact_pointer_pos() {
                         if response.clicked() && chevron_rect.contains(pos) {
-                            response.flags = response.flags & !egui::response::Flags::CLICKED;
+                            response.flags &= !egui::response::Flags::CLICKED;
                             state.toggle(ui);
                         }
                     }
                     egui::Image::from_texture(chevron)
                         .tint(icon_color)
-                        .rotate(openness * 3.14 / 2.0, egui::vec2(0.5, 0.5))
+                        .rotate(openness * f32::consts::FRAC_PI_2, egui::vec2(0.5, 0.5))
                         .paint_at(ui, chevron_rect);
 
                     chevron_rect.right_center()

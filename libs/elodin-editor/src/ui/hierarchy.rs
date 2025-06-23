@@ -1,29 +1,24 @@
-use crate::{EqlContext, ui::ComponentId};
-use arrow::compute::filter_record_batch;
+use crate::EqlContext;
 use bevy::ecs::{
-    system::{Query, ResMut, SystemParam, SystemState},
+    system::{ResMut, SystemParam, SystemState},
     world::World,
 };
-use bevy::prelude::Entity;
 use bevy::prelude::Res;
 use bevy_egui::egui;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
-use impeller2_bevy::{ComponentPathRegistry, EntityMap};
-use impeller2_wkt::ComponentMetadata;
+use impeller2_bevy::EntityMap;
 use std::collections::HashMap;
 
-use crate::ui::{EntityFilter, EntityPair, SelectedObject, colors::get_scheme, utils};
+use crate::ui::{EntityFilter, EntityPair, SelectedObject, colors::get_scheme};
 
 use super::{inspector::entity::search, schematic::Branch, widgets::WidgetSystem};
 
 #[derive(SystemParam)]
-pub struct HierarchyContent<'w, 's> {
+pub struct HierarchyContent<'w> {
     entity_filter: ResMut<'w, EntityFilter>,
     selected_object: ResMut<'w, SelectedObject>,
-    entities: Query<'w, 's, (&'static ComponentId, Entity, &'static ComponentMetadata)>,
     eql_ctx: Res<'w, EqlContext>,
     entity_map: Res<'w, EntityMap>,
-    path_reg: ResMut<'w, ComponentPathRegistry>,
 }
 
 pub struct HiearchyIcons {
@@ -32,7 +27,7 @@ pub struct HiearchyIcons {
     pub chevron: egui::TextureId,
 }
 
-impl WidgetSystem for HierarchyContent<'_, '_> {
+impl WidgetSystem for HierarchyContent<'_> {
     type Args = HiearchyIcons;
     type Output = ();
 
@@ -51,8 +46,6 @@ impl WidgetSystem for HierarchyContent<'_, '_> {
         let HierarchyContent {
             entity_filter,
             mut selected_object,
-            entities,
-            path_reg,
             eql_ctx,
             entity_map,
         } = state.get_mut(world);
@@ -64,7 +57,6 @@ impl WidgetSystem for HierarchyContent<'_, '_> {
             &eql_ctx,
             &entity_map,
             &mut selected_object,
-            &path_reg,
             &search_text,
             icons,
         );
@@ -89,7 +81,6 @@ pub fn entity_list(
     eql_ctx: &EqlContext,
     entity_map: &EntityMap,
     selected_object: &mut ResMut<SelectedObject>,
-    path_reg: &ComponentPathRegistry,
     entity_filter: &str,
     icons: HiearchyIcons,
 ) -> egui::Response {
@@ -99,7 +90,7 @@ pub fn entity_list(
             ui.vertical(|ui| {
                 let matcher = SkimMatcherV2::default().smart_case().use_cache(true);
                 let (parts, trailing) =
-                    filter_component_parts(&eql_ctx.0.component_parts, &matcher, &entity_filter);
+                    filter_component_parts(&eql_ctx.0.component_parts, &matcher, entity_filter);
 
                 for (_, _, part) in parts {
                     component_part(
@@ -108,7 +99,7 @@ pub fn entity_list(
                         &icons,
                         part,
                         entity_map,
-                        &trailing,
+                        trailing,
                         &matcher,
                         selected_object,
                     );
@@ -121,6 +112,7 @@ pub fn entity_list(
         .response
 }
 
+#[allow(clippy::too_many_arguments)]
 fn component_part(
     ui: &mut egui::Ui,
     tree_rect: egui::Rect,

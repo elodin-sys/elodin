@@ -679,7 +679,7 @@ pub fn load_schematic(
     mut selected_object: ResMut<ui::SelectedObject>,
     objects_3d: Query<Entity, With<Object3DState>>,
 ) {
-    if let Ok(kdl) = std::fs::read_to_string(&path) {
+    if let Ok(kdl) = std::fs::read_to_string(path) {
         if let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(&kdl) {
             // if let Ok(panel) = serde_json::from_str::<impeller2_wkt::Panel>(&json) {
             params.render_layer_alloc.free_all();

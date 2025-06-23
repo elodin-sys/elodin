@@ -33,7 +33,7 @@ use super::{
     plot::{GraphBundle, GraphState, PlotWidget},
     query_plot::QueryPlotData,
     query_table::{QueryTableData, QueryTablePane, QueryTableWidget},
-    schematic::{EqlExt, graph_label, viewport_label},
+    schematic::{graph_label, viewport_label},
     video_stream::{IsTileVisible, VideoDecoderHandle},
     widgets::{WidgetSystem, WidgetSystemExt},
 };
@@ -199,7 +199,7 @@ impl TileState {
         self.tree.active_tiles().is_empty()
     }
 
-    pub fn clear(&mut self, commands: &mut Commands, selected_object: &mut SelectedObject) {
+    pub fn clear(&mut self, commands: &mut Commands, _selected_object: &mut SelectedObject) {
         for (tile_id, tile) in self.tree.tiles.iter() {
             match tile {
                 Tile::Pane(Pane::Viewport(viewport)) => {
@@ -577,7 +577,6 @@ pub enum TreeAction {
 }
 
 enum TabState {
-    Active,
     Selected,
     Inactive,
 }
@@ -631,13 +630,11 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         if ui.is_rect_visible(rect) && !state.is_being_dragged {
             let scheme = get_scheme();
             let bg_color = match tab_state {
-                TabState::Active => scheme.bg_primary,
                 TabState::Selected => scheme.text_primary,
                 TabState::Inactive => scheme.bg_secondary,
             };
 
             let text_color = match tab_state {
-                TabState::Active => scheme.text_primary,
                 TabState::Selected => scheme.bg_secondary,
                 TabState::Inactive => with_opacity(scheme.text_primary, 0.6),
             };
@@ -655,7 +652,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                 EImageButton::new(self.icons.close)
                     .scale(1.3, 1.3)
                     .image_tint(match tab_state {
-                        TabState::Active | TabState::Inactive => scheme.text_primary,
+                        TabState::Inactive => scheme.text_primary,
                         TabState::Selected => scheme.bg_primary,
                     })
                     .bg_color(colors::TRANSPARENT)

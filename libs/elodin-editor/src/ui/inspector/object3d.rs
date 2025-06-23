@@ -8,10 +8,6 @@ use bevy::{
     scene::SceneRoot,
 };
 use bevy_egui::egui::{self, Align, RichText};
-use egui::{
-    Color32,
-    color_picker::{Alpha, color_picker_color32},
-};
 use impeller2_wkt::{ComponentMetadata, Material, Mesh, Object3DMesh};
 use smallvec::SmallVec;
 
@@ -21,7 +17,7 @@ use crate::{
     object_3d::Object3DState,
     ui::{
         button::EColorButton,
-        colors::{self, get_scheme},
+        colors::get_scheme,
         label,
         theme::{self, configure_combo_box, configure_input_with_border},
         tiles::TreeAction,

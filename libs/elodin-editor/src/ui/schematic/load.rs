@@ -56,7 +56,7 @@ impl LoadSchematicParams<'_, '_> {
             expr,
             &mut self.materials,
             &mut self.meshes,
-            &mut self.asset_server,
+            &self.asset_server,
         );
     }
 
