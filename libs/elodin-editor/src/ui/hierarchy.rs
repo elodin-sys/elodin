@@ -1,4 +1,5 @@
 use crate::{EqlContext, ui::ComponentId};
+use arrow::compute::filter_record_batch;
 use bevy::ecs::{
     system::{Query, ResMut, SystemParam, SystemState},
     world::World,
@@ -13,7 +14,11 @@ use std::collections::HashMap;
 
 use crate::ui::{EntityFilter, EntityPair, SelectedObject, colors::get_scheme, utils};
 
-use super::{inspector::entity::search, schematic::branch, widgets::WidgetSystem};
+use super::{
+    inspector::entity::search,
+    schematic::{Branch, branch},
+    widgets::WidgetSystem,
+};
 
 #[derive(SystemParam)]
 pub struct HierarchyContent<'w, 's> {
@@ -132,15 +137,10 @@ fn component_part(
 ) {
     let selected = selected_object.is_entity_selected(part.id);
     let (filtered_entities, trailing) = filter_component_parts(&part.children, matcher, filter);
-    let list_item = branch(
-        ui,
-        &part.name,
-        icons.entity,
-        icons.chevron,
-        filtered_entities.is_empty(),
-        tree_rect,
-        selected,
-        |ui| {
+    let list_item = Branch::new(part.name.clone(), icons.entity, icons.chevron, tree_rect)
+        .selected(selected)
+        .leaf(filtered_entities.is_empty())
+        .show(ui, |ui| {
             for (_, _, part) in filtered_entities {
                 component_part(
                     ui,
@@ -153,8 +153,7 @@ fn component_part(
                     selected_object,
                 );
             }
-        },
-    );
+        });
 
     if list_item.clicked() {
         let Some(entity) = entity_map.get(&part.id) else {
@@ -176,89 +175,6 @@ fn component_part(
             })
         }
     }
-}
-
-fn list_item_ui(ui: &mut egui::Ui, on: bool, metadata: &ComponentMetadata) -> egui::Response {
-    let image_tint = get_scheme().text_primary;
-    let image_tint_click = get_scheme().text_secondary;
-    let background_color = if on {
-        get_scheme().text_primary
-    } else {
-        get_scheme().bg_primary
-    };
-    let text_color = if on {
-        get_scheme().bg_primary
-    } else {
-        get_scheme().text_primary
-    };
-
-    // Set widget size and allocate space
-    let height_scale = 2.0;
-    let desired_size = egui::vec2(
-        ui.available_width(),
-        ui.spacing().interact_size.y * height_scale,
-    );
-    let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
-
-    // Paint the UI
-    if ui.is_rect_visible(rect) {
-        let outer_margin = 1.0;
-        let rect = rect.shrink(outer_margin);
-
-        let style = ui.style_mut();
-        let font_id = egui::TextStyle::Button.resolve(style);
-        style.visuals.widgets.inactive.bg_fill = image_tint;
-        style.visuals.widgets.hovered.bg_fill = image_tint;
-        style.visuals.widgets.active.bg_fill = image_tint_click;
-
-        let visuals = ui.style().interact(&response);
-
-        // Background
-        ui.painter().rect(
-            rect,
-            visuals.corner_radius,
-            background_color,
-            visuals.bg_stroke,
-            egui::StrokeKind::Middle,
-        );
-
-        // Icon
-        let left_center_pos = rect.left_center();
-        let horizontal_margin = 20.0;
-        let icon_side = 8.0;
-        let icon_rect = egui::Rect::from_center_size(
-            egui::pos2(left_center_pos.x + horizontal_margin, left_center_pos.y),
-            egui::vec2(icon_side, icon_side),
-        );
-        ui.painter().rect(
-            icon_rect,
-            egui::CornerRadius::same(2),
-            get_scheme().blue,
-            egui::Stroke::NONE,
-            egui::StrokeKind::Middle,
-        );
-
-        // Label
-        let left_text_margin = horizontal_margin + 12.0 + icon_side;
-
-        let layout_job = utils::get_galley_layout_job(
-            metadata.name.to_owned(),
-            ui.available_width() - left_text_margin - horizontal_margin,
-            font_id,
-            text_color,
-        );
-        let galley = ui.fonts(|f| f.layout_job(layout_job));
-        let text_rect = egui::Align2::LEFT_CENTER.anchor_rect(egui::Rect::from_min_size(
-            egui::pos2(left_center_pos.x + left_text_margin, left_center_pos.y),
-            galley.size(),
-        ));
-        ui.painter().galley(text_rect.min, galley, text_color);
-    }
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
-}
-
-pub fn list_item(on: bool, metadata: &ComponentMetadata) -> impl egui::Widget + '_ {
-    move |ui: &mut egui::Ui| list_item_ui(ui, on, metadata)
 }
 
 fn filter_component_parts<'a, 'b>(
