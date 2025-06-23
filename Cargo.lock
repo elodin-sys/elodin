@@ -6757,6 +6757,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "impeller2-kdl"
+version = "0.1.0"
+dependencies = [
+ "impeller2",
+ "impeller2-wkt",
+ "kdl",
+ "miette 7.2.0",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "impeller2-stellar"
 version = "0.1.0"
 dependencies = [
@@ -7121,6 +7132,18 @@ dependencies = [
  "unicode-segmentation",
  "unicode-width 0.2.0",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "kdl"
+version = "6.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12661358400b02cbbf1fbd05f0a483335490e8a6bd1867620f2eeb78f304a22f"
+dependencies = [
+ "miette 7.2.0",
+ "num",
+ "thiserror 1.0.69",
+ "winnow 0.6.24",
 ]
 
 [[package]]
@@ -12042,7 +12065,7 @@ dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "winnow 0.6.20",
+ "winnow 0.6.24",
 ]
 
 [[package]]
@@ -13480,9 +13503,9 @@ dependencies = [
 
 [[package]]
 name = "winnow"
-version = "0.6.20"
+version = "0.6.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36c1fec1a2bb5866f07c25f68c26e565c4c200aebb96d7e55710c19d3e8ac49b"
+checksum = "c8d71a593cc5c42ad7876e2c1fda56f314f3754c084128833e64f1345ff8a03a"
 dependencies = [
  "memchr",
 ]
