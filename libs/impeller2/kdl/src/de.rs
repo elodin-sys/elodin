@@ -2,7 +2,6 @@ use impeller2::types::ComponentId;
 use impeller2_wkt::{Color, Schematic, SchematicElem};
 use kdl::{KdlDocument, KdlNode};
 use std::collections::HashMap;
-use std::default;
 use std::time::Duration;
 
 use impeller2_wkt::*;
@@ -65,7 +64,7 @@ fn parse_panel(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
         "inspector" => Ok(Panel::Inspector),
         "hierarchy" => Ok(Panel::Hierarchy),
         "schematic_tree" => Ok(Panel::SchematicTree),
-        "dashboard" => parse_dashboard(node, src),
+        "dashboard" => parse_dashboard(node),
         _ => Err(KdlSchematicError::UnknownNode {
             node_type: node.name().to_string(),
             src: src.to_string(),
@@ -536,44 +535,44 @@ fn parse_material_from_node(node: &KdlNode) -> Option<Material> {
     parse_color_from_node(node).map(|color| Material { base_color: color })
 }
 
-fn parse_dashboard(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
+fn parse_dashboard(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
     let title = node
         .get("title")
         .and_then(|v| v.as_string())
         .map(|s| s.to_string())
         .unwrap_or_default();
 
-    let root = parse_dashboard_node(node, src)?;
+    let root = parse_dashboard_node(node)?;
 
-    Ok(Panel::Dashboard(Dashboard {
+    Ok(Panel::Dashboard(Box::new(Dashboard {
         title,
         root,
         aux: (),
-    }))
+    })))
 }
 
-fn parse_dashboard_node(node: &KdlNode, src: &str) -> Result<DashboardNode<()>, KdlSchematicError> {
+fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode<()>, KdlSchematicError> {
     let display = node
         .get("display")
         .and_then(|v| v.as_string())
-        .map(|s| parse_display(s))
+        .map(parse_display)
         .unwrap_or_default();
 
     let box_sizing = node
         .get("box_sizing")
         .and_then(|v| v.as_string())
-        .map(|s| parse_box_sizing(s))
+        .map(parse_box_sizing)
         .unwrap_or_default();
 
     let position_type = node
         .get("position_type")
         .and_then(|v| v.as_string())
-        .map(|s| parse_position_type(s))
+        .map(parse_position_type)
         .unwrap_or_default();
 
     let overflow = node
         .get("overflow")
-        .and_then(|v| parse_overflow_from_value(v))
+        .and_then(parse_overflow_from_value)
         .unwrap_or(Overflow {
             x: OverflowAxis::Visible,
             y: OverflowAxis::Visible,
@@ -581,7 +580,7 @@ fn parse_dashboard_node(node: &KdlNode, src: &str) -> Result<DashboardNode<()>, 
 
     let overflow_clip_margin = node
         .get("overflow_clip_margin")
-        .and_then(|v| parse_overflow_clip_margin_from_value(v))
+        .and_then(parse_overflow_clip_margin_from_value)
         .unwrap_or(OverflowClipMargin {
             visual_box: OverflowClipBox::ContentBox,
             margin: 0.0,
@@ -589,43 +588,43 @@ fn parse_dashboard_node(node: &KdlNode, src: &str) -> Result<DashboardNode<()>, 
 
     let left = node
         .get("left")
-        .map(|v| parse_val_from_value(v))
+        .map(parse_val_from_value)
         .unwrap_or(Val::Auto);
     let right = node
         .get("right")
-        .map(|v| parse_val_from_value(v))
+        .map(parse_val_from_value)
         .unwrap_or(Val::Auto);
     let top = node
         .get("top")
-        .map(|v| parse_val_from_value(v))
+        .map(parse_val_from_value)
         .unwrap_or(Val::Auto);
     let bottom = node
         .get("bottom")
-        .map(|v| parse_val_from_value(v))
+        .map(parse_val_from_value)
         .unwrap_or(Val::Auto);
     let width = node
         .get("width")
-        .map(|v| parse_val_from_value(v))
+        .map(parse_val_from_value)
         .unwrap_or(Val::Auto);
     let height = node
         .get("height")
-        .map(|v| parse_val_from_value(v))
+        .map(parse_val_from_value)
         .unwrap_or(Val::Auto);
     let min_width = node
         .get("min_width")
-        .map(|v| parse_val_from_value(v))
+        .map(parse_val_from_value)
         .unwrap_or(Val::Auto);
     let min_height = node
         .get("min_height")
-        .map(|v| parse_val_from_value(v))
+        .map(parse_val_from_value)
         .unwrap_or(Val::Auto);
     let max_width = node
         .get("max_width")
-        .map(|v| parse_val_from_value(v))
+        .map(parse_val_from_value)
         .unwrap_or(Val::Auto);
     let max_height = node
         .get("max_height")
-        .map(|v| parse_val_from_value(v))
+        .map(parse_val_from_value)
         .unwrap_or(Val::Auto);
 
     let aspect_ratio = node
@@ -636,49 +635,49 @@ fn parse_dashboard_node(node: &KdlNode, src: &str) -> Result<DashboardNode<()>, 
     let align_items = node
         .get("align_items")
         .and_then(|v| v.as_string())
-        .map(|s| parse_align_items(s))
+        .map(parse_align_items)
         .unwrap_or_default();
 
     let justify_items = node
         .get("justify_items")
         .and_then(|v| v.as_string())
-        .map(|s| parse_justify_items(s))
+        .map(parse_justify_items)
         .unwrap_or_default();
 
     let align_self = node
         .get("align_self")
         .and_then(|v| v.as_string())
-        .map(|s| parse_align_self(s))
+        .map(parse_align_self)
         .unwrap_or_default();
 
     let justify_self = node
         .get("justify_self")
         .and_then(|v| v.as_string())
-        .map(|s| parse_justify_self(s))
+        .map(parse_justify_self)
         .unwrap_or_default();
 
     let align_content = node
         .get("align_content")
         .and_then(|v| v.as_string())
-        .map(|s| parse_align_content(s))
+        .map(parse_align_content)
         .unwrap_or_default();
 
     let justify_content = node
         .get("justify_content")
         .and_then(|v| v.as_string())
-        .map(|s| parse_justify_content(s))
+        .map(parse_justify_content)
         .unwrap_or_default();
 
     let flex_direction = node
         .get("flex_direction")
         .and_then(|v| v.as_string())
-        .map(|s| parse_flex_direction(s))
+        .map(parse_flex_direction)
         .unwrap_or(FlexDirection::Row);
 
     let flex_wrap = node
         .get("flex_wrap")
         .and_then(|v| v.as_string())
-        .map(|s| parse_flex_wrap(s))
+        .map(parse_flex_wrap)
         .unwrap_or(FlexWrap::NoWrap);
 
     let flex_grow = node
@@ -693,16 +692,16 @@ fn parse_dashboard_node(node: &KdlNode, src: &str) -> Result<DashboardNode<()>, 
         .unwrap_or(1.0);
     let flex_basis = node
         .get("flex_basis")
-        .map(|v| parse_val_from_value(v))
+        .map(parse_val_from_value)
         .unwrap_or(Val::Auto);
 
     let row_gap = node
         .get("row_gap")
-        .map(|v| parse_val_from_value(v))
+        .map(parse_val_from_value)
         .unwrap_or(Val::Auto);
     let column_gap = node
         .get("column_gap")
-        .map(|v| parse_val_from_value(v))
+        .map(parse_val_from_value)
         .unwrap_or(Val::Auto);
 
     let text = node
@@ -730,7 +729,7 @@ fn parse_dashboard_node(node: &KdlNode, src: &str) -> Result<DashboardNode<()>, 
                     border = parse_ui_rect_from_node(child).unwrap_or_default();
                 }
                 _ => {
-                    children.push(parse_dashboard_node(child, src)?);
+                    children.push(parse_dashboard_node(child)?);
                 }
             }
         }
@@ -915,15 +914,6 @@ fn parse_overflow_axis(s: &str) -> OverflowAxis {
     }
 }
 
-fn parse_overflow_clip_box(s: &str) -> OverflowClipBox {
-    match s {
-        "content-box" => OverflowClipBox::ContentBox,
-        "padding-box" => OverflowClipBox::PaddingBox,
-        "border-box" => OverflowClipBox::BorderBox,
-        _ => Default::default(),
-    }
-}
-
 fn parse_val_from_value(value: &kdl::KdlValue) -> Val {
     if let Some(s) = value.as_string() {
         match s {
@@ -973,7 +963,7 @@ fn parse_overflow_from_value(value: &kdl::KdlValue) -> Option<Overflow> {
 }
 
 fn parse_overflow_clip_margin_from_value(value: &kdl::KdlValue) -> Option<OverflowClipMargin> {
-    if let Some(_) = value.as_string() {
+    if value.as_string().is_some() {
         Some(OverflowClipMargin {
             visual_box: OverflowClipBox::ContentBox,
             margin: 0.0,
@@ -986,19 +976,19 @@ fn parse_overflow_clip_margin_from_value(value: &kdl::KdlValue) -> Option<Overfl
 fn parse_ui_rect_from_node(node: &kdl::KdlNode) -> Option<UiRect> {
     let left = node
         .get("left")
-        .map(|v| parse_val_from_value(v))
+        .map(parse_val_from_value)
         .unwrap_or_default();
     let right = node
         .get("right")
-        .map(|v| parse_val_from_value(v))
+        .map(parse_val_from_value)
         .unwrap_or_default();
     let top = node
         .get("top")
-        .map(|v| parse_val_from_value(v))
+        .map(parse_val_from_value)
         .unwrap_or_default();
     let bottom = node
         .get("bottom")
-        .map(|v| parse_val_from_value(v))
+        .map(parse_val_from_value)
         .unwrap_or_default();
 
     Some(UiRect {

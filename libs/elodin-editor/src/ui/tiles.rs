@@ -27,7 +27,7 @@ use super::{
     colors::{self, get_scheme, with_opacity},
     command_palette::{CommandPaletteState, palette_items},
     dashboard::{DashboardWidget, spawn_dashboard},
-    hierarchy::{HiearchyIcons, HierarchyContent},
+    hierarchy::{Hierarchy, HierarchyContent},
     images,
     inspector::{InspectorContent, InspectorIcons},
     monitor::{MonitorPane, MonitorWidget},
@@ -191,8 +191,11 @@ impl TileState {
         label: String,
         tile_id: Option<TileId>,
     ) {
-        self.tree_actions
-            .push(TreeAction::AddDashboard(tile_id, dashboard, label));
+        self.tree_actions.push(TreeAction::AddDashboard(
+            tile_id,
+            Box::new(dashboard),
+            label,
+        ));
     }
 
     pub fn create_hierarchy_tile(&mut self, tile_id: Option<TileId>) {
@@ -367,7 +370,7 @@ impl Pane {
                 ui.add_widget_with::<HierarchyContent>(
                     world,
                     "hierarchy_content",
-                    HiearchyIcons {
+                    Hierarchy {
                         search: icons.search,
                         entity: icons.entity,
                         chevron: icons.chevron,
@@ -594,7 +597,7 @@ pub enum TreeAction {
     AddQueryPlot(Option<TileId>),
     AddActionTile(Option<TileId>, String, String),
     AddVideoStream(Option<TileId>, [u8; 2], String),
-    AddDashboard(Option<TileId>, impeller2_wkt::Dashboard, String),
+    AddDashboard(Option<TileId>, Box<impeller2_wkt::Dashboard>, String),
     AddHierarchy(Option<TileId>),
     AddInspector(Option<TileId>),
     AddSchematicTree(Option<TileId>),

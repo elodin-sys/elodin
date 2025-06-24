@@ -21,14 +21,14 @@ pub struct HierarchyContent<'w> {
     entity_map: Res<'w, EntityMap>,
 }
 
-pub struct HiearchyIcons {
+pub struct Hierarchy {
     pub search: egui::TextureId,
     pub entity: egui::TextureId,
     pub chevron: egui::TextureId,
 }
 
 impl WidgetSystem for HierarchyContent<'_> {
-    type Args = HiearchyIcons;
+    type Args = Hierarchy;
     type Output = ();
 
     fn ui_system(
@@ -82,7 +82,7 @@ pub fn entity_list(
     entity_map: &EntityMap,
     selected_object: &mut ResMut<SelectedObject>,
     entity_filter: &str,
-    icons: HiearchyIcons,
+    icons: Hierarchy,
 ) -> egui::Response {
     let tree_rect = ui.max_rect();
     egui::ScrollArea::both()
@@ -116,7 +116,7 @@ pub fn entity_list(
 fn component_part(
     ui: &mut egui::Ui,
     tree_rect: egui::Rect,
-    icons: &HiearchyIcons,
+    icons: &Hierarchy,
     part: &eql::ComponentPart,
     entity_map: &EntityMap,
     filter: &str,

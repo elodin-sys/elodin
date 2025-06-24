@@ -18,8 +18,6 @@ pub mod tree;
 pub use tree::*;
 mod load;
 pub use load::*;
-mod asset;
-pub use asset::*;
 
 #[derive(Resource, Debug, Clone, Deref, DerefMut)]
 pub struct CurrentSchematic(pub Schematic<Entity>);
@@ -100,9 +98,8 @@ impl SchematicParam<'_, '_> {
                 Pane::Inspector => Some(Panel::Inspector),
                 Pane::SchematicTree(_) => Some(Panel::SchematicTree),
                 Pane::Dashboard(dash) => {
-                    let entity = dash.entity;
                     let dashboard = self.dashboards.get(dash.entity).ok()?;
-                    Some(Panel::Dashboard(dashboard.clone()))
+                    Some(Panel::Dashboard(Box::new(dashboard.clone())))
                 }
             },
             Tile::Container(container) => match container {

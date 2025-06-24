@@ -6,14 +6,13 @@ use std::{
 };
 
 use bevy::{
-    asset::{AssetServer, Assets, Handle},
+    asset::{AssetServer, Assets},
     ecs::{
-        entity::Entity,
         query::With,
-        system::{Commands, InRef, IntoSystem, NonSendMut, Query, Res, ResMut, System},
+        system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
         world::World,
     },
-    log::{info, warn},
+    log::info,
     pbr::{StandardMaterial, wireframe::WireframeConfig},
     prelude::In,
     render::view::Visibility,
@@ -25,18 +24,17 @@ use impeller2::types::msg_id;
 use impeller2_bevy::{ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
 use impeller2_kdl::{FromKdl, KdlSchematicError, ToKdl};
 use impeller2_wkt::{
-    AssetHandle, ComponentPath, ComponentValue, IsRecording, Material, Mesh, Object3D, Schematic,
-    SetDbSettings, SetStreamState,
+    ComponentPath, ComponentValue, IsRecording, Material, Mesh, Object3D, SetDbSettings,
+    SetStreamState,
 };
 use miette::IntoDiagnostic;
 use nox::ArrayBuf;
 
 use crate::{
     EqlContext, Offset, SelectedTimeRange, TimeRangeBehavior,
-    object_3d::Object3DState,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        self, HdrEnabled, colors,
+        HdrEnabled, colors,
         plot::{GraphBundle, default_component_values},
         schematic::{CurrentSchematic, LoadSchematicParams, SchematicLiveReloadRx},
         tiles::{self, TileState},
@@ -666,7 +664,7 @@ pub fn load_preset_inner(name: String) -> PaletteItem {
     PaletteItem::new(
         name.clone(),
         "",
-        move |_: In<String>, params: LoadSchematicParams, mut rx: ResMut<SchematicLiveReloadRx>| {
+        move |_: In<String>, params: LoadSchematicParams, rx: ResMut<SchematicLiveReloadRx>| {
             let dirs = crate::dirs();
             let path = dirs.data_dir().join("presets").join(name.clone());
             if let Err(err) = load_schematic(&path, params, rx) {

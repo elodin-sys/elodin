@@ -73,18 +73,15 @@ pub fn update_nodes(
     entity_map: Res<EntityMap>,
     values: Query<&'static ComponentValue>,
 ) {
-    for (node_updater, mut node, mut text) in query.iter_mut() {
+    for (node_updater, mut node, text) in query.iter_mut() {
         let Ok((new_node, new_text)) = (node_updater.0)(&entity_map, &values).inspect_err(|err| {
             warn!(?err, "Failed to update node");
         }) else {
             continue;
         };
         *node = new_node;
-        match (text, new_text) {
-            (Some(mut text), Some(new_text)) => {
-                *text = new_text;
-            }
-            _ => {}
+        if let (Some(mut text), Some(new_text)) = (text, new_text) {
+            *text = new_text;
         }
     }
 }
@@ -109,27 +106,27 @@ impl CompiledVal {
             CompiledVal::Auto => Val::Auto,
             CompiledVal::Px(expr) => {
                 let val = expr.execute(entity_map, values)?;
-                Val::Px(val.as_f32().ok_or_else(|| "invalid value")?)
+                Val::Px(val.as_f32().ok_or("invalid value")?)
             }
             CompiledVal::Percent(expr) => {
                 let val = expr.execute(entity_map, values)?;
-                Val::Percent(val.as_f32().ok_or_else(|| "invalid value")?)
+                Val::Percent(val.as_f32().ok_or("invalid value")?)
             }
             CompiledVal::Vw(expr) => {
                 let val = expr.execute(entity_map, values)?;
-                Val::Vw(val.as_f32().ok_or_else(|| "invalid value")?)
+                Val::Vw(val.as_f32().ok_or("invalid value")?)
             }
             CompiledVal::Vh(expr) => {
                 let val = expr.execute(entity_map, values)?;
-                Val::Vh(val.as_f32().ok_or_else(|| "invalid value")?)
+                Val::Vh(val.as_f32().ok_or("invalid value")?)
             }
             CompiledVal::VMin(expr) => {
                 let val = expr.execute(entity_map, values)?;
-                Val::VMin(val.as_f32().ok_or_else(|| "invalid value")?)
+                Val::VMin(val.as_f32().ok_or("invalid value")?)
             }
             CompiledVal::VMax(expr) => {
                 let val = expr.execute(entity_map, values)?;
-                Val::VMax(val.as_f32().ok_or_else(|| "invalid value")?)
+                Val::VMax(val.as_f32().ok_or("invalid value")?)
             }
         };
         Ok(val)
@@ -144,16 +141,12 @@ pub fn compile_val(
         impeller2_wkt::Val::Auto => CompiledVal::Auto,
         impeller2_wkt::Val::Px(px) => CompiledVal::Px(compile_eql_expr(ctx.parse_str(px)?)),
         impeller2_wkt::Val::Percent(percent) => {
-            CompiledVal::Percent(compile_eql_expr(ctx.parse_str(&percent)?))
+            CompiledVal::Percent(compile_eql_expr(ctx.parse_str(percent)?))
         }
-        impeller2_wkt::Val::Vw(vw) => CompiledVal::Vw(compile_eql_expr(ctx.parse_str(&vw)?)),
-        impeller2_wkt::Val::Vh(vh) => CompiledVal::Vh(compile_eql_expr(ctx.parse_str(&vh)?)),
-        impeller2_wkt::Val::VMin(vmin) => {
-            CompiledVal::VMin(compile_eql_expr(ctx.parse_str(&vmin)?))
-        }
-        impeller2_wkt::Val::VMax(vmax) => {
-            CompiledVal::VMax(compile_eql_expr(ctx.parse_str(&vmax)?))
-        }
+        impeller2_wkt::Val::Vw(vw) => CompiledVal::Vw(compile_eql_expr(ctx.parse_str(vw)?)),
+        impeller2_wkt::Val::Vh(vh) => CompiledVal::Vh(compile_eql_expr(ctx.parse_str(vh)?)),
+        impeller2_wkt::Val::VMin(vmin) => CompiledVal::VMin(compile_eql_expr(ctx.parse_str(vmin)?)),
+        impeller2_wkt::Val::VMax(vmax) => CompiledVal::VMax(compile_eql_expr(ctx.parse_str(vmax)?)),
     };
     Ok(val)
 }
@@ -400,7 +393,7 @@ impl ComponentValueExt for ComponentValue {
             ComponentValue::I32(a) => a.buf.as_buf().first().map(|&v| v as f32),
             ComponentValue::I64(a) => a.buf.as_buf().first().map(|&v| v as f32),
             ComponentValue::Bool(a) => a.buf.as_buf().first().map(|&v| if v { 1.0 } else { 0.0 }),
-            ComponentValue::F32(array) => array.buf.as_buf().first().map(|&v| v),
+            ComponentValue::F32(array) => array.buf.as_buf().first().copied(),
             ComponentValue::F64(array) => array.buf.as_buf().first().map(|&v| v as f32),
         }
     }

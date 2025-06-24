@@ -1,14 +1,9 @@
-use bevy::{
-    asset::{AssetEvents, io::AssetSourceEvent},
-    ecs::system::SystemParam,
-    platform::collections::HashSet,
-    prelude::*,
-};
+use bevy::{ecs::system::SystemParam, prelude::*};
 use bevy_egui::egui::Color32;
 use egui_tiles::{Container, Tile, TileId};
 use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
 use impeller2_wkt::{Graph, Object3D, Panel, Schematic, Viewport};
-use std::{collections::BTreeMap, default};
+use std::collections::BTreeMap;
 
 use crate::{
     EqlContext,
@@ -65,7 +60,7 @@ impl LoadSchematicParams<'_, '_> {
         for elem in &schematic.elems {
             match elem {
                 impeller2_wkt::SchematicElem::Panel(p) => {
-                    self.spawn_panel(&p, None);
+                    self.spawn_panel(p, None);
                 }
                 impeller2_wkt::SchematicElem::Object3d(object_3d) => {
                     self.spawn_object_3d(object_3d.clone());
@@ -269,7 +264,7 @@ impl LoadSchematicParams<'_, '_> {
                     .insert_tile(Tile::Pane(pane), parent_id, false)
             }
             Panel::Dashboard(dashboard) => {
-                let Ok(dashboard) = spawn_dashboard(&dashboard, &self.eql.0, &mut self.commands)
+                let Ok(dashboard) = spawn_dashboard(dashboard, &self.eql.0, &mut self.commands)
                     .inspect_err(|err| {
                         warn!(?err, "Failed to spawn dashboard");
                     })
