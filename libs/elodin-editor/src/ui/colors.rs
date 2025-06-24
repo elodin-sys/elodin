@@ -286,9 +286,11 @@ static COLOR_SCHEME: AtomicPtr<ColorScheme> = AtomicPtr::new(std::ptr::null_mut(
 pub fn get_scheme() -> &'static ColorScheme {
     let ptr = COLOR_SCHEME.load(atomic::Ordering::Relaxed);
     if ptr.is_null() {
-        load_color_scheme()
+        let scheme = load_color_scheme()
             .map(|c| &*Box::leak(Box::new(c)))
-            .unwrap_or(&DARK)
+            .unwrap_or(&DARK);
+        COLOR_SCHEME.store((scheme as *const _) as *mut _, atomic::Ordering::Relaxed);
+        scheme
     } else {
         unsafe { &*ptr }
     }
