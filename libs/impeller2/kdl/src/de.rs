@@ -519,10 +519,10 @@ fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
             "turquoise" => Some(Color::TURQUOISE),
             "slate" => Some(Color::SLATE),
             "pumpkin" => Some(Color::PUMPKIN),
-            "yolk" => Some(Color::YOLK),
+            "yolk" | "yellow" => Some(Color::YOLK),
             "peach" => Some(Color::PEACH),
-            "reddish" => Some(Color::REDDISH),
-            "hyperblue" => Some(Color::HYPERBLUE),
+            "reddish" | "red" => Some(Color::REDDISH),
+            "hyperblue" | "blue " => Some(Color::HYPERBLUE),
             "mint" => Some(Color::MINT),
             _ => None,
         }
@@ -709,16 +709,18 @@ fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode<()>, KdlSchemati
         .and_then(|v| v.as_string())
         .map(|s| s.to_string());
 
-    let color = parse_color_from_node(node).unwrap_or(Color::TRANSPARENT);
-
     let mut margin = UiRect::default();
     let mut padding = UiRect::default();
     let mut border = UiRect::default();
+    let mut color = Color::TRANSPARENT;
 
     let mut children = Vec::new();
     if let Some(child_nodes) = node.children() {
         for child in child_nodes.nodes() {
             match child.name().value() {
+                "background" | "bg" => {
+                    color = parse_color_from_node(child).unwrap_or(Color::TRANSPARENT);
+                }
                 "margin" => {
                     margin = parse_ui_rect_from_node(child).unwrap_or_default();
                 }
