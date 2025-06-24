@@ -1,9 +1,9 @@
 use std::f32;
 
-use crate::ui::SelectedObject;
 use crate::ui::colors::{ColorExt, get_scheme};
 use crate::ui::inspector::entity::search;
 use crate::ui::widgets::WidgetSystem;
+use crate::ui::{SelectedObject, dashboard};
 
 use super::CurrentSchematic;
 use bevy::ecs::entity::Entity;
@@ -11,7 +11,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::{Component, Query, ResMut};
 use egui::collapsing_header::CollapsingState;
 use egui::load::SizedTexture;
-use impeller2_wkt::Panel;
+use impeller2_wkt::{DashboardNode, Panel};
 
 #[derive(SystemParam)]
 pub struct TreeWidget<'w, 's> {
@@ -124,12 +124,23 @@ fn panel(
     } else {
         false
     };
+    let leaf = if let Panel::Dashboard(d) = p {
+        d.root.children.is_empty()
+    } else {
+        children.is_empty()
+    };
     let branch_res = Branch::new(p.label().to_string(), icon, icons.chevron, tree_rect)
-        .leaf(children.is_empty())
+        .leaf(leaf)
         .selected(selected)
         .show(ui, |ui| {
-            for child in children {
-                panel(ui, tree_rect, icons, child, selected_object);
+            if let Panel::Dashboard(d) = p {
+                for child in &d.root.children {
+                    dashboard_node(ui, tree_rect, &child, icons, selected_object);
+                }
+            } else {
+                for child in children {
+                    panel(ui, tree_rect, icons, child, selected_object);
+                }
             }
         });
     if branch_res.clicked() {
@@ -150,6 +161,29 @@ fn panel(
             _ => {}
         }
     }
+}
+
+fn dashboard_node(
+    ui: &mut egui::Ui,
+    tree_rect: egui::Rect,
+    node: &DashboardNode<()>,
+    icons: &TreeIcons,
+    selected_object: &mut SelectedObject,
+) {
+    let children = &node.children;
+    let branch_res = Branch::new(
+        "node".to_string(),
+        icons.container,
+        icons.chevron,
+        tree_rect,
+    )
+    .leaf(children.is_empty())
+    //.selected(selected)
+    .show(ui, |ui| {
+        for child in children {
+            dashboard_node(ui, tree_rect, &child, icons, selected_object);
+        }
+    });
 }
 
 pub struct Branch {

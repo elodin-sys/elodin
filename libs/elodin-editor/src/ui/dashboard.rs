@@ -162,6 +162,7 @@ pub fn spawn_dashboard(
                 ..Default::default()
             },
             BackgroundColor(colors::SURFACE_PRIMARY.into_bevy()),
+            source.clone(),
         ))
         .id();
     spawn_node(Some(parent), &source.root, eql, commands)?;
