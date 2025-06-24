@@ -10,7 +10,7 @@ use bevy::{
     ecs::{
         entity::Entity,
         query::With,
-        system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
+        system::{Commands, InRef, IntoSystem, NonSendMut, Query, Res, ResMut, System},
         world::World,
     },
     log::{info, warn},
@@ -38,7 +38,7 @@ use crate::{
     ui::{
         self, HdrEnabled, colors,
         plot::{GraphBundle, default_component_values},
-        schematic::{CurrentSchematic, LoadSchematicParams},
+        schematic::{CurrentSchematic, LoadSchematicParams, SchematicLiveReloadRx},
         tiles::{self, TileState},
     },
 };
@@ -643,12 +643,12 @@ pub fn load_preset_picker() -> PaletteItem {
     PaletteItem::new(
         "From File",
         "",
-        move |_: In<String>, params: LoadSchematicParams| {
+        move |_: In<String>, params: LoadSchematicParams, rx: ResMut<SchematicLiveReloadRx>| {
             if let Some(path) = rfd::FileDialog::new()
                 .add_filter("kdl", &["kdl"])
                 .pick_file()
             {
-                if let Err(err) = load_schematic(&path, params)
+                if let Err(err) = load_schematic(&path, params, rx)
                     .inspect_err(|err| {
                         dbg!(err);
                     })
@@ -666,10 +666,10 @@ pub fn load_preset_inner(name: String) -> PaletteItem {
     PaletteItem::new(
         name.clone(),
         "",
-        move |_: In<String>, params: LoadSchematicParams| {
+        move |_: In<String>, params: LoadSchematicParams, mut rx: ResMut<SchematicLiveReloadRx>| {
             let dirs = crate::dirs();
             let path = dirs.data_dir().join("presets").join(name.clone());
-            if let Err(err) = load_schematic(&path, params) {
+            if let Err(err) = load_schematic(&path, params, rx) {
                 PaletteEvent::Error(err.to_string())
             } else {
                 PaletteEvent::Exit
@@ -681,7 +681,41 @@ pub fn load_preset_inner(name: String) -> PaletteItem {
 pub fn load_schematic(
     path: &Path,
     mut params: LoadSchematicParams,
+    mut live_reload_rx: ResMut<SchematicLiveReloadRx>,
 ) -> Result<(), KdlSchematicError> {
+    let (tx, rx) = flume::bounded(1);
+    live_reload_rx.0 = Some(rx);
+    let watch_path = path.to_path_buf();
+    std::thread::spawn(move || {
+        let cb_path = watch_path.clone();
+        let mut debouncer = notify_debouncer_mini::new_debouncer(
+            Duration::from_millis(500),
+            move |res: notify_debouncer_mini::DebounceEventResult| {
+                if res.is_err() {
+                    return;
+                }
+
+                info!(path = ?cb_path, "refreshing schematic");
+                if let Ok(kdl) = std::fs::read_to_string(&cb_path) {
+                    let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(&kdl) else {
+                        return;
+                    };
+                    let _ = tx.send(schematic);
+                }
+            },
+        )
+        .unwrap();
+        debouncer
+            .watcher()
+            .watch(
+                &watch_path,
+                notify_debouncer_mini::notify::RecursiveMode::NonRecursive,
+            )
+            .unwrap();
+        loop {
+            std::thread::park();
+        }
+    });
     if let Ok(kdl) = std::fs::read_to_string(path) {
         let schematic = impeller2_wkt::Schematic::from_kdl(&kdl)?;
         params.load_schematic(&schematic);

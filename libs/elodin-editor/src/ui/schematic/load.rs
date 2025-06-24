@@ -8,7 +8,7 @@ use bevy_egui::egui::Color32;
 use egui_tiles::{Container, Tile, TileId};
 use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
 use impeller2_wkt::{Graph, Object3D, Panel, Schematic, Viewport};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, default};
 
 use crate::{
     EqlContext,
@@ -299,4 +299,16 @@ pub fn viewport_label(viewport: &Viewport) -> String {
 pub fn graph_label(graph: &Graph) -> String {
     // TODO: Update graph labeling once Graph structure is migrated to use ComponentPath
     graph.name.clone().unwrap_or_else(|| "Graph".to_string())
+}
+
+#[derive(Default, Deref, DerefMut, Resource)]
+pub struct SchematicLiveReloadRx(pub Option<flume::Receiver<Schematic>>);
+
+pub fn schematic_live_reload(
+    mut rx: ResMut<SchematicLiveReloadRx>,
+    mut params: LoadSchematicParams,
+) {
+    let Some(rx) = &mut rx.0 else { return };
+    let Ok(schematic) = rx.try_recv() else { return };
+    params.load_schematic(&schematic);
 }

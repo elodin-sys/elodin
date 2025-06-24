@@ -96,6 +96,10 @@ flume = "0.11.1"
 jiff = "0.2"
 peg = "0.8.5"
 
+# eql
+eql.path = "../db/eql"
+convert_case = "0.6.0"
+
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 impeller2-bevy.path = "../../libs/impeller2/bevy"
@@ -107,6 +111,8 @@ tokio = { version = "1.34", features = ["rt-multi-thread", "net"] }
 directories = "5.0"
 rfd = "0.15.2"
 s10.path = "../s10"
+notify-debouncer-mini = "0.6.0"
+
 # async
 stellarator.path = "../../libs/stellarator"
 stellarator.features = ["miette"]
@@ -121,9 +127,6 @@ impeller2-bevy.path = "../../libs/impeller2/bevy"
 impeller2-bevy.features = ["tcp"]
 impeller2-bevy.default-features = false
 
-# eql
-eql.path = "../db/eql"
-convert_case = "0.6.0"
 
 # macos
 [target.'cfg(target_os = "macos")'.dependencies]

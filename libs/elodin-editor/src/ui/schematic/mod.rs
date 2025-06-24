@@ -176,9 +176,11 @@ pub struct SchematicPlugin;
 
 impl Plugin for SchematicPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(CurrentSchematic(Default::default()));
-        app.add_systems(PostUpdate, tiles_to_schematic);
-        app.add_systems(PreUpdate, sync_panels);
+        app.insert_resource(CurrentSchematic(Default::default()))
+            .add_systems(PostUpdate, tiles_to_schematic)
+            .add_systems(PreUpdate, sync_panels)
+            .init_resource::<SchematicLiveReloadRx>()
+            .add_systems(PreUpdate, load::schematic_live_reload);
     }
 }
 
