@@ -211,7 +211,7 @@ fn panel(
     if branch_res.extra_clicked {
         if let Panel::Dashboard(d) = p {
             spawn_child_node(
-                DashboardNodePath {
+                &DashboardNodePath {
                     root: d.aux,
                     path: smallvec![],
                 },
@@ -265,8 +265,74 @@ fn dashboard_node(
             );
         }
     });
+
+    branch_res.inner.context_menu(|ui| {
+        ui.spacing_mut().button_padding = egui::vec2(4.0, 4.0);
+        if ui.button("Add Child").clicked() {
+            spawn_child_node(&path, spawn_node_params, parent);
+            ui.close_menu();
+        }
+        if ui.button("Duplicate").clicked() {
+            let Ok(mut dashboard) = spawn_node_params.dashboards.get_mut(path.root) else {
+                ui.close_menu();
+                return;
+            };
+            let mut parent_path = path.path.clone();
+            parent_path.pop();
+            let Some(parent_node) = dashboard.root.get_node_mut(&parent_path) else {
+                ui.close_menu();
+                return;
+            };
+            let parent_entity = parent_node.aux;
+            let mut path = DashboardNodePath {
+                root: path.root,
+                path: parent_path,
+            };
+            path.path.push(parent_node.children.len());
+            let mut commands = spawn_node_params.commands.spawn(ChildOf(parent_entity));
+            if let Ok(child) = spawn_node(
+                node,
+                &spawn_node_params.eql_ctx.0,
+                &mut commands,
+                path.root,
+                path.path,
+                &spawn_node_params.node_update_params,
+            ) {
+                parent_node.children.push(child);
+            }
+            ui.close_menu();
+        }
+        if ui.button("Delete").clicked() {
+            let Ok(mut dashboard) = spawn_node_params.dashboards.get_mut(path.root) else {
+                ui.close_menu();
+                return;
+            };
+            let Some(parent_node) = dashboard
+                .root
+                .get_node_mut(&path.path[..path.path.len().saturating_sub(1)])
+            else {
+                ui.close_menu();
+                return;
+            };
+            let Some(index) = path.path.last() else {
+                ui.close_menu();
+                return;
+            };
+            let node = parent_node.children.remove(*index);
+            if let Ok(mut e) = spawn_node_params.commands.get_entity(node.aux) {
+                e.despawn();
+            }
+            if selected {
+                *selected_object = SelectedObject::DashboardNode {
+                    entity: parent_node.aux,
+                };
+            }
+            ui.close_menu();
+        }
+    });
+
     if branch_res.extra_clicked {
-        spawn_child_node(path, spawn_node_params, parent);
+        spawn_child_node(&path, spawn_node_params, parent);
     }
 
     if branch_res.inner.clicked() {
@@ -275,7 +341,7 @@ fn dashboard_node(
 }
 
 fn spawn_child_node(
-    path: DashboardNodePath,
+    path: &DashboardNodePath,
     spawn_node_params: &mut SpawnNodeParams,
     parent: Entity,
 ) {
@@ -361,7 +427,7 @@ impl Branch {
             extra_icon,
         } = self;
 
-        let id = ui.next_auto_id();
+        let id = ui.make_persistent_id((&label, &selected));
         let mut state = CollapsingState::load_with_default_open(ui.ctx(), id, true);
         let chevron = SizedTexture::new(chevron, [18., 18.]);
         let icon = SizedTexture::new(icon, [12., 12.]);
