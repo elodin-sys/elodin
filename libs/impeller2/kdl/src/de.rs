@@ -1030,7 +1030,7 @@ object_3d "a.world_pos" {
     #[test]
     fn test_parse_dashboard() {
         let kdl = r#"
-dashboard title="Test Dashboard" {
+dashboard label="Test Dashboard" {
     node display="flex" flex_direction="column" {
         text "Hello World"
         node width="100px" height="50px" {
@@ -1043,7 +1043,7 @@ dashboard title="Test Dashboard" {
 
         assert_eq!(schematic.elems.len(), 1);
         if let SchematicElem::Panel(Panel::Dashboard(dashboard)) = &schematic.elems[0] {
-            assert_eq!(dashboard.label, "Test Dashboard".to_string());
+            assert_eq!(dashboard.root.label, Some("Test Dashboard".to_string()));
             assert_eq!(dashboard.root.children.len(), 1);
 
             let node = &dashboard.root.children[0];

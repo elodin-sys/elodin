@@ -81,6 +81,7 @@ fn main() {
             color: Color::YOLK,
             perspective: true,
             eql: "a.world_pos".to_string(),
+            aux: (),
         });
         world.spawn(asset);
 
@@ -89,6 +90,7 @@ fn main() {
             color: Color::MINT,
             perspective: true,
             eql: "b.world_pos".to_string(),
+            aux: (),
         });
         world.spawn(asset);
 

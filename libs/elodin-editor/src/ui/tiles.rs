@@ -492,23 +492,23 @@ impl ViewportPane {
         let pos = viewport
             .pos
             .as_ref()
-            .and_then(|eql| {
-                let expr = eql_ctx.parse_str(eql).ok()?;
-                Some(EditableEQL {
+            .map(|eql| {
+                let compiled_expr = eql_ctx.parse_str(eql).ok().map(compile_eql_expr);
+                EditableEQL {
                     eql: eql.to_string(),
-                    compiled_expr: Some(compile_eql_expr(expr)),
-                })
+                    compiled_expr,
+                }
             })
             .unwrap_or_default();
         let look_at = viewport
             .look_at
             .as_ref()
-            .and_then(|eql| {
-                let expr = eql_ctx.parse_str(eql).ok()?;
-                Some(EditableEQL {
+            .map(|eql| {
+                let compiled_expr = eql_ctx.parse_str(eql).ok().map(compile_eql_expr);
+                EditableEQL {
                     eql: eql.to_string(),
-                    compiled_expr: Some(compile_eql_expr(expr)),
-                })
+                    compiled_expr,
+                }
             })
             .unwrap_or_default();
 
@@ -633,8 +633,8 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
         let mut query =
             SystemState::<(Query<&GraphState>, Query<&Dashboard<Entity>>)>::new(self.world);
-        let (graphs, dashs) = query.get(self.world);
-        pane.title(&graphs, &dashs).into()
+        let (graphs, dashes) = query.get(self.world);
+        pane.title(&graphs, &dashes).into()
     }
 
     fn pane_ui(

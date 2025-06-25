@@ -723,7 +723,7 @@ fn sync_object_3d(
         if synced_object_3d.0.contains_key(&entity) {
             continue;
         }
-        let Some(path) = dbg!(path_reg.get(id)) else {
+        let Some(path) = path_reg.get(id) else {
             continue;
         };
         let parent = path.path.first().unwrap();
@@ -747,7 +747,7 @@ fn sync_object_3d(
             )))
             .and_then(|e| materials.get(*e).ok());
 
-        let mesh_source = match dbg!((glb, mesh, material)) {
+        let mesh_source = match (glb, mesh, material) {
             (Some(glb), _, _) => impeller2_wkt::Object3DMesh::Glb(glb.0.clone()),
             (_, Some(mesh), Some(mat)) => impeller2_wkt::Object3DMesh::Mesh {
                 mesh: mesh.clone(),
@@ -757,7 +757,7 @@ fn sync_object_3d(
         };
 
         let eql = format!("{}.world_pos", parent.name.to_case(Case::Snake));
-        let Ok(expr) = dbg!(ctx.0.parse_str(&eql)) else {
+        let Ok(expr) = ctx.0.parse_str(&eql) else {
             continue;
         };
 

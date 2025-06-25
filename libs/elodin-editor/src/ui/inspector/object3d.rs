@@ -12,11 +12,10 @@ use impeller2_wkt::{ComponentMetadata, Material, Mesh, Object3DMesh};
 use smallvec::SmallVec;
 
 use crate::object_3d::spawn_mesh;
-use crate::ui::colors::EColor;
+use crate::ui::inspector::{eql_textfield, node_color_picker};
 use crate::{
     object_3d::Object3DState,
     ui::{
-        button::EColorButton,
         colors::get_scheme,
         label,
         theme::{self, configure_combo_box, configure_input_with_border},
@@ -26,9 +25,7 @@ use crate::{
     },
 };
 
-use super::{
-    InspectorIcons, color_popup, empty_inspector, eql_autocomplete, inspector_text_field, query,
-};
+use super::{InspectorIcons, empty_inspector, inspector_text_field};
 
 #[derive(SystemParam)]
 pub struct InspectorObject3D<'w, 's> {
@@ -74,7 +71,8 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
 
         let mono_font = egui::TextStyle::Monospace.resolve(ui.style_mut());
 
-        ui.add_space(8.0);
+        ui.spacing_mut().item_spacing.y = 8.0;
+
         ui.horizontal(|ui| {
             ui.add(
                 label::ELabel::new(object_name)
@@ -101,23 +99,11 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
             });
         });
 
-        ui.add_space(8.0);
-
         egui::Frame::NONE.show(ui, |ui| {
             ui.label(egui::RichText::new("EQL Expression").color(get_scheme().text_secondary));
-            ui.add_space(8.0);
             configure_input_with_border(ui.style_mut());
 
-            let query_res = ui.add(query(
-                &mut object_3d_state.data.eql,
-                impeller2_wkt::QueryType::EQL,
-            ));
-            eql_autocomplete(
-                ui,
-                &eql_context.0,
-                &query_res,
-                &mut object_3d_state.data.eql,
-            );
+            let query_res = eql_textfield(ui, true, &eql_context.0, &mut object_3d_state.data.eql);
 
             if query_res.changed() {
                 match eql_context.0.parse_str(&object_3d_state.data.eql) {
@@ -131,13 +117,10 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                 }
             }
 
-            ui.add_space(12.0);
             ui.separator();
-            ui.add_space(8.0);
 
             // Mesh Type Selection
             ui.label(egui::RichText::new("Mesh Type").color(get_scheme().text_secondary));
-            ui.add_space(4.0);
 
             let mut changed = false;
             let current_mesh_type = match &object_3d_state.data.mesh {
@@ -206,12 +189,12 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                 }
             }
 
-            ui.add_space(8.0);
+            ui.separator();
 
             match &mut object_3d_state.data.mesh {
                 Object3DMesh::Glb(path) => {
                     ui.label(egui::RichText::new("GLB Path").color(get_scheme().text_secondary));
-                    ui.add_space(4.0);
+                    ui.add_space(8.0);
                     if ui
                         .add(inspector_text_field(path, "Enter a path to a glb"))
                         .changed()
@@ -220,96 +203,78 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     }
                 }
                 Object3DMesh::Mesh { mesh, material } => {
-                    ui.horizontal(|ui| match mesh {
-                        Mesh::Sphere { radius } => {
-                            ui.label(
-                                egui::RichText::new("Radius").color(get_scheme().text_secondary),
-                            );
-                            ui.add_space(4.0);
-                            changed |= ui
-                                .add(egui::DragValue::new(radius).speed(0.01).range(0.01..=100.0))
-                                .changed();
-                        }
-                        Mesh::Box { x, y, z } => {
-                            ui.label(
-                                egui::RichText::new("Dimensions")
-                                    .color(get_scheme().text_secondary),
-                            );
-                            ui.add_space(4.0);
-                            ui.horizontal(|ui| {
-                                ui.label("X:");
-                                changed |= ui
-                                    .add(egui::DragValue::new(x).speed(0.01).range(0.01..=100.0))
-                                    .changed();
-                                ui.add_space(4.0);
-                                ui.label("Y:");
-                                changed |= ui
-                                    .add(egui::DragValue::new(y).speed(0.01).range(0.01..=100.0))
-                                    .changed();
-                                ui.add_space(4.0);
-                                ui.label("Z:");
-                                changed |= ui
-                                    .add(egui::DragValue::new(z).speed(0.01).range(0.01..=100.0))
-                                    .changed();
-                            });
-                        }
-                        Mesh::Cylinder { radius, height } => {
-                            ui.label(
-                                egui::RichText::new("Radius").color(get_scheme().text_secondary),
-                            );
-                            ui.add_space(4.0);
-                            changed |= ui
-                                .add(egui::DragValue::new(radius).speed(0.01).range(0.01..=100.0))
-                                .changed();
-                            ui.add_space(8.0);
-                            ui.label(
-                                egui::RichText::new("Height").color(get_scheme().text_secondary),
-                            );
-                            ui.add_space(4.0);
-                            changed |= ui
-                                .add(egui::DragValue::new(height).speed(0.01).range(0.01..=100.0))
-                                .changed();
-                        }
-                    });
-
-                    ui.add_space(8.0);
-
                     ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new("Material Color")
-                                .color(get_scheme().text_secondary),
-                        );
-                        ui.add_space(4.0);
-
-                        let mut color32 = material.base_color.into_color32();
-
-                        let color_popup_id = ui.make_persistent_id("mat_color_popup");
-
-                        let btn_resp = ui.add(EColorButton::new(color32));
-
-                        if btn_resp.clicked() {
-                            ui.memory_mut(|m| m.toggle_popup(color_popup_id));
-                        }
-
-                        if ui.memory(|m| m.is_popup_open(color_popup_id)) {
-                            let popup_response = color_popup(
-                                ui,
-                                &mut color32,
-                                color_popup_id,
-                                btn_resp.rect.left_bottom(),
-                            );
-
-                            if !btn_resp.clicked()
-                                && (ui.input(|i| i.key_pressed(egui::Key::Escape))
-                                    || popup_response.clicked_elsewhere())
-                            {
-                                ui.memory_mut(|m| m.close_popup());
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        match mesh {
+                            Mesh::Sphere { radius } => {
+                                ui.label(
+                                    egui::RichText::new("Radius")
+                                        .color(get_scheme().text_secondary),
+                                );
+                                changed |= ui
+                                    .add(
+                                        egui::DragValue::new(radius)
+                                            .speed(0.01)
+                                            .range(0.01..=100.0),
+                                    )
+                                    .changed();
                             }
-
-                            material.base_color = impeller2_wkt::Color::from_color32(color32);
-                            changed = true;
+                            Mesh::Box { x, y, z } => {
+                                ui.label(
+                                    egui::RichText::new("Dimensions")
+                                        .color(get_scheme().text_secondary),
+                                );
+                                ui.horizontal(|ui| {
+                                    ui.label("X:");
+                                    changed |= ui
+                                        .add(
+                                            egui::DragValue::new(x).speed(0.01).range(0.01..=100.0),
+                                        )
+                                        .changed();
+                                    ui.label("Y:");
+                                    changed |= ui
+                                        .add(
+                                            egui::DragValue::new(y).speed(0.01).range(0.01..=100.0),
+                                        )
+                                        .changed();
+                                    ui.label("Z:");
+                                    changed |= ui
+                                        .add(
+                                            egui::DragValue::new(z).speed(0.01).range(0.01..=100.0),
+                                        )
+                                        .changed();
+                                });
+                            }
+                            Mesh::Cylinder { radius, height } => {
+                                ui.label(
+                                    egui::RichText::new("Radius")
+                                        .color(get_scheme().text_secondary),
+                                );
+                                changed |= ui
+                                    .add(
+                                        egui::DragValue::new(radius)
+                                            .speed(0.01)
+                                            .range(0.01..=100.0),
+                                    )
+                                    .changed();
+                                ui.label(
+                                    egui::RichText::new("Height")
+                                        .color(get_scheme().text_secondary),
+                                );
+                                changed |= ui
+                                    .add(
+                                        egui::DragValue::new(height)
+                                            .speed(0.01)
+                                            .range(0.01..=100.0),
+                                    )
+                                    .changed();
+                            }
                         }
                     });
+
+                    ui.separator();
+
+                    node_color_picker(ui, "Material Color", &mut material.base_color);
                 }
             }
 
@@ -327,8 +292,6 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     &assets,
                 );
             }
-
-            ui.add_space(8.0);
         });
 
         tree_actions

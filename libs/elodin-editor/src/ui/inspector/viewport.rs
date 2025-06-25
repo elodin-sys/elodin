@@ -79,6 +79,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
             return;
         };
 
+        ui.spacing_mut().item_spacing.y = 8.0;
         ui.add(
             ELabel::new("Viewport")
                 .padding(egui::Margin::same(8).bottom(24.0))
@@ -89,15 +90,12 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                 .margin(egui::Margin::same(0).bottom(16.0)),
         );
 
-        ui.separator();
-        ui.add_space(8.0);
         ui.label(egui::RichText::new("Position").color(get_scheme().text_secondary));
-        ui.add_space(8.0);
         eql_input(ui, &mut viewport.pos, &eql_ctx.0);
+        ui.separator();
         ui.label(egui::RichText::new("Look At").color(get_scheme().text_secondary));
-        ui.add_space(8.0);
         eql_input(ui, &mut viewport.look_at, &eql_ctx.0);
-        ui.add_space(8.0);
+        ui.separator();
 
         if ui.add(EButton::highlight("Reset Pos")).clicked() {
             *cam.transform = Transform::default();
@@ -154,23 +152,26 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
 }
 
 fn eql_input(ui: &mut egui::Ui, editable_expr: &mut EditableEQL, ctx: &eql::Context) {
-    configure_input_with_border(ui.style_mut());
-    let query_res = ui.add(query(&mut editable_expr.eql, QueryType::EQL));
-    eql_autocomplete(ui, ctx, &query_res, &mut editable_expr.eql);
-    if query_res.changed() {
-        if editable_expr.eql.is_empty() {
-            editable_expr.compiled_expr = None;
-            return;
-        }
-        match ctx.parse_str(&editable_expr.eql) {
-            Ok(expr) => {
-                editable_expr.compiled_expr = Some(compile_eql_expr(expr));
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        configure_input_with_border(ui.style_mut());
+        let query_res = ui.add(query(&mut editable_expr.eql, QueryType::EQL));
+        eql_autocomplete(ui, ctx, &query_res, &mut editable_expr.eql);
+        if query_res.changed() {
+            if editable_expr.eql.is_empty() {
+                editable_expr.compiled_expr = None;
+                return;
             }
-            Err(err) => {
-                ui.colored_label(get_scheme().error, err.to_string());
+            match ctx.parse_str(&editable_expr.eql) {
+                Ok(expr) => {
+                    editable_expr.compiled_expr = Some(compile_eql_expr(expr));
+                }
+                Err(err) => {
+                    ui.colored_label(get_scheme().error, err.to_string());
+                }
             }
         }
-    }
+    });
 }
 
 pub fn set_viewport_pos(

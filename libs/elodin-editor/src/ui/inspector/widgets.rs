@@ -3,8 +3,8 @@ use egui::color_picker::{Alpha, color_picker_color32};
 use impeller2_wkt::QueryType;
 
 use crate::ui::{
-    button::EColorButton,
-    colors::{self, ColorExt, get_scheme},
+    button::{ECheckboxButton, EColorButton},
+    colors::{self, ColorExt, EColor, get_scheme},
     theme::{self, configure_combo_box},
 };
 
@@ -152,7 +152,7 @@ pub fn eql_autocomplete(
             ui.memory_mut(|mem| {
                 mem.data.remove::<usize>(suggestion_memory_id);
                 if mem.is_popup_open(id) {
-                    mem.close_popup()
+                    mem.close_popup();
                 }
             });
         }
@@ -225,4 +225,54 @@ pub fn search(
             });
     })
     .response
+}
+
+pub fn node_color_picker(ui: &mut egui::Ui, label: &str, color: &mut impeller2_wkt::Color) -> bool {
+    let mut egui_color = color.into_color32();
+    let res = ui.add(
+        ECheckboxButton::new(label, true)
+            .margin(egui::Margin::symmetric(0, 8))
+            .on_color(egui_color)
+            .text_color(get_scheme().text_secondary)
+            .left_label(true),
+    );
+    let color_id = ui.auto_id_with("color");
+    if res.clicked() {
+        ui.memory_mut(|mem| mem.toggle_popup(color_id));
+    }
+    if ui.memory(|mem| mem.is_popup_open(color_id)) {
+        let popup_response = color_popup(
+            ui,
+            &mut egui_color,
+            color_id,
+            res.rect.right_center() - egui::vec2(128.0, 0.0),
+        );
+        if !res.clicked()
+            && (ui.input(|i| i.key_pressed(egui::Key::Escape))
+                || popup_response.clicked_elsewhere())
+        {
+            ui.memory_mut(|mem| mem.close_popup());
+        }
+    }
+
+    let new_color = impeller2_wkt::Color::from_color32(egui_color);
+    let changed = new_color != *color;
+    *color = new_color;
+    ui.separator();
+    changed
+}
+
+pub fn eql_textfield(
+    ui: &mut egui::Ui,
+    enabled: bool,
+    eql_ctx: &eql::Context,
+    eql: &mut String,
+) -> egui::Response {
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        let eql_res = ui.add_enabled(enabled, query(eql, impeller2_wkt::QueryType::EQL));
+        eql_autocomplete(ui, eql_ctx, &eql_res, eql);
+        eql_res
+    })
+    .inner
 }

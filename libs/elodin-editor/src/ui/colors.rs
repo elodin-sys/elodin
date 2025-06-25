@@ -122,11 +122,12 @@ impl EColor for Color {
     }
 
     fn from_color32(color: egui::Color32) -> Self {
+        let [r, g, b, a] = color.to_srgba_unmultiplied();
         Self {
-            r: color.r() as f32 / 255.0,
-            g: color.g() as f32 / 255.0,
-            b: color.b() as f32 / 255.0,
-            a: color.a() as f32 / 255.0,
+            r: r as f32 / 255.0,
+            g: g as f32 / 255.0,
+            b: b as f32 / 255.0,
+            a: a as f32 / 255.0,
         }
     }
 }

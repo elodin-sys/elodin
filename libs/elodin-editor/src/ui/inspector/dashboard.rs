@@ -3,14 +3,14 @@ use std::str::FromStr;
 use bevy::{ecs::system::SystemParam, prelude::*};
 use impeller2_wkt::{Dashboard, DashboardNode};
 
+use crate::ui::dashboard::DashboardNodePath;
 use crate::{
     EqlContext,
     ui::{
         SelectedObject,
-        button::ECheckboxButton,
-        colors::{EColor, get_scheme},
-        dashboard::{DashboardNodePath, NodeUpdaterParams, spawn_node},
-        inspector::{color_popup, eql_autocomplete, query},
+        colors::get_scheme,
+        dashboard::{NodeUpdaterParams, spawn_node},
+        inspector::{eql_textfield, node_color_picker},
         label,
         theme::{configure_combo_box, configure_combo_item, configure_input_with_border},
         widgets::WidgetSystem,
@@ -97,6 +97,10 @@ impl WidgetSystem for InspectorDashboardNode<'_, '_> {
         changed |= val_editor(ui, "Min Height", &eql_ctx.0, &mut node.min_height);
         changed |= val_editor(ui, "Max Width", &eql_ctx.0, &mut node.max_width);
         changed |= val_editor(ui, "Max Height", &eql_ctx.0, &mut node.max_height);
+        changed |= val_editor(ui, "left", &eql_ctx.0, &mut node.left);
+        changed |= val_editor(ui, "right", &eql_ctx.0, &mut node.right);
+        changed |= val_editor(ui, "top", &eql_ctx.0, &mut node.top);
+        changed |= val_editor(ui, "bottom", &eql_ctx.0, &mut node.bottom);
 
         if changed {
             if let Some(children) = children {
@@ -118,41 +122,6 @@ impl WidgetSystem for InspectorDashboardNode<'_, '_> {
             }
         }
     }
-}
-
-fn node_color_picker(ui: &mut egui::Ui, label: &str, color: &mut impeller2_wkt::Color) -> bool {
-    let mut egui_color = color.into_color32();
-    let res = ui.add(
-        ECheckboxButton::new(label, true)
-            .margin(egui::Margin::symmetric(0, 8))
-            .on_color(egui_color)
-            .text_color(get_scheme().text_secondary)
-            .left_label(true),
-    );
-    let color_id = ui.auto_id_with("color");
-    if res.clicked() {
-        ui.memory_mut(|mem| mem.toggle_popup(color_id));
-    }
-    if ui.memory(|mem| mem.is_popup_open(color_id)) {
-        let popup_response = color_popup(
-            ui,
-            &mut egui_color,
-            color_id,
-            res.rect.right_center() - egui::vec2(128.0, 0.0),
-        );
-        if !res.clicked()
-            && (ui.input(|i| i.key_pressed(egui::Key::Escape))
-                || popup_response.clicked_elsewhere())
-        {
-            ui.memory_mut(|mem| mem.close_popup());
-        }
-    }
-
-    let new_color = impeller2_wkt::Color::from_color32(egui_color);
-    let changed = new_color != *color;
-    *color = new_color;
-    ui.separator();
-    changed
 }
 
 fn eql_editor(ui: &mut egui::Ui, label: &str, eql_ctx: &eql::Context, eql: &mut String) -> bool {
@@ -210,20 +179,6 @@ fn val_editor(
 
     ui.separator();
     changed
-}
-
-fn eql_textfield(
-    ui: &mut egui::Ui,
-    enabled: bool,
-    eql_ctx: &eql::Context,
-    eql: &mut String,
-) -> egui::Response {
-    ui.vertical(|ui| {
-        let eql_res = ui.add_enabled(enabled, query(eql, impeller2_wkt::QueryType::EQL));
-        eql_autocomplete(ui, eql_ctx, &eql_res, eql);
-        eql_res
-    })
-    .inner
 }
 
 fn val_ty_select(
