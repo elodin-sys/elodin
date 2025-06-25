@@ -161,32 +161,34 @@ pub fn spawn_dashboard(
     eql: &eql::Context,
     commands: &mut Commands,
 ) -> Result<Entity, eql::Error> {
-    let parent = commands
-        .spawn((
-            Node {
-                overflow: Overflow {
-                    x: OverflowAxis::Scroll,
-                    y: OverflowAxis::Scroll,
-                },
-                ..Default::default()
+    let mut parent = commands.spawn((
+        Node {
+            overflow: Overflow {
+                x: OverflowAxis::Scroll,
+                y: OverflowAxis::Scroll,
             },
-            BackgroundColor(colors::SURFACE_PRIMARY.into_bevy()),
-        ))
-        .id();
+            ..Default::default()
+        },
+        BackgroundColor(colors::SURFACE_PRIMARY.into_bevy()),
+    ));
+    let parent_id = parent.id();
     let node = spawn_node(
-        Some(parent),
         &source.root,
         eql,
-        commands,
-        parent,
+        parent.with_child(()),
+        parent_id,
         smallvec![],
     )?;
-    commands.entity(parent).insert(impeller2_wkt::Dashboard {
+    parent.insert(impeller2_wkt::Dashboard {
         title: source.title.clone(),
         root: node,
-        aux: parent,
+        aux: parent_id,
     });
-    Ok(parent)
+    parent.insert(DashboardNodePath {
+        root: parent_id,
+        path: smallvec![],
+    });
+    Ok(parent_id)
 }
 
 #[derive(Component)]
@@ -196,10 +198,9 @@ pub struct DashboardNodePath {
 }
 
 pub fn spawn_node<T>(
-    parent: Option<Entity>,
     source: &impeller2_wkt::DashboardNode<T>,
     eql: &eql::Context,
-    commands: &mut Commands,
+    commands: &mut EntityCommands,
     root: Entity,
     path: SmallVec<[usize; 4]>,
 ) -> Result<DashboardNode<Entity>, eql::Error> {
@@ -383,7 +384,7 @@ pub fn spawn_node<T>(
         Ok((node, text))
     }));
 
-    let mut node = commands.spawn((
+    let node = commands.insert((
         node,
         node_updater,
         BackgroundColor(Color::srgba(
@@ -397,9 +398,6 @@ pub fn spawn_node<T>(
             path: path.clone(),
         },
     ));
-    if let Some(parent) = parent {
-        node.insert(ChildOf(parent));
-    }
     if has_text {
         node.insert(Text("".to_string()));
     }
@@ -444,7 +442,10 @@ pub fn spawn_node<T>(
             .map(|(index, child)| {
                 let mut path = path.clone();
                 path.push(index);
-                spawn_node(Some(node), child, eql, commands, root, path)
+                let parent_id = commands.id();
+                let mut commands = commands.commands();
+                let mut commands = commands.spawn(ChildOf(parent_id));
+                spawn_node(child, eql, &mut commands, root, path)
             })
             .collect::<Result<Vec<_>, _>>()?,
         color: source.color,

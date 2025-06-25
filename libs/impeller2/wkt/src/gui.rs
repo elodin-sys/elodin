@@ -127,6 +127,7 @@ impl<T> Panel<T> {
             Panel::Graph(graph) => Some(&graph.aux),
             Panel::QueryPlot(query_plot) => Some(&query_plot.aux),
             Panel::Viewport(v) => Some(&v.aux),
+            Panel::Dashboard(d) => Some(&d.aux),
             _ => None,
         }
     }

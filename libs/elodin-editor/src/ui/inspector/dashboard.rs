@@ -2,15 +2,14 @@ use std::str::FromStr;
 
 use bevy::{ecs::system::SystemParam, prelude::*};
 use impeller2_wkt::{Dashboard, DashboardNode};
-use smallvec::SmallVec;
 
 use crate::{
     EqlContext,
     ui::{
         SelectedObject,
-        colors::{self, get_scheme},
+        colors::get_scheme,
         dashboard::{DashboardNodePath, spawn_node},
-        inspector::graph::{eql_autocomplete, query},
+        inspector::{eql_autocomplete, query},
         theme::{configure_combo_box, configure_combo_item, configure_input_with_border},
         widgets::WidgetSystem,
     },
@@ -18,7 +17,7 @@ use crate::{
 
 #[derive(SystemParam)]
 pub struct InspectorDashboardNode<'w, 's> {
-    pub paths: Query<'w, 's, (&'static ChildOf, &'static DashboardNodePath)>,
+    pub paths: Query<'w, 's, (&'static DashboardNodePath, Option<&'static Children>)>,
     pub dashboards: Query<'w, 's, &'static mut Dashboard<Entity>>,
     pub eql_ctx: Res<'w, EqlContext>,
     pub commands: Commands<'w, 's>,
@@ -43,7 +42,7 @@ impl WidgetSystem for InspectorDashboardNode<'_, '_> {
             mut commands,
             mut selected_object,
         } = state.get_mut(world);
-        let Ok((parent, path)) = paths.get(entity) else {
+        let Ok((path, children)) = paths.get(entity) else {
             ui.colored_label(get_scheme().error, "Node found");
             return;
         };
@@ -69,11 +68,25 @@ impl WidgetSystem for InspectorDashboardNode<'_, '_> {
         changed |= val_editor(ui, "Width", &eql_ctx.0, &mut node.width);
         changed |= val_editor(ui, "Height", &eql_ctx.0, &mut node.height);
         changed |= enum_select(ui, "Flex Direction", &mut node.flex_direction);
+        changed |= enum_select(ui, "Flex Wrap", &mut node.flex_wrap);
         changed |= enum_select(ui, "Justify Content", &mut node.justify_content);
+        changed |= enum_select(ui, "Align Items", &mut node.align_items);
+        changed |= enum_select(ui, "Align Content", &mut node.align_content);
+        changed |= enum_select(ui, "Align Self", &mut node.align_self);
+        changed |= enum_select(ui, "Justify Items", &mut node.justify_items);
+        changed |= val_editor(ui, "Min Width", &eql_ctx.0, &mut node.min_width);
+        changed |= val_editor(ui, "Min Height", &eql_ctx.0, &mut node.min_height);
+        changed |= val_editor(ui, "Max Width", &eql_ctx.0, &mut node.max_width);
+        changed |= val_editor(ui, "Max Height", &eql_ctx.0, &mut node.max_height);
+
         if changed {
-            commands.entity(node.aux).despawn();
+            if let Some(children) = children {
+                for child in children.iter() {
+                    commands.entity(child).despawn();
+                }
+            }
+            let mut commands = commands.entity(node.aux);
             if let Ok(new) = spawn_node(
-                Some(parent.0),
                 node,
                 &eql_ctx.0,
                 &mut commands,
@@ -115,26 +128,28 @@ fn val_editor(
                 changed = true;
             }
             ui.add_space(8.0);
-            changed |= match val {
-                Val::Auto => false,
+            let mut empty = String::new();
+            let enabled = !matches!(val, Val::Auto);
+            let eql = match val {
+                Val::Auto => &mut empty,
                 Val::Px(eql)
                 | Val::Percent(eql)
                 | Val::Vw(eql)
                 | Val::Vh(eql)
                 | Val::VMin(eql)
-                | Val::VMax(eql) => {
-                    let eql_res = ui
-                        .vertical(|ui| {
-                            let eql_res = query(ui, eql, impeller2_wkt::QueryType::EQL);
-                            eql_autocomplete(ui, &eql_ctx, &eql_res, eql);
-                            eql_res
-                        })
-                        .inner;
-                    eql_res.changed()
-                }
+                | Val::VMax(eql) => eql,
             };
 
-            changed
+            let eql_res = ui
+                .vertical(|ui| {
+                    let eql_res =
+                        ui.add_enabled(enabled, query(eql, impeller2_wkt::QueryType::EQL));
+                    eql_autocomplete(ui, &eql_ctx, &eql_res, eql);
+                    eql_res
+                })
+                .inner;
+
+            changed | eql_res.changed()
         })
         .inner;
 
@@ -150,6 +165,7 @@ fn val_ty_select(
     use impeller2_wkt::Val;
     ui.scope(|ui| {
         configure_combo_box(ui.style_mut());
+        ui.style_mut().spacing.combo_width = 60.0;
         let mut selected_val_type = current_val_type;
         egui::ComboBox::from_id_salt(ui.next_auto_id())
             .selected_text(current_val_type)
@@ -192,9 +208,10 @@ fn enum_select<T: strum::VariantNames + FromStr + Copy>(
 where
     &'static str: From<T>,
 {
-    ui.label(label);
+    ui.label(egui::RichText::new(label).color(get_scheme().text_secondary));
     let current_ty = <&str>::from(*value);
     ui.scope(|ui| {
+        ui.style_mut().spacing.combo_width = ui.available_size().x;
         configure_combo_box(ui.style_mut());
         let mut selected_ty = current_ty;
         egui::ComboBox::from_id_salt(ui.next_auto_id())
@@ -205,6 +222,7 @@ where
                     ui.selectable_value(&mut selected_ty, name, *name);
                 }
             });
+        ui.add_space(8.0);
         ui.separator();
         if selected_ty != current_ty {
             *value = selected_ty.parse().map_err(|_| ()).unwrap();
