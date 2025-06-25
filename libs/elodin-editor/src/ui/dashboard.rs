@@ -180,7 +180,6 @@ pub fn spawn_dashboard(
         smallvec![],
     )?;
     parent.insert(impeller2_wkt::Dashboard {
-        title: source.title.clone(),
         root: node,
         aux: parent_id,
     });
@@ -403,6 +402,7 @@ pub fn spawn_node<T>(
     }
     let node = node.id();
     let node = DashboardNode {
+        label: source.label.clone(),
         display: source.display,
         box_sizing: source.box_sizing,
         position_type: source.position_type,

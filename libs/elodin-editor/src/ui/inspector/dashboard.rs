@@ -7,9 +7,11 @@ use crate::{
     EqlContext,
     ui::{
         SelectedObject,
-        colors::get_scheme,
+        button::ECheckboxButton,
+        colors::{self, EColor, get_scheme},
         dashboard::{DashboardNodePath, spawn_node},
-        inspector::{eql_autocomplete, query},
+        inspector::{color_popup, eql_autocomplete, query},
+        label,
         theme::{configure_combo_box, configure_combo_item, configure_input_with_border},
         widgets::WidgetSystem,
     },
@@ -61,12 +63,27 @@ impl WidgetSystem for InspectorDashboardNode<'_, '_> {
         };
 
         ui.spacing_mut().item_spacing.y = 8.0;
-        ui.label("Dashboard");
+
+        label::editable_label_with_buttons(
+            ui,
+            [],
+            &mut node.label.get_or_insert_with(|| {
+                if path.path.is_empty() {
+                    "Dashboard".to_string()
+                } else {
+                    "node".to_string()
+                }
+            }),
+            get_scheme().text_primary,
+            egui::Margin::ZERO,
+        );
         ui.separator();
 
         let mut changed = false;
         changed |= val_editor(ui, "Width", &eql_ctx.0, &mut node.width);
         changed |= val_editor(ui, "Height", &eql_ctx.0, &mut node.height);
+        changed |= node_color_picker(ui, "Background", &mut node.color);
+        changed |= eql_editor(ui, "Text", &eql_ctx.0, node.text.get_or_insert_default());
         changed |= enum_select(ui, "Flex Direction", &mut node.flex_direction);
         changed |= enum_select(ui, "Flex Wrap", &mut node.flex_wrap);
         changed |= enum_select(ui, "Justify Content", &mut node.justify_content);
@@ -98,6 +115,49 @@ impl WidgetSystem for InspectorDashboardNode<'_, '_> {
             }
         }
     }
+}
+
+fn node_color_picker(ui: &mut egui::Ui, label: &str, color: &mut impeller2_wkt::Color) -> bool {
+    let mut egui_color = color.into_color32();
+    let res = ui.add(
+        ECheckboxButton::new(label, true)
+            .margin(egui::Margin::symmetric(0, 8))
+            .on_color(egui_color)
+            .text_color(get_scheme().text_secondary)
+            .left_label(true),
+    );
+    let color_id = ui.auto_id_with("color");
+    if res.clicked() {
+        ui.memory_mut(|mem| mem.toggle_popup(color_id));
+    }
+    if ui.memory(|mem| mem.is_popup_open(color_id)) {
+        let popup_response = color_popup(
+            ui,
+            &mut egui_color,
+            color_id,
+            res.rect.right_center() - egui::vec2(128.0, 0.0),
+        );
+        if !res.clicked()
+            && (ui.input(|i| i.key_pressed(egui::Key::Escape))
+                || popup_response.clicked_elsewhere())
+        {
+            ui.memory_mut(|mem| mem.close_popup());
+        }
+    }
+
+    let new_color = impeller2_wkt::Color::from_color32(egui_color);
+    let changed = new_color != *color;
+    *color = new_color;
+    ui.separator();
+    changed
+}
+
+fn eql_editor(ui: &mut egui::Ui, label: &str, eql_ctx: &eql::Context, eql: &mut String) -> bool {
+    ui.label(egui::RichText::new(label).color(get_scheme().text_secondary));
+    configure_input_with_border(ui.style_mut());
+    let changed = eql_textfield(ui, true, eql_ctx, eql).changed();
+    ui.separator();
+    changed
 }
 
 fn val_editor(
@@ -140,21 +200,27 @@ fn val_editor(
                 | Val::VMax(eql) => eql,
             };
 
-            let eql_res = ui
-                .vertical(|ui| {
-                    let eql_res =
-                        ui.add_enabled(enabled, query(eql, impeller2_wkt::QueryType::EQL));
-                    eql_autocomplete(ui, &eql_ctx, &eql_res, eql);
-                    eql_res
-                })
-                .inner;
-
+            let eql_res = eql_textfield(ui, enabled, eql_ctx, eql);
             changed | eql_res.changed()
         })
         .inner;
 
     ui.separator();
     changed
+}
+
+fn eql_textfield(
+    ui: &mut egui::Ui,
+    enabled: bool,
+    eql_ctx: &eql::Context,
+    eql: &mut String,
+) -> egui::Response {
+    ui.vertical(|ui| {
+        let eql_res = ui.add_enabled(enabled, query(eql, impeller2_wkt::QueryType::EQL));
+        eql_autocomplete(ui, &eql_ctx, &eql_res, eql);
+        eql_res
+    })
+    .inner
 }
 
 fn val_ty_select(

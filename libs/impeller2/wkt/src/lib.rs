@@ -22,7 +22,7 @@ mod gui;
 #[cfg(feature = "gui")]
 pub use gui::*;
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
 pub struct Color {
     pub r: f32,
     pub g: f32,

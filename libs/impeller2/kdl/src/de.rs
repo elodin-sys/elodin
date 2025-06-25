@@ -537,19 +537,9 @@ fn parse_material_from_node(node: &KdlNode) -> Option<Material> {
 }
 
 fn parse_dashboard(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
-    let title = node
-        .get("title")
-        .and_then(|v| v.as_string())
-        .map(|s| s.to_string())
-        .unwrap_or_default();
-
     let root = parse_dashboard_node(node)?;
 
-    Ok(Panel::Dashboard(Box::new(Dashboard {
-        title,
-        root,
-        aux: (),
-    })))
+    Ok(Panel::Dashboard(Box::new(Dashboard { root, aux: () })))
 }
 
 fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode<()>, KdlSchematicError> {
@@ -710,7 +700,10 @@ fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode<()>, KdlSchemati
         .and_then(|v| v.as_string())
         .map(|s| s.to_string());
 
-    //let color = parse_color_from_node(node).unwrap_or(Color::TRANSPARENT);
+    let label = node
+        .get("label")
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string());
 
     let mut margin = UiRect::default();
     let mut padding = UiRect::default();
@@ -741,6 +734,7 @@ fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode<()>, KdlSchemati
     }
 
     Ok(DashboardNode {
+        label,
         display,
         box_sizing,
         position_type,
@@ -1049,7 +1043,7 @@ dashboard title="Test Dashboard" {
 
         assert_eq!(schematic.elems.len(), 1);
         if let SchematicElem::Panel(Panel::Dashboard(dashboard)) = &schematic.elems[0] {
-            assert_eq!(dashboard.title, "Test Dashboard".to_string());
+            assert_eq!(dashboard.label, "Test Dashboard".to_string());
             assert_eq!(dashboard.root.children.len(), 1);
 
             let node = &dashboard.root.children[0];

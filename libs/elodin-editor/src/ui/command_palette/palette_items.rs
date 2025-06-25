@@ -687,7 +687,7 @@ pub fn load_schematic_file(
     std::thread::spawn(move || {
         let cb_path = watch_path.clone();
         let mut debouncer = notify_debouncer_mini::new_debouncer(
-            Duration::from_millis(500),
+            Duration::from_millis(100),
             move |res: notify_debouncer_mini::DebounceEventResult| {
                 if res.is_err() {
                     return;

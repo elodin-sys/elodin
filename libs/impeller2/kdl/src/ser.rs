@@ -315,11 +315,6 @@ fn serialize_material_to_node(node: &mut KdlNode, material: &Material) {
 fn serialize_dashboard<T>(dashboard: &Dashboard<T>) -> KdlNode {
     let mut node = KdlNode::new("dashboard");
 
-    if !dashboard.title.is_empty() {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("title", dashboard.title.clone()));
-    }
-
     // Copy all the properties from the root node to the dashboard node
     serialize_dashboard_node_properties(&mut node, &dashboard.root);
 
@@ -387,7 +382,10 @@ fn serialize_dashboard_node<T>(dashboard_node: &DashboardNode<T>) -> KdlNode {
 }
 
 fn serialize_dashboard_node_properties<T>(node: &mut KdlNode, dashboard_node: &DashboardNode<T>) {
-    // Only serialize non-default values to keep output clean
+    if let Some(label) = dashboard_node.label.as_ref() {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("label", label.as_str()));
+    }
 
     if !matches!(dashboard_node.display, Display::Flex) {
         node.entries_mut().push(KdlEntry::new_prop(

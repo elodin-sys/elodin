@@ -170,6 +170,7 @@ pub fn color_popup(
         .order(egui::Order::Foreground)
         .fixed_pos(pos)
         .default_width(300.0)
+        .constrain(true)
         .show(ui.ctx(), |ui| {
             theme::configure_input_with_border(ui.style_mut());
             ui.spacing_mut().slider_width = 275.;

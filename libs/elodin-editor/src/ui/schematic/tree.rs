@@ -183,7 +183,7 @@ fn dashboard_node(
         false
     };
     let branch_res = Branch::new(
-        "node".to_string(),
+        node.label.as_deref().unwrap_or("node").to_string(),
         icons.container,
         icons.chevron,
         tree_rect,

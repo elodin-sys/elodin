@@ -113,23 +113,35 @@ pub struct ECheckboxButton {
     is_on: bool,
     label: String,
     corner_radius: egui::CornerRadius,
+    left_label: bool,
 }
 
 impl ECheckboxButton {
-    pub fn new(label: String, is_on: bool) -> Self {
+    pub fn new(label: impl ToString, is_on: bool) -> Self {
         Self {
             on_color: get_scheme().text_primary,
             off_color: get_scheme().bg_secondary,
             text_color: get_scheme().text_primary,
             margin: egui::Margin::same(8),
             is_on,
-            label,
+            label: label.to_string(),
             corner_radius: egui::CornerRadius::same(2),
+            left_label: false,
         }
+    }
+
+    pub fn left_label(mut self, left_label: bool) -> Self {
+        self.left_label = left_label;
+        self
     }
 
     pub fn on_color(mut self, color: egui::Color32) -> Self {
         self.on_color = color;
+        self
+    }
+
+    pub fn text_color(mut self, color: egui::Color32) -> Self {
+        self.text_color = color;
         self
     }
 
@@ -139,7 +151,7 @@ impl ECheckboxButton {
     }
 
     fn render(&mut self, ui: &mut egui::Ui) -> egui::Response {
-        let font_id = egui::TextStyle::Monospace.resolve(ui.style());
+        let font_id = egui::TextStyle::Button.resolve(ui.style());
 
         // Set widget size and allocate space
         let galley =
@@ -148,7 +160,11 @@ impl ECheckboxButton {
         let checkbox_side = galley.size().y;
         let spacing = checkbox_side * 0.5;
         let desired_size = egui::vec2(
-            checkbox_side + spacing + galley.size().x + self.margin.sum().x,
+            if self.left_label {
+                ui.available_width()
+            } else {
+                checkbox_side + spacing + galley.size().x + self.margin.sum().x
+            },
             galley.size().y + self.margin.sum().y,
         );
 
@@ -164,8 +180,24 @@ impl ECheckboxButton {
 
             // Checkbox
 
-            let checkbox_rect =
-                egui::Rect::from_min_size(inner_rect.min, egui::Vec2::splat(checkbox_side));
+            let (checkbox_rect, label_rect_pos) = if self.left_label {
+                let label_rect_pos = egui::pos2(inner_rect.min.x, inner_rect.center().y);
+                let checkbox_rect = egui::Rect::from_center_size(
+                    inner_rect.right_center() - egui::vec2(checkbox_side + spacing, 0.0),
+                    egui::Vec2::splat(checkbox_side),
+                );
+                (checkbox_rect, label_rect_pos)
+            } else {
+                let checkbox_rect =
+                    egui::Rect::from_min_size(inner_rect.min, egui::Vec2::splat(checkbox_side));
+
+                let label_rect_pos = egui::pos2(
+                    inner_rect.min.x + checkbox_side + spacing,
+                    inner_rect.center().y,
+                );
+                (checkbox_rect, label_rect_pos)
+            };
+
             let fill_color = if self.is_on {
                 self.on_color
             } else {
@@ -178,13 +210,6 @@ impl ECheckboxButton {
                 fill_color,
                 visuals.bg_stroke,
                 egui::StrokeKind::Middle,
-            );
-
-            // Label
-
-            let label_rect_pos = egui::pos2(
-                inner_rect.min.x + checkbox_side + spacing,
-                inner_rect.center().y,
             );
 
             ui.painter().text(

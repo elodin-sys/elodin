@@ -16,7 +16,7 @@ use bevy_render::{
 use egui::UiBuilder;
 use egui_tiles::{Container, Tile, TileId, Tiles};
 use impeller2::types::ComponentId;
-use impeller2_wkt::{Graph, Viewport};
+use impeller2_wkt::{Dashboard, Graph, Viewport};
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, HashMap};
 
@@ -285,7 +285,11 @@ pub enum Pane {
 }
 
 impl Pane {
-    fn title(&self, graph_states: &Query<&GraphState>) -> String {
+    fn title(
+        &self,
+        graph_states: &Query<&GraphState>,
+        dashboards: &Query<&Dashboard<Entity>>,
+    ) -> String {
         match self {
             Pane::Graph(pane) => {
                 if let Ok(graph_state) = graph_states.get(pane.id) {
@@ -304,7 +308,17 @@ impl Pane {
             }
             Pane::ActionTile(action) => action.label.to_string(),
             Pane::VideoStream(video_stream) => video_stream.label.to_string(),
-            Pane::Dashboard(dashboard) => dashboard.label.to_string(),
+            Pane::Dashboard(dashboard) => {
+                if let Ok(dash) = dashboards.get(dashboard.entity) {
+                    return dash
+                        .root
+                        .label
+                        .as_deref()
+                        .unwrap_or("Dashboard")
+                        .to_string();
+                }
+                "Dashboard".to_string()
+            }
             Pane::Hierarchy => "Entities".to_string(),
             Pane::Inspector => "Inspector".to_string(),
             Pane::SchematicTree(_) => "Tree".to_string(),
@@ -615,9 +629,10 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     fn on_edit(&mut self, _edit_action: egui_tiles::EditAction) {}
 
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
-        let mut query = SystemState::<Query<&GraphState>>::new(self.world);
-        let query = query.get(self.world);
-        pane.title(&query).into()
+        let mut query =
+            SystemState::<(Query<&GraphState>, Query<&Dashboard<Entity>>)>::new(self.world);
+        let (graphs, dashs) = query.get(self.world);
+        pane.title(&graphs, &dashs).into()
     }
 
     fn pane_ui(

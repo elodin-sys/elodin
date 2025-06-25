@@ -83,7 +83,7 @@ impl<T> Panel<T> {
             Panel::Inspector => "Inspector",
             Panel::Hierarchy => "Hierarchy",
             Panel::SchematicTree => "Tree",
-            Panel::Dashboard(d) => &d.title,
+            Panel::Dashboard(d) => d.root.label.as_deref().unwrap_or("Dashboard"),
         }
     }
 
@@ -427,7 +427,6 @@ pub enum QueryType {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Dashboard<T = ()> {
-    pub title: String,
     pub root: DashboardNode<T>,
     pub aux: T,
 }
@@ -435,7 +434,6 @@ pub struct Dashboard<T = ()> {
 impl<T> Dashboard<T> {
     pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> Dashboard<U> {
         Dashboard {
-            title: self.title.clone(),
             root: self.root.map_aux(&f),
             aux: f(&self.aux),
         }
@@ -445,6 +443,7 @@ impl<T> Dashboard<T> {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct DashboardNode<T> {
+    pub label: Option<String>,
     pub display: Display,
     pub box_sizing: BoxSizing,
     pub position_type: PositionType,
@@ -486,6 +485,7 @@ pub struct DashboardNode<T> {
 impl<T> DashboardNode<T> {
     pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> DashboardNode<U> {
         DashboardNode {
+            label: self.label.clone(),
             display: self.display,
             box_sizing: self.box_sizing,
             position_type: self.position_type,
