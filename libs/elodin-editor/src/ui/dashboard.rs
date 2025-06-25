@@ -159,6 +159,10 @@ pub fn spawn_dashboard(
     let parent = commands
         .spawn((
             Node {
+                overflow: Overflow {
+                    x: OverflowAxis::Scroll,
+                    y: OverflowAxis::Scroll,
+                },
                 ..Default::default()
             },
             BackgroundColor(colors::SURFACE_PRIMARY.into_bevy()),
@@ -365,17 +369,18 @@ pub fn spawn_node<T>(
             source.color.a,
         )),
     ));
-    let source = source.map_aux(|_| node.id());
+    //let source = source.map_aux(|_| node.id());
     if let Some(parent) = parent {
         node.insert(ChildOf(parent));
     }
     if has_text {
         node.insert(Text("".to_string()));
     }
+    //node.insert(source.clone());
+    let node = node.id();
     for child in &source.children {
-        spawn_node(Some(node.id()), child, eql, commands)?;
+        spawn_node(Some(node), child, eql, commands)?;
     }
-    node.insert(source);
     Ok(node)
 }
 

@@ -1,8 +1,4 @@
-use impeller2_wkt::{
-    ActionPane, Color, ComponentMonitor, Graph, GraphType, Line3d, Material, Mesh, Object3D,
-    Object3DMesh, Panel, QueryPlot, QueryTable, QueryType, Schematic, SchematicElem, Split,
-    Viewport,
-};
+use impeller2_wkt::*;
 use kdl::{KdlDocument, KdlEntry, KdlNode};
 
 pub fn serialize_schematic<T>(schematic: &Schematic<T>) -> String {
@@ -49,7 +45,7 @@ fn serialize_panel<T>(panel: &Panel<T>) -> KdlNode {
         Panel::Inspector => KdlNode::new("inspector"),
         Panel::Hierarchy => KdlNode::new("hierarchy"),
         Panel::SchematicTree => KdlNode::new("schematic_tree"),
-        Panel::Dashboard(_) => todo!(),
+        Panel::Dashboard(dashboard) => serialize_dashboard(dashboard),
     }
 }
 
@@ -316,11 +312,250 @@ fn serialize_material_to_node(node: &mut KdlNode, material: &Material) {
     serialize_color_to_node(node, &material.base_color);
 }
 
+fn serialize_dashboard<T>(dashboard: &Dashboard<T>) -> KdlNode {
+    let mut node = KdlNode::new("dashboard");
+
+    if !dashboard.title.is_empty() {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("title", dashboard.title.clone()));
+    }
+
+    // Copy all the properties from the root node to the dashboard node
+    serialize_dashboard_node_properties(&mut node, &dashboard.root);
+
+    // Add children if any
+    if !dashboard.root.children.is_empty() {
+        let mut children = KdlDocument::new();
+        for child in &dashboard.root.children {
+            children.nodes_mut().push(serialize_dashboard_node(child));
+        }
+        node.set_children(children);
+    }
+
+    node
+}
+
+fn serialize_dashboard_node<T>(dashboard_node: &DashboardNode<T>) -> KdlNode {
+    let mut node = KdlNode::new("node");
+
+    serialize_dashboard_node_properties(&mut node, dashboard_node);
+
+    let mut children = KdlDocument::new();
+    let mut has_children = false;
+
+    // Add special child nodes for margin, padding, border if they're not default
+    if !is_ui_rect_default(&dashboard_node.margin) {
+        let mut margin_node = KdlNode::new("margin");
+        serialize_ui_rect_to_node(&mut margin_node, &dashboard_node.margin);
+        children.nodes_mut().push(margin_node);
+        has_children = true;
+    }
+
+    if !is_ui_rect_default(&dashboard_node.padding) {
+        let mut padding_node = KdlNode::new("padding");
+        serialize_ui_rect_to_node(&mut padding_node, &dashboard_node.padding);
+        children.nodes_mut().push(padding_node);
+        has_children = true;
+    }
+
+    if !is_ui_rect_default(&dashboard_node.border) {
+        let mut border_node = KdlNode::new("border");
+        serialize_ui_rect_to_node(&mut border_node, &dashboard_node.border);
+        children.nodes_mut().push(border_node);
+        has_children = true;
+    }
+
+    // Add color as "bg" child node if not transparent
+    if dashboard_node.color.a > 0.0 {
+        let mut bg_node = KdlNode::new("bg");
+        serialize_color_to_node(&mut bg_node, &dashboard_node.color);
+        children.nodes_mut().push(bg_node);
+        has_children = true;
+    }
+
+    // Add regular children
+    for child in &dashboard_node.children {
+        children.nodes_mut().push(serialize_dashboard_node(child));
+        has_children = true;
+    }
+
+    if has_children {
+        node.set_children(children);
+    }
+
+    node
+}
+
+fn serialize_dashboard_node_properties<T>(node: &mut KdlNode, dashboard_node: &DashboardNode<T>) {
+    // Only serialize non-default values to keep output clean
+
+    if !matches!(dashboard_node.display, Display::Flex) {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "display",
+            <&str>::from(dashboard_node.display),
+        ));
+    }
+
+    if !matches!(dashboard_node.box_sizing, BoxSizing::BorderBox) {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "box_sizing",
+            <&str>::from(dashboard_node.box_sizing),
+        ));
+    }
+
+    if !matches!(dashboard_node.position_type, PositionType::Relative) {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "position_type",
+            <&str>::from(dashboard_node.position_type),
+        ));
+    }
+
+    // Serialize Val properties
+    serialize_val_prop(node, "left", &dashboard_node.left);
+    serialize_val_prop(node, "right", &dashboard_node.right);
+    serialize_val_prop(node, "top", &dashboard_node.top);
+    serialize_val_prop(node, "bottom", &dashboard_node.bottom);
+    serialize_val_prop(node, "width", &dashboard_node.width);
+    serialize_val_prop(node, "height", &dashboard_node.height);
+    serialize_val_prop(node, "min_width", &dashboard_node.min_width);
+    serialize_val_prop(node, "min_height", &dashboard_node.min_height);
+    serialize_val_prop(node, "max_width", &dashboard_node.max_width);
+    serialize_val_prop(node, "max_height", &dashboard_node.max_height);
+
+    if let Some(aspect_ratio) = dashboard_node.aspect_ratio {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("aspect_ratio", aspect_ratio as f64));
+    }
+
+    // Serialize alignment properties
+    if !matches!(dashboard_node.align_items, AlignItems::Default) {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "align_items",
+            <&str>::from(dashboard_node.align_items),
+        ));
+    }
+
+    if !matches!(dashboard_node.justify_items, JustifyItems::Default) {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "justify_items",
+            <&str>::from(dashboard_node.justify_items),
+        ));
+    }
+
+    if !matches!(dashboard_node.align_self, AlignSelf::Auto) {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "align_self",
+            <&str>::from(dashboard_node.align_self),
+        ));
+    }
+
+    if !matches!(dashboard_node.justify_self, JustifySelf::Auto) {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "justify_self",
+            <&str>::from(dashboard_node.justify_self),
+        ));
+    }
+
+    if !matches!(dashboard_node.align_content, AlignContent::Default) {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "align_content",
+            <&str>::from(dashboard_node.align_content),
+        ));
+    }
+
+    if !matches!(dashboard_node.justify_content, JustifyContent::Default) {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "justify_content",
+            <&str>::from(dashboard_node.justify_content),
+        ));
+    }
+
+    if !matches!(dashboard_node.flex_direction, FlexDirection::Row) {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "flex_direction",
+            <&str>::from(dashboard_node.flex_direction),
+        ));
+    }
+
+    if !matches!(dashboard_node.flex_wrap, FlexWrap::NoWrap) {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "flex_wrap",
+            <&str>::from(dashboard_node.flex_wrap),
+        ));
+    }
+
+    if dashboard_node.flex_grow != 0.0 {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "flex_grow",
+            dashboard_node.flex_grow as f64,
+        ));
+    }
+
+    if dashboard_node.flex_shrink != 1.0 {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "flex_shrink",
+            dashboard_node.flex_shrink as f64,
+        ));
+    }
+
+    serialize_val_prop(node, "flex_basis", &dashboard_node.flex_basis);
+    serialize_val_prop(node, "row_gap", &dashboard_node.row_gap);
+    serialize_val_prop(node, "column_gap", &dashboard_node.column_gap);
+
+    if let Some(ref text) = dashboard_node.text {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("text", text.clone()));
+    }
+}
+
+fn serialize_val_prop(node: &mut KdlNode, prop_name: &str, val: &Val) {
+    match val {
+        Val::Auto => {}
+        Val::Px(s) => {
+            node.entries_mut()
+                .push(KdlEntry::new_prop(prop_name, format!("{}px", s)));
+        }
+        Val::Percent(s) => {
+            node.entries_mut()
+                .push(KdlEntry::new_prop(prop_name, format!("{}%", s)));
+        }
+        Val::Vw(s) => {
+            node.entries_mut()
+                .push(KdlEntry::new_prop(prop_name, format!("{}vw", s)));
+        }
+        Val::Vh(s) => {
+            node.entries_mut()
+                .push(KdlEntry::new_prop(prop_name, format!("{}vh", s)));
+        }
+        Val::VMin(s) => {
+            node.entries_mut()
+                .push(KdlEntry::new_prop(prop_name, format!("{}vmin", s)));
+        }
+        Val::VMax(s) => {
+            node.entries_mut()
+                .push(KdlEntry::new_prop(prop_name, format!("{}vmax", s)));
+        }
+    }
+}
+
+fn serialize_ui_rect_to_node(node: &mut KdlNode, ui_rect: &UiRect) {
+    serialize_val_prop(node, "left", &ui_rect.left);
+    serialize_val_prop(node, "right", &ui_rect.right);
+    serialize_val_prop(node, "top", &ui_rect.top);
+    serialize_val_prop(node, "bottom", &ui_rect.bottom);
+}
+
+fn is_ui_rect_default(ui_rect: &UiRect) -> bool {
+    matches!(ui_rect.left, Val::Px(ref s) if s == "0.0")
+        && matches!(ui_rect.right, Val::Px(ref s) if s == "0.0")
+        && matches!(ui_rect.top, Val::Px(ref s) if s == "0.0")
+        && matches!(ui_rect.bottom, Val::Px(ref s) if s == "0.0")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::parse_schematic;
-    use impeller2::types::ComponentId;
 
     #[test]
     fn test_serialize_simple_viewport() {

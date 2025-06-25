@@ -710,16 +710,20 @@ fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode<()>, KdlSchemati
         .and_then(|v| v.as_string())
         .map(|s| s.to_string());
 
-    let color = parse_color_from_node(node).unwrap_or(Color::TRANSPARENT);
+    //let color = parse_color_from_node(node).unwrap_or(Color::TRANSPARENT);
 
     let mut margin = UiRect::default();
     let mut padding = UiRect::default();
     let mut border = UiRect::default();
+    let mut color = Color::TRANSPARENT;
 
     let mut children = Vec::new();
     if let Some(child_nodes) = node.children() {
         for child in child_nodes.nodes() {
             match child.name().value() {
+                "bg" | "background" => {
+                    color = parse_color_from_node(child).unwrap_or(Color::TRANSPARENT);
+                }
                 "margin" => {
                     margin = parse_ui_rect_from_node(child).unwrap_or_default();
                 }
@@ -1046,21 +1050,12 @@ dashboard title="Test Dashboard" {
         assert_eq!(schematic.elems.len(), 1);
         if let SchematicElem::Panel(Panel::Dashboard(dashboard)) = &schematic.elems[0] {
             assert_eq!(dashboard.title, "Test Dashboard".to_string());
-            assert_eq!(dashboard.children.len(), 1);
+            assert_eq!(dashboard.root.children.len(), 1);
 
-            if let DashboardElement::Node(node) = &dashboard.children[0] {
-                assert!(matches!(node.display, Display::Flex));
-                assert!(matches!(node.flex_direction, FlexDirection::Column));
-                assert_eq!(node.children.len(), 2);
-
-                if let DashboardElement::Text(_text) = &node.children[0] {
-                    // Note: text field is private, can't test directly
-                } else {
-                    panic!("Expected text element");
-                }
-            } else {
-                panic!("Expected node element");
-            }
+            let node = &dashboard.root.children[0];
+            assert!(matches!(node.display, Display::Flex));
+            assert!(matches!(node.flex_direction, FlexDirection::Column));
+            assert_eq!(node.children.len(), 2);
         } else {
             panic!("Expected dashboard panel");
         }

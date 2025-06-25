@@ -592,7 +592,7 @@ fn set_time_range_behavior() -> PaletteItem {
     })
 }
 
-pub fn save_preset() -> PaletteItem {
+pub fn save_schematic() -> PaletteItem {
     PaletteItem::new("Save Schematic", PRESETS_LABEL, |_name: In<String>| {
         PalettePage::new(vec![save_preset_inner()]).into()
     })
@@ -616,7 +616,7 @@ pub fn save_preset_inner() -> PaletteItem {
     .default()
 }
 
-pub fn load_preset() -> PaletteItem {
+pub fn load_schematic() -> PaletteItem {
     PaletteItem::new("Load Schematic", PRESETS_LABEL, |_: In<String>| {
         let dirs = crate::dirs();
         let dir = dirs.data_dir().join("schematics");
@@ -624,20 +624,20 @@ pub fn load_preset() -> PaletteItem {
             return PaletteEvent::Exit;
         };
 
-        let mut items = vec![load_preset_picker()];
+        let mut items = vec![load_schematic_picker()];
         for elem in elems {
             let Ok(elem) = elem else { continue };
             let path = elem.path();
             let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
                 continue;
             };
-            items.push(load_preset_inner(file_name.to_string()))
+            items.push(load_schematic_inner(file_name.to_string()))
         }
         PalettePage::new(items).into()
     })
 }
 
-pub fn load_preset_picker() -> PaletteItem {
+pub fn load_schematic_picker() -> PaletteItem {
     PaletteItem::new(
         "From File",
         "",
@@ -646,7 +646,7 @@ pub fn load_preset_picker() -> PaletteItem {
                 .add_filter("kdl", &["kdl"])
                 .pick_file()
             {
-                if let Err(err) = load_schematic(&path, params, rx)
+                if let Err(err) = load_schematic_file(&path, params, rx)
                     .inspect_err(|err| {
                         dbg!(err);
                     })
@@ -660,14 +660,14 @@ pub fn load_preset_picker() -> PaletteItem {
     )
 }
 
-pub fn load_preset_inner(name: String) -> PaletteItem {
+pub fn load_schematic_inner(name: String) -> PaletteItem {
     PaletteItem::new(
         name.clone(),
         "",
         move |_: In<String>, params: LoadSchematicParams, rx: ResMut<SchematicLiveReloadRx>| {
             let dirs = crate::dirs();
-            let path = dirs.data_dir().join("presets").join(name.clone());
-            if let Err(err) = load_schematic(&path, params, rx) {
+            let path = dirs.data_dir().join("schematics").join(name.clone());
+            if let Err(err) = load_schematic_file(&path, params, rx) {
                 PaletteEvent::Error(err.to_string())
             } else {
                 PaletteEvent::Exit
@@ -676,7 +676,7 @@ pub fn load_preset_inner(name: String) -> PaletteItem {
     )
 }
 
-pub fn load_schematic(
+pub fn load_schematic_file(
     path: &Path,
     mut params: LoadSchematicParams,
     mut live_reload_rx: ResMut<SchematicLiveReloadRx>,
@@ -1056,8 +1056,8 @@ impl Default for PalettePage {
             create_schematic_tree(None),
             create_sidebars(),
             create_3d_object(),
-            save_preset(),
-            load_preset(),
+            save_schematic(),
+            load_schematic(),
             set_color_scheme(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {
                 let _ = opener::open("https://docs.elodin.systems");
