@@ -15,6 +15,7 @@ use bevy_egui::{
 
 use big_space::GridCell;
 use schematic::SchematicPlugin;
+use smallvec::SmallVec;
 
 use self::colors::get_scheme;
 use self::{command_palette::CommandPaletteState, timeline::timeline_slider};
@@ -68,7 +69,7 @@ pub struct HdrEnabled(pub bool);
 #[derive(Resource, Default)]
 pub struct Paused(pub bool);
 
-#[derive(Resource, Default, Debug, Clone, PartialEq, Eq, Copy)]
+#[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
 pub enum SelectedObject {
     #[default]
     None,
@@ -83,6 +84,9 @@ pub enum SelectedObject {
         action_id: Entity,
     },
     Object3D {
+        entity: Entity,
+    },
+    DashboardNode {
         entity: Entity,
     },
 }
@@ -100,6 +104,7 @@ impl SelectedObject {
             SelectedObject::Graph { graph_id } => Some(*graph_id),
             SelectedObject::Action { action_id } => Some(*action_id),
             SelectedObject::Object3D { entity } => Some(*entity),
+            SelectedObject::DashboardNode { entity } => Some(*entity),
         }
     }
 }

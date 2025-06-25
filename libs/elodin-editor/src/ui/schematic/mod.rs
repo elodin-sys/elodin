@@ -32,7 +32,7 @@ pub struct SchematicParam<'w, 's> {
     pub objects_3d: Query<'w, 's, (Entity, &'static Object3DState)>,
     pub lines_3d: Query<'w, 's, (Entity, &'static Line3d)>,
     pub ui_state: Res<'w, tiles::TileState>,
-    pub dashboards: Query<'w, 's, &'static Dashboard>,
+    pub dashboards: Query<'w, 's, &'static Dashboard<Entity>>,
 }
 
 impl SchematicParam<'_, '_> {

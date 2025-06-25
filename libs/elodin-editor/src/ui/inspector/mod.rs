@@ -7,24 +7,24 @@ use bevy_egui::egui;
 use egui::CornerRadius;
 use smallvec::SmallVec;
 
+use super::widgets::{WidgetSystem, WidgetSystemExt};
 use crate::ui::{
     InspectorAnchor, SelectedObject,
     colors::{self, get_scheme},
     tiles::TreeAction,
 };
 
-use self::{
-    entity::InspectorEntity, graph::InspectorGraph, object3d::InspectorObject3D,
-    viewport::InspectorViewport,
-};
-
-use super::widgets::{WidgetSystem, WidgetSystemExt};
-
 pub mod action;
+pub mod dashboard;
 pub mod entity;
 pub mod graph;
 pub mod object3d;
 pub mod viewport;
+
+use self::{
+    dashboard::InspectorDashboardNode, entity::InspectorEntity, graph::InspectorGraph,
+    object3d::InspectorObject3D, viewport::InspectorViewport,
+};
 
 pub struct InspectorIcons {
     pub chart: egui::TextureId,
@@ -53,7 +53,7 @@ pub fn empty_inspector() -> impl egui::Widget {
 #[derive(SystemParam)]
 pub struct InspectorContent<'w> {
     inspector_anchor: ResMut<'w, InspectorAnchor>,
-    selected_object: Res<'w, SelectedObject>,
+    selected_object: ResMut<'w, SelectedObject>,
 }
 
 impl WidgetSystem for InspectorContent<'_> {
@@ -127,6 +127,14 @@ impl WidgetSystem for InspectorContent<'_> {
                                     world,
                                     "inspector_object3d",
                                     (icons, entity),
+                                );
+                                Default::default()
+                            }
+                            SelectedObject::DashboardNode { entity } => {
+                                ui.add_widget_with::<InspectorDashboardNode>(
+                                    world,
+                                    "inspector_dashboard_node",
+                                    entity,
                                 );
                                 Default::default()
                             }

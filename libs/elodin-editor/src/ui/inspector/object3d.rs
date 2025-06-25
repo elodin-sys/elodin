@@ -76,36 +76,32 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
 
         let mono_font = egui::TextStyle::Monospace.resolve(ui.style_mut());
 
-        // Header
-        egui::Frame::NONE
-            .inner_margin(egui::Margin::ZERO.top(8.0))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.add(
-                        label::ELabel::new(object_name)
-                            .padding(egui::Margin::same(0).bottom(24.))
-                            .bottom_stroke(egui::Stroke {
-                                width: 1.0,
-                                color: get_scheme().border_primary,
-                            })
-                            .margin(egui::Margin::same(0).bottom(8.)),
-                    );
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.add(
+                label::ELabel::new(object_name)
+                    .padding(egui::Margin::same(0).bottom(24.))
+                    .bottom_stroke(egui::Stroke {
+                        width: 1.0,
+                        color: get_scheme().border_primary,
+                    })
+                    .margin(egui::Margin::same(0).bottom(8.)),
+            );
 
-                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
-                        ui.label(
-                            RichText::new(format!("{:?}", entity))
-                                .color(get_scheme().text_primary)
-                                .font(mono_font.clone()),
-                        );
-                        ui.add_space(6.0);
-                        ui.label(
-                            egui::RichText::new("Entity")
-                                .color(get_scheme().text_secondary)
-                                .font(mono_font.clone()),
-                        );
-                    });
-                });
+            ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                ui.label(
+                    RichText::new(format!("{:?}", entity))
+                        .color(get_scheme().text_primary)
+                        .font(mono_font.clone()),
+                );
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new("Entity")
+                        .color(get_scheme().text_secondary)
+                        .font(mono_font.clone()),
+                );
             });
+        });
 
         ui.add_space(8.0);
 

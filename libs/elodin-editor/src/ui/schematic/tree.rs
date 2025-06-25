@@ -12,6 +12,7 @@ use bevy::prelude::{Component, Query, ResMut};
 use egui::collapsing_header::CollapsingState;
 use egui::load::SizedTexture;
 use impeller2_wkt::{DashboardNode, Panel};
+use smallvec::{SmallVec, smallvec};
 
 #[derive(SystemParam)]
 pub struct TreeWidget<'w, 's> {
@@ -134,8 +135,8 @@ fn panel(
         .selected(selected)
         .show(ui, |ui| {
             if let Panel::Dashboard(d) = p {
-                for child in &d.root.children {
-                    dashboard_node(ui, tree_rect, &child, icons, selected_object);
+                for (i, child) in d.root.children.iter().enumerate() {
+                    dashboard_node(ui, tree_rect, &child, icons, selected_object, smallvec![i]);
                 }
             } else {
                 for child in children {
@@ -166,11 +167,18 @@ fn panel(
 fn dashboard_node(
     ui: &mut egui::Ui,
     tree_rect: egui::Rect,
-    node: &DashboardNode<()>,
+    node: &DashboardNode<Entity>,
     icons: &TreeIcons,
     selected_object: &mut SelectedObject,
+    path: SmallVec<[usize; 2]>,
 ) {
     let children = &node.children;
+
+    let selected = if Some(node.aux) == selected_object.entity() {
+        *selected_object != SelectedObject::None
+    } else {
+        false
+    };
     let branch_res = Branch::new(
         "node".to_string(),
         icons.container,
@@ -178,12 +186,17 @@ fn dashboard_node(
         tree_rect,
     )
     .leaf(children.is_empty())
-    //.selected(selected)
+    .selected(selected)
     .show(ui, |ui| {
-        for child in children {
-            dashboard_node(ui, tree_rect, &child, icons, selected_object);
+        for (i, child) in children.iter().enumerate() {
+            let mut path = path.clone();
+            path.push(i);
+            dashboard_node(ui, tree_rect, &child, icons, selected_object, path);
         }
     });
+    if branch_res.clicked() {
+        *selected_object = SelectedObject::DashboardNode { entity: node.aux };
+    }
 }
 
 pub struct Branch {

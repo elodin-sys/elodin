@@ -4706,6 +4706,7 @@ dependencies = [
  "spin",
  "stacker",
  "stellarator",
+ "strum 0.27.1",
  "thiserror 2.0.12",
  "tokio",
  "toml 0.8.19",

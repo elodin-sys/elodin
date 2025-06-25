@@ -7,8 +7,9 @@ use bevy::ui::{
 };
 use bevy::window::PrimaryWindow;
 use impeller2_bevy::EntityMap;
-use impeller2_wkt::ComponentValue;
+use impeller2_wkt::{ComponentValue, DashboardNode};
 use nox::ArrayBuf;
+use smallvec::{SmallVec, smallvec};
 
 use crate::object_3d::{CompiledExpr, compile_eql_expr};
 use crate::ui::colors::{self, ColorExt};
@@ -133,7 +134,11 @@ impl CompiledVal {
     }
 }
 
-pub fn compile_val(
+pub fn compile_val(ctx: &eql::Context, val: &impeller2_wkt::Val) -> CompiledVal {
+    try_compile_val(ctx, val).unwrap_or(CompiledVal::Auto)
+}
+
+pub fn try_compile_val(
     ctx: &eql::Context,
     val: &impeller2_wkt::Val,
 ) -> Result<CompiledVal, eql::Error> {
@@ -166,11 +171,28 @@ pub fn spawn_dashboard(
                 ..Default::default()
             },
             BackgroundColor(colors::SURFACE_PRIMARY.into_bevy()),
-            source.clone(),
         ))
         .id();
-    spawn_node(Some(parent), &source.root, eql, commands)?;
+    let node = spawn_node(
+        Some(parent),
+        &source.root,
+        eql,
+        commands,
+        parent,
+        smallvec![],
+    )?;
+    commands.entity(parent).insert(impeller2_wkt::Dashboard {
+        title: source.title.clone(),
+        root: node,
+        aux: parent,
+    });
     Ok(parent)
+}
+
+#[derive(Component)]
+pub struct DashboardNodePath {
+    pub root: Entity,
+    pub path: SmallVec<[usize; 4]>,
 }
 
 pub fn spawn_node<T>(
@@ -178,32 +200,34 @@ pub fn spawn_node<T>(
     source: &impeller2_wkt::DashboardNode<T>,
     eql: &eql::Context,
     commands: &mut Commands,
-) -> Result<Entity, eql::Error> {
-    let left = compile_val(eql, &source.left)?;
-    let right = compile_val(eql, &source.right)?;
-    let top = compile_val(eql, &source.top)?;
-    let bottom = compile_val(eql, &source.bottom)?;
-    let width = compile_val(eql, &source.width)?;
-    let height = compile_val(eql, &source.height)?;
-    let min_width = compile_val(eql, &source.min_width)?;
-    let min_height = compile_val(eql, &source.min_height)?;
-    let max_width = compile_val(eql, &source.max_width)?;
-    let max_height = compile_val(eql, &source.max_height)?;
-    let margin_left = compile_val(eql, &source.margin.left)?;
-    let margin_right = compile_val(eql, &source.margin.right)?;
-    let margin_top = compile_val(eql, &source.margin.top)?;
-    let margin_bottom = compile_val(eql, &source.margin.bottom)?;
-    let padding_left = compile_val(eql, &source.padding.left)?;
-    let padding_right = compile_val(eql, &source.padding.right)?;
-    let padding_top = compile_val(eql, &source.padding.top)?;
-    let padding_bottom = compile_val(eql, &source.padding.bottom)?;
-    let border_left = compile_val(eql, &source.border.left)?;
-    let border_right = compile_val(eql, &source.border.right)?;
-    let border_top = compile_val(eql, &source.border.top)?;
-    let border_bottom = compile_val(eql, &source.border.bottom)?;
-    let flex_basis = compile_val(eql, &source.flex_basis)?;
-    let row_gap = compile_val(eql, &source.row_gap)?;
-    let column_gap = compile_val(eql, &source.column_gap)?;
+    root: Entity,
+    path: SmallVec<[usize; 4]>,
+) -> Result<DashboardNode<Entity>, eql::Error> {
+    let left = compile_val(eql, &source.left);
+    let right = compile_val(eql, &source.right);
+    let top = compile_val(eql, &source.top);
+    let bottom = compile_val(eql, &source.bottom);
+    let width = compile_val(eql, &source.width);
+    let height = compile_val(eql, &source.height);
+    let min_width = compile_val(eql, &source.min_width);
+    let min_height = compile_val(eql, &source.min_height);
+    let max_width = compile_val(eql, &source.max_width);
+    let max_height = compile_val(eql, &source.max_height);
+    let margin_left = compile_val(eql, &source.margin.left);
+    let margin_right = compile_val(eql, &source.margin.right);
+    let margin_top = compile_val(eql, &source.margin.top);
+    let margin_bottom = compile_val(eql, &source.margin.bottom);
+    let padding_left = compile_val(eql, &source.padding.left);
+    let padding_right = compile_val(eql, &source.padding.right);
+    let padding_top = compile_val(eql, &source.padding.top);
+    let padding_bottom = compile_val(eql, &source.padding.bottom);
+    let border_left = compile_val(eql, &source.border.left);
+    let border_right = compile_val(eql, &source.border.right);
+    let border_top = compile_val(eql, &source.border.top);
+    let border_bottom = compile_val(eql, &source.border.bottom);
+    let flex_basis = compile_val(eql, &source.flex_basis);
+    let row_gap = compile_val(eql, &source.row_gap);
+    let column_gap = compile_val(eql, &source.column_gap);
     let text = source.text.as_ref().and_then(|src| {
         let expr = eql.parse_str(src).ok()?;
         Some(compile_eql_expr(expr))
@@ -368,19 +392,65 @@ pub fn spawn_node<T>(
             source.color.b,
             source.color.a,
         )),
+        DashboardNodePath {
+            root,
+            path: path.clone(),
+        },
     ));
-    //let source = source.map_aux(|_| node.id());
     if let Some(parent) = parent {
         node.insert(ChildOf(parent));
     }
     if has_text {
         node.insert(Text("".to_string()));
     }
-    //node.insert(source.clone());
     let node = node.id();
-    for child in &source.children {
-        spawn_node(Some(node), child, eql, commands)?;
-    }
+    let node = DashboardNode {
+        display: source.display,
+        box_sizing: source.box_sizing,
+        position_type: source.position_type,
+        overflow: source.overflow,
+        overflow_clip_margin: source.overflow_clip_margin.clone(),
+        left: source.left.clone(),
+        right: source.right.clone(),
+        top: source.top.clone(),
+        bottom: source.bottom.clone(),
+        width: source.width.clone(),
+        height: source.height.clone(),
+        min_width: source.min_width.clone(),
+        min_height: source.min_height.clone(),
+        max_width: source.max_width.clone(),
+        max_height: source.max_height.clone(),
+        aspect_ratio: source.aspect_ratio,
+        align_items: source.align_items,
+        justify_items: source.justify_items,
+        align_self: source.align_self,
+        justify_self: source.justify_self,
+        align_content: source.align_content,
+        justify_content: source.justify_content,
+        margin: source.margin.clone(),
+        padding: source.padding.clone(),
+        border: source.border.clone(),
+        flex_direction: source.flex_direction,
+        flex_wrap: source.flex_wrap,
+        flex_grow: source.flex_grow,
+        flex_shrink: source.flex_shrink,
+        flex_basis: source.flex_basis.clone(),
+        row_gap: source.row_gap.clone(),
+        column_gap: source.column_gap.clone(),
+        children: source
+            .children
+            .iter()
+            .enumerate()
+            .map(|(index, child)| {
+                let mut path = path.clone();
+                path.push(index);
+                spawn_node(Some(node), child, eql, commands, root, path)
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        color: source.color,
+        text: source.text.clone(),
+        aux: node,
+    };
     Ok(node)
 }
 

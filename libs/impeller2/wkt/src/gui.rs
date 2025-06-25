@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::HashMap;
 use std::ops::Range;
 use std::time::Duration;
-use strum::{EnumString, IntoStaticStr};
+use strum::{EnumString, IntoStaticStr, VariantNames};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(bound = "T: Serialize + DeserializeOwned")]
@@ -65,7 +65,7 @@ pub enum Panel<T = ()> {
     Inspector,
     Hierarchy,
     SchematicTree,
-    Dashboard(Box<Dashboard>),
+    Dashboard(Box<Dashboard<T>>),
 }
 
 impl<T> Panel<T> {
@@ -118,7 +118,7 @@ impl<T> Panel<T> {
             Panel::SchematicTree => Panel::SchematicTree,
             Panel::Inspector => Panel::Inspector,
             Panel::Viewport(v) => Panel::Viewport(v.map_aux(f)),
-            Panel::Dashboard(d) => Panel::Dashboard(d.clone()),
+            Panel::Dashboard(d) => Panel::Dashboard(Box::new(d.map_aux(f))),
         }
     }
 
@@ -525,7 +525,9 @@ impl<T> DashboardNode<T> {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr)]
+#[derive(
+    Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
+)]
 #[strum(serialize_all = "kebab-case")]
 pub enum PositionType {
     #[default]
@@ -533,7 +535,9 @@ pub enum PositionType {
     Absolute,
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr)]
+#[derive(
+    Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
+)]
 #[strum(serialize_all = "kebab-case")]
 pub enum AlignItems {
     #[default]
@@ -547,7 +551,9 @@ pub enum AlignItems {
     Stretch,
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr)]
+#[derive(
+    Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
+)]
 #[strum(serialize_all = "kebab-case")]
 pub enum JustifyItems {
     #[default]
@@ -559,7 +565,9 @@ pub enum JustifyItems {
     Stretch,
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr)]
+#[derive(
+    Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
+)]
 #[strum(serialize_all = "kebab-case")]
 pub enum Display {
     #[default]
@@ -569,7 +577,9 @@ pub enum Display {
     None,
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr)]
+#[derive(
+    Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
+)]
 #[strum(serialize_all = "kebab-case")]
 pub enum BoxSizing {
     #[default]
@@ -589,7 +599,9 @@ pub struct OverflowClipMargin {
     pub margin: f32,
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr)]
+#[derive(
+    Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
+)]
 #[strum(serialize_all = "kebab-case")]
 pub enum OverflowClipBox {
     #[default]
@@ -617,7 +629,9 @@ impl Default for UiRect {
     }
 }
 
-#[derive(Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr)]
+#[derive(
+    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
+)]
 #[strum(serialize_all = "kebab-case")]
 pub enum OverflowAxis {
     #[default]
@@ -627,7 +641,9 @@ pub enum OverflowAxis {
     Scroll,
 }
 
-#[derive(Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr)]
+#[derive(
+    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
+)]
 #[strum(serialize_all = "kebab-case")]
 pub enum FlexDirection {
     #[default]
@@ -637,7 +653,9 @@ pub enum FlexDirection {
     ColumnReverse,
 }
 
-#[derive(Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr)]
+#[derive(
+    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
+)]
 #[strum(serialize_all = "kebab-case")]
 pub enum FlexWrap {
     #[default]
@@ -658,7 +676,23 @@ pub enum Val {
     VMax(String),
 }
 
-#[derive(Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr)]
+impl Val {
+    pub fn eql(&self) -> &str {
+        match self {
+            Val::Auto => "",
+            Val::Px(v) => v,
+            Val::Percent(v) => v,
+            Val::Vw(v) => v,
+            Val::Vh(v) => v,
+            Val::VMin(v) => v,
+            Val::VMax(v) => v,
+        }
+    }
+}
+
+#[derive(
+    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
+)]
 #[strum(serialize_all = "kebab-case")]
 pub enum AlignSelf {
     #[default]
@@ -672,7 +706,9 @@ pub enum AlignSelf {
     Stretch,
 }
 
-#[derive(Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr)]
+#[derive(
+    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
+)]
 #[strum(serialize_all = "kebab-case")]
 pub enum JustifySelf {
     #[default]
@@ -684,7 +720,9 @@ pub enum JustifySelf {
     Stretch,
 }
 
-#[derive(Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr)]
+#[derive(
+    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
+)]
 #[strum(serialize_all = "kebab-case")]
 pub enum AlignContent {
     #[default]
@@ -700,7 +738,9 @@ pub enum AlignContent {
     SpaceAround,
 }
 
-#[derive(Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr)]
+#[derive(
+    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
+)]
 #[strum(serialize_all = "kebab-case")]
 pub enum JustifyContent {
     #[default]

@@ -81,6 +81,7 @@ const-fnv1a-hash = "1.1.0"
 zerocopy = "0.8.14"
 hifitime.version = "4.0"
 stacker = "0.1.19"
+strum = "0.27"
 
 # arrow
 arrow.version = "55"
