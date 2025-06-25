@@ -15,7 +15,6 @@ use bevy_egui::{
 
 use big_space::GridCell;
 use schematic::SchematicPlugin;
-use smallvec::SmallVec;
 
 use self::colors::get_scheme;
 use self::{command_palette::CommandPaletteState, timeline::timeline_slider};
@@ -28,7 +27,6 @@ use impeller2_wkt::ComponentValue;
 use crate::{GridHandle, MainCamera, plugins::LogicalKeyState};
 
 use self::inspector::entity::ComponentFilter;
-//use self::widgets::modal::ModalWithSettings;
 
 use self::command_palette::CommandPalette;
 use self::widgets::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystemExt};

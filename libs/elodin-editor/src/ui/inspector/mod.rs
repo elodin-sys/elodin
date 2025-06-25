@@ -1,6 +1,6 @@
 use action::InspectorAction;
 use bevy::ecs::{
-    system::{Res, ResMut, SystemParam, SystemState},
+    system::{ResMut, SystemParam, SystemState},
     world::World,
 };
 use bevy_egui::egui;
@@ -20,6 +20,9 @@ pub mod entity;
 pub mod graph;
 pub mod object3d;
 pub mod viewport;
+
+mod widgets;
+pub use widgets::*;
 
 use self::{
     dashboard::InspectorDashboardNode, entity::InspectorEntity, graph::InspectorGraph,

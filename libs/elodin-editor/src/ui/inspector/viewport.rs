@@ -21,8 +21,7 @@ use crate::{
     ui::{label::ELabel, theme, utils::MarginSides},
 };
 
-use super::empty_inspector;
-use super::graph::{eql_autocomplete, query};
+use super::{empty_inspector, eql_autocomplete, query};
 
 #[derive(Component)]
 pub struct Viewport {
@@ -156,7 +155,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
 
 fn eql_input(ui: &mut egui::Ui, editable_expr: &mut EditableEQL, ctx: &eql::Context) {
     configure_input_with_border(ui.style_mut());
-    let query_res = query(ui, &mut editable_expr.eql, QueryType::EQL);
+    let query_res = ui.add(query(&mut editable_expr.eql, QueryType::EQL));
     eql_autocomplete(ui, ctx, &query_res, &mut editable_expr.eql);
     if query_res.changed() {
         if editable_expr.eql.is_empty() {

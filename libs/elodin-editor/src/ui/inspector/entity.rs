@@ -20,6 +20,7 @@ use crate::{
     ui::{
         EntityPair,
         colors::get_scheme,
+        inspector::search,
         label,
         plot::{GraphBundle, default_component_values},
         tiles::TreeAction,
@@ -174,40 +175,6 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
 
 #[derive(Resource, Default)]
 pub struct ComponentFilter(pub String);
-
-pub fn search(
-    ui: &mut egui::Ui,
-    filter: &mut String,
-    search_icon: egui::TextureId,
-) -> egui::Response {
-    ui.vertical(|ui| {
-        egui::Frame::NONE
-            .corner_radius(egui::CornerRadius::same(3))
-            .inner_margin(egui::Margin::same(4))
-            .fill(get_scheme().bg_secondary)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.add(
-                        egui::widgets::Image::new(egui::load::SizedTexture::new(
-                            search_icon,
-                            [ui.spacing().interact_size.y, ui.spacing().interact_size.y],
-                        ))
-                        .tint(get_scheme().text_secondary),
-                    );
-
-                    let mut font_id = egui::TextStyle::Button.resolve(ui.style());
-                    font_id.size = 12.0;
-                    ui.add(
-                        egui::TextEdit::singleline(filter)
-                            .desired_width(ui.available_width())
-                            .frame(false)
-                            .font(font_id),
-                    );
-                });
-            });
-    })
-    .response
-}
 
 fn inspector_item_value_ui(
     ui: &mut egui::Ui,

@@ -17,7 +17,7 @@ use crate::EqlContext;
 use super::{
     button::EButton,
     colors::{ColorExt, get_scheme},
-    inspector::graph::eql_autocomplete,
+    inspector::eql_autocomplete,
     theme,
     widgets::WidgetSystem,
 };

@@ -1,9 +1,9 @@
 use std::f32;
 
+use crate::ui::SelectedObject;
 use crate::ui::colors::{ColorExt, get_scheme};
-use crate::ui::inspector::entity::search;
+use crate::ui::inspector::search;
 use crate::ui::widgets::WidgetSystem;
-use crate::ui::{SelectedObject, dashboard};
 
 use super::CurrentSchematic;
 use bevy::ecs::entity::Entity;
@@ -158,6 +158,9 @@ fn panel(
             }
             Panel::QueryPlot(plot) => {
                 *selected_object = SelectedObject::Graph { graph_id: plot.aux }
+            }
+            Panel::Dashboard(d) => {
+                *selected_object = SelectedObject::DashboardNode { entity: d.aux }
             }
             _ => {}
         }

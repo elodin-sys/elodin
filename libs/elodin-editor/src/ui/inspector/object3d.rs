@@ -26,10 +26,8 @@ use crate::{
     },
 };
 
-use super::graph::color_popup;
 use super::{
-    InspectorIcons, empty_inspector,
-    graph::{eql_autocomplete, inspector_text_field, query},
+    InspectorIcons, color_popup, empty_inspector, eql_autocomplete, inspector_text_field, query,
 };
 
 #[derive(SystemParam)]
@@ -110,11 +108,10 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
             ui.add_space(8.0);
             configure_input_with_border(ui.style_mut());
 
-            let query_res = query(
-                ui,
+            let query_res = ui.add(query(
                 &mut object_3d_state.data.eql,
                 impeller2_wkt::QueryType::EQL,
-            );
+            ));
             eql_autocomplete(
                 ui,
                 &eql_context.0,
@@ -215,7 +212,10 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                 Object3DMesh::Glb(path) => {
                     ui.label(egui::RichText::new("GLB Path").color(get_scheme().text_secondary));
                     ui.add_space(4.0);
-                    if inspector_text_field(ui, path, "Enter a path to a glb").changed() {
+                    if ui
+                        .add(inspector_text_field(path, "Enter a path to a glb"))
+                        .changed()
+                    {
                         changed = true;
                     }
                 }
