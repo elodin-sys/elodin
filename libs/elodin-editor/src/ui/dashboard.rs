@@ -1,3 +1,4 @@
+use bevy::ecs::entity;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::ui::{
@@ -160,6 +161,8 @@ pub fn spawn_dashboard(
     source: &impeller2_wkt::Dashboard,
     eql: &eql::Context,
     commands: &mut Commands,
+    entity_map: &EntityMap,
+    values: &Query<&'static ComponentValue>,
 ) -> Result<Entity, eql::Error> {
     let mut parent = commands.spawn((
         Node {
@@ -178,6 +181,8 @@ pub fn spawn_dashboard(
         parent.with_child(()),
         parent_id,
         smallvec![],
+        entity_map,
+        values,
     )?;
     parent.insert(impeller2_wkt::Dashboard {
         root: node,
@@ -202,6 +207,8 @@ pub fn spawn_node<T>(
     commands: &mut EntityCommands,
     root: Entity,
     path: SmallVec<[usize; 4]>,
+    entity_map: &EntityMap,
+    values: &Query<&'static ComponentValue>,
 ) -> Result<DashboardNode<Entity>, eql::Error> {
     let left = compile_val(eql, &source.left);
     let right = compile_val(eql, &source.right);
@@ -344,8 +351,8 @@ pub fn spawn_node<T>(
         flex_shrink: source.flex_shrink,
         ..Default::default()
     };
-    let updater_node = node.clone();
     let has_text = text.is_some();
+    let updater_node = node.clone();
     let node_updater = NodeUpdater(Box::new(move |e, q| {
         let mut node = updater_node.clone();
         node.left = left.execute(e, q)?;
@@ -383,6 +390,7 @@ pub fn spawn_node<T>(
         Ok((node, text))
     }));
 
+    let (node, text) = ((node_updater.0)(&entity_map, &values)).unwrap_or((node, None));
     let node = commands.insert((
         node,
         node_updater,
@@ -397,8 +405,8 @@ pub fn spawn_node<T>(
             path: path.clone(),
         },
     ));
-    if has_text {
-        node.insert(Text("".to_string()));
+    if let Some(text) = text {
+        node.insert(text);
     }
     let node = node.id();
     let node = DashboardNode {
@@ -445,7 +453,7 @@ pub fn spawn_node<T>(
                 let parent_id = commands.id();
                 let mut commands = commands.commands();
                 let mut commands = commands.spawn(ChildOf(parent_id));
-                spawn_node(child, eql, &mut commands, root, path)
+                spawn_node(child, eql, &mut commands, root, path, entity_map, values)
             })
             .collect::<Result<Vec<_>, _>>()?,
         color: source.color,

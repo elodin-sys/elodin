@@ -1,12 +1,13 @@
 use std::str::FromStr;
 
 use bevy::{ecs::system::SystemParam, prelude::*};
-use impeller2_wkt::{Dashboard, DashboardNode};
+use impeller2_bevy::EntityMap;
+use impeller2_wkt::{ComponentValue, Dashboard, DashboardNode};
 
 use crate::{
     EqlContext,
     ui::{
-        SelectedObject,
+        self, SelectedObject,
         button::ECheckboxButton,
         colors::{self, EColor, get_scheme},
         dashboard::{DashboardNodePath, spawn_node},
@@ -24,6 +25,8 @@ pub struct InspectorDashboardNode<'w, 's> {
     pub eql_ctx: Res<'w, EqlContext>,
     pub commands: Commands<'w, 's>,
     pub selected_object: ResMut<'w, SelectedObject>,
+    pub entity_map: Res<'w, EntityMap>,
+    pub values: Query<'w, 's, &'static ComponentValue>,
 }
 
 impl WidgetSystem for InspectorDashboardNode<'_, '_> {
@@ -43,6 +46,8 @@ impl WidgetSystem for InspectorDashboardNode<'_, '_> {
             eql_ctx,
             mut commands,
             mut selected_object,
+            entity_map,
+            values,
         } = state.get_mut(world);
         let Ok((path, children)) = paths.get(entity) else {
             ui.colored_label(get_scheme().error, "Node found");
@@ -102,13 +107,15 @@ impl WidgetSystem for InspectorDashboardNode<'_, '_> {
                     commands.entity(child).despawn();
                 }
             }
-            let mut commands = commands.entity(node.aux);
+            let mut entity = commands.entity(node.aux);
             if let Ok(new) = spawn_node(
                 node,
                 &eql_ctx.0,
-                &mut commands,
+                &mut entity,
                 dashboard_entity,
                 path.path.clone(),
+                &entity_map,
+                &values,
             ) {
                 *selected_object = SelectedObject::DashboardNode { entity: new.aux };
                 *node = new;

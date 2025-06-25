@@ -1,8 +1,8 @@
 use bevy::{ecs::system::SystemParam, prelude::*};
 use bevy_egui::egui::Color32;
 use egui_tiles::{Container, Tile, TileId};
-use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
-use impeller2_wkt::{Graph, Object3D, Panel, Schematic, Viewport};
+use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry, EntityMap};
+use impeller2_wkt::{ComponentValue, Graph, Object3D, Panel, Schematic, Viewport};
 use std::collections::BTreeMap;
 
 use crate::{
@@ -36,6 +36,8 @@ pub struct LoadSchematicParams<'w, 's> {
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
     pub eql: Res<'w, EqlContext>,
     pub selected_object: ResMut<'w, SelectedObject>,
+    pub entity_map: Res<'w, EntityMap>,
+    pub values: Query<'w, 's, &'static ComponentValue>,
     objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
 }
 
@@ -264,11 +266,16 @@ impl LoadSchematicParams<'_, '_> {
                     .insert_tile(Tile::Pane(pane), parent_id, false)
             }
             Panel::Dashboard(dashboard) => {
-                let Ok(dashboard) = spawn_dashboard(dashboard, &self.eql.0, &mut self.commands)
-                    .inspect_err(|err| {
-                        warn!(?err, "Failed to spawn dashboard");
-                    })
-                else {
+                let Ok(dashboard) = spawn_dashboard(
+                    dashboard,
+                    &self.eql.0,
+                    &mut self.commands,
+                    &self.entity_map,
+                    &self.values,
+                )
+                .inspect_err(|err| {
+                    warn!(?err, "Failed to spawn dashboard");
+                }) else {
                     return None;
                 };
                 self.tile_state.insert_tile(
