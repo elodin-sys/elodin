@@ -1,24 +1,37 @@
 use std::f32;
 
+use crate::EqlContext;
 use crate::ui::SelectedObject;
 use crate::ui::colors::{ColorExt, get_scheme};
+use crate::ui::dashboard::{DashboardNodePath, NodeUpdaterParams, spawn_node};
+use crate::ui::inspector::dashboard::DashboardExt;
 use crate::ui::inspector::search;
 use crate::ui::widgets::WidgetSystem;
 
 use super::CurrentSchematic;
 use bevy::ecs::entity::Entity;
-use bevy::ecs::system::SystemParam;
+use bevy::ecs::hierarchy::ChildOf;
+use bevy::ecs::system::{Commands, Res, SystemParam};
 use bevy::prelude::{Component, Query, ResMut};
 use egui::collapsing_header::CollapsingState;
 use egui::load::SizedTexture;
-use impeller2_wkt::{DashboardNode, Panel};
-use smallvec::{SmallVec, smallvec};
+use impeller2_wkt::{Dashboard, DashboardNode, Panel};
+use smallvec::smallvec;
 
 #[derive(SystemParam)]
 pub struct TreeWidget<'w, 's> {
     schematic: ResMut<'w, CurrentSchematic>,
     state: Query<'w, 's, &'static mut TreeWidgetState>,
     selected_object: ResMut<'w, SelectedObject>,
+    spawn_node_params: SpawnNodeParams<'w, 's>,
+}
+
+#[derive(SystemParam)]
+struct SpawnNodeParams<'w, 's> {
+    eql_ctx: Res<'w, EqlContext>,
+    commands: Commands<'w, 's>,
+    node_update_params: NodeUpdaterParams<'w, 's>,
+    dashboards: Query<'w, 's, &'static mut Dashboard<Entity>>,
 }
 
 pub struct TreeIcons {
@@ -27,6 +40,7 @@ pub struct TreeIcons {
     pub viewport: egui::TextureId,
     pub plot: egui::TextureId,
     pub container: egui::TextureId,
+    pub add: egui::TextureId,
 }
 
 #[derive(Component, Default)]
@@ -49,6 +63,7 @@ impl WidgetSystem for TreeWidget<'_, '_> {
             schematic,
             mut state,
             mut selected_object,
+            mut spawn_node_params,
         } = state.get_mut(world);
         let Ok(mut tree_state) = state.get_mut(entity) else {
             return;
@@ -66,9 +81,14 @@ impl WidgetSystem for TreeWidget<'_, '_> {
         egui::ScrollArea::vertical().show(ui, |ui| {
             for elem in &schematic.elems {
                 match elem {
-                    impeller2_wkt::SchematicElem::Panel(p) => {
-                        panel(ui, max_rect, &icons, p, &mut selected_object)
-                    }
+                    impeller2_wkt::SchematicElem::Panel(p) => panel(
+                        ui,
+                        max_rect,
+                        &icons,
+                        p,
+                        &mut selected_object,
+                        &mut spawn_node_params,
+                    ),
                     impeller2_wkt::SchematicElem::Object3d(object_3d) => {
                         let selected = if Some(object_3d.aux) == selected_object.entity() {
                             *selected_object != SelectedObject::None
@@ -84,7 +104,7 @@ impl WidgetSystem for TreeWidget<'_, '_> {
                         .leaf(true)
                         .selected(selected)
                         .show(ui, |_| {});
-                        if branch_res.clicked() {
+                        if branch_res.inner.clicked() {
                             *selected_object = SelectedObject::Object3D {
                                 entity: object_3d.aux,
                             };
@@ -103,6 +123,7 @@ fn panel(
     icons: &TreeIcons,
     p: &Panel<Entity>,
     selected_object: &mut SelectedObject,
+    spawn_node_params: &mut SpawnNodeParams,
 ) {
     let p = p.collapse();
     let icon = match p {
@@ -130,21 +151,43 @@ fn panel(
     } else {
         children.is_empty()
     };
-    let branch_res = Branch::new(p.label().to_string(), icon, icons.chevron, tree_rect)
+    let mut branch = Branch::new(p.label().to_string(), icon, icons.chevron, tree_rect)
         .leaf(leaf)
-        .selected(selected)
-        .show(ui, |ui| {
-            if let Panel::Dashboard(d) = p {
-                for (i, child) in d.root.children.iter().enumerate() {
-                    dashboard_node(ui, tree_rect, &child, icons, selected_object, smallvec![i]);
-                }
-            } else {
-                for child in children {
-                    panel(ui, tree_rect, icons, child, selected_object);
-                }
+        .selected(selected);
+    if let Panel::Dashboard(_) = p {
+        branch = branch.extra_icon(icons.add);
+    }
+    let branch_res = branch.show(ui, |ui| {
+        if let Panel::Dashboard(d) = p {
+            for (i, child) in d.root.children.iter().enumerate() {
+                dashboard_node(
+                    ui,
+                    tree_rect,
+                    child,
+                    icons,
+                    selected_object,
+                    DashboardNodePath {
+                        root: d.aux,
+                        path: smallvec![i],
+                    },
+                    spawn_node_params,
+                    d.aux,
+                );
             }
-        });
-    if branch_res.clicked() {
+        } else {
+            for child in children {
+                panel(
+                    ui,
+                    tree_rect,
+                    icons,
+                    child,
+                    selected_object,
+                    spawn_node_params,
+                );
+            }
+        }
+    });
+    if branch_res.inner.clicked() {
         match p {
             Panel::Viewport(viewport) => {
                 *selected_object = SelectedObject::Viewport {
@@ -165,15 +208,30 @@ fn panel(
             _ => {}
         }
     }
+    if branch_res.extra_clicked {
+        if let Panel::Dashboard(d) = p {
+            spawn_child_node(
+                DashboardNodePath {
+                    root: d.aux,
+                    path: smallvec![],
+                },
+                spawn_node_params,
+                d.aux,
+            );
+        }
+    }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn dashboard_node(
     ui: &mut egui::Ui,
     tree_rect: egui::Rect,
     node: &DashboardNode<Entity>,
     icons: &TreeIcons,
     selected_object: &mut SelectedObject,
-    path: SmallVec<[usize; 2]>,
+    path: DashboardNodePath,
+    spawn_node_params: &mut SpawnNodeParams,
+    parent: Entity,
 ) {
     let children = &node.children;
 
@@ -189,16 +247,63 @@ fn dashboard_node(
         tree_rect,
     )
     .leaf(children.is_empty())
+    .extra_icon(icons.add)
     .selected(selected)
     .show(ui, |ui| {
         for (i, child) in children.iter().enumerate() {
             let mut path = path.clone();
-            path.push(i);
-            dashboard_node(ui, tree_rect, &child, icons, selected_object, path);
+            path.path.push(i);
+            dashboard_node(
+                ui,
+                tree_rect,
+                child,
+                icons,
+                selected_object,
+                path,
+                spawn_node_params,
+                node.aux,
+            );
         }
     });
-    if branch_res.clicked() {
+    if branch_res.extra_clicked {
+        spawn_child_node(path, spawn_node_params, parent);
+    }
+
+    if branch_res.inner.clicked() {
         *selected_object = SelectedObject::DashboardNode { entity: node.aux };
+    }
+}
+
+fn spawn_child_node(
+    path: DashboardNodePath,
+    spawn_node_params: &mut SpawnNodeParams,
+    parent: Entity,
+) {
+    let mut path = path.clone();
+    let SpawnNodeParams {
+        eql_ctx,
+        commands,
+        node_update_params,
+        dashboards,
+    } = spawn_node_params;
+    let mut commands = commands.spawn(ChildOf(parent));
+
+    let Ok(mut dashboard) = dashboards.get_mut(path.root) else {
+        return;
+    };
+    let Some(parent_node) = dashboard.root.get_node_mut(&path.path) else {
+        return;
+    };
+    path.path.push(parent_node.children.len());
+    if let Ok(child) = spawn_node::<()>(
+        &Default::default(),
+        &eql_ctx.0,
+        &mut commands,
+        path.root,
+        path.path,
+        node_update_params,
+    ) {
+        parent_node.children.push(child);
     }
 }
 
@@ -208,6 +313,7 @@ pub struct Branch {
     pub chevron: egui::TextureId,
     pub leaf: bool,
     pub tree_rect: egui::Rect,
+    pub extra_icon: Option<egui::TextureId>,
     pub selected: bool,
 }
 
@@ -224,6 +330,7 @@ impl Branch {
             chevron,
             leaf: true,
             tree_rect,
+            extra_icon: None,
             selected: false,
         }
     }
@@ -238,7 +345,12 @@ impl Branch {
         self
     }
 
-    pub fn show(self, ui: &mut egui::Ui, content: impl FnOnce(&mut egui::Ui)) -> egui::Response {
+    pub fn extra_icon(mut self, icon: egui::TextureId) -> Self {
+        self.extra_icon = Some(icon);
+        self
+    }
+
+    pub fn show(self, ui: &mut egui::Ui, content: impl FnOnce(&mut egui::Ui)) -> BranchResponse {
         let Branch {
             label,
             icon,
@@ -246,12 +358,14 @@ impl Branch {
             leaf,
             tree_rect,
             selected,
+            extra_icon,
         } = self;
 
         let id = ui.next_auto_id();
         let mut state = CollapsingState::load_with_default_open(ui.ctx(), id, true);
         let chevron = SizedTexture::new(chevron, [18., 18.]);
         let icon = SizedTexture::new(icon, [12., 12.]);
+        let extra_icon = extra_icon.map(|icon| SizedTexture::new(icon, [12., 12.]));
         ui.spacing_mut().icon_width_inner = 12.0;
         ui.visuals_mut().indent_has_left_vline = false;
         let scheme = get_scheme();
@@ -333,10 +447,37 @@ impl Branch {
                         scheme.text_primary
                     },
                 );
-                response.with_new_rect(inner_rect)
+
+                let mut extra_clicked = false;
+                if let Some(extra_icon) = extra_icon {
+                    let extra_rect = egui::Rect::from_center_size(
+                        response.rect.right_center() - egui::vec2(6.0 + 8.0, 0.0),
+                        egui::vec2(12., 12.),
+                    );
+                    egui::Image::from_texture(extra_icon)
+                        .tint(icon_color)
+                        .paint_at(ui, extra_rect);
+
+                    if let Some(pos) = response.interact_pointer_pos() {
+                        if response.clicked() && extra_rect.contains(pos) {
+                            response.flags &= !egui::response::Flags::CLICKED;
+                            extra_clicked = true;
+                        }
+                    }
+                }
+
+                BranchResponse {
+                    inner: response.with_new_rect(inner_rect),
+                    extra_clicked,
+                }
             },
         );
         state.show_body_indented(&header_res.response, ui, content);
         header_res.inner
     }
+}
+
+pub struct BranchResponse {
+    pub inner: egui::Response,
+    pub extra_clicked: bool,
 }

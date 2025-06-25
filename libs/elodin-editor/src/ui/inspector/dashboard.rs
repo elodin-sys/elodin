@@ -1,16 +1,15 @@
 use std::str::FromStr;
 
 use bevy::{ecs::system::SystemParam, prelude::*};
-use impeller2_bevy::EntityMap;
-use impeller2_wkt::{ComponentValue, Dashboard, DashboardNode};
+use impeller2_wkt::{Dashboard, DashboardNode};
 
 use crate::{
     EqlContext,
     ui::{
-        self, SelectedObject,
+        SelectedObject,
         button::ECheckboxButton,
-        colors::{self, EColor, get_scheme},
-        dashboard::{DashboardNodePath, spawn_node},
+        colors::{EColor, get_scheme},
+        dashboard::{DashboardNodePath, NodeUpdaterParams, spawn_node},
         inspector::{color_popup, eql_autocomplete, query},
         label,
         theme::{configure_combo_box, configure_combo_item, configure_input_with_border},
@@ -25,8 +24,7 @@ pub struct InspectorDashboardNode<'w, 's> {
     pub eql_ctx: Res<'w, EqlContext>,
     pub commands: Commands<'w, 's>,
     pub selected_object: ResMut<'w, SelectedObject>,
-    pub entity_map: Res<'w, EntityMap>,
-    pub values: Query<'w, 's, &'static ComponentValue>,
+    pub node_updater_params: NodeUpdaterParams<'w, 's>,
 }
 
 impl WidgetSystem for InspectorDashboardNode<'_, '_> {
@@ -46,8 +44,7 @@ impl WidgetSystem for InspectorDashboardNode<'_, '_> {
             eql_ctx,
             mut commands,
             mut selected_object,
-            entity_map,
-            values,
+            node_updater_params,
         } = state.get_mut(world);
         let Ok((path, children)) = paths.get(entity) else {
             ui.colored_label(get_scheme().error, "Node found");
@@ -72,7 +69,7 @@ impl WidgetSystem for InspectorDashboardNode<'_, '_> {
         label::editable_label_with_buttons(
             ui,
             [],
-            &mut node.label.get_or_insert_with(|| {
+            node.label.get_or_insert_with(|| {
                 if path.path.is_empty() {
                     "Dashboard".to_string()
                 } else {
@@ -114,8 +111,7 @@ impl WidgetSystem for InspectorDashboardNode<'_, '_> {
                 &mut entity,
                 dashboard_entity,
                 path.path.clone(),
-                &entity_map,
-                &values,
+                &node_updater_params,
             ) {
                 *selected_object = SelectedObject::DashboardNode { entity: new.aux };
                 *node = new;
@@ -224,7 +220,7 @@ fn eql_textfield(
 ) -> egui::Response {
     ui.vertical(|ui| {
         let eql_res = ui.add_enabled(enabled, query(eql, impeller2_wkt::QueryType::EQL));
-        eql_autocomplete(ui, &eql_ctx, &eql_res, eql);
+        eql_autocomplete(ui, eql_ctx, &eql_res, eql);
         eql_res
     })
     .inner

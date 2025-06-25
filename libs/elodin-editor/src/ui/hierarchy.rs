@@ -143,7 +143,7 @@ fn component_part(
             }
         });
 
-    if list_item.clicked() {
+    if list_item.inner.clicked() {
         let Some(entity) = entity_map.get(&part.id) else {
             return;
         };

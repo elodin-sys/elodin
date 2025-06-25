@@ -1,4 +1,3 @@
-use bevy::ecs::entity;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::ui::{
@@ -60,10 +59,13 @@ impl WidgetSystem for DashboardWidget<'_, '_> {
     }
 }
 
-type NodeFn = dyn for<'a, 'b> Fn(
-        &'a EntityMap,
-        &'a Query<'b, 'b, &'static ComponentValue>,
-    ) -> Result<(Node, Option<Text>), String>
+#[derive(SystemParam)]
+pub struct NodeUpdaterParams<'w, 's> {
+    entity_map: Res<'w, EntityMap>,
+    values: Query<'w, 's, &'static ComponentValue>,
+}
+
+type NodeFn = dyn for<'a, 'b> Fn(&'a NodeUpdaterParams<'b, 'b>) -> Result<(Node, Option<Text>), String>
     + Send
     + Sync;
 
@@ -72,11 +74,10 @@ pub struct NodeUpdater(Box<NodeFn>);
 
 pub fn update_nodes(
     mut query: Query<(&NodeUpdater, &mut Node, Option<&mut Text>)>,
-    entity_map: Res<EntityMap>,
-    values: Query<&'static ComponentValue>,
+    params: NodeUpdaterParams,
 ) {
     for (node_updater, mut node, text) in query.iter_mut() {
-        let Ok((new_node, new_text)) = (node_updater.0)(&entity_map, &values).inspect_err(|err| {
+        let Ok((new_node, new_text)) = (node_updater.0)(&params).inspect_err(|err| {
             warn!(?err, "Failed to update node");
         }) else {
             continue;
@@ -161,8 +162,7 @@ pub fn spawn_dashboard(
     source: &impeller2_wkt::Dashboard,
     eql: &eql::Context,
     commands: &mut Commands,
-    entity_map: &EntityMap,
-    values: &Query<&'static ComponentValue>,
+    params: &NodeUpdaterParams,
 ) -> Result<Entity, eql::Error> {
     let mut parent = commands.spawn((
         Node {
@@ -181,8 +181,7 @@ pub fn spawn_dashboard(
         parent.with_child(()),
         parent_id,
         smallvec![],
-        entity_map,
-        values,
+        params,
     )?;
     parent.insert(impeller2_wkt::Dashboard {
         root: node,
@@ -195,7 +194,7 @@ pub fn spawn_dashboard(
     Ok(parent_id)
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct DashboardNodePath {
     pub root: Entity,
     pub path: SmallVec<[usize; 4]>,
@@ -207,8 +206,7 @@ pub fn spawn_node<T>(
     commands: &mut EntityCommands,
     root: Entity,
     path: SmallVec<[usize; 4]>,
-    entity_map: &EntityMap,
-    values: &Query<&'static ComponentValue>,
+    params: &NodeUpdaterParams,
 ) -> Result<DashboardNode<Entity>, eql::Error> {
     let left = compile_val(eql, &source.left);
     let right = compile_val(eql, &source.right);
@@ -351,9 +349,12 @@ pub fn spawn_node<T>(
         flex_shrink: source.flex_shrink,
         ..Default::default()
     };
-    let has_text = text.is_some();
     let updater_node = node.clone();
-    let node_updater = NodeUpdater(Box::new(move |e, q| {
+    let node_updater = NodeUpdater(Box::new(move |params| {
+        let NodeUpdaterParams {
+            entity_map: e,
+            values: q,
+        } = params;
         let mut node = updater_node.clone();
         node.left = left.execute(e, q)?;
         node.right = right.execute(e, q)?;
@@ -390,7 +391,7 @@ pub fn spawn_node<T>(
         Ok((node, text))
     }));
 
-    let (node, text) = ((node_updater.0)(&entity_map, &values)).unwrap_or((node, None));
+    let (node, text) = ((node_updater.0)(params)).unwrap_or((node, None));
     let node = commands.insert((
         node,
         node_updater,
@@ -453,7 +454,7 @@ pub fn spawn_node<T>(
                 let parent_id = commands.id();
                 let mut commands = commands.commands();
                 let mut commands = commands.spawn(ChildOf(parent_id));
-                spawn_node(child, eql, &mut commands, root, path, entity_map, values)
+                spawn_node(child, eql, &mut commands, root, path, params)
             })
             .collect::<Result<Vec<_>, _>>()?,
         color: source.color,

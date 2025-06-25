@@ -1,8 +1,8 @@
 use bevy::{ecs::system::SystemParam, prelude::*};
 use bevy_egui::egui::Color32;
 use egui_tiles::{Container, Tile, TileId};
-use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry, EntityMap};
-use impeller2_wkt::{ComponentValue, Graph, Object3D, Panel, Schematic, Viewport};
+use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
+use impeller2_wkt::{Graph, Object3D, Panel, Schematic, Viewport};
 use std::collections::BTreeMap;
 
 use crate::{
@@ -12,7 +12,7 @@ use crate::{
     ui::{
         HdrEnabled, SelectedObject,
         colors::{self},
-        dashboard::spawn_dashboard,
+        dashboard::{NodeUpdaterParams, spawn_dashboard},
         monitor::MonitorPane,
         plot::GraphBundle,
         query_plot::QueryPlotData,
@@ -36,8 +36,7 @@ pub struct LoadSchematicParams<'w, 's> {
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
     pub eql: Res<'w, EqlContext>,
     pub selected_object: ResMut<'w, SelectedObject>,
-    pub entity_map: Res<'w, EntityMap>,
-    pub values: Query<'w, 's, &'static ComponentValue>,
+    pub node_updater_params: NodeUpdaterParams<'w, 's>,
     objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
 }
 
@@ -270,8 +269,7 @@ impl LoadSchematicParams<'_, '_> {
                     dashboard,
                     &self.eql.0,
                     &mut self.commands,
-                    &self.entity_map,
-                    &self.values,
+                    &self.node_updater_params,
                 )
                 .inspect_err(|err| {
                     warn!(?err, "Failed to spawn dashboard");

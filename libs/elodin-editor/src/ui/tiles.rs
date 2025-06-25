@@ -16,8 +16,7 @@ use bevy_render::{
 use egui::UiBuilder;
 use egui_tiles::{Container, Tile, TileId, Tiles};
 use impeller2::types::ComponentId;
-use impeller2_bevy::EntityMap;
-use impeller2_wkt::{ComponentValue, Dashboard, Graph, Viewport};
+use impeller2_wkt::{Dashboard, Graph, Viewport};
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, HashMap};
 
@@ -46,6 +45,7 @@ use crate::{
         LogicalKeyState,
         navigation_gizmo::{RenderLayerAlloc, spawn_gizmo},
     },
+    ui::dashboard::NodeUpdaterParams,
 };
 
 #[derive(Clone)]
@@ -416,6 +416,7 @@ impl Pane {
                     container: icons.container,
                     plot: icons.plot,
                     viewport: icons.viewport,
+                    add: icons.add,
                 };
                 ui.add_widget_with::<super::schematic::tree::TreeWidget>(
                     world,
@@ -965,8 +966,7 @@ pub struct TileLayout<'w, 's> {
     editor_cam: Query<'w, 's, &'static mut EditorCam, With<MainCamera>>,
     cmd_palette_state: ResMut<'w, CommandPaletteState>,
     eql_ctx: Res<'w, EqlContext>,
-    entity_map: Res<'w, EntityMap>,
-    values: Query<'w, 's, &'static ComponentValue>,
+    node_updater_params: NodeUpdaterParams<'w, 's>,
 }
 
 impl WidgetSystem for TileLayout<'_, '_> {
@@ -1146,8 +1146,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             &dashboard,
                             &state_mut.eql_ctx.0,
                             &mut state_mut.commands,
-                            &state_mut.entity_map,
-                            &state_mut.values,
+                            &state_mut.node_updater_params,
                         ) {
                             Ok(entity) => entity,
                             Err(_) => {

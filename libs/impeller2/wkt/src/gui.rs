@@ -90,7 +90,7 @@ impl<T> Panel<T> {
     pub fn collapse(&self) -> &Panel<T> {
         match self {
             Panel::Tabs(panels) if panels.len() == 1 => panels[0].collapse(),
-            _ => self,
+            this => this,
         }
     }
 
@@ -99,6 +99,14 @@ impl<T> Panel<T> {
             Panel::HSplit(split) | Panel::VSplit(split) => &split.panels,
             Panel::Tabs(panels) => panels,
             _ => &[],
+        }
+    }
+
+    pub fn children_mut(&mut self) -> &mut [Panel<T>] {
+        match self {
+            Panel::HSplit(split) | Panel::VSplit(split) => &mut split.panels,
+            Panel::Tabs(panels) => panels,
+            _ => &mut [],
         }
     }
 
