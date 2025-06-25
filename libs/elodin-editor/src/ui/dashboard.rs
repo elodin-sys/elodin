@@ -365,16 +365,17 @@ pub fn spawn_node<T>(
             source.color.a,
         )),
     ));
+    let source = source.map_aux(|_| node.id());
     if let Some(parent) = parent {
         node.insert(ChildOf(parent));
     }
     if has_text {
         node.insert(Text("".to_string()));
     }
-    let node = node.id();
     for child in &source.children {
-        spawn_node(Some(node), child, eql, commands)?;
+        spawn_node(Some(node.id()), child, eql, commands)?;
     }
+    node.insert(source);
     Ok(node)
 }
 

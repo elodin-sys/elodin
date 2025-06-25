@@ -2,6 +2,7 @@ use impeller2::types::ComponentId;
 use impeller2_wkt::{Color, Schematic, SchematicElem};
 use kdl::{KdlDocument, KdlNode};
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::time::Duration;
 
 use impeller2_wkt::*;
@@ -519,10 +520,10 @@ fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
             "turquoise" => Some(Color::TURQUOISE),
             "slate" => Some(Color::SLATE),
             "pumpkin" => Some(Color::PUMPKIN),
-            "yolk" | "yellow" => Some(Color::YOLK),
+            "yolk" => Some(Color::YOLK),
             "peach" => Some(Color::PEACH),
-            "reddish" | "red" => Some(Color::REDDISH),
-            "hyperblue" | "blue " => Some(Color::HYPERBLUE),
+            "reddish" => Some(Color::REDDISH),
+            "hyperblue" => Some(Color::HYPERBLUE),
             "mint" => Some(Color::MINT),
             _ => None,
         }
@@ -555,19 +556,19 @@ fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode<()>, KdlSchemati
     let display = node
         .get("display")
         .and_then(|v| v.as_string())
-        .map(parse_display)
+        .and_then(|s| Display::from_str(s).ok())
         .unwrap_or_default();
 
     let box_sizing = node
         .get("box_sizing")
         .and_then(|v| v.as_string())
-        .map(parse_box_sizing)
+        .and_then(|s| BoxSizing::from_str(s).ok())
         .unwrap_or_default();
 
     let position_type = node
         .get("position_type")
         .and_then(|v| v.as_string())
-        .map(parse_position_type)
+        .and_then(|s| PositionType::from_str(s).ok())
         .unwrap_or_default();
 
     let overflow = node
@@ -635,50 +636,50 @@ fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode<()>, KdlSchemati
     let align_items = node
         .get("align_items")
         .and_then(|v| v.as_string())
-        .map(parse_align_items)
+        .and_then(|s| AlignItems::from_str(s).ok())
         .unwrap_or_default();
 
     let justify_items = node
         .get("justify_items")
         .and_then(|v| v.as_string())
-        .map(parse_justify_items)
+        .and_then(|s| JustifyItems::from_str(s).ok())
         .unwrap_or_default();
 
     let align_self = node
         .get("align_self")
         .and_then(|v| v.as_string())
-        .map(parse_align_self)
+        .and_then(|s| AlignSelf::from_str(s).ok())
         .unwrap_or_default();
 
     let justify_self = node
         .get("justify_self")
         .and_then(|v| v.as_string())
-        .map(parse_justify_self)
+        .and_then(|s| JustifySelf::from_str(s).ok())
         .unwrap_or_default();
 
     let align_content = node
         .get("align_content")
         .and_then(|v| v.as_string())
-        .map(parse_align_content)
+        .and_then(|s| AlignContent::from_str(s).ok())
         .unwrap_or_default();
 
     let justify_content = node
         .get("justify_content")
         .and_then(|v| v.as_string())
-        .map(parse_justify_content)
+        .and_then(|s| JustifyContent::from_str(s).ok())
         .unwrap_or_default();
 
     let flex_direction = node
         .get("flex_direction")
         .and_then(|v| v.as_string())
-        .map(parse_flex_direction)
-        .unwrap_or(FlexDirection::Row);
+        .and_then(|s| FlexDirection::from_str(s).ok())
+        .unwrap_or_default();
 
     let flex_wrap = node
         .get("flex_wrap")
         .and_then(|v| v.as_string())
-        .map(parse_flex_wrap)
-        .unwrap_or(FlexWrap::NoWrap);
+        .and_then(|s| FlexWrap::from_str(s).ok())
+        .unwrap_or_default();
 
     let flex_grow = node
         .get("flex_grow")
@@ -709,18 +710,16 @@ fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode<()>, KdlSchemati
         .and_then(|v| v.as_string())
         .map(|s| s.to_string());
 
+    let color = parse_color_from_node(node).unwrap_or(Color::TRANSPARENT);
+
     let mut margin = UiRect::default();
     let mut padding = UiRect::default();
     let mut border = UiRect::default();
-    let mut color = Color::TRANSPARENT;
 
     let mut children = Vec::new();
     if let Some(child_nodes) = node.children() {
         for child in child_nodes.nodes() {
             match child.name().value() {
-                "background" | "bg" => {
-                    color = parse_color_from_node(child).unwrap_or(Color::TRANSPARENT);
-                }
                 "margin" => {
                     margin = parse_ui_rect_from_node(child).unwrap_or_default();
                 }
@@ -775,135 +774,6 @@ fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode<()>, KdlSchemati
         text,
         aux: (),
     })
-}
-
-fn parse_display(s: &str) -> Display {
-    match s {
-        "flex" => Display::Flex,
-        "grid" => Display::Grid,
-        "block" => Display::Block,
-        "none" => Display::None,
-        _ => Default::default(),
-    }
-}
-
-fn parse_box_sizing(s: &str) -> BoxSizing {
-    match s {
-        "border-box" => BoxSizing::BorderBox,
-        "content-box" => BoxSizing::ContentBox,
-        _ => Default::default(),
-    }
-}
-
-fn parse_position_type(s: &str) -> PositionType {
-    match s {
-        "relative" => PositionType::Relative,
-        "absolute" => PositionType::Absolute,
-        _ => Default::default(),
-    }
-}
-
-fn parse_align_items(s: &str) -> AlignItems {
-    match s {
-        "default" => AlignItems::Default,
-        "start" => AlignItems::Start,
-        "end" => AlignItems::End,
-        "flex-start" => AlignItems::FlexStart,
-        "flex-end" => AlignItems::FlexEnd,
-        "center" => AlignItems::Center,
-        "baseline" => AlignItems::Baseline,
-        "stretch" => AlignItems::Stretch,
-        _ => Default::default(),
-    }
-}
-
-fn parse_justify_items(s: &str) -> JustifyItems {
-    match s {
-        "default" => JustifyItems::Default,
-        "start" => JustifyItems::Start,
-        "end" => JustifyItems::End,
-        "center" => JustifyItems::Center,
-        "baseline" => JustifyItems::Baseline,
-        "stretch" => JustifyItems::Stretch,
-        _ => Default::default(),
-    }
-}
-
-fn parse_align_self(s: &str) -> AlignSelf {
-    match s {
-        "auto" => AlignSelf::Auto,
-        "start" => AlignSelf::Start,
-        "end" => AlignSelf::End,
-        "flex-start" => AlignSelf::FlexStart,
-        "flex-end" => AlignSelf::FlexEnd,
-        "center" => AlignSelf::Center,
-        "baseline" => AlignSelf::Baseline,
-        "stretch" => AlignSelf::Stretch,
-        _ => Default::default(),
-    }
-}
-
-fn parse_justify_self(s: &str) -> JustifySelf {
-    match s {
-        "auto" => JustifySelf::Auto,
-        "start" => JustifySelf::Start,
-        "end" => JustifySelf::End,
-        "center" => JustifySelf::Center,
-        "baseline" => JustifySelf::Baseline,
-        "stretch" => JustifySelf::Stretch,
-        _ => Default::default(),
-    }
-}
-
-fn parse_align_content(s: &str) -> AlignContent {
-    match s {
-        "default" => AlignContent::Default,
-        "start" => AlignContent::Start,
-        "end" => AlignContent::End,
-        "flex-start" => AlignContent::FlexStart,
-        "flex-end" => AlignContent::FlexEnd,
-        "center" => AlignContent::Center,
-        "stretch" => AlignContent::Stretch,
-        "space-between" => AlignContent::SpaceBetween,
-        "space-evenly" => AlignContent::SpaceEvenly,
-        "space-around" => AlignContent::SpaceAround,
-        _ => Default::default(),
-    }
-}
-
-fn parse_justify_content(s: &str) -> JustifyContent {
-    match s {
-        "default" => JustifyContent::Default,
-        "start" => JustifyContent::Start,
-        "end" => JustifyContent::End,
-        "flex-start" => JustifyContent::FlexStart,
-        "flex-end" => JustifyContent::FlexEnd,
-        "center" => JustifyContent::Center,
-        "stretch" => JustifyContent::Stretch,
-        "space-between" => JustifyContent::SpaceBetween,
-        "space-evenly" => JustifyContent::SpaceEvenly,
-        "space-around" => JustifyContent::SpaceAround,
-        _ => Default::default(),
-    }
-}
-
-fn parse_flex_direction(s: &str) -> FlexDirection {
-    match s {
-        "row" => FlexDirection::Row,
-        "column" => FlexDirection::Column,
-        "row-reverse" => FlexDirection::RowReverse,
-        "column-reverse" => FlexDirection::ColumnReverse,
-        _ => Default::default(),
-    }
-}
-
-fn parse_flex_wrap(s: &str) -> FlexWrap {
-    match s {
-        "no_wrap" => FlexWrap::NoWrap,
-        "wrap" => FlexWrap::Wrap,
-        "wrap-reverse" => FlexWrap::WrapReverse,
-        _ => Default::default(),
-    }
 }
 
 fn parse_overflow_axis(s: &str) -> OverflowAxis {
