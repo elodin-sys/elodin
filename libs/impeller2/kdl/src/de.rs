@@ -700,6 +700,12 @@ fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode<()>, KdlSchemati
         .and_then(|v| v.as_string())
         .map(|s| s.to_string());
 
+    let font_size = node
+        .get("font_size")
+        .and_then(|v| v.as_float())
+        .map(|f| f as f32)
+        .unwrap_or(16.0);
+
     let label = node
         .get("label")
         .and_then(|v| v.as_string())
@@ -709,11 +715,15 @@ fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode<()>, KdlSchemati
     let mut padding = UiRect::default();
     let mut border = UiRect::default();
     let mut color = Color::TRANSPARENT;
+    let mut text_color = Color::WHITE;
 
     let mut children = Vec::new();
     if let Some(child_nodes) = node.children() {
         for child in child_nodes.nodes() {
             match child.name().value() {
+                "text_color" => {
+                    text_color = parse_color_from_node(child).unwrap_or(Color::WHITE);
+                }
                 "bg" | "background" => {
                     color = parse_color_from_node(child).unwrap_or(Color::TRANSPARENT);
                 }
@@ -770,6 +780,8 @@ fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode<()>, KdlSchemati
         children,
         color,
         text,
+        font_size,
+        text_color,
         aux: (),
     })
 }
@@ -1024,6 +1036,41 @@ object_3d "a.world_pos" {
             assert_eq!(monitor.component_id, ComponentId::new("a.world_pos"));
         } else {
             panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_dashboard_with_font_and_color() {
+        let kdl = r#"
+dashboard label="Styled Dashboard" {
+    node display="flex" flex_direction="column" text="Hello World" font_size=24.0  {
+        text_color color="hyperblue"
+        node width="100px" height="50px" text="Child Text" font_size=12.0 {
+            text_color color="mint"
+        }
+    }
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Panel(Panel::Dashboard(dashboard)) = &schematic.elems[0] {
+            assert_eq!(dashboard.root.label, Some("Styled Dashboard".to_string()));
+            assert_eq!(dashboard.root.children.len(), 1);
+
+            let node = &dashboard.root.children[0];
+            assert!(matches!(node.display, Display::Flex));
+            assert_eq!(node.font_size, 24.0);
+            assert_eq!(node.text_color, Color::HYPERBLUE);
+            assert_eq!(node.text, Some("Hello World".to_string()));
+
+            assert_eq!(node.children.len(), 1);
+            let child_node = &node.children[0];
+            assert_eq!(child_node.font_size, 12.0);
+            assert_eq!(child_node.text_color, Color::MINT);
+            assert_eq!(child_node.text, Some("Child Text".to_string()));
+        } else {
+            panic!("Expected dashboard");
         }
     }
 

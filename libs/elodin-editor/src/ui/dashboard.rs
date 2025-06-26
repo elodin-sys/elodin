@@ -1,5 +1,6 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy::text::{TextColor, TextFont};
 use bevy::ui::{
     AlignContent, AlignItems, AlignSelf, BoxSizing, Display, FlexDirection, FlexWrap,
     JustifyContent, JustifyItems, JustifySelf, Node, Overflow, OverflowAxis, OverflowClipBox,
@@ -66,26 +67,41 @@ pub struct NodeUpdaterParams<'w, 's> {
     values: Query<'w, 's, &'static ComponentValue>,
 }
 
-type NodeFn = dyn for<'a, 'b> Fn(&'a NodeUpdaterParams<'b, 'b>) -> Result<(Node, Option<Text>), String>
+type NodeFn = dyn for<'a, 'b> Fn(
+        &'a NodeUpdaterParams<'b, 'b>,
+    ) -> Result<(Node, Option<Text>, Option<TextFont>, Option<TextColor>), String>
     + Send
     + Sync;
 
 #[derive(Component)]
 pub struct NodeUpdater(Box<NodeFn>);
 
-pub fn update_nodes(
-    mut query: Query<(&NodeUpdater, &mut Node, Option<&mut Text>)>,
-    params: NodeUpdaterParams,
-) {
-    for (node_updater, mut node, text) in query.iter_mut() {
-        let Ok((new_node, new_text)) = (node_updater.0)(&params).inspect_err(|err| {
-            warn!(?err, "Failed to update node");
-        }) else {
+pub type NodeUpdaterArgs = (
+    &'static NodeUpdater,
+    &'static mut Node,
+    Option<&'static mut Text>,
+    Option<&'static mut TextFont>,
+    Option<&'static mut TextColor>,
+);
+
+pub fn update_nodes(mut query: Query<NodeUpdaterArgs>, params: NodeUpdaterParams) {
+    for (node_updater, mut node, text, text_font, text_color) in query.iter_mut() {
+        let Ok((new_node, new_text, new_text_font, new_text_color)) = (node_updater.0)(&params)
+            .inspect_err(|err| {
+                warn!(?err, "Failed to update node");
+            })
+        else {
             continue;
         };
         *node = new_node;
         if let (Some(mut text), Some(new_text)) = (text, new_text) {
             *text = new_text;
+        }
+        if let (Some(mut text_font), Some(new_text_font)) = (text_font, new_text_font) {
+            *text_font = new_text_font;
+        }
+        if let (Some(mut text_color), Some(new_text_color)) = (text_color, new_text_color) {
+            *text_color = new_text_color;
         }
     }
 }
@@ -351,6 +367,8 @@ pub fn spawn_node<T>(
         ..Default::default()
     };
     let updater_node = node.clone();
+    let font_size = source.font_size;
+    let text_color = source.text_color;
     let node_updater = NodeUpdater(Box::new(move |params| {
         let NodeUpdaterParams {
             entity_map: e,
@@ -388,10 +406,23 @@ pub fn spawn_node<T>(
             .as_ref()
             .and_then(|text| text.execute(e, q).ok())
             .map(Text);
-        Ok((node, text))
+        let text_font = text.as_ref().map(|_| TextFont {
+            font_size,
+            ..Default::default()
+        });
+        let text_color_component = text.as_ref().map(|_| {
+            TextColor(Color::srgba(
+                text_color.r,
+                text_color.g,
+                text_color.b,
+                text_color.a,
+            ))
+        });
+        Ok((node, text, text_font, text_color_component))
     }));
 
-    let (node, text) = ((node_updater.0)(params)).unwrap_or((node, None));
+    let (node, text, text_font, text_color) =
+        ((node_updater.0)(params)).unwrap_or((node, None, None, None));
     let node = commands.insert((
         node,
         node_updater,
@@ -408,6 +439,12 @@ pub fn spawn_node<T>(
     ));
     if let Some(text) = text {
         node.insert(text);
+    }
+    if let Some(text_font) = text_font {
+        node.insert(text_font);
+    }
+    if let Some(text_color) = text_color {
+        node.insert(text_color);
     }
     let node = node.id();
     let node = DashboardNode {
@@ -459,6 +496,8 @@ pub fn spawn_node<T>(
             .collect::<Result<Vec<_>, _>>()?,
         color: source.color,
         text: source.text.clone(),
+        font_size: source.font_size,
+        text_color: source.text_color,
         aux: node,
     };
     Ok(node)

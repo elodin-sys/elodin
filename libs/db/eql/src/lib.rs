@@ -14,8 +14,6 @@ use impeller2::{
 use impeller2_wkt::ComponentPath;
 use peg::error::ParseError;
 
-pub mod fmt;
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum AstNode<'input> {
     Ident(Cow<'input, str>),

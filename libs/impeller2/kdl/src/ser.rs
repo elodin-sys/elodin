@@ -313,19 +313,8 @@ fn serialize_material_to_node(node: &mut KdlNode, material: &Material) {
 }
 
 fn serialize_dashboard<T>(dashboard: &Dashboard<T>) -> KdlNode {
-    let mut node = KdlNode::new("dashboard");
-
-    // Copy all the properties from the root node to the dashboard node
-    serialize_dashboard_node_properties(&mut node, &dashboard.root);
-
-    // Add children if any
-    if !dashboard.root.children.is_empty() {
-        let mut children = KdlDocument::new();
-        for child in &dashboard.root.children {
-            children.nodes_mut().push(serialize_dashboard_node(child));
-        }
-        node.set_children(children);
-    }
+    let mut node = serialize_dashboard_node(&dashboard.root);
+    node.set_name("dashboard");
 
     node
 }
@@ -336,47 +325,42 @@ fn serialize_dashboard_node<T>(dashboard_node: &DashboardNode<T>) -> KdlNode {
     serialize_dashboard_node_properties(&mut node, dashboard_node);
 
     let mut children = KdlDocument::new();
-    let mut has_children = false;
 
     // Add special child nodes for margin, padding, border if they're not default
     if !is_ui_rect_default(&dashboard_node.margin) {
         let mut margin_node = KdlNode::new("margin");
         serialize_ui_rect_to_node(&mut margin_node, &dashboard_node.margin);
         children.nodes_mut().push(margin_node);
-        has_children = true;
     }
 
     if !is_ui_rect_default(&dashboard_node.padding) {
         let mut padding_node = KdlNode::new("padding");
         serialize_ui_rect_to_node(&mut padding_node, &dashboard_node.padding);
         children.nodes_mut().push(padding_node);
-        has_children = true;
     }
 
     if !is_ui_rect_default(&dashboard_node.border) {
         let mut border_node = KdlNode::new("border");
         serialize_ui_rect_to_node(&mut border_node, &dashboard_node.border);
         children.nodes_mut().push(border_node);
-        has_children = true;
     }
 
-    // Add color as "bg" child node if not transparent
     if dashboard_node.color.a > 0.0 {
         let mut bg_node = KdlNode::new("bg");
         serialize_color_to_node(&mut bg_node, &dashboard_node.color);
         children.nodes_mut().push(bg_node);
-        has_children = true;
     }
+
+    let mut text_color_node = KdlNode::new("text_color");
+    serialize_color_to_node(&mut text_color_node, &dashboard_node.text_color);
+    children.nodes_mut().push(text_color_node);
 
     // Add regular children
     for child in &dashboard_node.children {
         children.nodes_mut().push(serialize_dashboard_node(child));
-        has_children = true;
     }
 
-    if has_children {
-        node.set_children(children);
-    }
+    node.set_children(children);
 
     node
 }
@@ -503,6 +487,13 @@ fn serialize_dashboard_node_properties<T>(node: &mut KdlNode, dashboard_node: &D
     if let Some(ref text) = dashboard_node.text {
         node.entries_mut()
             .push(KdlEntry::new_prop("text", text.clone()));
+    }
+
+    if dashboard_node.font_size != 16.0 {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "font_size",
+            dashboard_node.font_size as f64,
+        ));
     }
 }
 
@@ -743,5 +734,53 @@ object_3d "a.world_pos" {
 
         // Check that the structure is preserved
         assert_eq!(parsed.elems.len(), reparsed.elems.len());
+    }
+
+    #[test]
+    fn test_serialize_dashboard_with_font_and_color() {
+        let mut schematic = Schematic::default();
+        let dashboard = Dashboard {
+            root: DashboardNode {
+                label: Some("Styled Dashboard".to_string()),
+                display: Display::Flex,
+                flex_direction: FlexDirection::Column,
+                text: Some("Hello World".to_string()),
+                font_size: 24.0,
+                text_color: Color::TURQUOISE,
+                children: vec![DashboardNode {
+                    width: Val::Px("100.0".to_string()),
+                    height: Val::Px("50.0".to_string()),
+                    text: Some("Child Text".to_string()),
+                    font_size: 12.0,
+                    text_color: Color::MINT,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            aux: (),
+        };
+        schematic
+            .elems
+            .push(SchematicElem::Panel(Panel::Dashboard(Box::new(dashboard))));
+
+        let serialized = serialize_schematic(&schematic);
+        println!("{}", serialized);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert_eq!(parsed.elems.len(), 1);
+        if let SchematicElem::Panel(Panel::Dashboard(dashboard)) = &parsed.elems[0] {
+            assert_eq!(dashboard.root.label, Some("Styled Dashboard".to_string()));
+            assert_eq!(dashboard.root.font_size, 24.0);
+            assert_eq!(dashboard.root.text_color, Color::TURQUOISE);
+            assert_eq!(dashboard.root.text, Some("Hello World".to_string()));
+
+            assert_eq!(dashboard.root.children.len(), 1);
+            let child_node = &dashboard.root.children[0];
+            assert_eq!(child_node.font_size, 12.0);
+            assert_eq!(child_node.text_color, Color::MINT);
+            assert_eq!(child_node.text, Some("Child Text".to_string()));
+        } else {
+            panic!("Expected dashboard");
+        }
     }
 }

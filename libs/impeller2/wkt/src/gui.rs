@@ -487,6 +487,8 @@ pub struct DashboardNode<T> {
     pub children: Vec<DashboardNode<T>>,
     pub color: Color,
     pub text: Option<String>,
+    pub font_size: f32,
+    pub text_color: Color,
     pub aux: T,
 }
 
@@ -529,6 +531,8 @@ impl<T> DashboardNode<T> {
             children: self.children.iter().map(|c| c.map_aux(&f)).collect(),
             color: self.color,
             text: self.text.clone(),
+            font_size: self.font_size,
+            text_color: self.text_color,
             aux: f(&self.aux),
         }
     }

@@ -86,6 +86,8 @@ impl WidgetSystem for InspectorDashboardNode<'_, '_> {
         changed |= val_editor(ui, "Height", &eql_ctx.0, &mut node.height);
         changed |= node_color_picker(ui, "Background", &mut node.color);
         changed |= eql_editor(ui, "Text", &eql_ctx.0, node.text.get_or_insert_default());
+        changed |= font_size_editor(ui, "Font Size", &mut node.font_size);
+        changed |= node_color_picker(ui, "Text Color", &mut node.text_color);
         changed |= enum_select(ui, "Flex Direction", &mut node.flex_direction);
         changed |= enum_select(ui, "Flex Wrap", &mut node.flex_wrap);
         changed |= enum_select(ui, "Justify Content", &mut node.justify_content);
@@ -256,6 +258,25 @@ where
         }
     })
     .inner
+}
+
+fn font_size_editor(ui: &mut egui::Ui, label: &str, font_size: &mut f32) -> bool {
+    ui.label(egui::RichText::new(label).color(get_scheme().text_secondary));
+    configure_input_with_border(ui.style_mut());
+
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        let response = ui.add(
+            egui::DragValue::new(font_size)
+                .range(1.0..=200.0)
+                .speed(0.5)
+                .suffix(" px"),
+        );
+        changed = response.changed();
+    });
+
+    ui.separator();
+    changed
 }
 
 pub trait DashboardExt<T> {

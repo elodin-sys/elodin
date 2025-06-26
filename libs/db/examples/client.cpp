@@ -151,7 +151,6 @@ try {
     sock.send(set_component_name("vehicle.temp.temp"));
     sock.send(set_component_name("vehicle.temp.pressure"));
     sock.send(set_component_name("vehicle.temp.humidity"));
-    sock.send(set_component_name("vehicle"));
 
     // Start the reader thread
     std::println("Main thread: starting reader thread");

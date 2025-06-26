@@ -101,7 +101,7 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
                         let data = array.buf.as_buf();
                         if index < data.len() {
                             let value = data[index];
-                            let value = nox::array!(value).to_dyn();
+                            let value = nox::Array::<_, ()> { buf: value }.to_dyn();
                             Ok(ComponentValue::F64(value))
                         } else {
                             Err(format!(
@@ -116,7 +116,7 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
                         let data = array.buf.as_buf();
                         if index < data.len() {
                             let value = data[index];
-                            let value = nox::array!(value).to_dyn();
+                            let value = nox::Array::<_, ()> { buf: value }.to_dyn();
                             Ok(ComponentValue::F32(value))
                         } else {
                             Err(format!(
