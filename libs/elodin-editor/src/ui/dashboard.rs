@@ -6,6 +6,7 @@ use bevy::ui::{
     OverflowClipMargin, PositionType,
 };
 use bevy::window::PrimaryWindow;
+use eql::FmtExpr;
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::{ComponentValue, DashboardNode};
 use nox::ArrayBuf;
@@ -234,8 +235,8 @@ pub fn spawn_node<T>(
     let row_gap = compile_val(eql, &source.row_gap);
     let column_gap = compile_val(eql, &source.column_gap);
     let text = source.text.as_ref().and_then(|src| {
-        let expr = eql.parse_str(src).ok()?;
-        Some(compile_eql_expr(expr))
+        let expr = eql.parse_fmt_string(src).ok()?;
+        Some(compile_fmt_string(expr))
     });
     let node = Node {
         display: match source.display {
@@ -386,7 +387,6 @@ pub fn spawn_node<T>(
         let text = text
             .as_ref()
             .and_then(|text| text.execute(e, q).ok())
-            .map(|v| v.to_string())
             .map(Text);
         Ok((node, text))
     }));
@@ -462,6 +462,53 @@ pub fn spawn_node<T>(
         aux: node,
     };
     Ok(node)
+}
+
+type FmtExprFn = dyn for<'a, 'b> Fn(
+        &'a EntityMap,
+        &'a Query<'b, 'b, &'static ComponentValue>,
+    ) -> Result<String, String>
+    + Send
+    + Sync;
+
+pub enum CompiledFmtExpr {
+    String(String),
+    Closure(Box<FmtExprFn>),
+}
+
+impl CompiledFmtExpr {
+    pub fn execute<'a, 'b>(
+        &'a self,
+        entity_map: &'a EntityMap,
+        values: &'a Query<'b, 'b, &'static ComponentValue>,
+    ) -> Result<String, String> {
+        match self {
+            CompiledFmtExpr::String(str) => Ok(str.clone()),
+            CompiledFmtExpr::Closure(c) => (c)(entity_map, values),
+        }
+    }
+}
+
+fn compile_fmt_expr(expr: FmtExpr) -> CompiledFmtExpr {
+    match expr {
+        FmtExpr::String(str) => CompiledFmtExpr::String(str),
+        FmtExpr::Expr(expr) => {
+            let expr = compile_eql_expr(expr);
+            CompiledFmtExpr::Closure(Box::new(move |e, q| {
+                expr.execute(e, q).map(|v| v.to_string())
+            }))
+        }
+    }
+}
+
+pub fn compile_fmt_string(expr: Vec<FmtExpr>) -> CompiledFmtExpr {
+    let exprs: Vec<_> = expr.into_iter().map(compile_fmt_expr).collect();
+    CompiledFmtExpr::Closure(Box::new(move |e, q| {
+        exprs.iter().try_fold(String::new(), |mut acc, expr| {
+            acc.push_str(&expr.execute(e, q)?);
+            Ok(acc)
+        })
+    }))
 }
 
 pub trait ComponentValueExt {

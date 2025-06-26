@@ -111,11 +111,12 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
         ui.add_space(4.0);
 
         let matcher = SkimMatcherV2::default().smart_case().use_cache(true);
-        let children = children.get(pair.bevy).into_iter().flat_map(|c| c.iter());
+
+        let children = children.iter_descendants(pair.bevy);
 
         let mut components = children
-            .chain(std::iter::once(&pair.bevy))
-            .filter_map(|&child| {
+            .chain(std::iter::once(pair.bevy))
+            .filter_map(|child| {
                 let id = component_ids.get(child).ok()?;
                 let metadata = metadata_store.get_metadata(id)?;
                 let priority = metadata.priority();
