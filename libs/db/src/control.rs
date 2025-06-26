@@ -1,7 +1,7 @@
 use impeller2::{
     schema::Schema,
     table::{Entry, VTable},
-    types::{ComponentId, EntityId, Msg, PacketId},
+    types::{ComponentId, Msg, PacketId},
 };
 use impeller2_stellar::MsgExt;
 use serde::{Deserialize, Serialize};
@@ -31,7 +31,6 @@ pub type StreamId = u64;
 #[derive(Serialize, Deserialize)]
 pub struct StreamFilter {
     pub component_id: Option<ComponentId>,
-    pub entity_id: Option<EntityId>,
 }
 
 impl Msg for Stream {
@@ -53,7 +52,6 @@ impl Msg for SetStreamState {
 pub struct GetTimeSeries {
     pub id: PacketId,
     pub range: Range<u64>,
-    pub entity_id: EntityId,
     pub component_id: ComponentId,
 }
 
@@ -85,15 +83,6 @@ impl Msg for GetComponentMetadata {
     const ID: PacketId = [224, 0, 6];
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct GetEntityMetadata {
-    pub entity_id: EntityId,
-}
-
-impl Msg for GetEntityMetadata {
-    const ID: PacketId = [224, 0, 7];
-}
-
 #[derive(Clone, Serialize, Deserialize, Default, Debug)]
 pub struct Metadata {
     pub metadata: HashMap<String, MetadataValue>,
@@ -120,16 +109,6 @@ impl Msg for SetComponentMetadata {
     const ID: PacketId = [224, 0, 8];
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct SetEntityMetadata {
-    pub entity_id: EntityId,
-    pub metadata: Metadata,
-}
-
-impl Msg for SetEntityMetadata {
-    const ID: PacketId = [224, 0, 9];
-}
-
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ComponentMetadata {
     pub component_id: ComponentId,
@@ -137,15 +116,5 @@ pub struct ComponentMetadata {
 }
 
 impl Msg for ComponentMetadata {
-    const ID: PacketId = [224, 0, 11];
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct EntityMetadata {
-    pub entity_id: EntityId,
-    pub metadata: Metadata,
-}
-
-impl Msg for EntityMetadata {
     const ID: PacketId = [224, 0, 11];
 }

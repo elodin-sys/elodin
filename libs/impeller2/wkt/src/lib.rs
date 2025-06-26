@@ -6,12 +6,14 @@ use serde::{Deserialize, Serialize};
 mod assets;
 mod metadata;
 mod msgs;
+mod path;
 #[cfg(feature = "nox")]
 mod value;
 
 pub use assets::*;
 pub use metadata::*;
 pub use msgs::*;
+pub use path::*;
 #[cfg(feature = "nox")]
 pub use value::*;
 
@@ -59,7 +61,6 @@ impl impeller2::com_de::Decomponentize for Tick {
     fn apply_value(
         &mut self,
         component_id: impeller2::types::ComponentId,
-        _entity_id: impeller2::types::EntityId,
         value: impeller2::types::ComponentView<'_>,
         _timestamp: Option<Timestamp>,
     ) -> Result<(), Self::Error> {
@@ -113,7 +114,6 @@ impl impeller2::com_de::Decomponentize for SimulationTimeStep {
     fn apply_value(
         &mut self,
         component_id: impeller2::types::ComponentId,
-        _entity_id: impeller2::types::EntityId,
         value: impeller2::types::ComponentView<'_>,
         _timestamp: Option<Timestamp>,
     ) -> Result<(), Self::Error> {
@@ -164,7 +164,6 @@ impl impeller2::com_de::Decomponentize for WorldPos {
     fn apply_value(
         &mut self,
         component_id: impeller2::types::ComponentId,
-        _entity_id: impeller2::types::EntityId,
         value: impeller2::types::ComponentView<'_>,
         _timestamp: Option<Timestamp>,
     ) -> Result<(), Self::Error> {
@@ -212,7 +211,6 @@ impl impeller2::com_de::Decomponentize for CurrentTimestamp {
     fn apply_value(
         &mut self,
         component_id: impeller2::types::ComponentId,
-        _entity_id: impeller2::types::EntityId,
         value: impeller2::types::ComponentView<'_>,
         _timestamp: Option<Timestamp>,
     ) -> Result<(), Self::Error> {

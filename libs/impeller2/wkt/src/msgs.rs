@@ -2,8 +2,8 @@ use impeller2::{
     buf::IoBuf,
     schema::Schema,
     types::{
-        ComponentId, EntityId, Msg, MsgBuf, OwnedTable, OwnedTimeSeries, PacketId, Request,
-        Timestamp, TryFromPacket,
+        ComponentId, Msg, MsgBuf, OwnedTable, OwnedTimeSeries, PacketId, Request, Timestamp,
+        TryFromPacket,
     },
     vtable::{Field, Op, VTable},
 };
@@ -12,10 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, path::PathBuf, time::Duration};
 use std::{collections::HashMap, ops::Range};
 
-use crate::{
-    LastUpdated,
-    metadata::{ComponentMetadata, EntityMetadata},
-};
+use crate::{LastUpdated, metadata::ComponentMetadata};
 
 use crate::AssetId;
 
@@ -138,7 +135,6 @@ impl Msg for SetStreamState {
 pub struct GetTimeSeries {
     pub id: PacketId,
     pub range: Range<Timestamp>,
-    pub entity_id: EntityId,
     pub component_id: ComponentId,
     pub limit: Option<usize>,
 }
@@ -183,19 +179,6 @@ impl Request for GetComponentMetadata {
     type Reply<B: IoBuf + Clone> = crate::ComponentMetadata;
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct GetEntityMetadata {
-    pub entity_id: EntityId,
-}
-
-impl Msg for GetEntityMetadata {
-    const ID: PacketId = [224, 7];
-}
-
-impl Request for GetEntityMetadata {
-    type Reply<B: IoBuf + Clone> = crate::EntityMetadata;
-}
-
 #[derive(Clone, Serialize, Deserialize, Debug, postcard_schema::Schema)]
 #[serde(transparent)]
 pub struct SetComponentMetadata(pub ComponentMetadata);
@@ -219,27 +202,6 @@ impl SetComponentMetadata {
 
     pub fn asset(mut self, asset: bool) -> Self {
         self.0.asset = asset;
-        self
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug, postcard_schema::Schema)]
-#[serde(transparent)]
-pub struct SetEntityMetadata(pub EntityMetadata);
-
-impl SetEntityMetadata {
-    pub fn new(entity_id: impl Into<EntityId>, name: impl ToString) -> Self {
-        let entity_id = entity_id.into();
-        let name = name.to_string();
-        Self(EntityMetadata {
-            entity_id,
-            metadata: Default::default(),
-            name,
-        })
-    }
-
-    pub fn metadata(mut self, metadata: std::collections::HashMap<String, String>) -> Self {
-        self.0.metadata = metadata;
         self
     }
 }
@@ -291,7 +253,6 @@ impl Request for DumpMetadata {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct DumpMetadataResp {
     pub component_metadata: Vec<ComponentMetadata>,
-    pub entity_metadata: Vec<EntityMetadata>,
     pub msg_metadata: Vec<MsgMetadata>,
 }
 
@@ -384,7 +345,6 @@ impl_user_data_msg!(MsgStream);
 impl_user_data_msg!(SetAsset<'_>);
 impl_user_data_msg!(SetStreamState);
 impl_user_data_msg!(SetComponentMetadata);
-impl_user_data_msg!(SetEntityMetadata);
 impl_user_data_msg!(UdpUnicast);
 impl_user_data_msg!(UdpVTableStream);
 

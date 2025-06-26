@@ -9,8 +9,8 @@ use bevy::prelude::*;
 use bevy::render::view::RenderLayers;
 use bevy_egui::egui::{self, Color32};
 
-use impeller2::types::{ComponentId, EntityId, Timestamp};
-use impeller2_bevy::ComponentValue;
+use impeller2::types::{ComponentId, Timestamp};
+use impeller2_bevy::{ComponentPath, ComponentValue};
 use impeller2_wkt::GraphType;
 
 use super::gpu::LineVisibleRange;
@@ -35,8 +35,8 @@ pub struct GraphBundle {
 
 #[derive(Clone, Debug, Component)]
 pub struct GraphState {
-    pub entities: BTreeMap<EntityId, GraphStateEntity>,
-    pub enabled_lines: BTreeMap<(EntityId, ComponentId, usize), (Entity, Color32)>,
+    pub components: BTreeMap<ComponentPath, GraphStateComponent>,
+    pub enabled_lines: BTreeMap<(ComponentPath, usize), (Entity, Color32)>,
     pub render_layers: RenderLayers,
     pub line_width: f32,
     pub zoom_factor: Vec2,
@@ -54,7 +54,7 @@ pub struct GraphState {
 impl GraphBundle {
     pub fn new(
         render_layer_alloc: &mut RenderLayerAlloc,
-        entities: BTreeMap<EntityId, GraphStateEntity>,
+        components: BTreeMap<ComponentPath, GraphStateComponent>,
         label: String,
     ) -> Self {
         let Some(layer) = render_layer_alloc.alloc() else {
@@ -62,7 +62,7 @@ impl GraphBundle {
         };
         let render_layers = RenderLayers::layer(layer);
         let graph_state = GraphState {
-            entities,
+            components,
             enabled_lines: BTreeMap::new(),
             render_layers: render_layers.clone(),
             line_width: 2.0,
@@ -105,39 +105,31 @@ impl GraphBundle {
 }
 
 impl GraphState {
-    pub fn remove_component(&mut self, entity_id: &EntityId, component_id: &ComponentId) {
-        let Some(components) = self.entities.get_mut(entity_id) else {
-            return;
-        };
+    pub fn remove_component(&mut self, component_path: &ComponentPath) {
+        self.components.remove(component_path);
 
-        components.remove(component_id);
-
-        if components.is_empty() {
-            self.entities.remove(entity_id);
-        }
+        // Also remove from enabled_lines
+        self.enabled_lines
+            .retain(|(path, _), _| path != component_path);
     }
 
     pub fn insert_component(
         &mut self,
-        entity_id: &EntityId,
-        component_id: &ComponentId,
+        component_path: ComponentPath,
         component_values: Vec<(bool, egui::Color32)>,
     ) {
-        let entity = self.entities.entry(*entity_id).or_default();
-
-        entity.insert(*component_id, component_values);
+        self.components.insert(component_path, component_values);
     }
 }
 
 pub fn default_component_values(
-    entity_id: &EntityId,
     component_id: &ComponentId,
     component_value: &ComponentValue,
 ) -> GraphStateComponent {
     component_value
         .iter()
         .enumerate()
-        .map(|(i, _)| (entity_id.0 + component_id.0) as usize + i)
+        .map(|(i, _)| (component_id.0) as usize + i)
         .map(|i| (true, colors::get_color_by_index_all(i)))
         .collect::<Vec<(bool, egui::Color32)>>()
 }

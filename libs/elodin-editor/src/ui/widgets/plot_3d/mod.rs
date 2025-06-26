@@ -2,10 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use crate::ui::widgets::plot::CollectedGraphData;
 use bevy::{
+    animation::graph,
     app::{Startup, Update},
-    asset::Assets,
+    asset::{Assets, Handle},
     ecs::{
         entity::Entity,
         query::{With, Without},
@@ -15,59 +15,68 @@ use bevy::{
     render::view::RenderLayers,
 };
 use big_space::GridCell;
-use impeller2_bevy::{CommandsExt, ComponentMetadataRegistry};
+use eql;
+use impeller2_bevy::{CommandsExt, ComponentMetadataRegistry, EntityMap};
 use impeller2_wkt::LastUpdated;
-use impeller2_wkt::{EntityMetadata, GetTimeSeries, Line3d};
+use impeller2_wkt::{ComponentValue, EntityMetadata, GetTimeSeries, Line3d};
 
 use gpu::LineBundle;
 use gpu::{LineConfig, LineUniform};
 
-use super::plot::{Line, PlotDataComponent, PlotDataEntity, gpu::LineHandle};
+use super::plot::{CollectedGraphData, Line, PlotDataComponent, gpu::LineHandle};
+use crate::{
+    EqlContext,
+    object_3d::{CompiledExpr, EditableEQL, compile_eql_expr},
+    ui::preset::EqlExt,
+};
 
 pub mod gpu;
 
 pub fn sync_line_plot_3d(
-    mut collected_graph_data: ResMut<CollectedGraphData>,
-    line_plot_3d_query: Query<(Entity, &EntityMetadata, &Line3d), Without<LineHandle>>,
-    metadata_store: Res<ComponentMetadataRegistry>,
+    line_plot_3d_query: Query<(Entity, &Line3d), Without<gpu::LineHandles>>,
     mut uniforms: Query<(&Line3d, &mut LineUniform), With<LineHandle>>,
     mut lines: ResMut<Assets<Line>>,
     mut commands: Commands,
+    eql_ctx: Res<EqlContext>,
+    mut collected_graph_data: ResMut<CollectedGraphData>,
+    metadata_store: Res<ComponentMetadataRegistry>,
 ) {
-    for (entity, metadata, line_plot) in line_plot_3d_query.iter() {
-        let line = collected_graph_data
-            .entities
-            .entry(line_plot.entity)
-            .or_insert_with(|| PlotDataEntity {
-                label: metadata.name.clone(),
-                components: BTreeMap::new(),
-            });
-        let Some(metadata) = metadata_store.get_metadata(&line_plot.component_id) else {
-            continue;
+    for (entity, line_plot) in line_plot_3d_query.iter() {
+        // Parse and compile the EQL expression
+        let parsed = match eql_ctx.0.parse_str(&line_plot.eql) {
+            Ok(expr) => expr,
+            Err(e) => {
+                println!(
+                    "Failed to parse Line3D EQL expression '{}': {}",
+                    line_plot.eql, e
+                );
+                continue;
+            }
         };
-
-        let data_component = line
-            .components
-            .entry(line_plot.component_id)
-            .or_insert_with(|| {
-                PlotDataComponent::new(
-                    metadata.name.clone(),
-                    metadata
-                        .element_names()
-                        .split(',')
-                        .filter(|s| !s.is_empty())
-                        .map(str::to_string)
-                        .collect(),
-                )
-            });
-        let [x, y, z] = line_plot.index;
-        let Some(x) = data_component.lines.get(&x).cloned() else {
-            continue;
-        };
-        let Some(y) = data_component.lines.get(&y).cloned() else {
-            continue;
-        };
-        let Some(z) = data_component.lines.get(&z).cloned() else {
+        let graph_components = parsed.to_graph_components();
+        let skip = if graph_components.len() == 7 { 4 } else { 0 };
+        let mut handles: [Option<Handle<Line>>; 3] = [None, None, None];
+        for (i, (c, index)) in graph_components.iter().skip(skip).take(3).enumerate() {
+            let Some(metadata) = metadata_store.get_metadata(&c.id) else {
+                continue;
+            };
+            let data = collected_graph_data
+                .components
+                .entry(c.id)
+                .or_insert_with(|| {
+                    PlotDataComponent::new(
+                        metadata.name.clone(),
+                        metadata
+                            .element_names()
+                            .split(',')
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_string)
+                            .collect(),
+                    )
+                });
+            handles[i] = data.lines.get(index).cloned();
+        }
+        let [Some(x), Some(y), Some(z)] = handles else {
             continue;
         };
 

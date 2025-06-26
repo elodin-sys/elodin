@@ -18,6 +18,7 @@ nox.path = "../../nox"
 # bevy
 bevy.version = "0.16"
 bevy.default-features = false
+
 # channels
 thingbuf = "0.1.6"
 impeller2-bbq.path = "../bbq"
@@ -38,6 +39,7 @@ futures-lite = "2.5.0"
 
 # helpers
 smallvec.version = "1.11.2"
+compact_str = "0.9"
 
 # error
 miette.version = "7.2"
@@ -45,7 +47,6 @@ miette.features = ["fancy-no-syscall"]
 
 # rand
 fastrand = "2.2"
-
 
 # serde
 serde.version = "1.0"

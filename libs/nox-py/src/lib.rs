@@ -148,7 +148,6 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Color>()?;
     m.add_class::<Panel>()?;
     m.add_class::<Integrator>()?;
-    m.add_class::<GraphEntity>()?;
     m.add_class::<Glb>()?;
     m.add_class::<Line3d>()?;
     m.add_class::<PyFnSystem>()?;

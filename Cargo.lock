@@ -1708,7 +1708,7 @@ dependencies = [
  "bevy_utils",
  "derive_more 1.0.0",
  "log",
- "smol_str 0.2.2",
+ "smol_str",
  "thiserror 2.0.12",
 ]
 
@@ -1958,7 +1958,7 @@ dependencies = [
  "petgraph",
  "serde",
  "smallvec",
- "smol_str 0.2.2",
+ "smol_str",
  "thiserror 2.0.12",
  "uuid",
  "variadics_please",
@@ -2268,7 +2268,7 @@ dependencies = [
  "log",
  "raw-window-handle 0.6.2",
  "serde",
- "smol_str 0.2.2",
+ "smol_str",
 ]
 
 [[package]]
@@ -2504,15 +2504,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "borsh"
-version = "1.5.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad8646f98db542e39fc66e68a20b2144f6a732636df7c2354e74645faaa433ce"
-dependencies = [
- "cfg_aliases",
-]
-
-[[package]]
 name = "boxcar"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2719,6 +2710,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e779867f62d81627d1438e0d3fb6ed7d7c9d64293ca6d87a1e88781b94ece1c"
 dependencies = [
  "syn 2.0.101",
+]
+
+[[package]]
+name = "castaway"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0abae9be0aaf9ea96a3b1b8b1b55c602ca751eba1b1500220cea4ecbafe7c0d5"
+dependencies = [
+ "rustversion",
 ]
 
 [[package]]
@@ -3033,6 +3033,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "compact_str"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3fdb1325a1cece981e8a296ab8f0f9b63ae357bd0784a9faaf548cc7b480707a"
+dependencies = [
+ "castaway",
+ "cfg-if",
+ "itoa",
+ "rustversion",
+ "ryu",
+ "static_assertions",
+]
+
+[[package]]
 name = "concurrent-queue"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3173,6 +3187,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "convert_case"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baaaa0ecca5b51987b9423ccdc971514dd8b0bb7b4060b983d3664dad3f1f89f"
+dependencies = [
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "cordyceps"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3289,7 +3312,7 @@ dependencies = [
  "rustc-hash 1.1.0",
  "rustybuzz",
  "self_cell",
- "smol_str 0.2.2",
+ "smol_str",
  "swash",
  "sys-locale",
  "ttf-parser 0.21.1",
@@ -4847,12 +4870,13 @@ checksum = "9343d356d7cac894dacafc161b4654e0881301097bdf32a122ed503d97cb94b6"
 name = "eql"
 version = "0.1.0"
 dependencies = [
+ "convert_case 0.8.0",
  "hifitime",
  "impeller2",
+ "impeller2-wkt",
  "jiff",
  "peg",
  "smallvec",
- "smol_str 0.3.2",
  "thiserror 1.0.69",
  "unicode-ident",
 ]
@@ -6678,6 +6702,7 @@ version = "0.1.0"
 dependencies = [
  "bbq2",
  "bevy",
+ "compact_str",
  "fastrand 2.2.0",
  "futures-lite 2.6.0",
  "impeller2",
@@ -6755,12 +6780,14 @@ name = "impeller2-wkt"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "compact_str",
  "impeller2",
  "mlua",
  "nox",
  "postcard",
  "postcard-schema",
  "serde",
+ "smallvec",
  "zerocopy 0.8.14",
 ]
 
@@ -11027,16 +11054,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "smol_str"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9676b89cd56310a87b93dec47b11af744f34d5fc9f367b829474eec0a891350d"
-dependencies = [
- "borsh",
- "serde",
-]
-
-[[package]]
 name = "snafu"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13435,7 +13452,7 @@ dependencies = [
  "rustix 0.38.37",
  "sctk-adwaita",
  "smithay-client-toolkit",
- "smol_str 0.2.2",
+ "smol_str",
  "tracing",
  "unicode-segmentation",
  "wasm-bindgen",

@@ -6,7 +6,7 @@ use arrow::{
     buffer::{BooleanBuffer, Buffer, ScalarBuffer},
     datatypes::*,
 };
-use convert_case::{Case, Casing};
+use convert_case::Casing;
 use datafusion::{
     catalog::streaming::StreamingTable, datasource::MemTable, execution::RecordBatchStream,
     parquet, physical_plan::streaming::PartitionStream, prelude::SessionContext,
@@ -202,18 +202,19 @@ impl DB {
 
         self.with_state(|state| {
             for component in state.components.values() {
-                let entity_metadata = state.entity_metadata.get(&component.entity_id).unwrap();
                 let component_metadata = state
                     .component_metadata
                     .get(&component.component_id)
                     .unwrap();
-                let entity_name = entity_metadata.name.to_case(convert_case::Case::Snake);
-                let component_name = component_metadata.name.to_case(convert_case::Case::Snake);
-                let name = format!("{entity_name}_{component_name}");
+                let component_name = component_metadata
+                    .name
+                    .to_case(convert_case::Case::Snake)
+                    .replace(".", "_");
+                let name = component_name.clone();
                 let mem_table = component.as_mem_table(&component_name);
                 ctx.register_table(name, Arc::new(mem_table))?;
 
-                let stream_name = format!("{entity_name}_{component_name}_stream");
+                let stream_name = format!("{component_name}_stream");
                 let stream_table = component.as_stream_table(component_name);
                 ctx.register_table(stream_name, Arc::new(stream_table))?;
             }
@@ -223,46 +224,9 @@ impl DB {
     }
     pub async fn insert_views(
         &self,
-        ctx: &mut SessionContext,
+        _ctx: &mut SessionContext,
     ) -> Result<(), datafusion::error::DataFusionError> {
-        let queries = self.with_state(|state| {
-            let mut queries = vec![];
-            for (entity_id, entity_metadata) in state.entity_metadata.iter() {
-                let entity_name = entity_metadata.name.to_case(Case::Snake);
-                let mut view_query_end = "".to_string();
-                let mut selects = vec![];
-                let mut first_table = None;
-                for component in state.components.values().filter(|c| c.entity_id == *entity_id) {
-                    let component_metadata = state.component_metadata.get(&component.component_id).unwrap();
-                    let component_name = component_metadata.name.to_case(Case::Snake);
-                    let table = format!("{entity_name}_{component_name}");
-                    selects.push(format!("{table:?}.{component_name:?}"));
-                    if let Some(first_table) = &first_table {
-                        view_query_end = format!(
-                            "{view_query_end} FULL OUTER JOIN {table:?} on {first_table:?}.time = {table:?}.time"
-                        );
-                    } else {
-                        first_table = Some(table);
-                    };
-                }
-                let Some(first_table) = first_table else {
-                    continue;
-                };
-                if selects.is_empty() {
-                    continue;
-                }
-                selects.push(format!("{first_table:?}.time"));
-                let selects = selects.join(",");
-                let view_query = format!(
-                    "CREATE VIEW {entity_name:?} AS SELECT {selects} FROM {first_table:?} {view_query_end}"
-                );
-                queries.push(view_query);
-            }
-            queries
-        });
-        for view_query in queries {
-            ctx.sql(&view_query).await?.collect().await?;
-        }
+        // Views are no longer needed without entity grouping
         Ok(())
     }
 
@@ -276,11 +240,8 @@ impl DB {
                 else {
                     continue;
                 };
-                let Some(entity_metadata) = state.entity_metadata.get(&component.entity_id) else {
-                    continue;
-                };
 
-                let column_name = format!("{}_{}", entity_metadata.name, component_metadata.name);
+                let column_name = component_metadata.name.clone();
                 let record_batch = component.as_record_batch(column_name.clone());
                 let schema = record_batch.schema_ref();
                 match format {

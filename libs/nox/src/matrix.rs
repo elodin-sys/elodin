@@ -93,13 +93,13 @@ where
 
 impl<T: RealField, R: OwnedRepr> Matrix3<T, R> {
     pub fn look_at_rh(dir: impl Into<Vector<T, 3, R>>, up: impl Into<Vector<T, 3, R>>) -> Self {
-        let dir = dir.into() * T::neg_one();
+        let dir = dir.into();
         let up = up.into();
         // apply gram-schmidt orthogonalization to create a rot matrix
-        let z = dir.normalize();
-        let x = up.cross(&z).normalize();
-        let y = z.cross(&x);
-        Self::from_rows([x, y, z])
+        let f = dir.normalize();
+        let s = f.cross(&up).normalize();
+        let u = s.cross(&f);
+        Self::from_rows([s, f, u]).transpose()
     }
 }
 
@@ -286,16 +286,23 @@ mod tests {
         let expected = tensor![
             [
                 -0.9486832980505139,
-                -0.16903085094570333,
-                -0.2672612419124244
+                0.2672612419124244,
+                -0.16903085094570333
             ],
-            [0.0, 0.8451542547285167, -0.5345224838248488],
-            [0.31622776601683794, -0.50709255283711, -0.8017837257372732]
-        ]
-        .transpose();
+            [0.0, 0.5345224838248488, 0.8451542547285167],
+            [0.31622776601683794, 0.8017837257372732, -0.50709255283711]
+        ];
         assert_eq!(
             Matrix3::look_at_rh(Vector3::new(1.0, 2.0, 3.0).normalize(), Vector3::y_axis()),
             expected
-        )
+        );
+
+        let m: Matrix3<f64, crate::ArrayRepr> =
+            Matrix3::look_at_rh(Vector3::new(0.0, 1.0, 0.0).normalize(), Vector3::z_axis());
+        assert_eq!(m, Matrix3::eye());
+
+        let m: Matrix3<f64, crate::ArrayRepr> =
+            Matrix3::look_at_rh(Vector3::new(1.0, 0.0, 0.0).normalize(), Vector3::y_axis());
+        assert_eq!(m.dot(&tensor![0.0, 0.0, -1.0]), tensor![0.0, -1.0, 0.0]);
     }
 }

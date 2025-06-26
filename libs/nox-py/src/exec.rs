@@ -33,7 +33,7 @@ impl Exec {
                 ProgressStyle::with_template("{bar:50} {pos:>6}/{len:6} remaining: {eta}").unwrap(),
             );
         let mut timestamp = Timestamp::now();
-        nox_ecs::impeller2_server::init_db(&self.db, &self.exec.world, timestamp)?;
+        nox_ecs::impeller2_server::init_db(&self.db, &mut self.exec.world, timestamp)?;
         for _ in 0..ticks {
             self.exec.run()?;
             self.db.with_state(|state| {
@@ -55,14 +55,13 @@ impl Exec {
         &mut self,
         py: Python<'a>,
         component_name: String,
-        entity_id: EntityId,
+        entity_name: String,
     ) -> Result<Bound<'a, PyAny>, Error> {
-        let id = ComponentId::new(&component_name);
-        let entity_id = entity_id.inner;
+        let id = ComponentId::new(&format!("{entity_name}.{component_name}"));
 
         let component = self
             .db
-            .with_state(|state| state.get_component(entity_id, id).cloned())
+            .with_state(|state| state.get_component(id).cloned())
             .ok_or(elodin_db::Error::ComponentNotFound(id))?;
         let component_metadata = self
             .db

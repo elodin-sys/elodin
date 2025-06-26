@@ -19,6 +19,11 @@ nox.optional = true
 zerocopy.version = "0.8.2"
 zerocopy.features = ["derive"]
 
+
+# data-structs
+smallvec.version = "1.11.2"
+compact_str = "0.9"
+
 # bevy
 bevy.version = "0.16"
 bevy.optional = true
@@ -34,3 +39,4 @@ postcard-schema.features = ["use-std"]
 mlua.version = "0.10"
 mlua.features = ["serialize"]
 mlua.optional = true
+

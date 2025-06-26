@@ -1,5 +1,5 @@
-use impeller2::types::{EntityId, LenPacket, Msg, PacketId};
-use impeller2_wkt::{MsgStream, SetEntityMetadata};
+use impeller2::types::{LenPacket, Msg, PacketId};
+use impeller2_wkt::{MsgStream, SetComponentMetadata};
 use roci::tcp::SinkExt;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -37,7 +37,7 @@ pub async fn connect() -> anyhow::Result<()> {
     let mut rx = impeller2_stellar::PacketStream::new(rx);
 
     let id: PacketId = fastrand::u16(..).to_le_bytes();
-    tx.send(&SetEntityMetadata::new(EntityId(1), "Aleph"))
+    tx.send(&SetComponentMetadata::new("aleph", "aleph"))
         .await
         .0?;
     tx.init_world::<Record>(id).await?;

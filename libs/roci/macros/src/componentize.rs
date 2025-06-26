@@ -10,7 +10,7 @@ pub struct Componentize {
     ident: Ident,
     generics: Generics,
     data: ast::Data<(), crate::Field>,
-    entity_id: Option<u64>,
+    parent: Option<String>,
 }
 
 pub fn componentize(input: TokenStream) -> TokenStream {
@@ -20,19 +20,24 @@ pub fn componentize(input: TokenStream) -> TokenStream {
         ident,
         generics,
         data,
-        entity_id,
+        parent,
     } = Componentize::from_derive_input(&input).unwrap();
     let where_clause = &generics.where_clause;
     let impeller = quote! { #crate_name::impeller2 };
     let fields = data.take_struct().unwrap();
     let sink_calls = fields.fields.iter().map(|field| {
         let component_id = field.component_id();
+
+        let component_id = if let Some(parent) = &parent {
+            format!("{parent}.{component_id}")
+        } else {
+            component_id.to_string()
+        };
         let ident = field.ident.as_ref().expect("only named fields allowed");
-        if let Some(id) = field.entity_id.or(entity_id) {
+        if !field.nest {
             quote! {
                 let _ = output.apply_value(
-                    #component_id,
-                    #impeller::types::EntityId(#id),
+                    #impeller::types::ComponentId::new(#component_id),
                     self.#ident.as_component_view(),
                     None
                 );
