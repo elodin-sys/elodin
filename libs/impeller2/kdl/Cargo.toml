@@ -1,0 +1,18 @@
+[package]
+name = "impeller2-kdl"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# parse
+kdl = "6.3.4"
+
+# types
+impeller2.path = ".."
+impeller2-wkt.path = "../wkt"
+impeller2-wkt.features = ["gui", "std"]
+
+# errors
+thiserror = "2.0"
+miette.version = "7.0"
+miette.features = ["fancy"]

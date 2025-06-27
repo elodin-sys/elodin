@@ -1,7 +1,7 @@
 //! Provides a Matrix type alias with convenience functions for converting to various representations.
 use core::marker::PhantomData;
 
-use crate::Const;
+use crate::{ArrayRepr, Const};
 use crate::{
     DefaultRepr, Dim, Error, NonScalarDim, NonTupleDim, OwnedRepr, RealField, SquareDim, Tensor,
     Vector,
@@ -91,12 +91,20 @@ where
     }
 }
 
-impl<T: RealField, R: OwnedRepr> Matrix3<T, R> {
-    pub fn look_at_rh(dir: impl Into<Vector<T, 3, R>>, up: impl Into<Vector<T, 3, R>>) -> Self {
+impl<T: RealField> Matrix3<T, ArrayRepr> {
+    pub fn look_at_rh(
+        dir: impl Into<Vector<T, 3, ArrayRepr>>,
+        up: impl Into<Vector<T, 3, ArrayRepr>>,
+    ) -> Self {
         let dir = dir.into();
         let up = up.into();
         // apply gram-schmidt orthogonalization to create a rot matrix
         let f = dir.normalize();
+        let up = if up.dot(&dir).abs() == T::one() {
+            Vector::y_axis()
+        } else {
+            up
+        };
         let s = f.cross(&up).normalize();
         let u = s.cross(&f);
         Self::from_rows([s, f, u]).transpose()

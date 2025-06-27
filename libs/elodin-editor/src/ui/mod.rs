@@ -14,39 +14,49 @@ use bevy_egui::{
 };
 
 use big_space::GridCell;
+use schematic::SchematicPlugin;
 
 use self::colors::get_scheme;
+use self::{command_palette::CommandPaletteState, timeline::timeline_slider};
 use egui::CornerRadius;
-use egui_tiles::TileId;
 use impeller2::types::ComponentId;
 use impeller2_bevy::ComponentValueMap;
 use impeller2_wkt::ComponentMetadata;
 use impeller2_wkt::ComponentValue;
-use widgets::{
-    command_palette::CommandPaletteState,
-    timeline::{self, timeline_slider},
-};
 
 use crate::{GridHandle, MainCamera, plugins::LogicalKeyState};
 
-use self::widgets::inspector::entity::ComponentFilter;
-//use self::widgets::modal::ModalWithSettings;
+use self::inspector::entity::ComponentFilter;
 
-use self::widgets::command_palette::{self, CommandPalette};
+use self::command_palette::CommandPalette;
 use self::widgets::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystemExt};
-use self::{utils::MarginSides, widgets::button::EImageButton};
+use self::{button::EImageButton, utils::MarginSides};
 
 pub mod actions;
+pub mod button;
 pub mod colors;
+pub mod command_palette;
+pub mod dashboard;
+pub mod hierarchy;
 pub mod images;
+pub mod inspector;
+pub mod label;
 pub mod monitor;
-pub mod preset;
+pub mod plot;
+pub mod plot_3d;
+pub mod query_plot;
 pub mod query_table;
+pub mod schematic;
 mod theme;
 pub mod tiles;
+pub mod time_label;
+pub mod timeline;
 pub mod utils;
 pub mod video_stream;
 pub mod widgets;
+
+#[cfg(not(target_family = "wasm"))]
+pub mod status_bar;
 
 #[cfg(not(target_family = "wasm"))]
 pub mod startup_window;
@@ -57,23 +67,25 @@ pub struct HdrEnabled(pub bool);
 #[derive(Resource, Default)]
 pub struct Paused(pub bool);
 
-#[derive(Resource, Default, Debug, Clone)]
+#[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
 pub enum SelectedObject {
     #[default]
     None,
     Entity(EntityPair),
     Viewport {
         camera: Entity,
-        tile_id: TileId,
     },
     Graph {
-        tile_id: TileId,
-        label: String,
         graph_id: Entity,
     },
     Action {
-        tile_id: TileId,
         action_id: Entity,
+    },
+    Object3D {
+        entity: Entity,
+    },
+    DashboardNode {
+        entity: Entity,
     },
 }
 
@@ -82,17 +94,15 @@ impl SelectedObject {
         matches!(self, SelectedObject::Entity(pair) if pair.impeller == id)
     }
 
-    pub fn is_tile_selected(&self, tile_id: TileId) -> bool {
-        self.tile_id() == Some(tile_id)
-    }
-
-    pub fn tile_id(&self) -> Option<TileId> {
+    pub fn entity(&self) -> Option<Entity> {
         match self {
             SelectedObject::None => None,
-            SelectedObject::Entity(_) => None,
-            SelectedObject::Viewport { tile_id, .. } => Some(*tile_id),
-            SelectedObject::Graph { tile_id, .. } => Some(*tile_id),
-            SelectedObject::Action { tile_id, .. } => Some(*tile_id),
+            SelectedObject::Entity(pair) => Some(pair.bevy),
+            SelectedObject::Viewport { camera } => Some(*camera),
+            SelectedObject::Graph { graph_id } => Some(*graph_id),
+            SelectedObject::Action { action_id } => Some(*action_id),
+            SelectedObject::Object3D { entity } => Some(*entity),
+            SelectedObject::DashboardNode { entity } => Some(*entity),
         }
     }
 }
@@ -109,7 +119,7 @@ pub struct InspectorAnchor(pub Option<egui::Pos2>);
 #[derive(Component, Clone)]
 pub struct ViewportRect(pub Option<egui::Rect>);
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EntityPair {
     pub bevy: Entity,
     pub impeller: ComponentId,
@@ -180,11 +190,12 @@ impl Plugin for UiPlugin {
             .add_systems(Update, shortcuts)
             .add_systems(Update, render_layout)
             .add_systems(Update, sync_hdr)
-            .add_systems(Update, tiles::sync_viewports.after(render_layout))
             .add_systems(Update, tiles::shortcuts)
             .add_systems(Update, set_camera_viewport.after(render_layout))
             .add_systems(Update, sync_camera_grid_cell.after(render_layout))
-            .add_systems(Update, widgets::query_plot::auto_bounds);
+            .add_systems(Update, query_plot::auto_bounds)
+            .add_systems(Update, dashboard::update_nodes)
+            .add_plugins(SchematicPlugin);
     }
 }
 
@@ -242,9 +253,10 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
             icon_close,
         } = args;
 
-        let titlebar_height = if cfg!(target_os = "macos") {
-            52.0
-        } else if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
+        let titlebar_height = if cfg!(target_os = "macos")
+            || cfg!(target_os = "windows")
+            || cfg!(target_os = "linux")
+        {
             45.0
         } else {
             34.0
@@ -456,7 +468,7 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         world.add_root_widget_with::<Titlebar, With<PrimaryWindow>>("titlebar", titlebar_icons);
 
         #[cfg(not(target_family = "wasm"))]
-        world.add_root_widget::<widgets::status_bar::StatusBar>("status_bar");
+        world.add_root_widget::<status_bar::StatusBar>("status_bar");
 
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)

@@ -26,6 +26,12 @@ pub enum AstNode<'input> {
     FloatLiteral(f64),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum FmtNode<'input> {
+    String(Cow<'input, str>),
+    AstNode(AstNode<'input>),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub enum BinaryOp {
     Add,
@@ -62,6 +68,11 @@ peg::parser! {
         rule comma() = ("," _?)
         rule binary_op() -> BinaryOp = "+" { BinaryOp::Add } / "-" { BinaryOp::Sub } / "*" { BinaryOp::Mul } / "/" { BinaryOp::Div }
 
+        rule fmt_ast_node() -> FmtNode<'input> = "${" e:expr() "}" { FmtNode::AstNode(e) }
+        rule fmt_string_node() -> FmtNode<'input> = s:$([^'$']+) { FmtNode::String(Cow::Borrowed(s)) }
+        rule fmt_node() -> FmtNode<'input> = fmt_ast_node() / fmt_string_node()
+        pub rule fmt_string() -> Vec<FmtNode<'input>> = s:fmt_node()+ { s }
+
         pub rule expr() -> AstNode<'input> = precedence! {
         a:(@) comma() b:@ { AstNode::Tuple(vec![a, b]) }
         --
@@ -91,8 +102,8 @@ pub enum Expr {
     Time(Arc<Component>),
     ArrayAccess(Box<Expr>, usize),
     Tuple(Vec<Expr>),
-    DurationLiteral(hifitime::Duration),
     FloatLiteral(f64),
+    StringLiteral(String),
 
     // ffts
     Fft(Box<Expr>),
@@ -317,8 +328,8 @@ impl Expr {
                 ))
             }
 
-            Expr::DurationLiteral(_) => Err(Error::InvalidFieldAccess(
-                "cannot convert duration literal to SQL".to_string(),
+            Expr::StringLiteral(_) => Err(Error::InvalidFieldAccess(
+                "cannot convert string literal to SQL".to_string(),
             )),
 
             expr => Ok(format!(
@@ -328,6 +339,11 @@ impl Expr {
             )),
         }
     }
+}
+
+pub enum FmtExpr {
+    String(String),
+    Expr(Expr),
 }
 
 #[derive(Clone, Debug)]
@@ -512,11 +528,11 @@ impl Context {
                 match (cow.as_ref(), &recv, &args[..]) {
                     ("fft", Expr::ArrayAccess(_, _), &[]) => Ok(Expr::Fft(Box::new(recv))),
                     ("fftfreq", Expr::Time(_), &[]) => Ok(Expr::FftFreq(Box::new(recv))),
-                    ("last", _, &[Expr::DurationLiteral(duration)]) => {
-                        Ok(Expr::Last(Box::new(recv), duration))
+                    ("last", _, &[Expr::StringLiteral(ref d)]) => {
+                        Ok(Expr::Last(Box::new(recv), parse_duration(d)?))
                     }
-                    ("first", _, &[Expr::DurationLiteral(duration)]) => {
-                        Ok(Expr::First(Box::new(recv), duration))
+                    ("first", _, &[Expr::StringLiteral(ref d)]) => {
+                        Ok(Expr::First(Box::new(recv), parse_duration(d)?))
                     }
                     _ => Err(Error::InvalidMethodCall(cow.to_string())),
                 }
@@ -527,8 +543,9 @@ impl Context {
                 .collect::<Result<Vec<_>, _>>()
                 .map(Expr::Tuple),
             AstNode::StringLiteral(s) => {
-                // Parse duration strings like "5m", "10s", "1h"
-                self.parse_duration(s.as_ref()).map(Expr::DurationLiteral)
+                Ok(Expr::StringLiteral(s.to_string()))
+                // // Parse duration strings like "5m", "10s", "1h"
+                // self.parse_duration(s.as_ref()).map(Expr::DurationLiteral)
             }
             AstNode::BinaryOp(left, right, op) => {
                 let left = self.parse(left)?;
@@ -548,12 +565,17 @@ impl Context {
         }
     }
 
-    fn parse_duration(&self, duration_str: &str) -> Result<hifitime::Duration, Error> {
-        let span = jiff::Span::from_str(duration_str)
-            .map_err(|err| Error::InvalidMethodCall(err.to_string()))?;
-        Ok(hifitime::Duration::from_nanoseconds(
-            span.total(jiff::Unit::Nanosecond).unwrap(),
-        ))
+    pub fn parse_fmt_string(&self, input: &str) -> Result<Vec<FmtExpr>, Error> {
+        let fmt_nodes = ast_parser::fmt_string(input)?;
+        fmt_nodes
+            .into_iter()
+            .map(|node| {
+                Ok(match node {
+                    FmtNode::String(cow) => FmtExpr::String(cow.to_string()),
+                    FmtNode::AstNode(ast_node) => FmtExpr::Expr(self.parse(&ast_node)?),
+                })
+            })
+            .collect()
     }
 
     /// Get suggestions for the given expression
@@ -583,7 +605,7 @@ impl Context {
             Expr::Tuple(_) => {
                 vec!["last".to_string(), "first".to_string()]
             }
-            Expr::DurationLiteral(_) => {
+            Expr::StringLiteral(_) => {
                 vec![]
             }
             Expr::Fft(_) => {
@@ -665,6 +687,14 @@ impl Context {
 
         vec![]
     }
+}
+
+fn parse_duration(duration_str: &str) -> Result<hifitime::Duration, Error> {
+    let span = jiff::Span::from_str(duration_str)
+        .map_err(|err| Error::InvalidMethodCall(err.to_string()))?;
+    Ok(hifitime::Duration::from_nanoseconds(
+        span.total(jiff::Unit::Nanosecond).unwrap(),
+    ))
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1058,6 +1088,30 @@ mod tests {
         assert_eq!(
             ast_parser::expr("cow_0").unwrap(),
             AstNode::Ident(Cow::Borrowed("cow_0"))
+        );
+    }
+
+    #[test]
+    fn test_fmt_string() {
+        assert_eq!(
+            ast_parser::fmt_string("test${foo}test").unwrap(),
+            vec![
+                FmtNode::String(Cow::Borrowed("test")),
+                FmtNode::AstNode(AstNode::Ident(Cow::Borrowed("foo"))),
+                FmtNode::String(Cow::Borrowed("test")),
+            ]
+        );
+        assert_eq!(
+            ast_parser::fmt_string("test${x + 1}test").unwrap(),
+            vec![
+                FmtNode::String(Cow::Borrowed("test")),
+                FmtNode::AstNode(AstNode::BinaryOp(
+                    Box::new(AstNode::Ident(Cow::Borrowed("x"))),
+                    Box::new(AstNode::FloatLiteral(1.0)),
+                    BinaryOp::Add
+                )),
+                FmtNode::String(Cow::Borrowed("test")),
+            ]
         );
     }
 }

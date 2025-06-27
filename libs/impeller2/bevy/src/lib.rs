@@ -155,20 +155,17 @@ fn sink_inner(
             OwnedPacket::Msg(m) if m.id == DumpMetadataResp::ID => {
                 let metadata = m.parse::<DumpMetadataResp>()?;
                 for metadata in metadata.component_metadata.into_iter() {
-                    let component_id = metadata.component_id;
-                    world_sink.path_reg.0.insert(
-                        metadata.component_id,
-                        ComponentPath::from_name(&metadata.name),
+                    let path = ComponentPath::from_name(&metadata.name);
+                    try_insert_entity(
+                        &mut world_sink.entity_map,
+                        &mut world_sink.metadata_reg,
+                        &mut world_sink.commands,
+                        path.path.last().unwrap(),
                     );
+                    world_sink.path_reg.0.insert(metadata.component_id, path);
                     world_sink
                         .metadata_reg
                         .insert(metadata.component_id, metadata);
-                    try_insert_entity(
-                        &mut world_sink.entity_map,
-                        &world_sink.metadata_reg,
-                        &mut world_sink.commands,
-                        component_id,
-                    );
                 }
                 // for metadata in metadata.entity_metadata.into_iter() {
                 //     let mut e = if let Some(entity) = world_sink.entity_map.get(&metadata.entity_id)
@@ -315,10 +312,11 @@ pub struct WorldSink<'w, 's> {
 #[allow(clippy::needless_lifetimes)] // removing these lifetimes causes an internal compiler error, so here we are
 fn try_insert_entity<'a, 'w, 's>(
     entity_map: &mut EntityMap,
-    metadata_reg: &ComponentMetadataRegistry,
+    metadata_reg: &mut ComponentMetadataRegistry,
     commands: &'a mut Commands<'w, 's>,
-    component_id: ComponentId,
+    component_path: &ComponentPart,
 ) -> Option<EntityCommands<'a>> {
+    let component_id = component_path.id;
     if let Some(entity) = entity_map.get(&component_id) {
         let Ok(e) = commands.get_entity(*entity) else {
             return None;
@@ -326,9 +324,16 @@ fn try_insert_entity<'a, 'w, 's>(
         Some(e)
     } else {
         let mut e = commands.spawn((component_id, ComponentValueMap::default()));
-        if let Some(metadata) = metadata_reg.get(&component_id) {
-            e.insert(metadata.clone());
-        }
+        let metadata = metadata_reg
+            .entry(component_id)
+            .or_insert_with(|| ComponentMetadata {
+                component_id,
+                name: component_path.name.to_string(),
+                metadata: Default::default(),
+                asset: false,
+            })
+            .clone();
+        e.insert(metadata.clone());
 
         entity_map.insert(component_id, e.id());
         Some(e)
@@ -343,11 +348,19 @@ impl Decomponentize for WorldSink<'_, '_> {
         view: ComponentView<'_>,
         _timestamp: Option<Timestamp>,
     ) -> Result<(), Infallible> {
+        let Some(path) = self.path_reg.get(&component_id) else {
+            return Ok(());
+        };
+
+        let Some(part) = path.path.last() else {
+            return Ok(());
+        };
+
         let Some(mut e) = try_insert_entity(
             &mut self.entity_map,
-            &self.metadata_reg,
+            &mut self.metadata_reg,
             &mut self.commands,
-            component_id,
+            part,
         ) else {
             return Ok(());
         };
@@ -358,17 +371,13 @@ impl Decomponentize for WorldSink<'_, '_> {
             e.insert(ComponentValue::from_view(view));
         }
 
-        let Some(path) = self.path_reg.get(&component_id) else {
-            return Ok(());
-        };
-
         let mut last_entity: Option<Entity> = None;
         for parent in path.path.iter() {
             let Some(mut e) = try_insert_entity(
                 &mut self.entity_map,
-                &self.metadata_reg,
+                &mut self.metadata_reg,
                 &mut self.commands,
-                parent.id,
+                parent,
             ) else {
                 continue;
             };

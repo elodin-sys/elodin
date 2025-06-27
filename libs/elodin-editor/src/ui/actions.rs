@@ -10,8 +10,9 @@ use impeller2_bevy::{ConnectionAddr, ConnectionStatus, ThreadConnectionStatus};
 use impeller2_cli::mlua::MultiValue;
 
 use super::{
+    button::EButton,
     colors::{ColorExt, get_scheme},
-    widgets::{WidgetSystem, button::EButton},
+    widgets::WidgetSystem,
 };
 
 #[derive(Resource)]

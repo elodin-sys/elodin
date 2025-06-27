@@ -3,15 +3,18 @@ use bevy::prelude::*;
 use big_space::GridCell;
 use eql::Expr;
 use impeller2_bevy::EntityMap;
-use impeller2_wkt::ComponentValue;
+use impeller2_wkt::{ComponentValue, Object3D};
 use nox::Array;
 use smallvec::smallvec;
 
 use crate::BevyExt;
 
 /// ExprObject3D component that holds an EQL expression for dynamic positioning
-#[derive(Component, Deref, DerefMut)]
-pub struct Object3D(EditableEQL);
+#[derive(Component)]
+pub struct Object3DState {
+    pub compiled_expr: Option<CompiledExpr>,
+    pub data: Object3D,
+}
 
 #[derive(Default)]
 pub struct EditableEQL {
@@ -30,7 +33,7 @@ impl EditableEQL {
 
 type ExprFn = dyn for<'a, 'b> Fn(
         &'a EntityMap,
-        &'a Query<'b, 'b, &'static ComponentValue, Without<Object3D>>,
+        &'a Query<'b, 'b, &'static ComponentValue>,
     ) -> Result<ComponentValue, String>
     + Send
     + Sync;
@@ -45,7 +48,7 @@ impl CompiledExpr {
     where
         F: for<'a, 'b> Fn(
                 &'a EntityMap,
-                &'a Query<'b, 'b, &'static ComponentValue, Without<Object3D>>,
+                &'a Query<'b, 'b, &'static ComponentValue>,
             ) -> Result<ComponentValue, String>
             + Send
             + Sync
@@ -58,7 +61,7 @@ impl CompiledExpr {
     pub fn execute<'a, 'b>(
         &'a self,
         entity_map: &'a EntityMap,
-        values: &'a Query<'b, 'b, &'static ComponentValue, Without<Object3D>>,
+        values: &'a Query<'b, 'b, &'static ComponentValue>,
     ) -> Result<ComponentValue, String> {
         match self {
             Self::Closure(c) => (c)(entity_map, values),
@@ -98,7 +101,7 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
                         let data = array.buf.as_buf();
                         if index < data.len() {
                             let value = data[index];
-                            let value = nox::array!(value).to_dyn();
+                            let value = nox::Array::<_, ()> { buf: value }.to_dyn();
                             Ok(ComponentValue::F64(value))
                         } else {
                             Err(format!(
@@ -113,7 +116,7 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
                         let data = array.buf.as_buf();
                         if index < data.len() {
                             let value = data[index];
-                            let value = nox::array!(value).to_dyn();
+                            let value = nox::Array::<_, ()> { buf: value }.to_dyn();
                             Ok(ComponentValue::F32(value))
                         } else {
                             Err(format!(
@@ -187,9 +190,9 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
 
 /// System that updates 3D object entities based on their EQL expressions
 pub fn update_object_3d_system(
-    mut objects_query: Query<(Entity, &Object3D, &mut impeller2_wkt::WorldPos)>,
+    mut objects_query: Query<(Entity, &Object3DState, &mut impeller2_wkt::WorldPos)>,
     entity_map: Res<EntityMap>,
-    component_value_maps: Query<&'static ComponentValue, Without<Object3D>>,
+    component_value_maps: Query<&'static ComponentValue>,
 ) {
     for (entity, object_3d, mut pos) in objects_query.iter_mut() {
         let Some(compiled_expr) = &object_3d.compiled_expr else {
@@ -233,15 +236,17 @@ impl ComponentArrayExt for ComponentValue {
 
 pub fn create_object_3d_entity(
     commands: &mut Commands,
-    eql: String,
+    data: impeller2_wkt::Object3D,
     expr: eql::Expr,
-    mesh_source: Option<impeller2_wkt::Object3D>,
     material_assets: &mut ResMut<Assets<StandardMaterial>>,
     mesh_assets: &mut ResMut<Assets<Mesh>>,
     assets: &Res<AssetServer>,
 ) -> Entity {
     let mut entity = commands.spawn((
-        Object3D(EditableEQL::new(eql, compile_eql_expr(expr))),
+        Object3DState {
+            compiled_expr: Some(compile_eql_expr(expr)),
+            data: data.clone(),
+        },
         Transform::default(),
         GlobalTransform::default(),
         Visibility::default(),
@@ -251,21 +256,36 @@ pub fn create_object_3d_entity(
         impeller2_wkt::WorldPos::default(),
     ));
 
-    if let Some(source) = mesh_source {
-        match source {
-            impeller2_wkt::Object3D::Glb(path) => {
-                let url = format!("{path}#Scene0");
-                let scene = assets.load(&url);
-                entity.insert(SceneRoot(scene));
-            }
-            impeller2_wkt::Object3D::Mesh { mesh, material } => {
-                let material = material.clone().into_bevy();
-                let material = material_assets.add(material);
-                entity.insert(MeshMaterial3d(material));
-                let mesh = mesh.clone().into_bevy();
-                let mesh = mesh_assets.add(mesh);
-                entity.insert(Mesh3d(mesh));
-            }
+    spawn_mesh(
+        &mut entity,
+        &data.mesh,
+        material_assets,
+        mesh_assets,
+        assets,
+    );
+
+    entity.id()
+}
+pub fn spawn_mesh(
+    entity: &mut EntityCommands,
+    mesh: &impeller2_wkt::Object3DMesh,
+    material_assets: &mut ResMut<Assets<StandardMaterial>>,
+    mesh_assets: &mut ResMut<Assets<Mesh>>,
+    assets: &Res<AssetServer>,
+) -> Entity {
+    match mesh {
+        impeller2_wkt::Object3DMesh::Glb(path) => {
+            let url = format!("{path}#Scene0");
+            let scene = assets.load(&url);
+            entity.insert(SceneRoot(scene));
+        }
+        impeller2_wkt::Object3DMesh::Mesh { mesh, material } => {
+            let material = material.clone().into_bevy();
+            let material = material_assets.add(material);
+            entity.insert(MeshMaterial3d(material));
+            let mesh = mesh.clone().into_bevy();
+            let mesh = mesh_assets.add(mesh);
+            entity.insert(Mesh3d(mesh));
         }
     }
 

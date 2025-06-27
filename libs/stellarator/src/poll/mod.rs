@@ -150,7 +150,10 @@ impl PollingReactor {
                     .expect("failed to submit op to reactor");
                 Poll::Pending
             }
-            poll => poll,
+            Poll::Ready(res) => {
+                let _ = self.states.try_remove(completion.id.0);
+                Poll::Ready(res)
+            }
         }
     }
 }

@@ -108,15 +108,27 @@ pub fn with_opacity(color: Color32, opacity: f32) -> Color32 {
 
 pub trait EColor {
     fn into_color32(self) -> Color32;
+    fn from_color32(color: egui::Color32) -> Self;
 }
 
 impl EColor for Color {
     fn into_color32(self) -> Color32 {
-        Color32::from_rgb(
+        Color32::from_rgba_unmultiplied(
             (255.0 * self.r) as u8,
             (255.0 * self.g) as u8,
             (255.0 * self.b) as u8,
+            (255.0 * self.a) as u8,
         )
+    }
+
+    fn from_color32(color: egui::Color32) -> Self {
+        let [r, g, b, a] = color.to_srgba_unmultiplied();
+        Self {
+            r: r as f32 / 255.0,
+            g: g as f32 / 255.0,
+            b: b as f32 / 255.0,
+            a: a as f32 / 255.0,
+        }
     }
 }
 
@@ -276,9 +288,11 @@ static COLOR_SCHEME: AtomicPtr<ColorScheme> = AtomicPtr::new(std::ptr::null_mut(
 pub fn get_scheme() -> &'static ColorScheme {
     let ptr = COLOR_SCHEME.load(atomic::Ordering::Relaxed);
     if ptr.is_null() {
-        load_color_scheme()
+        let scheme = load_color_scheme()
             .map(|c| &*Box::leak(Box::new(c)))
-            .unwrap_or(&DARK)
+            .unwrap_or(&DARK);
+        COLOR_SCHEME.store((scheme as *const _) as *mut _, atomic::Ordering::Relaxed);
+        scheme
     } else {
         unsafe { &*ptr }
     }

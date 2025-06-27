@@ -22,11 +22,12 @@ mod gui;
 #[cfg(feature = "gui")]
 pub use gui::*;
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
 pub struct Color {
     pub r: f32,
     pub g: f32,
     pub b: f32,
+    pub a: f32,
 }
 
 impl Color {
@@ -41,9 +42,20 @@ impl Color {
     pub const REDDISH: Self = Self::rgb(0.913, 0.125, 0.0335);
     pub const HYPERBLUE: Self = Self::rgb(0.08, 0.38, 0.82);
     pub const MINT: Self = Self::rgb(0.53, 0.87, 0.62);
+    pub const TRANSPARENT: Self = Self::rgba(0., 0., 0., 0.);
 
     pub const fn rgb(r: f32, g: f32, b: f32) -> Self {
-        Self { r, g, b }
+        Self { r, g, b, a: 1. }
+    }
+
+    pub const fn rgba(r: f32, g: f32, b: f32, a: f32) -> Self {
+        Self { r, g, b, a }
+    }
+}
+
+impl Default for Color {
+    fn default() -> Self {
+        Self::TRANSPARENT
     }
 }
 

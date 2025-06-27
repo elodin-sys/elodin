@@ -6,14 +6,14 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <iostream>
 #include <print>
 #include <system_error>
-#include <vector>
-#include <chrono>
 #include <thread>
+#include <vector>
 
 #include "db.hpp"
 
@@ -76,8 +76,9 @@ public:
         }
     }
 
-    template<typename T>
-    void send(T msg) {
+    template <typename T>
+    void send(T msg)
+    {
         auto buf = Msg(msg).encode_vec();
         write_all(buf.data(), buf.size());
     }
@@ -96,7 +97,8 @@ private:
 };
 
 // Thread function to read from a socket connection
-void reader_thread_func(const char* ip, uint16_t port) {
+void reader_thread_func(const char* ip, uint16_t port)
+{
     try {
         std::println("Reader thread: connecting to {}:{}", ip, port);
         auto read_sock = Socket(ip, port);
@@ -131,25 +133,24 @@ try {
     auto sock = Socket(ip, port);
     auto time = builder::raw_table(0, 8);
     auto table = builder::vtable({
-        field<SensorData, &SensorData::mag>(schema(PrimType::F32(), { 3 }, timestamp(time, pair(1, "mag")))),
-        field<SensorData, &SensorData::gyro>(schema(PrimType::F32(), { 3 }, timestamp(time, pair(1, "gyro")))),
-        field<SensorData, &SensorData::accel>(schema(PrimType::F32(), { 3 }, timestamp(time, pair(1, "accel")))),
-        field<SensorData, &SensorData::temp>(schema(PrimType::F32(), {}, timestamp(time, pair(1, "temp")))),
-        field<SensorData, &SensorData::pressure>(schema(PrimType::F32(), {}, timestamp(time, pair(1, "pressure")))),
-        field<SensorData, &SensorData::humidity>(schema(PrimType::F32(), {}, timestamp(time, pair(1, "humidity")))),
+        field<SensorData, &SensorData::mag>(schema(PrimType::F32(), { 3 }, timestamp(time, component("vehicle.imu.mag")))),
+        field<SensorData, &SensorData::gyro>(schema(PrimType::F32(), { 3 }, timestamp(time, component("vehicle.imu.gyro")))),
+        field<SensorData, &SensorData::accel>(schema(PrimType::F32(), { 3 }, timestamp(time, component("vehicle.imu.accel")))),
+        field<SensorData, &SensorData::temp>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.temp.temp")))),
+        field<SensorData, &SensorData::pressure>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.temp.pressure")))),
+        field<SensorData, &SensorData::humidity>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.temp.humidity")))),
     });
 
     sock.send(VTableMsg {
         .id = { 2, 0 },
         .vtable = table,
     });
-    sock.send(set_component_name("mag"));
-    sock.send(set_component_name("gyro"));
-    sock.send(set_component_name("accel"));
-    sock.send(set_component_name("temp"));
-    sock.send(set_component_name("pressure"));
-    sock.send(set_component_name("humidity"));
-    sock.send(set_entity_name(1, "vehicle"));
+    sock.send(set_component_name("vehicle.imu.mag"));
+    sock.send(set_component_name("vehicle.imu.gyro"));
+    sock.send(set_component_name("vehicle.imu.accel"));
+    sock.send(set_component_name("vehicle.temp.temp"));
+    sock.send(set_component_name("vehicle.temp.pressure"));
+    sock.send(set_component_name("vehicle.temp.humidity"));
 
     // Start the reader thread
     std::println("Main thread: starting reader thread");

@@ -16,7 +16,7 @@ nox.default-features = false
 
 # bevy
 bevy.version = "0.16"
-bevy.features = ["wayland"]
+bevy.features = ["wayland", "file_watcher"]
 bevy_render.version = "0.16"
 bevy_color.version = "0.16"
 bevy_egui.version = "0.34.0-rc.2"
@@ -55,6 +55,7 @@ impeller2.path = "../../libs/impeller2"
 impeller2.features = ["hifitime"]
 impeller2-wkt.path = "../../libs/impeller2/wkt"
 impeller2-wkt.features = ["bevy", "nox", "gui", "std"]
+impeller2-kdl.path = "../../libs/impeller2/kdl"
 toml.version = "0.8"
 serde = { version = "1.0.196", features = ["derive"] }
 serde_json = "1"
@@ -80,6 +81,7 @@ const-fnv1a-hash = "1.1.0"
 zerocopy = "0.8.14"
 hifitime.version = "4.0"
 stacker = "0.1.19"
+strum = "0.27"
 
 # arrow
 arrow.version = "55"
@@ -95,6 +97,10 @@ flume = "0.11.1"
 jiff = "0.2"
 peg = "0.8.5"
 
+# eql
+eql.path = "../db/eql"
+convert_case = "0.6.0"
+
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 impeller2-bevy.path = "../../libs/impeller2/bevy"
@@ -106,11 +112,14 @@ tokio = { version = "1.34", features = ["rt-multi-thread", "net"] }
 directories = "5.0"
 rfd = "0.15.2"
 s10.path = "../s10"
+notify-debouncer-mini = "0.6.0"
+
 # async
 stellarator.path = "../../libs/stellarator"
 stellarator.features = ["miette"]
 
 # errors
+thiserror.version = "2"
 miette.version = "7.2"
 miette.features = ["fancy"]
 
@@ -119,9 +128,6 @@ impeller2-bevy.path = "../../libs/impeller2/bevy"
 impeller2-bevy.features = ["tcp"]
 impeller2-bevy.default-features = false
 
-# eql
-eql.path = "../db/eql"
-convert_case = "0.6.0"
 
 # macos
 [target.'cfg(target_os = "macos")'.dependencies]

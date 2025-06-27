@@ -22,10 +22,11 @@ use std::{
 use crate::{VERSION, dirs};
 
 use super::{
+    button::EButton,
     colors::{self, ColorExt, get_scheme},
     images,
     theme::{self, corner_radius_sm},
-    widgets::{RootWidgetSystem, RootWidgetSystemExt, button::EButton},
+    widgets::{RootWidgetSystem, RootWidgetSystemExt},
 };
 
 #[derive(Component)]
@@ -332,18 +333,20 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
             .frame(egui::Frame::NONE.fill(get_scheme().bg_secondary))
             .resizable(false)
             .show(ctx, |ui| {
-                for item in state.recent_files.recent_files.clone().into_values().rev() {
-                    if ui.add(recent_item_button(item.clone(), arrow)).clicked() {
-                        match item {
-                            RecentItem::File(path) => {
-                                state.open_file(path.clone());
-                            }
-                            RecentItem::Addr(addr) => {
-                                state.start_connect(addr);
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for item in state.recent_files.recent_files.clone().into_values().rev() {
+                        if ui.add(recent_item_button(item.clone(), arrow)).clicked() {
+                            match item {
+                                RecentItem::File(path) => {
+                                    state.open_file(path.clone());
+                                }
+                                RecentItem::Addr(addr) => {
+                                    state.start_connect(addr);
+                                }
                             }
                         }
                     }
-                }
+                });
             });
         match state.modal_state.clone() {
             ModalState::None => {}

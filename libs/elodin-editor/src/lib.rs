@@ -26,7 +26,7 @@ use impeller2_bevy::{
     ComponentMetadataRegistry, ComponentPathRegistry, ComponentSchemaRegistry, ComponentValueMap,
     CurrentStreamId, EntityMap, PacketHandlerInput, PacketHandlers, PacketTx,
 };
-use impeller2_wkt::{CurrentTimestamp, NewConnection, SetStreamState, WorldPos};
+use impeller2_wkt::{CurrentTimestamp, NewConnection, Object3D, SetStreamState, WorldPos};
 use impeller2_wkt::{EarliestTimestamp, LastUpdated};
 use nox::Tensor;
 use object_3d::create_object_3d_entity;
@@ -34,12 +34,10 @@ use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc};
 use ui::{
     SelectedObject,
     colors::{ColorExt, get_scheme},
+    inspector::viewport::set_viewport_pos,
+    plot::{CollectedGraphData, gpu::LineHandle},
     tiles::{self, TileState},
     utils::FriendlyEpoch,
-    widgets::{
-        inspector::viewport::set_viewport_pos,
-        plot::{CollectedGraphData, gpu::LineHandle},
-    },
 };
 
 pub mod object_3d;
@@ -84,6 +82,10 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/logo-full.png");
         embedded_asset!(app, "assets/icons/chevron_right.png");
         embedded_asset!(app, "assets/icons/vertical-chevrons.png");
+        embedded_asset!(app, "assets/icons/container.png");
+        embedded_asset!(app, "assets/icons/plot.png");
+        embedded_asset!(app, "assets/icons/viewport.png");
+        embedded_asset!(app, "assets/icons/entity.png");
     }
 }
 
@@ -152,6 +154,7 @@ impl Plugin for EditorPlugin {
                     })
                     .set(AssetPlugin {
                         unapproved_path_mode: UnapprovedPathMode::Allow,
+                        mode: AssetMode::Processed,
                         ..default()
                     })
                     .disable::<TransformPlugin>()
@@ -177,7 +180,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(FrameTimeDiagnosticsPlugin::default())
             .add_plugins(WireframePlugin::default())
             .add_plugins(editor_cam_touch::EditorCamTouchPlugin)
-            .add_plugins(crate::ui::widgets::PlotPlugin)
+            .add_plugins(crate::ui::plot::PlotPlugin)
             .add_plugins(crate::plugins::LogicalKeyPlugin)
             .add_systems(Startup, setup_floating_origin)
             .add_systems(Startup, setup_window_icon)
@@ -404,7 +407,7 @@ fn setup_titlebar(
                     | NSWindowStyleMask::NSMiniaturizableWindowMask
                     | NSWindowStyleMask::NSUnifiedTitleAndToolbarWindowMask,
             );
-            window.setToolbarStyle_(NSWindowToolbarStyle::NSWindowToolbarStyleUnified);
+            window.setToolbarStyle_(NSWindowToolbarStyle::NSWindowToolbarStyleUnifiedCompact);
             window.setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
             window.setToolbar_(toolbar);
             commands.entity(id).insert(SetupTitlebar);
@@ -720,7 +723,7 @@ fn sync_object_3d(
         if synced_object_3d.0.contains_key(&entity) {
             continue;
         }
-        let Some(path) = dbg!(path_reg.get(id)) else {
+        let Some(path) = path_reg.get(id) else {
             continue;
         };
         let parent = path.path.first().unwrap();
@@ -744,9 +747,9 @@ fn sync_object_3d(
             )))
             .and_then(|e| materials.get(*e).ok());
 
-        let mesh_source = match dbg!((glb, mesh, material)) {
-            (Some(glb), _, _) => impeller2_wkt::Object3D::Glb(glb.0.clone()),
-            (_, Some(mesh), Some(mat)) => impeller2_wkt::Object3D::Mesh {
+        let mesh_source = match (glb, mesh, material) {
+            (Some(glb), _, _) => impeller2_wkt::Object3DMesh::Glb(glb.0.clone()),
+            (_, Some(mesh), Some(mat)) => impeller2_wkt::Object3DMesh::Mesh {
                 mesh: mesh.clone(),
                 material: mat.clone(),
             },
@@ -754,15 +757,18 @@ fn sync_object_3d(
         };
 
         let eql = format!("{}.world_pos", parent.name.to_case(Case::Snake));
-        let Ok(expr) = dbg!(ctx.0.parse_str(&eql)) else {
+        let Ok(expr) = ctx.0.parse_str(&eql) else {
             continue;
         };
 
         let object_entity = create_object_3d_entity(
             &mut commands,
-            eql,
+            Object3D {
+                eql,
+                mesh: mesh_source,
+                aux: (),
+            },
             expr,
-            Some(mesh_source),
             &mut material_assets,
             &mut mesh_assets,
             &assets,
