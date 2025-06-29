@@ -67,7 +67,6 @@ pub struct DB {
 
     // metadata
     pub path: PathBuf,
-    pub time_step: AtomicU64,
     pub default_stream_time_step: AtomicU64,
     pub last_updated: AtomicCell<Timestamp>,
     pub earliest_timestamp: Timestamp,
@@ -85,6 +84,8 @@ pub struct State {
     streams: HashMap<StreamId, Arc<FixedRateStreamState>>,
 
     udp_vtable_streams: HashSet<(SocketAddr, [u8; 2])>,
+
+    db_config: DbConfig,
 }
 
 impl DB {
@@ -96,9 +97,14 @@ impl DB {
         info!(?path, "created db");
 
         let default_stream_time_step = AtomicU64::new(time_step.as_nanos() as u64);
-        let time_step = AtomicU64::new(time_step.as_nanos() as u64);
         let state = State {
             assets: open_assets(&path)?,
+            db_config: DbConfig {
+                recording: true,
+                default_stream_time_step: time_step,
+                schematic_path: None,
+                schematic_kdl: None,
+            },
             ..Default::default()
         };
         let db = DB {
@@ -106,7 +112,6 @@ impl DB {
             recording_cell: PlayingCell::new(true),
             path,
             vtable_gen: AtomicCell::new(0),
-            time_step,
             default_stream_time_step,
             last_updated: AtomicCell::new(Timestamp(i64::MIN)),
             earliest_timestamp: Timestamp::now(),
@@ -125,18 +130,12 @@ impl DB {
         f(&mut state)
     }
 
-    fn db_settings(&self) -> DbSettings {
-        DbSettings {
-            recording: self.recording_cell.is_playing(),
-            time_step: Duration::from_nanos(self.time_step.load(atomic::Ordering::SeqCst)),
-            default_stream_time_step: Duration::from_nanos(
-                self.default_stream_time_step.load(atomic::Ordering::SeqCst),
-            ),
-        }
+    fn db_config(&self) -> DbConfig {
+        self.with_state(|db| db.db_config.clone())
     }
 
     pub fn save_db_state(&self) -> Result<(), Error> {
-        let db_state = self.db_settings();
+        let db_state = self.db_config();
         db_state.write(self.path.join("db_state"))
     }
 
@@ -203,7 +202,7 @@ impl DB {
         }
 
         info!(db.path = ?path, "opened db");
-        let db_state = DbSettings::read(path.join("db_state"))?;
+        let db_state = DbConfig::read(path.join("db_state"))?;
         let state = State {
             components,
             component_metadata,
@@ -221,17 +220,12 @@ impl DB {
             path,
             vtable_gen: AtomicCell::new(0),
             recording_cell: PlayingCell::new(db_state.recording),
-            time_step: AtomicU64::new(db_state.time_step.as_nanos() as u64),
             default_stream_time_step: AtomicU64::new(
                 db_state.default_stream_time_step.as_nanos() as u64
             ),
             last_updated: AtomicCell::new(Timestamp(last_updated)),
             earliest_timestamp,
         })
-    }
-
-    pub fn time_step(&self) -> Duration {
-        Duration::from_nanos(self.time_step.load(atomic::Ordering::Relaxed))
     }
 
     pub fn insert_vtable(&self, vtable: VTableMsg) -> Result<(), Error> {
@@ -836,9 +830,6 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 if let Some(timestamp) = set_stream_state.timestamp {
                     state.set_timestamp(timestamp);
                 }
-                if let Some(time_step) = set_stream_state.time_step {
-                    state.set_time_step(time_step);
-                }
                 if let Some(frequency) = set_stream_state.frequency {
                     state.set_frequency(frequency);
                 }
@@ -950,6 +941,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 DumpMetadataResp {
                     component_metadata,
                     msg_metadata,
+                    db_config: state.db_config.clone(),
                 }
             });
             tx.send_msg(&msg).await?;
@@ -1004,27 +996,37 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 }
             });
         }
-        Packet::Msg(m) if m.id == SetDbSettings::ID => {
-            let SetDbSettings {
+        Packet::Msg(m) if m.id == SetDbConfig::ID => {
+            let SetDbConfig {
                 recording,
-                time_step,
-            } = m.parse::<SetDbSettings>()?;
+                schematic_path,
+                schematic_kdl,
+            } = m.parse::<SetDbConfig>()?;
             if let Some(recording) = recording {
+                db.with_state_mut(|s| {
+                    s.db_config.recording = recording;
+                });
                 db.recording_cell.set_playing(recording);
             }
-            if let Some(time_step) = time_step {
-                db.time_step
-                    .store(time_step.as_nanos() as u64, atomic::Ordering::Release);
+            if let Some(schematic_path) = schematic_path {
+                db.with_state_mut(|s| {
+                    s.db_config.schematic_path = Some(schematic_path);
+                });
+            }
+            if let Some(schematic_kdl) = schematic_kdl {
+                db.with_state_mut(|s| {
+                    s.db_config.schematic_kdl = Some(schematic_kdl);
+                });
             }
             db.save_db_state()?;
-            tx.send_msg(&db.db_settings()).await?;
+            tx.send_msg(&db.db_config()).await?;
         }
         Packet::Msg(m) if m.id == GetEarliestTimestamp::ID => {
             tx.send_msg(&EarliestTimestamp(db.earliest_timestamp))
                 .await?;
         }
         Packet::Msg(m) if m.id == GetDbSettings::ID => {
-            let settings = db.db_settings();
+            let settings = db.db_config();
             tx.send_msg(&settings).await?;
         }
         Packet::Table(table) => {
@@ -1045,7 +1047,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         }
 
         Packet::Msg(m) if m.id == GetDbSettings::ID => {
-            let settings = db.db_settings();
+            let settings = db.db_config();
             tx.send_msg(&settings).await?;
         }
         Packet::Msg(m) if m.id == SQLQuery::ID => {
@@ -1287,11 +1289,6 @@ impl FixedRateStreamState {
         self.current_tick
             .store(timestamp.0, atomic::Ordering::SeqCst);
         self.playing_cell.wait_cell.wake_all();
-    }
-
-    fn set_time_step(&self, time_step: Duration) {
-        self.time_step
-            .store(time_step.as_nanos() as u64, atomic::Ordering::SeqCst);
     }
 
     fn set_frequency(&self, frequency: u64) {
@@ -1610,7 +1607,7 @@ impl PlayingCell {
     }
 }
 
-impl MetadataExt for DbSettings {}
+impl MetadataExt for DbConfig {}
 
 pub trait AtomicTimestampExt {
     fn update_max(&self, val: Timestamp);

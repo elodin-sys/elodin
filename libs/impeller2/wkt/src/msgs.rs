@@ -254,6 +254,7 @@ impl Request for DumpMetadata {
 pub struct DumpMetadataResp {
     pub component_metadata: Vec<ComponentMetadata>,
     pub msg_metadata: Vec<MsgMetadata>,
+    pub db_config: DbConfig,
 }
 
 impl Msg for DumpMetadataResp {
@@ -283,23 +284,37 @@ impl Request for SubscribeLastUpdated {
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
-pub struct SetDbSettings {
+pub struct SetDbConfig {
     pub recording: Option<bool>,
-    pub time_step: Option<Duration>,
+    pub schematic_path: Option<String>,
+    pub schematic_kdl: Option<String>,
 }
 
-impl Msg for SetDbSettings {
+impl Msg for SetDbConfig {
     const ID: PacketId = [224, 19];
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct DbSettings {
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
+pub struct DbConfig {
     pub recording: bool,
-    pub time_step: Duration,
     pub default_stream_time_step: Duration,
+    pub schematic_path: Option<String>,
+    pub schematic_kdl: Option<String>,
 }
 
-impl Msg for DbSettings {
+impl Default for DbConfig {
+    fn default() -> Self {
+        Self {
+            recording: true,
+            default_stream_time_step: Duration::from_millis(10),
+            schematic_path: None,
+            schematic_kdl: None,
+        }
+    }
+}
+
+impl Msg for DbConfig {
     const ID: PacketId = [224, 20];
 }
 
