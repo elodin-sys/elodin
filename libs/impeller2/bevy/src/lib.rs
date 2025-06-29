@@ -2,7 +2,7 @@ use bevy::{
     app::Plugin,
     ecs::{
         hierarchy::ChildOf,
-        system::{EntityCommands, SystemId},
+        system::{EntityCommands, SystemId, command::init_resource},
     },
     log::warn,
     prelude::{Command, In, InRef, IntoSystem, Mut, System},
@@ -26,7 +26,7 @@ use impeller2::{
 };
 use impeller2_bbq::{AsyncArcQueueRx, RxExt};
 use impeller2_wkt::{
-    AssetId, BodyAxes, ComponentMetadata, CurrentTimestamp, DbSettings, DumpAssets, DumpMetadata,
+    AssetId, BodyAxes, ComponentMetadata, CurrentTimestamp, DbConfig, DumpAssets, DumpMetadata,
     DumpMetadataResp, DumpSchema, DumpSchemaResp, EarliestTimestamp, ErrorResponse,
     FixedRateBehavior, GetDbSettings, GetEarliestTimestamp, Glb, IsRecording, LastUpdated, Line3d,
     Material, Mesh, Panel, Stream, StreamBehavior, StreamId, StreamTimestamp, SubscribeLastUpdated,
@@ -167,30 +167,16 @@ fn sink_inner(
                         .metadata_reg
                         .insert(metadata.component_id, metadata);
                 }
-                // for metadata in metadata.entity_metadata.into_iter() {
-                //     let mut e = if let Some(entity) = world_sink.entity_map.get(&metadata.entity_id)
-                //     {
-                //         let Ok(e) = world_sink.commands.get_entity(*entity) else {
-                //             continue;
-                //         };
-                //         e
-                //     } else {
-                //         let e = world_sink
-                //             .commands
-                //             .spawn((metadata.entity_id, ComponentValueMap::default()));
-                //         world_sink.entity_map.insert(metadata.entity_id, e.id());
-                //         e
-                //     };
-                //     e.insert(metadata.clone());
-                // }
+                *world_sink.db_config = metadata.db_config;
             }
             OwnedPacket::Msg(m) if m.id == LastUpdated::ID => {
                 let m = m.parse::<LastUpdated>()?;
                 *world_sink.max_tick = m;
             }
-            OwnedPacket::Msg(m) if m.id == DbSettings::ID => {
-                let settings = m.parse::<DbSettings>()?;
-                world_sink.recording.0 = settings.recording;
+            OwnedPacket::Msg(m) if m.id == DbConfig::ID => {
+                let config = m.parse::<DbConfig>()?;
+                world_sink.recording.0 = config.recording;
+                *world_sink.db_config = config;
             }
             OwnedPacket::Msg(m) if m.id == DumpSchemaResp::ID => {
                 let dump_schema = m.parse::<DumpSchemaResp>()?;
@@ -307,6 +293,7 @@ pub struct WorldSink<'w, 's> {
     current_timestamp: ResMut<'w, CurrentTimestamp>,
     schema_reg: ResMut<'w, ComponentSchemaRegistry>,
     path_reg: ResMut<'w, ComponentPathRegistry>,
+    db_config: ResMut<'w, DbConfig>,
 }
 
 #[allow(clippy::needless_lifetimes)] // removing these lifetimes causes an internal compiler error, so here we are
@@ -696,7 +683,8 @@ impl Plugin for Impeller2Plugin {
             .init_resource::<PacketIdHandlers>()
             .init_resource::<PacketHandlers>()
             .init_resource::<RequestIdHandlers>()
-            .init_resource::<RequestIdAlloc>();
+            .init_resource::<RequestIdAlloc>()
+            .init_resource::<DbConfig>();
     }
 }
 

@@ -24,7 +24,7 @@ use impeller2::types::msg_id;
 use impeller2_bevy::{ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
 use impeller2_kdl::{FromKdl, KdlSchematicError, ToKdl};
 use impeller2_wkt::{
-    ComponentPath, ComponentValue, IsRecording, Material, Mesh, Object3D, SetDbSettings,
+    ComponentPath, ComponentValue, IsRecording, Material, Mesh, Object3D, SetDbConfig,
     SetStreamState,
 };
 use miette::IntoDiagnostic;
@@ -1046,7 +1046,7 @@ impl Default for PalettePage {
                 SIMULATION_LABEL,
                 |_: In<String>, packet_tx: Res<PacketTx>, mut simulating: ResMut<IsRecording>| {
                     simulating.0 = !simulating.0;
-                    packet_tx.send_msg(SetDbSettings {
+                    packet_tx.send_msg(SetDbConfig {
                         recording: Some(simulating.0),
                         ..Default::default()
                     });

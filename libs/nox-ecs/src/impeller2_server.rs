@@ -113,10 +113,6 @@ pub fn init_db(
         Ok::<_, elodin_db::Error>(())
     })?;
 
-    db.time_step.store(
-        world.metadata.run_time_step.0.as_nanos() as u64,
-        atomic::Ordering::SeqCst,
-    );
     let default_stream_time_step = Duration::from_secs_f64(
         world.metadata.sim_time_step.0.as_secs_f64() / world.metadata.default_playback_speed,
     );
@@ -216,7 +212,7 @@ async fn tick(
             }
         });
         db.last_updated.store(timestamp);
-        let time_step = db.time_step().max(Duration::from_micros(100));
+        let time_step = world.world.metadata.run_time_step.0;
         let sleep_time = time_step.saturating_sub(start.elapsed());
         if is_cancelled() {
             return;
