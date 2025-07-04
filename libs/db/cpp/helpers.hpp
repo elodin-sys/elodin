@@ -108,11 +108,21 @@ public:
     }
 };
 
-SetComponentMetadata set_component_name(std::string name)
+SetComponentMetadata set_component_metadata(std::string name, const std::vector<std::string>& element_names = {})
 {
+    std::string element_names_str;
+    if (!element_names.empty()) {
+        for (size_t i = 0; i < element_names.size(); ++i) {
+            if (i > 0) element_names_str += ",";
+            element_names_str += element_names[i];
+        }
+    }
     return SetComponentMetadata(ComponentMetadata {
         .component_id = component_id(name),
         .name = std::move(name),
+        .metadata = {
+            { "element_names", std::move(element_names_str) }
+        },
     });
 }
 

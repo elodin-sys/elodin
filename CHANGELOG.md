@@ -1,6 +1,7 @@
 # Changelog
 
 ## unreleased
+- **(breaking)** Replace `set_component_name` with `set_component_metadata` in C++ API to support setting element names.
 
 ## v0.14
 
