@@ -109,6 +109,6 @@ elodin-db ships with a single header C++20 library. The library includes message
 
 You can generate the C++ library by running:
 
-`cargo run gen-cpp ./db.hpp`
+`cargo run gen-cpp > ./examples/db.hpp`
 
-This will generate a C++ header file at `./db.hpp`
+This will generate a C++ header file at `./examples/db.hpp`

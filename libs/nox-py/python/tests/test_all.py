@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import elodin as el
 import jax
 import jax.numpy as np
+import polars as pl
+from polars.testing import assert_frame_equal
 from elodin import ukf
 from jax import random
 
@@ -38,24 +40,29 @@ def test_basic_system():
 
     sys = foo.pipe(bar).pipe(baz)
     w = el.World()
-    w.spawn(Test(np.array([1.0]), np.array([500.0])))
+    w.spawn(Test(np.array([1.0]), np.array([500.0])), "e1")
     w.spawn(
         [
             Test(np.array([15.0]), np.array([500.0])),
             EffectArchetype(np.array([15.0])),
-        ]
+        ],
+        "e2",
     )
     exec = w.build(sys)
     exec.run()
-    x1 = exec.column_array(el.Component.id(X))
-    y1 = exec.column_array(el.Component.id(Y))
-    assert (x1 == [1000.0, 15015.0]).all()
-    assert (y1 == [500.0, 500.0]).all()
     exec.run()
-    x1 = exec.column_array(el.Component.id(X))
-    y1 = exec.column_array(el.Component.id(Y))
-    assert (x1 == [1000000.0, 15015015.0]).all()
-    assert (y1 == [500.0, 500.0]).all()
+    df = exec.history(["e1.x", "e2.x", "e1.y", "e2.y"])
+    print(df)
+
+    expected_df = pl.DataFrame(
+        {
+            "e1.x": [1.0, 1000.0, 1000000.0],
+            "e2.x": [15.0, 15015.0, 15015015.0],
+            "e1.y": [500.0, 500.0, 500.0],
+            "e2.y": [500.0, 500.0, 500.0],
+        }
+    )
+    assert_frame_equal(df.drop("time"), expected_df)
 
 
 def test_six_dof():
@@ -65,14 +72,16 @@ def test_six_dof():
             world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
             world_vel=el.SpatialMotion(linear=np.array([1.0, 0.0, 0.0])),
             inertia=el.SpatialInertia(1.0),
-        )
+        ),
+        "e1",
     )
     sys = el.six_dof(1.0 / 60.0)
     exec = w.build(sys)
     exec.run()
-    x = exec.column_array(el.Component.id(el.WorldPos))
-    assert np.allclose(x.to_numpy()[0][:4], np.array([0.0, 0.0, 0.0, 1.0]))
-    assert np.allclose(x.to_numpy()[0][4:], np.array([0.01666667, 0.0, 0.0]))
+    df = exec.history("e1.world_pos")
+    x = df["e1.world_pos"][-1]
+    assert np.allclose(x.to_numpy()[:4], np.array([0.0, 0.0, 0.0, 1.0]))
+    assert np.allclose(x.to_numpy()[4:], np.array([0.01666667, 0.0, 0.0]))
 
 
 def test_spatial_integration():
@@ -94,14 +103,16 @@ def test_spatial_integration():
                 angular=np.array([np.pi / 2, 0.0, 0.0]),
             ),
             inertia=el.SpatialInertia(1.0),
-        )
+        ),
+        "e1",
     )
     exec = w.build(sys)
     exec.run()
     exec.run()
-    pos = exec.column_array(el.Component.name(el.WorldPos))
+    df = exec.history("e1.world_pos")
+    pos = df["e1.world_pos"][-1]
     assert (pos[4:] == [2.0, 0.0, 0.0]).all()
-    assert np.allclose(pos.to_numpy()[0][:4], np.array([0.97151626, 0.0, 0.0, 0.23697292]))
+    assert np.allclose(pos.to_numpy()[:4], np.array([0.97151626, 0.0, 0.0, 0.23697292]))
 
 
 def test_graph():
@@ -118,17 +129,18 @@ def test_graph():
         return graph.edge_fold(x, x, X, np.array(5.0), lambda x, a, b: x + a + b)
 
     w = el.World()
-    a = w.spawn(Test(np.array([1.0])))
-    b = w.spawn(Test(np.array([2.0])))
-    c = w.spawn(Test(np.array([2.0])))
+    a = w.spawn(Test(np.array([1.0])), "e1")
+    b = w.spawn(Test(np.array([2.0])), "e2")
+    c = w.spawn(Test(np.array([2.0])), "e3")
     print(a, b, c)
     w.spawn(EdgeArchetype(el.Edge(a, b)))
     w.spawn(EdgeArchetype(el.Edge(a, c)))
     w.spawn(EdgeArchetype(el.Edge(b, c)))
     exec = w.build(fold_test)
     exec.run()
-    x = exec.column_array(el.Component.id(X))
-    assert (x == [11.0, 9.0, 2.0]).all()
+    df = exec.history(["e1.x", "e2.x", "e3.x"])
+    expected_df = pl.DataFrame({"e1.x": [1.0, 11.0], "e2.x": [2.0, 9.0], "e3.x": [2.0, 2.0]})
+    assert_frame_equal(df.drop("time"), expected_df)
 
 
 def test_seed():
@@ -166,15 +178,19 @@ def test_seed():
     sys = foo.pipe(bar).pipe(seed_mul).pipe(seed_sample)
     w = el.World()
     w.spawn(Globals(seed=np.array(2)))
-    w.spawn(Test(np.array(1.0), np.array(500.0)))
-    w.spawn(Test(np.array(15.0), np.array(500.0)))
+    w.spawn(Test(np.array(1.0), np.array(500.0)), "e1")
+    w.spawn(Test(np.array(15.0), np.array(500.0)), "e2")
     exec = w.build(sys)
     exec.run()
-    x1 = exec.column_array(el.Component.id(X))
-    y1 = exec.column_array(el.Component.id(Y))
-    assert (x1 == [2000.0, 30000.0]).all()
-    assert (y1 >= [500.0, 500.0]).all()
-    assert (y1 <= [1000.0, 1000.0]).all()
+    df = exec.history(["e1.x", "e2.x", "e1.y", "e2.y"])
+    e1x = df["e1.x"][-1]
+    e2x = df["e2.x"][-1]
+    e1y = df["e1.y"][-1]
+    e2y = df["e2.y"][-1]
+    assert np.isclose(e1x, 2000.0)
+    assert np.isclose(e2x, 30000.0)
+    assert e1y >= 500.0 and e1y <= 1000.0
+    assert e2y >= 500.0 and e2y <= 1000.0
 
 
 def test_archetype_name():
@@ -192,11 +208,22 @@ def test_spatial_vector_algebra():
         return v + v
 
     w = el.World()
-    w.spawn(el.Body(world_vel=el.SpatialMotion(linear=np.array([1.0, 0.0, 0.0]))))
+    w.spawn(el.Body(world_vel=el.SpatialMotion(linear=np.array([1.0, 0.0, 0.0]))), "e1")
     exec = w.build(double_vec)
     exec.run()
-    v = exec.column_array(el.Component.id(el.WorldVel))
-    assert (v[0][3:] == [2.0, 0.0, 0.0]).all()
+    df = exec.history("e1.world_vel")
+    expected_df = pl.DataFrame(
+        {
+            "e1.world_vel": [
+                [0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 2.0, 0.0, 0.0],
+            ]
+        },
+        schema={
+            "e1.world_vel": pl.Array(pl.Float64, 6),
+        },
+    )
+    assert_frame_equal(df.drop("time"), expected_df)
 
 
 def test_six_dof_ang_vel_int():
@@ -206,16 +233,17 @@ def test_six_dof_ang_vel_int():
             world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
             world_vel=el.SpatialMotion(angular=np.array([0.0, 0.0, 1.0])),
             inertia=el.SpatialInertia(1.0),
-        )
+        ),
+        "e1",
     )
     sys = el.six_dof(1.0 / 120.0)
     exec = w.build(sys)
-    for _ in range(120):
-        exec.run()
-    x = exec.column_array(el.Component.id(el.WorldPos))
+    exec.run(120)
+    df = exec.history("e1.world_pos")
+    x = df["e1.world_pos"][-1]
     # value from Julia and Simulink
     assert np.isclose(
-        x.to_numpy()[0],
+        x.to_numpy(),
         np.array([0.0, 0.0, 0.479425538604203, 0.8775825618903728, 0.0, 0.0, 0.0]),
         rtol=1e-5,
     ).all()
@@ -226,16 +254,17 @@ def test_six_dof_ang_vel_int():
             world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
             world_vel=el.SpatialMotion(angular=np.array([0.0, 1.0, 0.0])),
             inertia=el.SpatialInertia(1.0),
-        )
+        ),
+        "e1",
     )
     sys = el.six_dof(1.0 / 120.0)
     exec = w.build(sys)
-    for _ in range(120):
-        exec.run()
-    x = exec.column_array(el.Component.id(el.WorldPos))
+    exec.run(120)
+    df = exec.history("e1.world_pos")
+    x = df["e1.world_pos"][-1]
     # value from Julia and Simulink
     assert np.isclose(
-        x.to_numpy()[0],
+        x.to_numpy(),
         np.array([0.0, 0.479425538604203, 0.0, 0.8775825618903728, 0.0, 0.0, 0.0]),
         rtol=1e-5,
     ).all()
@@ -246,17 +275,18 @@ def test_six_dof_ang_vel_int():
             world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
             world_vel=el.SpatialMotion(angular=np.array([1.0, 1.0, 0.0])),
             inertia=el.SpatialInertia(1.0),
-        )
+        ),
+        "e1",
     )
     sys = el.six_dof(1.0 / 120.0)
     exec = w.build(sys)
-    for _ in range(120):
-        exec.run()
-    x = exec.column_array(el.Component.id(el.WorldPos))
-    print(x.to_numpy()[0])
+    exec.run(120)
+    df = exec.history("e1.world_pos")
+    x = df["e1.world_pos"][-1]
+    print(x.to_numpy())
     # value from Julia and Simulink
     assert np.isclose(
-        x.to_numpy()[0],
+        x.to_numpy(),
         np.array([0.45936268493243, 0.45936268493243, 0.0, 0.76024459707606, 0.0, 0.0, 0.0]),
         rtol=1e-5,
     ).all()
@@ -317,7 +347,8 @@ def test_six_dof_force():
             world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
             world_vel=el.SpatialMotion(angular=np.array([0.0, 0.0, 0.0])),
             inertia=el.SpatialInertia(1.0),
-        )
+        ),
+        "e1",
     )
 
     @el.map
@@ -327,16 +358,10 @@ def test_six_dof_force():
 
     sys = el.six_dof(1.0 / 120.0, constant_force)
     exec = w.build(sys)
-    for _ in range(120):
-        exec.run()
-    x = exec.column_array(el.Component.id(el.WorldPos))
-    v = exec.column_array(el.Component.id(el.WorldVel))
-    a = exec.column_array(el.Component.id(el.WorldAccel))
-    print(x.to_numpy())
-    print(v.to_numpy())
-    print(a.to_numpy())
+    exec.run(120)
+    df = exec.history(["e1.world_pos", "e1.world_vel", "e1.world_accel"])
     assert np.isclose(
-        x.to_numpy()[0], np.array([0.0, 0.0, 0.0, 1.0, 0.5, 0.0, 0.0]), rtol=1e-5
+        df["e1.world_pos"][-1].to_numpy(), np.array([0.0, 0.0, 0.0, 1.0, 0.5, 0.0, 0.0]), rtol=1e-5
     ).all()  # values taken from simulink
 
 

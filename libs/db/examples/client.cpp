@@ -136,21 +136,21 @@ try {
         field<SensorData, &SensorData::mag>(schema(PrimType::F32(), { 3 }, timestamp(time, component("vehicle.imu.mag")))),
         field<SensorData, &SensorData::gyro>(schema(PrimType::F32(), { 3 }, timestamp(time, component("vehicle.imu.gyro")))),
         field<SensorData, &SensorData::accel>(schema(PrimType::F32(), { 3 }, timestamp(time, component("vehicle.imu.accel")))),
-        field<SensorData, &SensorData::temp>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.temp.temp")))),
-        field<SensorData, &SensorData::pressure>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.temp.pressure")))),
-        field<SensorData, &SensorData::humidity>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.temp.humidity")))),
+        field<SensorData, &SensorData::temp>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.temp")))),
+        field<SensorData, &SensorData::pressure>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.pressure")))),
+        field<SensorData, &SensorData::humidity>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.humidity")))),
     });
 
     sock.send(VTableMsg {
         .id = { 2, 0 },
         .vtable = table,
     });
-    sock.send(set_component_name("vehicle.imu.mag"));
-    sock.send(set_component_name("vehicle.imu.gyro"));
-    sock.send(set_component_name("vehicle.imu.accel"));
-    sock.send(set_component_name("vehicle.temp.temp"));
-    sock.send(set_component_name("vehicle.temp.pressure"));
-    sock.send(set_component_name("vehicle.temp.humidity"));
+    sock.send(set_component_metadata("vehicle.imu.mag", {"x", "y", "z"}));
+    sock.send(set_component_metadata("vehicle.imu.gyro", {"x", "y", "z"}));
+    sock.send(set_component_metadata("vehicle.imu.accel", {"x", "y", "z"}));
+    sock.send(set_component_metadata("vehicle.temp"));
+    sock.send(set_component_metadata("vehicle.pressure"));
+    sock.send(set_component_metadata("vehicle.humidity"));
 
     // Start the reader thread
     std::println("Main thread: starting reader thread");

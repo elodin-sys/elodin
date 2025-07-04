@@ -1,7 +1,7 @@
 use crate::*;
 use ::s10::{GroupRecipe, SimRecipe, cli::run_recipe};
 use clap::Parser;
-use impeller2::types::PrimType;
+use impeller2::types::{PrimType, Timestamp};
 use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 use miette::miette;
 use nox_ecs::{ComponentSchema, IntoSystem, System as _, TimeStep, World, increment_sim_tick, nox};
@@ -324,13 +324,12 @@ impl WorldBuilder {
         if !optimize {
             client.disable_optimizations();
         }
-        let exec = exec.compile(client.clone())?;
+        let mut exec = exec.compile(client.clone())?;
         let db_dir = tempfile::tempdir()?;
         let db_dir = db_dir.into_path();
-        Ok(Exec {
-            exec,
-            db: elodin_db::DB::create(db_dir.join("db"))?,
-        })
+        let db = elodin_db::DB::create(db_dir.join("db"))?;
+        nox_ecs::impeller2_server::init_db(&db, &mut exec.world, Timestamp::now())?;
+        Ok(Exec { exec, db })
     }
 
     #[allow(clippy::too_many_arguments)]
