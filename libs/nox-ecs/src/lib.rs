@@ -28,7 +28,6 @@ mod query;
 mod system;
 pub mod utils;
 
-pub mod arrow;
 pub mod graph;
 pub mod impeller2_server;
 pub mod six_dof;

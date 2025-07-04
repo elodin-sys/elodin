@@ -124,7 +124,7 @@ def world() -> tuple[el.World, el.EntityId]:
             mekf.MEKF(),
             telemetry.Telemetry(),
         ],
-        name="Drone",
+        name="drone",
     )
     world.spawn(
         el.Panel.hsplit(
@@ -145,7 +145,7 @@ def world() -> tuple[el.World, el.EntityId]:
             ),
             active=True,
         ),
-        name="Viewport",
+        name="viewport",
     )
     world.spawn(
         el.Panel.hsplit(
