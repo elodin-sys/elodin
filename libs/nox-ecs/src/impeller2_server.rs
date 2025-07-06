@@ -60,9 +60,6 @@ pub fn init_db(
     start_timestamp: Timestamp,
 ) -> Result<(), elodin_db::Error> {
     tracing::info!("initializing db");
-    for (id, asset) in world.assets.iter().enumerate() {
-        db.insert_asset(id as u64, &asset.inner)?;
-    }
     db.with_state_mut(|state| {
         for (component_id, (schema, component_metadata)) in world.metadata.component_map.iter() {
             let Some(column) = world.host.get(component_id) else {
@@ -89,7 +86,6 @@ pub fn init_db(
                     component_id: pair_id,
                     name: pair_name,
                     metadata: component_metadata.metadata.clone(),
-                    asset: component_metadata.asset,
                 };
 
                 state.set_component_metadata(pair_metadata, &db.path)?;
@@ -113,7 +109,6 @@ pub fn init_db(
                     component_id: ComponentId::new(&entity_metadata.name),
                     name: entity_metadata.name.clone(),
                     metadata: entity_metadata.metadata.clone(),
-                    asset: false,
                 },
                 &db.path,
             )?;

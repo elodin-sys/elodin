@@ -130,7 +130,6 @@ impl LoadSchematicParams<'_, '_> {
                     self.spawn_object_3d(object_3d.clone());
                 }
                 impeller2_wkt::SchematicElem::Line3d(line_3d) => {
-                    println!("spawn line 3d {:?}", line_3d);
                     self.spawn_line_3d(line_3d.clone());
                 }
             }

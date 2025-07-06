@@ -131,7 +131,6 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                         .map(|score| (id, child, score, metadata))
                 }
             })
-            .filter(|(_, _, _, metadata)| !metadata.asset)
             .filter(|(_, _, priority, _)| *priority >= 0)
             .collect::<Vec<_>>();
         components.sort_by_key(|(_, _, priority, metadata)| (*priority, &metadata.name));

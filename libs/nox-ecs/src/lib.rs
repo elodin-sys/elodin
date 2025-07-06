@@ -2,7 +2,7 @@ extern crate self as nox_ecs;
 
 use crate::utils::SchemaExt;
 use impeller2::types::{ComponentId, EntityId};
-use impeller2_wkt::{EntityMetadata, Material, Mesh};
+use impeller2_wkt::EntityMetadata;
 use nox::xla::{BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
 use nox::{ArrayTy, Client, CompFn, Noxpr};
 use profile::Profiler;
@@ -18,7 +18,6 @@ use std::{collections::BTreeMap, marker::PhantomData};
 pub use nox;
 
 mod archetype;
-mod assets;
 mod component;
 mod dyn_array;
 mod globals;
@@ -34,7 +33,6 @@ pub mod six_dof;
 pub mod world;
 
 pub use archetype::*;
-pub use assets::*;
 pub use component::*;
 pub use dyn_array::*;
 pub use globals::*;
@@ -542,12 +540,6 @@ where
     }
 }
 
-#[derive(Archetype)]
-pub struct Shape {
-    pub mesh: Handle<Mesh>,
-    pub material: Handle<Material>,
-}
-
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("nox {0}")]
@@ -585,7 +577,6 @@ impl From<nox::xla::Error> for Error {
 mod tests {
     use super::*;
     use crate::{Archetype, World};
-    use assets::Handle;
     use impeller2_wkt::Glb;
     use nox::{Op, OwnedRepr, Scalar, Vector, tensor};
     use nox_ecs_macros::ReprMonad;
@@ -672,24 +663,6 @@ mod tests {
             v.typed_buf::<f64>().unwrap(),
             &[4.0, 5.5, 3.0, 12.0, 1.0, -2.0]
         )
-    }
-
-    #[test]
-    fn test_assets() {
-        #[derive(Component, ReprMonad)]
-        struct A<R: OwnedRepr = Op>(Scalar<f64, R>);
-
-        #[derive(Archetype)]
-        struct Body {
-            glb: Handle<Glb>,
-            a: A,
-        }
-        let mut world = World::default();
-        let body = Body {
-            glb: world.insert_asset(Glb("foo-bar".to_string())),
-            a: A(1.0.into()),
-        };
-        world.spawn(body);
     }
 
     #[test]

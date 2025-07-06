@@ -3,14 +3,12 @@ use impeller2::component::Component;
 use impeller2::types::Timestamp;
 use serde::{Deserialize, Serialize};
 
-mod assets;
 mod metadata;
 mod msgs;
 mod path;
 #[cfg(feature = "nox")]
 mod value;
 
-pub use assets::*;
 pub use metadata::*;
 pub use msgs::*;
 pub use path::*;

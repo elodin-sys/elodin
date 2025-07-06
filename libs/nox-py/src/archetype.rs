@@ -35,7 +35,6 @@ impl<'s> FromPyObject<'s> for Archetype<'s> {
 
 pub enum Spawnable<'py> {
     Archetypes(Vec<Archetype<'py>>),
-    Asset { name: String, bytes: PyBufBytes },
 }
 
 impl<'py> FromPyObject<'py> for Spawnable<'py> {
@@ -46,9 +45,7 @@ impl<'py> FromPyObject<'py> for Spawnable<'py> {
             let archetype = Archetype::extract_bound(ob)?;
             Ok(Self::Archetypes(vec![archetype]))
         } else {
-            let name = ob.call_method0("asset_name")?.extract()?;
-            let bytes = ob.call_method0("bytes")?.extract()?;
-            Ok(Self::Asset { name, bytes })
+            Err(PyValueError::new_err("Not spawnable"))
         }
     }
 }

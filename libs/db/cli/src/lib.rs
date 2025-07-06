@@ -584,7 +584,6 @@ impl UserData for Client {
                 );
             };
         }
-        add_req_reply_method!(get_asset, GetAsset, Asset);
         add_req_reply_method!(
             get_component_metadata,
             GetComponentMetadata,
@@ -885,13 +884,6 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                         ),
                     );
 
-                    print_usage_line(
-                        "Client:get_asset(GetAsset)",
-                        format!(
-                            "Gets a entity's metadata using {} {{ id }}",
-                            Color::Blue.bold().paint("GetAsset")
-                        ),
-                    );
                     print_usage_line("Client:dump_metadata()", "Dumps all metadata from the db ");
                     print_usage_line(
                         "Client:get_schema(GetSchema)",
@@ -907,12 +899,11 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
  - format - 'arrow-ipc' (default), 'parquet' - the format that will be used"#,
                     );
                     println!("{}", Color::Yellow.bold().paint("Messages"));
-                    print_message("SetComponentMetadata { component_id, name, metadata, asset }");
+                    print_message("SetComponentMetadata { component_id, name, metadata }");
                     print_message(
                         "UdpUnicast { stream = { filter = { component_id }, id }, addr }",
                     );
                     print_message("SetStreamState { id, playing, tick, time_step }");
-                    print_message("SetAsset { id, buf }");
                     break;
                 }
                 editor.save_history(&history_path)?;

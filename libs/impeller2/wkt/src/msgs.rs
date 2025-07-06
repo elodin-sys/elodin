@@ -14,8 +14,6 @@ use std::{collections::HashMap, ops::Range};
 
 use crate::{LastUpdated, metadata::ComponentMetadata};
 
-use crate::AssetId;
-
 #[derive(Serialize, Deserialize, Clone, postcard_schema::Schema)]
 pub struct VTableMsg {
     pub id: PacketId,
@@ -190,7 +188,6 @@ impl SetComponentMetadata {
         Self(ComponentMetadata {
             component_id,
             metadata: Default::default(),
-            asset: false,
             name,
         })
     }
@@ -199,44 +196,6 @@ impl SetComponentMetadata {
         self.0.metadata = metadata;
         self
     }
-
-    pub fn asset(mut self, asset: bool) -> Self {
-        self.0.asset = asset;
-        self
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SetAsset<'a> {
-    pub id: AssetId,
-    pub buf: Cow<'a, [u8]>,
-}
-
-impl SetAsset<'static> {
-    pub fn new(id: AssetId, asset: impl Serialize) -> Result<Self, postcard::Error> {
-        let buf = postcard::to_allocvec(&asset)?;
-        Ok(Self {
-            id,
-            buf: buf.into(),
-        })
-    }
-}
-
-impl Msg for SetAsset<'_> {
-    const ID: PacketId = [224, 12];
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct GetAsset {
-    pub id: AssetId,
-}
-
-impl Msg for GetAsset {
-    const ID: PacketId = [224, 13];
-}
-
-impl Request for GetAsset {
-    type Reply<B: IoBuf + Clone> = crate::Asset<'static>;
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -259,13 +218,6 @@ pub struct DumpMetadataResp {
 
 impl Msg for DumpMetadataResp {
     const ID: PacketId = [224, 15];
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct DumpAssets;
-
-impl Msg for DumpAssets {
-    const ID: PacketId = [224, 16];
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -372,7 +324,6 @@ impl_user_data_msg!(VTableStream);
 impl_user_data_msg!(VTableMsg);
 impl_user_data_msg!(Stream);
 impl_user_data_msg!(MsgStream);
-impl_user_data_msg!(SetAsset<'_>);
 impl_user_data_msg!(SetStreamState);
 impl_user_data_msg!(SetComponentMetadata);
 impl_user_data_msg!(UdpUnicast);

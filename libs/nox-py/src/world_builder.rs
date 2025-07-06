@@ -97,7 +97,6 @@ impl WorldBuilder {
                             component_id,
                             name: component.name.clone(),
                             metadata: component.metadata.clone(),
-                            asset: component.asset,
                         };
 
                         self.world.metadata.component_map.insert(
@@ -118,45 +117,7 @@ impl WorldBuilder {
                 }
                 Ok(())
             }
-            Spawnable::Asset { name, bytes } => {
-                let name = format!("asset_handle_{name}");
-                let component_id = ComponentId::new(&name);
-                let metadata = ComponentMetadata {
-                    component_id,
-                    name,
-                    metadata: Default::default(),
-                    asset: true,
-                };
-
-                self.world.metadata.component_map.insert(
-                    component_id,
-                    (
-                        ComponentSchema {
-                            prim_type: PrimType::U64,
-                            dim: iter::empty().collect(),
-                        },
-                        metadata,
-                    ),
-                );
-                let inner = self.world.assets.insert_bytes(bytes.bytes);
-
-                let buffer = self.world.host.entry(component_id).or_default();
-                buffer.buffer.extend_from_slice(&inner.id.to_le_bytes());
-                buffer
-                    .entity_ids
-                    .extend_from_slice(&entity_id.inner.0.to_le_bytes());
-
-                self.world.dirty_components.insert(component_id);
-
-                Ok(())
-            }
         }
-    }
-
-    fn insert_asset(&mut self, py: Python<'_>, asset: PyObject) -> Result<Handle, Error> {
-        let asset = PyAsset::try_new(py, asset.clone_ref(py))?;
-        let inner = self.world.assets.insert_bytes(asset.bytes()?);
-        Ok(Handle { inner })
     }
 
     fn recipe(&mut self, py: Python<'_>, recipe_obj: PyObject) -> PyResult<()> {

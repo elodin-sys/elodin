@@ -15,7 +15,6 @@ use pyo3::prelude::*;
 use pyo3::types::PyAnyMethods;
 
 mod archetype;
-mod asset;
 mod component;
 mod entity;
 mod error;
@@ -30,7 +29,6 @@ mod ukf;
 mod world_builder;
 
 pub use archetype::*;
-pub use asset::*;
 pub use component::*;
 pub use entity::*;
 pub use error::*;
@@ -133,7 +131,6 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SpatialMotion>()?;
     m.add_class::<SpatialInertia>()?;
     m.add_class::<Quaternion>()?;
-    m.add_class::<Handle>()?;
     m.add_class::<PrimitiveType>()?;
     m.add_class::<QueryInner>()?;
     m.add_class::<GraphQueryInner>()?;

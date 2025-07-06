@@ -3,16 +3,14 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::utils::SchemaExt;
-use assets::Handle;
 use bytemuck::Pod;
 use elodin_db::{ComponentSchema, MetadataExt};
 use impeller2::com_de::FromComponentView;
 use impeller2::{
-    component::{Asset, Component},
+    component::Component,
     types::{ComponentView, EntityId},
 };
-use impeller2_wkt::{ComponentMetadata, Material, Mesh};
-//use impeller::{well_known, Asset, AssetStore, Component, ComponentValue, ComponentMetadata, ValueRepr};
+use impeller2_wkt::ComponentMetadata;
 
 use crate::*;
 
@@ -39,7 +37,6 @@ impl Default for TimeStep {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct World {
     pub host: Buffers,
-    pub assets: AssetStore,
     pub dirty_components: HashSet<ComponentId>,
     pub metadata: WorldMetadata,
 }
@@ -82,7 +79,6 @@ impl Default for World {
         let mut world = Self {
             host: Default::default(),
             dirty_components: Default::default(),
-            assets: Default::default(),
             metadata: Default::default(),
         };
 
@@ -256,16 +252,6 @@ impl World {
             .collect()
     }
 
-    pub fn insert_asset<C: Asset + Send + Sync + 'static>(&mut self, asset: C) -> Handle<C> {
-        self.assets.insert(asset)
-    }
-
-    pub fn insert_shape(&mut self, mesh: Mesh, material: Material) -> Shape {
-        let mesh = self.insert_asset(mesh);
-        let material = self.insert_asset(material);
-        Shape { mesh, material }
-    }
-
     pub fn advance_tick(&mut self) {
         self.metadata.tick += 1;
     }
@@ -278,7 +264,6 @@ impl Clone for World {
             host: self.host.clone(),
             dirty_components,
             metadata: self.metadata.clone(),
-            assets: self.assets.clone(),
         }
     }
 }

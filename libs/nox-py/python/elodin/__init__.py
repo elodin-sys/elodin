@@ -313,7 +313,6 @@ jax.tree_util.register_pytree_node(
     SpatialInertia.unflatten,
 )
 jax.tree_util.register_pytree_node(Quaternion, Quaternion.flatten, Quaternion.unflatten)
-jax.tree_util.register_pytree_node(Handle, Handle.flatten, Handle.unflatten)
 jax.tree_util.register_pytree_node(Edge, Edge.flatten, Edge.unflatten)
 
 WorldPos = Annotated[
@@ -356,26 +355,6 @@ SimulationTimeStep = Annotated[
     jax.Array,
     Component("simulation_time_step", ComponentType.F64, metadata={"priority": 8}),
 ]
-MeshAsset = Annotated[
-    Handle,
-    Component("asset_handle_mesh", asset=True, metadata={"priority": -1}),
-]
-MaterialAsset = Annotated[
-    Handle,
-    Component("asset_handle_material", asset=True, metadata={"priority": -1}),
-]
-GlbAsset = Annotated[
-    Handle,
-    Component("asset_handle_glb", asset=True, metadata={"priority": -1}),
-]
-GizmoAsset = Annotated[
-    Handle,
-    Component("asset_handle_gizmo", asset=True, metadata={"priority": -1}),
-]
-PanelAsset = Annotated[
-    Handle,
-    Component("asset_handle_panel", asset=True, metadata={"priority": -1}),
-]
 Camera = Annotated[
     jax.Array,
     Component(
@@ -413,16 +392,6 @@ class Body(Archetype):
     force: Force = SpatialForce()
     world_accel: WorldAccel = SpatialMotion()
 
-
-@dataclass
-class Shape(Archetype):
-    mesh: MeshAsset
-    material: MaterialAsset
-
-
-@dataclass
-class Scene(Archetype):
-    glb: GlbAsset
 
 
 class World(WorldBuilder):
@@ -472,6 +441,3 @@ class World(WorldBuilder):
             obj, ins, outs, state, dictionary, entity_dict, component_entity_dict
         )
         return sim_object
-
-    def glb(self, url: str) -> Scene:
-        return Scene(self.insert_asset(Glb(url)))  # type: ignore

@@ -141,7 +141,6 @@ mod tests {
                 metadata: [("baz".to_string(), "bang".to_string())]
                     .into_iter()
                     .collect(),
-                asset: false,
             },]
         )
     }
@@ -303,13 +302,11 @@ mod tests {
         let mut client = Client::connect(addr).await.unwrap();
 
         let component_id = ComponentId::new("sensor");
-        let metadata = SetComponentMetadata::new(component_id, "Temperature Sensor")
-            .metadata(
-                [("unit".to_string(), "celsius".to_string())]
-                    .into_iter()
-                    .collect(),
-            )
-            .asset(false);
+        let metadata = SetComponentMetadata::new(component_id, "Temperature Sensor").metadata(
+            [("unit".to_string(), "celsius".to_string())]
+                .into_iter()
+                .collect(),
+        );
         client.send(&metadata).await.0.unwrap();
 
         sleep(Duration::from_millis(50)).await;
@@ -320,62 +317,6 @@ mod tests {
         assert_eq!(component_metadata.component_id, component_id);
         assert_eq!(component_metadata.name, "Temperature Sensor");
         assert_eq!(component_metadata.metadata.get("unit").unwrap(), "celsius");
-        assert_eq!(component_metadata.asset, false);
-    }
-
-    #[test]
-    async fn test_get_asset() {
-        let (addr, _db) = setup_test_db().await.unwrap();
-        let mut client = Client::connect(addr).await.unwrap();
-
-        let asset_id = 0;
-        let test_data = vec![1, 2, 3, 4, 5];
-
-        let set_asset = SetAsset {
-            id: asset_id,
-            buf: Cow::Owned(test_data.clone()),
-        };
-
-        client.send(&set_asset).await.0.unwrap();
-        sleep(Duration::from_millis(50)).await;
-
-        let get_asset = GetAsset { id: asset_id };
-        let asset = client.request(&get_asset).await.unwrap();
-
-        assert_eq!(asset.id, asset_id);
-        assert_eq!(asset.buf.as_ref(), test_data.as_slice());
-    }
-
-    #[test]
-    async fn test_update_asset() {
-        let (addr, _db) = setup_test_db().await.unwrap();
-        let mut client = Client::connect(addr).await.unwrap();
-
-        let asset_id = 0;
-        let test_data = vec![1, 2, 3, 4, 5];
-
-        let set_asset = SetAsset {
-            id: asset_id,
-            buf: Cow::Owned(test_data.clone()),
-        };
-
-        client.send(&set_asset).await.0.unwrap();
-        let asset_id = 0;
-        let test_data = vec![0xFF, 0xFF];
-
-        let set_asset = SetAsset {
-            id: asset_id,
-            buf: Cow::Owned(test_data.clone()),
-        };
-
-        client.send(&set_asset).await.0.unwrap();
-        sleep(Duration::from_millis(50)).await;
-
-        let get_asset = GetAsset { id: asset_id };
-        let asset = client.request(&get_asset).await.unwrap();
-
-        assert_eq!(asset.id, asset_id);
-        assert_eq!(asset.buf.as_ref(), test_data.as_slice());
     }
 
     #[test]
@@ -657,26 +598,6 @@ mod tests {
         };
         assert_eq!(
             elodin_db::Error::ComponentNotFound(non_existent_component_id).to_string(),
-            resp.description
-        );
-    }
-
-    #[test]
-    async fn test_get_asset_not_found() {
-        let (addr, _db) = setup_test_db().await.unwrap();
-        let mut client = Client::connect(addr).await.unwrap();
-
-        // Try to get a non-existent asset
-        let asset_id = 9999;
-
-        let get_asset = GetAsset { id: asset_id };
-
-        let result = client.request(&get_asset).await.unwrap_err();
-        let impeller2_stellar::Error::Response(resp) = result else {
-            panic!("invalid error");
-        };
-        assert_eq!(
-            elodin_db::Error::AssetNotFound(asset_id).to_string(),
             resp.description
         );
     }
@@ -1224,8 +1145,6 @@ mod tests {
         let component_id = ComponentId::new("subscription_test");
         let vtable_id = 1u16.to_le_bytes();
         let test_value = 123.45f64;
-        let asset_id = 77;
-        let asset_data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
         // Define message type for testing
         #[derive(postcard_schema::Schema, serde::Deserialize, serde::Serialize)]
@@ -1293,13 +1212,6 @@ mod tests {
             client.send(&set_msg_metadata).await.0.unwrap();
 
             client.send(&test_msg).await.0.unwrap();
-
-            let set_asset = SetAsset {
-                id: asset_id,
-                buf: Cow::Owned(asset_data.clone()),
-            };
-
-            client.send(&set_asset).await.0.unwrap();
 
             sleep(Duration::from_millis(100)).await;
         }
