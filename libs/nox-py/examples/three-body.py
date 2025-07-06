@@ -43,16 +43,6 @@ c = w.spawn(
     name="C",
 )
 
-w.spawn(
-    el.Panel.sidebars(
-        el.Panel.viewport(
-            pos="(0,0,0,0,0,0,4)",
-            look_at="c.world_pos",
-            hdr=True,
-        ),
-    )
-)
-
 # Define a new "gravity edge" component type
 GravityEdge = el.Annotated[el.Edge, el.Component("gravity_edge", el.ComponentType.Edge)]
 
@@ -103,6 +93,32 @@ w.spawn(GravityConstraint(c, a), name="C -> A")
 w.spawn(GravityConstraint(c, b), name="C -> B")
 
 w.spawn(el.Line3d("b.world_pos", line_width=10.0))
+
+w.schematic("""
+    hsplit {
+        tabs share=0.2 {
+            hierarchy
+            schematic_tree
+        }
+        tabs share=0.6 {
+            viewport name=Viewport pos="(0,0,0,0,0,0,3)" look_at="(0,0,0,0,0,0,0)" hdr=#true
+            graph "a.world_pos" name=Graph
+        }
+        tabs share=0.2 {
+            inspector
+        }
+    }
+    object_3d a.world_pos {
+        sphere radius=0.2 r=1.0 g=1.0 b=1.0
+    }
+    object_3d b.world_pos {
+        sphere radius=0.2 r=1.0 g=0.0 b=1.0
+    }
+    object_3d c.world_pos {
+        sphere radius=0.2 r=0.0 g=1.0 b=10.0
+    }
+    line_3d b.world_pos line_width=10.0 r=0.079 g=0.38 b=0.82 perspective=#false
+""")
 
 sys = el.six_dof(sys=gravity)
 sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 120.0)

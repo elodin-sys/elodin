@@ -85,7 +85,7 @@ pub struct State {
 
     udp_vtable_streams: HashSet<(SocketAddr, [u8; 2])>,
 
-    db_config: DbConfig,
+    pub db_config: DbConfig,
 }
 
 impl DB {

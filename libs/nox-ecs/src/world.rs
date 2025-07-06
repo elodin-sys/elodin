@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::utils::SchemaExt;
@@ -43,7 +44,7 @@ pub struct World {
     pub metadata: WorldMetadata,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub struct WorldMetadata {
     pub entity_metadata: HashMap<EntityId, EntityMetadata>,
     pub component_map: HashMap<ComponentId, (ComponentSchema, ComponentMetadata)>,
@@ -53,6 +54,8 @@ pub struct WorldMetadata {
     pub run_time_step: TimeStep,
     pub default_playback_speed: f64,
     pub max_tick: u64,
+    pub schematic_path: Option<PathBuf>,
+    pub schematic: Option<String>,
 }
 
 impl MetadataExt for World {}
@@ -68,6 +71,8 @@ impl Default for WorldMetadata {
             sim_time_step: Default::default(),
             default_playback_speed: 1.0,
             max_tick: u64::MAX,
+            schematic: None,
+            schematic_path: None,
         }
     }
 }
@@ -272,16 +277,7 @@ impl Clone for World {
         Self {
             host: self.host.clone(),
             dirty_components,
-            metadata: WorldMetadata {
-                component_map: self.metadata.component_map.clone(),
-                entity_metadata: self.metadata.entity_metadata.clone(),
-                tick: self.metadata.tick,
-                entity_len: self.metadata.entity_len,
-                run_time_step: self.metadata.run_time_step,
-                sim_time_step: self.metadata.sim_time_step,
-                default_playback_speed: self.metadata.default_playback_speed,
-                max_tick: self.metadata.max_tick,
-            },
+            metadata: self.metadata.clone(),
             assets: self.assets.clone(),
         }
     }

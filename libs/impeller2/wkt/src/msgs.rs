@@ -302,8 +302,16 @@ pub struct DbConfig {
 }
 
 impl DbConfig {
+    pub fn set_schematic_path(&mut self, path: String) {
+        self.metadata.insert("schematic.path".to_string(), path);
+    }
+
     pub fn schematic_path(&self) -> Option<&str> {
         self.metadata.get("schematic.path").map(String::as_str)
+    }
+
+    pub fn set_schematic_content(&mut self, path: String) {
+        self.metadata.insert("schematic.content".to_string(), path);
     }
 
     pub fn schematic_content(&self) -> Option<&str> {

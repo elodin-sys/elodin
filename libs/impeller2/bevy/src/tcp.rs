@@ -1,7 +1,7 @@
 use crate::*;
 use bbq2::queue::ArcBBQueue;
 use bbq2::traits::storage::BoxedSlice;
-use bevy::app::{Plugin, Update};
+use bevy::app::{Plugin, PreUpdate, Update};
 use impeller2::types::LenPacket;
 use impeller2_bbq::*;
 use impeller2_stellar::queue::tcp_connect;
@@ -40,7 +40,7 @@ impl Plugin for TcpImpellerPlugin {
             .insert_resource(packet_rx)
             .insert_resource(CurrentStreamId(stream_id))
             .insert_resource(status)
-            .add_systems(Update, sink);
+            .add_systems(PreUpdate, sink);
     }
 }
 

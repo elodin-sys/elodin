@@ -8,6 +8,7 @@ use nox_ecs::{ComponentSchema, IntoSystem, System as _, TimeStep, World, increme
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
 use pyo3::{IntoPyObjectExt, types::PyDict};
 use std::{collections::HashMap, iter, net::SocketAddr, path::PathBuf, time};
+use tracing::warn;
 use zerocopy::{FromBytes, TryFromBytes};
 
 #[derive(Parser, Debug)]
@@ -389,6 +390,19 @@ impl WorldBuilder {
             dict.set_item(comp_name, id.0)?;
         }
         Ok(dict.into_py_any(py)?)
+    }
+
+    #[pyo3(signature = (contents = None, path = None,))]
+    pub fn schematic(&mut self, mut contents: Option<String>, path: Option<String>) {
+        if let Some(path) = &path {
+            if contents.is_none() {
+                contents = std::fs::read_to_string(path)
+                    .inspect_err(|err| warn!(?err, "could not load path contents"))
+                    .ok();
+            }
+        }
+        self.world.metadata.schematic_path = path.map(PathBuf::from);
+        self.world.metadata.schematic = contents;
     }
 }
 
