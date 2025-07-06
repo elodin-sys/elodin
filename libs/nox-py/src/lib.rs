@@ -27,7 +27,6 @@ mod s10;
 mod spatial;
 mod system;
 mod ukf;
-mod well_known;
 mod world_builder;
 
 pub use archetype::*;
@@ -41,7 +40,6 @@ pub use linalg::*;
 pub use query::*;
 pub use spatial::*;
 pub use system::*;
-pub use well_known::*;
 pub use world_builder::*;
 
 trait PyUntypedArrayExt {
@@ -135,21 +133,13 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SpatialMotion>()?;
     m.add_class::<SpatialInertia>()?;
     m.add_class::<Quaternion>()?;
-    m.add_class::<Mesh>()?;
-    m.add_class::<Material>()?;
     m.add_class::<Handle>()?;
     m.add_class::<PrimitiveType>()?;
     m.add_class::<QueryInner>()?;
     m.add_class::<GraphQueryInner>()?;
     m.add_class::<Edge>()?;
     m.add_class::<Component>()?;
-    m.add_class::<VectorArrow>()?;
-    m.add_class::<BodyAxes>()?;
-    m.add_class::<Color>()?;
-    m.add_class::<Panel>()?;
     m.add_class::<Integrator>()?;
-    m.add_class::<Glb>()?;
-    m.add_class::<Line3d>()?;
     m.add_class::<PyFnSystem>()?;
     m.add_class::<QueryMetadata>()?;
     m.add_class::<SystemBuilder>()?;
