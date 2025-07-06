@@ -4,7 +4,7 @@ use egui_tiles::{Container, Tile, TileId};
 use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
 use impeller2_kdl::FromKdl;
 use impeller2_kdl::KdlSchematicError;
-use impeller2_wkt::{DbConfig, Graph, Object3D, Panel, Schematic, Viewport};
+use impeller2_wkt::{DbConfig, Graph, Line3d, Object3D, Panel, Schematic, Viewport};
 use std::time::Duration;
 use std::{collections::BTreeMap, path::Path};
 
@@ -129,7 +129,10 @@ impl LoadSchematicParams<'_, '_> {
                 impeller2_wkt::SchematicElem::Object3d(object_3d) => {
                     self.spawn_object_3d(object_3d.clone());
                 }
-                _ => {}
+                impeller2_wkt::SchematicElem::Line3d(line_3d) => {
+                    println!("spawn line 3d {:?}", line_3d);
+                    self.spawn_line_3d(line_3d.clone());
+                }
             }
         }
     }
@@ -146,6 +149,10 @@ impl LoadSchematicParams<'_, '_> {
             &mut self.meshes,
             &self.asset_server,
         );
+    }
+
+    pub fn spawn_line_3d(&mut self, line_3d: Line3d) {
+        self.commands.spawn(line_3d);
     }
 
     pub fn spawn_panel(&mut self, panel: &Panel, parent_id: Option<TileId>) -> Option<TileId> {

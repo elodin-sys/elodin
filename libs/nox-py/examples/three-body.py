@@ -103,15 +103,15 @@ w.schematic("""
         }
     }
     object_3d a.world_pos {
-        sphere radius=0.2 r=1.0 g=1.0 b=1.0
+        sphere radius=0.2 r=10.0 g=10.0 b=0.0
     }
     object_3d b.world_pos {
-        sphere radius=0.2 r=1.0 g=0.0 b=1.0
+        sphere radius=0.2 r=10.0 g=0.0 b=10.0
     }
     object_3d c.world_pos {
         sphere radius=0.2 r=0.0 g=1.0 b=10.0
     }
-    line_3d b.world_pos line_width=10.0 r=0.079 g=0.38 b=0.82 perspective=#false
+    line_3d b.world_pos line_width=10.0 color="yolk" perspective=#false
 """)
 
 sys = el.six_dof(sys=gravity)
