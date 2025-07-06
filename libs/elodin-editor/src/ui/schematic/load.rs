@@ -2,8 +2,11 @@ use bevy::{ecs::system::SystemParam, prelude::*};
 use bevy_egui::egui::Color32;
 use egui_tiles::{Container, Tile, TileId};
 use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
-use impeller2_wkt::{Graph, Object3D, Panel, Schematic, Viewport};
-use std::collections::BTreeMap;
+use impeller2_kdl::FromKdl;
+use impeller2_kdl::KdlSchematicError;
+use impeller2_wkt::{DbConfig, Graph, Object3D, Panel, Schematic, Viewport};
+use std::time::Duration;
+use std::{collections::BTreeMap, path::Path};
 
 use crate::{
     EqlContext,
@@ -40,14 +43,74 @@ pub struct LoadSchematicParams<'w, 's> {
     objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
 }
 
-pub fn sync_panels(
-    panels: Query<(Entity, &'static Panel), Without<SyncedViewport>>,
+pub fn sync_schematic(
+    config: Res<DbConfig>,
     mut params: LoadSchematicParams,
+    live_reload_rx: ResMut<SchematicLiveReloadRx>,
 ) {
-    for (entity, panel) in panels.iter() {
-        params.spawn_panel(panel, None);
-        params.commands.entity(entity).try_insert(SyncedViewport);
+    if !config.is_changed() {
+        return;
     }
+    if let Some(path) = config.schematic_path() {
+        let path = Path::new(path);
+        if path.exists() {
+            if load_schematic_file(&path, params, live_reload_rx).is_ok() {
+                return;
+            }
+        }
+        return;
+    }
+    if let Some(content) = config.schematic_content() {
+        let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(&content) else {
+            return;
+        };
+        params.load_schematic(&schematic);
+    }
+}
+
+pub fn load_schematic_file(
+    path: &Path,
+    mut params: LoadSchematicParams,
+    mut live_reload_rx: ResMut<SchematicLiveReloadRx>,
+) -> Result<(), KdlSchematicError> {
+    let (tx, rx) = flume::bounded(1);
+    live_reload_rx.0 = Some(rx);
+    let watch_path = path.to_path_buf();
+    std::thread::spawn(move || {
+        let cb_path = watch_path.clone();
+        let mut debouncer = notify_debouncer_mini::new_debouncer(
+            Duration::from_millis(100),
+            move |res: notify_debouncer_mini::DebounceEventResult| {
+                if res.is_err() {
+                    return;
+                }
+
+                info!(path = ?cb_path, "refreshing schematic");
+                if let Ok(kdl) = std::fs::read_to_string(&cb_path) {
+                    let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(&kdl) else {
+                        return;
+                    };
+                    let _ = tx.send(schematic);
+                }
+            },
+        )
+        .unwrap();
+        debouncer
+            .watcher()
+            .watch(
+                &watch_path,
+                notify_debouncer_mini::notify::RecursiveMode::NonRecursive,
+            )
+            .unwrap();
+        loop {
+            std::thread::park();
+        }
+    });
+    if let Ok(kdl) = std::fs::read_to_string(path) {
+        let schematic = impeller2_wkt::Schematic::from_kdl(&kdl)?;
+        params.load_schematic(&schematic);
+    }
+    Ok(())
 }
 
 impl LoadSchematicParams<'_, '_> {

@@ -100,10 +100,8 @@ impl DB {
         let state = State {
             assets: open_assets(&path)?,
             db_config: DbConfig {
-                recording: true,
                 default_stream_time_step: time_step,
-                schematic_path: None,
-                schematic_kdl: None,
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -999,8 +997,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         Packet::Msg(m) if m.id == SetDbConfig::ID => {
             let SetDbConfig {
                 recording,
-                schematic_path,
-                schematic_kdl,
+                metadata,
             } = m.parse::<SetDbConfig>()?;
             if let Some(recording) = recording {
                 db.with_state_mut(|s| {
@@ -1008,16 +1005,9 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 });
                 db.recording_cell.set_playing(recording);
             }
-            if let Some(schematic_path) = schematic_path {
-                db.with_state_mut(|s| {
-                    s.db_config.schematic_path = Some(schematic_path);
-                });
-            }
-            if let Some(schematic_kdl) = schematic_kdl {
-                db.with_state_mut(|s| {
-                    s.db_config.schematic_kdl = Some(schematic_kdl);
-                });
-            }
+            db.with_state_mut(|s| {
+                s.db_config.metadata.extend(metadata);
+            });
             db.save_db_state()?;
             tx.send_msg(&db.db_config()).await?;
         }

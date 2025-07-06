@@ -1,6 +1,5 @@
 use std::{
     collections::{BTreeMap, HashMap},
-    path::Path,
     str::FromStr,
     time::Duration,
 };
@@ -22,7 +21,7 @@ use egui_tiles::TileId;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::msg_id;
 use impeller2_bevy::{ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
-use impeller2_kdl::{FromKdl, KdlSchematicError, ToKdl};
+use impeller2_kdl::ToKdl;
 use impeller2_wkt::{
     ComponentPath, ComponentValue, IsRecording, Material, Mesh, Object3D, SetDbConfig,
     SetStreamState,
@@ -36,7 +35,9 @@ use crate::{
     ui::{
         HdrEnabled, colors,
         plot::{GraphBundle, default_component_values},
-        schematic::{CurrentSchematic, LoadSchematicParams, SchematicLiveReloadRx},
+        schematic::{
+            CurrentSchematic, LoadSchematicParams, SchematicLiveReloadRx, load_schematic_file,
+        },
         tiles::{self, TileState},
     },
 };
@@ -609,6 +610,23 @@ pub fn save_schematic() -> PaletteItem {
     })
 }
 
+pub fn save_schematic_db() -> PaletteItem {
+    PaletteItem::new(
+        "Save Schematic To Db",
+        PRESETS_LABEL,
+        |_name: In<String>, tx: Res<PacketTx>, schematic: Res<CurrentSchematic>| {
+            let kdl = schematic.0.to_kdl();
+            tx.send_msg(SetDbConfig {
+                metadata: [(("schematic.content".to_string(), kdl))]
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            });
+            PaletteEvent::Exit
+        },
+    )
+}
+
 pub fn save_preset_inner() -> PaletteItem {
     PaletteItem::new(
         LabelSource::placeholder("Enter a name for the schematic"),
@@ -685,51 +703,6 @@ pub fn load_schematic_inner(name: String) -> PaletteItem {
             }
         },
     )
-}
-
-pub fn load_schematic_file(
-    path: &Path,
-    mut params: LoadSchematicParams,
-    mut live_reload_rx: ResMut<SchematicLiveReloadRx>,
-) -> Result<(), KdlSchematicError> {
-    let (tx, rx) = flume::bounded(1);
-    live_reload_rx.0 = Some(rx);
-    let watch_path = path.to_path_buf();
-    std::thread::spawn(move || {
-        let cb_path = watch_path.clone();
-        let mut debouncer = notify_debouncer_mini::new_debouncer(
-            Duration::from_millis(100),
-            move |res: notify_debouncer_mini::DebounceEventResult| {
-                if res.is_err() {
-                    return;
-                }
-
-                info!(path = ?cb_path, "refreshing schematic");
-                if let Ok(kdl) = std::fs::read_to_string(&cb_path) {
-                    let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(&kdl) else {
-                        return;
-                    };
-                    let _ = tx.send(schematic);
-                }
-            },
-        )
-        .unwrap();
-        debouncer
-            .watcher()
-            .watch(
-                &watch_path,
-                notify_debouncer_mini::notify::RecursiveMode::NonRecursive,
-            )
-            .unwrap();
-        loop {
-            std::thread::park();
-        }
-    });
-    if let Ok(kdl) = std::fs::read_to_string(path) {
-        let schematic = impeller2_wkt::Schematic::from_kdl(&kdl)?;
-        params.load_schematic(&schematic);
-    }
-    Ok(())
 }
 
 pub fn set_color_scheme() -> PaletteItem {
@@ -1070,6 +1043,7 @@ impl Default for PalettePage {
             create_sidebars(),
             create_3d_object(),
             save_schematic(),
+            save_schematic_db(),
             load_schematic(),
             set_color_scheme(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {

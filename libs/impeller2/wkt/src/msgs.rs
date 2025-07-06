@@ -286,8 +286,7 @@ impl Request for SubscribeLastUpdated {
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct SetDbConfig {
     pub recording: Option<bool>,
-    pub schematic_path: Option<String>,
-    pub schematic_kdl: Option<String>,
+    pub metadata: HashMap<String, String>,
 }
 
 impl Msg for SetDbConfig {
@@ -299,8 +298,17 @@ impl Msg for SetDbConfig {
 pub struct DbConfig {
     pub recording: bool,
     pub default_stream_time_step: Duration,
-    pub schematic_path: Option<String>,
-    pub schematic_kdl: Option<String>,
+    pub metadata: HashMap<String, String>,
+}
+
+impl DbConfig {
+    pub fn schematic_path(&self) -> Option<&str> {
+        self.metadata.get("schematic.path").map(String::as_str)
+    }
+
+    pub fn schematic_content(&self) -> Option<&str> {
+        self.metadata.get("schematic.content").map(String::as_str)
+    }
 }
 
 impl Default for DbConfig {
@@ -308,8 +316,7 @@ impl Default for DbConfig {
         Self {
             recording: true,
             default_stream_time_step: Duration::from_millis(10),
-            schematic_path: None,
-            schematic_kdl: None,
+            metadata: Default::default(),
         }
     }
 }
