@@ -10,8 +10,6 @@ pub struct ComponentMetadata {
     pub name: String,
     #[serde(default)]
     pub metadata: HashMap<String, String>,
-    #[serde(default)]
-    pub asset: bool,
 }
 
 impl ComponentMetadata {

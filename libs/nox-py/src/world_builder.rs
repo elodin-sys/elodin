@@ -8,6 +8,7 @@ use nox_ecs::{ComponentSchema, IntoSystem, System as _, TimeStep, World, increme
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
 use pyo3::{IntoPyObjectExt, types::PyDict};
 use std::{collections::HashMap, iter, net::SocketAddr, path::PathBuf, time};
+use tracing::warn;
 use zerocopy::{FromBytes, TryFromBytes};
 
 #[derive(Parser, Debug)]
@@ -96,7 +97,6 @@ impl WorldBuilder {
                             component_id,
                             name: component.name.clone(),
                             metadata: component.metadata.clone(),
-                            asset: component.asset,
                         };
 
                         self.world.metadata.component_map.insert(
@@ -117,45 +117,7 @@ impl WorldBuilder {
                 }
                 Ok(())
             }
-            Spawnable::Asset { name, bytes } => {
-                let name = format!("asset_handle_{name}");
-                let component_id = ComponentId::new(&name);
-                let metadata = ComponentMetadata {
-                    component_id,
-                    name,
-                    metadata: Default::default(),
-                    asset: true,
-                };
-
-                self.world.metadata.component_map.insert(
-                    component_id,
-                    (
-                        ComponentSchema {
-                            prim_type: PrimType::U64,
-                            dim: iter::empty().collect(),
-                        },
-                        metadata,
-                    ),
-                );
-                let inner = self.world.assets.insert_bytes(bytes.bytes);
-
-                let buffer = self.world.host.entry(component_id).or_default();
-                buffer.buffer.extend_from_slice(&inner.id.to_le_bytes());
-                buffer
-                    .entity_ids
-                    .extend_from_slice(&entity_id.inner.0.to_le_bytes());
-
-                self.world.dirty_components.insert(component_id);
-
-                Ok(())
-            }
         }
-    }
-
-    fn insert_asset(&mut self, py: Python<'_>, asset: PyObject) -> Result<Handle, Error> {
-        let asset = PyAsset::try_new(py, asset.clone_ref(py))?;
-        let inner = self.world.assets.insert_bytes(asset.bytes()?);
-        Ok(Handle { inner })
     }
 
     fn recipe(&mut self, py: Python<'_>, recipe_obj: PyObject) -> PyResult<()> {
@@ -389,6 +351,19 @@ impl WorldBuilder {
             dict.set_item(comp_name, id.0)?;
         }
         Ok(dict.into_py_any(py)?)
+    }
+
+    #[pyo3(signature = (contents = None, path = None,))]
+    pub fn schematic(&mut self, mut contents: Option<String>, path: Option<String>) {
+        if let Some(path) = &path {
+            if contents.is_none() {
+                contents = std::fs::read_to_string(path)
+                    .inspect_err(|err| warn!(?err, "could not load path contents"))
+                    .ok();
+            }
+        }
+        self.world.metadata.schematic_path = path.map(PathBuf::from);
+        self.world.metadata.schematic = contents;
     }
 }
 

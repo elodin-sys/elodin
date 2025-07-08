@@ -14,8 +14,6 @@ use std::{collections::HashMap, ops::Range};
 
 use crate::{LastUpdated, metadata::ComponentMetadata};
 
-use crate::AssetId;
-
 #[derive(Serialize, Deserialize, Clone, postcard_schema::Schema)]
 pub struct VTableMsg {
     pub id: PacketId,
@@ -190,7 +188,6 @@ impl SetComponentMetadata {
         Self(ComponentMetadata {
             component_id,
             metadata: Default::default(),
-            asset: false,
             name,
         })
     }
@@ -199,44 +196,6 @@ impl SetComponentMetadata {
         self.0.metadata = metadata;
         self
     }
-
-    pub fn asset(mut self, asset: bool) -> Self {
-        self.0.asset = asset;
-        self
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SetAsset<'a> {
-    pub id: AssetId,
-    pub buf: Cow<'a, [u8]>,
-}
-
-impl SetAsset<'static> {
-    pub fn new(id: AssetId, asset: impl Serialize) -> Result<Self, postcard::Error> {
-        let buf = postcard::to_allocvec(&asset)?;
-        Ok(Self {
-            id,
-            buf: buf.into(),
-        })
-    }
-}
-
-impl Msg for SetAsset<'_> {
-    const ID: PacketId = [224, 12];
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct GetAsset {
-    pub id: AssetId,
-}
-
-impl Msg for GetAsset {
-    const ID: PacketId = [224, 13];
-}
-
-impl Request for GetAsset {
-    type Reply<B: IoBuf + Clone> = crate::Asset<'static>;
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -254,17 +213,11 @@ impl Request for DumpMetadata {
 pub struct DumpMetadataResp {
     pub component_metadata: Vec<ComponentMetadata>,
     pub msg_metadata: Vec<MsgMetadata>,
+    pub db_config: DbConfig,
 }
 
 impl Msg for DumpMetadataResp {
     const ID: PacketId = [224, 15];
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct DumpAssets;
-
-impl Msg for DumpAssets {
-    const ID: PacketId = [224, 16];
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -283,23 +236,52 @@ impl Request for SubscribeLastUpdated {
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
-pub struct SetDbSettings {
+pub struct SetDbConfig {
     pub recording: Option<bool>,
-    pub time_step: Option<Duration>,
+    pub metadata: HashMap<String, String>,
 }
 
-impl Msg for SetDbSettings {
+impl Msg for SetDbConfig {
     const ID: PacketId = [224, 19];
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct DbSettings {
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
+pub struct DbConfig {
     pub recording: bool,
-    pub time_step: Duration,
     pub default_stream_time_step: Duration,
+    pub metadata: HashMap<String, String>,
 }
 
-impl Msg for DbSettings {
+impl DbConfig {
+    pub fn set_schematic_path(&mut self, path: String) {
+        self.metadata.insert("schematic.path".to_string(), path);
+    }
+
+    pub fn schematic_path(&self) -> Option<&str> {
+        self.metadata.get("schematic.path").map(String::as_str)
+    }
+
+    pub fn set_schematic_content(&mut self, path: String) {
+        self.metadata.insert("schematic.content".to_string(), path);
+    }
+
+    pub fn schematic_content(&self) -> Option<&str> {
+        self.metadata.get("schematic.content").map(String::as_str)
+    }
+}
+
+impl Default for DbConfig {
+    fn default() -> Self {
+        Self {
+            recording: true,
+            default_stream_time_step: Duration::from_millis(10),
+            metadata: Default::default(),
+        }
+    }
+}
+
+impl Msg for DbConfig {
     const ID: PacketId = [224, 20];
 }
 
@@ -342,7 +324,6 @@ impl_user_data_msg!(VTableStream);
 impl_user_data_msg!(VTableMsg);
 impl_user_data_msg!(Stream);
 impl_user_data_msg!(MsgStream);
-impl_user_data_msg!(SetAsset<'_>);
 impl_user_data_msg!(SetStreamState);
 impl_user_data_msg!(SetComponentMetadata);
 impl_user_data_msg!(UdpUnicast);
