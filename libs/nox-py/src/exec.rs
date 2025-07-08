@@ -3,8 +3,11 @@ use std::collections::HashMap;
 use crate::*;
 
 use impeller2::types::Timestamp;
+use impeller2_wkt::ArchiveFormat;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use nox_ecs::Compiled;
+use pyo3::exceptions::PyTypeError;
+use pyo3::types::IntoPyDict;
 
 #[pyclass]
 pub struct Exec {
@@ -33,7 +36,6 @@ impl Exec {
                 ProgressStyle::with_template("{bar:50} {pos:>6}/{len:6} remaining: {eta}").unwrap(),
             );
         let mut timestamp = Timestamp::now();
-        nox_ecs::impeller2_server::init_db(&self.db, &mut self.exec.world, timestamp)?;
         for _ in 0..ticks {
             self.exec.run()?;
             self.db.with_state(|state| {
@@ -51,65 +53,66 @@ impl Exec {
         self.exec.profile()
     }
 
-    pub fn history<'a>(
-        &mut self,
-        py: Python<'a>,
-        component_name: String,
-        entity_name: String,
-    ) -> Result<Bound<'a, PyAny>, Error> {
-        let id = ComponentId::new(&format!("{entity_name}.{component_name}"));
-
-        let component = self
-            .db
-            .with_state(|state| state.get_component(id).cloned())
-            .ok_or(elodin_db::Error::ComponentNotFound(id))?;
-        let component_metadata = self
-            .db
-            .with_state(|state| state.get_component_metadata(id).cloned())
-            .unwrap();
-
-        let temp_file = tempfile::NamedTempFile::with_suffix(".feather")?;
-        let path = temp_file.path().to_owned();
-        nox_ecs::arrow::write_ipc(
-            component
-                .time_series
-                .get_range(Timestamp(i64::MIN)..Timestamp(i64::MAX))
-                .expect("failed to get data")
-                .1,
-            &component.schema,
-            &component_metadata,
-            path.clone(),
-        )?;
-
-        let df = py.import("polars")?.call_method1("read_ipc", (path,))?;
-        Ok(df)
+    pub fn save_archive(&self, path: String, format: String) -> Result<(), Error> {
+        let format = match format.as_str() {
+            "arrow_ipc" | "arrow" => ArchiveFormat::ArrowIpc,
+            "parquet" | "pq" => ArchiveFormat::Parquet,
+            "csv" => ArchiveFormat::Csv,
+            _ => return Err(Error::UnknownCommand(format)),
+        };
+        self.db.save_archive(path, format)?;
+        Ok(())
     }
 
-    fn column_array<'a>(
+    pub fn history<'a>(
         &self,
         py: Python<'a>,
-        component_name: String,
+        components: ComponentsArg,
     ) -> Result<Bound<'a, PyAny>, Error> {
-        let id = ComponentId::new(&component_name);
-        let series = self
-            .exec
-            .world
-            .column_by_id(id)
-            .ok_or(nox_ecs::Error::ComponentNotFound)?;
+        let component_names = components.to_vec();
 
-        let temp_file = tempfile::NamedTempFile::with_suffix(".feather")?;
-        let path = temp_file.path().to_owned();
-        nox_ecs::arrow::write_ipc(
-            series.column.as_ref(),
-            series.schema,
-            series.metadata,
-            path.clone(),
-        )?;
+        let temp_dir = tempfile::TempDir::new()?;
+        let temp_path = temp_dir.path().to_string_lossy().to_string();
+        self.save_archive(temp_path.clone(), "arrow".to_string())?;
+        let polars = py.import("polars")?;
+        let mut dataframes = Vec::new();
+        for component_name in component_names {
+            let file_path = format!("{}/{}.arrow", temp_path, component_name);
+            let df = polars.call_method1("read_ipc", (file_path,))?;
+            dataframes.push(df);
+        }
 
-        let series = py
-            .import("polars")?
-            .call_method1("read_ipc", (path,))?
-            .get_item(component_name)?;
-        Ok(series)
+        let mut result_df = dataframes[0].clone();
+        for df in dataframes.into_iter().skip(1) {
+            result_df =
+                result_df.call_method("join", (df,), Some(&[("on", "time")].into_py_dict(py)?))?;
+        }
+        Ok(result_df)
+    }
+}
+
+pub enum ComponentsArg {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+impl ComponentsArg {
+    pub fn to_vec(self) -> Vec<String> {
+        match self {
+            Self::Single(s) => vec![s],
+            Self::Multiple(v) => v,
+        }
+    }
+}
+
+impl FromPyObject<'_> for ComponentsArg {
+    fn extract_bound(ob: &Bound<'_, PyAny>) -> PyResult<Self> {
+        if let Ok(single) = ob.extract::<String>() {
+            Ok(Self::Single(single))
+        } else if let Ok(multiple) = ob.extract::<Vec<String>>() {
+            Ok(Self::Multiple(multiple))
+        } else {
+            Err(PyTypeError::new_err("Expected str or list[str]"))
+        }
     }
 }

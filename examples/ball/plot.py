@@ -1,6 +1,5 @@
 import argparse
 
-import elodin as el
 import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
@@ -14,15 +13,16 @@ args = parser.parse_args()
 exec = world(args.seed).build(system())
 exec.run(args.ticks)
 
-fig, ax = plt.subplots()
-df = exec.history("world_pos", el.EntityId(1))
+df = exec.history("ball.world_pos")
 df = df.with_columns(
-    pl.col("world_pos").arr.get(4).alias("x"),
-    pl.col("world_pos").arr.get(5).alias("y"),
-    pl.col("world_pos").arr.get(6).alias("z"),
+    pl.col("ball.world_pos").arr.get(4).alias("ball.x"),
+    pl.col("ball.world_pos").arr.get(5).alias("ball.y"),
+    pl.col("ball.world_pos").arr.get(6).alias("ball.z"),
 )
-distance = np.linalg.norm(df.select(["x", "y", "z"]).to_numpy(), axis=1)
+print(df)
+distance = np.linalg.norm(df.select(["ball.x", "ball.y", "ball.z"]).to_numpy(), axis=1)
 df = df.with_columns(pl.Series(distance).alias("distance"))
 ticks = np.arange(df.shape[0])
+fig, ax = plt.subplots()
 ax.plot(ticks, df["distance"])
 plt.show()

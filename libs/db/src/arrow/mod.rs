@@ -1,9 +1,10 @@
 use arrow::{
     array::{
-        ArrayRef, ArrowPrimitiveType, BooleanArray, FixedSizeListArray, PrimitiveArray,
-        RecordBatch, TimestampMicrosecondArray,
+        Array, ArrayRef, ArrowPrimitiveType, BooleanArray, FixedSizeListArray, Int32Array,
+        PrimitiveArray, RecordBatch, TimestampMicrosecondArray,
     },
     buffer::{BooleanBuffer, Buffer, ScalarBuffer},
+    compute,
     datatypes::*,
 };
 use convert_case::Casing;
@@ -99,35 +100,67 @@ impl Component {
             return (inner_field, array);
         }
 
-        let data_type = match self.schema.prim_type {
-            PrimType::U8 => DataType::UInt8,
-            PrimType::U16 => DataType::UInt16,
-            PrimType::U32 => DataType::UInt32,
-            PrimType::U64 => DataType::UInt64,
-            PrimType::I8 => DataType::Int8,
-            PrimType::I16 => DataType::Int16,
-            PrimType::I32 => DataType::Int32,
-            PrimType::I64 => DataType::Int64,
-            PrimType::Bool => DataType::Boolean,
-            PrimType::F32 => DataType::Float32,
-            PrimType::F64 => DataType::Float64,
-        };
-
-        let field = Arc::new(
-            Field::new_fixed_size_list(name.to_string(), inner_field.clone(), size, false)
-                .with_extension_type(
-                    arrow_schema::extension::FixedShapeTensor::try_new(
-                        data_type,
-                        self.schema.dim.iter().copied(),
-                        None,
-                        None,
-                    )
-                    .unwrap(),
-                ),
-        );
+        let field = Arc::new(Field::new_fixed_size_list(
+            name.to_string(),
+            inner_field.clone(),
+            size,
+            false,
+        ));
         let array = FixedSizeListArray::new(inner_field, size, array, None);
         let array = Arc::new(array);
         (field, array)
+    }
+
+    pub fn as_flattened_columns<R: RangeBounds<usize> + Clone>(
+        &self,
+        name: impl ToString,
+        range: R,
+        element_names: &str,
+    ) -> (Vec<FieldRef>, Vec<ArrayRef>) {
+        let name = name.to_string();
+        let size = self.schema.dim.iter().product::<usize>();
+        let (field, array) = self.as_data_array_range(name.clone(), range);
+        if self.schema.dim.is_empty() || size <= 1 {
+            return (vec![field], vec![array]);
+        }
+
+        let list_array = array.as_any().downcast_ref::<FixedSizeListArray>().unwrap();
+        let values = list_array.values();
+        let num_lists = list_array.len();
+
+        // Parse element names from metadata
+        let element_name_parts: Vec<&str> = if element_names.is_empty() {
+            Vec::new()
+        } else {
+            element_names.split(',').map(|s| s.trim()).collect()
+        };
+
+        let mut fields = Vec::new();
+        let mut arrays = Vec::new();
+        for i in 0..size {
+            let suffix = if i < element_name_parts.len() && !element_name_parts[i].is_empty() {
+                element_name_parts[i].to_string()
+            } else {
+                i.to_string()
+            };
+            let field_name = format!("{}.{}", name, suffix);
+
+            // Extract every nth element starting from offset i using arrow's take function
+            let indices: Vec<i32> = (0..num_lists).map(|row| (row * size + i) as i32).collect();
+
+            let indices_array = Int32Array::from(indices);
+            let element_array =
+                compute::take(values, &indices_array, None).expect("Failed to take elements");
+            let field = Arc::new(Field::new(
+                field_name,
+                element_array.data_type().clone(),
+                false,
+            ));
+            fields.push(field);
+            arrays.push(element_array);
+        }
+
+        (fields, arrays)
     }
 
     pub fn as_time_series_array(&self) -> ArrayRef {
@@ -160,8 +193,37 @@ impl Component {
             DataType::Timestamp(TimeUnit::Microsecond, None),
             false,
         ));
-        let fields = vec![data_field, time_field];
-        let columns = vec![data_array.slice(0, len), time_array.slice(0, len)];
+        let fields = vec![time_field, data_field];
+        let columns = vec![time_array.slice(0, len), data_array.slice(0, len)];
+
+        RecordBatch::try_new(Arc::new(Schema::new(fields)), columns)
+            .expect("record batch params wrong")
+    }
+
+    pub fn as_flat_record_batch(&self, name: impl ToString, element_names: &str) -> RecordBatch {
+        let name = name.to_string();
+        let range = ..;
+        let (data_fields, data_arrays) = self.as_flattened_columns(name, range, element_names);
+        let time_array = self.as_time_series_array_range(range);
+
+        let min_len = data_arrays
+            .iter()
+            .map(|a| a.len())
+            .min()
+            .unwrap_or(0)
+            .min(time_array.len());
+
+        let time_field = Arc::new(Field::new(
+            "time",
+            DataType::Timestamp(TimeUnit::Microsecond, None),
+            false,
+        ));
+
+        let mut fields = vec![time_field];
+        fields.extend(data_fields);
+
+        let mut columns = vec![time_array.slice(0, min_len)];
+        columns.extend(data_arrays.into_iter().map(|a| a.slice(0, min_len)));
 
         RecordBatch::try_new(Arc::new(Schema::new(fields)), columns)
             .expect("record batch params wrong")
@@ -242,7 +304,18 @@ impl DB {
                 };
 
                 let column_name = component_metadata.name.clone();
-                let record_batch = component.as_record_batch(column_name.clone());
+                let element_names = component_metadata.element_names();
+
+                let record_batch = match format {
+                    ArchiveFormat::Csv => {
+                        // CSV doesn't support nested structures, use flattened columns
+                        component.as_flat_record_batch(column_name.clone(), element_names)
+                    }
+                    _ => {
+                        // Parquet and Arrow IPC both support ListArray natively
+                        component.as_record_batch(column_name.clone())
+                    }
+                };
                 let schema = record_batch.schema_ref();
                 match format {
                     ArchiveFormat::ArrowIpc => {
