@@ -103,7 +103,6 @@ impl nox_ecs::System for PyFnSystem {
                 component: Component {
                     name: col.metadata.name.to_string(),
                     ty: Some(col.schema.clone().into()),
-                    asset: col.metadata.asset,
                     metadata: col.metadata.metadata.clone(),
                 },
             };

@@ -7,7 +7,6 @@ SIM_TIME_STEP = 1.0 / 120.0
 G = 6.6743e-11
 
 w = el.World()
-mesh = w.insert_asset(el.Mesh.sphere(0.2))
 
 a = w.spawn(
     [
@@ -16,7 +15,6 @@ a = w.spawn(
             world_vel=el.WorldVel(linear=jnp.array([0.0, 0.9957939373, 0.0])),
             inertia=el.Inertia(1.0 / G),
         ),
-        el.Shape(mesh, w.insert_asset(el.Material.color(25.3, 18.4, 1.0))),
     ],
     name="A",
 )
@@ -27,7 +25,6 @@ b = w.spawn(
             world_vel=el.WorldVel(linear=jnp.array([0.0, -1.6191613336, 0.0])),
             inertia=el.Inertia(1.0 / G),
         ),
-        el.Shape(mesh, w.insert_asset(el.Material.color(10.0, 0.0, 10.0))),
     ],
     name="B",
 )
@@ -38,19 +35,8 @@ c = w.spawn(
             world_vel=el.WorldVel(linear=jnp.array([0, 0.6233673964, 0.0])),
             inertia=el.Inertia(1.0 / G),
         ),
-        el.Shape(mesh, w.insert_asset(el.Material.color(0.0, 1.0, 10.0))),
     ],
     name="C",
-)
-
-w.spawn(
-    el.Panel.sidebars(
-        el.Panel.viewport(
-            pos="(0,0,0,0,0,0,4)",
-            look_at="c.world_pos",
-            hdr=True,
-        ),
-    )
 )
 
 # Define a new "gravity edge" component type
@@ -102,7 +88,31 @@ w.spawn(GravityConstraint(b, c), name="B -> C")
 w.spawn(GravityConstraint(c, a), name="C -> A")
 w.spawn(GravityConstraint(c, b), name="C -> B")
 
-w.spawn(el.Line3d("b.world_pos", line_width=10.0))
+w.schematic("""
+    hsplit {
+        tabs share=0.2 {
+            hierarchy
+            schematic_tree
+        }
+        tabs share=0.6 {
+            viewport name=Viewport pos="(0,0,0,0,0,0,3)" look_at="(0,0,0,0,0,0,0)" hdr=#true
+            graph "a.world_pos" name=Graph
+        }
+        tabs share=0.2 {
+            inspector
+        }
+    }
+    object_3d a.world_pos {
+        sphere radius=0.2 r=10.0 g=10.0 b=0.0
+    }
+    object_3d b.world_pos {
+        sphere radius=0.2 r=10.0 g=0.0 b=10.0
+    }
+    object_3d c.world_pos {
+        sphere radius=0.2 r=0.0 g=1.0 b=10.0
+    }
+    line_3d b.world_pos line_width=10.0 color="yolk" perspective=#false
+""")
 
 sys = el.six_dof(sys=gravity)
 sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 120.0)

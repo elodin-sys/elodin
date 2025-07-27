@@ -196,8 +196,8 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, sync_paused)
             .add_systems(PreUpdate, set_selected_range)
             .add_systems(PreUpdate, set_floating_origin.after(sync_pos))
-            .add_systems(PreUpdate, update_eql_context)
-            .add_systems(PreUpdate, set_eql_context_range.after(update_eql_context))
+            .add_systems(Update, update_eql_context)
+            .add_systems(Update, set_eql_context_range.after(update_eql_context))
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
             .add_systems(PostUpdate, set_clear_color)
@@ -996,6 +996,9 @@ pub fn update_eql_context(
     path_reg: Res<ComponentPathRegistry>,
     mut eql_context: ResMut<EqlContext>,
 ) {
+    if path_reg.0.is_empty() {
+        return;
+    };
     eql_context.0 = eql::Context::from_leaves(
         path_reg.0.iter().filter_map(|(id, path)| {
             let schema = component_schema_registry.0.get(id)?;

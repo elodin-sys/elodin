@@ -1,17 +1,16 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::utils::SchemaExt;
-use assets::Handle;
 use bytemuck::Pod;
 use elodin_db::{ComponentSchema, MetadataExt};
 use impeller2::com_de::FromComponentView;
 use impeller2::{
-    component::{Asset, Component},
+    component::Component,
     types::{ComponentView, EntityId},
 };
-use impeller2_wkt::{ComponentMetadata, Material, Mesh};
-//use impeller::{well_known, Asset, AssetStore, Component, ComponentValue, ComponentMetadata, ValueRepr};
+use impeller2_wkt::ComponentMetadata;
 
 use crate::*;
 
@@ -38,12 +37,11 @@ impl Default for TimeStep {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct World {
     pub host: Buffers,
-    pub assets: AssetStore,
     pub dirty_components: HashSet<ComponentId>,
     pub metadata: WorldMetadata,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub struct WorldMetadata {
     pub entity_metadata: HashMap<EntityId, EntityMetadata>,
     pub component_map: HashMap<ComponentId, (ComponentSchema, ComponentMetadata)>,
@@ -53,6 +51,8 @@ pub struct WorldMetadata {
     pub run_time_step: TimeStep,
     pub default_playback_speed: f64,
     pub max_tick: u64,
+    pub schematic_path: Option<PathBuf>,
+    pub schematic: Option<String>,
 }
 
 impl MetadataExt for World {}
@@ -68,6 +68,8 @@ impl Default for WorldMetadata {
             sim_time_step: Default::default(),
             default_playback_speed: 1.0,
             max_tick: u64::MAX,
+            schematic: None,
+            schematic_path: None,
         }
     }
 }
@@ -77,7 +79,6 @@ impl Default for World {
         let mut world = Self {
             host: Default::default(),
             dirty_components: Default::default(),
-            assets: Default::default(),
             metadata: Default::default(),
         };
 
@@ -251,16 +252,6 @@ impl World {
             .collect()
     }
 
-    pub fn insert_asset<C: Asset + Send + Sync + 'static>(&mut self, asset: C) -> Handle<C> {
-        self.assets.insert(asset)
-    }
-
-    pub fn insert_shape(&mut self, mesh: Mesh, material: Material) -> Shape {
-        let mesh = self.insert_asset(mesh);
-        let material = self.insert_asset(material);
-        Shape { mesh, material }
-    }
-
     pub fn advance_tick(&mut self) {
         self.metadata.tick += 1;
     }
@@ -272,17 +263,7 @@ impl Clone for World {
         Self {
             host: self.host.clone(),
             dirty_components,
-            metadata: WorldMetadata {
-                component_map: self.metadata.component_map.clone(),
-                entity_metadata: self.metadata.entity_metadata.clone(),
-                tick: self.metadata.tick,
-                entity_len: self.metadata.entity_len,
-                run_time_step: self.metadata.run_time_step,
-                sim_time_step: self.metadata.sim_time_step,
-                default_playback_speed: self.metadata.default_playback_speed,
-                max_tick: self.metadata.max_tick,
-            },
-            assets: self.assets.clone(),
+            metadata: self.metadata.clone(),
         }
     }
 }
