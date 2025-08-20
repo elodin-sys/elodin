@@ -1,10 +1,13 @@
+use flate2::read::GzDecoder;
+use fs_extra::dir as fs_dir;
+use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::{env, io};
-
-use anyhow::Context;
-use flate2::read::GzDecoder;
 use tar::Archive;
+
+const XLA_REV: &str = "2a6015f068e4285a69ca9a535af63173ba92995b";
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 #[allow(clippy::enum_variant_names)]
@@ -26,28 +29,23 @@ impl OS {
     }
 }
 
-fn env_var_rerun(name: &str) -> Option<String> {
-    println!("cargo:rerun-if-env-changed={name}");
-    env::var(name).ok()
-}
-
 fn main() -> anyhow::Result<()> {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("missing out dir"));
     let os = OS::get();
 
-    let xla_dir = env_var_rerun("XLA_EXTENSION_DIR")
-        .map_or_else(|| out_dir.join("xla_extension"), PathBuf::from);
+    let xla_dir = out_dir.join("xla_extension");
     if !xla_dir.exists() {
-        if cfg!(feature = "shared") {
-            download_shared_xla(&out_dir)?;
-        } else {
+        let xla_src_dir = out_dir.join(format!("xla-{XLA_REV}"));
+        if !xla_src_dir.exists() {
             download_xla(&out_dir)?;
         }
+        build_xla(&out_dir, &xla_src_dir)?;
     }
 
     let mut config = cpp_build::Config::new();
     config
         .flag("-std=c++17")
+        .flag("-Wno-unused-parameter")
         .flag("-DLLVM_ON_UNIX=1")
         .flag("-DLLVM_VERSION_STRING=")
         .flag(&format!("-isystem{}", xla_dir.join("include").display()))
@@ -104,8 +102,7 @@ fn main() -> anyhow::Result<()> {
     println!("cargo:rerun-if-changed=src/computation.rs");
     println!("cargo:rerun-if-changed=src/hlo_module.rs");
 
-    let jax_metal_dir =
-        env_var_rerun("JAX_METAL_DIR").map_or_else(|| out_dir.join("jax_metal"), PathBuf::from);
+    let jax_metal_dir = out_dir.join("jax_metal");
     if !jax_metal_dir.exists() && cfg!(target_os = "macos") {
         download_jax_metal(&jax_metal_dir)?;
     }
@@ -123,22 +120,43 @@ fn main() -> anyhow::Result<()> {
         println!("cargo:rustc-link-arg=-Wl,-lstdc++");
     }
 
-    if cfg!(feature = "shared") {
-        println!("cargo:rustc-link-search={}", xla_dir.join("lib").display());
-        println!("cargo:rustc-link-lib=dylib=xla_extension");
-    } else {
-        println!(
-            "cargo:rustc-link-search=native={}",
-            xla_dir.join("lib").display()
-        );
-        println!("cargo:rustc-link-lib=static=xla_extension");
-    }
+    println!(
+        "cargo:rustc-link-search=native={}",
+        xla_dir.join("lib").display()
+    );
+    println!("cargo:rustc-link-lib=static=xla_extension");
+
     if os == OS::MacOS {
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=SystemConfiguration");
         println!("cargo:rustc-link-lib=framework=Security");
     }
 
+    Ok(())
+}
+
+fn build_xla(out_dir: &Path, xla_dir: &Path) -> anyhow::Result<()> {
+    // thread::sleep(Duration::from_secs(20));
+    // std::intrinsics::breakpoint();
+    let cwd = env::current_dir()?;
+    let src_dir = cwd.join("extension");
+    let dst_dir = xla_dir.join("xla");
+    copy_dir(src_dir, dst_dir)?;
+    env::set_current_dir(xla_dir)?;
+    Command::new("bazelisk")
+        .args([
+            "build",
+            "--enable_workspace",
+            "--experimental_cc_static_library",
+            "//xla/extension:tarball",
+        ])
+        .status()?;
+    let tarball = xla_dir.join("bazel-bin/xla/extension/xla_extension.tar.gz");
+    let file = File::open(tarball)?;
+    let decoder = GzDecoder::new(file);
+    let mut archive = Archive::new(decoder);
+    archive.unpack(out_dir)?;
+    env::set_current_dir(cwd)?;
     Ok(())
 }
 
@@ -150,75 +168,25 @@ fn download_jax_metal(jax_dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn download_shared_xla(xla_dir: &Path) -> anyhow::Result<()> {
-    let os = env::var("CARGO_CFG_TARGET_OS").expect("Unable to get TARGET_OS");
-    let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("Unable to get TARGET_ARCH");
-    let url = match (os.as_str(), arch.as_str()) {
-        ("macos", arch) => format!(
-            "https://github.com/elixir-nx/xla/releases/download/v0.7.0/xla_extension-{}-darwin-cpu.tar.gz",
-            arch
-        ),
-        ("linux", arch) => {
-            if true {
-                format!(
-                    "https://github.com/elixir-nx/xla/releases/download/v0.7.0/xla_extension-{}-linux-gnu-cuda12.tar.gz",
-                    arch
-                )
-            } else {
-                format!(
-                    "https://github.com/elixir-nx/xla/releases/download/v0.7.0/xla_extension-{}-linux-gnu-cpu.tar.gz",
-                    arch
-                )
-            }
-        }
-
-        (os, arch) => panic!("{}-{} is an unsupported platform", os, arch),
-    };
-
-    let buf = download_file(&url)?;
-    let mut bytes = io::Cursor::new(buf);
-
-    let tar = GzDecoder::new(&mut bytes);
-    let mut archive = Archive::new(tar);
-    archive.unpack(xla_dir)?;
-
-    Ok(())
-}
-
 fn download_xla(xla_dir: &Path) -> anyhow::Result<()> {
-    let os = env::var("CARGO_CFG_TARGET_OS").expect("Unable to get TARGET_OS");
-    let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("Unable to get TARGET_ARCH");
-    let url = match (os.as_str(), arch.as_str()) {
-        ("macos", arch) => format!(
-            "https://github.com/elodin-sys/xla/releases/download/v0.5.4/xla_extension-{}-darwin-cpu.tar.gz",
-            arch
-        ),
-        ("linux", arch) => format!(
-            "https://github.com/elodin-sys/xla/releases/download/v0.5.4/xla_extension-{}-linux-gnu-cpu.tar.gz",
-            arch
-        ),
-        (os, arch) => panic!("{}-{} is an unsupported platform", os, arch),
-    };
+    let url = format!("https://github.com/openxla/xla/archive/{XLA_REV}.tar.gz");
     let buf = download_file(&url)?;
     let mut bytes = io::Cursor::new(buf);
-
     let tar = GzDecoder::new(&mut bytes);
     let mut archive = Archive::new(tar);
     archive.unpack(xla_dir)?;
-
     Ok(())
 }
 
 fn download_file(url: &str) -> anyhow::Result<Vec<u8>> {
     let res = ureq::get(url).call()?;
-    let content_length = res
-        .header("Content-Length")
-        .context("Content-Length header not found")?
-        .parse::<usize>()?;
-    let mut buf = Vec::with_capacity(content_length);
-    res.into_reader()
-        .take(content_length as u64)
-        .read_to_end(&mut buf)
-        .context("Failed to read response")?;
+    let mut buf = Vec::new();
+    res.into_reader().read_to_end(&mut buf)?;
     Ok(buf)
+}
+
+fn copy_dir(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> fs_extra::error::Result<u64> {
+    let mut options = fs_dir::CopyOptions::new();
+    options.overwrite = true; // Overwrite existing files in destination
+    fs_dir::copy(src, dst, &options)
 }
