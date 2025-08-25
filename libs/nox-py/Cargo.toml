@@ -20,8 +20,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # python
-pyo3 = "0.23.0"
-numpy.version = "0.23"
+pyo3 = "0.25.1"
+numpy.version = "0.25.0"
 
 # nox
 nox-ecs.path = "../nox-ecs"

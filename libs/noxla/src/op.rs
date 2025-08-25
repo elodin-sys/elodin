@@ -10,11 +10,11 @@ use std::mem::ManuallyDrop;
 use std::pin::Pin;
 
 cpp! {{
-    #include "xla/client/xla_builder.h"
-    #include "xla/client/lib/constants.h"
-    #include "xla/client/lib/matrix.h"
-    #include "xla/client/lib/math.h"
-    #include "xla/statusor.h"
+    #include "xla/hlo/builder/xla_builder.h"
+    #include "xla/hlo/builder/lib/constants.h"
+    #include "xla/hlo/builder/lib/matrix.h"
+    #include "xla/hlo/builder/lib/math.h"
+    #include "xla/tsl/platform/status.h"
     #include "xla/literal_util.h"
     using namespace xla;
 }}
@@ -47,13 +47,13 @@ impl XlaOp {
         let op = &self.raw;
         let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
         let comp = unsafe {
-            cpp!([op as "XlaOp*", out_status as "Status*"] -> XlaComputation as "XlaComputation" {
+            cpp!([op as "XlaOp*", out_status as "absl::Status*"] -> XlaComputation as "XlaComputation" {
                 auto builder = op->builder();
                 auto status = builder->Build(*op, false);
                 if (status.ok()) {
                     return std::move(status.value());
                 }else{
-                    *out_status = Status(status.status());
+                    *out_status = absl::Status(status.status());
                     return XlaComputation();
                 }
             })
@@ -76,7 +76,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Add(*op, *rhs));
                 } catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -90,7 +90,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Sub(*op, *rhs));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -104,7 +104,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Mul(*op, *rhs));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -118,7 +118,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Div(*op, *rhs));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -132,7 +132,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Rem(*op, *rhs));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -146,7 +146,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Neg(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -160,7 +160,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Abs(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -174,7 +174,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Sqrt(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -188,7 +188,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Pow(*op, *rhs));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -202,7 +202,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Dot(*op, *rhs));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -217,7 +217,7 @@ impl XlaOp {
                 try {
                     return XlaOp(DotGeneral(*op, *rhs, dims));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -231,7 +231,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Atan2(*op, *rhs));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -245,7 +245,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Max(*op, *rhs));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -259,7 +259,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Min(*op, *rhs));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -273,7 +273,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Or(*op, *rhs));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -287,7 +287,7 @@ impl XlaOp {
                 try {
                     return XlaOp(And(*op, *rhs));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -301,7 +301,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Xor(*op, *rhs));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -315,7 +315,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Eq(*op, *rhs));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -329,7 +329,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Ne(*op, *rhs));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -343,7 +343,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Ge(*op, *rhs));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -357,7 +357,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Gt(*op, *rhs));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -371,7 +371,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Le(*op, *rhs));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -385,7 +385,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Lt(*op, *rhs));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -399,7 +399,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Not(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -413,7 +413,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Exp(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -427,7 +427,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Expm1(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -441,7 +441,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Floor(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -455,7 +455,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Ceil(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -469,7 +469,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Round(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -483,7 +483,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Log(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -497,7 +497,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Log1p(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -511,7 +511,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Logistic(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -525,7 +525,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Sign(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -539,7 +539,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Clz(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -553,7 +553,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Cos(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -567,7 +567,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Sin(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -581,7 +581,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Asin(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -595,7 +595,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Acos(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -609,7 +609,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Tanh(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -623,7 +623,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Real(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -637,7 +637,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Imag(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -651,7 +651,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Rsqrt(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -665,7 +665,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Cbrt(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -679,7 +679,7 @@ impl XlaOp {
                 try {
                     return XlaOp(IsFinite(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -693,7 +693,7 @@ impl XlaOp {
                 try {
                     return XlaOp(LowerTriangle(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -707,7 +707,7 @@ impl XlaOp {
                 try {
                     return XlaOp(UpperTriangle(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -739,7 +739,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Clamp(*op, *min, *max));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -753,7 +753,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Copy(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -767,7 +767,7 @@ impl XlaOp {
                 try {
                     return XlaOp(ZerosLike(*op));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -782,7 +782,7 @@ impl XlaOp {
                     const Shape *shape = op->builder()->GetShapePtr(*op).value();
                     return XlaOp(Zero(op->builder(), shape->element_type()));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -798,7 +798,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Reshape(*op, absl::Span(ds_ptr, ds_len)));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -814,7 +814,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Broadcast(*op, absl::Span(ds_ptr, ds_len)));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -832,7 +832,7 @@ impl XlaOp {
                 try {
                     return XlaOp(BroadcastInDim(*op, absl::Span(dims_ptr, dims_len), absl::Span(broadcast_dims_ptr, broadcast_dims_len)));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -848,7 +848,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Collapse(*op, absl::Span(ds_ptr, ds_len)));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -864,7 +864,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Transpose(*op, absl::Span(dims_ptr, dims_len)));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -878,7 +878,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Select(*op, *on_true, *on_false));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -897,7 +897,7 @@ impl XlaOp {
                     auto shape = ShapeUtil::MakeShape((PrimitiveType)prim_type, absl::Span(dims_ptr, dims_len));
                     return XlaOp(RngUniform(*op, *sigma, shape));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -916,7 +916,7 @@ impl XlaOp {
                     auto shape = ShapeUtil::MakeShape((PrimitiveType)prim_type, absl::Span(dims_ptr, dims_len));
                     return XlaOp(RngNormal(*op, *sigma, shape));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -936,7 +936,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Slice(*op, absl::Span(start_indices_ptr, start_indices_len), absl::Span(limit_indices_ptr, limit_indices_len), absl::Span(strides_ptr, strides_len)));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -950,7 +950,7 @@ impl XlaOp {
                 try {
                     return XlaOp(SliceInDim(*op, start_index, limit_index, stride, dim));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -968,7 +968,7 @@ impl XlaOp {
                 try {
                     return XlaOp(DynamicSlice(*op, absl::Span(start_indices_ptr, start_indices_len), absl::Span(size_indices_ptr, size_indices_len)));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -984,7 +984,7 @@ impl XlaOp {
                 try {
                     return XlaOp(DynamicUpdateSlice(*op, *update, absl::Span(start_indices_ptr, start_indices_len)));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -998,7 +998,7 @@ impl XlaOp {
                 try {
                     return XlaOp(GetTupleElement(*op, index));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -1063,7 +1063,7 @@ impl XlaOp {
                 try {
                     return XlaOp(ConvertElementType(*op, (PrimitiveType)ty));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -1077,7 +1077,7 @@ impl XlaOp {
                 try {
                     return XlaOp(GetDimensionSize(*op, dim));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -1093,7 +1093,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Reduce(*op, *init_value, *comp, absl::Span(dims_ptr, dims_len)));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -1113,7 +1113,7 @@ impl XlaOp {
                 try {
                     return XlaOp(Conditional(*op, *true_op, *on_true, *false_op, *on_false));
                 }catch(std::exception& e) {
-                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -1172,7 +1172,7 @@ impl XlaOp {
                     try {
                         return XlaOp(Cholesky(*op, lower));
                     }catch(std::exception& e) {
-                        return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                        return XlaOp(op->builder()->ReportError(absl::InternalError(e.what())));
                     }
                 }
             )
