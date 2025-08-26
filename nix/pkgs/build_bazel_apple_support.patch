@@ -1,0 +1,15 @@
+diff --git a/crosstool/cc_toolchain_config.bzl b/crosstool/cc_toolchain_config.bzl
+index e7b2169..92cfd78 100644
+--- a/crosstool/cc_toolchain_config.bzl
++++ b/crosstool/cc_toolchain_config.bzl
+@@ -1487,8 +1487,8 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
+         }
+     else:
+         apple_env = {
+-            "DEVELOPER_DIR": "/Library/Developer/CommandLineTools",
+-            "SDKROOT": "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
++            "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
++            "SDKROOT": "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+         }
+ 
+     apple_env_feature = feature(

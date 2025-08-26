@@ -34,11 +34,15 @@ fn main() -> anyhow::Result<()> {
     let os = OS::get();
 
     let xla_dir = out_dir.join("xla_extension");
+    println!("Using XLA extension directory {:#?}", xla_dir);
     if !xla_dir.exists() {
         let xla_src_dir = out_dir.join(format!("xla-{XLA_REV}"));
+        println!("Using XLA extension source directory {:#?}", xla_src_dir);
         if !xla_src_dir.exists() {
+            println!("Downloading XLA source code to {:#?}", out_dir);
             download_xla(&out_dir)?;
         }
+        println!("Building XLA extension...");
         build_xla(&out_dir, &xla_src_dir)?;
     }
 
@@ -138,11 +142,13 @@ fn main() -> anyhow::Result<()> {
 fn build_xla(out_dir: &Path, xla_dir: &Path) -> anyhow::Result<()> {
     // thread::sleep(Duration::from_secs(20));
     // std::intrinsics::breakpoint();
-    let cwd = env::current_dir()?;
+    // let cwd = env::current_dir()?;
     let src_dir = cwd.join("extension");
     let dst_dir = xla_dir.join("xla");
+    println!("Copying {:#?} to {:#?}", src_dir, dst_dir);
     copy_dir(src_dir, dst_dir)?;
     env::set_current_dir(xla_dir)?;
+    println!("Using working directory {:#?}", xla_dir);
     Command::new("bazelisk")
         .args([
             "build",
@@ -156,7 +162,7 @@ fn build_xla(out_dir: &Path, xla_dir: &Path) -> anyhow::Result<()> {
     let decoder = GzDecoder::new(file);
     let mut archive = Archive::new(decoder);
     archive.unpack(out_dir)?;
-    env::set_current_dir(cwd)?;
+    // env::set_current_dir(cwd)?;
     Ok(())
 }
 
