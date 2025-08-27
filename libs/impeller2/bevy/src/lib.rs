@@ -29,7 +29,6 @@ use impeller2_wkt::{
     GetEarliestTimestamp, IsRecording, LastUpdated, Stream, StreamBehavior, StreamId,
     StreamTimestamp, SubscribeLastUpdated, VTableMsg, WorldPos,
 };
-use nox::array::ArrayViewExt;
 use serde::de::DeserializeOwned;
 use std::{
     collections::{BTreeMap, HashMap},
