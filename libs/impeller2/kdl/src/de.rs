@@ -369,18 +369,16 @@ fn parse_object_3d_mesh(
     match node.name().value() {
         "glb" => {
             let path = node
-                .entries()
-                .iter()
-                .find(|e| e.name().is_none())
+                .get("path")
+                .and_then(|v| v.as_string())
                 .ok_or_else(|| KdlSchematicError::MissingProperty {
                     property: "path".to_string(),
                     node: "glb".to_string(),
                     src: src.to_string(),
                     span: node.span(),
-                })?
-                .to_string();
+                })?;
 
-            Ok(Object3DMesh::Glb(path))
+            Ok(Object3DMesh::Glb(path.to_string()))
         }
         "sphere" => {
             let radius = node
@@ -1099,6 +1097,41 @@ dashboard label="Test Dashboard" {
             assert_eq!(node.children.len(), 2);
         } else {
             panic!("Expected dashboard panel");
+        }
+    }
+
+    #[test]
+    fn test_parse_mesh_example() {
+        let kdl = r#"
+tabs {
+    viewport fov=45.0 active=#true show_grid=#false hdr=#true
+    graph "a.world_pos" name="a world_pos"
+}
+
+object_3d "a.world_pos" {
+    glb path="hi"
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 2);
+
+        // Check tabs panel
+        if let SchematicElem::Panel(Panel::Tabs(tabs)) = &schematic.elems[0] {
+            assert_eq!(tabs.len(), 2);
+        } else {
+            panic!("Expected tabs panel");
+        }
+
+        // Check object_3d
+        if let SchematicElem::Object3d(obj) = &schematic.elems[1] {
+            assert_eq!(obj.eql, "a.world_pos");
+            match &obj.mesh {
+                Object3DMesh::Glb(s) => assert_eq!(s.as_str(), "hi"),
+                _ => panic!("Expected glb"),
+            }
+        } else {
+            panic!("Expected object_3d");
         }
     }
 }
