@@ -458,29 +458,25 @@ rocket = w.spawn(
             inertia=el.SpatialInertia(3.0, jnp.array([0.1, 1.0, 1.0])),
         ),
         Rocket(),
-        w.glb("https://assets.elodin.systems/assets/rocket.glb"),
     ],
     name="Rocket",
 )
 
-w.spawn(el.Line3d("rocket.world_pos", line_width=11.0))
-
-w.spawn(
-    el.Panel.hsplit(
-        el.Panel.vsplit(
-            el.Panel.viewport(
-                pos="rocket.world_pos + (0.0,0.0,0.0,0.0, 5.0, 0.0, 1.0)",
-                look_at="rocket.world_pos",
-                show_grid=True,
-            ),
-        ),
-        el.Panel.vsplit(
-            el.Panel.graph("rocket.fin_deflect"),
-            el.Panel.graph("rocket.v_rel_accel, rocket.v_rel_accel_filtered"),
-        ),
-        active=True,
-    )
-)
+w.schematic("""
+    hsplit {
+        tabs share=0.8 {
+            viewport name=Viewport pos="rocket.world_pos + (0.0,0.0,0.0,0.0, 5.0, 0.0, 1.0)" look_at="rocket.world_pos" hdr=#true
+        }
+        vsplit share=0.4 {
+            graph "rocket.fin_deflect" name=Fin
+            graph "rocket.v_rel_accel, rocket.v_rel_accel_filtered" name=Accel
+        }
+    }
+    object_3d rocket.world_pos {
+        glb path="https://storage.googleapis.com/elodin-assets/rocket.glb"
+    }
+    line_3d rocket.world_pos line_width=11.0 color="yolk" perspective=#false
+""")
 
 non_effectors = (
     mach
