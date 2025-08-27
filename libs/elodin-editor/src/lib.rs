@@ -128,7 +128,7 @@ impl Plugin for EditorPlugin {
             WinitSettings::game()
         };
         app
-            //.insert_resource(AssetMetaCheck::Never)
+            // .insert_resource(AssetMetaCheck::Never)
             .add_plugins(plugins::WebAssetPlugin)
             .add_plugins(
                 DefaultPlugins
@@ -154,7 +154,8 @@ impl Plugin for EditorPlugin {
                     })
                     .set(AssetPlugin {
                         unapproved_path_mode: UnapprovedPathMode::Allow,
-                        mode: AssetMode::Processed,
+                        // NOTE: `Processed` interferes with WebAssetPlugin.
+                        // mode: AssetMode::Processed,
                         ..default()
                     })
                     .disable::<TransformPlugin>()
