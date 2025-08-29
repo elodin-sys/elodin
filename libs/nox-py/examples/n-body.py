@@ -25,14 +25,15 @@ def gravity(
 
 
 w = el.World()
-mesh = w.insert_asset(el.Mesh.sphere(0.2))
+# mesh = w.insert_asset(el.Mesh.sphere(0.2))
+body_kdl = ""
 for i in range(1, 200):
     key = jax.random.key(i)
     pos = jax.random.uniform(key, shape=(3,), minval=-10.0, maxval=10.0)
     # vel = jax.random.uniform(key, shape=(3,), minval=-5.0, maxval=5.0)
     vel = np.zeros(3)
     [r, g, b] = jax.random.uniform(key, shape=(3,), minval=0.0, maxval=1.0) * 2.0
-    color = w.insert_asset(el.Material.color(r, g, b))
+    # color = w.insert_asset(el.Material.color(r, g, b))
     body = w.spawn(
         [
             el.Body(
@@ -40,20 +41,30 @@ for i in range(1, 200):
                 world_vel=el.SpatialMotion(linear=vel),
                 inertia=el.SpatialInertia(1.0 / G),
             ),
-            el.Shape(mesh, color),
+            # el.Shape(mesh, color),
         ],
-        name=f"Body {i}",
+        name=f"body{i:03d}",
     )
-w.spawn(
-    el.Panel.viewport(
-        track_rotation=False,
-        active=True,
-        pos=[100.0, 5.0, 100.0],
-        looking_at=[0.0, 0.0, 0.0],
-        hdr=True,
-    ),
-    name="Viewport 1",
-)
+
+    body_kdl += f"""
+    object_3d body{i:03d}.world_pos {{
+       sphere radius=0.2 r=1.0 g=1.0 b=1.0
+    }}
+"""
+# w.spawn(
+#     el.Panel.viewport(
+#         track_rotation=False,
+#         active=True,
+#         pos=[100.0, 5.0, 100.0],
+#         looking_at=[0.0, 0.0, 0.0],
+#         hdr=True,
+#     ),
+#     name="Viewport 1",
+# )
+
+w.schematic("""
+    viewport name="Viewport 1" pos="(0.0,0.0,0.0,0.0, 100.0, 5.0, 100.0)" look_at="(0,0,0,0, 0,0,0)" hdr=#true active=#true show_grid=#true
+""" + body_kdl)
 
 sys = el.six_dof(sys=gravity)
 sim = w.run(sys, sim_time_step=1 / 240.0)
