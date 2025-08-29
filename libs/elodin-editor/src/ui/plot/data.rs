@@ -1,5 +1,5 @@
 use bevy::asset::Asset;
-use bevy::log::warn;
+use bevy::log::warn_once;
 use bevy::prelude::{DetectChanges, InRef, Res, ResMut};
 use bevy::reflect::TypePath;
 use bevy::{
@@ -136,7 +136,7 @@ pub fn pkt_handler(
             return;
         }
         if let Err(err) = table.sink(registry, &mut tick) {
-            warn!(?err, "tick sick failed");
+            warn_once!(?err, "tick sink failed");
         }
         if let Err(err) = table.sink(
             registry,
@@ -149,7 +149,7 @@ pub fn pkt_handler(
                 }
             },
         ) {
-            warn!(?err, "graph sink failed");
+            warn_once!(?err, "graph sink failed");
         }
     }
 }
