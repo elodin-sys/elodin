@@ -5,10 +5,10 @@ use cpp::{cpp, cpp_class};
 use std::pin::Pin;
 
 cpp! {{
-    #include "xla/client/xla_builder.h"
-    #include "xla/client/lib/constants.h"
-    #include "xla/client/lib/matrix.h"
-    #include "xla/statusor.h"
+    #include "xla/hlo/builder/xla_builder.h"
+    #include "xla/hlo/builder/lib/constants.h"
+    #include "xla/hlo/builder/lib/matrix.h"
+    #include "xla/tsl/platform/status.h"
     #include "xla/literal_util.h"
     #include "xla/pjrt/pjrt_api.h"
     #include "xla/pjrt/pjrt_c_api_client.h"
@@ -38,7 +38,7 @@ impl PjRtLoadedExecutable {
         {
             let out_ptr = &mut out;
             unsafe {
-                cpp!([self as "const std::shared_ptr<PjRtLoadedExecutable>*", buffers as "std::unique_ptr<std::vector<PjRtBuffer*>>", out_status as "Status*", out_ptr as "void*", untuple_result as "bool"] {
+                cpp!([self as "const std::shared_ptr<PjRtLoadedExecutable>*", buffers as "std::unique_ptr<std::vector<PjRtBuffer*>>", out_status as "absl::Status*", out_ptr as "void*", untuple_result as "bool"] {
                     ExecuteOptions options;
                     options.untuple_result = untuple_result;
                     auto status = (*self)->Execute(absl::Span(buffers.get(), 1), options);
@@ -56,7 +56,7 @@ impl PjRtLoadedExecutable {
                              }
                         }
                     }else{
-                        *out_status = Status(status.status());
+                        *out_status = absl::Status(status.status());
                     }
                 })
             };

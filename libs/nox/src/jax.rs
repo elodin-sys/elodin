@@ -191,9 +191,9 @@ impl JaxTracer {
                         py,
                         "GatherDimensionNumbers",
                         (
-                            g.offset_dims.to_vec(),
-                            g.collapsed_slice_dims.to_vec(),
-                            g.start_index_map.to_vec(),
+                            vec_to_tuple(py, g.offset_dims.to_vec())?,
+                            vec_to_tuple(py, g.collapsed_slice_dims.to_vec())?,
+                            vec_to_tuple(py, g.start_index_map.to_vec())?,
                         ),
                     )
                 })?;
@@ -483,6 +483,15 @@ pub fn call_comp_fn<T, R: ReprMonad<crate::Op>>(
         Python::with_gil(|py| tracer.cache.insert(arg_id, py_arg.clone_ref(py)));
     }
     tracer.visit(&func.inner)
+}
+
+/// Convert a Rust vector to a Python tuple.
+fn vec_to_tuple<'py, T>(py: Python<'py>, data: Vec<T>) -> PyResult<Py<PyTuple>>
+where
+    T: IntoPyObject<'py>,
+{
+    let py_tuple = PyTuple::new(py, data)?;
+    Ok(py_tuple.into())
 }
 
 #[cfg(test)]

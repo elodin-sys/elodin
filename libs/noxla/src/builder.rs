@@ -7,7 +7,7 @@ use cxx::let_cxx_string;
 use std::pin::Pin;
 
 cpp! {{
-    #include "xla/client/xla_builder.h"
+    #include "xla/hlo/builder/xla_builder.h"
     using namespace xla;
 }}
 
@@ -27,12 +27,12 @@ impl XlaBuilder {
     pub fn build(&self, op: &XlaOp) -> Result<XlaComputation> {
         let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
         let comp = unsafe {
-            cpp!([self as "std::shared_ptr<XlaBuilder>*", op as "XlaOp*", out_status as "Status*"] -> XlaComputation as "XlaComputation" {
+            cpp!([self as "std::shared_ptr<XlaBuilder>*", op as "XlaOp*", out_status as "absl::Status*"] -> XlaComputation as "XlaComputation" {
                 auto status = (*self)->Build(*op, false);
                 if (status.ok()) {
                     return std::move(status.value());
                 }else{
-                    *out_status = Status(status.status());
+                    *out_status = absl::Status(status.status());
                     return XlaComputation();
                 }
             })
@@ -94,7 +94,7 @@ impl XlaBuilder {
                 try {
                     return XlaOp(Parameter((self->get()), num, raw_shape, *name));
                 }catch(std::exception& e) {
-                    return XlaOp((*self)->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp((*self)->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
@@ -131,11 +131,11 @@ impl XlaBuilder {
     pub fn setup_alias(&self, param_num: u64, output_index: u64) -> Result<()> {
         let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
         unsafe {
-            cpp!([self as "std::shared_ptr<XlaBuilder>*", param_num as "uint64_t", output_index as "uint64_t", out_status as "Status*"] {
+            cpp!([self as "std::shared_ptr<XlaBuilder>*", param_num as "uint64_t", output_index as "uint64_t", out_status as "absl::Status*"] {
                 try {
                     (*self)->SetUpAlias({(int64_t) output_index}, (int64_t) param_num, {}, HloInputOutputAliasConfig::AliasKind::kMustAlias);
                 }catch(std::exception& e) {
-                    *out_status = Status(tsl::errors::Internal(e.what()));
+                    *out_status = absl::Status(absl::InternalError(e.what()));
                 }
             })
         };
@@ -151,7 +151,7 @@ impl XlaBuilder {
                     auto shape = ShapeUtil::MakeShape((PrimitiveType)prim_type, absl::Span(dims_ptr, dims_len));
                     return XlaOp(Iota(self->get(), shape, iota_dim));
                 }catch(std::exception& e) {
-                    return XlaOp(self->get()->ReportError(tsl::errors::Internal(e.what())));
+                    return XlaOp(self->get()->ReportError(absl::InternalError(e.what())));
                 }
             })
         };
