@@ -223,6 +223,9 @@ impl Plugin for EditorPlugin {
         #[cfg(target_os = "macos")]
         app.add_systems(Update, setup_titlebar);
 
+        #[cfg(feature = "inspector")]
+        app.add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new());
+
         // For adding features incompatible with wasm:
         embedded_asset!(app, "./assets/diffuse.ktx2");
         embedded_asset!(app, "./assets/specular.ktx2");
