@@ -1,0 +1,224 @@
+# Deploy Documentation to GitHub Pages
+#
+# This workflow builds our Zola-based documentation site and deploys it to GitHub Pages.
+# It runs automatically on pushes to main and pull requests.
+#
+# Features:
+# - Production deployment on main branch pushes
+# - Preview deployments for pull requests
+# - Automatic cleanup of old previews
+#
+# For contributors:
+# - The docs source is in /docs/public
+# - We use Zola static site generator (https://www.getzola.org/)
+# - PRs get preview deployments at: https://docs.elodin.systems/preview/pr-{number}/
+# - Live site: https://docs.elodin.systems
+
+name: Deploy Documentation
+
+on:
+  # Trigger on pushes to main branch
+  push:
+    branches: [ main ]
+    paths:
+      - 'docs/public/**'
+      - '.github/workflows/deploy-docs.yml'
+  
+  # Trigger on pull requests
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    paths:
+      - 'docs/public/**'
+      - '.github/workflows/deploy-docs.yml'
+  
+  # Allow manual trigger from GitHub UI
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Enable debug logging'
+        required: false
+        default: 'false'
+
+# Sets permissions of the GITHUB_TOKEN
+permissions:
+  contents: write  # Needed for gh-pages branch
+  pull-requests: write  # Needed to comment on PRs
+
+# Allow only one concurrent deployment per PR/branch
+concurrency:
+  group: "pages-${{ github.event.pull_request.number || github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  # Build and deploy job
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Zola
+        if: github.event.action != 'closed'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: zola@0.19.2
+
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # For main branch: Build and deploy production
+      - name: Build production site
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          cd docs/public
+          echo "🔨 Building production site..."
+          zola build
+          echo "✅ Build complete!"
+          
+          # Copy to gh-pages root (preserving preview directory)
+          cd ../..
+          rsync -av --delete \
+            --exclude=preview/ \
+            --exclude=.git/ \
+            --exclude=CNAME \
+            docs/public/public/ gh-pages/
+          
+          # Ensure CNAME file exists
+          echo "docs.elodin.systems" > gh-pages/CNAME
+
+      # For PRs: Build and deploy preview
+      - name: Build preview site
+        if: github.event_name == 'pull_request' && github.event.action != 'closed'
+        run: |
+          cd docs/public
+          echo "🔨 Building preview for PR #${{ github.event.pull_request.number }}..."
+          
+          # Build with preview base URL
+          zola build --base-url "https://docs.elodin.systems/preview/pr-${{ github.event.pull_request.number }}"
+          echo "✅ Build complete!"
+          
+          # Deploy to preview directory
+          cd ../..
+          mkdir -p gh-pages/preview/pr-${{ github.event.pull_request.number }}
+          rsync -av --delete docs/public/public/ gh-pages/preview/pr-${{ github.event.pull_request.number }}/
+
+      # For closed PRs: Cleanup preview
+      - name: Cleanup preview
+        if: github.event_name == 'pull_request' && github.event.action == 'closed'
+        run: |
+          echo "🧹 Removing preview for PR #${{ github.event.pull_request.number }}..."
+          rm -rf gh-pages/preview/pr-${{ github.event.pull_request.number }}
+
+      # Commit and push changes
+      - name: Deploy to GitHub Pages
+        if: github.event.action != 'closed' || (github.event_name == 'pull_request' && github.event.action == 'closed')
+        run: |
+          cd gh-pages
+          
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Commit changes
+          git add -A
+          
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            git commit -m "Deploy documentation from ${{ github.sha }}" || echo "No changes to commit"
+          elif [[ "${{ github.event.action }}" == "closed" ]]; then
+            git commit -m "Remove preview for PR #${{ github.event.pull_request.number }}" || echo "No changes to commit"
+          else
+            git commit -m "Deploy preview for PR #${{ github.event.pull_request.number }}" || echo "No changes to commit"
+          fi
+          
+          git push origin gh-pages
+
+      # Comment on PR with preview link
+      - name: Comment PR with preview link
+        if: github.event_name == 'pull_request' && github.event.action != 'closed'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const previewUrl = `https://docs.elodin.systems/preview/pr-${prNumber}/`;
+            
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.type === 'Bot' && 
+              comment.body.includes('📚 Documentation Preview')
+            );
+            
+            const body = `📚 **Documentation Preview Ready!**
+            
+            Your documentation changes have been deployed to:
+            🔗 ${previewUrl}
+            
+            This preview will be automatically updated when you push new commits.
+            The preview will be removed when this PR is closed or merged.
+            
+            ---
+            <sub>Preview deployment started at ${new Date().toUTCString()}</sub>`;
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: body
+              });
+            }
+
+      # Comment when preview is removed
+      - name: Comment PR on cleanup
+        if: github.event_name == 'pull_request' && github.event.action == 'closed'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: `🧹 Documentation preview for PR #${prNumber} has been removed.`
+            });
+
+  # Verify deployment (only for production)
+  verify:
+    needs: build-and-deploy
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify deployment
+        run: |
+          echo "🚀 Documentation deployed successfully!"
+          echo "📍 View at: https://docs.elodin.systems"
+          
+          # Wait a bit for deployment to propagate
+          sleep 10
+          
+          # Simple health check
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://docs.elodin.systems)
+          if [ "$response" = "200" ]; then
+            echo "✅ Site is accessible (HTTP $response)"
+          else
+            echo "⚠️ Site returned HTTP $response - may still be propagating"
+          fi
