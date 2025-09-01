@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    
+<link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css" media="print" onload="this.media='all'; this.onload = null">
+<noscript><link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css"></noscript>
+
+    
+  <link rel="preload" as="font" href="/fonts/spacegrotesk.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="/fonts/ibm-plex-sans-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="/fonts/ibm-plex-sans-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="/fonts/ibm-plex-sans-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="/fonts/ibm-plex-sans-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="/fonts/ibm-plex-sans-700.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="/fonts/ibm-plex-mono-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="/fonts/ibm-plex-mono-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="/fonts/ibm-plex-mono-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="/fonts/ibm-plex-mono-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="/fonts/ibm-plex-mono-700.woff2" type="font/woff2" crossorigin>
+
+    
+<link rel="stylesheet" href="/main.css">
+
+    
+  <meta name="theme-color" content="#fff">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+  
+    <link rel="manifest" href="/site.webmanifest" crossorigin>
+  
+
+
+  
+  
+    
+  
+
+  
+  
+    
+    
+  
+
+  
+    
+  
+  
+  
+  
+    
+  
+
+  
+
+
+  <meta name="robots" content="index, follow">
+  <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <meta name="bingbot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+
+
+	
+
+
+	
+
+<title>Elodin CLI | Elodin</title>
+<meta name="description" content="Elodin CLI">
+<link rel="canonical" href="/reference/elodin-cli/">
+
+
+  <meta name="twitter:card" content="summary_large_image">
+  
+    <meta name="twitter:image" content="//logo.png">
+  
+  <meta name="twitter:title" content="Elodin CLI">
+  <meta name="twitter:description" content="Elodin CLI">
+  <meta name="twitter:site" content="@elodinsystems">
+  <meta name="twitter:creator" content="@elodinsystems">
+
+  <meta property="og:title" content="Elodin CLI">
+  <meta property="og:description" content="Elodin CLI">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="/reference/elodin-cli/">
+
+  
+    <meta property="og:image" content="//logo.png">
+  
+
+  <meta property="og:updated_time" content="">
+  <meta property="og:site_name" content="Elodin CLI">
+
+  
+
+  
+
+  
+  <meta property="og:locale" content="en_US">
+
+
+
+
+
+  
+
+
+
+
+
+<script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "BreadcrumbList",
+    
+      
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          {
+            "@type": "ListItem",
+            "position":  1 ,
+            "name": "Home",
+            "item": ":///"
+          },
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  2 ,
+            "name": "Reference",
+            "item": ":///reference/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  3 ,
+            "name": "Elodin Cli",
+            "item": ":///reference/elodin-cli/"
+          },
+        
+      
+    
+  }
+</script>
+
+
+
+
+</head>
+
+<body class="docs single">
+  
+    
+    
+    
+  
+  
+    
+<header class="navbar fixed-top navbar-expand-md navbar-light">
+    <div class="container">
+        <div class="col-2" style="display: flex; gap: 20px">
+            <a
+                href="https://elodin.systems"
+                class="nav-link-icon"
+                target="_blank"
+                rel="noopener noreferrer"
+                ><svg
+                    width="20"
+                    height="25"
+                    viewBox="0 0 20 25"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                >
+                    <path
+                        d="M10 0H15C17.7615 0 20 2.23858 20 5V20.0001C20 22.7615 17.7615 25.0001 15 25.0001H5C2.23853 25.0001 0 22.7615 0 20V5C0 2.23858 2.23853 1.90735e-06 5 1.90735e-06V5V20.0001H15V5L5 5C5 2.23858 7.23853 0 10 0Z"
+                        fill="currentColor"
+                    />
+                </svg>
+            </a>
+            <span>
+                <select name="version" class="version-select" disabled>
+                    <option value="v0.14.2" selected>
+                        v0.14.2
+                    </option>
+                </select>
+            </span>
+        </div>
+
+        <div
+            class="col-2 d-none d-lg-block"
+            style="margin-left: 56px"
+        >
+            <form style="width: 264px">
+                <input
+                    id="userinput"
+                    class="form-control is-search"
+                    type="search"
+                    placeholder="Search"
+                    aria-label="Search"
+                    autocomplete="off"
+                />
+                <div id="suggestions" class="shadow bg-white rounded"></div>
+            </form>
+        </div>
+        <div class="col-2 d-none d-md-block"></div>
+        <div class="col-2" style="margin-left: 35px">
+            <ul class="navbar-nav main-nav me-auto">
+                      
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="/home/quickstart"
+                        >HOME</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item reference active"
+                >
+                    <a
+                        class="nav-link"
+                        href="/reference/overview"
+                        >Reference</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="/releases/changelog"
+                        >Releases</a
+                    >
+                </li>
+                  
+            </ul>
+        </div>
+        <div class="col-1"></div>
+        <div
+            class="col-2 d-none d-xl-block"
+            style="margin-right: 63px"
+        >
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://github.com/elodin-sys/elodin">
+                        <i class="bx bxl-github"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://elodin.app/discord">
+                        <i class="bx bxl-discord-alt"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a id="mode-1" class="nav-link nav-link-icon toggle-dark">
+                        <i class='bx bxs-sun'></i>
+                    </a>
+                    <a id="mode-2" class="nav-link nav-link-icon toggle-light">
+                        <i class='bx bxs-moon'></i>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</header>
+
+  
+  <div class="wrap container tom-blue" role="document">
+      <div class="content">
+          <div class="row flex-xxl-nowrap justify-content-center">
+              
+<div class="col-lg-5 col-xl-4 docs-sidebar d-none d-lg-block">
+    <nav class="docs-links" aria-label="Main navigation">
+          
+        <h3>Reference</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="/reference/overview/"
+                    >Overview</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="/reference/coords/"
+                    >Coordinate Systems</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="/reference/python-api/"
+                    >Python API</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link active"
+                    href="/reference/elodin-cli/"
+                    >Elodin CLI</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="/reference/replays/"
+                    >Replays</a
+                >
+            </li>
+            
+        </ul>
+         
+    </nav>
+</div>
+
+               
+<nav
+    class="docs-toc d-none d-xxl-block col-xl-3"
+    aria-label="Secondary navigation"
+>
+    <div class="page-links">
+        <h3>On this page</h3>
+        <nav id="TableOfContents">
+            <ul>
+                
+                <li><a href="/reference/elodin-cli/#command-line-help-for-elodin">Command-Line Help for elodin</a></li>
+                
+                <ul>
+                    
+                    <li>
+                        <a href="/reference/elodin-cli/#elodin">elodin</a>
+                    </li>
+                    
+                    <li>
+                        <a href="/reference/elodin-cli/#elodin-login">elodin login</a>
+                    </li>
+                    
+                    <li>
+                        <a href="/reference/elodin-cli/#elodin-editor">elodin editor</a>
+                    </li>
+                    
+                    <li>
+                        <a href="/reference/elodin-cli/#elodin-run">elodin run</a>
+                    </li>
+                    
+                    <li>
+                        <a href="/reference/elodin-cli/#elodin-create">elodin create</a>
+                    </li>
+                    
+                </ul>
+                 
+            </ul>
+        </nav>
+    </div>
+</nav>
+ 
+              <main class="docs-content col-lg-11 col-xxl-10">
+                  <h1>Elodin CLI</h1>
+                   <h1 id="command-line-help-for-elodin">Command-Line Help for <code>elodin</code></h1>
+<p>This document contains the help content for the <code>elodin</code> command-line program.</p>
+<p><strong>Command Overview:</strong></p>
+<ul>
+<li><a href="/reference/elodin-cli/#elodin"><code>elodin</code>↴</a></li>
+<li><a href="/reference/elodin-cli/#elodin-login"><code>elodin login</code>↴</a></li>
+<li><a href="/reference/elodin-cli/#elodin-editor"><code>elodin editor</code>↴</a></li>
+<li><a href="/reference/elodin-cli/#elodin-run"><code>elodin run</code>↴</a></li>
+<li><a href="/reference/elodin-cli/#elodin-create"><code>elodin create</code>↴</a></li>
+</ul>
+<h2 id="elodin"><code>elodin</code></h2>
+<p><strong>Usage:</strong> <code>elodin [OPTIONS] [COMMAND]</code></p>
+<h6 id="subcommands"><strong>Subcommands:</strong></h6>
+<ul>
+<li><code>login</code> — Obtain access credentials for your user account</li>
+<li><code>editor</code> — Launch the Elodin editor (default)</li>
+<li><code>run</code> — Run an Elodin simulaton in headless mode</li>
+<li><code>create</code> — Create template</li>
+</ul>
+<h6 id="options"><strong>Options:</strong></h6>
+<ul>
+<li>
+<p><code>-u</code>, <code>--url &lt;URL&gt;</code></p>
+<p>Default value: <code>https://app.elodin.systems</code></p>
+</li>
+</ul>
+<h2 id="elodin-login"><code>elodin login</code></h2>
+<p>Obtain access credentials for your user account</p>
+<p><strong>Usage:</strong> <code>elodin login</code></p>
+<h2 id="elodin-editor"><code>elodin editor</code></h2>
+<p>Launch the Elodin editor (default)</p>
+<p><strong>Usage:</strong> <code>elodin editor [addr/path]</code></p>
+<h6 id="arguments"><strong>Arguments:</strong></h6>
+<ul>
+<li>
+<p><code>&lt;addr/path&gt;</code></p>
+<p>Default value: <code>127.0.0.1:2240</code></p>
+</li>
+</ul>
+<h2 id="elodin-run"><code>elodin run</code></h2>
+<p>Run an Elodin simulaton in headless mode</p>
+<p><strong>Usage:</strong> <code>elodin run [addr/path]</code></p>
+<h6 id="arguments-1"><strong>Arguments:</strong></h6>
+<ul>
+<li>
+<p><code>&lt;addr/path&gt;</code></p>
+<p>Default value: <code>127.0.0.1:2240</code></p>
+</li>
+</ul>
+<h2 id="elodin-create"><code>elodin create</code></h2>
+<p>Create template</p>
+<p><strong>Usage:</strong> <code>elodin create [OPTIONS] --template &lt;TEMPLATE&gt;</code></p>
+<h6 id="options-1"><strong>Options:</strong></h6>
+<ul>
+<li>
+<p><code>-t</code>, <code>--template &lt;TEMPLATE&gt;</code> — Name of the template</p>
+<p>Possible values: <code>rocket</code>, <code>drone</code>, <code>cube-sat</code>, <code>three-body</code>, <code>ball</code></p>
+</li>
+<li>
+<p><code>-p</code>, <code>--path &lt;PATH&gt;</code> — Path where the result will be located</p>
+<p>Default value: <code>.</code></p>
+</li>
+</ul>
+<hr/>
+<p><small><i>
+This document was generated automatically by
+<a href="https://crates.io/crates/clap-markdown"><code>clap-markdown</code></a>.
+</i></small></p>
+
+                  
+<div class="footer-line-padding"></div>
+<div class="footer-line"></div>
+<div class="docs-navigation d-flex justify-content-between">
+      
+</div>
+
+              </main>
+          </div>
+      </div>
+  </div>
+  
+<script type="text/javascript" src="/js/main.js"></script>
+<script>
+    // https://mathjax.github.io/MathJax-demos-web/convert-configuration/convert-configuration.html
+    window.MathJax = {
+        tex: {
+            inlineMath: [
+                ["$", "$"],
+                ["\\(", "\\)"],
+            ],
+            displayMath: [
+                ["$$", "$$"],
+                ["\[\[", "\]\]"],
+            ],
+            processEscapes: true,
+            processEnvironments: true,
+        },
+        options: {
+            skipHtmlTags: ["script", "noscript", "style", "textarea", "pre"],
+        },
+    };
+</script>
+<script type="text/javascript" src="/js/tex-mml-chtml.js"></script>
+
+  <script type="text/javascript" src="/js/elasticlunr.min.js"></script>
+  <script type="text/javascript" src="/search_index.en.js"></script>
+  <script type="text/javascript" src="/js/search.js"></script>
+
+
+</body>
+
+</html>
