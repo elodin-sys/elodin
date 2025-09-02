@@ -106,6 +106,9 @@ fn sink_inner(
                 if let Err(err) = world.run_system_with(handler, &pkt) {
                     bevy::log::error!(?err, "packet id handler error");
                 }
+                if let Err(err) = world.unregister_system(handler) {
+                    bevy::log::error!(?err, "unregister packet handler error");
+                }
             }
         }
 
