@@ -617,7 +617,7 @@ pub fn save_schematic_db() -> PaletteItem {
         |_name: In<String>, tx: Res<PacketTx>, schematic: Res<CurrentSchematic>| {
             let kdl = schematic.0.to_kdl();
             tx.send_msg(SetDbConfig {
-                metadata: [(("schematic.content".to_string(), kdl))]
+                metadata: [("schematic.content".to_string(), kdl)]
                     .into_iter()
                     .collect(),
                 ..Default::default()
