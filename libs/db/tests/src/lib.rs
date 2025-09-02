@@ -9,7 +9,7 @@ mod tests {
     };
     use impeller2_stellar::Client;
     use postcard_schema::{Schema, schema::owned::OwnedNamedType};
-    use std::{borrow::Cow, net::SocketAddr, sync::Arc, time::Duration};
+    use std::{net::SocketAddr, sync::Arc, time::Duration};
     use stellarator::{net::TcpListener, sleep, spawn, struc_con::stellar, test};
     use zerocopy::FromBytes;
     use zerocopy::IntoBytes;
@@ -675,7 +675,7 @@ mod tests {
             .0
             .unwrap();
 
-        /// NOTE: This can sometimes be too short a wait.
+        // NOTE: This can sometimes be too short a wait.
         sleep(Duration::from_millis(100)).await;
 
         const NUM_CLIENTS: usize = 5;

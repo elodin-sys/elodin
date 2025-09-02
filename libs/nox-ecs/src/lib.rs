@@ -577,7 +577,6 @@ impl From<nox::xla::Error> for Error {
 mod tests {
     use super::*;
     use crate::{Archetype, World};
-    use impeller2_wkt::Glb;
     use nox::{Op, OwnedRepr, Scalar, Vector, tensor};
     use nox_ecs_macros::ReprMonad;
 
