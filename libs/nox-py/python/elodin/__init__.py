@@ -393,7 +393,6 @@ class Body(Archetype):
     world_accel: WorldAccel = SpatialMotion()
 
 
-
 class World(WorldBuilder):
     def run(
         self,
