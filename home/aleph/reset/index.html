@@ -506,7 +506,11 @@
 <li>An adapter from USB A to USB C - not necessary if you are using a USB C flash drive</li>
 </ul>
 <h3 id="flash-usb-drive">Flash USB Drive</h3>
-<p>First download the OS image: <a href="https://storage.googleapis.com/elodin-releases/aleph/aleph-2025-03-16.img">aleph-2025-03-16.img</a></p>
+<p>Compile the SD Image from source using Nix:</p>
+<pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">git</span></span><span class="z-meta z-function-call z-arguments z-shell"> clone git@github.com:elodin-sys/elodin.git</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-support z-function z-cd z-shell">cd</span></span><span class="z-meta z-function-call z-arguments z-shell"> elodin/images/aleph</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">nix</span></span><span class="z-meta z-function-call z-arguments z-shell"> build<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>accept-flake-config</span> .#packages.aarch64-linux.sdimage</span>
+</span></code></pre>
 <p>Then you will need to write this image onto your flash drive. There are a number of methods to do this. The two easiest (in ascending order of difficulty) are:</p>
 <ol>
 <li>Using balenaEtcher - https://etcher.balena.io - This is the recommended way if it works on your machine</li>
@@ -539,9 +543,9 @@
 <h2 id="expansion-board-rp2040-debugger">Expansion Board RP2040 Debugger</h2>
 <p>This is easiest to perform when separated from the stack to provide access to the bootloader button.</p>
 <ol>
+<li>Build the debugprobe.uf2 from source <a href="https://github.com/elodin-sys/debugprobe">here</a>, binary will be "debugprobe.uf2"</li>
 <li>While pressing the bootloader button, connect the Expansion Board to your computer and confirm that all 3 red power LEDs (labeled “USB”, “5v0”, and “3v3”) are on.</li>
 <li>Your computer should recognize a new drive labeled "RPI-RP2".</li>
-<li>Download the debugger UF2 firmware file <a href="https://storage.googleapis.com/elodin-releases/debugger/debugprobe.uf2">here</a>.</li>
 <li>Drag and drop the UF2 firmware file onto the "RPI-RP2" drive. This flashes the necessary firmware onto the built-in debugger, and resets the board.
 Confirm that the “RG0” green LED is now on.</li>
 <li>Continue to re-flash the firmware as needed using the development process described above.</li>
