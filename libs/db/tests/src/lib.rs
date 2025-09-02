@@ -675,7 +675,8 @@ mod tests {
             .0
             .unwrap();
 
-        sleep(Duration::from_millis(50)).await;
+        /// NOTE: This can sometimes be too short a wait.
+        sleep(Duration::from_millis(100)).await;
 
         const NUM_CLIENTS: usize = 5;
         const WRITES_PER_CLIENT: usize = 10;
