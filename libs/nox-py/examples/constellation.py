@@ -6,6 +6,10 @@ import jax
 import jax.numpy as np
 from elodin.elodin import Quaternion
 from jax.numpy import linalg as la
+# NOTE: If you get a segmentation fault, here's how you get the stacktrace in
+# Python.
+import faulthandler
+faulthandler.enable()
 
 rw_force_clamp = 0.02
 G = 6.6743e-11  #
@@ -365,8 +369,6 @@ w = el.World()
 
 sat_ids = []
 
-scene = w.glb("https://assets.elodin.systems/assets/oresat-low.glb")
-
 
 def spawn_sat(x, y, w: el.World):
     sat_num = x + y * 100
@@ -417,7 +419,6 @@ def spawn_sat(x, y, w: el.World):
             UserInput(np.array([0.0, 0.0, 0.0])),
             Sensors(np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3)),
             KalmanFilter(np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3)),
-            scene,
         ],
         name=f"OreSat {sat_num}",
     )
@@ -437,22 +438,23 @@ for x in range(-bound, bound):
         spawn_sat(x, y, w)
 
 
-w.spawn(
-    el.Panel.hsplit(
-        el.Panel.viewport(
-            track_entity=sat,
-            track_rotation=False,
-            pos=[100.0, 0.0, 0.0],
-            looking_at=[0.0, 0.0, 0.0],
-            active=True,
-        ),
-        el.Panel.graph(
-            *[el.GraphEntity(sat_id, *el.Component.index(el.WorldPos)[:4]) for sat_id in sat_ids]
-        ),
-        active=True,
-    ),
-    name="Viewport and Graph",
-)
+# w.spawn(
+#     el.Panel.hsplit(
+#         el.Panel.viewport(
+#             track_entity=sat,
+#             track_rotation=False,
+#             pos=[100.0, 0.0, 0.0],
+#             looking_at=[0.0, 0.0, 0.0],
+#             active=True,
+#         ),
+#         el.Panel.graph(
+#             *[el.GraphEntity(sat_id, *el.Component.index(el.WorldPos)[:4]) for sat_id in sat_ids]
+#         ),
+#         active=True,
+#     ),
+#     name="Viewport and Graph",
+# )
+
 
 w.spawn(
     [
@@ -461,11 +463,28 @@ w.spawn(
             world_vel=el.SpatialMotion(angular=np.array([0.0, 0.0, 1.0]) * 7.2921159e-5),
             inertia=el.SpatialInertia(1.0),
         ),
-        w.glb("https://assets.elodin.systems/assets/earth.glb"),
     ],
     name="Earth",
 )
 
+# TODO: Include all the satellites.
+w.schematic("""
+    hsplit {
+        tabs share=0.8 {
+            viewport name=Viewport pos="sat.world_pos + (0.0,0.0,0.0,0.0, 100.0, 0.0, 0.0)" look_at="(0, 0, 0, 0,  0, 0, 0)" hdr=#true
+        }
+        vsplit share=0.4 {
+            graph "OreSat 1.world_pos" name=Positions
+        }
+    }
+    object_3d "OreSat 1.world_pos" {
+        glb path="https://storage.googleapis.com/elodin-assets/oresat-low.glb"
+    }
+
+    object_3d "Earth.world_pos" {
+        glb path="https://storage.googleapis.com/elodin-assets/earth.glb"
+    }
+""")
 
 exec = w.run(
     system=el.six_dof(
