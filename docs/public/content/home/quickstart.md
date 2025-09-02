@@ -28,6 +28,10 @@ The SDK is only supported on macOS and Linux distributions with glibc 2.35+ (Ubu
 pip install -U elodin
 ```
 
+### Upgrading? 
+
+If upgrading from an old Elodin version, consult the [migration guides](/home/migration/).
+
 ## Start Simulating
 
 ### Windows (WSL)
