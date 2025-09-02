@@ -8,6 +8,7 @@ publish = false
 
 [features]
 cargo-clippy = []
+inspector = ["dep:bevy-inspector-egui"]
 
 [dependencies]
 # math
@@ -100,6 +101,8 @@ peg = "0.8.5"
 # eql
 eql.path = "../db/eql"
 convert_case = "0.6.0"
+bevy-inspector-egui.version = "0.31"
+bevy-inspector-egui.optional = true
 
 
 [target.'cfg(target_family = "wasm")'.dependencies]
