@@ -71,9 +71,9 @@ Once logged in you can run `aleph-installer` which will flash the OS image to yo
 
 This is easiest to perform when separated from the stack to provide access to the bootloader button.
 
-1. While pressing the bootloader button, connect the Expansion Board to your computer and confirm that all 3 red power LEDs (labeled “USB”, “5v0”, and “3v3”) are on.
-2. Your computer should recognize a new drive labeled "RPI-RP2".
-3. Download the debugger UF2 firmware file [here](https://assets.elodin.systems/releases/debugger/debugprobe.uf2).
+1. Build the debugprobe.uf2 from source [here](https://github.com/elodin-sys/debugprobe), binary will be "debugprobe.uf2"
+2. While pressing the bootloader button, connect the Expansion Board to your computer and confirm that all 3 red power LEDs (labeled “USB”, “5v0”, and “3v3”) are on.
+3. Your computer should recognize a new drive labeled "RPI-RP2".
 4. Drag and drop the UF2 firmware file onto the "RPI-RP2" drive. This flashes the necessary firmware onto the built-in debugger, and resets the board.
 Confirm that the “RG0” green LED is now on.
 5. Continue to re-flash the firmware as needed using the development process described above.
