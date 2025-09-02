@@ -652,14 +652,6 @@ w.spawn(
     name="Earth",
 )
 
-w.spawn(
-    el.Line3d(
-        "ore_sat.world_pos",
-        line_width=10.0,
-        perspective=False,
-    )
-)
-
 exec = w.run(
     system=el.six_dof(
         sys=sensors

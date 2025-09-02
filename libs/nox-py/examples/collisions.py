@@ -146,39 +146,51 @@ def collide(
 world = el.World()
 
 balls = []
-mesh = world.insert_asset(el.Mesh.sphere(0.2))
+#mesh = world.insert_asset(el.Mesh.sphere(0.2))
+ball_kdl=""
 for i in range(1, 200):
     key = jax.random.key(i)
     pos = jax.random.uniform(key, shape=(3,), minval=-5.0, maxval=5.0) + np.array([0.0, 0.0, 7.0])
     [r, g, b] = jax.random.uniform(key, shape=(3,), minval=0.0, maxval=1.0) * 2.0
-    color = world.insert_asset(el.Material.color(r, g, b))
+#    color = world.insert_asset(el.Material.color(r, g, b))
     ball = world.spawn(
         [
             el.Body(
                 world_pos=el.SpatialTransform(linear=pos),
                 world_vel=el.SpatialMotion(linear=jax.random.normal(key, shape=(3,)) * 3.0),
             ),
-            el.Shape(mesh, color),
+            #el.Shape(mesh, color),
         ],
-        name=f"Ball {i}",
+        name=f"Ball{i:03d}",
     )
+
+# Any chance of specifying random color here?
+    ball_kdl += f"""
+    object_3d ball{i:03d}.world_pos {{
+       sphere radius=2.0 r=1.0 g=0.0 b=0.0
+    }}
+"""
     balls.append(ball)
 
+# world.spawn(
+#     el.Panel.graph(*[el.GraphEntity(b, *el.Component.index(el.WorldPos)[4:]) for b in balls]),
+# )
+# TODO: Does not include previous graph.
+world.schematic("""
+    hsplit {
+        tabs share=0.2 {
+            hierarchy
+            schematic_tree
+        }
+        tabs share=0.6 {
+            viewport name=Viewport pos="(0,0,0,0, 6,6,3)" look_at="(0,0,0,0, 0,0,1)" hdr=#true show_grid=#true active=#true
+        }
+        tabs share=0.2 {
+            inspector
+        }
+    }
 
-world.spawn(
-    el.Panel.viewport(
-        track_rotation=False,
-        active=True,
-        pos=[6.0, 6.0, 3.0],
-        looking_at=[0.0, 0.0, 1.0],
-        show_grid=True,
-        hdr=True,
-    ),
-    name="Viewport",
-)
-world.spawn(
-    el.Panel.graph(*[el.GraphEntity(b, *el.Component.index(el.WorldPos)[4:]) for b in balls]),
-)
+""" + ball_kdl) #, "collisions.kdl")
 
 
 sys = bounce.pipe(collide).pipe(walls).pipe(el.six_dof(sys=gravity))
