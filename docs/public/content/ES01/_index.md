@@ -1,4 +1,4 @@
 +++
 title = "ES01"
-redirect_to = "https://storage.googleapis.com/elodin-docs/ES01.pdf"
+redirect_to = "https://assets.elodin.systems/docs/ES01.pdf"
 +++

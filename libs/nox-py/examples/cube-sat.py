@@ -527,7 +527,7 @@ sat = w.spawn(
         Sensors(np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3)),
         KalmanFilter(np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3)),
         Debug(np.float64(0.0)),
-        w.glb("https://storage.googleapis.com/elodin-assets/oresat-low.glb"),
+        w.glb("https://assets.elodin.systems/assets/oresat-low.glb"),
     ],
     name="OreSat",
 )
@@ -643,7 +643,7 @@ w.spawn(
             world_vel=el.SpatialMotion(angular=np.array([0.0, 0.0, 1.0]) * 7.2921159e-5),
             inertia=el.SpatialInertia(1.0),
         ),
-        w.glb("https://storage.googleapis.com/elodin-assets/earth.glb"),
+        w.glb("https://assets.elodin.systems/assets/earth.glb"),
     ],
     name="Earth",
 )

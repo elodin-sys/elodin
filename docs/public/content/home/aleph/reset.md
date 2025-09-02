@@ -24,7 +24,13 @@ If you have broken the OS image beyond repair, or are simply replacing the SSD. 
 
 ### Flash USB Drive
 
-First download the OS image: [aleph-2025-03-16.img]( https://storage.googleapis.com/elodin-releases/aleph/aleph-2025-03-16.img)
+Compile the SD Image from source using Nix:
+
+```bash
+git clone git@github.com:elodin-sys/elodin.git
+cd elodin/images/aleph
+nix build --accept-flake-config .#packages.aarch64-linux.sdimage
+```
 
 Then you will need to write this image onto your flash drive. There are a number of methods to do this. The two easiest (in ascending order of difficulty) are:
 
@@ -65,9 +71,9 @@ Once logged in you can run `aleph-installer` which will flash the OS image to yo
 
 This is easiest to perform when separated from the stack to provide access to the bootloader button.
 
-1. While pressing the bootloader button, connect the Expansion Board to your computer and confirm that all 3 red power LEDs (labeled “USB”, “5v0”, and “3v3”) are on.
-2. Your computer should recognize a new drive labeled "RPI-RP2".
-3. Download the debugger UF2 firmware file [here](https://storage.googleapis.com/elodin-releases/debugger/debugprobe.uf2).
+1. Build the debugprobe.uf2 from source [here](https://github.com/elodin-sys/debugprobe), binary will be "debugprobe.uf2"
+2. While pressing the bootloader button, connect the Expansion Board to your computer and confirm that all 3 red power LEDs (labeled “USB”, “5v0”, and “3v3”) are on.
+3. Your computer should recognize a new drive labeled "RPI-RP2".
 4. Drag and drop the UF2 firmware file onto the "RPI-RP2" drive. This flashes the necessary firmware onto the built-in debugger, and resets the board.
 Confirm that the “RG0” green LED is now on.
 5. Continue to re-flash the firmware as needed using the development process described above.

@@ -20,9 +20,6 @@ To replay a simulation using the Elodin editor, run the following command:
 elodin editor <path to replay dir>
 ```
 
-You can download an example replay archive from the following url: [replay.tar.gz](https://storage.googleapis.com/elodin-releases/docs/replay.tar.gz).
-
-
 ## File Layout
 
 An Elodin replay directory contains:

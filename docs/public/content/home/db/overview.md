@@ -21,17 +21,8 @@ Elodin DB chiefly communicates over `impeller` -- Elodin's lightweight message p
 
 ## Quick Start
 
-You can install Elodin DB using the following command:
+Install Elodin DB from the [releases](https://github.com/elodin-sys/elodin/releases) page.
 
-```sh
-curl -LsSf https://storage.googleapis.com/elodin-releases/install-db.sh | sh
-```
-
-Alternatively, you can download the latest portable binary for your platform:
-
-- [macOS (arm64)](https://storage.googleapis.com/elodin-releases/latest/elodin-db-aarch64-apple-darwin.tar.gz)
-- [Linux (x86_64)](https://storage.googleapis.com/elodin-releases/latest/elodin-db-x86_64-unknown-linux-musl.tar.gz)
-- [Linux (arm64)](https://storage.googleapis.com/elodin-releases/latest/elodin-db-aarch64-unknown-linux-musl.tar.gz)
 
 To start a new instance of Elodin DB, use the following command:
 ```sh
