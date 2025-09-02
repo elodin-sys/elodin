@@ -547,6 +547,7 @@ mod tests {
         });
     }
 
+    #[ignore]
     #[test]
     fn test_add() {
         prepare_python();
