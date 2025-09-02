@@ -1,6 +1,6 @@
 <h1 align="center">
   <a href="https://www.elodin.systems/">
-    <img alt="elodin-banner" src="https://storage.googleapis.com/elodin-assets/elodin-banner.png">
+    <img alt="elodin-banner" src="https://assets.elodin.systems/assets/elodin-banner.png">
   </a>
 </h1>
 

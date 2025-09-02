@@ -2,22 +2,7 @@
 
 ### Install
 
-Install the editor using the standalone installer script:
-
-```sh
-# Install the latest version
-curl -LsSf https://storage.googleapis.com/elodin-releases/install-editor.sh | sh
-
-# Install a specific version (e.g., 0.13.3)
-curl -LsSf https://storage.googleapis.com/elodin-releases/install-editor.sh | sh -s v0.13.3
-```
-
-Alternatively, you can download the latest portable binary for your platform:
-
-- [macOS (arm64)](https://storage.googleapis.com/elodin-releases/latest/elodin-aarch64-apple-darwin.tar.gz)
-- [Linux (x86_64)](https://storage.googleapis.com/elodin-releases/latest/elodin-x86_64-unknown-linux-musl.tar.gz)
-- [Linux (arm64)](https://storage.googleapis.com/elodin-releases/latest/elodin-aarch64-unknown-linux-musl.tar.gz)
-- [Windows (x86_64)](https://storage.googleapis.com/elodin-releases/latest/elodin-x86_64-pc-windows-msvc.zip)
+Install the editor from the [releases](https://github.com/elodin-sys/elodin/releases) page.
 
 ### How to run locally
 

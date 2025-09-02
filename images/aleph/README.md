@@ -102,11 +102,9 @@ NOTE: The bootloader can only be accessed via the serial console. So, you'll nee
 
 This method installs a minimal base NixOS image on Aleph, returning the device to its factory state. It's useful primarily for recovery when the system becomes unbootable or severely corrupted. This method requires a USB drive with at least 8GB of space.
 
-1. Download the latest OS image and decompress it.
+1. Compile the SD Image from source using Nix:
    ```bash
-   # This convenience script just runs:
-   # curl -L https://storage.googleapis.com/elodin-releases/latest/aleph-os.img.zst | zstd -d > aleph-os.img
-   ./justfile download-sdimage
+   nix build --accept-flake-config .#packages.aarch64-linux.sdimage
    ```
 
 2. Flash the image to a USB drive.

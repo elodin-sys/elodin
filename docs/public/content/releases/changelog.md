@@ -362,7 +362,7 @@ name\>" for viewports and "\<entity name\>: \<component name\>" for graphs.
     ```python
     # before:
     w.spawn(el.Body(pbr = w.insert_asset( el.Pbr(el.Mesh.sphere(0.2), el.Material.color(0.0, 10.0, 10.0)))))
-    w.spawn(el.Body(w.insert_asset(el.Pbr.from_url("https://storage.googleapis.com/elodin-assets/earth.glb"))))
+    w.spawn(el.Body(w.insert_asset(el.Pbr.from_url("https://assets.elodin.systems/assets/earth.glb"))))
     # after
     w.spawn([
       el.Body(),
@@ -370,7 +370,7 @@ name\>" for viewports and "\<entity name\>: \<component name\>" for graphs.
     ])
     w.spawn([
       el.Body(),
-      w.glb("https://storage.googleapis.com/elodin-assets/earth.glb")
+      w.glb("https://assets.elodin.systems/assets/earth.glb")
     ])
     ```
 - **(breaking)** Remove `SpatialInertia.from_mass()`.

@@ -25,7 +25,7 @@ class EGM08:
         if not os.path.isfile(self.c_full_path):
             os.makedirs(cache_directory, exist_ok=True)
             self.c_bar_file_path = urllib.request.urlretrieve(
-                "https://storage.googleapis.com/elodin-assets/C_normal.npy",
+                "https://assets.elodin.systems/assets/C_normal.npy",
                 self.c_full_path,
             )
         self.s_bar_file_name = "S_normal.npy"
@@ -34,7 +34,7 @@ class EGM08:
         if not os.path.isfile(self.s_full_path):
             os.makedirs(cache_directory, exist_ok=True)
             self.s_bar_file_path = urllib.request.urlretrieve(
-                "https://storage.googleapis.com/elodin-assets/S_normal.npy",
+                "https://assets.elodin.systems/assets/S_normal.npy",
                 self.s_full_path,
             )
 

@@ -15,20 +15,7 @@ icon = ""
 
 ## Install
 
-Download the Elodin Client:
-
-| File                                                    | Platform            | Checksum                        |
-| ------------------------------------------------------- | ------------------- | ------------------------------- |
-| [elodin-aarch64-apple-darwin.tar.gz][elodin-macos]      | Apple Silicon macOS | [sha256][elodin-macos-sha256]   |
-| [elodin-x86_64-unknown-linux-gnu.tar.gz][elodin-linux]  | x64 Linux           | [sha256][elodin-linux-sha256]   |
-| [elodin-x86_64-pc-windows-msvc.zip][elodin-windows]     | x64 Windows         | [sha256][elodin-windows-sha256] |
-
-[elodin-macos]: https://storage.googleapis.com/elodin-releases/latest/elodin-aarch64-apple-darwin.tar.gz
-[elodin-macos-sha256]: https://storage.googleapis.com/elodin-releases/latest/elodin-aarch64-apple-darwin.tar.gz.sha256
-[elodin-linux]: https://storage.googleapis.com/elodin-releases/latest/elodin-x86_64-unknown-linux-gnu.tar.gz
-[elodin-linux-sha256]: https://storage.googleapis.com/elodin-releases/latest/elodin-x86_64-unknown-linux-gnu.tar.gz.sha256
-[elodin-windows]: https://storage.googleapis.com/elodin-releases/latest/elodin-x86_64-pc-windows-msvc.zip
-[elodin-windows-sha256]: https://storage.googleapis.com/elodin-releases/latest/elodin-x86_64-pc-windows-msvc.zip.sha256
+Download the Elodin Client from the [releases](https://github.com/elodin-sys/elodin/releases) page.
 
 Install the Elodin Python SDK using `pip`:
 
