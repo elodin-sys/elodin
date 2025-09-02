@@ -527,14 +527,14 @@ sat = w.spawn(
         Sensors(np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3)),
         KalmanFilter(np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3)),
         Debug(np.float64(0.0)),
-        w.glb("https://assets.elodin.systems/assets/oresat-low.glb"),
     ],
     name="OreSat",
 )
 
 # w.spawn(el.VectorArrow(sat, "control_force", color = el.Color(1.0, 0.0, 0.0), scale=2.0))
 # w.spawn(el.VectorArrow(sat, "world_vel", offset=3, body_frame=False, scale=1/2000.0))
-w.spawn(el.BodyAxes(sat, scale=1.0))
+# TODO: Any schematics call for this? No. Consider adding one.
+# w.spawn(el.BodyAxes(sat, scale=1.0))
 
 rw_1 = w.spawn(
     ReactionWheel(
@@ -621,20 +621,25 @@ w.spawn(CSSRel(el.Edge(css_3, sat)), name="CSS 3 -> Sat")
 w.spawn(CSSRel(el.Edge(css_4, sat)), name="CSS 4 -> Sat")
 w.spawn(CSSRel(el.Edge(css_5, sat)), name="CSS 5 -> Sat")
 
-w.spawn(
-    el.Panel.sidebars(
-        el.Panel.vsplit(
-            el.Panel.hsplit(
-                el.Panel.viewport(
-                    pos="ore_sat.world_pos + (0,0,0,0, 5,0,0)", look_at="earth.world_pos"
-                ),
-                el.Panel.graph("course_sun_sensor_0.css_value, course_sun_sensor_1.css_value"),
-            ),
-            el.Panel.graph("ore_sat.att_est"),
-            active=True,
-        )
-    )
-)
+w.schematic("""
+    vsplit {
+        hsplit share=0.6 {
+            tabs {
+                viewport name=Viewport pos="ore_sat.world_pos + (0,0,0,0, 5,0,0)" look_at="earth.world_pos" hdr=#true
+            }
+            graph "course_sun_sensor_0.css_value, course_sun_sensor_1.css_value" Name=Sensor
+        }
+        graph "ore_sat.att_est" Name=Att
+    }
+    object_3d earth.world_pos {
+        glb path="https://storage.googleapis.com/elodin-assets/earth.glb"
+    }
+
+    object_3d ore_sat.world_pos {
+        glb path="https://storage.googleapis.com/elodin-assets/oresat-low.glb"
+    }
+    line_3d ore_sat.world_pos line_width=10.0 perspective=#false
+""")
 
 w.spawn(
     [
@@ -643,7 +648,6 @@ w.spawn(
             world_vel=el.SpatialMotion(angular=np.array([0.0, 0.0, 1.0]) * 7.2921159e-5),
             inertia=el.SpatialInertia(1.0),
         ),
-        w.glb("https://assets.elodin.systems/assets/earth.glb"),
     ],
     name="Earth",
 )
