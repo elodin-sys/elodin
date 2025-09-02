@@ -42,13 +42,11 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
             } else {
                 component_id.to_string()
             };
-            let asset = field.asset.unwrap_or_default();
             quote! {
                 .chain(core::iter::once(#impeller_wkt::ComponentMetadata {
                     component_id: #impeller::types::ComponentId::new(#component_id),
                     name: #name.to_string(),
                     metadata: Default::default(),
-                    asset: #asset,
                 }))
             }
         } else {
