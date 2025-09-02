@@ -543,9 +543,9 @@
 <h2 id="expansion-board-rp2040-debugger">Expansion Board RP2040 Debugger</h2>
 <p>This is easiest to perform when separated from the stack to provide access to the bootloader button.</p>
 <ol>
+<li>Build the debugprobe.uf2 from source <a href="https://github.com/elodin-sys/debugprobe">here</a>, binary will be "debugprobe.uf2"</li>
 <li>While pressing the bootloader button, connect the Expansion Board to your computer and confirm that all 3 red power LEDs (labeled “USB”, “5v0”, and “3v3”) are on.</li>
 <li>Your computer should recognize a new drive labeled "RPI-RP2".</li>
-<li>Download the debugger UF2 firmware file <a href="https://assets.elodin.systems/releases/debugger/debugprobe.uf2">here</a>.</li>
 <li>Drag and drop the UF2 firmware file onto the "RPI-RP2" drive. This flashes the necessary firmware onto the built-in debugger, and resets the board.
 Confirm that the “RG0” green LED is now on.</li>
 <li>Continue to re-flash the firmware as needed using the development process described above.</li>
