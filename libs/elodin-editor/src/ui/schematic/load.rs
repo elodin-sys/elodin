@@ -61,7 +61,7 @@ pub fn sync_schematic(
         return;
     }
     if let Some(content) = config.schematic_content() {
-        let schematic = impeller2_wkt::Schematic::from_kdl(&content).expect("schematic error");
+        let schematic = impeller2_wkt::Schematic::from_kdl(content).expect("schematic error");
         params.load_schematic(&schematic);
     }
 }
