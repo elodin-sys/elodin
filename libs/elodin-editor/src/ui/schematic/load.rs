@@ -54,7 +54,7 @@ pub fn sync_schematic(
     if let Some(path) = config.schematic_path() {
         let path = Path::new(path);
         if path.exists() {
-            if let Err(e) = load_schematic_file(&path, params, live_reload_rx) {
+            if let Err(e) = load_schematic_file(path, params, live_reload_rx) {
                 bevy::log::error!(?e, "invalid schematic for {path:?}");
             } else {
                 return;

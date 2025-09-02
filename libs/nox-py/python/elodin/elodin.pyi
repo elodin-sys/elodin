@@ -4,11 +4,8 @@ from collections.abc import Sequence
 from typing import (
     Any,
     ClassVar,
-    List,
     Optional,
-    Protocol,
     Tuple,
-    Union,
     overload,
 )
 
@@ -44,10 +41,10 @@ class SystemBuilder:
 class WorldBuilder:
     def spawn(
         self,
-        archetypes: Asset | Archetype | list[Archetype],
+        archetypes: Archetype | list[Archetype],
         name: Optional[str] = None,
     ) -> EntityId: ...
-    def insert(self, id: EntityId, archetypes: Asset | Archetype | Sequence[Archetype]): ...
+    def insert(self, id: EntityId, archetypes: Archetype | Sequence[Archetype]): ...
     def run(
         self,
         system: System,
