@@ -138,6 +138,6 @@ else:
     world.run(
         system(),
         sim_time_step=Config.GLOBAL.dt,
-        run_time_step=0.0,
-        max_ticks=int(Config.GLOBAL.total_sim_ticks),
+        run_time_step=1.0/60.0,
+        max_ticks=int(Config.GLOBAL.total_sim_ticks or 1200),
     )
