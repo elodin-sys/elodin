@@ -4,7 +4,6 @@ use bevy::{
         hierarchy::ChildOf,
         system::{EntityCommands, SystemId},
     },
-    log::warn,
     prelude::{Command, In, InRef, IntoSystem, Mut, System},
 };
 use bevy::{ecs::system::SystemParam, prelude::World};
@@ -16,7 +15,6 @@ use impeller2::types::IntoLenPacket;
 use impeller2::types::RequestId;
 use impeller2::{
     com_de::Decomponentize,
-    component::Asset,
     registry::HashMapRegistry,
     types::{OwnedPacket, PacketId, Request},
 };
@@ -26,13 +24,11 @@ use impeller2::{
 };
 use impeller2_bbq::{AsyncArcQueueRx, RxExt};
 use impeller2_wkt::{
-    AssetId, BodyAxes, ComponentMetadata, CurrentTimestamp, DbSettings, DumpAssets, DumpMetadata,
-    DumpMetadataResp, DumpSchema, DumpSchemaResp, EarliestTimestamp, ErrorResponse,
-    FixedRateBehavior, GetDbSettings, GetEarliestTimestamp, Glb, IsRecording, LastUpdated, Line3d,
-    Material, Mesh, Panel, Stream, StreamBehavior, StreamId, StreamTimestamp, SubscribeLastUpdated,
-    VTableMsg, VectorArrow, WorldPos,
+    ComponentMetadata, CurrentTimestamp, DbConfig, DumpMetadata, DumpMetadataResp, DumpSchema,
+    DumpSchemaResp, EarliestTimestamp, ErrorResponse, FixedRateBehavior, GetDbSettings,
+    GetEarliestTimestamp, IsRecording, LastUpdated, Stream, StreamBehavior, StreamId,
+    StreamTimestamp, SubscribeLastUpdated, VTableMsg, WorldPos,
 };
-use nox::array::ArrayViewExt;
 use serde::de::DeserializeOwned;
 use std::{
     collections::{BTreeMap, HashMap},
@@ -170,30 +166,15 @@ fn sink_inner(
                         .metadata_reg
                         .insert(metadata.component_id, metadata);
                 }
-                // for metadata in metadata.entity_metadata.into_iter() {
-                //     let mut e = if let Some(entity) = world_sink.entity_map.get(&metadata.entity_id)
-                //     {
-                //         let Ok(e) = world_sink.commands.get_entity(*entity) else {
-                //             continue;
-                //         };
-                //         e
-                //     } else {
-                //         let e = world_sink
-                //             .commands
-                //             .spawn((metadata.entity_id, ComponentValueMap::default()));
-                //         world_sink.entity_map.insert(metadata.entity_id, e.id());
-                //         e
-                //     };
-                //     e.insert(metadata.clone());
-                // }
+                *world_sink.db_config = metadata.db_config;
             }
             OwnedPacket::Msg(m) if m.id == LastUpdated::ID => {
                 let m = m.parse::<LastUpdated>()?;
                 *world_sink.max_tick = m;
             }
-            OwnedPacket::Msg(m) if m.id == DbSettings::ID => {
-                let settings = m.parse::<DbSettings>()?;
-                world_sink.recording.0 = settings.recording;
+            OwnedPacket::Msg(m) if m.id == DbConfig::ID => {
+                let config = m.parse::<DbConfig>()?;
+                world_sink.recording.0 = config.recording;
             }
             OwnedPacket::Msg(m) if m.id == DumpSchemaResp::ID => {
                 let dump_schema = m.parse::<DumpSchemaResp>()?;
@@ -203,10 +184,6 @@ fn sink_inner(
                 let _ = table.sink(&*vtable_registry, &mut world_sink)?;
             }
             OwnedPacket::Table(_) => {}
-            OwnedPacket::Msg(m) if m.id == impeller2_wkt::Asset::ID => {
-                let asset = m.parse::<impeller2_wkt::Asset>()?;
-                world_sink.asset_store.insert(asset.id, asset.buf.to_vec());
-            }
             OwnedPacket::Msg(m) if m.id == EarliestTimestamp::ID => {
                 let earliest_timestamp = m.parse::<EarliestTimestamp>()?;
                 world_sink.commands.insert_resource(earliest_timestamp);
@@ -300,9 +277,7 @@ pub struct WorldSink<'w, 's> {
     query: Query<'w, 's, &'static mut ComponentValue>,
     commands: Commands<'w, 's>,
     entity_map: ResMut<'w, EntityMap>,
-    asset_store: ResMut<'w, AssetStore>,
     metadata_reg: ResMut<'w, ComponentMetadataRegistry>,
-    asset_adapters: ResMut<'w, AssetAdapters>,
     component_adapters: ResMut<'w, ComponentAdapters>,
     max_tick: ResMut<'w, LastUpdated>,
     current_stream_id: ResMut<'w, CurrentStreamId>,
@@ -310,6 +285,7 @@ pub struct WorldSink<'w, 's> {
     current_timestamp: ResMut<'w, CurrentTimestamp>,
     schema_reg: ResMut<'w, ComponentSchemaRegistry>,
     path_reg: ResMut<'w, ComponentPathRegistry>,
+    db_config: ResMut<'w, DbConfig>,
 }
 
 #[allow(clippy::needless_lifetimes)] // removing these lifetimes causes an internal compiler error, so here we are
@@ -333,7 +309,6 @@ fn try_insert_entity<'a, 'w, 's>(
                 component_id,
                 name: component_path.name.to_string(),
                 metadata: Default::default(),
-                asset: false,
             })
             .clone();
         e.insert(metadata.clone());
@@ -392,48 +367,11 @@ impl Decomponentize for WorldSink<'_, '_> {
 
         let tail_component = path.tail();
 
-        if self
-            .metadata_reg
-            .get_metadata(&path.id)
-            .map(|m| m.asset)
-            .unwrap_or_default()
-        {
-            let Some(adapter) = self.asset_adapters.get(&tail_component.id) else {
-                return Ok(());
-            };
-            let Some(asset_id) = view.as_asset_id() else {
-                return Ok(());
-            };
-            let Some(asset) = self.asset_store.get(&asset_id) else {
-                return Ok(());
-            };
-            adapter.insert(
-                &mut self.commands,
-                &mut self.entity_map,
-                component_id,
-                asset,
-                asset_id,
-            );
-        } else {
-            let Some(adapter) = self.component_adapters.get(&tail_component.id) else {
-                return Ok(());
-            };
-            adapter.insert(&mut self.commands, &mut self.entity_map, component_id, view);
-        }
-        Ok(())
-    }
-}
-
-pub trait ComponentViewExt {
-    fn as_asset_id(&self) -> Option<u64>;
-}
-
-impl ComponentViewExt for ComponentView<'_> {
-    fn as_asset_id(&self) -> Option<u64> {
-        let ComponentView::U64(arr) = self else {
-            return None;
+        let Some(adapter) = self.component_adapters.get(&tail_component.id) else {
+            return Ok(());
         };
-        Some(arr.get(0))
+        adapter.insert(&mut self.commands, &mut self.entity_map, component_id, view);
+        Ok(())
     }
 }
 
@@ -448,23 +386,6 @@ impl CurrentStreamId {
     pub fn packet_id(&self) -> PacketId {
         self.0.to_le_bytes()[..2].try_into().unwrap()
     }
-}
-
-#[derive(Resource, Debug, Deref, DerefMut, Default)]
-pub struct AssetStore(HashMap<AssetId, Vec<u8>>);
-
-#[derive(Resource, Deref, DerefMut, Default)]
-pub struct AssetAdapters(HashMap<ComponentId, Box<dyn AssetAdapter>>);
-
-pub trait AssetAdapter: Send + Sync {
-    fn insert(
-        &self,
-        commands: &mut Commands,
-        map: &mut EntityMap,
-        component_id: ComponentId,
-        asset: &[u8],
-        asset_id: AssetId,
-    );
 }
 
 pub trait ComponentAdapter: Send + Sync {
@@ -512,76 +433,6 @@ where
     }
 }
 
-#[derive(bevy::prelude::Component, Debug, Clone)]
-pub struct AssetHandle<T> {
-    id: u64,
-    phantom_data: PhantomData<T>,
-}
-
-impl<T> AssetHandle<T> {
-    pub fn new(id: u64) -> Self {
-        Self {
-            id,
-            phantom_data: PhantomData,
-        }
-    }
-}
-
-impl<T> PartialEq for AssetHandle<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
-impl<T> Eq for AssetHandle<T> {}
-
-impl<T> core::hash::Hash for AssetHandle<T> {
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
-
-pub struct PostcardAssetAdapter<T: DeserializeOwned + Asset>(PhantomData<T>);
-
-impl<T: DeserializeOwned + Asset> Default for PostcardAssetAdapter<T> {
-    fn default() -> Self {
-        Self(Default::default())
-    }
-}
-
-impl<T: DeserializeOwned + Asset + Send + Sync + Component> AssetAdapter
-    for PostcardAssetAdapter<T>
-{
-    fn insert(
-        &self,
-        commands: &mut Commands,
-        entity_map: &mut EntityMap,
-        entity_id: ComponentId,
-        asset: &[u8],
-        asset_id: AssetId,
-    ) {
-        let Ok(asset) = postcard::from_bytes::<T>(asset) else {
-            let name = std::any::type_name::<T>();
-            warn!(asset.id = ?asset_id, adapter = name, buf = ?asset, "failed to deserialize asset");
-            return;
-        };
-        let mut e = if let Some(entity) = entity_map.0.get(&entity_id) {
-            let Ok(e) = commands.get_entity(*entity) else {
-                return;
-            };
-            e
-        } else {
-            let e = commands.spawn((entity_id, ComponentValueMap::default()));
-            entity_map.0.insert(entity_id, e.id());
-            e
-        };
-        e.insert_if_new(asset).insert_if_new(AssetHandle::<T> {
-            id: asset_id,
-            phantom_data: PhantomData,
-        });
-    }
-}
-
 pub trait AppExt {
     fn add_impeller_component<C>(&mut self) -> &mut Self
     where
@@ -593,17 +444,6 @@ pub trait AppExt {
     ) -> &mut Self
     where
         C: impeller2::component::Component + Decomponentize + Default + Component;
-
-    fn add_impeller_asset_with_adapter<R>(
-        &mut self,
-        adapter: Box<dyn AssetAdapter + Send + Sync>,
-    ) -> &mut Self
-    where
-        R: Asset;
-
-    fn add_impeller_asset<R>(&mut self) -> &mut Self
-    where
-        R: Asset + Send + Sync + Component + DeserializeOwned;
 }
 
 impl AppExt for bevy::app::App {
@@ -628,28 +468,6 @@ impl AppExt for bevy::app::App {
         map.0.insert(C::COMPONENT_ID, adapter);
         self
     }
-
-    fn add_impeller_asset_with_adapter<R: Asset>(
-        &mut self,
-        adapter: Box<dyn AssetAdapter + Send + Sync>,
-    ) -> &mut Self {
-        let mut map = self
-            .world_mut()
-            .get_resource_or_insert_with(AssetAdapters::default);
-
-        map.0.insert(
-            ComponentId::new(&format!("asset_handle_{}", R::NAME)),
-            adapter,
-        );
-        self
-    }
-
-    fn add_impeller_asset<R>(&mut self) -> &mut Self
-    where
-        R: Asset + Send + Sync + Component + DeserializeOwned,
-    {
-        self.add_impeller_asset_with_adapter::<R>(Box::new(PostcardAssetAdapter::<R>::default()))
-    }
 }
 
 #[derive(Resource, Default)]
@@ -666,14 +484,6 @@ pub struct DefaultAdaptersPlugin;
 
 impl Plugin for DefaultAdaptersPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
-        app.add_impeller_asset::<Glb>();
-        app.add_impeller_asset::<Mesh>();
-        app.add_impeller_asset::<VectorArrow>();
-        app.add_impeller_asset::<BodyAxes>();
-        app.add_impeller_asset::<Panel>();
-        app.add_impeller_asset::<Material>();
-        app.add_impeller_asset::<Line3d>();
-
         app.add_impeller_component::<WorldPos>();
         app.add_impeller_component::<CurrentTimestamp>();
         app.add_impeller_component::<impeller2_wkt::SimulationTimeStep>();
@@ -694,12 +504,12 @@ impl Plugin for Impeller2Plugin {
             .init_resource::<ComponentMetadataRegistry>()
             .init_resource::<ComponentSchemaRegistry>()
             .init_resource::<ComponentPathRegistry>()
-            .init_resource::<AssetStore>()
             .init_resource::<HashMapRegistry>()
             .init_resource::<PacketIdHandlers>()
             .init_resource::<PacketHandlers>()
             .init_resource::<RequestIdHandlers>()
-            .init_resource::<RequestIdAlloc>();
+            .init_resource::<RequestIdAlloc>()
+            .init_resource::<DbConfig>();
     }
 }
 
@@ -867,7 +677,6 @@ pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPa
         }
         .into_len_packet(),
         GetEarliestTimestamp.into_len_packet(),
-        DumpAssets.into_len_packet(),
         DumpMetadata.into_len_packet(),
         GetDbSettings.into_len_packet(),
         SubscribeLastUpdated.into_len_packet(),

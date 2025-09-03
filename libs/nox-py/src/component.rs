@@ -13,8 +13,6 @@ pub struct Component {
     pub name: String,
     #[pyo3(get, set)]
     pub ty: Option<ComponentType>,
-    #[pyo3(get, set)]
-    pub asset: bool,
     pub metadata: HashMap<String, String>,
 }
 
@@ -31,7 +29,6 @@ impl Component {
                 shape: schema.shape().iter().map(|&x| x as u64).collect(),
                 ty: schema.prim_type().into(),
             }),
-            asset: C::ASSET,
             metadata: Default::default(),
         }
     }
@@ -40,12 +37,11 @@ impl Component {
 #[pymethods]
 impl Component {
     #[new]
-    #[pyo3(signature = (name, ty = None, asset = false, metadata = HashMap::default()))]
+    #[pyo3(signature = (name, ty = None, metadata = HashMap::default()))]
     pub fn new(
         py: Python<'_>,
         name: String,
         ty: Option<ComponentType>,
-        asset: bool,
         metadata: HashMap<String, PyObject>,
     ) -> Result<Self, Error> {
         let metadata = metadata
@@ -64,12 +60,7 @@ impl Component {
             })
             .collect();
 
-        Ok(Self {
-            name,
-            ty,
-            metadata,
-            asset,
-        })
+        Ok(Self { name, ty, metadata })
     }
 
     #[staticmethod]

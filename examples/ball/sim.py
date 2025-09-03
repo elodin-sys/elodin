@@ -14,28 +14,23 @@ BALL_RADIUS = 0.2
 
 def world(seed: int = 0) -> el.World:
     world = el.World()
-    # world.spawn(WindData(seed=jnp.int64(seed)), name="WindData")
-    ball_mesh = world.insert_asset(el.Mesh.sphere(BALL_RADIUS))
-    ball_color = world.insert_asset(el.Material.color(12.7, 9.2, 0.5))
     world.spawn(
         [
             el.Body(world_pos=el.SpatialTransform(linear=jnp.array([0.0, 0.0, 6.0]))),
-            el.Shape(ball_mesh, ball_color),
             WindData(seed=jnp.int64(seed)),
         ],
         name="ball",
     )
-    world.spawn(
-        el.Panel.viewport(
-            active=True,
-            pos="(0.0,0.0,0.0, 0.0, 8.0, 2.0, 4.0)",
-            look_at="(0.0,0.0,0.0,0.0, 0.0, 0.0, 3.0)",
-            show_grid=True,
-            hdr=True,
-        ),
-        name="Viewport",
-    )
-    world.spawn(el.Line3d("ball.world_pos", line_width=2.0))
+
+    world.schematic("""
+        hsplit {
+            viewport name=Viewport pos="(0,0,0,0, 8,2,4)" look_at="(0,0,0,0, 0,0,3)" hdr=#true show_grid=#true active=#true
+        }
+        object_3d ball.world_pos {
+            sphere radius=0.2 r=12.7 g=9.2 b=0.5
+        }
+        line_3d ball.world_pos line_width=2.0 color="yolk"
+    """)
     return world
 
 

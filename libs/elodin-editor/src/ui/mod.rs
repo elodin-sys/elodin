@@ -14,6 +14,7 @@ use bevy_egui::{
 };
 
 use big_space::GridCell;
+use plot_3d::LinePlot3dPlugin;
 use schematic::SchematicPlugin;
 
 use self::colors::get_scheme;
@@ -195,7 +196,8 @@ impl Plugin for UiPlugin {
             .add_systems(Update, sync_camera_grid_cell.after(render_layout))
             .add_systems(Update, query_plot::auto_bounds)
             .add_systems(Update, dashboard::update_nodes)
-            .add_plugins(SchematicPlugin);
+            .add_plugins(SchematicPlugin)
+            .add_plugins(LinePlot3dPlugin);
     }
 }
 

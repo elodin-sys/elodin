@@ -116,7 +116,6 @@ def world() -> tuple[el.World, el.EntityId]:
                 world_pos=Config.GLOBAL.spatial_transform,
                 inertia=Config.GLOBAL.spatial_inertia,
             ),
-            world.glb(Config.GLOBAL.drone_glb),
             Drone(),
             motors.Motors(),
             sensors.IMU(),
@@ -124,65 +123,50 @@ def world() -> tuple[el.World, el.EntityId]:
             mekf.MEKF(),
             telemetry.Telemetry(),
         ],
-        name="drone",
+        name="Drone",
     )
-    world.spawn(
-        el.Panel.hsplit(
-            el.Panel.vsplit(
-                el.Panel.viewport(
-                    pos="drone.world_pos + (0,0,0,0,2,2,2)",
-                    look_at="drone.world_pos",
-                    active=True,
-                    show_grid=True,
-                ),
-            ),
-            el.Panel.vsplit(
-                el.Panel.graph("drone.angle_desired"),
-                el.Panel.graph(
-                    "drone.world_pos.q0, drone.world_pos.q1, drone.world_pos.q2, drone.world_pos.q3, drone.attitude_target",
-                ),
-                el.Panel.graph("drone.ang_vel_setpoint"),
-            ),
-            active=True,
-        ),
-        name="viewport",
-    )
-    world.spawn(
-        el.Panel.hsplit(
-            el.Panel.vsplit(
-                el.Panel.graph("drone.motor_input"),
-                el.Panel.graph("drone.motor_pwm"),
-                el.Panel.graph("drone.motor_rpm"),
-            ),
-            el.Panel.vsplit(
-                el.Panel.graph("drone.thrust"),
-            ),
-        ),
-        name="Motor Panel",
-    )
-    world.spawn(
-        el.Panel.hsplit(
-            el.Panel.vsplit(
-                el.Panel.graph("drone.rate_pid_state"),
-            ),
-            el.Panel.vsplit(
-                el.Panel.graph(
-                    "drone.gyro, drone.ang_vel_setpoint",
-                    name="Drone: rate_control",
-                ),
-            ),
-        ),
-        name="Rate Control Panel",
-    )
-    world.spawn(
-        el.Panel.hsplit(
-            el.Panel.vsplit(
-                el.Panel.graph("drone.gyro"),
-                el.Panel.graph("drone.accel"),
-                el.Panel.graph("drone.magnetometer"),
-            ),
-        ),
-        name="Sensor Panel",
+
+    object_mesh = f"""
+    object_3d drone.world_pos {{
+        glb path="{Config.GLOBAL.drone_glb}"
+    }}
+    """
+
+    world.schematic(
+        """
+        tabs {
+            hsplit name = "Viewport" {
+                viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 2,2,2)" look_at="drone.world_pos" show_grid=#true active=#true
+                vsplit share=0.4 {
+                    graph "drone.angle_desired" name="angle_desired"
+                    graph "drone.world_pos.q0, drone.world_pos.q1, drone.world_pos.q2, drone.world_pos.q3, drone.attitude_target" name="World Pos"
+                    graph "drone.ang_vel_setpoint"
+                }
+            }
+            hsplit name = "Motor Panel" {
+                vsplit share=0.4 {
+                    graph "drone.motor_input"
+                    graph "drone.motor_pwm"
+                    graph "drone.motor_rpm"
+                }
+                graph "drone.thrust"
+            }
+            hsplit name="Rate Control Panel" {
+                vsplit {
+                    graph "drone.rate_pid_state"
+                }
+                vsplit {
+                    graph "drone.gyro, drone.ang_vel_setpoint" name="Drone: rate_control"
+                }
+            }
+            vsplit name="Sensor Panel" {
+                graph "drone.gyro"
+                graph "drone.accel"
+                graph "drone.magnetometer"
+            }
+        }
+    """
+        + object_mesh
     )
     return world, drone
 

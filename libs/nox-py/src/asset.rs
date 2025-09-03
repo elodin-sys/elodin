@@ -66,7 +66,6 @@ impl Handle {
         Component {
             name: "handle".to_string(),
             ty: Some(ComponentType::u64()),
-            asset: true,
             metadata: Default::default(),
         }
     }

@@ -18,7 +18,6 @@ struct Field {
     component_id: Option<String>,
     #[darling(skip, default)]
     nest: bool,
-    asset: Option<bool>,
 }
 
 impl Field {

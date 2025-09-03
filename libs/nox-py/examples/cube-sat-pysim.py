@@ -529,14 +529,14 @@ sat = w.spawn(
         Sensors(np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3)),
         KalmanFilter(np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3)),
         Debug(np.float64(0.0)),
-        w.glb("https://assets.elodin.systems/assets/oresat-low.glb"),
     ],
     name="OreSat",
 )
 
 # w.spawn(el.VectorArrow(sat, "control_force", color = el.Color(1.0, 0.0, 0.0), scale=2.0))
 # w.spawn(el.VectorArrow(sat, "world_vel", offset=3, body_frame=False, scale=1/2000.0))
-w.spawn(el.BodyAxes(sat, scale=1.0))
+# TODO: Any schematics call for this? No. Consider adding one.
+# w.spawn(el.BodyAxes(sat, scale=1.0))
 
 rw_1 = w.spawn(
     ReactionWheel(
@@ -623,33 +623,53 @@ w.spawn(CSSRel(el.Edge(css_3, sat)), name="CSS 3 -> Sat")
 w.spawn(CSSRel(el.Edge(css_4, sat)), name="CSS 4 -> Sat")
 w.spawn(CSSRel(el.Edge(css_5, sat)), name="CSS 5 -> Sat")
 
-w.spawn(
-    el.Panel.vsplit(
-        el.Panel.hsplit(
-            el.Panel.viewport(
-                track_entity=sat,
-                track_rotation=False,
-                pos=[7.0, 0.0, 0.0],
-                looking_at=[0.0, 0.0, 0.0],
-            ),
-            el.Panel.graph(
-                *[
-                    el.GraphEntity(css, CssValue)
-                    for css in [css_0, css_1, css_2, css_3, css_4, css_5]
-                ]
-            ),
-        ),
-        el.Panel.graph(
-            el.GraphEntity(
-                sat,
-                AttEst,
-                *el.Component.index(el.WorldPos)[:4],
-            )
-        ),
-        active=True,
-    )
-)
+# TODO: Graph css not represented in schematic yet.
+# w.spawn(
+#     el.Panel.vsplit(
+#         el.Panel.hsplit(
+#             el.Panel.viewport(
+#                 track_entity=sat,
+#                 track_rotation=False,
+#                 pos=[7.0, 0.0, 0.0],
+#                 looking_at=[0.0, 0.0, 0.0],
+#             ),
+#             el.Panel.graph(
+#                 *[
+#                     el.GraphEntity(css, CssValue)
+#                     for css in [css_0, css_1, css_2, css_3, css_4, css_5]
+#                 ]
+#             ),
+#         ),
+#         el.Panel.graph(
+#             el.GraphEntity(
+#                 sat,
+#                 AttEst,
+#                 *el.Component.index(el.WorldPos)[:4],
+#             )
+#         ),
+#         active=True,
+#     )
+# )
 
+w.schematic("""
+    vsplit {
+        hsplit share=0.6 {
+            tabs {
+                viewport name=Viewport pos="sat.world_pos + (0,0,0,0, 7,0,0)" look_at="(0,0,0,0, 0,0,0)" hdr=#true
+            }
+            graph "course_sun_sensor_0.css_value, course_sun_sensor_1.css_value" Name=Sensor
+        }
+        graph "sat.att_est" Name=AttEst
+    }
+    object_3d earth.world_pos {
+        glb path="https://storage.googleapis.com/elodin-assets/earth.glb"
+    }
+
+    object_3d sat.world_pos {
+        glb path="https://storage.googleapis.com/elodin-assets/oresat-low.glb"
+    }
+    line_3d sat.world_pos line_width=10.0 perspective=#false
+""")
 
 w.spawn(
     [
@@ -658,18 +678,8 @@ w.spawn(
             world_vel=el.SpatialMotion(angular=np.array([0.0, 0.0, 1.0]) * 7.2921159e-5),
             inertia=el.SpatialInertia(1.0),
         ),
-        w.glb("https://assets.elodin.systems/assets/earth.glb"),
     ],
     name="Earth",
-)
-
-w.spawn(
-    el.Line3d(
-        sat,
-        "world_pos",
-        line_width=10.0,
-        perspective=False,
-    )
 )
 
 sys = el.six_dof(

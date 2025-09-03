@@ -1,7 +1,7 @@
 use std::io;
 
 use impeller2::types::{ComponentId, PacketId};
-use impeller2_wkt::{AssetId, ErrorResponse, StreamId};
+use impeller2_wkt::{ErrorResponse, StreamId};
 use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum Error {
@@ -21,8 +21,6 @@ pub enum Error {
     Postcard(#[from] postcard::Error),
     #[error("invalid component id")]
     InvalidComponentId,
-    #[error("invalid asset id")]
-    InvalidAssetId,
     #[error("time travel - you tried to push a time stamp in the past")]
     TimeTravel,
     #[error("datafusion {0}")]
@@ -31,8 +29,6 @@ pub enum Error {
     Arrow(#[from] arrow::error::ArrowError),
     #[error("stream not found {0}")]
     StreamNotFound(StreamId),
-    #[error("asset not found {0}")]
-    AssetNotFound(AssetId),
     #[error("time range out of bounds")]
     TimeRangeOutOfBounds,
     #[error("invalid msg id")]

@@ -1,7 +1,6 @@
 use clap::Parser;
 use impeller2::types::{LenPacket, PacketId};
 use impeller2_stellar::Client;
-use impeller2_wkt::{AssetHandle, Glb, SetAsset};
 use mlua::LuaSerdeExt;
 use nox::{
     array::{Mat3, Quat, SpatialTransform, Vec3},
@@ -31,8 +30,6 @@ pub struct Output {
     pub gyro_est: Vec3<f64>,
     pub world_pos: SpatialTransform<f64>,
     pub mag_cal: Vec3<f64>,
-    #[roci(asset = true)]
-    pub asset_handle_glb: AssetHandle<Glb>,
 }
 
 async fn connect(config: &Config) -> anyhow::Result<()> {
@@ -46,11 +43,6 @@ async fn connect(config: &Config) -> anyhow::Result<()> {
         tensor![1., 1., 1.] * config.mekf.gyro_bias_sigma,
         config.mekf.dt,
     );
-    let glb_id = fastrand::u64(..);
-    client
-        .send(&SetAsset::new(glb_id, Glb(config.glb_url.clone()))?)
-        .await
-        .0?;
     let mut sub = client.subscribe::<Input>().await?;
     loop {
         let input = sub.next().await?;
@@ -75,7 +67,6 @@ async fn connect(config: &Config) -> anyhow::Result<()> {
         let output = Output {
             q_hat: mekf.q_hat,
             world_pos,
-            asset_handle_glb: AssetHandle::new(glb_id),
             b_hat: mekf.b_hat,
             mag_cal: mag,
             gyro_est,

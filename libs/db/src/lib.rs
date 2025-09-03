@@ -1,4 +1,3 @@
-use assets::open_assets;
 use datafusion::common::HashSet;
 use futures_lite::StreamExt;
 use impeller2::registry::VTableRegistry;
@@ -53,7 +52,6 @@ pub use error::Error;
 
 pub mod append_log;
 mod arrow;
-mod assets;
 pub mod axum;
 mod error;
 mod msg_log;
@@ -67,7 +65,6 @@ pub struct DB {
 
     // metadata
     pub path: PathBuf,
-    pub time_step: AtomicU64,
     pub default_stream_time_step: AtomicU64,
     pub last_updated: AtomicCell<Timestamp>,
     pub earliest_timestamp: Timestamp,
@@ -77,7 +74,6 @@ pub struct DB {
 pub struct State {
     components: HashMap<ComponentId, Component>,
     component_metadata: HashMap<ComponentId, ComponentMetadata>,
-    assets: HashMap<AssetId, memmap2::Mmap>,
 
     msg_logs: HashMap<PacketId, MsgLog>,
 
@@ -85,6 +81,8 @@ pub struct State {
     streams: HashMap<StreamId, Arc<FixedRateStreamState>>,
 
     udp_vtable_streams: HashSet<(SocketAddr, [u8; 2])>,
+
+    pub db_config: DbConfig,
 }
 
 impl DB {
@@ -95,10 +93,13 @@ impl DB {
     pub fn with_time_step(path: PathBuf, time_step: Duration) -> Result<Self, Error> {
         info!(?path, "created db");
 
+        std::fs::create_dir_all(&path)?;
         let default_stream_time_step = AtomicU64::new(time_step.as_nanos() as u64);
-        let time_step = AtomicU64::new(time_step.as_nanos() as u64);
         let state = State {
-            assets: open_assets(&path)?,
+            db_config: DbConfig {
+                default_stream_time_step: time_step,
+                ..Default::default()
+            },
             ..Default::default()
         };
         let db = DB {
@@ -106,7 +107,6 @@ impl DB {
             recording_cell: PlayingCell::new(true),
             path,
             vtable_gen: AtomicCell::new(0),
-            time_step,
             default_stream_time_step,
             last_updated: AtomicCell::new(Timestamp(i64::MIN)),
             earliest_timestamp: Timestamp::now(),
@@ -125,18 +125,12 @@ impl DB {
         f(&mut state)
     }
 
-    fn db_settings(&self) -> DbSettings {
-        DbSettings {
-            recording: self.recording_cell.is_playing(),
-            time_step: Duration::from_nanos(self.time_step.load(atomic::Ordering::SeqCst)),
-            default_stream_time_step: Duration::from_nanos(
-                self.default_stream_time_step.load(atomic::Ordering::SeqCst),
-            ),
-        }
+    fn db_config(&self) -> DbConfig {
+        self.with_state(|db| db.db_config.clone())
     }
 
     pub fn save_db_state(&self) -> Result<(), Error> {
-        let db_state = self.db_settings();
+        let db_state = self.db_config();
         db_state.write(self.path.join("db_state"))
     }
 
@@ -151,10 +145,7 @@ impl DB {
         for elem in std::fs::read_dir(&path)? {
             let Ok(elem) = elem else { continue };
             let path = elem.path();
-            if !path.is_dir()
-                || path.file_name() == Some(OsStr::new("assets"))
-                || path.file_name() == Some(OsStr::new("msgs"))
-            {
+            if !path.is_dir() || path.file_name() == Some(OsStr::new("msgs")) {
                 trace!("Skipping non-component directory: {}", path.display());
                 continue;
             }
@@ -203,11 +194,10 @@ impl DB {
         }
 
         info!(db.path = ?path, "opened db");
-        let db_state = DbSettings::read(path.join("db_state"))?;
+        let db_state = DbConfig::read(path.join("db_state"))?;
         let state = State {
             components,
             component_metadata,
-            assets: open_assets(&path)?,
             msg_logs,
             ..Default::default()
         };
@@ -221,17 +211,12 @@ impl DB {
             path,
             vtable_gen: AtomicCell::new(0),
             recording_cell: PlayingCell::new(db_state.recording),
-            time_step: AtomicU64::new(db_state.time_step.as_nanos() as u64),
             default_stream_time_step: AtomicU64::new(
                 db_state.default_stream_time_step.as_nanos() as u64
             ),
             last_updated: AtomicCell::new(Timestamp(last_updated)),
             earliest_timestamp,
         })
-    }
-
-    pub fn time_step(&self) -> Duration {
-        Duration::from_nanos(self.time_step.load(atomic::Ordering::Relaxed))
     }
 
     pub fn insert_vtable(&self, vtable: VTableMsg) -> Result<(), Error> {
@@ -252,10 +237,6 @@ impl DB {
             Ok::<_, Error>(())
         })?;
         Ok(())
-    }
-
-    pub fn insert_asset(&self, id: AssetId, buf: &[u8]) -> Result<(), Error> {
-        self.with_state_mut(|state| assets::insert_asset(&self.path, &mut state.assets, id, buf))
     }
 
     pub fn push_msg(&self, timestamp: Timestamp, id: PacketId, msg: &[u8]) -> Result<(), Error> {
@@ -324,7 +305,6 @@ impl State {
             component_id,
             name: component_id.to_string(),
             metadata: Default::default(),
-            asset: false,
         };
         let component = Component::create(db_path, component_id, schema, Timestamp::now())?;
         if !self.component_metadata.contains_key(&component_id) {
@@ -836,9 +816,6 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 if let Some(timestamp) = set_stream_state.timestamp {
                     state.set_timestamp(timestamp);
                 }
-                if let Some(time_step) = set_stream_state.time_step {
-                    state.set_time_step(time_step);
-                }
                 if let Some(frequency) = set_stream_state.frequency {
                     state.set_frequency(frequency);
                 }
@@ -909,34 +886,6 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             .await?;
         }
 
-        Packet::Msg(m) if m.id == SetAsset::ID => {
-            let set_asset = m.parse::<SetAsset<'_>>()?;
-            db.insert_asset(set_asset.id, &set_asset.buf)?;
-        }
-        Packet::Msg(m) if m.id == GetAsset::ID => {
-            let GetAsset { id } = m.parse::<GetAsset>()?;
-
-            tx.send_with_builder(|pkt| {
-                let header = PacketHeader {
-                    packet_ty: impeller2::types::PacketTy::Msg,
-                    id: Asset::ID,
-                    req_id: m.req_id,
-                };
-                pkt.as_mut_packet().header = header;
-                pkt.clear();
-                db.with_state(|state| {
-                    let Some(mmap) = state.assets.get(&id) else {
-                        return Err(Error::AssetNotFound(id));
-                    };
-                    let asset = Asset {
-                        id,
-                        buf: Cow::Borrowed(&mmap[..]),
-                    };
-                    postcard::serialize_with_flavor(&asset, pkt).map_err(Error::from)
-                })
-            })
-            .await?;
-        }
         Packet::Msg(m) if m.id == DumpMetadata::ID => {
             let msg = db.with_state(|state| {
                 let component_metadata = state.component_metadata.values().cloned().collect();
@@ -950,6 +899,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 DumpMetadataResp {
                     component_metadata,
                     msg_metadata,
+                    db_config: state.db_config.clone(),
                 }
             });
             tx.send_msg(&msg).await?;
@@ -967,23 +917,6 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             tx.send_msg(&msg).await?;
         }
 
-        Packet::Msg(m) if m.id == DumpAssets::ID => {
-            // TODO(sphw): Implement dump assets in a no-alloc fashion
-            let packets = db.with_state(|state| {
-                state
-                    .assets
-                    .iter()
-                    .map(|(id, mmap)| Asset {
-                        id: *id,
-                        buf: Cow::Owned(mmap[..].to_vec()),
-                    })
-                    .collect::<Vec<_>>()
-            });
-
-            for packet in packets {
-                tx.send_msg(&packet).await?;
-            }
-        }
         Packet::Msg(m) if m.id == SubscribeLastUpdated::ID => {
             let mut tx = tx.clone();
             let db = db.clone();
@@ -1004,27 +937,29 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 }
             });
         }
-        Packet::Msg(m) if m.id == SetDbSettings::ID => {
-            let SetDbSettings {
+        Packet::Msg(m) if m.id == SetDbConfig::ID => {
+            let SetDbConfig {
                 recording,
-                time_step,
-            } = m.parse::<SetDbSettings>()?;
+                metadata,
+            } = m.parse::<SetDbConfig>()?;
             if let Some(recording) = recording {
+                db.with_state_mut(|s| {
+                    s.db_config.recording = recording;
+                });
                 db.recording_cell.set_playing(recording);
             }
-            if let Some(time_step) = time_step {
-                db.time_step
-                    .store(time_step.as_nanos() as u64, atomic::Ordering::Release);
-            }
+            db.with_state_mut(|s| {
+                s.db_config.metadata.extend(metadata);
+            });
             db.save_db_state()?;
-            tx.send_msg(&db.db_settings()).await?;
+            tx.send_msg(&db.db_config()).await?;
         }
         Packet::Msg(m) if m.id == GetEarliestTimestamp::ID => {
             tx.send_msg(&EarliestTimestamp(db.earliest_timestamp))
                 .await?;
         }
         Packet::Msg(m) if m.id == GetDbSettings::ID => {
-            let settings = db.db_settings();
+            let settings = db.db_config();
             tx.send_msg(&settings).await?;
         }
         Packet::Table(table) => {
@@ -1045,7 +980,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         }
 
         Packet::Msg(m) if m.id == GetDbSettings::ID => {
-            let settings = db.db_settings();
+            let settings = db.db_config();
             tx.send_msg(&settings).await?;
         }
         Packet::Msg(m) if m.id == SQLQuery::ID => {
@@ -1287,11 +1222,6 @@ impl FixedRateStreamState {
         self.current_tick
             .store(timestamp.0, atomic::Ordering::SeqCst);
         self.playing_cell.wait_cell.wake_all();
-    }
-
-    fn set_time_step(&self, time_step: Duration) {
-        self.time_step
-            .store(time_step.as_nanos() as u64, atomic::Ordering::SeqCst);
     }
 
     fn set_frequency(&self, frequency: u64) {
@@ -1610,7 +1540,7 @@ impl PlayingCell {
     }
 }
 
-impl MetadataExt for DbSettings {}
+impl MetadataExt for DbConfig {}
 
 pub trait AtomicTimestampExt {
     fn update_max(&self, val: Timestamp);

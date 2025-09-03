@@ -60,9 +60,6 @@ pub fn init_db(
     start_timestamp: Timestamp,
 ) -> Result<(), elodin_db::Error> {
     tracing::info!("initializing db");
-    for (id, asset) in world.assets.iter().enumerate() {
-        db.insert_asset(id as u64, &asset.inner)?;
-    }
     db.with_state_mut(|state| {
         for (component_id, (schema, component_metadata)) in world.metadata.component_map.iter() {
             let Some(column) = world.host.get(component_id) else {
@@ -89,7 +86,6 @@ pub fn init_db(
                     component_id: pair_id,
                     name: pair_name,
                     metadata: component_metadata.metadata.clone(),
-                    asset: component_metadata.asset,
                 };
 
                 state.set_component_metadata(pair_metadata, &db.path)?;
@@ -98,6 +94,14 @@ pub fn init_db(
                 let buf = &column.buffer[offset..offset + size];
                 component.time_series.push_buf(start_timestamp, buf)?;
             }
+            if let Some(path) = &world.metadata.schematic_path {
+                state
+                    .db_config
+                    .set_schematic_path(path.to_string_lossy().to_string());
+            }
+            if let Some(content) = &world.metadata.schematic {
+                state.db_config.set_schematic_content(content.clone());
+            }
         }
         for entity_metadata in world.entity_metadata().values() {
             state.set_component_metadata(
@@ -105,7 +109,6 @@ pub fn init_db(
                     component_id: ComponentId::new(&entity_metadata.name),
                     name: entity_metadata.name.clone(),
                     metadata: entity_metadata.metadata.clone(),
-                    asset: false,
                 },
                 &db.path,
             )?;
@@ -113,10 +116,6 @@ pub fn init_db(
         Ok::<_, elodin_db::Error>(())
     })?;
 
-    db.time_step.store(
-        world.metadata.run_time_step.0.as_nanos() as u64,
-        atomic::Ordering::SeqCst,
-    );
     let default_stream_time_step = Duration::from_secs_f64(
         world.metadata.sim_time_step.0.as_secs_f64() / world.metadata.default_playback_speed,
     );
@@ -216,7 +215,7 @@ async fn tick(
             }
         });
         db.last_updated.store(timestamp);
-        let time_step = db.time_step().max(Duration::from_micros(100));
+        let time_step = world.world.metadata.run_time_step.0;
         let sleep_time = time_step.saturating_sub(start.elapsed());
         if is_cancelled() {
             return;
