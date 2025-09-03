@@ -13,7 +13,7 @@ order = 1
 +++
 ## v0.15
 ### v0.15.0
-- **(breaking)** Handle UI and object visualization using new schematics format. See [migration guide](/home/migration/to-0-15).
+- **(breaking)** Handle UI and object visualization using new schematics format. See [migration guide](/reference/migration/to-0-15).
 - **(fix)** Stop endlessly creating entities for packet handling.
 
 ## v0.14

@@ -30,7 +30,7 @@ pip install -U elodin
 
 ### Upgrading? 
 
-If upgrading from an old Elodin version, consult the [migration guides](/home/migration/).
+If upgrading from an old Elodin version, consult the [migration guides](../reference/migration/).
 
 ## Start Simulating
 
