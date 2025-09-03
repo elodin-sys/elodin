@@ -155,18 +155,18 @@ fn download_shared_xla(xla_dir: &Path) -> anyhow::Result<()> {
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("Unable to get TARGET_ARCH");
     let url = match (os.as_str(), arch.as_str()) {
         ("macos", arch) => format!(
-            "https://github.com/elixir-nx/xla/releases/download/v0.7.0/xla_extension-{}-darwin-cpu.tar.gz",
+            "https://github.com/elixir-nx/xla/releases/download/v0.9.1/xla_extension-0.9.1-{}-darwin-cpu.tar.gz",
             arch
         ),
         ("linux", arch) => {
             if true {
                 format!(
-                    "https://github.com/elixir-nx/xla/releases/download/v0.7.0/xla_extension-{}-linux-gnu-cuda12.tar.gz",
+                    "https://github.com/elixir-nx/xla/releases/download/v0.9.1/xla_extension-0.9.1-{}-linux-gnu-cuda12.tar.gz",
                     arch
                 )
             } else {
                 format!(
-                    "https://github.com/elixir-nx/xla/releases/download/v0.7.0/xla_extension-{}-linux-gnu-cpu.tar.gz",
+                    "https://github.com/elixir-nx/xla/releases/download/v0.9.1/xla_extension-0.9.1-{}-linux-gnu-cpu.tar.gz",
                     arch
                 )
             }

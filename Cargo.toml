@@ -42,8 +42,9 @@ members = [
     "fsw/video-streamer",
     "fsw/gstreamer",
     "libs/db/eql",
-    "libs/impeller2/kdl"
- ]
+    "libs/impeller2/kdl",
+    # "fsw/sensor-fw",
+]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 
 [workspace.package]
@@ -87,3 +88,6 @@ wmm.path = "libs/wmm"
 [profile.release-with-debug]
 inherits = "release"
 debug = true
+
+[patch.crates-io]
+lapack-src = { git = "https://github.com/elodin-sys/lapack-src.git" }

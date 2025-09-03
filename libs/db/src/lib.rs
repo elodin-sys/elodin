@@ -722,7 +722,7 @@ impl<A: AsyncWrite + 'static> PacketTx<A> {
                 id: M::ID,
                 req_id,
             };
-            pkt.as_mut_packet().header = header;
+            *pkt.as_mut_packet_parts().0 = header;
             pkt.clear();
             postcard::serialize_with_flavor(&msg, pkt).map_err(Error::from)
         })
@@ -739,7 +739,7 @@ impl<A: AsyncWrite + 'static> PacketTx<A> {
             self.pkt = Some(pkt);
             return Err(err);
         }
-        pkt.as_mut_packet().header.req_id = self.req_id;
+        pkt.as_mut_packet_parts().0.req_id = self.req_id;
         let tx = self.tx.lock().await;
         let res = rent!(tx.send(pkt).await, pkt);
         self.pkt = Some(pkt);
@@ -759,7 +759,7 @@ impl<A: AsyncWrite + 'static> PacketTx<A> {
                 id,
                 req_id,
             };
-            pkt.as_mut_packet().header = header;
+            *pkt.as_mut_packet_parts().0 = header;
             pkt.clear();
             pkt.extend_from_slice(&(timestamps.len() as u64).to_le_bytes());
             pkt.extend_from_slice(timestamps.as_bytes());
@@ -874,7 +874,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     id: ComponentMetadata::ID,
                     req_id: m.req_id,
                 };
-                pkt.as_mut_packet().header = header;
+                *pkt.as_mut_packet_parts().0 = header;
                 pkt.clear();
                 db.with_state(|state| {
                     let Some(metadata) = state.component_metadata.get(&component_id) else {

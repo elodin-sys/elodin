@@ -22,15 +22,29 @@ test_steps = [
         ],
     ),
     group(
-        name=":crab: rust",
+        name=":nix: Nix",
+        steps=[
+            step(
+                label=":nix: flake check",
+                key="flake-check",
+                command="nix flake check .",
+                env={
+                    "RUSTC_BOOTSTRAP": "1",
+                    "BUILDKITE_ANALYTICS_TOKEN": "R6hH2MNhtMdbfQWhDd9cvZfo",
+                },
+            ),
+        ],
+    ),
+    group(
+        name=":crab: rust (sensors)",
         steps=[
             rust_step(
                 label="clippy",
-                command="cargo clippy -- -Dwarnings && cd fsw/sensor-fw && cargo clippy -- -Dwarnings",
+                command="cd fsw/sensor-fw && cargo clippy -- -Dwarnings",
             ),
             rust_step(
                 label="cargo test",
-                command="cargo test --release -- -Z unstable-options --format json --report-time | buildkite-test-collector",
+                command="cargo test --release -- -Z unstable-options --manifest-path fsw/sensor-fw/Cargo.toml --format json --report-time | buildkite-test-collector",
                 env={
                     "RUSTC_BOOTSTRAP": "1",
                     "BUILDKITE_ANALYTICS_TOKEN": "R6hH2MNhtMdbfQWhDd9cvZfo",
@@ -38,7 +52,7 @@ test_steps = [
             ),
             rust_step(
                 label="cargo fmt",
-                command="cargo fmt --check && cargo fmt --check --manifest-path fsw/sensor-fw/Cargo.toml",
+                command="cargo fmt --check --manifest-path fsw/sensor-fw/Cargo.toml",
             ),
         ],
     ),

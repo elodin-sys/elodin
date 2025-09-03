@@ -6,232 +6,477 @@ use cpp::{cpp, cpp_class};
 use std::pin::Pin;
 
 cpp! {{
-    #pragma GCC diagnostic ignored "-Wignored-attributes"
-    #include "xla/pjrt/pjrt_api.h"
-    #include "xla/pjrt/pjrt_c_api_client.h"
-    #include "xla/pjrt/pjrt_client.h"
-    #include "xla/pjrt/pjrt_stream_executor_client.h"
-    #include "xla/pjrt/tfrt_cpu_pjrt_client.h"
-    #include "xla/pjrt/gpu/gpu_helpers.h"
-    #include "xla/pjrt/gpu/se_gpu_pjrt_client.h"
-    #include "xla/service/custom_call_target_registry.h"
-    #include "jaxlib/cpu/lapack_kernels.h"
-    #include "xla/service/custom_call_target_registry.h"
-    #include "tsl/platform/cpu_info.h"
+   #pragma GCC diagnostic ignored "-Wignored-attributes"
+   #include "xla/pjrt/pjrt_api.h"
+   #include "xla/pjrt/pjrt_c_api_client.h"
+   #include "xla/pjrt/pjrt_client.h"
+   #include "xla/pjrt/pjrt_stream_executor_client.h"
+   #include "xla/pjrt/tfrt_cpu_pjrt_client.h"
+   #include "xla/pjrt/gpu/gpu_helpers.h"
+   #include "xla/pjrt/gpu/se_gpu_pjrt_client.h"
+   #include "xla/service/custom_call_target_registry.h"
+   #include "jaxlib/cpu/lapack_kernels.h"
+   #include "xla/service/custom_call_target_registry.h"
+   #include "tsl/platform/cpu_info.h"
 
-    #ifdef EL_CUDA
-    #include "xla/ffi/api/api.h"
-    #include "xla/ffi/ffi_api.h"
-    #include "jaxlib/gpu/blas_kernels.h"
-    #include "jaxlib/gpu/cholesky_update_kernel.h"
-    #include "jaxlib/gpu/lu_pivot_kernels.h"
-    #include "jaxlib/gpu/prng_kernels.h"
-    #include "jaxlib/gpu/rnn_kernels.h"
-    #include "jaxlib/gpu/solver_kernels.h"
-    #include "jaxlib/gpu/sparse_kernels.h"
-    //#include "jaxlib/gpu/triton_kernels.h"
-    //#include "jaxlib/gpu/vendor.h"
-    #endif
-    using namespace xla;
+   #ifdef EL_CUDA
+   #include "xla/ffi/api/api.h"
+   #include "xla/ffi/ffi_api.h"
+   #include "jaxlib/gpu/blas_kernels.h"
+   #include "jaxlib/gpu/cholesky_update_kernel.h"
+   #include "jaxlib/gpu/lu_pivot_kernels.h"
+   #include "jaxlib/gpu/prng_kernels.h"
+   #include "jaxlib/gpu/rnn_kernels.h"
+   #include "jaxlib/gpu/solver_kernels.h"
+   #include "jaxlib/gpu/sparse_kernels.h"
+   //#include "jaxlib/gpu/triton_kernels.h"
+   //#include "jaxlib/gpu/vendor.h"
+   #endif
 
-    #pragma clang diagnostic ignored "-Wundefined-var-template"
-    extern "C" {
+   #pragma clang diagnostic ignored "-Wundefined-var-template"
+   namespace ffi = xla::ffi;
 
-        jax::Trsm<float>::FnType strsm_;
-        jax::Trsm<double>::FnType dtrsm_;
-        jax::Trsm<std::complex<float>>::FnType ctrsm_;
-        jax::Trsm<std::complex<double>>::FnType ztrsm_;
+   extern "C" {
 
-        jax::Getrf<float>::FnType sgetrf_;
-        jax::Getrf<double>::FnType dgetrf_;
-        jax::Getrf<std::complex<float>>::FnType cgetrf_;
-        jax::Getrf<std::complex<double>>::FnType zgetrf_;
+   jax::TriMatrixEquationSolver<ffi::DataType::F32>::FnType strsm_;
+   jax::TriMatrixEquationSolver<ffi::DataType::F64>::FnType dtrsm_;
+   jax::TriMatrixEquationSolver<ffi::DataType::C64>::FnType ctrsm_;
+   jax::TriMatrixEquationSolver<ffi::DataType::C128>::FnType ztrsm_;
 
-        jax::Geqrf<float>::FnType sgeqrf_;
-        jax::Geqrf<double>::FnType dgeqrf_;
-        jax::Geqrf<std::complex<float>>::FnType cgeqrf_;
-        jax::Geqrf<std::complex<double>>::FnType zgeqrf_;
+   jax::LuDecomposition<ffi::DataType::F32>::FnType sgetrf_;
+   jax::LuDecomposition<ffi::DataType::F64>::FnType dgetrf_;
+   jax::LuDecomposition<ffi::DataType::C64>::FnType cgetrf_;
+   jax::LuDecomposition<ffi::DataType::C128>::FnType zgetrf_;
 
-        jax::Orgqr<float>::FnType sorgqr_;
-        jax::Orgqr<double>::FnType dorgqr_;
-        jax::Orgqr<std::complex<float>>::FnType cungqr_;
-        jax::Orgqr<std::complex<double>>::FnType zungqr_;
+   jax::QrFactorization<ffi::DataType::F32>::FnType sgeqrf_;
+   jax::QrFactorization<ffi::DataType::F64>::FnType dgeqrf_;
+   jax::QrFactorization<ffi::DataType::C64>::FnType cgeqrf_;
+   jax::QrFactorization<ffi::DataType::C128>::FnType zgeqrf_;
 
-        jax::Potrf<float>::FnType spotrf_;
-        jax::Potrf<double>::FnType dpotrf_;
-        jax::Potrf<std::complex<float>>::FnType cpotrf_;
-        jax::Potrf<std::complex<double>>::FnType zpotrf_;
+   jax::PivotingQrFactorization<ffi::DataType::F32>::FnType sgeqp3_;
+   jax::PivotingQrFactorization<ffi::DataType::F64>::FnType dgeqp3_;
+   jax::PivotingQrFactorization<ffi::DataType::C64>::FnType cgeqp3_;
+   jax::PivotingQrFactorization<ffi::DataType::C128>::FnType zgeqp3_;
 
-        jax::RealGesdd<float>::FnType sgesdd_;
-        jax::RealGesdd<double>::FnType dgesdd_;
-        jax::ComplexGesdd<std::complex<float>>::FnType cgesdd_;
-        jax::ComplexGesdd<std::complex<double>>::FnType zgesdd_;
+   jax::OrthogonalQr<ffi::DataType::F32>::FnType sorgqr_;
+   jax::OrthogonalQr<ffi::DataType::F64>::FnType dorgqr_;
+   jax::OrthogonalQr<ffi::DataType::C64>::FnType cungqr_;
+   jax::OrthogonalQr<ffi::DataType::C128>::FnType zungqr_;
 
-        jax::RealSyevd<float>::FnType ssyevd_;
-        jax::RealSyevd<double>::FnType dsyevd_;
-        jax::ComplexHeevd<std::complex<float>>::FnType cheevd_;
-        jax::ComplexHeevd<std::complex<double>>::FnType zheevd_;
+   jax::CholeskyFactorization<ffi::DataType::F32>::FnType spotrf_;
+   jax::CholeskyFactorization<ffi::DataType::F64>::FnType dpotrf_;
+   jax::CholeskyFactorization<ffi::DataType::C64>::FnType cpotrf_;
+   jax::CholeskyFactorization<ffi::DataType::C128>::FnType zpotrf_;
 
-        jax::RealGeev<float>::FnType sgeev_;
-        jax::RealGeev<double>::FnType dgeev_;
-        jax::ComplexGeev<std::complex<float>>::FnType cgeev_;
-        jax::ComplexGeev<std::complex<double>>::FnType zgeev_;
+   jax::SingularValueDecomposition<ffi::DataType::F32>::FnType sgesdd_;
+   jax::SingularValueDecomposition<ffi::DataType::F64>::FnType dgesdd_;
+   jax::SingularValueDecompositionComplex<ffi::DataType::C64>::FnType cgesdd_;
+   jax::SingularValueDecompositionComplex<ffi::DataType::C128>::FnType zgesdd_;
 
-        jax::RealGees<float>::FnType sgees_;
-        jax::RealGees<double>::FnType dgees_;
-        jax::ComplexGees<std::complex<float>>::FnType cgees_;
-        jax::ComplexGees<std::complex<double>>::FnType zgees_;
+   jax::SingularValueDecompositionQR<ffi::DataType::F32>::FnType sgesvd_;
+   jax::SingularValueDecompositionQR<ffi::DataType::F64>::FnType dgesvd_;
+   jax::SingularValueDecompositionQRComplex<ffi::DataType::C64>::FnType cgesvd_;
+   jax::SingularValueDecompositionQRComplex<ffi::DataType::C128>::FnType zgesvd_;
 
-        jax::Gehrd<float>::FnType sgehrd_;
-        jax::Gehrd<double>::FnType dgehrd_;
-        jax::Gehrd<std::complex<float>>::FnType cgehrd_;
-        jax::Gehrd<std::complex<double>>::FnType zgehrd_;
+   jax::EigenvalueDecompositionSymmetric<ffi::DataType::F32>::FnType ssyevd_;
+   jax::EigenvalueDecompositionSymmetric<ffi::DataType::F64>::FnType dsyevd_;
+   jax::EigenvalueDecompositionHermitian<ffi::DataType::C64>::FnType cheevd_;
+   jax::EigenvalueDecompositionHermitian<ffi::DataType::C128>::FnType zheevd_;
 
-        jax::Sytrd<float>::FnType ssytrd_;
-        jax::Sytrd<double>::FnType dsytrd_;
-        jax::Sytrd<std::complex<float>>::FnType chetrd_;
-        jax::Sytrd<std::complex<double>>::FnType zhetrd_;
-    }
+   jax::EigenvalueDecomposition<ffi::DataType::F32>::FnType sgeev_;
+   jax::EigenvalueDecomposition<ffi::DataType::F64>::FnType dgeev_;
+   jax::EigenvalueDecompositionComplex<ffi::DataType::C64>::FnType cgeev_;
+   jax::EigenvalueDecompositionComplex<ffi::DataType::C128>::FnType zgeev_;
 
-    namespace jax {
-    static auto init = []() -> int {
-        Trsm<float>::fn = strsm_;
-        Trsm<double>::fn = dtrsm_;
-        Trsm<std::complex<float>>::fn = ctrsm_;
-        Trsm<std::complex<double>>::fn = ztrsm_;
-        Getrf<float>::fn = sgetrf_;
-        Getrf<double>::fn = dgetrf_;
-        Getrf<std::complex<float>>::fn = cgetrf_;
-        Getrf<std::complex<double>>::fn = zgetrf_;
-        Geqrf<float>::fn = sgeqrf_;
-        Geqrf<double>::fn = dgeqrf_;
-        Geqrf<std::complex<float>>::fn = cgeqrf_;
-        Geqrf<std::complex<double>>::fn = zgeqrf_;
-        Orgqr<float>::fn = sorgqr_;
-        Orgqr<double>::fn = dorgqr_;
-        Orgqr<std::complex<float>>::fn = cungqr_;
-        Orgqr<std::complex<double>>::fn = zungqr_;
-        Potrf<float>::fn = spotrf_;
-        Potrf<double>::fn = dpotrf_;
-        Potrf<std::complex<float>>::fn = cpotrf_;
-        Potrf<std::complex<double>>::fn = zpotrf_;
-        RealGesdd<float>::fn = sgesdd_;
-        RealGesdd<double>::fn = dgesdd_;
-        ComplexGesdd<std::complex<float>>::fn = cgesdd_;
-        ComplexGesdd<std::complex<double>>::fn = zgesdd_;
-        RealSyevd<float>::fn = ssyevd_;
-        RealSyevd<double>::fn = dsyevd_;
-        ComplexHeevd<std::complex<float>>::fn = cheevd_;
-        ComplexHeevd<std::complex<double>>::fn = zheevd_;
-        RealGeev<float>::fn = sgeev_;
-        RealGeev<double>::fn = dgeev_;
-        ComplexGeev<std::complex<float>>::fn = cgeev_;
-        ComplexGeev<std::complex<double>>::fn = zgeev_;
-        RealGees<float>::fn = sgees_;
-        RealGees<double>::fn = dgees_;
-        ComplexGees<std::complex<float>>::fn = cgees_;
-        ComplexGees<std::complex<double>>::fn = zgees_;
-        Gehrd<float>::fn = sgehrd_;
-        Gehrd<double>::fn = dgehrd_;
-        Gehrd<std::complex<float>>::fn = cgehrd_;
-        Gehrd<std::complex<double>>::fn = zgehrd_;
-        Sytrd<float>::fn = ssytrd_;
-        Sytrd<double>::fn = dsytrd_;
-        Sytrd<std::complex<float>>::fn = chetrd_;
-        Sytrd<std::complex<double>>::fn = zhetrd_;
+   jax::SchurDecomposition<ffi::DataType::F32>::FnType sgees_;
+   jax::SchurDecomposition<ffi::DataType::F64>::FnType dgees_;
+   jax::SchurDecompositionComplex<ffi::DataType::C64>::FnType cgees_;
+   jax::SchurDecompositionComplex<ffi::DataType::C128>::FnType zgees_;
 
-        return 0;
-    }();
-}
+   jax::HessenbergDecomposition<ffi::DataType::F32>::FnType sgehrd_;
+   jax::HessenbergDecomposition<ffi::DataType::F64>::FnType dgehrd_;
+   jax::HessenbergDecomposition<ffi::DataType::C64>::FnType cgehrd_;
+   jax::HessenbergDecomposition<ffi::DataType::C128>::FnType zgehrd_;
+
+   jax::TridiagonalReduction<ffi::DataType::F32>::FnType ssytrd_;
+   jax::TridiagonalReduction<ffi::DataType::F64>::FnType dsytrd_;
+   jax::TridiagonalReduction<ffi::DataType::C64>::FnType chetrd_;
+   jax::TridiagonalReduction<ffi::DataType::C128>::FnType zhetrd_;
+
+   jax::TridiagonalSolver<ffi::DataType::F32>::FnType sgtsv_;
+   jax::TridiagonalSolver<ffi::DataType::F64>::FnType dgtsv_;
+   jax::TridiagonalSolver<ffi::DataType::C64>::FnType cgtsv_;
+   jax::TridiagonalSolver<ffi::DataType::C128>::FnType zgtsv_;
+
+   }  // extern "C"
+
+   namespace jax {
+
+   static auto init = []() -> int {
+     AssignKernelFn<TriMatrixEquationSolver<ffi::DataType::F32>>(strsm_);
+     AssignKernelFn<TriMatrixEquationSolver<ffi::DataType::F64>>(dtrsm_);
+     AssignKernelFn<TriMatrixEquationSolver<ffi::DataType::C64>>(ctrsm_);
+     AssignKernelFn<TriMatrixEquationSolver<ffi::DataType::C128>>(ztrsm_);
+
+     AssignKernelFn<LuDecomposition<ffi::DataType::F32>>(sgetrf_);
+     AssignKernelFn<LuDecomposition<ffi::DataType::F64>>(dgetrf_);
+     AssignKernelFn<LuDecomposition<ffi::DataType::C64>>(cgetrf_);
+     AssignKernelFn<LuDecomposition<ffi::DataType::C128>>(zgetrf_);
+
+     AssignKernelFn<QrFactorization<ffi::DataType::F32>>(sgeqrf_);
+     AssignKernelFn<QrFactorization<ffi::DataType::F64>>(dgeqrf_);
+     AssignKernelFn<QrFactorization<ffi::DataType::C64>>(cgeqrf_);
+     AssignKernelFn<QrFactorization<ffi::DataType::C128>>(zgeqrf_);
+
+     AssignKernelFn<PivotingQrFactorization<ffi::DataType::F32>>(sgeqp3_);
+     AssignKernelFn<PivotingQrFactorization<ffi::DataType::F64>>(dgeqp3_);
+     AssignKernelFn<PivotingQrFactorization<ffi::DataType::C64>>(cgeqp3_);
+     AssignKernelFn<PivotingQrFactorization<ffi::DataType::C128>>(zgeqp3_);
+
+     AssignKernelFn<OrthogonalQr<ffi::DataType::F32>>(sorgqr_);
+     AssignKernelFn<OrthogonalQr<ffi::DataType::F64>>(dorgqr_);
+     AssignKernelFn<OrthogonalQr<ffi::DataType::C64>>(cungqr_);
+     AssignKernelFn<OrthogonalQr<ffi::DataType::C128>>(zungqr_);
+
+     AssignKernelFn<CholeskyFactorization<ffi::DataType::F32>>(spotrf_);
+     AssignKernelFn<CholeskyFactorization<ffi::DataType::F64>>(dpotrf_);
+     AssignKernelFn<CholeskyFactorization<ffi::DataType::C64>>(cpotrf_);
+     AssignKernelFn<CholeskyFactorization<ffi::DataType::C128>>(zpotrf_);
+
+     AssignKernelFn<SingularValueDecomposition<ffi::DataType::F32>>(sgesdd_);
+     AssignKernelFn<SingularValueDecomposition<ffi::DataType::F64>>(dgesdd_);
+     AssignKernelFn<SingularValueDecompositionComplex<ffi::DataType::C64>>(
+         cgesdd_);
+     AssignKernelFn<SingularValueDecompositionComplex<ffi::DataType::C128>>(
+         zgesdd_);
+
+     AssignKernelFn<SingularValueDecompositionQR<ffi::DataType::F32>>(sgesvd_);
+     AssignKernelFn<SingularValueDecompositionQR<ffi::DataType::F64>>(dgesvd_);
+     AssignKernelFn<SingularValueDecompositionQRComplex<ffi::DataType::C64>>(
+         cgesvd_);
+     AssignKernelFn<SingularValueDecompositionQRComplex<ffi::DataType::C128>>(
+         zgesvd_);
+
+     AssignKernelFn<EigenvalueDecompositionSymmetric<ffi::DataType::F32>>(ssyevd_);
+     AssignKernelFn<EigenvalueDecompositionSymmetric<ffi::DataType::F64>>(dsyevd_);
+     AssignKernelFn<EigenvalueDecompositionHermitian<ffi::DataType::C64>>(cheevd_);
+     AssignKernelFn<EigenvalueDecompositionHermitian<ffi::DataType::C128>>(
+         zheevd_);
+
+     AssignKernelFn<EigenvalueDecomposition<ffi::DataType::F32>>(sgeev_);
+     AssignKernelFn<EigenvalueDecomposition<ffi::DataType::F64>>(dgeev_);
+     AssignKernelFn<EigenvalueDecompositionComplex<ffi::DataType::C64>>(cgeev_);
+     AssignKernelFn<EigenvalueDecompositionComplex<ffi::DataType::C128>>(zgeev_);
+
+     AssignKernelFn<TridiagonalReduction<ffi::DataType::F32>>(ssytrd_);
+     AssignKernelFn<TridiagonalReduction<ffi::DataType::F64>>(dsytrd_);
+     AssignKernelFn<TridiagonalReduction<ffi::DataType::C64>>(chetrd_);
+     AssignKernelFn<TridiagonalReduction<ffi::DataType::C128>>(zhetrd_);
+
+     AssignKernelFn<SchurDecomposition<ffi::DataType::F32>>(sgees_);
+     AssignKernelFn<SchurDecomposition<ffi::DataType::F64>>(dgees_);
+     AssignKernelFn<SchurDecompositionComplex<ffi::DataType::C64>>(cgees_);
+     AssignKernelFn<SchurDecompositionComplex<ffi::DataType::C128>>(zgees_);
+
+     AssignKernelFn<HessenbergDecomposition<ffi::DataType::F32>>(sgehrd_);
+     AssignKernelFn<HessenbergDecomposition<ffi::DataType::F64>>(dgehrd_);
+     AssignKernelFn<HessenbergDecomposition<ffi::DataType::C64>>(cgehrd_);
+     AssignKernelFn<HessenbergDecomposition<ffi::DataType::C128>>(zgehrd_);
+
+     AssignKernelFn<TridiagonalSolver<ffi::DataType::F32>>(sgtsv_);
+     AssignKernelFn<TridiagonalSolver<ffi::DataType::F64>>(dgtsv_);
+     AssignKernelFn<TridiagonalSolver<ffi::DataType::C64>>(cgtsv_);
+     AssignKernelFn<TridiagonalSolver<ffi::DataType::C128>>(zgtsv_);
+
+     return 0;
+   }();
+   }  // namespace jax
 }}
 
 cpp_class!(pub unsafe struct PjRtClient as "std::shared_ptr<PjRtClient>");
 
 fn init_cpu_lapack() {
     cpp! {{
-        namespace jax {
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("blas_strsm", Trsm<float>::Kernel,
-                                                "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("blas_dtrsm", Trsm<double>::Kernel,
-                                                "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("blas_ctrsm",
-                                                Trsm<std::complex<float>>::Kernel,
-                                                "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("blas_ztrsm",
-                                                Trsm<std::complex<double>>::Kernel,
-                                                "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_sgetrf", Getrf<float>::Kernel,
-                                                "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_dgetrf", Getrf<double>::Kernel,
-                                                "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_cgetrf",
-                                                Getrf<std::complex<float>>::Kernel,
-                                                "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_zgetrf",
-                                                Getrf<std::complex<double>>::Kernel,
-                                                "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_sgeqrf", Geqrf<float>::Kernel,
-                                                "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_dgeqrf", Geqrf<double>::Kernel,
-                                                "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_cgeqrf",
-                                                Geqrf<std::complex<float>>::Kernel,
-                                                "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_zgeqrf",
-                                                Geqrf<std::complex<double>>::Kernel,
-                                                "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_sorgqr", Orgqr<float>::Kernel,
-                                                "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_dorgqr", Orgqr<double>::Kernel,
-                                                "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_cungqr",
-                                                Orgqr<std::complex<float>>::Kernel,
-                                                "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_zungqr",
-                                                Orgqr<std::complex<double>>::Kernel,
-                                                "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_spotrf", Potrf<float>::Kernel,
-                                                "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_dpotrf", Potrf<double>::Kernel,
-                                                "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_cpotrf",
-                                                Potrf<std::complex<float>>::Kernel,
-                                                "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_zpotrf",
-                                                Potrf<std::complex<double>>::Kernel,
-                                                "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_sgesdd",
-                                                RealGesdd<float>::Kernel, "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_dgesdd",
-                                                RealGesdd<double>::Kernel, "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
-            "lapack_cgesdd", ComplexGesdd<std::complex<float>>::Kernel, "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
-            "lapack_zgesdd", ComplexGesdd<std::complex<double>>::Kernel, "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_ssyevd",
-                                                RealSyevd<float>::Kernel, "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_dsyevd",
-                                                RealSyevd<double>::Kernel, "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
-            "lapack_cheevd", ComplexHeevd<std::complex<float>>::Kernel, "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
-            "lapack_zheevd", ComplexHeevd<std::complex<double>>::Kernel, "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_sgeev",
-                                                RealGeev<float>::Kernel, "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_dgeev",
-                                                RealGeev<double>::Kernel, "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
-            "lapack_cgeev", ComplexGeev<std::complex<float>>::Kernel, "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
-            "lapack_zgeev", ComplexGeev<std::complex<double>>::Kernel, "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_sgees",
-                                                RealGees<float>::Kernel, "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_dgees",
-                                                RealGees<double>::Kernel, "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
-            "lapack_cgees", ComplexGees<std::complex<float>>::Kernel, "Host");
-        XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
-            "lapack_zgees", ComplexGees<std::complex<double>>::Kernel, "Host");
+       namespace jax {
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "blas_strsm",
+           jax::TriMatrixEquationSolver<ffi::DataType::F32>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "blas_dtrsm",
+           jax::TriMatrixEquationSolver<ffi::DataType::F64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "blas_ctrsm",
+           jax::TriMatrixEquationSolver<ffi::DataType::C64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "blas_ztrsm",
+           jax::TriMatrixEquationSolver<ffi::DataType::C128>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_sgetrf",
+           jax::LuDecomposition<ffi::DataType::F32>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+            "lapack_dgetrf",
+            jax::LuDecomposition<ffi::DataType::F64>::Kernel,
+            "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_cgetrf",
+           jax::LuDecomposition<ffi::DataType::C64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_zgetrf",
+           jax::LuDecomposition<ffi::DataType::C128>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("lapack_sgeqrf",
+           jax::QrFactorization<ffi::DataType::F32>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_dgeqrf",
+           jax::QrFactorization<ffi::DataType::F64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_cgeqrf",
+           jax::QrFactorization<ffi::DataType::C64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_zgeqrf",
+           jax::QrFactorization<ffi::DataType::C128>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_sgeqp3",
+           jax::PivotingQrFactorization<ffi::DataType::F32>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_dgeqp3",
+           jax::PivotingQrFactorization<ffi::DataType::F64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_cgeqp3",
+           jax::PivotingQrFactorization<ffi::DataType::C64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_zgeqp3",
+           jax::PivotingQrFactorization<ffi::DataType::C128>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_sorgqr",
+           jax::OrthogonalQr<ffi::DataType::F32>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_dorgqr",
+           jax::OrthogonalQr<ffi::DataType::F64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_cungqr",
+           jax::OrthogonalQr<ffi::DataType::C64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_zungqr",
+           jax::OrthogonalQr<ffi::DataType::C128>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_spotrf",
+           jax::CholeskyFactorization<ffi::DataType::F32>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_dpotrf",
+           jax::CholeskyFactorization<ffi::DataType::F64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_cpotrf",
+           jax::CholeskyFactorization<ffi::DataType::C64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_zpotrf",
+           jax::CholeskyFactorization<ffi::DataType::C128>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_sgesdd",
+           jax::SingularValueDecomposition<ffi::DataType::F32>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_dgesdd",
+           jax::SingularValueDecomposition<ffi::DataType::F64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_cgesdd",
+           jax::SingularValueDecompositionComplex<ffi::DataType::C64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_zgesdd",
+           jax::SingularValueDecompositionComplex<ffi::DataType::C128>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_sgesvd",
+           jax::SingularValueDecompositionQR<ffi::DataType::F32>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_dgesvd",
+           jax::SingularValueDecompositionQR<ffi::DataType::F64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_cgesvd",
+           jax::SingularValueDecompositionQRComplex<ffi::DataType::C64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_zgesvd",
+           jax::SingularValueDecompositionQRComplex<ffi::DataType::C128>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_ssyevd",
+           jax::EigenvalueDecompositionSymmetric<ffi::DataType::F32>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_dsyevd",
+           jax::EigenvalueDecompositionSymmetric<ffi::DataType::F64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_cheevd",
+           jax::EigenvalueDecompositionHermitian<ffi::DataType::C64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_zheevd",
+           jax::EigenvalueDecompositionHermitian<ffi::DataType::C128>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_sgeev",
+           jax::EigenvalueDecomposition<ffi::DataType::F32>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_dgeev",
+           jax::EigenvalueDecomposition<ffi::DataType::F64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_cgeev",
+           jax::EigenvalueDecompositionComplex<ffi::DataType::C64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_zgeev",
+           jax::EigenvalueDecompositionComplex<ffi::DataType::C128>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_sgees",
+           jax::SchurDecomposition<ffi::DataType::F32>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_dgees",
+           jax::SchurDecomposition<ffi::DataType::F64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_cgees",
+           jax::SchurDecompositionComplex<ffi::DataType::C64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_zgees",
+           jax::SchurDecompositionComplex<ffi::DataType::C128>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_sgehrd",
+           jax::HessenbergDecomposition<ffi::DataType::F32>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_dgehrd",
+           jax::HessenbergDecomposition<ffi::DataType::F64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_cgehrd",
+           jax::HessenbergDecomposition<ffi::DataType::C64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_zgehrd",
+           jax::HessenbergDecomposition<ffi::DataType::C128>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_ssytrd",
+           jax::TridiagonalReduction<ffi::DataType::F32>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_dsytrd",
+           jax::TridiagonalReduction<ffi::DataType::F64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_csytrd",
+           jax::TridiagonalReduction<ffi::DataType::C64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_zsytrd",
+           jax::TridiagonalReduction<ffi::DataType::C128>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_sgtsv",
+           jax::TridiagonalSolver<ffi::DataType::F32>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_dgtsv",
+           jax::TridiagonalSolver<ffi::DataType::F64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_cgtsv",
+           jax::TridiagonalSolver<ffi::DataType::C64>::Kernel,
+           "Host"
+       );
+       XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
+           "lapack_zgtsv",
+           jax::TridiagonalSolver<ffi::DataType::C128>::Kernel,
+           "Host"
+       );
         }
         #ifdef EL_CUDA
         namespace jax::cuda {
@@ -265,12 +510,12 @@ impl PjRtClient {
         let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
         init_cpu_lapack();
         let client = unsafe {
-            cpp!([out_status as "Status*"] -> PjRtClient as "std::shared_ptr<PjRtClient>" {
-                auto status = xla::GetTfrtCpuClient(false);
+            cpp!([out_status as "absl::Status*"] -> PjRtClient as "std::shared_ptr<PjRtClient>" {
+                auto status = GetXlaPjrtCpuClient(CpuClientOptions());
                 if (status.ok()) {
                     return std::shared_ptr(std::move(status.value()));
                 }else{
-                    *out_status = Status(status.status());
+                    *out_status = absl::Status(status.status());
                     return std::shared_ptr<PjRtClient>();
                 }
             })
@@ -292,7 +537,7 @@ impl PjRtClient {
         let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
         init_cpu_lapack();
         let client = unsafe {
-            cpp!([out_status as "__attribute__((unused)) Status*", memory_fraction as "__attribute__((unused)) double", preallocate as "__attribute__((unused)) bool"] -> PjRtClient as "std::shared_ptr<PjRtClient>" {
+            cpp!([out_status as "__attribute__((unused)) absl::Status*", memory_fraction as "__attribute__((unused)) double", preallocate as "__attribute__((unused)) bool"] -> PjRtClient as "std::shared_ptr<PjRtClient>" {
                 #ifdef EL_CUDA
                 auto reg = CustomCallTargetRegistry::Global();
                 xla::ffi::Ffi::RegisterStaticHandler(
@@ -313,7 +558,7 @@ impl PjRtClient {
                 if (status.ok()) {
                     return std::shared_ptr(std::move(status.value()));
                 }else{
-                    *out_status = Status(status.status());
+                    *out_status = absl::Status(status.status());
                     return std::shared_ptr<PjRtClient>();
                 }
                 #else
@@ -346,19 +591,21 @@ impl PjRtClient {
         let prim_type = T::TY.primitive_type() as i32;
         let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
         let buffer = unsafe {
-            cpp!([self as "std::shared_ptr<PjRtClient>*", buf_ptr as "const uint8_t*", out_status as "Status*", dims_ptr as "const int64_t*", dims_len as "size_t", prim_type as "int32_t"] -> PjRtBuffer as "std::unique_ptr<PjRtBuffer>" {
+            cpp!([self as "std::shared_ptr<PjRtClient>*", buf_ptr as "const uint8_t*", out_status as "absl::Status*", dims_ptr as "const int64_t*", dims_len as "size_t", prim_type as "int32_t"] -> PjRtBuffer as "std::unique_ptr<PjRtBuffer>" {
                 auto client = *self;
                 auto device = client->devices()[0];
+                PjRtMemorySpace* memory_space = *device->default_memory_space();
                 auto status = client->BufferFromHostBuffer(
                     buf_ptr,
                     (PrimitiveType)prim_type,
                     absl::Span(dims_ptr, dims_len), {},
-                    PjRtClient::HostBufferSemantics::kImmutableOnlyDuringCall, []() {}, device
+                    PjRtClient::HostBufferSemantics::kImmutableOnlyDuringCall,
+                    nullptr, memory_space, nullptr
                 );
                 if (status.ok()) {
                     return std::unique_ptr(std::move(status.value()));
                 }else{
-                    *out_status = Status(status.status());
+                    *out_status = absl::Status(status.status());
                     return std::unique_ptr<PjRtBuffer>();
                 }
             })
@@ -394,19 +641,21 @@ impl PjRtClient {
         let prim_type = ty.primitive_type() as i32;
         let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
         let buffer = unsafe {
-            cpp!([self as "std::shared_ptr<PjRtClient>*", buf_ptr as "const uint8_t*", out_status as "Status*", dims_ptr as "const int64_t*", dims_len as "size_t", prim_type as "int32_t"] -> PjRtBuffer as "std::unique_ptr<PjRtBuffer>" {
+            cpp!([self as "std::shared_ptr<PjRtClient>*", buf_ptr as "const uint8_t*", out_status as "absl::Status*", dims_ptr as "const int64_t*", dims_len as "size_t", prim_type as "int32_t"] -> PjRtBuffer as "std::unique_ptr<PjRtBuffer>" {
                 auto client = *self;
                 auto device = client->devices()[0];
+                PjRtMemorySpace* memory_space = *device->default_memory_space();
                 auto status = client->BufferFromHostBuffer(
                     buf_ptr,
                     (PrimitiveType)prim_type,
                     absl::Span(dims_ptr, dims_len), {},
-                    PjRtClient::HostBufferSemantics::kImmutableOnlyDuringCall, []() {}, device
+                    PjRtClient::HostBufferSemantics::kImmutableOnlyDuringCall,
+                    nullptr, memory_space, nullptr
                 );
                 if (status.ok()) {
                     return std::unique_ptr(std::move(status.value()));
                 }else{
-                    *out_status = Status(status.status());
+                    *out_status = absl::Status(status.status());
                     return std::unique_ptr<PjRtBuffer>();
                 }
             })
@@ -425,14 +674,15 @@ impl PjRtClient {
     pub fn copy_literal(&self, literal: &Literal) -> Result<PjRtBuffer> {
         let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
         let buffer = unsafe {
-            cpp!([self as "std::shared_ptr<PjRtClient>*", literal as "const std::shared_ptr<Literal>*", out_status as "Status*"] -> PjRtBuffer as "std::unique_ptr<PjRtBuffer>" {
+            cpp!([self as "std::shared_ptr<PjRtClient>*", literal as "const std::shared_ptr<Literal>*", out_status as "absl::Status*"] -> PjRtBuffer as "std::unique_ptr<PjRtBuffer>" {
                 auto client = *self;
                 auto device = client->devices()[0];
-                auto status = client->BufferFromHostLiteral(*literal->get(), device);
+                PjRtMemorySpace* memory_space = *device->default_memory_space();
+                auto status = client->BufferFromHostLiteral(*literal->get(), memory_space);
                 if (status.ok()) {
                     return std::unique_ptr(std::move(status.value()));
                 }else{
-                    *out_status = Status(status.status());
+                    *out_status = absl::Status(status.status());
                     return std::unique_ptr<PjRtBuffer>();
                 }
             })
@@ -456,15 +706,15 @@ impl PjRtClient {
         let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
         let mut options = options.0;
         let exec = unsafe {
-            cpp!([self as "std::shared_ptr<PjRtClient>*", mut options as "CompileOptions", comp as "const XlaComputation*", out_status as "Status*"] -> PjRtLoadedExecutable as "std::shared_ptr<PjRtLoadedExecutable>" {
+            cpp!([self as "std::shared_ptr<PjRtClient>*", mut options as "CompileOptions", comp as "const XlaComputation*", out_status as "absl::Status*"] -> PjRtLoadedExecutable as "std::shared_ptr<PjRtLoadedExecutable>" {
                 auto client = *self;
                 auto thread_pool = std::make_unique<tsl::thread::ThreadPool>(tsl::Env::Default(), "", tsl::port::MaxParallelism());
                 options.executable_build_options.set_compile_thread_pool(thread_pool.get());
-                auto status = client->Compile(*comp, options);
+                auto status = client->CompileAndLoad(*comp, options);
                 if (status.ok()) {
                     return std::shared_ptr(std::move(status.value()));
                 }else{
-                    *out_status = Status(status.status());
+                    *out_status = absl::Status(status.status());
                     return std::shared_ptr<PjRtLoadedExecutable>();
                 }
             })
@@ -510,12 +760,12 @@ impl PjRtClient {
         let len = buffer.shape().size();
         let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
         let src: &[u8] = unsafe {
-            let src_ptr = cpp!([self as "std::shared_ptr<PjRtClient>*", buffer as "const std::unique_ptr<PjRtBuffer>*", out_status as "Status*"] -> *const u8 as "std::uintptr_t" {
+            let src_ptr = cpp!([self as "std::shared_ptr<PjRtClient>*", buffer as "const std::unique_ptr<PjRtBuffer>*", out_status as "absl::Status*"] -> *const u8 as "std::uintptr_t" {
                 auto status = (*self)->UnsafeBufferPointer(buffer->get());
                 if (status.ok()) {
                     return status.value();
                 } else {
-                    *out_status = Status(status.status());
+                    *out_status = absl::Status(status.status());
                     return 0;
                 }
             });
