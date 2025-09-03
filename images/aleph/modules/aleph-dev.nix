@@ -5,9 +5,13 @@
       version = "1.16.3";
       format = "wheel";
 
+      # src = pkgs.fetchurl {
+      #   url = "https://pypi.jetson-ai-lab.dev/jp5/cu114/+f/43e/f0cec5f026159/onnxruntime_gpu-1.16.3-cp311-cp311-linux_aarch64.whl";
+      #   sha256 = "43ef0cec5f026159306e69540138f457ecbc8eb0282d1f7166761e7fbc84288e";
+      # };
       src = pkgs.fetchurl {
-        url = "https://pypi.jetson-ai-lab.dev/jp5/cu114/+f/43e/f0cec5f026159/onnxruntime_gpu-1.16.3-cp311-cp311-linux_aarch64.whl";
-        sha256 = "43ef0cec5f026159306e69540138f457ecbc8eb0282d1f7166761e7fbc84288e";
+        url = "https://pypi.jetson-ai-lab.io/jp5/cu114/+f/38f/9120323ff84c2/onnxruntime_gpu-1.16.0-cp38-cp38-linux_aarch64.whl";
+        sha256 = "38f9120323ff84c264edf73eb41760aa71304c134c109d4fbf41090987b85d42";
       };
 
       propagatedBuildInputs = with ps; [
@@ -31,7 +35,7 @@
       tqdm
       matplotlib
       pycuda
-      (onnxruntime-gpu-wheel ps)
+      # (onnxruntime-gpu-wheel ps)
     ];
 in {
   nixpkgs.config = {
