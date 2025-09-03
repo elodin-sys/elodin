@@ -14,7 +14,7 @@ use std::{
     path::{Path, PathBuf},
     time,
 };
-use tracing::warn;
+use tracing::error;
 use zerocopy::{FromBytes, TryFromBytes};
 
 #[derive(Parser, Debug)]
