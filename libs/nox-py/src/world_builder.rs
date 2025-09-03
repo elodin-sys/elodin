@@ -7,7 +7,13 @@ use miette::miette;
 use nox_ecs::{ComponentSchema, IntoSystem, System as _, TimeStep, World, increment_sim_tick, nox};
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
 use pyo3::{IntoPyObjectExt, types::PyDict};
-use std::{collections::HashMap, iter, net::SocketAddr, path::PathBuf, time};
+use std::{
+    collections::HashMap,
+    iter,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    time,
+};
 use tracing::warn;
 use zerocopy::{FromBytes, TryFromBytes};
 
@@ -353,17 +359,31 @@ impl WorldBuilder {
         Ok(dict.into_py_any(py)?)
     }
 
-    #[pyo3(signature = (contents = None, path = None,))]
-    pub fn schematic(&mut self, mut contents: Option<String>, path: Option<String>) {
-        if let Some(path) = &path {
-            if contents.is_none() {
-                contents = std::fs::read_to_string(path)
-                    .inspect_err(|err| warn!(?err, "could not load path contents"))
-                    .ok();
+    /// Set the schematic to represent UI and visualization.
+    ///
+    /// If a `path` is given and the file exists, the file's contents will be
+    /// used as the schematic.
+    ///
+    /// In all other cases, `default_content` is used as the schematic.
+    ///
+    /// Primarily this affords the code a means of specifying a default
+    /// schematic and location for saving custom schematics. It is expected that
+    /// the user may make changes and save the schematic to the given path, but
+    /// this function itself does not write to the `path`.
+    #[pyo3(signature = (default_content = None, path = None,))]
+    pub fn schematic(&mut self, default_content: Option<String>, path: Option<String>) {
+        let file_contents = path.as_deref().and_then(|path| {
+            let path = Path::new(path);
+            if path.exists() {
+                std::fs::read_to_string(path)
+                    .inspect_err(|err| error!(?err, "could not read schematic file at {path:?}"))
+                    .ok()
+            } else {
+                None
             }
-        }
+        });
         self.world.metadata.schematic_path = path.map(PathBuf::from);
-        self.world.metadata.schematic = contents;
+        self.world.metadata.schematic = file_contents.or(default_content);
     }
 }
 
