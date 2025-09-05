@@ -678,24 +678,27 @@ impl LenPacket {
         self.inner[..4].copy_from_slice(&len.to_le_bytes());
     }
 
+    // N.B: repr(C) on Packet prevents us from deriving IntoBytes.
+    // This means we can't use `try_ref_from_bytes` and `try_mut_from_bytes`.
+
     #[inline]
-    pub fn as_packet(&self) -> &Packet {
+    pub fn as_packet_parts(&self) -> (&PacketHeader, &[u8]) {
         let len = self.pkt_len() as usize;
-        Packet::try_ref_from_bytes_with_elems(
-            &self.inner[4..],
-            len.saturating_sub(PACKET_HEADER_LEN),
-        )
-        .expect("len packet was not a valid `Packet`")
+        let bytes = &self.inner[4..PACKET_HEADER_LEN + len];
+        let (header_bytes, body) = bytes.split_at(PACKET_HEADER_LEN);
+        let header =
+            PacketHeader::try_ref_from_bytes(header_bytes).expect("len packet had invalid header");
+        (header, body)
     }
 
     #[inline]
-    pub fn as_mut_packet(&mut self) -> &mut Packet {
+    pub fn as_mut_packet_parts(&mut self) -> (&mut PacketHeader, &mut [u8]) {
         let len = self.pkt_len() as usize;
-        Packet::try_mut_from_bytes_with_elems(
-            &mut self.inner[4..],
-            len.saturating_sub(PACKET_HEADER_LEN),
-        )
-        .expect("len packet was not a valid `Packet`")
+        let bytes = &mut self.inner[4..PACKET_HEADER_LEN + len];
+        let (header_bytes, body) = bytes.split_at_mut(PACKET_HEADER_LEN);
+        let header =
+            PacketHeader::try_mut_from_bytes(header_bytes).expect("len packet had invalid header");
+        (header, body)
     }
 
     pub fn clear(&mut self) {
@@ -825,7 +828,7 @@ impl<B: IoBuf> MsgBuf<B> {
     }
 
     pub fn try_parse<'a, T: Msg + Deserialize<'a> + 'a>(&'a self) -> Option<Result<T, Error>> {
-        if T::ID == self.id {
+        if T::ID != self.id {
             return None;
         }
         Some(self.parse())

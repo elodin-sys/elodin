@@ -51,7 +51,7 @@ mod tests {
         }
 
         let q: Quaternion<f64, ArrayRepr> =
-            Quaternion::from_axis_angle(Vector::z_axis(), 3.14 / 4.0);
+            Quaternion::from_axis_angle(Vector::z_axis(), std::f64::consts::PI / 4.0);
         let dcm = test_triad_inner(q);
         approx::assert_relative_eq!(
             tensor![

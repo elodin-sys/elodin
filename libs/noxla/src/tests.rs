@@ -74,7 +74,7 @@ fn add_op() -> Result<()> {
     let sum = cst42 + cst43;
     let computation = sum.build()?;
     let result = client.compile_with_default_options(&computation)?;
-    let result = result.execute_buffers(&BufferArgsRef::default())?;
+    let result = result.execute_buffers(BufferArgsRef::default())?;
     let result = result[0].to_literal_sync()?;
     assert_eq!(result.element_count(), 2);
     assert_eq!(
@@ -95,7 +95,7 @@ fn copy_to_vec() -> Result<()> {
     let sum = cst42 + cst43;
     let computation = sum.build()?;
     let result = client.compile_with_default_options(&computation)?;
-    let result = result.execute_buffers(&BufferArgsRef::default())?;
+    let result = result.execute_buffers(BufferArgsRef::default())?;
     let result_literal = result[0].to_literal_sync()?;
     let result_vec = client.to_host_vec(&result[0])?;
     assert_eq!(result_literal.raw_buf(), &result_vec);

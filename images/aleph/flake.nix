@@ -92,11 +92,13 @@
         inherit system;
         modules = [
           module
-          ({...}: {
-            imports = [./modules/installer.nix];
-            aleph.sd.enable = true;
-            aleph.installer.system = baseNixosConfig.config.system.build.toplevel;
-          })
+          (
+            {...}: {
+              imports = [./modules/installer.nix];
+              aleph.sd.enable = true;
+              aleph.installer.system = baseNixosConfig.config.system.build.toplevel;
+            }
+          )
         ];
       };
   in
@@ -126,13 +128,13 @@
         default = nixpkgs.lib.nixosSystem {
           inherit system;
           modules =
-            builtins.attrValues baseModules
-            ++ builtins.attrValues fswModules
-            ++ builtins.attrValues devModules;
+            builtins.attrValues baseModules ++ builtins.attrValues fswModules ++ builtins.attrValues devModules;
         };
-        installer = installerSystem ({...}: {
-          imports = builtins.attrValues baseModules;
-        });
+        installer = installerSystem (
+          {...}: {
+            imports = builtins.attrValues baseModules;
+          }
+        );
         docs = nixpkgs.lib.nixosSystem {
           inherit system;
           modules =
@@ -141,10 +143,12 @@
               agenix.nixosModules.default
               ../../nix/modules/docs.nix
               ../../nix/modules/tunnel.nix
-              ({pkgs, ...}: {
-                services.nvpmodel.profileNumber = 1;
-                services.nvpmodel.configFile = "${pkgs.nvidia-jetpack.l4t-nvpmodel}/etc/nvpmodel/nvpmodel_p3767_0003.conf";
-              })
+              (
+                {pkgs, ...}: {
+                  services.nvpmodel.profileNumber = 1;
+                  services.nvpmodel.configFile = "${pkgs.nvidia-jetpack.l4t-nvpmodel}/etc/nvpmodel/nvpmodel_p3767_0003.conf";
+                }
+              )
             ];
         };
       };

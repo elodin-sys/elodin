@@ -4,46 +4,52 @@
   rustToolchain,
   ...
 }: {
-  c = (pkgs.mkShell.override {stdenv = pkgs.llvmPackages_19.libcxxStdenv;}) {
+  c = (pkgs.mkShell.override {stdenv = pkgs.llvmPackages_20.libcxxStdenv;}) {
     name = "elo-c-shell";
     buildInputs = [];
     doCheck = false;
   };
   rust = pkgs.mkShell {
     name = "elo-rust-shell";
-    buildInputs = with pkgs; [
-      buildkite-test-collector-rust
-      (rustToolchain pkgs)
-      pkg-config
-      python3
-      python3Packages.jax
-      python3Packages.jaxlib
-      python3Packages.typing-extensions
-      python3Packages.pytest
-      python3Packages.matplotlib
-      python3Packages.polars
-      openssl
-      clang
-      alsa-lib
-      alsa-oss
-      alsa-utils
-      vulkan-loader
-      wayland
-      gtk3
-      udev
-      libxkbcommon
-      fontconfig
-      maturin
-      cmake
-      openssl
-      libclang
-      gfortran
-      gfortran.cc.lib
-      ffmpeg-full
-      gst_all_1.gstreamer
-      gst_all_1.gst-plugins-base
-      gst_all_1.gst-plugins-good
-    ];
+    buildInputs = with pkgs;
+      [
+        buildkite-test-collector-rust
+        (rustToolchain pkgs)
+        cargo-nextest
+        pkg-config
+        python3
+        python3Packages.jax
+        python3Packages.jaxlib
+        python3Packages.typing-extensions
+        python3Packages.pytest
+        python3Packages.matplotlib
+        python3Packages.polars
+        openssl
+        clang
+        maturin
+        cmake
+        openssl
+        xz
+        libclang
+        gfortran
+        gfortran.cc.lib
+        ffmpeg-full
+        gst_all_1.gstreamer
+        gst_all_1.gst-plugins-base
+        gst_all_1.gst-plugins-good
+        flip-link
+      ]
+      ++ lib.optionals stdenv.isLinux [
+        alsa-lib
+        alsa-oss
+        alsa-utils
+        vulkan-loader
+        wayland
+        gtk3
+        udev
+        libxkbcommon
+        fontconfig
+      ];
     LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
     doCheck = false;
   };
@@ -58,7 +64,9 @@
       jq
       yq
       git-filter-repo
-      (google-cloud-sdk.withExtraComponents (with google-cloud-sdk.components; [gke-gcloud-auth-plugin]))
+      (google-cloud-sdk.withExtraComponents (
+        with google-cloud-sdk.components; [gke-gcloud-auth-plugin]
+      ))
       azure-cli
     ];
     doCheck = false;
@@ -69,7 +77,7 @@
       ruff
       python3Packages.pytest
       python3Packages.pytest-json-report
-      config.packages.elodin-py
+      config.packages.elodin-py.py
     ];
   };
 

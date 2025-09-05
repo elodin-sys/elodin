@@ -620,6 +620,8 @@ mod tests {
                 0.0,
                 1.0,
                 -0.41421356237309515,
+                // Clippy will want to replace this with std::f64::consts::SQRT_2.
+                // Ignore it or the test will fail!
                 1.414213562373095,
                 0.0
             ]

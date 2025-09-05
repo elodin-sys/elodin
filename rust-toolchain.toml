@@ -1,4 +1,5 @@
 [toolchain]
 channel = "1.85.0"
+# channel = "nightly"
 targets = [ "wasm32-unknown-unknown", "thumbv7em-none-eabihf" ]
 profile = "default"

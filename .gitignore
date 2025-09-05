@@ -24,3 +24,8 @@ out-with-envs.yaml
 .buildkite/pipeline.json
 
 __pycache__
+
+default.nix
+shell.nix
+
+*bck

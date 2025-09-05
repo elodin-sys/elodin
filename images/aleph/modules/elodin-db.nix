@@ -31,12 +31,15 @@ in {
       serviceConfig = {
         Type = "exec";
         User = "root";
-        ExecStart = "${elodin-db}/bin/elodin-db run [::]:2240 --http-addr [::]:2248 /db";
+        ExecStart = "${elodin-db.bin}/bin/elodin-db run [::]:2240 --http-addr [::]:2248 /db";
         KillSignal = "SIGINT";
         Environment = "RUST_LOG=info";
       };
     };
-    environment.systemPackages = [pkgs.elodin-db];
-    networking.firewall.allowedTCPPorts = lib.optionals cfg.openFirewall [2240 2248];
+    environment.systemPackages = [pkgs.elodin-db.bin];
+    networking.firewall.allowedTCPPorts = lib.optionals cfg.openFirewall [
+      2240
+      2248
+    ];
   };
 }
