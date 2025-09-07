@@ -25,4 +25,6 @@ Validated on M1 architecture, macOS 15.1.1 on 2025-08-26.
 ``` sh
 brew install gstreamer python pipx gfortran openblas uv
 pipx install jax
+
+just install
 ```
