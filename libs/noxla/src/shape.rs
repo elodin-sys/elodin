@@ -175,7 +175,7 @@ impl RawShape {
             PrimitiveType::Tuple => {
                 let count = unsafe {
                     cpp!([self as "const Shape*"] -> usize as "size_t" {
-                        return self->tuple_shapes_size();
+                        return self->tuple_shapes().size();
                     })
                 };
                 let shapes = (0..count)
@@ -192,7 +192,7 @@ impl RawShape {
             ty => {
                 let rank = unsafe {
                     cpp!([self as "const Shape*"] -> usize as "size_t" {
-                        return self->dimensions_size();
+                        return self->dimensions().size();
                     })
                 };
 

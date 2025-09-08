@@ -215,7 +215,7 @@ impl WorldBuilder {
                 }
                 py.allow_threads(|| {
                     stellarator::run(|| {
-                        let tmpfile = tempfile::tempdir().unwrap().into_path();
+                        let tmpfile = tempfile::tempdir().unwrap().keep();
                         nox_ecs::impeller2_server::Server::new(
                             elodin_db::Server::new(tmpfile.join("db"), addr).unwrap(),
                             exec,
@@ -294,7 +294,7 @@ impl WorldBuilder {
         }
         let mut exec = exec.compile(client.clone())?;
         let db_dir = tempfile::tempdir()?;
-        let db_dir = db_dir.into_path();
+        let db_dir = db_dir.keep();
         let db = elodin_db::DB::create(db_dir.join("db"))?;
         nox_ecs::impeller2_server::init_db(&db, &mut exec.world, Timestamp::now())?;
         Ok(Exec { exec, db })
@@ -413,8 +413,8 @@ impl WorldBuilder {
         self.world.set_globals();
 
         let world = std::mem::take(&mut self.world);
-        let xla_exec = increment_sim_tick.pipe(sys).compile(&world).unwrap();
-        let tick_exec = xla_exec.compile_hlo_module(py, &world).unwrap();
+        let xla_exec = increment_sim_tick.pipe(sys).compile(&world)?;
+        let tick_exec = xla_exec.compile_hlo_module(py, &world)?;
 
         let mut exec = nox_ecs::WorldExec::new(world, tick_exec, None);
         exec.profiler.build.observe(&mut start);
