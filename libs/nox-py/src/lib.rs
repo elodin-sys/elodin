@@ -8,6 +8,7 @@ use nox_ecs::{
     ErasedSystem,
     nox::{self, Noxpr},
 };
+
 use numpy::PyUntypedArray;
 use pyo3::exceptions::PyOSError;
 use pyo3::exceptions::PyValueError;

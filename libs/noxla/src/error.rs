@@ -2,7 +2,7 @@ use cpp::{cpp, cpp_class};
 use cxx::{CxxString, UniquePtr};
 
 cpp! {{
-    #include "xla/statusor.h"
+    #include "xla/tsl/platform/status.h"
     using namespace xla;
 }}
 
@@ -111,20 +111,20 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-cpp_class!(pub unsafe struct Status as "Status");
+cpp_class!(pub unsafe struct Status as "absl::Status");
 
 impl Status {
     pub fn ok() -> Self {
         unsafe {
-            cpp!([] -> Status as "Status" {
-                return Status();
+            cpp!([] -> Status as "absl::Status" {
+                return absl::Status();
             })
         }
     }
 
     pub fn is_ok(&self) -> bool {
         unsafe {
-            cpp!([self as "const Status*"] -> bool as "bool" {
+            cpp!([self as "const absl::Status*"] -> bool as "bool" {
                 return self->ok();
             })
         }
@@ -135,7 +135,7 @@ impl Status {
             Ok(())
         } else {
             let msg = unsafe {
-                cpp!([self as "Status*"] -> UniquePtr<CxxString> as "std::unique_ptr<std::string>" {
+                cpp!([self as "absl::Status*"] -> UniquePtr<CxxString> as "std::unique_ptr<std::string>" {
                     return std::make_unique<std::string>(std::string(self->message()));
                 })
             };
