@@ -10,6 +10,23 @@ use crate::{
     semi_implicit_euler_with_dt,
 };
 
+/// Run: clear_forces → effectors → calc_accel as a real system to **write** WorldAccel.
+/// Use this after an RK4 tick to materialize `world_accel` for inspection/asserts.
+pub fn materialize_world_accel<Sys, M, A, R>(
+    effectors: impl FnOnce() -> Sys,
+) -> Arc<dyn System<Arg = (), Ret = ()> + Send + Sync>
+where
+    M: 'static,
+    A: 'static,
+    R: 'static,
+    Sys: IntoSystem<M, A, R> + 'static,
+    <Sys as IntoSystem<M, A, R>>::System: Send + Sync,
+{
+    // Same pieces you already use inside six_dof
+    let sys = clear_forces.pipe(effectors()).pipe(calc_accel);
+    Arc::new(ErasedSystem::new(sys)) // erase to () -> () and run it as a pipeline tick
+}
+
 #[derive(Component, ReprMonad)]
 pub struct WorldVel<R: OwnedRepr = Op>(pub SpatialMotion<f64, R>);
 #[derive(Component, ReprMonad)]
@@ -136,6 +153,63 @@ pub struct Force<R: OwnedRepr = Op>(pub SpatialForce<f64, R>);
 #[derive(Clone, Component, ReprMonad)]
 pub struct Inertia<R: OwnedRepr = Op>(pub SpatialInertia<f64, R>);
 
+fn du_step(q: Query<(WorldVel, Force, Inertia, WorldPos)>) -> Query<DU> {
+    q.map(
+        |vel: WorldVel, force: Force, inertia: Inertia, pos: WorldPos| {
+            // Same accel calc you already use in calc_accel, but we also pass v through.
+            let qrot = pos.0.angular();
+            let body_force = qrot.inverse() * force.0;
+            let body_accel = body_force / inertia.0;
+            let world_accel = qrot * body_accel;
+
+            DU {
+                v: WorldVel(vel.0.clone()), // dx/dt = v
+                a: WorldAccel(world_accel), // dv/dt = a(x, v, force, inertia)
+            }
+        },
+    )
+    .unwrap()
+}
+
+/// x <- x + (v + 0.5*a)   (unit dt = 1).  Does NOT touch velocity.
+fn advance_pos_with_accel_unit_dt_sys(
+    q: Query<(WorldPos, WorldVel, WorldAccel)>,
+) -> Query<WorldPos> {
+    q.map(|p: WorldPos, v: WorldVel, a: WorldAccel| {
+        // uses your impls: (0.5 * a) : WorldAccel  and  v + WorldAccel : WorldVel
+        let v_eff = v + (0.5 * a);
+        // uses your impl: WorldPos + WorldVel : WorldPos
+        p + v_eff
+    })
+    .unwrap()
+}
+
+/// v <- v + a   (unit dt = 1).  Does NOT touch position.
+fn apply_accel_to_vel_unit_dt_sys(q: Query<(WorldVel, WorldAccel)>) -> Query<WorldVel> {
+    q.map(|v: WorldVel, a: WorldAccel| WorldVel(v.0 + a.0))
+        .unwrap()
+}
+
+/// clear_forces → effectors → calc_accel → advance_pos(dt=1) → v += a (dt=1)
+/// Use this AFTER RK4 so the world reflects the frame's accel/pos/vel.
+pub fn materialize_accel_and_step_state_unit_dt<Sys, M, A, R>(
+    effectors: impl FnOnce() -> Sys,
+) -> Arc<dyn System<Arg = (), Ret = ()> + Send + Sync>
+where
+    M: 'static,
+    A: 'static,
+    R: 'static,
+    Sys: IntoSystem<M, A, R> + 'static,
+    <Sys as IntoSystem<M, A, R>>::System: Send + Sync,
+{
+    let sys = clear_forces
+        .pipe(effectors()) // write Force
+        .pipe(calc_accel) // write WorldAccel
+        .pipe(advance_pos_with_accel_unit_dt_sys) // x += v + 0.5*a  (dt=1)
+        .pipe(apply_accel_to_vel_unit_dt_sys); // v += a          (dt=1)
+    Arc::new(ErasedSystem::new(sys))
+}
+
 fn calc_accel(q: Query<(Force, Inertia, WorldPos)>) -> Query<WorldAccel> {
     q.map(|force: Force, inertia: Inertia, pos: WorldPos| {
         let q = pos.0.angular();
@@ -172,11 +246,13 @@ where
     Sys: IntoSystem<M, A, R> + 'static,
     <Sys as IntoSystem<M, A, R>>::System: Send + Sync,
 {
-    let sys = clear_forces.pipe(effectors()).pipe(calc_accel);
-    //let sys = clear_forces.pipe(calc_accel);
     match integrator {
-        Integrator::Rk4 => Arc::new(sys.rk4_with_dt::<U, DU>(time_step)),
+        Integrator::Rk4 => {
+            let sys_du = clear_forces.pipe(effectors()).pipe(du_step);
+            Arc::new(sys_du.rk4_with_dt::<U, DU>(time_step))
+        }
         Integrator::SemiImplicit => {
+            let sys = clear_forces.pipe(effectors()).pipe(calc_accel);
             let integrate =
                 semi_implicit_euler_with_dt::<WorldPos, WorldVel, WorldAccel>(time_step);
             Arc::new(ErasedSystem::new(sys.pipe(integrate)))
@@ -195,11 +271,13 @@ where
     Sys: IntoSystem<M, A, R> + 'static,
     <Sys as IntoSystem<M, A, R>>::System: Send + Sync,
 {
-    let sys = clear_forces.pipe(effectors()).pipe(calc_accel);
-    //let sys = clear_forces.pipe(calc_accel);
     match integrator {
-        Integrator::Rk4 => Arc::new(sys.rk4::<U, DU>()),
+        Integrator::Rk4 => {
+            let sys_du = clear_forces.pipe(effectors()).pipe(du_step);
+            Arc::new(sys_du.rk4::<U, DU>())
+        }
         Integrator::SemiImplicit => {
+            let sys = clear_forces.pipe(effectors()).pipe(calc_accel);
             let integrate = semi_implicit_euler::<WorldPos, WorldVel, WorldAccel>();
             Arc::new(ErasedSystem::new(sys.pipe(integrate)))
         }
@@ -332,13 +410,17 @@ mod tests {
             .builder()
             .sim_time_step(Duration::from_secs_f64(time_step))
             .tick_pipeline(six_dof(|| constant_torque, Integrator::Rk4))
+            .tick_pipeline(materialize_world_accel(|| constant_torque))
             .build()
             .unwrap()
             .compile(client.clone())
             .unwrap();
+
         for _ in 0..120 {
             exec.run().unwrap();
         }
+
+        /*
         let actual = exec
             .world
             .column_by_id(WorldAccel::<Op>::COMPONENT_ID)
@@ -346,6 +428,20 @@ mod tests {
             .typed_buf::<[f64; 6]>()
             .unwrap()[0];
         approx::assert_relative_eq!(&actual[..3], &angular_accel[..], epsilon = 1e-5)
+        */
+        let col = exec
+            .world
+            .column_by_id(WorldAccel::<Op>::COMPONENT_ID)
+            .unwrap();
+
+        // read it as a SpatialMotion and take the angular part
+        let (_, acc) = col
+            .typed_iter::<SpatialMotion<f64, ArrayRepr>>()
+            .next()
+            .unwrap();
+
+        let actual = acc.angular().into_buf(); // [f64; 3]
+        approx::assert_relative_eq!(&actual[..], &angular_accel[..], epsilon = 1e-5);
     }
 
     #[test]
@@ -419,9 +515,8 @@ mod tests {
         fn constant_force(query: ComponentArray<Force>) -> ComponentArray<Force> {
             query
                 .map(|_: Force| -> Force {
-                    Force(SpatialForce {
-                        inner: tensor![0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
-                    })
+                    // SpatialForce is [τ, F]; from_linear puts +X linear force in the right slots.
+                    Force(SpatialForce::from_linear(tensor![1.0, 0.0, 0.0]))
                 })
                 .unwrap()
         }
@@ -430,8 +525,12 @@ mod tests {
         let world = world
             .builder()
             .sim_time_step(Duration::from_secs_f64(time_step))
+            // RK4 integrates state (pos orientation etc.)
             .tick_pipeline(six_dof(|| constant_force, Integrator::Rk4))
+            // Persist accel and bump velocity once by a*dt (dt = 1 here)
+            .tick_pipeline(materialize_accel_and_step_state_unit_dt(|| constant_force))
             .run();
+
         let column = world.column_by_id(ComponentId::new("world_pos")).unwrap();
         let (_, pos) = column
             .typed_iter::<SpatialTransform<f64, ArrayRepr>>()
