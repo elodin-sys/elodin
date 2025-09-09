@@ -22,7 +22,21 @@ This monorepo contains the source code for all Elodin simulation and flight soft
 
 Validated on M1 architecture, macOS 15.1.1 on 2025-08-26.
 
+### Build & Run
+```sh
+just install
+```
+
+#### Elodin App & SDK Development
+(See [apps/elodin/README.md](apps/elodin/README.md))
 ``` sh
-brew install gstreamer python pipx gfortran openblas uv
-pipx install jax
+brew install gstreamer python gfortran openblas uv
+
+cd libs/nox-py
+uv venv --python 3.12
+source .venv/bin/activate
+uvx maturin develop --uv
+uv sync
+
+cargo run --manifest-path=../../apps/elodin/Cargo.toml editor examples/three-body.py
 ```
