@@ -1,6 +1,12 @@
 # Changelog
 
 ## unreleased
+
+## v0.15
+
+### v0.15.0
+- **(breaking)** Handle UI and object visualization using new schematics format. See [migration guide](/reference/migration/to-0-15).
+- **(fix)** Stop endlessly creating entities for packet handling.
 - **(breaking)** Replace `set_component_name` with `set_component_metadata` in C++ API to support setting element names.
 - **(breaking)** `exec.history()` now expects a component name, or a list of component names. If multiple component names are provided, they will be joined on the "time" column.
 - **(fix)** Fix bug where component values for tick 0 (initial component values before simulating) and tick 1 would have the same timestamps.
