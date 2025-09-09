@@ -170,6 +170,9 @@ w = el.World()
 ### Hierarchical Components & Archetypes
 Components are organized hierarchically using dot notation. When you spawn an archetype with a name, that name becomes the root of the component tree:
 ```python
+import elodin as el
+import jax.numpy as jnp
+
 @el.dataclass
 class Satellite(el.Archetype):
     world_pos: el.WorldPos
@@ -178,8 +181,8 @@ class Satellite(el.Archetype):
     
 # Creates components: "satellite.world_pos", "satellite.world_vel", "satellite.inertia"
 w.spawn(Satellite(
-    world_pos=el.SpatialTransform(linear=np.array([7000e3, 0, 0])),
-    world_vel=el.SpatialMotion(linear=np.array([0, 7.5e3, 0])),
+    world_pos=el.SpatialTransform(linear=jnp.array([7000e3, 0, 0])),
+    world_vel=el.SpatialMotion(linear=jnp.array([0, 7.5e3, 0])),
     inertia=el.SpatialInertia(mass=500.0)
 ), name="satellite")
 ```
