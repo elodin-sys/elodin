@@ -16,7 +16,16 @@ This monorepo contains the source code for all Elodin simulation and flight soft
   - [`nox-py`](./libs/nox-py): Python version of `nox-ecs`, that works with JAX.
 - [Editor](./apps/elodin): 3D viewer and graphing tool for visualizing both simulation and flight data.
 
+<h2 align="center">
+  <a href="https://www.elodin.systems/">
+    <img alt="elodin-stack" src="assets/elodin-stack.png">
+  </a>
+</h2>
+
 ## Dependencies
+
+Rust 1.85.0
+Preference for Arm based Macs
 
 ### macOS
 
