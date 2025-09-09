@@ -67,8 +67,8 @@ impl From<stellarator::Error> for Error {
 impl Error {
     pub fn is_stream_closed(&self) -> bool {
         match self {
-            Error::Stellar(stellarator::Error::EOF) => true,
-            Error::Io(err)
+            Self::Stellar(stellarator::Error::EOF) => true,
+            Self::Io(err)
                 if err.kind() == io::ErrorKind::BrokenPipe
                     || err.kind() == io::ErrorKind::ConnectionReset =>
             {
@@ -81,7 +81,7 @@ impl Error {
 
 impl From<Error> for ErrorResponse {
     fn from(val: Error) -> Self {
-        ErrorResponse {
+        Self {
             description: val.to_string(),
         }
     }

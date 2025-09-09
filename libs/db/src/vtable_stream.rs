@@ -388,9 +388,9 @@ impl StreamStage {
     pub fn as_component(&self) -> Option<&Component> {
         // returns optional because future stages may not have a component
         match self {
-            StreamStage::RealTime(real_time_stage) => Some(&real_time_stage.component),
-            StreamStage::FixedRate(fixed_rate_stage) => Some(&fixed_rate_stage.component),
-            StreamStage::Mean(_) => None,
+            Self::RealTime(real_time_stage) => Some(&real_time_stage.component),
+            Self::FixedRate(fixed_rate_stage) => Some(&fixed_rate_stage.component),
+            Self::Mean(_) => None,
         }
     }
 
@@ -401,13 +401,13 @@ impl StreamStage {
         prim_type: PrimType,
     ) -> Result<bool, Error> {
         match self {
-            StreamStage::RealTime(real_time_stage) => {
+            Self::RealTime(real_time_stage) => {
                 real_time_stage.next(shard, timestamp_shard).await
             }
-            StreamStage::FixedRate(fixed_rate_stage) => {
+            Self::FixedRate(fixed_rate_stage) => {
                 fixed_rate_stage.next(shard, timestamp_shard).await
             }
-            StreamStage::Mean(mean_stage) => {
+            Self::Mean(mean_stage) => {
                 mean_stage.next(shard, timestamp_shard, prim_type).await
             }
         }

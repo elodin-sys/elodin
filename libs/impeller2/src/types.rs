@@ -139,49 +139,49 @@ impl PrimType {
 
     pub const fn alignment(&self) -> usize {
         match self {
-            PrimType::U8 => mem::align_of::<u8>(),
-            PrimType::U16 => mem::align_of::<u16>(),
-            PrimType::U32 => mem::align_of::<u32>(),
-            PrimType::U64 => mem::align_of::<u64>(),
-            PrimType::I8 => mem::align_of::<i8>(),
-            PrimType::I16 => mem::align_of::<i16>(),
-            PrimType::I32 => mem::align_of::<i32>(),
-            PrimType::I64 => mem::align_of::<i64>(),
-            PrimType::Bool => mem::align_of::<bool>(),
-            PrimType::F32 => mem::align_of::<f32>(),
-            PrimType::F64 => mem::align_of::<f64>(),
+            Self::U8 => mem::align_of::<u8>(),
+            Self::U16 => mem::align_of::<u16>(),
+            Self::U32 => mem::align_of::<u32>(),
+            Self::U64 => mem::align_of::<u64>(),
+            Self::I8 => mem::align_of::<i8>(),
+            Self::I16 => mem::align_of::<i16>(),
+            Self::I32 => mem::align_of::<i32>(),
+            Self::I64 => mem::align_of::<i64>(),
+            Self::Bool => mem::align_of::<bool>(),
+            Self::F32 => mem::align_of::<f32>(),
+            Self::F64 => mem::align_of::<f64>(),
         }
     }
 
     pub const fn size(&self) -> usize {
         match self {
-            PrimType::U8 => mem::size_of::<u8>(),
-            PrimType::U16 => mem::size_of::<u16>(),
-            PrimType::U32 => mem::size_of::<u32>(),
-            PrimType::U64 => mem::size_of::<u64>(),
-            PrimType::I8 => mem::size_of::<i8>(),
-            PrimType::I16 => mem::size_of::<i16>(),
-            PrimType::I32 => mem::size_of::<i32>(),
-            PrimType::I64 => mem::size_of::<i64>(),
-            PrimType::Bool => mem::size_of::<bool>(),
-            PrimType::F32 => mem::size_of::<f32>(),
-            PrimType::F64 => mem::size_of::<f64>(),
+            Self::U8 => mem::size_of::<u8>(),
+            Self::U16 => mem::size_of::<u16>(),
+            Self::U32 => mem::size_of::<u32>(),
+            Self::U64 => mem::size_of::<u64>(),
+            Self::I8 => mem::size_of::<i8>(),
+            Self::I16 => mem::size_of::<i16>(),
+            Self::I32 => mem::size_of::<i32>(),
+            Self::I64 => mem::size_of::<i64>(),
+            Self::Bool => mem::size_of::<bool>(),
+            Self::F32 => mem::size_of::<f32>(),
+            Self::F64 => mem::size_of::<f64>(),
         }
     }
 
     pub const fn as_str(self) -> &'static str {
         match self {
-            PrimType::U8 => "u8",
-            PrimType::U16 => "u16",
-            PrimType::U32 => "u32",
-            PrimType::U64 => "u64",
-            PrimType::I8 => "i8",
-            PrimType::I16 => "i16",
-            PrimType::I32 => "i32",
-            PrimType::I64 => "i64",
-            PrimType::Bool => "bool",
-            PrimType::F32 => "f32",
-            PrimType::F64 => "f64",
+            Self::U8 => "u8",
+            Self::U16 => "u16",
+            Self::U32 => "u32",
+            Self::U64 => "u64",
+            Self::I8 => "i8",
+            Self::I16 => "i16",
+            Self::I32 => "i32",
+            Self::I64 => "i64",
+            Self::Bool => "bool",
+            Self::F32 => "f32",
+            Self::F64 => "f64",
         }
     }
 }
@@ -189,17 +189,17 @@ impl PrimType {
 impl core::fmt::Display for PrimType {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let s = match self {
-            PrimType::U8 => "u8",
-            PrimType::U16 => "u16",
-            PrimType::U32 => "u32",
-            PrimType::U64 => "u64",
-            PrimType::I8 => "i8",
-            PrimType::I16 => "i16",
-            PrimType::I32 => "i32",
-            PrimType::I64 => "i64",
-            PrimType::Bool => "bool",
-            PrimType::F32 => "f32",
-            PrimType::F64 => "f64",
+            Self::U8 => "u8",
+            Self::U16 => "u16",
+            Self::U32 => "u32",
+            Self::U64 => "u64",
+            Self::I8 => "i8",
+            Self::I16 => "i16",
+            Self::I32 => "i32",
+            Self::I64 => "i64",
+            Self::Bool => "bool",
+            Self::F32 => "f32",
+            Self::F64 => "f64",
         };
         core::fmt::Display::fmt(s, f)
     }
@@ -251,47 +251,47 @@ impl<'a> From<ComponentView<'a>> for [f32; 3] {
 impl core::fmt::Display for ComponentView<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            ComponentView::U8(array) => {
+            Self::U8(array) => {
                 f.write_str("u8")?;
                 core::fmt::Display::fmt(array, f)
             }
-            ComponentView::U16(array) => {
+            Self::U16(array) => {
                 f.write_str("u16")?;
                 core::fmt::Display::fmt(array, f)
             }
-            ComponentView::U32(array) => {
+            Self::U32(array) => {
                 f.write_str("u32")?;
                 core::fmt::Display::fmt(array, f)
             }
-            ComponentView::U64(array) => {
+            Self::U64(array) => {
                 f.write_str("u64")?;
                 core::fmt::Display::fmt(array, f)
             }
-            ComponentView::I8(array) => {
+            Self::I8(array) => {
                 f.write_str("i8")?;
                 core::fmt::Display::fmt(array, f)
             }
-            ComponentView::I16(array) => {
+            Self::I16(array) => {
                 f.write_str("i16")?;
                 core::fmt::Display::fmt(array, f)
             }
-            ComponentView::I32(array) => {
+            Self::I32(array) => {
                 f.write_str("i32")?;
                 core::fmt::Display::fmt(array, f)
             }
-            ComponentView::I64(array) => {
+            Self::I64(array) => {
                 f.write_str("i64")?;
                 core::fmt::Display::fmt(array, f)
             }
-            ComponentView::Bool(array) => {
+            Self::Bool(array) => {
                 f.write_str("bool")?;
                 core::fmt::Display::fmt(array, f)
             }
-            ComponentView::F32(array) => {
+            Self::F32(array) => {
                 f.write_str("f32")?;
                 core::fmt::Display::fmt(array, f)
             }
-            ComponentView::F64(array) => {
+            Self::F64(array) => {
                 f.write_str("f64")?;
                 core::fmt::Display::fmt(array, f)
             }
@@ -407,19 +407,19 @@ impl<'a> ComponentView<'a> {
     #[cfg(feature = "std")]
     pub fn iter<'i>(&'i self) -> Box<dyn Iterator<Item = ElementValue> + 'i> {
         match self {
-            ComponentView::U8(u8) => Box::new(u8.buf().iter().map(|&x| ElementValue::U8(x))),
-            ComponentView::U16(u16) => Box::new(u16.buf().iter().map(|&x| ElementValue::U16(x))),
-            ComponentView::U32(u32) => Box::new(u32.buf().iter().map(|&x| ElementValue::U32(x))),
-            ComponentView::U64(u64) => Box::new(u64.buf().iter().map(|&x| ElementValue::U64(x))),
-            ComponentView::I8(i8) => Box::new(i8.buf().iter().map(|&x| ElementValue::I8(x))),
-            ComponentView::I16(i16) => Box::new(i16.buf().iter().map(|&x| ElementValue::I16(x))),
-            ComponentView::I32(i32) => Box::new(i32.buf().iter().map(|&x| ElementValue::I32(x))),
-            ComponentView::I64(i64) => Box::new(i64.buf().iter().map(|&x| ElementValue::I64(x))),
-            ComponentView::Bool(bool) => {
+            Self::U8(u8) => Box::new(u8.buf().iter().map(|&x| ElementValue::U8(x))),
+            Self::U16(u16) => Box::new(u16.buf().iter().map(|&x| ElementValue::U16(x))),
+            Self::U32(u32) => Box::new(u32.buf().iter().map(|&x| ElementValue::U32(x))),
+            Self::U64(u64) => Box::new(u64.buf().iter().map(|&x| ElementValue::U64(x))),
+            Self::I8(i8) => Box::new(i8.buf().iter().map(|&x| ElementValue::I8(x))),
+            Self::I16(i16) => Box::new(i16.buf().iter().map(|&x| ElementValue::I16(x))),
+            Self::I32(i32) => Box::new(i32.buf().iter().map(|&x| ElementValue::I32(x))),
+            Self::I64(i64) => Box::new(i64.buf().iter().map(|&x| ElementValue::I64(x))),
+            Self::Bool(bool) => {
                 Box::new(bool.buf().iter().map(|&x| ElementValue::Bool(x)))
             }
-            ComponentView::F32(f32) => Box::new(f32.buf().iter().map(|&x| ElementValue::F32(x))),
-            ComponentView::F64(f64) => Box::new(f64.buf().iter().map(|&x| ElementValue::F64(x))),
+            Self::F32(f32) => Box::new(f32.buf().iter().map(|&x| ElementValue::F32(x))),
+            Self::F64(f64) => Box::new(f64.buf().iter().map(|&x| ElementValue::F64(x))),
         }
     }
 
@@ -785,9 +785,9 @@ impl<B: IoBuf> OwnedPacket<B> {
 
     pub fn req_id(&self) -> RequestId {
         match self {
-            OwnedPacket::Msg(msg_buf) => msg_buf.req_id,
-            OwnedPacket::Table(table) => table.req_id,
-            OwnedPacket::TimeSeries(time_series) => time_series.req_id,
+            Self::Msg(msg_buf) => msg_buf.req_id,
+            Self::Table(table) => table.req_id,
+            Self::TimeSeries(time_series) => time_series.req_id,
         }
     }
 }

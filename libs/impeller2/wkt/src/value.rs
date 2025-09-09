@@ -304,37 +304,37 @@ impl ComponentValue {
 
     pub fn iter<'i>(&'i self) -> Box<dyn Iterator<Item = ElementValue> + 'i> {
         match self {
-            ComponentValue::U8(u8) => {
+            Self::U8(u8) => {
                 Box::new(u8.buf.as_buf().iter().map(|&x| ElementValue::U8(x)))
             }
-            ComponentValue::U16(u16) => {
+            Self::U16(u16) => {
                 Box::new(u16.buf.as_buf().iter().map(|&x| ElementValue::U16(x)))
             }
-            ComponentValue::U32(u32) => {
+            Self::U32(u32) => {
                 Box::new(u32.buf.as_buf().iter().map(|&x| ElementValue::U32(x)))
             }
-            ComponentValue::U64(u64) => {
+            Self::U64(u64) => {
                 Box::new(u64.buf.as_buf().iter().map(|&x| ElementValue::U64(x)))
             }
-            ComponentValue::I8(i8) => {
+            Self::I8(i8) => {
                 Box::new(i8.buf.as_buf().iter().map(|&x| ElementValue::I8(x)))
             }
-            ComponentValue::I16(i16) => {
+            Self::I16(i16) => {
                 Box::new(i16.buf.as_buf().iter().map(|&x| ElementValue::I16(x)))
             }
-            ComponentValue::I32(i32) => {
+            Self::I32(i32) => {
                 Box::new(i32.buf.as_buf().iter().map(|&x| ElementValue::I32(x)))
             }
-            ComponentValue::I64(i64) => {
+            Self::I64(i64) => {
                 Box::new(i64.buf.as_buf().iter().map(|&x| ElementValue::I64(x)))
             }
-            ComponentValue::Bool(bool) => {
+            Self::Bool(bool) => {
                 Box::new(bool.buf.as_buf().iter().map(|&x| ElementValue::Bool(x)))
             }
-            ComponentValue::F32(f32) => {
+            Self::F32(f32) => {
                 Box::new(f32.buf.as_buf().iter().map(|&x| ElementValue::F32(x)))
             }
-            ComponentValue::F64(f64) => {
+            Self::F64(f64) => {
                 Box::new(f64.buf.as_buf().iter().map(|&x| ElementValue::F64(x)))
             }
         }
@@ -342,49 +342,49 @@ impl ComponentValue {
 
     pub fn get(&self, i: usize) -> Option<ElementValue> {
         match self {
-            ComponentValue::U8(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::U8(x)),
-            ComponentValue::U16(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::U16(x)),
-            ComponentValue::U32(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::U32(x)),
-            ComponentValue::U64(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::U64(x)),
-            ComponentValue::I8(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::I8(x)),
-            ComponentValue::I16(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::I16(x)),
-            ComponentValue::I32(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::I32(x)),
-            ComponentValue::I64(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::I64(x)),
-            ComponentValue::Bool(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::Bool(x)),
-            ComponentValue::F32(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::F32(x)),
-            ComponentValue::F64(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::F64(x)),
+            Self::U8(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::U8(x)),
+            Self::U16(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::U16(x)),
+            Self::U32(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::U32(x)),
+            Self::U64(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::U64(x)),
+            Self::I8(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::I8(x)),
+            Self::I16(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::I16(x)),
+            Self::I32(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::I32(x)),
+            Self::I64(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::I64(x)),
+            Self::Bool(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::Bool(x)),
+            Self::F32(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::F32(x)),
+            Self::F64(x) => x.buf.as_buf().get(i).map(|&x| ElementValue::F64(x)),
         }
     }
 
     pub fn prim_type(&self) -> PrimType {
         match self {
-            ComponentValue::U8(_) => PrimType::U8,
-            ComponentValue::U16(_) => PrimType::U16,
-            ComponentValue::U32(_) => PrimType::U32,
-            ComponentValue::U64(_) => PrimType::U64,
-            ComponentValue::I8(_) => PrimType::I8,
-            ComponentValue::I16(_) => PrimType::I16,
-            ComponentValue::I32(_) => PrimType::I32,
-            ComponentValue::I64(_) => PrimType::I64,
-            ComponentValue::Bool(_) => PrimType::Bool,
-            ComponentValue::F32(_) => PrimType::F32,
-            ComponentValue::F64(_) => PrimType::F64,
+            Self::U8(_) => PrimType::U8,
+            Self::U16(_) => PrimType::U16,
+            Self::U32(_) => PrimType::U32,
+            Self::U64(_) => PrimType::U64,
+            Self::I8(_) => PrimType::I8,
+            Self::I16(_) => PrimType::I16,
+            Self::I32(_) => PrimType::I32,
+            Self::I64(_) => PrimType::I64,
+            Self::Bool(_) => PrimType::Bool,
+            Self::F32(_) => PrimType::F32,
+            Self::F64(_) => PrimType::F64,
         }
     }
 
     pub fn as_bytes(&self) -> &[u8] {
         match self {
-            ComponentValue::U8(x) => x.buf.as_buf().as_bytes(),
-            ComponentValue::U16(x) => x.buf.as_buf().as_bytes(),
-            ComponentValue::U32(x) => x.buf.as_buf().as_bytes(),
-            ComponentValue::U64(x) => x.buf.as_buf().as_bytes(),
-            ComponentValue::I8(x) => x.buf.as_buf().as_bytes(),
-            ComponentValue::I16(x) => x.buf.as_buf().as_bytes(),
-            ComponentValue::I32(x) => x.buf.as_buf().as_bytes(),
-            ComponentValue::I64(x) => x.buf.as_buf().as_bytes(),
-            ComponentValue::Bool(x) => x.buf.as_buf().as_bytes(),
-            ComponentValue::F32(x) => x.buf.as_buf().as_bytes(),
-            ComponentValue::F64(x) => x.buf.as_buf().as_bytes(),
+            Self::U8(x) => x.buf.as_buf().as_bytes(),
+            Self::U16(x) => x.buf.as_buf().as_bytes(),
+            Self::U32(x) => x.buf.as_buf().as_bytes(),
+            Self::U64(x) => x.buf.as_buf().as_bytes(),
+            Self::I8(x) => x.buf.as_buf().as_bytes(),
+            Self::I16(x) => x.buf.as_buf().as_bytes(),
+            Self::I32(x) => x.buf.as_buf().as_bytes(),
+            Self::I64(x) => x.buf.as_buf().as_bytes(),
+            Self::Bool(x) => x.buf.as_buf().as_bytes(),
+            Self::F32(x) => x.buf.as_buf().as_bytes(),
+            Self::F64(x) => x.buf.as_buf().as_bytes(),
         }
     }
 }

@@ -109,8 +109,8 @@ pub enum NoxprTy {
 impl NoxprTy {
     fn pretty_print(&self, writer: &mut impl std::fmt::Write) -> std::fmt::Result {
         match self {
-            NoxprTy::ArrayTy(a) => a.pretty_print(writer),
-            NoxprTy::Tuple(t) => {
+            Self::ArrayTy(a) => a.pretty_print(writer),
+            Self::Tuple(t) => {
                 write!(writer, "tuple(")?;
                 for (i, ty) in t.iter().enumerate() {
                     if i != 0 {

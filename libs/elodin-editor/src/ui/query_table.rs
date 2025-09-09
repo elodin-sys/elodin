@@ -44,7 +44,7 @@ pub enum QueryTableState {
 impl QueryTableState {
     pub fn push_result(&mut self, batch: RecordBatch) {
         match self {
-            QueryTableState::Results(record_batches) => {
+            Self::Results(record_batches) => {
                 record_batches.push(batch);
             }
             other => {

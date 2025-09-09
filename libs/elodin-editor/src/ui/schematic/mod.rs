@@ -188,7 +188,7 @@ pub trait EqlExt {
 impl EqlExt for eql::Expr {
     fn to_graph_components(&self) -> Vec<(ComponentPath, usize)> {
         match self {
-            eql::Expr::ComponentPart(component_part) => {
+            Self::ComponentPart(component_part) => {
                 let Some(component) = &component_part.component else {
                     return vec![];
                 };
@@ -196,13 +196,13 @@ impl EqlExt for eql::Expr {
                     .map(|i| (ComponentPath::from_name(&component_part.name), i))
                     .collect()
             }
-            eql::Expr::ArrayAccess(expr, i) => {
+            Self::ArrayAccess(expr, i) => {
                 let eql::Expr::ComponentPart(component_part) = &**expr else {
                     return vec![];
                 };
                 vec![(ComponentPath::from_name(&component_part.name), *i)]
             }
-            eql::Expr::Tuple(exprs) => exprs
+            Self::Tuple(exprs) => exprs
                 .iter()
                 .flat_map(|expr| expr.to_graph_components().into_iter())
                 .collect(),

@@ -43,10 +43,10 @@ pub enum BinaryOp {
 impl BinaryOp {
     pub fn to_str(&self) -> &'static str {
         match self {
-            BinaryOp::Add => "+",
-            BinaryOp::Sub => "-",
-            BinaryOp::Mul => "*",
-            BinaryOp::Div => "/",
+            Self::Add => "+",
+            Self::Sub => "-",
+            Self::Mul => "*",
+            Self::Div => "/",
         }
     }
 }
@@ -120,27 +120,27 @@ pub enum Expr {
 impl Expr {
     fn to_field(&self) -> Result<String, Error> {
         match self {
-            Expr::ComponentPart(component) => Ok(component.name.replace(".", "_")),
+            Self::ComponentPart(component) => Ok(component.name.replace(".", "_")),
 
-            Expr::Time(_) => Ok("time".to_string()),
-            Expr::Fft(e) => Ok(format!("fft({})", e.to_field()?)),
-            Expr::FftFreq(e) => Ok(format!("fftfreq({})", e.to_field()?)),
-            Expr::BinaryOp(left, right, op) => Ok(format!(
+            Self::Time(_) => Ok("time".to_string()),
+            Self::Fft(e) => Ok(format!("fft({})", e.to_field()?)),
+            Self::FftFreq(e) => Ok(format!("fftfreq({})", e.to_field()?)),
+            Self::BinaryOp(left, right, op) => Ok(format!(
                 "({} {} {})",
                 left.to_field()?,
                 op.to_str(),
                 right.to_field()?
             )),
 
-            Expr::ArrayAccess(inner_expr, index) => match inner_expr.as_ref() {
-                Expr::ComponentPart(part) if part.component.is_some() => {
+            Self::ArrayAccess(inner_expr, index) => match inner_expr.as_ref() {
+                Self::ComponentPart(part) if part.component.is_some() => {
                     Ok(format!("{}[{}]", part.name.replace(".", "_"), index + 1))
                 }
                 _ => Err(Error::InvalidFieldAccess(
                     "array access on non-component".to_string(),
                 )),
             },
-            Expr::FloatLiteral(f) => Ok(format!("{}", f)),
+            Self::FloatLiteral(f) => Ok(format!("{}", f)),
 
             expr => Err(Error::InvalidFieldAccess(format!(
                 "unsupported expression type for field {expr:?}"

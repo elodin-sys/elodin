@@ -230,8 +230,8 @@ impl<'a> RealizedOp<'a> {
     /// Returns the operation as a byte slice if it contains data
     pub fn as_slice(&self) -> Option<&'a [u8]> {
         match self {
-            RealizedOp::Data(data) => Some(data),
-            RealizedOp::Table(table) => table.slice,
+            Self::Data(data) => Some(data),
+            Self::Table(table) => table.slice,
             _ => None,
         }
     }
@@ -252,7 +252,7 @@ impl<'a> RealizedOp<'a> {
     /// Returns a reference to the realized timestamp if this operation is a timestamp
     pub fn as_timestamp(&self) -> Option<&RealizedTimestamp> {
         match self {
-            RealizedOp::Timestamp(timestamp) => Some(timestamp),
+            Self::Timestamp(timestamp) => Some(timestamp),
             _ => None,
         }
     }
@@ -260,7 +260,7 @@ impl<'a> RealizedOp<'a> {
     /// Returns the range of a table if this operation represents a table
     pub fn as_table_range(&self) -> Option<Range<usize>> {
         match self {
-            RealizedOp::Table(t) => Some(t.range.clone()),
+            Self::Table(t) => Some(t.range.clone()),
             _ => None,
         }
     }

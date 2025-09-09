@@ -42,9 +42,9 @@ pub enum SchematicElem<T = ()> {
 impl<T> SchematicElem<T> {
     pub fn clear_aux(self) -> SchematicElem<()> {
         match self {
-            SchematicElem::Panel(panel) => SchematicElem::Panel(panel.map_aux(|_| ())),
-            SchematicElem::Object3d(obj) => SchematicElem::Object3d(obj.map_aux(|_| ())),
-            SchematicElem::Line3d(line) => SchematicElem::Line3d(line.map_aux(|_| ())),
+            Self::Panel(panel) => SchematicElem::Panel(panel.map_aux(|_| ())),
+            Self::Object3d(obj) => SchematicElem::Object3d(obj.map_aux(|_| ())),
+            Self::Line3d(line) => SchematicElem::Line3d(line.map_aux(|_| ())),
         }
     }
 }
@@ -71,71 +71,71 @@ pub enum Panel<T = ()> {
 impl<T> Panel<T> {
     pub fn label(&self) -> &str {
         match self {
-            Panel::Viewport(_) => "Viewport",
-            Panel::VSplit(_) => "Vertical Split",
-            Panel::HSplit(_) => "Horizontal Split",
-            Panel::Graph(_) => "Graph",
-            Panel::ComponentMonitor(_) => "Component Monitor",
-            Panel::ActionPane(_) => "Action Pane",
-            Panel::QueryTable(_) => "Query Table",
-            Panel::QueryPlot(query_plot) => &query_plot.label,
-            Panel::Tabs(_) => "Tabs",
-            Panel::Inspector => "Inspector",
-            Panel::Hierarchy => "Hierarchy",
-            Panel::SchematicTree => "Tree",
-            Panel::Dashboard(d) => d.root.label.as_deref().unwrap_or("Dashboard"),
+            Self::Viewport(_) => "Viewport",
+            Self::VSplit(_) => "Vertical Split",
+            Self::HSplit(_) => "Horizontal Split",
+            Self::Graph(_) => "Graph",
+            Self::ComponentMonitor(_) => "Component Monitor",
+            Self::ActionPane(_) => "Action Pane",
+            Self::QueryTable(_) => "Query Table",
+            Self::QueryPlot(query_plot) => &query_plot.label,
+            Self::Tabs(_) => "Tabs",
+            Self::Inspector => "Inspector",
+            Self::Hierarchy => "Hierarchy",
+            Self::SchematicTree => "Tree",
+            Self::Dashboard(d) => d.root.label.as_deref().unwrap_or("Dashboard"),
         }
     }
 
     pub fn collapse(&self) -> &Panel<T> {
         match self {
-            Panel::Tabs(panels) if panels.len() == 1 => panels[0].collapse(),
+            Self::Tabs(panels) if panels.len() == 1 => panels[0].collapse(),
             this => this,
         }
     }
 
     pub fn children(&self) -> &[Panel<T>] {
         match self {
-            Panel::HSplit(split) | Panel::VSplit(split) => &split.panels,
-            Panel::Tabs(panels) => panels,
+            Self::HSplit(split) | Self::VSplit(split) => &split.panels,
+            Self::Tabs(panels) => panels,
             _ => &[],
         }
     }
 
     pub fn children_mut(&mut self) -> &mut [Panel<T>] {
         match self {
-            Panel::HSplit(split) | Panel::VSplit(split) => &mut split.panels,
-            Panel::Tabs(panels) => panels,
+            Self::HSplit(split) | Self::VSplit(split) => &mut split.panels,
+            Self::Tabs(panels) => panels,
             _ => &mut [],
         }
     }
 
     pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> Panel<U> {
         match self {
-            Panel::HSplit(split) => Panel::HSplit(split.map_aux(f)),
-            Panel::VSplit(split) => Panel::VSplit(split.map_aux(f)),
-            Panel::Tabs(panels) => Panel::Tabs(panels.iter().map(|p| p.map_aux(&f)).collect()),
-            Panel::Graph(graph) => Panel::Graph(graph.map_aux(f)),
-            Panel::ComponentMonitor(component_monitor) => {
+            Self::HSplit(split) => Panel::HSplit(split.map_aux(f)),
+            Self::VSplit(split) => Panel::VSplit(split.map_aux(f)),
+            Self::Tabs(panels) => Panel::Tabs(panels.iter().map(|p| p.map_aux(&f)).collect()),
+            Self::Graph(graph) => Panel::Graph(graph.map_aux(f)),
+            Self::ComponentMonitor(component_monitor) => {
                 Panel::ComponentMonitor(component_monitor.clone())
             }
-            Panel::ActionPane(action_pane) => Panel::ActionPane(action_pane.clone()),
-            Panel::QueryTable(query_table) => Panel::QueryTable(query_table.clone()),
-            Panel::QueryPlot(query_plot) => Panel::QueryPlot(query_plot.map_aux(f)),
-            Panel::Hierarchy => Panel::Hierarchy,
-            Panel::SchematicTree => Panel::SchematicTree,
-            Panel::Inspector => Panel::Inspector,
-            Panel::Viewport(v) => Panel::Viewport(v.map_aux(f)),
-            Panel::Dashboard(d) => Panel::Dashboard(Box::new(d.map_aux(f))),
+            Self::ActionPane(action_pane) => Panel::ActionPane(action_pane.clone()),
+            Self::QueryTable(query_table) => Panel::QueryTable(query_table.clone()),
+            Self::QueryPlot(query_plot) => Panel::QueryPlot(query_plot.map_aux(f)),
+            Self::Hierarchy => Panel::Hierarchy,
+            Self::SchematicTree => Panel::SchematicTree,
+            Self::Inspector => Panel::Inspector,
+            Self::Viewport(v) => Panel::Viewport(v.map_aux(f)),
+            Self::Dashboard(d) => Panel::Dashboard(Box::new(d.map_aux(f))),
         }
     }
 
     pub fn aux(&self) -> Option<&T> {
         match self {
-            Panel::Graph(graph) => Some(&graph.aux),
-            Panel::QueryPlot(query_plot) => Some(&query_plot.aux),
-            Panel::Viewport(v) => Some(&v.aux),
-            Panel::Dashboard(d) => Some(&d.aux),
+            Self::Graph(graph) => Some(&graph.aux),
+            Self::QueryPlot(query_plot) => Some(&query_plot.aux),
+            Self::Viewport(v) => Some(&v.aux),
+            Self::Dashboard(d) => Some(&d.aux),
             _ => None,
         }
     }
@@ -693,12 +693,12 @@ impl Val {
     pub fn eql(&self) -> &str {
         match self {
             Val::Auto => "",
-            Val::Px(v) => v,
-            Val::Percent(v) => v,
-            Val::Vw(v) => v,
-            Val::Vh(v) => v,
-            Val::VMin(v) => v,
-            Val::VMax(v) => v,
+            Self::Px(v) |
+            Self::Percent(v) |
+            Self::Vw(v) |
+            Self::Vh(v) |
+            Self::VMin(v) |
+            Self::VMax(v) => v,
         }
     }
 }

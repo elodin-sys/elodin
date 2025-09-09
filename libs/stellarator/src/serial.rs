@@ -46,9 +46,9 @@ impl Baud {
     fn termios_baud(&self) -> u32 {
         match self {
             #[cfg(target_os = "linux")]
-            Baud::B921600 => termios::speed::B921600,
+            Self::B921600 => termios::speed::B921600,
             #[cfg(target_os = "linux")]
-            Baud::B460800 => termios::speed::B460800,
+            Self::B460800 => termios::speed::B460800,
             Self::B115200 => termios::speed::B115200,
             Self::B9600 => termios::speed::B9600,
             Self::Other(b) => *b as _,

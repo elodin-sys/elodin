@@ -142,13 +142,13 @@ pub enum ConnectError {
 impl std::fmt::Display for ConnectError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ConnectError::SocketParse(addr_parse_error) => {
+            Self::SocketParse(addr_parse_error) => {
                 write!(f, "{}", addr_parse_error)
             }
-            ConnectError::Connection => {
+            Self::Connection => {
                 write!(f, "Error connecting")
             }
-            ConnectError::ResolutionFailed => {
+            Self::ResolutionFailed => {
                 write!(f, "Resolution failed")
             }
         }

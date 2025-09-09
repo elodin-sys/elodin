@@ -681,13 +681,13 @@ impl BevyExt for impeller2_wkt::Mesh {
 
     fn into_bevy(self) -> Self::Bevy {
         match self {
-            impeller2_wkt::Mesh::Sphere { radius } => {
+            Self::Sphere { radius } => {
                 bevy::math::primitives::Sphere { radius }.into()
             }
-            impeller2_wkt::Mesh::Box { x, y, z } => {
+            Self::Box { x, y, z } => {
                 bevy::math::primitives::Cuboid::new(x, y, z).into()
             }
-            impeller2_wkt::Mesh::Cylinder { radius, height } => {
+            Self::Cylinder { radius, height } => {
                 bevy::math::primitives::Cylinder::new(radius, height).into()
             }
         }
@@ -864,19 +864,19 @@ enum Offset {
 impl std::fmt::Display for Offset {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Offset::Earliest(duration) => {
+            Self::Earliest(duration) => {
                 let d = hifitime::Duration::from(*duration)
                     .to_string()
                     .to_uppercase();
                 write!(f, "+{d}")
             }
-            Offset::Latest(duration) => {
+            Self::Latest(duration) => {
                 let d = hifitime::Duration::from(*duration)
                     .to_string()
                     .to_uppercase();
                 write!(f, "-{d}")
             }
-            Offset::Fixed(timestamp) => {
+            Self::Fixed(timestamp) => {
                 let timestamp = FriendlyEpoch(hifitime::Epoch::from(*timestamp));
                 write!(f, "{timestamp}")
             }

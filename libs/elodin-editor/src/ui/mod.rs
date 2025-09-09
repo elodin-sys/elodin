@@ -98,12 +98,12 @@ impl SelectedObject {
     pub fn entity(&self) -> Option<Entity> {
         match self {
             SelectedObject::None => None,
-            SelectedObject::Entity(pair) => Some(pair.bevy),
-            SelectedObject::Viewport { camera } => Some(*camera),
-            SelectedObject::Graph { graph_id } => Some(*graph_id),
-            SelectedObject::Action { action_id } => Some(*action_id),
-            SelectedObject::Object3D { entity } => Some(*entity),
-            SelectedObject::DashboardNode { entity } => Some(*entity),
+            Self::Entity(pair) => Some(pair.bevy),
+            Self::Viewport { camera } => Some(*camera),
+            Self::Graph { graph_id } => Some(*graph_id),
+            Self::Action { action_id } => Some(*action_id),
+            Self::Object3D { entity } => Some(*entity),
+            Self::DashboardNode { entity } => Some(*entity),
         }
     }
 }

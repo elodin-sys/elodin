@@ -51,16 +51,16 @@ pub enum RestartPolicy {
 impl Recipe {
     pub fn name(&self) -> String {
         match self {
-            Recipe::Cargo { name, .. } => name.clone(),
-            Recipe::Process { name, .. } => name.clone(),
-            Recipe::Group { name, .. } => name.clone(),
-            Recipe::Sim { name, .. } => name.clone(),
+            Self::Cargo { name, .. } |
+            Self::Process { name, .. } |
+            Self::Group { name, .. } |
+            Self::Sim { name, .. } => name.clone(),
         }
     }
 
     pub fn to_rust(&self) -> Result<RustRecipe, AddrParseError> {
         match self {
-            Recipe::Cargo {
+            Self::Cargo {
                 path,
                 package,
                 bin,
@@ -86,7 +86,7 @@ impl Recipe {
                 },
                 destination: s10::Destination::Local,
             })),
-            Recipe::Process {
+            Self::Process {
                 cmd,
                 args,
                 cwd,
@@ -107,14 +107,14 @@ impl Recipe {
                 },
                 no_watch: *no_watch,
             })),
-            Recipe::Group { recipes, .. } => Ok(RustRecipe::Group(GroupRecipe {
+            Self::Group { recipes, .. } => Ok(RustRecipe::Group(GroupRecipe {
                 refs: vec![],
                 recipes: recipes
                     .iter()
                     .map(|recipe| Ok((recipe.name(), recipe.to_rust()?)))
                     .collect::<Result<HashMap<_, _>, _>>()?,
             })),
-            Recipe::Sim {
+            Self::Sim {
                 path,
                 addr,
                 optimize,
