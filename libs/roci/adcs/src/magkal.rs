@@ -89,7 +89,7 @@ mod tests {
     fn test_calibrate() {
         let readings = test_mag_readings();
         let mut state = State::default();
-        for reading in readings.clone() {
+        for reading in readings {
             state = state
                 .update(reading, tensor![1.0, 0.0, 0.0] * 31.99)
                 .unwrap();

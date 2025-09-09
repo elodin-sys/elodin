@@ -22,7 +22,21 @@ test_steps = [
         ],
     ),
     group(
-        name=":crab: rust",
+        name=":nix: Nix",
+        steps=[
+            step(
+                label=":nix: flake check",
+                key="flake-check",
+                command="nix flake check .",
+                env={
+                    "RUSTC_BOOTSTRAP": "1",
+                    "BUILDKITE_ANALYTICS_TOKEN": "R6hH2MNhtMdbfQWhDd9cvZfo",
+                },
+            ),
+        ],
+    ),
+    group(
+        name=":crab: rust (sensors)",
         steps=[
             rust_step(
                 label="clippy",
