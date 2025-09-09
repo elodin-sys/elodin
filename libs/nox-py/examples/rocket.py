@@ -476,7 +476,8 @@ w.schematic("""
         glb path="https://storage.googleapis.com/elodin-assets/rocket.glb"
     }
     line_3d rocket.world_pos line_width=11.0 color="yolk" perspective=#false
-""")
+""",
+            "rocket.kdl")
 
 non_effectors = (
     mach
