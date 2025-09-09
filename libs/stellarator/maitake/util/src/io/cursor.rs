@@ -38,8 +38,8 @@ impl<T> Cursor<T> {
     /// Cursor initial position is `0` even if underlying buffer (e.g., `Vec`)
     /// is not empty. So writing to cursor starts with overwriting `Vec`
     /// content, not with appending to it.
-    pub fn new(inner: T) -> Cursor<T> {
-        Cursor { pos: 0, inner }
+    pub fn new(inner: T) -> Self {
+        Self { pos: 0, inner }
     }
 
     /// Consumes this cursor, returning the underlying value.

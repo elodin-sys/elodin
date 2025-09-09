@@ -225,7 +225,7 @@ impl Executor<PollingReactor> {
         };
         let scheduler =
             maitake::scheduler::LocalScheduler::with_external_waker(reactor.external_waker());
-        Ok(Executor {
+        Ok(Self {
             reactor: RefCell::new(reactor),
             scheduler,
             timer: Timer::new(crate::os::os_clock()),

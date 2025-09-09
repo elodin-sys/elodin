@@ -21,7 +21,7 @@ impl File {
             options,
         )?)
         .await?;
-        Ok(File { handle })
+        Ok(Self { handle })
     }
 
     pub async fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {

@@ -84,7 +84,7 @@ impl CancelToken {
     }
 
     pub fn child(&self) -> Self {
-        CancelToken {
+        Self {
             parent: Arc::downgrade(&self.this),
             this: Arc::new(CancelTokenInner::default()),
         }
@@ -213,7 +213,7 @@ impl_atomic_numeric_ops! {i8, i16, i32, i64, isize, u8, u16, u32, u64, usize}
 
 impl<A: AtomicValue> AtomicCell<A> {
     pub fn new(val: A) -> Self {
-        AtomicCell {
+        Self {
             value: val.atomic(),
             wait_queue: WaitQueue::new(),
         }

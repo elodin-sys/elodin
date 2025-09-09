@@ -1094,8 +1094,8 @@ impl Waiter {
     }
 }
 
-unsafe impl Linked<list::Links<Waiter>> for Waiter {
-    type Handle = NonNull<Waiter>;
+unsafe impl Linked<list::Links<Self>> for Waiter {
+    type Handle = NonNull<Self>;
 
     fn into_ptr(r: Self::Handle) -> NonNull<Self> {
         r
@@ -1105,7 +1105,7 @@ unsafe impl Linked<list::Links<Waiter>> for Waiter {
         ptr
     }
 
-    unsafe fn links(target: NonNull<Self>) -> NonNull<list::Links<Waiter>> {
+    unsafe fn links(target: NonNull<Self>) -> NonNull<list::Links<Self>> {
         // Safety: using `ptr::addr_of!` avoids creating a temporary
         // reference, which stacked borrows dislikes.
         unsafe {

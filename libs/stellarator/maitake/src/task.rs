@@ -500,7 +500,7 @@ where
     loom_const_fn! {
         /// Create a new stub task.
         pub(crate) fn new_stub() -> Self {
-            Task {
+            Self {
                 schedulable: Schedulable {
                     header: Header {
                         run_queue: mpsc_queue::Links::new(),
@@ -1379,7 +1379,7 @@ impl Header {
 /// # Safety
 ///
 /// A task must be pinned to be spawned.
-unsafe impl Linked<mpsc_queue::Links<Header>> for Header {
+unsafe impl Linked<mpsc_queue::Links<Self>> for Header {
     type Handle = TaskRef;
 
     #[inline]
@@ -1437,9 +1437,9 @@ unsafe impl Sync for Header {}
 impl<F: Future> fmt::Debug for Cell<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Cell::Pending(_) => write!(f, "Cell::Pending({})", type_name::<F>()),
-            Cell::Ready(_) => write!(f, "Cell::Ready({})", type_name::<F::Output>()),
-            Cell::Joined => f.pad("Cell::Joined"),
+            Self::Pending(_) => write!(f, "Cell::Pending({})", type_name::<F>()),
+            Self::Ready(_) => write!(f, "Cell::Ready({})", type_name::<F::Output>()),
+            Self::Joined => f.pad("Cell::Joined"),
         }
     }
 }
@@ -1447,13 +1447,13 @@ impl<F: Future> fmt::Debug for Cell<F> {
 impl<F: Future> Cell<F> {
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         let poll = match self {
-            Cell::Pending(future) => unsafe { Pin::new_unchecked(future).poll(cx) },
+            Self::Pending(future) => unsafe { Pin::new_unchecked(future).poll(cx) },
             _ => unreachable!("tried to poll a completed future!"),
         };
 
         match poll {
             Poll::Ready(ready) => {
-                *self = Cell::Ready(ready);
+                *self = Self::Ready(ready);
                 Poll::Ready(())
             }
             Poll::Pending => Poll::Pending,

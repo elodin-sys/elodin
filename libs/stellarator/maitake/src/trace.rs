@@ -102,7 +102,7 @@ pub(crate) struct Span {
 impl Span {
     #[inline(always)]
     pub(crate) const fn none() -> Self {
-        Span {
+        Self {
             span_01: tracing::Span::none(),
         }
     }

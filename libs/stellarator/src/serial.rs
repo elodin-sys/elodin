@@ -40,7 +40,7 @@ impl Baud {
     /// This is 921600 on Linux, and 115200 on macOS
     #[cfg(not(target_os = "linux"))]
     pub fn fastest() -> Self {
-        Baud::B115200
+        Self::B115200
     }
 
     fn termios_baud(&self) -> u32 {
@@ -49,9 +49,9 @@ impl Baud {
             Baud::B921600 => termios::speed::B921600,
             #[cfg(target_os = "linux")]
             Baud::B460800 => termios::speed::B460800,
-            Baud::B115200 => termios::speed::B115200,
-            Baud::B9600 => termios::speed::B9600,
-            Baud::Other(b) => *b as _,
+            Self::B115200 => termios::speed::B115200,
+            Self::B9600 => termios::speed::B9600,
+            Self::Other(b) => *b as _,
         }
     }
 }
@@ -100,7 +100,7 @@ impl SerialPort {
             termios
         };
 
-        Ok(SerialPort { termios, file })
+        Ok(Self { termios, file })
     }
 
     /// Set the baud rate for the serial port

@@ -20,7 +20,7 @@ impl OwnedHandle {
     /// because `OwnedHandle` will close the file-descriptor on drop
     pub unsafe fn from_raw_fd(raw_fd: RawFd) -> Self {
         // safety: simple wrapper around already unsafe code
-        unsafe { OwnedHandle::Fd(std::os::fd::OwnedFd::from_raw_fd(raw_fd)) }
+        unsafe { Self::Fd(std::os::fd::OwnedFd::from_raw_fd(raw_fd)) }
     }
 
     #[cfg(target_os = "windows")]
@@ -34,23 +34,23 @@ impl OwnedHandle {
     }
 
     pub fn from_socket(socket: Socket) -> Self {
-        OwnedHandle::Socket(socket)
+        Self::Socket(socket)
     }
 
     pub fn as_handle(&self) -> BorrowedHandle<'_> {
         match self {
             #[cfg(not(target_os = "windows"))]
-            OwnedHandle::Fd(owned_fd) => BorrowedHandle::Fd(owned_fd.as_fd()),
+            Self::Fd(owned_fd) => BorrowedHandle::Fd(owned_fd.as_fd()),
             #[cfg(target_os = "windows")]
             OwnedHandle::Fd(owned_fd) => BorrowedHandle::Fd(owned_fd.as_handle()),
-            OwnedHandle::Socket(socket) => BorrowedHandle::Socket(socket),
+            Self::Socket(socket) => BorrowedHandle::Socket(socket),
         }
     }
 
     pub fn try_clone(&self) -> io::Result<Self> {
         match self {
-            OwnedHandle::Fd(owned_fd) => owned_fd.try_clone().map(OwnedHandle::Fd),
-            OwnedHandle::Socket(socket) => socket.try_clone().map(OwnedHandle::Socket),
+            Self::Fd(owned_fd) => owned_fd.try_clone().map(OwnedHandle::Fd),
+            Self::Socket(socket) => socket.try_clone().map(OwnedHandle::Socket),
         }
     }
 }
@@ -97,8 +97,8 @@ impl std::os::fd::AsFd for BorrowedHandle<'_> {
 impl std::os::fd::AsFd for OwnedHandle {
     fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
         match self {
-            OwnedHandle::Fd(fd) => fd.as_fd(),
-            OwnedHandle::Socket(sock_ref) => sock_ref.as_fd(),
+            Self::Fd(fd) => fd.as_fd(),
+            Self::Socket(sock_ref) => sock_ref.as_fd(),
         }
     }
 }

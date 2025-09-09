@@ -1072,7 +1072,7 @@ impl Waiter {
     #[inline(always)]
     #[cfg_attr(loom, track_caller)]
     fn wake(this: NonNull<Self>, list: &mut List<Self>, wakeup: Wakeup) -> Option<Waker> {
-        Waiter::with_node(this, list, |node| {
+        Self::with_node(this, list, |node| {
             let waker = test_dbg!(mem::replace(&mut node.waker, wakeup));
             match waker {
                 // the node has a registered waker, so wake the task.
@@ -1276,7 +1276,7 @@ impl Waiter {
 
             // if the node has an unconsumed wakeup, it must be assigned to the next
             // node in the queue.
-            if Waiter::with_node(ptr, waiters, |node| matches!(&node.waker, Wakeup::One)) {
+            if Self::with_node(ptr, waiters, |node| matches!(&node.waker, Wakeup::One)) {
                 queue.wake_locked(waiters, state)
             } else {
                 None
@@ -1289,8 +1289,8 @@ impl Waiter {
     }
 }
 
-unsafe impl Linked<list::Links<Waiter>> for Waiter {
-    type Handle = NonNull<Waiter>;
+unsafe impl Linked<list::Links<Self>> for Waiter {
+    type Handle = NonNull<Self>;
 
     fn into_ptr(r: Self::Handle) -> NonNull<Self> {
         r
@@ -1300,7 +1300,7 @@ unsafe impl Linked<list::Links<Waiter>> for Waiter {
         ptr
     }
 
-    unsafe fn links(target: NonNull<Self>) -> NonNull<list::Links<Waiter>> {
+    unsafe fn links(target: NonNull<Self>) -> NonNull<list::Links<Self>> {
         // Safety: using `ptr::addr_of!` avoids creating a temporary
         // reference, which stacked borrows dislikes.
         unsafe {
@@ -1632,7 +1632,7 @@ feature! {
         /// ```
         #[inline]
         #[must_use]
-        pub fn same_queue(&self, other: &WaitOwned<Lock>) -> bool {
+        pub fn same_queue(&self, other: &Self) -> bool {
             Arc::ptr_eq(&self.queue, &other.queue)
         }
 

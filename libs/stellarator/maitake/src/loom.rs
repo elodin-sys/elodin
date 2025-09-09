@@ -204,8 +204,8 @@ mod inner {
         pub(crate) struct UnsafeCell<T: ?Sized>(core::cell::UnsafeCell<T>);
 
         impl<T> UnsafeCell<T> {
-            pub const fn new(data: T) -> UnsafeCell<T> {
-                UnsafeCell(core::cell::UnsafeCell::new(data))
+            pub const fn new(data: T) -> Self {
+                Self(core::cell::UnsafeCell::new(data))
             }
         }
 
@@ -481,8 +481,8 @@ mod inner {
             /// Track a value for leaks
             #[inline(always)]
             #[track_caller]
-            pub fn new(value: T) -> Track<T> {
-                Track {
+            pub fn new(value: T) -> Self {
+                Self {
                     value,
 
                     #[cfg(test)]
