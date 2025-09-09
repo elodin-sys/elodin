@@ -1043,7 +1043,8 @@ impl Default for PalettePage {
             create_sidebars(),
             create_3d_object(),
             save_schematic(),
-            save_schematic_db(),
+            // TODO: Don't enable until we have a clear save and load story for db.
+            //save_schematic_db(),
             load_schematic(),
             set_color_scheme(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {
