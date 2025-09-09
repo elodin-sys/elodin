@@ -24,7 +24,7 @@ use impeller2_bevy::{ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx
 use impeller2_kdl::ToKdl;
 use impeller2_wkt::{
     ComponentPath, ComponentValue, IsRecording, Material, Mesh, Object3D, SetDbConfig,
-    SetStreamState,
+    SetStreamState, DbConfig,
 };
 use miette::IntoDiagnostic;
 use nox::ArrayBuf;
@@ -605,7 +605,8 @@ fn set_time_range_behavior() -> PaletteItem {
 }
 
 pub fn save_schematic() -> PaletteItem {
-    PaletteItem::new("Save Schematic", PRESETS_LABEL, |_name: In<String>| {
+    PaletteItem::new("Save Schematic", PRESETS_LABEL, |_name: In<String>, db_config: Res<DbConfig>| {
+        bevy::log::info!("schematic path XXX {:?}", db_config.schematic_path().unwrap_or("N/A"));
         PalettePage::new(vec![save_preset_inner()]).into()
     })
 }
