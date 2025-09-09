@@ -8,6 +8,7 @@ use nox_ecs::{ComponentSchema, IntoSystem, System as _, TimeStep, World, increme
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
 use pyo3::{IntoPyObjectExt, types::PyDict};
 use std::{
+    env,
     collections::HashMap,
     iter,
     net::SocketAddr,
@@ -382,7 +383,13 @@ impl WorldBuilder {
                 None
             }
         });
-        self.world.metadata.schematic_path = path.map(PathBuf::from);
+        let override_file = env::var("SCHEMATIC_FILE").ok();
+        if let Some(override_path) = &override_file {
+            tracing::log::warn!("Overriding schematic path {:?} with env \"SCHEMATIC_FILE\": {:?}",
+                                path.as_deref().unwrap_or("N/A"),
+                                override_path);
+        }
+        self.world.metadata.schematic_path = override_file.or(path).map(PathBuf::from);
         self.world.metadata.schematic = file_contents.or(default_content);
     }
 }
