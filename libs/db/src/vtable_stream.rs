@@ -401,15 +401,11 @@ impl StreamStage {
         prim_type: PrimType,
     ) -> Result<bool, Error> {
         match self {
-            Self::RealTime(real_time_stage) => {
-                real_time_stage.next(shard, timestamp_shard).await
-            }
+            Self::RealTime(real_time_stage) => real_time_stage.next(shard, timestamp_shard).await,
             Self::FixedRate(fixed_rate_stage) => {
                 fixed_rate_stage.next(shard, timestamp_shard).await
             }
-            Self::Mean(mean_stage) => {
-                mean_stage.next(shard, timestamp_shard, prim_type).await
-            }
+            Self::Mean(mean_stage) => mean_stage.next(shard, timestamp_shard, prim_type).await,
         }
     }
 }

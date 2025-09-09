@@ -415,9 +415,7 @@ impl<'a> ComponentView<'a> {
             Self::I16(i16) => Box::new(i16.buf().iter().map(|&x| ElementValue::I16(x))),
             Self::I32(i32) => Box::new(i32.buf().iter().map(|&x| ElementValue::I32(x))),
             Self::I64(i64) => Box::new(i64.buf().iter().map(|&x| ElementValue::I64(x))),
-            Self::Bool(bool) => {
-                Box::new(bool.buf().iter().map(|&x| ElementValue::Bool(x)))
-            }
+            Self::Bool(bool) => Box::new(bool.buf().iter().map(|&x| ElementValue::Bool(x))),
             Self::F32(f32) => Box::new(f32.buf().iter().map(|&x| ElementValue::F32(x))),
             Self::F64(f64) => Box::new(f64.buf().iter().map(|&x| ElementValue::F64(x))),
         }

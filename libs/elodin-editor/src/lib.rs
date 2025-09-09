@@ -681,12 +681,8 @@ impl BevyExt for impeller2_wkt::Mesh {
 
     fn into_bevy(self) -> Self::Bevy {
         match self {
-            Self::Sphere { radius } => {
-                bevy::math::primitives::Sphere { radius }.into()
-            }
-            Self::Box { x, y, z } => {
-                bevy::math::primitives::Cuboid::new(x, y, z).into()
-            }
+            Self::Sphere { radius } => bevy::math::primitives::Sphere { radius }.into(),
+            Self::Box { x, y, z } => bevy::math::primitives::Cuboid::new(x, y, z).into(),
             Self::Cylinder { radius, height } => {
                 bevy::math::primitives::Cylinder::new(radius, height).into()
             }

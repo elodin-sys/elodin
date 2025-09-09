@@ -51,10 +51,10 @@ pub enum RestartPolicy {
 impl Recipe {
     pub fn name(&self) -> String {
         match self {
-            Self::Cargo { name, .. } |
-            Self::Process { name, .. } |
-            Self::Group { name, .. } |
-            Self::Sim { name, .. } => name.clone(),
+            Self::Cargo { name, .. }
+            | Self::Process { name, .. }
+            | Self::Group { name, .. }
+            | Self::Sim { name, .. } => name.clone(),
         }
     }
 

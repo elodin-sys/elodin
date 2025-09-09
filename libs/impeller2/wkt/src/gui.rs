@@ -693,12 +693,12 @@ impl Val {
     pub fn eql(&self) -> &str {
         match self {
             Val::Auto => "",
-            Self::Px(v) |
-            Self::Percent(v) |
-            Self::Vw(v) |
-            Self::Vh(v) |
-            Self::VMin(v) |
-            Self::VMax(v) => v,
+            Self::Px(v)
+            | Self::Percent(v)
+            | Self::Vw(v)
+            | Self::Vh(v)
+            | Self::VMin(v)
+            | Self::VMax(v) => v,
         }
     }
 }
