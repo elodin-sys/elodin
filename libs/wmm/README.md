@@ -193,8 +193,7 @@ The WMM coefficients are embedded at compile time from `src/coef.rs`.
 
 The WMM is updated every 5 years by NOAA/NCEI and the British Geological Survey:
 
-- **WMM 2020**: Current model (2020.0 - 2025.0)
-- **WMM 2025**: Expected release December 2024
+- **WMM 2025**: Current Release
 - **Updates**: Typically < 1% change in coefficients
 
 To update coefficients:
