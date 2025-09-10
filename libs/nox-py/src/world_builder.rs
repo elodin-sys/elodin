@@ -8,14 +8,13 @@ use nox_ecs::{ComponentSchema, IntoSystem, System as _, TimeStep, World, increme
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
 use pyo3::{IntoPyObjectExt, types::PyDict};
 use std::{
-    env,
     collections::HashMap,
     iter,
     net::SocketAddr,
-    path::{Path, PathBuf},
+    path::PathBuf,
     time,
 };
-use tracing::error;
+use tracing::{info, error};
 use zerocopy::{FromBytes, TryFromBytes};
 
 #[derive(Parser, Debug)]
@@ -373,23 +372,28 @@ impl WorldBuilder {
     /// this function itself does not write to the `path`.
     #[pyo3(signature = (default_content = None, path = None,))]
     pub fn schematic(&mut self, default_content: Option<String>, path: Option<String>) {
-        let file_contents = path.as_deref().and_then(|path| {
-            let path = Path::new(path);
+        // TODO: It would be nice to allow for a schematic override environment
+        // variable. However, due to s10 process orchestration, it is not
+        // trivial to implement. Holding off for now.
+
+        // let override_file = env::var("SCHEMATIC_FILE").ok();
+        // if let Some(override_path) = &override_file {
+        //     tracing::log::warn!("Overriding schematic path {:?} with env \"SCHEMATIC_FILE\": {:?}",
+        //                         path.as_deref().unwrap_or("N/A"),
+        //                         override_path);
+        // }
+        // self.world.metadata.schematic_path = override_file.or(path).map(PathBuf::from);
+        self.world.metadata.schematic_path = path.map(PathBuf::from);
+        let file_contents = self.world.metadata.schematic_path.as_ref().and_then(|path| {
             if path.exists() {
                 std::fs::read_to_string(path)
+                    .inspect(|_| info!("read schematic at {path:?}"))
                     .inspect_err(|err| error!(?err, "could not read schematic file at {path:?}"))
                     .ok()
             } else {
                 None
             }
         });
-        let override_file = env::var("SCHEMATIC_FILE").ok();
-        if let Some(override_path) = &override_file {
-            tracing::log::warn!("Overriding schematic path {:?} with env \"SCHEMATIC_FILE\": {:?}",
-                                path.as_deref().unwrap_or("N/A"),
-                                override_path);
-        }
-        self.world.metadata.schematic_path = override_file.or(path).map(PathBuf::from);
         self.world.metadata.schematic = file_contents.or(default_content);
     }
 }

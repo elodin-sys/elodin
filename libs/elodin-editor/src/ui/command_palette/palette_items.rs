@@ -2,6 +2,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     str::FromStr,
     time::Duration,
+    path::{Path, PathBuf},
 };
 
 use bevy::{
@@ -11,7 +12,7 @@ use bevy::{
         system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
         world::World,
     },
-    log::info,
+    log::{error, info},
     pbr::{StandardMaterial, wireframe::WireframeConfig},
     prelude::In,
     render::view::Visibility,
@@ -605,9 +606,22 @@ fn set_time_range_behavior() -> PaletteItem {
 }
 
 pub fn save_schematic() -> PaletteItem {
-    PaletteItem::new("Save Schematic", PRESETS_LABEL, |_name: In<String>, db_config: Res<DbConfig>| {
-        bevy::log::info!("schematic path XXX {:?}", db_config.schematic_path().unwrap_or("N/A"));
-        PalettePage::new(vec![save_preset_inner()]).into()
+    PaletteItem::new("Save Schematic", PRESETS_LABEL, |_name: In<String>, db_config: Res<DbConfig>, schematic: Res<CurrentSchematic>| {
+        match db_config.schematic_path() {
+            Some(path) => {
+                let kdl = schematic.0.to_kdl();
+                let path = Path::new(path).with_extension("kdl");
+                if let Err(e) = std::fs::write(&path, kdl) {
+                    error!(?e, "saving schematic");
+                } else {
+                    info!(?path, "saved schematic");
+                }
+                PaletteEvent::Exit
+            }
+            None => {
+                PalettePage::new(vec![save_preset_inner()]).into()
+            }
+        }
     })
 }
 
@@ -633,13 +647,13 @@ pub fn save_preset_inner() -> PaletteItem {
         LabelSource::placeholder("Enter a name for the schematic"),
         "",
         move |In(name): In<String>, schematic: Res<CurrentSchematic>| {
-            let dirs = crate::dirs();
-            let dir = dirs.data_dir().join("schematics");
-            let _ = std::fs::create_dir(&dir);
             let kdl = schematic.0.to_kdl();
-            let path = dir.join(&name).with_extension("kdl");
-            info!(?path, "saving schematic");
-            let _ = std::fs::write(path, kdl);
+            let path = PathBuf::from(name).with_extension("kdl");
+            if let Err(e) = std::fs::write(&path, kdl) {
+                error!(?e, "saving schematic");
+            } else {
+                info!(?path, "saved schematic");
+            }
             PaletteEvent::Exit
         },
     )
@@ -648,10 +662,19 @@ pub fn save_preset_inner() -> PaletteItem {
 
 pub fn load_schematic() -> PaletteItem {
     PaletteItem::new("Load Schematic", PRESETS_LABEL, |_: In<String>| {
-        let dirs = crate::dirs();
-        let dir = dirs.data_dir().join("schematics");
-        let Ok(elems) = std::fs::read_dir(dir) else {
-            return PaletteEvent::Exit;
+        let dir = match std::env::current_dir() {
+            Ok(dir) => dir,
+            Err(e) => {
+                error!(?e, "getting schematic dir");
+                return PaletteEvent::Exit;
+            }
+        };
+        let elems = match std::fs::read_dir(dir) {
+            Ok(x) => x,
+            Err(e) => {
+                error!(?e, "reading schematic dir");
+                return PaletteEvent::Exit;
+            }
         };
 
         let mut items = vec![load_schematic_picker()];
