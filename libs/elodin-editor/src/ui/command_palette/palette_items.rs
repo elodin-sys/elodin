@@ -694,12 +694,12 @@ pub fn load_schematic_picker() -> PaletteItem {
     PaletteItem::new(
         "From File",
         "",
-        move |_: In<String>, params: LoadSchematicParams, rx: ResMut<SchematicLiveReloadRx>| {
+        move |_: In<String>, mut params: LoadSchematicParams, rx: ResMut<SchematicLiveReloadRx>| {
             if let Some(path) = rfd::FileDialog::new()
                 .add_filter("kdl", &["kdl"])
                 .pick_file()
             {
-                if let Err(err) = load_schematic_file(&path, params, rx)
+                if let Err(err) = load_schematic_file(&path, &mut params, rx)
                     .inspect_err(|err| {
                         dbg!(err);
                     })
@@ -717,10 +717,10 @@ pub fn load_schematic_inner(name: String) -> PaletteItem {
     PaletteItem::new(
         name.clone(),
         "",
-        move |_: In<String>, params: LoadSchematicParams, rx: ResMut<SchematicLiveReloadRx>| {
+        move |_: In<String>, mut params: LoadSchematicParams, rx: ResMut<SchematicLiveReloadRx>| {
             let dirs = crate::dirs();
             let path = dirs.data_dir().join("schematics").join(name.clone());
-            if let Err(err) = load_schematic_file(&path, params, rx) {
+            if let Err(err) = load_schematic_file(&path, &mut params, rx) {
                 PaletteEvent::Error(err.to_string())
             } else {
                 PaletteEvent::Exit

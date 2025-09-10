@@ -53,14 +53,14 @@ pub fn sync_schematic(
     }
     if let Some(path) = config.schematic_path() {
         let path = Path::new(path);
-        if path.exists() {
-            if let Err(e) = load_schematic_file(path, params, live_reload_rx) {
+        if path.try_exists().unwrap_or(false) {
+            if let Err(e) = load_schematic_file(path, &mut params, live_reload_rx) {
                 bevy::log::error!(?e, "invalid schematic for {path:?}");
             } else {
                 return;
             }
+        } else {
         }
-        return;
     }
     if let Some(content) = config.schematic_content() {
         let schematic = impeller2_wkt::Schematic::from_kdl(content).expect("schematic error");
@@ -70,7 +70,7 @@ pub fn sync_schematic(
 
 pub fn load_schematic_file(
     path: &Path,
-    mut params: LoadSchematicParams,
+    params: &mut LoadSchematicParams,
     mut live_reload_rx: ResMut<SchematicLiveReloadRx>,
 ) -> Result<(), KdlSchematicError> {
     let (tx, rx) = flume::bounded(1);
@@ -223,6 +223,7 @@ impl LoadSchematicParams<'_, '_> {
                 tile_id
             }
             Panel::Graph(graph) => {
+                /// XXX: Is this where it happens?
                 let eql = self
                     .eql
                     .0

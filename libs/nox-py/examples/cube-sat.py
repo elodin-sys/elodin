@@ -639,7 +639,9 @@ w.schematic("""
         glb path="https://storage.googleapis.com/elodin-assets/oresat-low.glb"
     }
     line_3d ore_sat.world_pos line_width=10.0 perspective=#false
-""")
+""",
+            # "cube-sat.kdl")
+            None)
 
 w.spawn(
     [

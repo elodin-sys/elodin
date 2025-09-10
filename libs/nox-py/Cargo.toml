@@ -46,7 +46,6 @@ stellarator.path = "../stellarator"
 tokio.version = "1.34"
 tokio.features = ["full"]
 
-
 # logs
 tracing = "0.1"
 tracing-subscriber.version = "0.3"
