@@ -41,11 +41,6 @@ nox-py provides a high-performance Python API for building aerospace simulations
 
 ## Installation
 
-### From PyPI (Coming Soon)
-```bash
-pip install elodin
-```
-
 ### From Source
 ```bash
 # Clone the repository
