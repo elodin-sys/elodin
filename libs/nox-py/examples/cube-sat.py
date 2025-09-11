@@ -528,7 +528,7 @@ sat = w.spawn(
         KalmanFilter(np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3)),
         Debug(np.float64(0.0)),
     ],
-    name="OreSat",
+    name="ore_sat",
 )
 
 # w.spawn(el.VectorArrow(sat, "control_force", color = el.Color(1.0, 0.0, 0.0), scale=2.0))
@@ -640,8 +640,8 @@ w.schematic("""
     }
     line_3d ore_sat.world_pos line_width=10.0 perspective=#false
 """,
-            # "cube-sat.kdl")
-            None)
+            "cube-sat.kdl")
+            # None)
 
 w.spawn(
     [

@@ -396,6 +396,7 @@ fn default_element_names(shape: &[u64]) -> Vec<String> {
     elems
 }
 
+#[derive(Debug)]
 pub struct Context {
     pub component_parts: HashMap<String, ComponentPart>,
     pub earliest_timestamp: Timestamp,
@@ -1112,6 +1113,15 @@ mod tests {
                 )),
                 FmtNode::String(Cow::Borrowed("test")),
             ]
+        );
+    }
+
+    #[test]
+    fn test_rocket_string() {
+        assert_eq!(
+            ast_parser::expr("rocket.fin_deflect[0]").unwrap(),
+            AstNode::ArrayIndex(Box::new(AstNode::Field(Box::new(AstNode::Ident("rocket".into())),
+                                                        "fin_deflect".into())), 0)
         );
     }
 }
