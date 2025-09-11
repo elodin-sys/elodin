@@ -695,13 +695,16 @@ pub fn load_schematic() -> PaletteItem {
 
 pub fn load_schematic_picker() -> PaletteItem {
     PaletteItem::new(
-        "From File",
+        "Use File Dialog",
         "",
         move |_: In<String>, mut params: LoadSchematicParams, rx: ResMut<SchematicLiveReloadRx>| {
-            if let Some(path) = rfd::FileDialog::new()
-                .add_filter("kdl", &["kdl"])
-                .pick_file()
-            {
+            let mut dialog = rfd::FileDialog::new()
+                .add_filter("kdl", &["kdl"]);
+
+            if let Ok(cwd) = std::env::current_dir() {
+                dialog = dialog.set_directory(cwd);
+            }
+            if let Some(path) = dialog.pick_file() {
                 if let Err(err) = load_schematic_file(&path, &mut params, rx)
                     .inspect_err(|err| {
                         dbg!(err);
