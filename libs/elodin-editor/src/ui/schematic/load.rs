@@ -223,7 +223,6 @@ impl LoadSchematicParams<'_, '_> {
                 tile_id
             }
             Panel::Graph(graph) => {
-                /// XXX: Is this where it happens?
                 let eql = self
                     .eql
                     .0

@@ -7,15 +7,10 @@ use miette::miette;
 use nox_ecs::{ComponentSchema, IntoSystem, System as _, TimeStep, World, increment_sim_tick, nox};
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
 use pyo3::{IntoPyObjectExt, types::PyDict};
-use std::{
-    collections::HashMap,
-    iter,
-    net::SocketAddr,
-    path::PathBuf,
-    time,
-};
-use tracing::{info, error};
+use std::{collections::HashMap, iter, net::SocketAddr, path::PathBuf, time};
+use tracing::{error, info};
 use zerocopy::{FromBytes, TryFromBytes};
+use inflector::cases::snakecase::{to_snake_case, is_snake_case};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -73,19 +68,40 @@ impl WorldBuilder {
     pub fn new() -> Self {
         Self::default()
     }
-    #[pyo3(signature = (spawnable, name=None))]
-    pub fn spawn(&mut self, spawnable: Spawnable, name: Option<String>) -> Result<EntityId, Error> {
+    #[pyo3(signature = (spawnable, name=None, id=None))]
+    pub fn spawn(
+        &mut self,
+        spawnable: Spawnable,
+        name: Option<String>,
+        id: Option<String>,
+    ) -> Result<EntityId, Error> {
         let entity_id = EntityId {
             inner: impeller2::types::EntityId(self.world.entity_len()),
         };
         self.insert(entity_id, spawnable)?;
         self.world.metadata.entity_len += 1;
-        if let Some(name) = name {
+        let derived_id = match (&name, id) {
+            (Some(name), None) => {
+                let new_id = to_snake_case(name);
+                info!("convert name {:?} to ID {:?}", &name, &new_id);
+                Some(new_id)
+            }
+            (_, Some(id)) => Some(id),
+            _ => None,
+        };
+
+        if let Some(derived_id) = derived_id {
+            if ! is_snake_case(&derived_id) {
+                error!("the ID should be snake_case but was {:?}", derived_id);
+            }
             self.world.metadata.entity_metadata.insert(
                 entity_id.inner,
                 EntityMetadata {
                     entity_id: entity_id.inner,
-                    name: name.to_string(),
+                    // TODO: Consider changing this `name` field to `id`.
+                    // Perhaps add a human-readable field `display_name` or
+                    // `name` after that.
+                    name: derived_id,
                     metadata: Default::default(),
                 },
             );
@@ -384,16 +400,23 @@ impl WorldBuilder {
         // }
         // self.world.metadata.schematic_path = override_file.or(path).map(PathBuf::from);
         self.world.metadata.schematic_path = path.map(PathBuf::from);
-        let file_contents = self.world.metadata.schematic_path.as_ref().and_then(|path| {
-            if path.exists() {
-                std::fs::read_to_string(path)
-                    .inspect(|_| info!("read schematic at {path:?}"))
-                    .inspect_err(|err| error!(?err, "could not read schematic file at {path:?}"))
-                    .ok()
-            } else {
-                None
-            }
-        });
+        let file_contents = self
+            .world
+            .metadata
+            .schematic_path
+            .as_ref()
+            .and_then(|path| {
+                if path.exists() {
+                    std::fs::read_to_string(path)
+                        .inspect(|_| info!("read schematic at {path:?}"))
+                        .inspect_err(|err| {
+                            error!(?err, "could not read schematic file at {path:?}")
+                        })
+                        .ok()
+                } else {
+                    None
+                }
+            });
         self.world.metadata.schematic = file_contents.or(default_content);
     }
 }
