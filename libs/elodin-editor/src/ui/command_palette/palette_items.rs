@@ -684,6 +684,9 @@ pub fn load_schematic() -> PaletteItem {
             let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
                 continue;
             };
+            if path.extension().and_then(|e| e.to_str()) != Some("kdl") {
+                continue;
+            }
             items.push(load_schematic_inner(file_name.to_string()))
         }
         PalettePage::new(items).into()
