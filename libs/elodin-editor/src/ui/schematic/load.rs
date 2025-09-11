@@ -59,7 +59,6 @@ pub fn sync_schematic(
             } else {
                 return;
             }
-        } else {
         }
     }
     if let Some(content) = config.schematic_content() {
