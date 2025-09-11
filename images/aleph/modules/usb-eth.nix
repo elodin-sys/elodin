@@ -1,7 +1,7 @@
 {...}: {
   boot.kernelParams = [
     "g_ncm.dev_addr=ee:a1:ef:ee:a1:ef"
-    "g_ncm.host_addr=ee:a1:ef:ee:a1:ef"
+    "g_ncm.host_addr=ee:a1:ef:ae:a1:ef"
   ];
   networking.interfaces.usb0.useDHCP = false;
   networking.interfaces.dummy0.useDHCP = false;
