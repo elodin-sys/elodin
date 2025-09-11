@@ -631,7 +631,8 @@ w.spawn(CSSRel(el.Edge(css_3, sat)), name="CSS 3 -> Sat")
 w.spawn(CSSRel(el.Edge(css_4, sat)), name="CSS 4 -> Sat")
 w.spawn(CSSRel(el.Edge(css_5, sat)), name="CSS 5 -> Sat")
 
-w.schematic("""
+w.schematic(
+    """
     vsplit {
         hsplit share=0.6 {
             tabs {
@@ -650,7 +651,8 @@ w.schematic("""
     }
     line_3d ore_sat.world_pos line_width=10.0 perspective=#false
 """,
-            "cube-sat.kdl")
+    "cube-sat.kdl",
+)
 
 w.spawn(
     [
