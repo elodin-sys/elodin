@@ -73,3 +73,4 @@ roci-adcs.path = "../roci/adcs"
 s10.path = "../s10"
 
 zerocopy.version = "0.8.2"
+env_logger = "0.11.8"
