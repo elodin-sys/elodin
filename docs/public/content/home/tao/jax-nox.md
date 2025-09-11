@@ -35,7 +35,7 @@ As a result, NumPy has become a staple for numerical computation across schools 
 NumPy sounds great! So why not use it for Elodin?
 
 Millions of simulations running in parallel is a common use case for Elodin. When you are trying to perform a large series of mathematical
-expressions, find a way to optimize becomes important. That's where [JAX](https://jax.readthedocs.io/en/latest/) comes in.
+expressions, finding a way to optimize becomes important. That's where [JAX](https://jax.readthedocs.io/en/latest/) comes in.
 
 JAX is like NumPy’s supercharged cousin. It gives you all the things you love about NumPy—fast, efficient array operations—but with some
 game-changing extras that make it ideal for machine learning and other performance-heavy tasks.
