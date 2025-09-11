@@ -79,7 +79,7 @@ All the preceding information can now be specified via schematics.
     """)
 ```
 ## Details
-The old code is python, and the new code is specified in a [KDL](https://docs.rs/kdl/latest/kdl/) string to the `world.schematics()` method.
+The old code is python, and the new code is specified in a [KDL](https://docs.rs/kdl/latest/kdl/) string to the `world.schematic()` method.
 
 ### `el.Panel.hsplit` to `hsplit`
 OLD
