@@ -3,6 +3,7 @@ use ::s10::{GroupRecipe, SimRecipe, cli::run_recipe};
 use clap::Parser;
 use impeller2::types::{PrimType, Timestamp};
 use impeller2_wkt::{ComponentMetadata, EntityMetadata};
+use inflector::cases::snakecase::{is_snake_case, to_snake_case};
 use miette::miette;
 use nox_ecs::{ComponentSchema, IntoSystem, System as _, TimeStep, World, increment_sim_tick, nox};
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
@@ -10,7 +11,6 @@ use pyo3::{IntoPyObjectExt, types::PyDict};
 use std::{collections::HashMap, iter, net::SocketAddr, path::PathBuf, time};
 use tracing::{error, info};
 use zerocopy::{FromBytes, TryFromBytes};
-use inflector::cases::snakecase::{to_snake_case, is_snake_case};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -91,7 +91,7 @@ impl WorldBuilder {
         };
 
         if let Some(derived_id) = derived_id {
-            if ! is_snake_case(&derived_id) {
+            if !is_snake_case(&derived_id) {
                 error!("the ID should be snake_case but was {:?}", derived_id);
             }
             self.world.metadata.entity_metadata.insert(

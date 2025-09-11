@@ -1,8 +1,8 @@
 use std::{
     collections::{BTreeMap, HashMap},
+    path::{Path, PathBuf},
     str::FromStr,
     time::Duration,
-    path::{Path, PathBuf},
 };
 
 use bevy::{
@@ -24,8 +24,8 @@ use impeller2::types::msg_id;
 use impeller2_bevy::{ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
 use impeller2_kdl::ToKdl;
 use impeller2_wkt::{
-    ComponentPath, ComponentValue, IsRecording, Material, Mesh, Object3D, SetDbConfig,
-    SetStreamState, DbConfig,
+    ComponentPath, ComponentValue, DbConfig, IsRecording, Material, Mesh, Object3D, SetDbConfig,
+    SetStreamState,
 };
 use miette::IntoDiagnostic;
 use nox::ArrayBuf;
@@ -606,23 +606,25 @@ fn set_time_range_behavior() -> PaletteItem {
 }
 
 pub fn save_schematic() -> PaletteItem {
-    PaletteItem::new("Save Schematic", PRESETS_LABEL, |_name: In<String>, db_config: Res<DbConfig>, schematic: Res<CurrentSchematic>| {
-        match db_config.schematic_path() {
-            Some(path) => {
-                let kdl = schematic.0.to_kdl();
-                let path = Path::new(path).with_extension("kdl");
-                if let Err(e) = std::fs::write(&path, kdl) {
-                    error!(?e, "saving schematic");
-                } else {
-                    info!(?path, "saved schematic");
+    PaletteItem::new(
+        "Save Schematic",
+        PRESETS_LABEL,
+        |_name: In<String>, db_config: Res<DbConfig>, schematic: Res<CurrentSchematic>| {
+            match db_config.schematic_path() {
+                Some(path) => {
+                    let kdl = schematic.0.to_kdl();
+                    let path = Path::new(path).with_extension("kdl");
+                    if let Err(e) = std::fs::write(&path, kdl) {
+                        error!(?e, "saving schematic");
+                    } else {
+                        info!(?path, "saved schematic");
+                    }
+                    PaletteEvent::Exit
                 }
-                PaletteEvent::Exit
+                None => PalettePage::new(vec![save_preset_inner()]).into(),
             }
-            None => {
-                PalettePage::new(vec![save_preset_inner()]).into()
-            }
-        }
-    })
+        },
+    )
 }
 
 pub fn save_schematic_db() -> PaletteItem {
@@ -698,8 +700,7 @@ pub fn load_schematic_picker() -> PaletteItem {
         "Use File Dialog",
         "",
         move |_: In<String>, mut params: LoadSchematicParams, rx: ResMut<SchematicLiveReloadRx>| {
-            let mut dialog = rfd::FileDialog::new()
-                .add_filter("kdl", &["kdl"]);
+            let mut dialog = rfd::FileDialog::new().add_filter("kdl", &["kdl"]);
 
             if let Ok(cwd) = std::env::current_dir() {
                 dialog = dialog.set_directory(cwd);

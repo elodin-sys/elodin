@@ -107,10 +107,6 @@ mod tests {
     #[test]
     fn test_component_path_roundtrip() {
         let path = ComponentPath::from_name("a.b.c");
-        assert_eq!(
-            "a.b.c",
-            format!("{}", path).as_str()
-        );
+        assert_eq!("a.b.c", format!("{}", path).as_str());
     }
-
 }

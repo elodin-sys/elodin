@@ -1120,8 +1120,13 @@ mod tests {
     fn test_rocket_string() {
         assert_eq!(
             ast_parser::expr("rocket.fin_deflect[0]").unwrap(),
-            AstNode::ArrayIndex(Box::new(AstNode::Field(Box::new(AstNode::Ident("rocket".into())),
-                                                        "fin_deflect".into())), 0)
+            AstNode::ArrayIndex(
+                Box::new(AstNode::Field(
+                    Box::new(AstNode::Ident("rocket".into())),
+                    "fin_deflect".into()
+                )),
+                0
+            )
         );
     }
 }
