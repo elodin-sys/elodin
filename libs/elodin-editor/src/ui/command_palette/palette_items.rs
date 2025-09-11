@@ -720,12 +720,11 @@ pub fn load_schematic_picker() -> PaletteItem {
 }
 
 pub fn load_schematic_inner(name: String) -> PaletteItem {
+    let path = PathBuf::from(name.clone());
     PaletteItem::new(
-        name.clone(),
+        name,
         "",
         move |_: In<String>, mut params: LoadSchematicParams, rx: ResMut<SchematicLiveReloadRx>| {
-            let dirs = crate::dirs();
-            let path = dirs.data_dir().join("schematics").join(name.clone());
             if let Err(err) = load_schematic_file(&path, &mut params, rx) {
                 PaletteEvent::Error(err.to_string())
             } else {
