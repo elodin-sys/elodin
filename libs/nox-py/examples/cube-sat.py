@@ -528,7 +528,8 @@ sat = w.spawn(
         KalmanFilter(np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3)),
         Debug(np.float64(0.0)),
     ],
-    name="ore_sat",
+    name="OreSat",
+    id="ore_sat",
 )
 
 # w.spawn(el.VectorArrow(sat, "control_force", color = el.Color(1.0, 0.0, 0.0), scale=2.0))
@@ -541,6 +542,7 @@ rw_1 = w.spawn(
         axis=np.array([1.0, 0.0, 0.0]),
     ),
     name="Reaction Wheel 1",
+    id="rw_1",
 )
 
 
@@ -549,11 +551,13 @@ rw_2 = w.spawn(
         axis=np.array([0.0, 1.0, 0.0]),
     ),
     name="Reaction Wheel 2",
+    id="rw_2",
 )
 
 rw_3 = w.spawn(
     ReactionWheel(axis=np.array([0.0, 0.0, 1.0])),
     name="Reaction Wheel 3",
+    id="rw_3",
 )
 
 
@@ -564,6 +568,7 @@ css_0 = w.spawn(
         normal=np.array([0.0, 0.0, 1.0]),
     ),
     name="Course Sun Sensor 0",
+    id="css_0",
 )
 
 css_1 = w.spawn(
@@ -573,6 +578,7 @@ css_1 = w.spawn(
         normal=np.array([0.0, 1.0, 0.0]),
     ),
     name="Course Sun Sensor 1",
+    id="css_1",
 )
 
 css_2 = w.spawn(
@@ -582,6 +588,7 @@ css_2 = w.spawn(
         normal=np.array([1.0, 0.0, 0.0]),
     ),
     name="Course Sun Sensor 2",
+    id="css_2",
 )
 css_3 = w.spawn(
     SunSensor(
@@ -590,6 +597,7 @@ css_3 = w.spawn(
         normal=np.array([0.0, 0.0, -1.0]),
     ),
     name="Course Sun Sensor 3",
+    id="css_3",
 )
 
 css_4 = w.spawn(
@@ -599,6 +607,7 @@ css_4 = w.spawn(
         normal=np.array([0.0, -1.0, 0.0]),
     ),
     name="Course Sun Sensor 4",
+    id="css_4",
 )
 
 css_5 = w.spawn(
@@ -608,6 +617,7 @@ css_5 = w.spawn(
         normal=np.array([-1.0, 0.0, 0.0]),
     ),
     name="Course Sun Sensor 5",
+    id="css_5",
 )
 
 w.spawn(RWRel(el.Edge(sat, rw_1)), name="Sat -> RW 1")
@@ -627,7 +637,7 @@ w.schematic("""
             tabs {
                 viewport name=Viewport pos="ore_sat.world_pos + (0,0,0,0, 5,0,0)" look_at="earth.world_pos" hdr=#true
             }
-            graph "course_sun_sensor_0.css_value, course_sun_sensor_1.css_value" Name=Sensor
+            graph "css_0.css_value, css_1.css_value, css_2.css_value, css_3.css_value, css_4.css_value, css_5.css_value" Name=Sensor
         }
         graph "ore_sat.att_est" Name=Att
     }
@@ -641,7 +651,6 @@ w.schematic("""
     line_3d ore_sat.world_pos line_width=10.0 perspective=#false
 """,
             "cube-sat.kdl")
-            # None)
 
 w.spawn(
     [

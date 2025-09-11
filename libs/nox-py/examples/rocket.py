@@ -459,7 +459,8 @@ rocket = w.spawn(
         ),
         Rocket(),
     ],
-    name="rocket",
+    name="Rocket",
+    id="rocket",
 )
 
 w.schematic("""
