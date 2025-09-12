@@ -35,6 +35,10 @@ lapack-sys = "0.14"
 lapack-src = { version = "0.12", features = ["netlib"] }
 netlib-src = { version = "0.9", features = ["static"] }
 
+lapack-sys = "0.14"
+lapack-src = { version = "0.12", features = ["netlib"] }
+netlib-src = { version = "0.9", features = ["static"] }
+
 # types
 postcard.version = "1.0"
 postcard.features = ["alloc"]
