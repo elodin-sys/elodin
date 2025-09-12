@@ -7,6 +7,8 @@
   ...
 }: let
   xla_ext = pkgs.callPackage ./xla-ext.nix {};
+  lapack = pkgs.lapack;
+  blas = pkgs.blas;
   craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
   pname = (craneLib.crateNameFromCargoToml {cargoToml = ../../libs/nox-py/Cargo.toml;}).pname;
   version = (craneLib.crateNameFromCargoToml {cargoToml = ../../Cargo.toml;}).version;
@@ -113,6 +115,8 @@
         openssl
         gfortran
         gfortran.cc.lib
+        lapack
+        blas
         cmake
         xla_ext
       ]
@@ -170,6 +174,8 @@
         polars
         pytest
         xla_ext
+        lapack
+        blas
       ];
       buildInputs = [xla_ext];
       nativeBuildInputs = with pkgs; (
