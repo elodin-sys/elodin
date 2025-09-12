@@ -15,6 +15,7 @@
   commonArgs = {
     inherit pname version;
     inherit src;
+    # buildInputs = [pkgs.cmake];
     cargoExtraArgs = "--package=${pname}";
     HOST_CC = "${pkgs.stdenv.cc.nativePrefix}cc";
     TARGET_CC = "${pkgs.stdenv.cc.targetPrefix}cc";

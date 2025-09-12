@@ -15,6 +15,11 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyAnyMethods;
 
+#[cfg(target_os = "linux")]
+extern crate lapack_src as _;
+#[cfg(target_os = "linux")]
+extern crate lapack_sys as _;
+
 mod archetype;
 mod component;
 mod entity;

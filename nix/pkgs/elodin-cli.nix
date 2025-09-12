@@ -18,6 +18,7 @@
       [
         pkg-config
         python3
+        cmake
       ]
       ++ lib.optionals stdenv.isLinux [
         alsa-lib

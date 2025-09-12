@@ -26,13 +26,8 @@ cxx = "1.0"
 zerocopy.version = "0.8"
 zerocopy.features = ["derive"]
 lapack-sys = "0.14.0"
-
-# [target.'cfg(not(target_os = "macos"))'.dependencies]
 lapack-src = { version = "0.12", features = ["netlib"] }
-netlib-src.version = "0.9"
-netlib-src.features = ["static"]
-# [target.'cfg(target_os = "macos")'.dependencies]
-# lapack-src = { version = "0.11", features = ["accelerate"] }
+netlib-src = { version = "0.9", features = ["static"] }
 
 
 [build-dependencies]

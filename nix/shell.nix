@@ -82,6 +82,7 @@ in {
     name = "elo-py-shell";
     buildInputs = [
       ruff
+      cmake
       python3Packages.pytest
       python3Packages.pytest-json-report
       config.packages.elodin-py.py

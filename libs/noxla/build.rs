@@ -57,6 +57,7 @@ fn main() -> anyhow::Result<()> {
             "./vendor/jaxlib/cpu/cpu_kernels.cc",
             "./vendor/jaxlib/cpu/sparse_kernels.cc",
             "./vendor/jaxlib/cpu/lapack_kernels.cc",
+            "./vendor/jaxlib/cpu/lapack_kernels_using_lapack.cc",
         ])
         .include("./vendor")
         .include(xla_dir.join("include"))
@@ -121,7 +122,9 @@ fn main() -> anyhow::Result<()> {
     }
 
     println!("cargo:rerun-if-changed=vendor/jaxlib/cpu/cpu_kernels.cc");
+    println!("cargo:rerun-if-changed=vendor/jaxlib/cpu/sparse_kernels.cc");
     println!("cargo:rerun-if-changed=vendor/jaxlib/cpu/lapack_kernels.cc");
+    println!("cargo:rerun-if-changed=vendor/jaxlib/cpu/lapack_kernels_using_lapack.cc");
     println!("cargo:rerun-if-changed=src/executable.rs");
     println!("cargo:rerun-if-changed=src/literal.rs");
     println!("cargo:rerun-if-changed=src/op.rs");

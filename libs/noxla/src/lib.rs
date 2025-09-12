@@ -34,6 +34,14 @@
 //! let result = result[0][0].to_literal_sync()?.to_vec::<f32>()?;
 //! ```
 
+// Pull in vendored Netlib and make Cargo apply its link flags
+#[cfg(all(not(target_os = "macos")))]
+extern crate lapack_src as _;
+
+// Ensure lapack-sys’s link directives (-lgfortran, etc.) are applied too
+#[cfg(all(not(target_os = "macos")))]
+extern crate lapack_sys as _;
+
 mod buffer;
 mod builder;
 mod client;
