@@ -155,3 +155,24 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     s10::register(m)?;
     Ok(())
 }
+
+#[cfg(target_os = "linux")]
+mod keepalive {
+    unsafe extern "C" {
+        fn lapack_dgetrf_ffi();
+        // fn dgees_();
+    }
+
+    #[used]
+    #[unsafe(no_mangle)]
+    static __elodin_keep_noxla_kernels: unsafe extern "C" fn() = unsafe {
+        core::mem::transmute(lapack_dgetrf_ffi as *const ())
+    };
+    // #[used]
+    // #[unsafe(no_mangle)]
+    // static __elodin_keep_lapack: unsafe extern "C" fn() = unsafe {
+    //     core::mem::transmute(dgees_ as *const ())
+    // };
+}
+
+

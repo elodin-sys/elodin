@@ -29,11 +29,7 @@ nox-ecs.features = ["pyo3"]
 nox-ecs-macros.path = "../nox-ecs-macros"
 
 # noxla - a wrapper around raw xla
-xla = { workspace = true, default-features = false, features = ["shared"] }
-
-lapack-sys = "0.14"
-lapack-src = { version = "0.12", features = ["netlib"] }
-netlib-src = { version = "0.9", features = ["static"] }
+xla = { workspace = true, default-features = false, features = ["shared", "link-kernels"] }
 
 lapack-sys = "0.14"
 lapack-src = { version = "0.12", features = ["netlib"] }

@@ -25,9 +25,9 @@ cpp = "0.5.9"
 cxx = "1.0"
 zerocopy.version = "0.8"
 zerocopy.features = ["derive"]
-lapack-sys = "0.14.0"
-lapack-src = { version = "0.12", features = ["netlib"] }
-netlib-src = { version = "0.9", features = ["static"] }
+# lapack-sys = "0.14.0"
+# lapack-src = { version = "0.12", features = ["netlib"] }
+# netlib-src = { version = "0.9", features = ["static"] }
 
 
 [build-dependencies]

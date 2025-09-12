@@ -1,16 +1,15 @@
 use std::env;
 
 fn main() {
-    // We refer to the *archive by name*, not by a path —
-    // the path is already in the search list (propagated from `noxla` via `links`).
     let kernels_path = env::var("DEP_NOXLA_NOXLA_KERNELS")
         .expect("noxla did not export path to libnoxla_kernels.a");
 
     #[cfg(target_os = "linux")]
     {
-        println!("cargo:rustc-link-arg=-Wl,--whole-archive");
-        println!("cargo:rustc-link-arg={}", kernels_path);
-        println!("cargo:rustc-link-arg=-Wl,--no-whole-archive");
+        println!("cargo:rustc-link-arg=-Wl,--no-as-needed");
+        // println!("cargo:rustc-link-arg=-Wl,--whole-archive");
+        // println!("cargo:rustc-link-arg={}", kernels_path);
+        // println!("cargo:rustc-link-arg=-Wl,--no-whole-archive");
         println!("cargo:rustc-link-lib=stdc++");
     }
 

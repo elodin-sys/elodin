@@ -61,15 +61,15 @@ fn main() -> anyhow::Result<()> {
         ])
         .include("./vendor")
         .include(xla_dir.join("include"))
+        .cargo_metadata(false)
         .warnings(false);
 
     kernels.compile("noxla_kernels"); // libnoxla_kernels.a => OUT_DIR
 
     println!("cargo:rustc-link-search=native={}", out_dir.display());
 
-    if cfg!(feature = "link-kernels") {
-        println!("cargo:rustc-link-lib=static=noxla_kernels");
-    }
+    #[cfg(feature = "link-kernels")]
+    println!("cargo:rustc-link-lib=static=noxla_kernels");
 
     let kernels_path = out_dir.join("libnoxla_kernels.a");
     println!("cargo:noxla_kernels={}", kernels_path.display());
