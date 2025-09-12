@@ -132,8 +132,8 @@ impl<'a> MessageType<'a> {
 
     pub fn data_type_signature(&self) -> u64 {
         match self {
-            MessageType::NodeStatus(_) => NodeStatusType::SIGNATURE,
-            MessageType::LogMessage(_) => LogMessageType::SIGNATURE,
+            Self::NodeStatus(_) => NodeStatusType::SIGNATURE,
+            Self::LogMessage(_) => LogMessageType::SIGNATURE,
         }
     }
 }

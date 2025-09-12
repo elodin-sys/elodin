@@ -13,12 +13,12 @@ pub struct UdpSocket {
 }
 
 impl UdpSocket {
-    pub fn ephemeral() -> io::Result<UdpSocket> {
+    pub fn ephemeral() -> io::Result<Self> {
         let addr = SocketAddr::new([0; 4].into(), 0);
         Self::bind(addr)
     }
 
-    pub fn bind(addr: SocketAddr) -> io::Result<UdpSocket> {
+    pub fn bind(addr: SocketAddr) -> io::Result<Self> {
         let socket = socket2::Socket::new(
             socket2::Domain::for_address(addr),
             socket2::Type::DGRAM,
@@ -31,7 +31,7 @@ impl UdpSocket {
         socket.set_nonblocking(!cfg!(target_os = "linux"))?;
         socket.bind(&addr.into())?;
 
-        Ok(UdpSocket {
+        Ok(Self {
             socket,
             connected_addr: None,
         })

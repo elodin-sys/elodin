@@ -7,8 +7,8 @@ pub struct Initializer(bool);
 impl Initializer {
     /// Returns a new `Initializer` which will zero out buffers.
     #[inline]
-    pub fn zeroing() -> Initializer {
-        Initializer(true)
+    pub fn zeroing() -> Self {
+        Self(true)
     }
 
     /// Returns a new `Initializer` which will not zero out buffers.
@@ -20,8 +20,8 @@ impl Initializer {
     /// the method accurately reflects the number of bytes that have been
     /// written to the head of the buffer.
     #[inline]
-    pub unsafe fn nop() -> Initializer {
-        Initializer(false)
+    pub unsafe fn nop() -> Self {
+        Self(false)
     }
 
     /// Indicates if a buffer should be initialized.

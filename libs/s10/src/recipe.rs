@@ -46,11 +46,11 @@ impl Recipe {
         cancel_token: CancelToken,
     ) -> BoxFuture<'static, Result<(), Error>> {
         match self {
-            Recipe::Cargo(c) => c.run(name, release, cancel_token).boxed(),
-            Recipe::Process(p) => p.run(name, cancel_token).boxed(),
-            Recipe::Group(g) => g.run(release, cancel_token).boxed(),
+            Self::Cargo(c) => c.run(name, release, cancel_token).boxed(),
+            Self::Process(p) => p.run(name, cancel_token).boxed(),
+            Self::Group(g) => g.run(release, cancel_token).boxed(),
             #[cfg(not(target_os = "windows"))]
-            Recipe::Sim(s) => s.run(cancel_token).boxed(),
+            Self::Sim(s) => s.run(cancel_token).boxed(),
         }
     }
 
@@ -61,11 +61,11 @@ impl Recipe {
         cancel_token: CancelToken,
     ) -> BoxFuture<'static, Result<(), Error>> {
         match self {
-            Recipe::Cargo(c) => c.watch(name, release, cancel_token).boxed(),
-            Recipe::Process(p) => p.watch(name, cancel_token).boxed(),
-            Recipe::Group(g) => g.watch(release, cancel_token).boxed(),
+            Self::Cargo(c) => c.watch(name, release, cancel_token).boxed(),
+            Self::Process(p) => p.watch(name, cancel_token).boxed(),
+            Self::Group(g) => g.watch(release, cancel_token).boxed(),
             #[cfg(not(target_os = "windows"))]
-            Recipe::Sim(s) => s.watch(cancel_token).boxed(),
+            Self::Sim(s) => s.watch(cancel_token).boxed(),
         }
     }
 }

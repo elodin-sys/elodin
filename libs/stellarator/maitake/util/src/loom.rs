@@ -72,8 +72,8 @@ mod inner {
         impl<T> Track<T> {
             /// Track a value for leaks
             #[inline(always)]
-            pub fn new(value: T) -> Track<T> {
-                Track { value }
+            pub fn new(value: T) -> Self {
+                Self { value }
             }
 
             /// Get a reference to the value

@@ -123,28 +123,28 @@ impl CompiledVal {
         values: &Query<&'static ComponentValue>,
     ) -> Result<Val, String> {
         let val = match self {
-            CompiledVal::Auto => Val::Auto,
-            CompiledVal::Px(expr) => {
+            Self::Auto => Val::Auto,
+            Self::Px(expr) => {
                 let val = expr.execute(entity_map, values)?;
                 Val::Px(val.as_f32().ok_or("invalid value")?)
             }
-            CompiledVal::Percent(expr) => {
+            Self::Percent(expr) => {
                 let val = expr.execute(entity_map, values)?;
                 Val::Percent(val.as_f32().ok_or("invalid value")?)
             }
-            CompiledVal::Vw(expr) => {
+            Self::Vw(expr) => {
                 let val = expr.execute(entity_map, values)?;
                 Val::Vw(val.as_f32().ok_or("invalid value")?)
             }
-            CompiledVal::Vh(expr) => {
+            Self::Vh(expr) => {
                 let val = expr.execute(entity_map, values)?;
                 Val::Vh(val.as_f32().ok_or("invalid value")?)
             }
-            CompiledVal::VMin(expr) => {
+            Self::VMin(expr) => {
                 let val = expr.execute(entity_map, values)?;
                 Val::VMin(val.as_f32().ok_or("invalid value")?)
             }
-            CompiledVal::VMax(expr) => {
+            Self::VMax(expr) => {
                 let val = expr.execute(entity_map, values)?;
                 Val::VMax(val.as_f32().ok_or("invalid value")?)
             }
@@ -522,8 +522,8 @@ impl CompiledFmtExpr {
         values: &'a Query<'b, 'b, &'static ComponentValue>,
     ) -> Result<String, String> {
         match self {
-            CompiledFmtExpr::String(str) => Ok(str.clone()),
-            CompiledFmtExpr::Closure(c) => (c)(entity_map, values),
+            Self::String(str) => Ok(str.clone()),
+            Self::Closure(c) => (c)(entity_map, values),
         }
     }
 }
@@ -557,17 +557,17 @@ pub trait ComponentValueExt {
 impl ComponentValueExt for ComponentValue {
     fn as_f32(&self) -> Option<f32> {
         match self {
-            ComponentValue::U8(a) => a.buf.as_buf().first().map(|&v| v as f32),
-            ComponentValue::U16(a) => a.buf.as_buf().first().map(|&v| v as f32),
-            ComponentValue::U32(a) => a.buf.as_buf().first().map(|&v| v as f32),
-            ComponentValue::U64(a) => a.buf.as_buf().first().map(|&v| v as f32),
-            ComponentValue::I8(a) => a.buf.as_buf().first().map(|&v| v as f32),
-            ComponentValue::I16(a) => a.buf.as_buf().first().map(|&v| v as f32),
-            ComponentValue::I32(a) => a.buf.as_buf().first().map(|&v| v as f32),
-            ComponentValue::I64(a) => a.buf.as_buf().first().map(|&v| v as f32),
-            ComponentValue::Bool(a) => a.buf.as_buf().first().map(|&v| if v { 1.0 } else { 0.0 }),
-            ComponentValue::F32(array) => array.buf.as_buf().first().copied(),
-            ComponentValue::F64(array) => array.buf.as_buf().first().map(|&v| v as f32),
+            Self::U8(a) => a.buf.as_buf().first().map(|&v| v as f32),
+            Self::U16(a) => a.buf.as_buf().first().map(|&v| v as f32),
+            Self::U32(a) => a.buf.as_buf().first().map(|&v| v as f32),
+            Self::U64(a) => a.buf.as_buf().first().map(|&v| v as f32),
+            Self::I8(a) => a.buf.as_buf().first().map(|&v| v as f32),
+            Self::I16(a) => a.buf.as_buf().first().map(|&v| v as f32),
+            Self::I32(a) => a.buf.as_buf().first().map(|&v| v as f32),
+            Self::I64(a) => a.buf.as_buf().first().map(|&v| v as f32),
+            Self::Bool(a) => a.buf.as_buf().first().map(|&v| if v { 1.0 } else { 0.0 }),
+            Self::F32(array) => array.buf.as_buf().first().copied(),
+            Self::F64(array) => array.buf.as_buf().first().map(|&v| v as f32),
         }
     }
 }

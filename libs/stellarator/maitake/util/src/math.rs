@@ -58,28 +58,28 @@ impl Logarithm for usize {
     #[inline(always)]
     #[must_use = "this returns the result of the operation, \
                     without modifying the original"]
-    fn log2_ceil(self) -> usize {
+    fn log2_ceil(self) -> Self {
         usize_const_log2_ceil(self)
     }
 
     #[inline(always)]
     #[must_use = "this returns the result of the operation, \
                     without modifying the original"]
-    fn log2(self) -> usize {
+    fn log2(self) -> Self {
         usize_const_log2(self)
     }
 
     #[inline(always)]
     #[must_use = "this returns the result of the operation, \
                     without modifying the original"]
-    fn checked_log(self, base: usize) -> Option<Self> {
+    fn checked_log(self, base: Self) -> Option<Self> {
         usize_const_checked_log(self, base)
     }
 
     #[inline(always)]
     #[must_use = "this returns the result of the operation, \
                     without modifying the original"]
-    fn log(self, base: usize) -> Self {
+    fn log(self, base: Self) -> Self {
         match self.checked_log(base) {
             Some(log) => log,
             None => panic!("cannot take log base {base} of {self}"),

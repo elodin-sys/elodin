@@ -336,7 +336,7 @@ impl Instant {
     ///
     /// [global]: crate::time#global-timers
     #[must_use]
-    pub fn now() -> Instant {
+    pub fn now() -> Self {
         Self::try_now().expect("no global timer set")
     }
 
@@ -360,14 +360,14 @@ impl Instant {
     /// Returns the amount of time elapsed from another instant to this one,
     /// or zero duration if that instant is later than this one.
     #[must_use]
-    pub fn duration_since(&self, earlier: Instant) -> Duration {
+    pub fn duration_since(&self, earlier: Self) -> Duration {
         self.checked_duration_since(earlier).unwrap_or_default()
     }
 
     /// Returns the amount of time elapsed from another instant to this one,
     /// or [`None`]` if that instant is later than this one.
     #[must_use]
-    pub fn checked_duration_since(&self, earlier: Instant) -> Option<Duration> {
+    pub fn checked_duration_since(&self, earlier: Self) -> Option<Duration> {
         self.0.checked_sub(earlier.0)
     }
 
@@ -381,7 +381,7 @@ impl Instant {
     /// `Instant` (which means it's inside the bounds of the underlying data structure), [`None`]
     /// otherwise.
     #[must_use]
-    pub fn checked_add(&self, duration: Duration) -> Option<Instant> {
+    pub fn checked_add(&self, duration: Duration) -> Option<Self> {
         self.0.checked_add(duration).map(Instant)
     }
 
@@ -389,19 +389,19 @@ impl Instant {
     /// `Instant` (which means it's inside the bounds of the underlying data structure), [`None`]
     /// otherwise.
     #[must_use]
-    pub fn checked_sub(&self, duration: Duration) -> Option<Instant> {
+    pub fn checked_sub(&self, duration: Duration) -> Option<Self> {
         self.0.checked_sub(duration).map(Instant)
     }
 }
 
 impl Add<Duration> for Instant {
-    type Output = Instant;
+    type Output = Self;
 
     /// # Panics
     ///
     /// This function may panic if the resulting point in time cannot be represented by the
     /// underlying data structure. See [`Instant::checked_add`] for a version without panic.
-    fn add(self, other: Duration) -> Instant {
+    fn add(self, other: Duration) -> Self {
         self.checked_add(other)
             .expect("overflow when adding duration to instant")
     }
@@ -414,9 +414,9 @@ impl AddAssign<Duration> for Instant {
 }
 
 impl Sub<Duration> for Instant {
-    type Output = Instant;
+    type Output = Self;
 
-    fn sub(self, other: Duration) -> Instant {
+    fn sub(self, other: Duration) -> Self {
         self.checked_sub(other)
             .expect("overflow when subtracting duration from instant")
     }
@@ -428,12 +428,12 @@ impl SubAssign<Duration> for Instant {
     }
 }
 
-impl Sub<Instant> for Instant {
+impl Sub<Self> for Instant {
     type Output = Duration;
 
     /// Returns the amount of time elapsed from another instant to this one,
     /// or zero duration if that instant is later than this one.
-    fn sub(self, other: Instant) -> Duration {
+    fn sub(self, other: Self) -> Duration {
         self.duration_since(other)
     }
 }

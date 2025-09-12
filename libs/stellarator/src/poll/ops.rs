@@ -301,7 +301,7 @@ impl Open {
             | options.creation_mode()?
             | options.custom_flags;
         let mode = options.mode as libc::c_uint;
-        Ok(Open(unblock(move || {
+        Ok(Self(unblock(move || {
             let path = path.to_str().ok_or(Error::InvalidPath)?;
             let path = CString::new(path).map_err(io::Error::from)?;
             let fd = unsafe { libc::open(path.as_ptr(), flags, mode) }.as_result()?;

@@ -292,24 +292,24 @@ impl Pane {
         dashboards: &Query<&Dashboard<Entity>>,
     ) -> String {
         match self {
-            Pane::Graph(pane) => {
+            Self::Graph(pane) => {
                 if let Ok(graph_state) = graph_states.get(pane.id) {
                     return graph_state.label.to_string();
                 }
                 pane.label.to_string()
             }
-            Pane::Viewport(viewport) => viewport.label.to_string(),
-            Pane::Monitor(monitor) => monitor.label.to_string(),
-            Pane::QueryTable(..) => "Query".to_string(),
-            Pane::QueryPlot(query_plot) => {
+            Self::Viewport(viewport) => viewport.label.to_string(),
+            Self::Monitor(monitor) => monitor.label.to_string(),
+            Self::QueryTable(..) => "Query".to_string(),
+            Self::QueryPlot(query_plot) => {
                 if let Ok(graph_state) = graph_states.get(query_plot.entity) {
                     return graph_state.label.to_string();
                 }
                 "Query Plot".to_string()
             }
-            Pane::ActionTile(action) => action.label.to_string(),
-            Pane::VideoStream(video_stream) => video_stream.label.to_string(),
-            Pane::Dashboard(dashboard) => {
+            Self::ActionTile(action) => action.label.to_string(),
+            Self::VideoStream(video_stream) => video_stream.label.to_string(),
+            Self::Dashboard(dashboard) => {
                 if let Ok(dash) = dashboards.get(dashboard.entity) {
                     return dash
                         .root
@@ -320,9 +320,9 @@ impl Pane {
                 }
                 "Dashboard".to_string()
             }
-            Pane::Hierarchy => "Entities".to_string(),
-            Pane::Inspector => "Inspector".to_string(),
-            Pane::SchematicTree(_) => "Tree".to_string(),
+            Self::Hierarchy => "Entities".to_string(),
+            Self::Inspector => "Inspector".to_string(),
+            Self::SchematicTree(_) => "Tree".to_string(),
         }
     }
 
@@ -337,26 +337,26 @@ impl Pane {
     ) -> egui_tiles::UiResponse {
         let content_rect = ui.available_rect_before_wrap();
         match self {
-            Pane::Graph(pane) => {
+            Self::Graph(pane) => {
                 pane.rect = Some(content_rect);
 
                 ui.add_widget_with::<PlotWidget>(world, "graph", (pane.id, icons.scrub));
 
                 egui_tiles::UiResponse::None
             }
-            Pane::Viewport(pane) => {
+            Self::Viewport(pane) => {
                 pane.rect = Some(content_rect);
                 egui_tiles::UiResponse::None
             }
-            Pane::Monitor(pane) => {
+            Self::Monitor(pane) => {
                 ui.add_widget_with::<MonitorWidget>(world, "monitor", pane.clone());
                 egui_tiles::UiResponse::None
             }
-            Pane::QueryTable(pane) => {
+            Self::QueryTable(pane) => {
                 ui.add_widget_with::<QueryTableWidget>(world, "sql", pane.clone());
                 egui_tiles::UiResponse::None
             }
-            Pane::QueryPlot(pane) => {
+            Self::QueryPlot(pane) => {
                 pane.rect = Some(content_rect);
                 ui.add_widget_with::<super::query_plot::QueryPlotWidget>(
                     world,
@@ -365,11 +365,11 @@ impl Pane {
                 );
                 egui_tiles::UiResponse::None
             }
-            Pane::ActionTile(pane) => {
+            Self::ActionTile(pane) => {
                 ui.add_widget_with::<ActionTileWidget>(world, "action_tile", pane.entity);
                 egui_tiles::UiResponse::None
             }
-            Pane::VideoStream(pane) => {
+            Self::VideoStream(pane) => {
                 ui.add_widget_with::<super::video_stream::VideoStreamWidget>(
                     world,
                     "video_stream",
@@ -377,11 +377,11 @@ impl Pane {
                 );
                 egui_tiles::UiResponse::None
             }
-            Pane::Dashboard(pane) => {
+            Self::Dashboard(pane) => {
                 ui.add_widget_with::<DashboardWidget>(world, "dashboard", pane.entity);
                 egui_tiles::UiResponse::None
             }
-            Pane::Hierarchy => {
+            Self::Hierarchy => {
                 ui.add_widget_with::<HierarchyContent>(
                     world,
                     "hierarchy_content",
@@ -393,7 +393,7 @@ impl Pane {
                 );
                 egui_tiles::UiResponse::None
             }
-            Pane::Inspector => {
+            Self::Inspector => {
                 let inspector_icons = InspectorIcons {
                     chart: icons.chart,
                     add: icons.add,
@@ -409,7 +409,7 @@ impl Pane {
                 tree_actions.extend(actions);
                 egui_tiles::UiResponse::None
             }
-            Pane::SchematicTree(tree_pane) => {
+            Self::SchematicTree(tree_pane) => {
                 let tree_icons = super::schematic::tree::TreeIcons {
                     chevron: icons.chevron,
                     search: icons.search,

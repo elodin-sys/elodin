@@ -696,57 +696,57 @@ impl ComponentValueExt for ComponentValue {
     ) -> Box<dyn Iterator<Item = (&'i smallvec::SmallVec<[usize; 4]>, ElementValueMut<'i>)> + 'i>
     {
         match self {
-            ComponentValue::U8(array) => Box::new(
+            Self::U8(array) => Box::new(
                 array
                     .indexed_iter_mut()
                     .map(|(i, x)| (i, ElementValueMut::U8(x))),
             ),
-            ComponentValue::U16(array) => Box::new(
+            Self::U16(array) => Box::new(
                 array
                     .indexed_iter_mut()
                     .map(|(i, x)| (i, ElementValueMut::U16(x))),
             ),
-            ComponentValue::U32(array) => Box::new(
+            Self::U32(array) => Box::new(
                 array
                     .indexed_iter_mut()
                     .map(|(i, x)| (i, ElementValueMut::U32(x))),
             ),
-            ComponentValue::U64(array) => Box::new(
+            Self::U64(array) => Box::new(
                 array
                     .indexed_iter_mut()
                     .map(|(i, x)| (i, ElementValueMut::U64(x))),
             ),
-            ComponentValue::I8(array) => Box::new(
+            Self::I8(array) => Box::new(
                 array
                     .indexed_iter_mut()
                     .map(|(i, x)| (i, ElementValueMut::I8(x))),
             ),
-            ComponentValue::I16(array) => Box::new(
+            Self::I16(array) => Box::new(
                 array
                     .indexed_iter_mut()
                     .map(|(i, x)| (i, ElementValueMut::I16(x))),
             ),
-            ComponentValue::I32(array) => Box::new(
+            Self::I32(array) => Box::new(
                 array
                     .indexed_iter_mut()
                     .map(|(i, x)| (i, ElementValueMut::I32(x))),
             ),
-            ComponentValue::I64(array) => Box::new(
+            Self::I64(array) => Box::new(
                 array
                     .indexed_iter_mut()
                     .map(|(i, x)| (i, ElementValueMut::I64(x))),
             ),
-            ComponentValue::Bool(array) => Box::new(
+            Self::Bool(array) => Box::new(
                 array
                     .indexed_iter_mut()
                     .map(|(i, x)| (i, ElementValueMut::Bool(x))),
             ),
-            ComponentValue::F32(array) => Box::new(
+            Self::F32(array) => Box::new(
                 array
                     .indexed_iter_mut()
                     .map(|(i, x)| (i, ElementValueMut::F32(x))),
             ),
-            ComponentValue::F64(array) => Box::new(
+            Self::F64(array) => Box::new(
                 array
                     .indexed_iter_mut()
                     .map(|(i, x)| (i, ElementValueMut::F64(x))),

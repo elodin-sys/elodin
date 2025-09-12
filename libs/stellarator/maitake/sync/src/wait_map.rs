@@ -764,7 +764,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
     #[inline(always)]
     #[cfg_attr(loom, track_caller)]
     fn wake(this: NonNull<Self>, list: &mut List<Self>, wakeup: Wakeup<V>) -> Waker {
-        Waiter::with_node(this, list, |node| {
+        Self::with_node(this, list, |node| {
             let waker = test_dbg!(mem::replace(&mut node.waker, wakeup));
             match waker {
                 Wakeup::Waiting(waker) => waker,
@@ -960,8 +960,8 @@ impl<K: PartialEq, V> Waiter<K, V> {
     }
 }
 
-unsafe impl<K: PartialEq, V> Linked<list::Links<Waiter<K, V>>> for Waiter<K, V> {
-    type Handle = NonNull<Waiter<K, V>>;
+unsafe impl<K: PartialEq, V> Linked<list::Links<Self>> for Waiter<K, V> {
+    type Handle = NonNull<Self>;
 
     fn into_ptr(r: Self::Handle) -> NonNull<Self> {
         r
@@ -971,7 +971,7 @@ unsafe impl<K: PartialEq, V> Linked<list::Links<Waiter<K, V>>> for Waiter<K, V> 
         ptr
     }
 
-    unsafe fn links(target: NonNull<Self>) -> NonNull<list::Links<Waiter<K, V>>> {
+    unsafe fn links(target: NonNull<Self>) -> NonNull<list::Links<Self>> {
         // Safety: using `ptr::addr_of!` avoids creating a temporary
         // reference, which stacked borrows dislikes.
         unsafe {

@@ -291,7 +291,7 @@ impl StaticScheduler {
     ///   scheduler's run queue.
     /// - `Err`([`TryStealError::Busy`]`)` if another worker was already
     ///   stealing from this scheduler's run queue.
-    pub fn try_steal(&self) -> Result<Stealer<'_, &'static StaticScheduler>, TryStealError> {
+    pub fn try_steal(&self) -> Result<Stealer<'_, &'static Self>, TryStealError> {
         Stealer::try_new(&self.0.run_queue, &self.0.queued)
     }
 }
@@ -355,7 +355,7 @@ feature! {
         ///   scheduler's run queue.
         /// - `Err`([`TryStealError::Busy`]`)` if another worker was already
         ///   stealing from this scheduler's run queue.
-        pub fn try_steal(&self) -> Result<Stealer<'_, Scheduler>, TryStealError> {
+        pub fn try_steal(&self) -> Result<Stealer<'_, Self>, TryStealError> {
             Stealer::try_new(&self.0.run_queue, &self.0.queued)
         }
     }

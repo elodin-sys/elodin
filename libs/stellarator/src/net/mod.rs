@@ -26,7 +26,7 @@ pub struct SockAddrRaw {
 
 impl SockAddrRaw {
     pub(crate) fn zeroed() -> Self {
-        SockAddrRaw {
+        Self {
             storage: unsafe { std::mem::zeroed() },
             len: std::mem::size_of::<SockAddrStorage>() as _,
         }
@@ -35,7 +35,7 @@ impl SockAddrRaw {
 
 impl From<SockAddrRaw> for SockAddr {
     fn from(val: SockAddrRaw) -> Self {
-        unsafe { SockAddr::new(val.storage, val.len) }
+        unsafe { Self::new(val.storage, val.len) }
     }
 }
 
@@ -52,7 +52,7 @@ impl From<SockAddr> for SockAddrRaw {
             )
         };
 
-        SockAddrRaw {
+        Self {
             // This is safe as we written the address to `storage` above.
             storage: unsafe { storage.assume_init() },
             len,

@@ -154,11 +154,11 @@ impl LineMut<'_> {
         render_device: &RenderDevice,
     ) {
         match self {
-            LineMut::Timeseries(line) => {
+            Self::Timeseries(line) => {
                 line.data
                     .queue_load_range(range, render_queue, render_device)
             }
-            LineMut::XY(xy_line) => {
+            Self::XY(xy_line) => {
                 xy_line.queue_load(render_queue, render_device);
             }
         }
@@ -172,27 +172,27 @@ impl LineMut<'_> {
         pixel_width: usize,
     ) -> u32 {
         match self {
-            LineMut::Timeseries(line) => line.data.write_to_index_buffer(
+            Self::Timeseries(line) => line.data.write_to_index_buffer(
                 index_buffer,
                 render_queue,
                 line_visible_range,
                 pixel_width,
             ),
-            LineMut::XY(xy_line) => xy_line.write_to_index_buffer(index_buffer, render_queue),
+            Self::XY(xy_line) => xy_line.write_to_index_buffer(index_buffer, render_queue),
         }
     }
 
     pub fn x_buffer_shard_alloc(&self) -> Option<&BufferShardAlloc> {
         match self {
-            LineMut::Timeseries(line) => line.data.timestamp_buffer_shard_alloc(),
-            LineMut::XY(xy_line) => xy_line.x_shard_alloc.as_ref(),
+            Self::Timeseries(line) => line.data.timestamp_buffer_shard_alloc(),
+            Self::XY(xy_line) => xy_line.x_shard_alloc.as_ref(),
         }
     }
 
     pub fn y_buffer_shard_alloc(&self) -> Option<&BufferShardAlloc> {
         match self {
-            LineMut::Timeseries(line) => line.data.data_buffer_shard_alloc(),
-            LineMut::XY(xy_line) => xy_line.y_shard_alloc.as_ref(),
+            Self::Timeseries(line) => line.data.data_buffer_shard_alloc(),
+            Self::XY(xy_line) => xy_line.y_shard_alloc.as_ref(),
         }
     }
 }

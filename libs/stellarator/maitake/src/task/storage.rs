@@ -58,15 +58,15 @@ feature! {
     pub struct BoxStorage;
 
     impl<S, F: Future> Storage<S, F> for BoxStorage {
-        type StoredTask = Box<Task<S, F, BoxStorage>>;
+        type StoredTask = Box<Task<S, F, Self>>;
 
-        fn into_raw(task: Box<Task<S, F, BoxStorage>>) -> NonNull<Task<S, F, BoxStorage>> {
+        fn into_raw(task: Box<Task<S, F, Self>>) -> NonNull<Task<S, F, Self>> {
             unsafe {
                 crate::util::non_null(Box::into_raw(task))
             }
         }
 
-        fn from_raw(ptr: NonNull<Task<S, F, BoxStorage>>) -> Box<Task<S, F, BoxStorage>> {
+        fn from_raw(ptr: NonNull<Task<S, F, Self>>) -> Box<Task<S, F, Self>> {
             unsafe { Box::from_raw(ptr.as_ptr()) }
         }
     }

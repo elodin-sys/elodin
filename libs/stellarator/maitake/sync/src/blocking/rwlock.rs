@@ -352,8 +352,8 @@ impl<T, Lock: RawRwLock> RwLock<T, Lock> {
 
 impl<T: Default, Lock: Default> Default for RwLock<T, Lock> {
     /// Creates a new `RwLock<T>`, with the `Default` value for T.
-    fn default() -> RwLock<T, Lock> {
-        RwLock {
+    fn default() -> Self {
+        Self {
             data: UnsafeCell::new(Default::default()),
             lock: Default::default(),
         }
@@ -364,7 +364,7 @@ impl<T> From<T> for RwLock<T> {
     /// Creates a new instance of an `RwLock<T>` which is unlocked.
     /// This is equivalent to [`RwLock::new`].
     fn from(t: T) -> Self {
-        RwLock::new(t)
+        Self::new(t)
     }
 }
 

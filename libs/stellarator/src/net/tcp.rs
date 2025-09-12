@@ -14,7 +14,7 @@ pub struct TcpStream {
 }
 
 impl TcpStream {
-    pub async fn connect(addr: SocketAddr) -> Result<TcpStream, Error> {
+    pub async fn connect(addr: SocketAddr) -> Result<Self, Error> {
         let socket = socket2::Socket::new(
             socket2::Domain::for_address(addr),
             socket2::Type::STREAM,
@@ -26,7 +26,7 @@ impl TcpStream {
         let addr: SockAddr = addr.into();
         Completion::run(ops::Connect::new(&socket, Box::new(addr.into()))?).await?;
 
-        Ok(TcpStream { socket })
+        Ok(Self { socket })
     }
 
     pub async fn read<B: IoBufMut>(&self, buf: B) -> BufResult<usize, B> {
@@ -65,7 +65,7 @@ pub struct TcpListener {
 }
 
 impl TcpListener {
-    pub fn bind(addrs: impl ToSocketAddrs) -> io::Result<TcpListener> {
+    pub fn bind(addrs: impl ToSocketAddrs) -> io::Result<Self> {
         let addr = addrs.to_socket_addrs()?.next().ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -85,7 +85,7 @@ impl TcpListener {
         socket.listen(1024)?;
         socket.set_nonblocking(!cfg!(target_os = "linux"))?;
 
-        Ok(TcpListener { socket })
+        Ok(Self { socket })
     }
 
     pub async fn accept(&self) -> Result<TcpStream, Error> {

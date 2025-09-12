@@ -531,12 +531,12 @@ impl Turn {
 impl fmt::Display for TimerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TimerError::NoGlobalTimer => f.pad(
+            Self::NoGlobalTimer => f.pad(
                 "no global timer has been initialized! \
                 `set_global_timer` must be called before calling \
                 this function.",
             ),
-            TimerError::DurationTooLong { requested, max } => write!(
+            Self::DurationTooLong { requested, max } => write!(
                 f,
                 "requested duration {requested:?} exceeds this timer's \
                 maximum duration ({max:?}."

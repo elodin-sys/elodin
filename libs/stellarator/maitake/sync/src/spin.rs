@@ -130,7 +130,7 @@ unsafe impl RawMutex for Spinlock {
 
     #[inline]
     fn is_locked(&self) -> bool {
-        Spinlock::is_locked(self)
+        Self::is_locked(self)
     }
 }
 
@@ -139,7 +139,7 @@ impl blocking::ConstInit for Spinlock {
     // As usual, clippy is totally wrong about this --- the whole point of this
     // constant is to create a *new* spinlock every time.
     #[allow(clippy::declare_interior_mutable_const)]
-    const INIT: Self = Spinlock::new();
+    const INIT: Self = Self::new();
 }
 
 const UNLOCKED: usize = 0;
@@ -258,7 +258,7 @@ impl blocking::ConstInit for RwSpinlock {
     // As usual, clippy is totally wrong about this --- the whole point of this
     // constant is to create a *new* spinlock every time.
     #[allow(clippy::declare_interior_mutable_const)]
-    const INIT: Self = RwSpinlock::new();
+    const INIT: Self = Self::new();
 }
 
 impl fmt::Debug for RwSpinlock {

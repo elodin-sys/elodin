@@ -80,13 +80,13 @@ pub enum Error {
 
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
-        Error::Io(err)
+        Self::Io(err)
     }
 }
 
 impl From<rustix::io::Errno> for Error {
     fn from(err: rustix::io::Errno) -> Self {
-        Error::Io(std::io::Error::from_raw_os_error(err.raw_os_error()))
+        Self::Io(std::io::Error::from_raw_os_error(err.raw_os_error()))
     }
 }
 

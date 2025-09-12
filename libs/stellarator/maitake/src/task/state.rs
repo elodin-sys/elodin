@@ -159,23 +159,23 @@ enum JoinWakerState {
 
 impl State {
     fn has_join_waker(&mut self, should_wait: &mut bool) -> bool {
-        match self.get(State::JOIN_WAKER) {
+        match self.get(Self::JOIN_WAKER) {
             JoinWakerState::Empty => false,
             JoinWakerState::Registering => {
                 *should_wait = true;
                 debug_assert!(
-                    self.get(State::HAS_JOIN_HANDLE),
+                    self.get(Self::HAS_JOIN_HANDLE),
                     "a task cannot register a join waker if it does not have a join handle!",
                 );
                 true
             }
             JoinWakerState::Waiting => {
                 debug_assert!(
-                    self.get(State::HAS_JOIN_HANDLE),
+                    self.get(Self::HAS_JOIN_HANDLE),
                     "a task cannot have a join waker if it does not have a join handle!",
                 );
                 *should_wait = false;
-                self.set(State::JOIN_WAKER, JoinWakerState::Empty);
+                self.set(Self::JOIN_WAKER, JoinWakerState::Empty);
                 true
             }
             JoinWakerState::Woken => {

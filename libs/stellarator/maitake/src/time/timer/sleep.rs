@@ -183,8 +183,8 @@ impl fmt::Debug for Sleep<'_> {
 
 // === impl Entry ===
 
-unsafe impl Linked<list::Links<Entry>> for Entry {
-    type Handle = NonNull<Entry>;
+unsafe impl Linked<list::Links<Self>> for Entry {
+    type Handle = NonNull<Self>;
 
     fn into_ptr(r: Self::Handle) -> NonNull<Self> {
         r
@@ -194,7 +194,7 @@ unsafe impl Linked<list::Links<Entry>> for Entry {
         ptr
     }
 
-    unsafe fn links(target: NonNull<Self>) -> NonNull<list::Links<Entry>> {
+    unsafe fn links(target: NonNull<Self>) -> NonNull<list::Links<Self>> {
         unsafe {
             // Safety: using `ptr::addr_of!` avoids creating a temporary
             // reference, which stacked borrows dislikes.
