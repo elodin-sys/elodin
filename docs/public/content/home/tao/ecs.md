@@ -20,7 +20,7 @@ Our engine allows your simulations to run on GPU, TPU, or CPU, all with no code 
 ## A History Lesson on ECS
 
 
-ECS stands for Entity Component System, a design pattern that has recently come into vogue. It is most used in the context of video games, but as we will find out, it has been use in other places. I'm going to tell a slightly falsified version of the history of ECS to motivate its existence. The first thing to understand is how video games, simulations, and many other software pieces were historically developed using a vaguely object-oriented model. The player would be a class like:
+ECS stands for Entity Component System, a design pattern that has recently come into vogue. It is most used in the context of video games, but as we will find out, it has been used in other places. I'm going to tell a slightly falsified version of the history of ECS to motivate its existence. The first thing to understand is how video games, simulations, and many other software pieces were historically developed using a vaguely object-oriented model. The player would be a class like:
 
 ```swift
 struct Player {
@@ -68,7 +68,7 @@ fn integrate(query: Query<(Pos, Vel)>) {
 The code above describes a system, basically a function that operates on a set of components. When this function is run, the computer prefetches all the positions and all the velocities at once. This means that while `integrate` is running, you never have any cache-missing. It also means that you can effectively utilize vector instructions to speed up the computation. Below is a hypothetical implementation of `integrate`, where you interact with the entire array at once.
 
 ```rust
-fn integrate(pos: Array<Pos> vel: Array<Vel>) {
+fn integrate(pos: Array<Pos>, vel: Array<Vel>) {
   pos += DELTA_T * vel;
 }
 ```
@@ -80,9 +80,9 @@ The true history is that ECS has likely been developed numerous times independen
 ## An ECS-based Configurable Physics Engine
 
 
-ECS isn't just great for video games; it is widely applicable to all kinds of applications. In particular, simulations are a perfect fit for ECS. Simulations benefit from both the organization and performance aspects of ECS; after all, what are video games but complex not very realistic simulations?
+ECS isn't just great for video games; it is widely applicable to all kinds of applications. In particular, simulations are a perfect fit for ECS. Simulations benefit from both the organization and performance aspects of ECS; after all, what are video games but complex, not very realistic simulations?
 
-We want to build an ECS-based physics engine that utilizes all of ECS's benefits and is easy for non-professional software engineers to use. Historically, writing code that utilizes vectorized operations was a harrowing manual process. Engineers had to write code in an obscure, often difficult-to-read way ([https://mcyoung.xyz/2023/11/27/simd-base64/](https://mcyoung.xyz/2023/11/27/simd-base64/)). While the results were very performant, they were very readable. Simulation code is already difficult to understand due to its heavy reliance on often obscure mathematical methods. Adding complex performance optimizations to that is a recipe for confusion.
+We want to build an ECS-based physics engine that utilizes all of ECS's benefits and is easy for non-professional software engineers to use. Historically, writing code that utilizes vectorized operations was a harrowing manual process. Engineers had to write code in an obscure, often difficult-to-read way ([https://mcyoung.xyz/2023/11/27/simd-base64/](https://mcyoung.xyz/2023/11/27/simd-base64/)). While the results were very performant, they were not very readable. Simulation code is already difficult to understand due to its heavy reliance on often obscure mathematical methods. Adding complex performance optimizations to that is a recipe for confusion.
 
 Thankfully, there is another math-heavy field that deals with this exact problem – Machine Learning (ML). There are several systems built for machine learning that allow efficient vectorized operations without sacrificing readability. We will focus on two related projects, JAX and XLA. XLA is a compiler that compiles linear algebra operations to GPU, CPU, or TPU. JAX is a JIT for Python that turns standard numpy operations into XLA intermediate representation called StableHLO – technically, it uses MHLO, which is a compatible but distinct IR to StableHLO, which is then converted by XLA into StableHLO. JAX is wonderful because it allows anyone comfortable with Numpy to write efficient code for the GPU. Python is quickly becoming the lingua franca of scientific programming, so this feature is of particular interest.
 
@@ -130,7 +130,7 @@ Let's walk through what's happening here, and how it works.
 The first code block is dedicated to setting up all the components required for a six-dof system.
 You'll see references to `SpatialPos`, SpatialMotion, and SpatialForce.
 These are from Featherstone's Spatial Vector Algebra and are a compact way of representing the state of a rigid body with six degrees of freedom.
-You can read a short into [here](https://homes.cs.washington.edu/~todorov/courses/amath533/FeatherstoneSlides.pdf) or in [Rigid Body Dynamics Algorithms (Featherstone - 2008)](https://link.springer.com/book/10.1007/978-1-4899-7560-7).
+You can read a short intro [here](https://homes.cs.washington.edu/~todorov/courses/amath533/FeatherstoneSlides.pdf) or in [Rigid Body Dynamics Algorithms (Featherstone - 2008)](https://link.springer.com/book/10.1007/978-1-4899-7560-7).
 
 Next, you see the `Body` struct, which is an `Archetype`, which is a collection of different components that will be found together in an ECS. It allows us to initialize all the components together.
 
