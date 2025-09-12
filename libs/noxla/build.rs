@@ -45,41 +45,22 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    // Build the C++ kernels as a static lib
-    let mut kernels = cc::Build::new();
-    kernels
-        .cpp(true)
-        .flag("-std=c++17")
-        .flag("-DLLVM_ON_UNIX=1")
-        .flag("-DLLVM_VERSION_STRING=")
-        .flag_if_supported("-fPIC")
-        .files([
-            "./vendor/jaxlib/cpu/cpu_kernels.cc",
-            "./vendor/jaxlib/cpu/sparse_kernels.cc",
-            "./vendor/jaxlib/cpu/lapack_kernels.cc",
-        ])
-        .include("./vendor")
-        .include(xla_dir.join("include"))
-        .warnings(false);
-
-    kernels.compile("noxla_kernels"); // libnoxla_kernels.a => OUT_DIR
-
-    println!("cargo:rustc-link-search=native={}", out_dir.display());
-
-    if cfg!(feature = "link-kernels") {
-        println!("cargo:rustc-link-lib=static=noxla_kernels");
-    }
-
     let kernels_path = out_dir.join("libnoxla_kernels.a");
     println!("cargo:noxla_kernels={}", kernels_path.display());
 
     let mut config = cpp_build::Config::new();
     config
+        .flag("-DLLVM_ON_UNIX=1")
+        .flag("-DLLVM_VERSION_STRING=")
+        .flag_if_supported("-fPIC")
         .flag_if_supported("-std=c++17")
         .include(xla_dir.join("include"))
         .include("./vendor")
-        // .include(format!("{out_dir}/xla_extension/include"))
-        .build("src/lib.rs");
+        .file("./vendor/jaxlib/cpu/cpu_kernels.cc")
+        .file("./vendor/jaxlib/cpu/sparse_kernels.cc")
+        .file("./vendor/jaxlib/cpu/lapack_kernels.cc")
+        .include("./vendor")
+        .include(xla_dir.join("include"));
 
     if cfg!(feature = "cuda") {
         let cuda = find_cuda_helper::find_cuda_root().expect("No CUDA found!");
@@ -117,8 +98,9 @@ fn main() -> anyhow::Result<()> {
             .file("./vendor/jaxlib/gpu/sparse_kernels.cc")
             .define("JAX_GPU_CUDA", Some("1"));
         cuda_config.compile("jaxlib_cuda");
-        config.build("src/lib.rs")
     }
+
+    config.build("src/lib.rs");
 
     println!("cargo:rerun-if-changed=vendor/jaxlib/cpu/cpu_kernels.cc");
     println!("cargo:rerun-if-changed=vendor/jaxlib/cpu/lapack_kernels.cc");
