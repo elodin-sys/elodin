@@ -1,7 +1,10 @@
 # Memserve
 
+## Purpose
+Memserve was originally created to host the documentation site on an edge server with blazing-fast response times, a goal it achieved successfully. Since then, however, the docs have been moved to GitHub for easier maintenance, where we simply run Zola build/serve directly, which is more than fast enough for our current needs.
+
 ## Description
-memserve is a web server that serves static web content from memory. It is somewhat unique in that it loads all content into memory at startup, and then serves it from there. It also does some pre-processing, such as gzip compression and ETag generation, to reduce the amount of work that needs to be done when handling requests. Obviously, this approach is not suitable for very large sites.
+Memserve is a web server that serves static web content from memory. It is somewhat unique in that it loads all content into memory at startup, and then serves it from there. It also does some pre-processing, such as gzip compression and ETag generation, to reduce the amount of work that needs to be done when handling requests. Obviously, this approach is not suitable for very large sites.
 
 As a further optimization, memserve will prepare all possible responses ahead of time. As a result, it won't need to do any dynamic memory allocation when handling requests.
 
