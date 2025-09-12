@@ -1,7 +1,33 @@
+# Memserve
+
+## Description
 memserve is a web server that serves static web content from memory. It is somewhat unique in that it loads all content into memory at startup, and then serves it from there. It also does some pre-processing, such as gzip compression and ETag generation, to reduce the amount of work that needs to be done when handling requests. Obviously, this approach is not suitable for very large sites.
 
 As a further optimization, memserve will prepare all possible responses ahead of time. As a result, it won't need to do any dynamic memory allocation when handling requests.
 
+## Getting Started
+To quickly try memserve locally, you can follow these steps:
+```bash
+# Create the public directory
+mkdir -p public
+
+# Add a minimal index.html
+echo '<h1>Elodin</h1>' > public/index.html
+
+# Build the project (debug mode)
+cargo build
+
+# Start the server
+./target/debug/memserve \
+  --bind-address 127.0.0.1:8080 \
+  --log-level debug \
+  public
+
+# Test the server
+curl -i http://127.0.0.1:8080/
+```
+
+## Limitations
 Due to its very limited scope, memserve will make several simplifying assumptions, which are also limitations:
 - Only GET requests are supported.
 - Only HTTP/1.1 is supported.
