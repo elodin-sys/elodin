@@ -1,32 +1,33 @@
 # Elodin Editor
 
 ### Install
-
 Install the editor from the [releases](https://github.com/elodin-sys/elodin/releases) page.
 
 ### How to run locally
+To run the editor locally and test the included examples, follow these steps:
 
-Install nox-py:
-
-```sh
+```bash
+# Move into the nox-py library
 cd libs/nox-py
+
+# Create a new virtual environment using uv
 uv venv
-# Following command should be the one mentioned in previous output, like `Activate with: source .venv/bin/activate.fish`
-source .venv/bin/activate.fish
+
+# Activate the environment (Bash)
+source .venv/bin/activate
+
+# Build and install nox-py in development mode
 uvx maturin develop --uv
-```
 
-Run `three-body.py` example in the editor:
-
-```sh
-# run from `libs/nox-py`
+# Run the three-body example from the editor (execute inside libs/nox-py)
 cargo run --manifest-path=../../apps/elodin/Cargo.toml editor examples/three-body.py
 ```
 
+### Run the example with live code watching
 Run `three-body.py` example while watching for editor code changes (requires [cargo-watch](https://crates.io/crates/cargo-watch)):
 
-```sh
-# run from `libs/nox-py`
+```bash
+# Execute this command from inside the libs/nox-py directory
 cargo watch --watch ../../libs/elodin-editor \
     -x 'run --manifest-path=../../apps/elodin/Cargo.toml editor examples/three-body.py'
 ```
