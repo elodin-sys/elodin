@@ -462,27 +462,22 @@ rocket = w.spawn(
     name="Rocket",
     id="rocket",
 )
-w.schematic(
-    """
-    graph "rocket.world_pos[4]"
+w.schematic("""
+    hsplit {
+        tabs share=0.8 {
+            viewport name=Viewport pos="rocket.world_pos + (0.0,0.0,0.0,0.0, 5.0, 0.0, 1.0)" look_at="rocket.world_pos" hdr=#true
+        }
+        vsplit share=0.4 {
+            graph "rocket.fin_deflect" name=Fin
+            graph "rocket.v_rel_accel, rocket.v_rel_accel_filtered" name=Accel
+        }
+    }
+    object_3d rocket.world_pos {
+        glb path="https://storage.googleapis.com/elodin-assets/rocket.glb"
+    }
+    line_3d rocket.world_pos line_width=11.0 color="yolk" perspective=#false
 """,
-)
-# w.schematic("""
-#     hsplit {
-#         tabs share=0.8 {
-#             viewport name=Viewport pos="rocket.world_pos + (0.0,0.0,0.0,0.0, 5.0, 0.0, 1.0)" look_at="rocket.world_pos" hdr=#true
-#         }
-#         vsplit share=0.4 {
-#             graph "rocket.fin_deflect" name=Fin
-#             graph "rocket.v_rel_accel, rocket.v_rel_accel_filtered" name=Accel
-#         }
-#     }
-#     object_3d rocket.world_pos {
-#         glb path="https://storage.googleapis.com/elodin-assets/rocket.glb"
-#     }
-#     line_3d rocket.world_pos line_width=11.0 color="yolk" perspective=#false
-# """,
-#             "rocket.kdl")
+            "rocket.kdl")
 
 non_effectors = (
     mach
