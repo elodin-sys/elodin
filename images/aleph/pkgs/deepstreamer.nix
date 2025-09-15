@@ -42,7 +42,7 @@ stdenv.mkDerivation {
     openssl
   ];
 
-  unpackCmd = "for src in $srcs; do dpkg-deb -x $src source; done";
+  unpackCmd = "dpkg-deb -x $src source";
 
   autoPatchelfIgnoreMissingDeps = true;
 
