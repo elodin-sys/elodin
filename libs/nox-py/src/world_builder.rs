@@ -1,9 +1,9 @@
 use crate::*;
 use ::s10::{GroupRecipe, SimRecipe, cli::run_recipe};
 use clap::Parser;
+use convert_case::Casing;
 use impeller2::types::{PrimType, Timestamp};
 use impeller2_wkt::{ComponentMetadata, EntityMetadata};
-use inflector::cases::snakecase::{is_snake_case, to_snake_case};
 use miette::miette;
 use nox_ecs::{ComponentSchema, IntoSystem, System as _, TimeStep, World, increment_sim_tick, nox};
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
@@ -62,6 +62,19 @@ impl WorldBuilder {
     }
 }
 
+fn is_snake_case(s: &str) -> bool {
+    // This may look dumb and it is, but the [`is_case()` implementation][1] is
+    // no better and less expressive in that you can't express boundaries.
+    //
+    // TODO: Don't allocate a string to test a string.
+    //
+    // [1]: https://github.com/rutrum/convert-case/blob/b9dd92b4394745e15943a604890cdc57fa6bd289/src/lib.rs#L366
+    let b = s
+        .without_boundaries(&convert_case::Boundary::digits())
+        .to_case(convert_case::Case::Snake);
+    b == s
+}
+
 #[pymethods]
 impl WorldBuilder {
     #[new]
@@ -82,7 +95,10 @@ impl WorldBuilder {
         self.world.metadata.entity_len += 1;
         let derived_id = match (&name, id) {
             (Some(name), None) => {
-                let new_id = to_snake_case(name);
+                let new_id = name
+                    .without_boundaries(&convert_case::Boundary::digits())
+                    .to_case(convert_case::Case::Snake);
+                eprintln!("convert name {:?} to ID {:?}", &name, &new_id);
                 info!("convert name {:?} to ID {:?}", &name, &new_id);
                 Some(new_id)
             }
@@ -632,5 +648,34 @@ impl WorldBuilder {
             entity_dict,
             component_entity_dict,
         ))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use convert_case::{Boundary, Case, Casing};
+
+    #[test]
+    fn test_snake_case() {
+        assert!(!"e1".is_case(convert_case::Case::Snake));
+        // We can't express this:
+        // assert!("e1"
+        //         .without_boundaries(&convert_case::Boundary::digits())
+        //         .is_case(convert_case::Case::Snake));
+        assert!("e_1".is_case(convert_case::Case::Snake));
+
+        assert_eq!(
+            "e1".without_boundaries(&convert_case::Boundary::digits())
+                .to_case(convert_case::Case::Snake),
+            String::from("e1")
+        );
+    }
+
+    #[test]
+    fn test_our_snake_case() {
+        assert!(is_snake_case("e1"));
+        assert!(is_snake_case("e_1"));
+        assert!(!is_snake_case("E1"));
     }
 }

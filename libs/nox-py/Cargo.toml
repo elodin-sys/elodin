@@ -73,5 +73,5 @@ roci-adcs.path = "../roci/adcs"
 s10.path = "../s10"
 
 zerocopy.version = "0.8.2"
-Inflector = "0.11.4"
 env_logger = "0.11.8"
+convert_case = "0.8.0"
