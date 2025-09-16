@@ -1,4 +1,5 @@
 mod batch;
+pub mod batch_dfs;
 mod builder;
 mod client;
 mod comp;

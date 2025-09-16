@@ -85,6 +85,332 @@ pub enum NoxprNode {
     LuInverse(LuInverse),
 }
 
+/// An iterator over the children of a NoxprNode
+pub enum ChildrenIter<'a> {
+    Empty,
+    Single(Option<&'a Noxpr>),
+    Double(Option<&'a Noxpr>, Option<&'a Noxpr>),
+    Triple(Option<&'a Noxpr>, Option<&'a Noxpr>, Option<&'a Noxpr>),
+    Vec(std::slice::Iter<'a, Noxpr>),
+    Chain(Box<ChildrenIter<'a>>, Box<ChildrenIter<'a>>),
+}
+
+impl<'a> Iterator for ChildrenIter<'a> {
+    type Item = &'a Noxpr;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            ChildrenIter::Empty => None,
+            ChildrenIter::Single(opt) => opt.take(),
+            ChildrenIter::Double(first, second) => {
+                if let Some(item) = first.take() {
+                    Some(item)
+                } else {
+                    second.take()
+                }
+            }
+            ChildrenIter::Triple(first, second, third) => {
+                if let Some(item) = first.take() {
+                    Some(item)
+                } else if let Some(item) = second.take() {
+                    Some(item)
+                } else {
+                    third.take()
+                }
+            }
+            ChildrenIter::Vec(iter) => iter.next(),
+            ChildrenIter::Chain(first, second) => {
+                if let Some(item) = first.next() {
+                    Some(item)
+                } else {
+                    second.next()
+                }
+            }
+        }
+    }
+}
+
+impl NoxprNode {
+
+    pub fn push_children<'a>(&'a self, accum: &mut Vec<&'a Noxpr>) {
+        match self {
+            // Leaf nodes with no children
+            NoxprNode::Param(_) | NoxprNode::Constant(_) | NoxprNode::Iota(_) => {
+                // No children to push
+            }
+
+            // Binary operations with lhs and rhs children
+            NoxprNode::Add(binary_op)
+            | NoxprNode::Sub(binary_op)
+            | NoxprNode::Mul(binary_op)
+            | NoxprNode::Div(binary_op)
+            | NoxprNode::And(binary_op)
+            | NoxprNode::Or(binary_op)
+            | NoxprNode::GreaterOrEqual(binary_op)
+            | NoxprNode::LessOrEqual(binary_op)
+            | NoxprNode::Less(binary_op)
+            | NoxprNode::Equal(binary_op)
+            | NoxprNode::Atan2(binary_op)
+            | NoxprNode::Dot(binary_op) => {
+                accum.push(&binary_op.lhs);
+                accum.push(&binary_op.rhs);
+            }
+
+            // DotGeneral has lhs and rhs
+            NoxprNode::DotGeneral(dot_general) => {
+                accum.push(&dot_general.lhs);
+                accum.push(&dot_general.rhs);
+            }
+
+            // Unary operations with single child
+            NoxprNode::Sqrt(child)
+            | NoxprNode::Neg(child)
+            | NoxprNode::Log(child)
+            | NoxprNode::Sin(child)
+            | NoxprNode::Cos(child)
+            | NoxprNode::Abs(child)
+            | NoxprNode::Acos(child)
+            | NoxprNode::Asin(child) => {
+                accum.push(child);
+            }
+
+            // Tuple with multiple children
+            NoxprNode::Tuple(children) => {
+                accum.extend(children.iter());
+            }
+
+            // GetTupleElement with single child
+            NoxprNode::GetTupleElement(get_tuple) => {
+                accum.push(&get_tuple.expr);
+            }
+
+            // Concat with multiple children
+            NoxprNode::Concat(concat) => {
+                accum.extend(concat.nodes.iter());
+            }
+
+            // Reshape operations with single child
+            NoxprNode::Reshape(reshape) => {
+                accum.push(&reshape.expr);
+            }
+
+            NoxprNode::Broadcast(broadcast) => {
+                accum.push(&broadcast.expr);
+            }
+
+            NoxprNode::BroadcastInDim(broadcast_in_dim) => {
+                accum.push(&broadcast_in_dim.expr);
+            }
+
+            NoxprNode::Transpose(transpose) => {
+                accum.push(&transpose.expr);
+            }
+
+            // Slice operations
+            NoxprNode::Gather(gather) => {
+                accum.push(&gather.expr);
+                accum.push(&gather.indices);
+            }
+
+            NoxprNode::Slice(slice) => {
+                accum.push(&slice.expr);
+            }
+
+            NoxprNode::DynamicSlice(dynamic_slice) => {
+                accum.push(&dynamic_slice.expr);
+                accum.extend(dynamic_slice.start_indices.iter());
+            }
+
+            NoxprNode::DynamicUpdateSlice(dynamic_update_slice) => {
+                accum.push(&dynamic_update_slice.expr);
+                accum.extend(dynamic_update_slice.start_indices.iter());
+                accum.push(&dynamic_update_slice.update);
+            }
+
+            // Control flow operations
+            NoxprNode::Scan(scan) => {
+                accum.extend(scan.inputs.iter());
+                accum.push(&scan.initial_state);
+            }
+
+            NoxprNode::Select(select) => {
+                accum.push(&select.cond);
+                accum.push(&select.on_true);
+                accum.push(&select.on_false);
+            }
+
+            // Cast operations
+            NoxprNode::Convert(convert) => {
+                accum.push(&convert.arg);
+            }
+
+            // Call operations
+            NoxprNode::Call(call) => {
+                accum.extend(call.args.iter());
+            }
+
+            // Triangle operations
+            NoxprNode::Cholesky(cholesky) => {
+                accum.push(&cholesky.arg);
+            }
+
+            NoxprNode::LuInverse(lu_inverse) => {
+                accum.push(&lu_inverse.arg);
+            }
+
+            // Jax operations (no children to traverse)
+            #[cfg(feature = "jax")]
+            NoxprNode::Jax(_) => {
+                // No children to push
+            }
+        }
+    }
+
+    /// Returns an iterator over the children of this node.
+    /// This is equivalent to `push_children` but returns an iterator instead of pushing to a vector.
+    pub fn children<'a>(&'a self) -> ChildrenIter<'a> {
+        match self {
+            // Leaf nodes with no children
+            NoxprNode::Param(_) | NoxprNode::Constant(_) | NoxprNode::Iota(_) => {
+                ChildrenIter::Empty
+            }
+            
+            // Binary operations with lhs and rhs children
+            NoxprNode::Add(binary_op)
+            | NoxprNode::Sub(binary_op)
+            | NoxprNode::Mul(binary_op)
+            | NoxprNode::Div(binary_op)
+            | NoxprNode::And(binary_op)
+            | NoxprNode::Or(binary_op)
+            | NoxprNode::GreaterOrEqual(binary_op)
+            | NoxprNode::LessOrEqual(binary_op)
+            | NoxprNode::Less(binary_op)
+            | NoxprNode::Equal(binary_op)
+            | NoxprNode::Atan2(binary_op)
+            | NoxprNode::Dot(binary_op) => {
+                ChildrenIter::Double(Some(&binary_op.lhs), Some(&binary_op.rhs))
+            }
+            
+            // DotGeneral has lhs and rhs
+            NoxprNode::DotGeneral(dot_general) => {
+                ChildrenIter::Double(Some(&dot_general.lhs), Some(&dot_general.rhs))
+            }
+            
+            // Unary operations with single child
+            NoxprNode::Sqrt(child)
+            | NoxprNode::Neg(child)
+            | NoxprNode::Log(child)
+            | NoxprNode::Sin(child)
+            | NoxprNode::Cos(child)
+            | NoxprNode::Abs(child)
+            | NoxprNode::Acos(child)
+            | NoxprNode::Asin(child) => {
+                ChildrenIter::Single(Some(child))
+            }
+            
+            // Tuple with multiple children
+            NoxprNode::Tuple(children) => {
+                ChildrenIter::Vec(children.iter())
+            }
+            
+            // GetTupleElement with single child
+            NoxprNode::GetTupleElement(get_tuple) => {
+                ChildrenIter::Single(Some(&get_tuple.expr))
+            }
+            
+            // Concat with multiple children
+            NoxprNode::Concat(concat) => {
+                ChildrenIter::Vec(concat.nodes.iter())
+            }
+            
+            // Reshape operations with single child
+            NoxprNode::Reshape(reshape) => {
+                ChildrenIter::Single(Some(&reshape.expr))
+            }
+            
+            NoxprNode::Broadcast(broadcast) => {
+                ChildrenIter::Single(Some(&broadcast.expr))
+            }
+            
+            NoxprNode::BroadcastInDim(broadcast_in_dim) => {
+                ChildrenIter::Single(Some(&broadcast_in_dim.expr))
+            }
+            
+            NoxprNode::Transpose(transpose) => {
+                ChildrenIter::Single(Some(&transpose.expr))
+            }
+            
+            // Slice operations
+            NoxprNode::Gather(gather) => {
+                ChildrenIter::Double(Some(&gather.expr), Some(&gather.indices))
+            }
+            
+            NoxprNode::Slice(slice) => {
+                ChildrenIter::Single(Some(&slice.expr))
+            }
+            
+            NoxprNode::DynamicSlice(dynamic_slice) => {
+                ChildrenIter::Chain(
+                    Box::new(ChildrenIter::Single(Some(&dynamic_slice.expr))),
+                    Box::new(ChildrenIter::Vec(dynamic_slice.start_indices.iter()))
+                )
+            }
+            
+            NoxprNode::DynamicUpdateSlice(dynamic_update_slice) => {
+                ChildrenIter::Chain(
+                    Box::new(ChildrenIter::Single(Some(&dynamic_update_slice.expr))),
+                    Box::new(ChildrenIter::Chain(
+                        Box::new(ChildrenIter::Vec(dynamic_update_slice.start_indices.iter())),
+                        Box::new(ChildrenIter::Single(Some(&dynamic_update_slice.update)))
+                    ))
+                )
+            }
+            
+            // Control flow operations
+            NoxprNode::Scan(scan) => {
+                ChildrenIter::Chain(
+                    Box::new(ChildrenIter::Vec(scan.inputs.iter())),
+                    Box::new(ChildrenIter::Single(Some(&scan.initial_state)))
+                )
+            }
+            
+            NoxprNode::Select(select) => {
+                ChildrenIter::Triple(
+                    Some(&select.cond),
+                    Some(&select.on_true),
+                    Some(&select.on_false)
+                )
+            }
+            
+            // Cast operations
+            NoxprNode::Convert(convert) => {
+                ChildrenIter::Single(Some(&convert.arg))
+            }
+            
+            // Call operations
+            NoxprNode::Call(call) => {
+                ChildrenIter::Vec(call.args.iter())
+            }
+            
+            // Triangle operations
+            NoxprNode::Cholesky(cholesky) => {
+                ChildrenIter::Single(Some(&cholesky.arg))
+            }
+            
+            NoxprNode::LuInverse(lu_inverse) => {
+                ChildrenIter::Single(Some(&lu_inverse.arg))
+            }
+            
+            // Jax operations (no children to traverse)
+            #[cfg(feature = "jax")]
+            NoxprNode::Jax(_) => {
+                ChildrenIter::Empty
+            }
+        }
+    }
+}
+
+
 /// Represents a constant value within the Noxpr.
 #[derive(Clone)]
 pub struct Constant {
@@ -2622,5 +2948,59 @@ mod tests {
             .unwrap()
             .to_host();
         assert_eq!(out, tensor![3.0, 8.0, 13.0])
+    }
+
+    #[test]
+    fn test_children_iterator() {
+        use crate::{NoxprScalarExt, NoxprNode};
+        
+        // Create a simple binary operation: a + b
+        let a = 1.0f32.constant();
+        let b = 2.0f32.constant();
+        let add = a + b;
+        
+        // Test that we can iterate over children
+        let children: Vec<_> = add.node.children().collect();
+        assert_eq!(children.len(), 2);
+        
+        // Test that the children are the operands
+        match &*add.node {
+            NoxprNode::Add(binary_op) => {
+                assert_eq!(children[0].id(), binary_op.lhs.id());
+                assert_eq!(children[1].id(), binary_op.rhs.id());
+            }
+            _ => panic!("Expected Add node"),
+        }
+    }
+
+    #[test]
+    fn test_children_iterator_unary() {
+        use crate::{NoxprScalarExt, NoxprNode};
+        
+        // Create a simple unary operation: sqrt(a)
+        let a = 4.0f32.constant();
+        let sqrt = a.sqrt();
+        
+        // Test that we can iterate over children
+        let children: Vec<_> = sqrt.node.children().collect();
+        assert_eq!(children.len(), 1);
+        
+        // Test that the child is the operand
+        match &*sqrt.node {
+            NoxprNode::Sqrt(child) => {
+                assert_eq!(children[0].id(), child.id());
+            }
+            _ => panic!("Expected Sqrt node"),
+        }
+    }
+
+    #[test]
+    fn test_children_iterator_leaf() {
+        use crate::NoxprScalarExt;
+        
+        // Test leaf nodes have no children
+        let a = 1.0f32.constant();
+        let children: Vec<_> = a.node.children().collect();
+        assert_eq!(children.len(), 0);
     }
 }

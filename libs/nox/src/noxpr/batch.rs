@@ -22,19 +22,20 @@ pub struct BatchTracer {
 /// Represents an expression along with its batch axis information.
 #[derive(Clone, Debug)]
 pub struct BatchedExpr {
-    inner: Noxpr,
-    batch_axis: BatchAxis,
+    pub(crate) inner: Noxpr,
+    pub(crate) batch_axis: BatchAxis,
 }
 
 impl BatchedExpr {
-    fn map_expr(self, func: impl FnOnce(Noxpr) -> Noxpr) -> Self {
+    
+    pub(crate) fn map_expr(self, func: impl FnOnce(Noxpr) -> Noxpr) -> Self {
         BatchedExpr {
             inner: func(self.inner),
             batch_axis: self.batch_axis,
         }
     }
 
-    fn move_batch_axis(self, dest: BatchAxis) -> Option<Self> {
+    pub(crate) fn move_batch_axis(self, dest: BatchAxis) -> Option<Self> {
         let BatchAxis::Mapped {
             index: dest_axis,
             size: dest_size,
@@ -83,7 +84,7 @@ impl BatchedExpr {
 }
 
 /// Describes the axis along which batch operations are performed.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BatchAxis {
     NotMapped,
     Mapped { index: usize, size: usize },
@@ -96,6 +97,10 @@ impl BatchTracer {
             cache: HashMap::default(),
             out_axis,
         }
+    }
+
+    pub fn walk(&mut self, expr: &Noxpr) -> Result<BatchedExpr, Error> {
+        self.visit(expr)
     }
 
     pub fn visit(&mut self, expr: &Noxpr) -> Result<BatchedExpr, Error> {
@@ -865,82 +870,3 @@ impl BatchTracer {
     }
 }
 
-impl Noxpr {
-    /// Applies vectorized map operation to a function across specified axes.
-    pub fn vmap_with_axis(
-        func: NoxprFn,
-        in_axis: &[usize],
-        args: &[Noxpr],
-    ) -> Result<Noxpr, Error> {
-        if in_axis.len() != args.len() {
-            return Err(Error::VmapInAxisMismatch);
-        }
-        let shape = args
-            .first()
-            .ok_or(Error::VmapArgsEmpty)?
-            .shape()
-            .ok_or(Error::UnbatchableArgument)
-            .unwrap();
-        let mut tracer = BatchTracer::new(BatchAxis::Mapped {
-            index: in_axis[0],
-            size: shape[in_axis[0]] as usize,
-        });
-        for ((arg, axis), arg_expr) in args.iter().zip(in_axis).zip(func.args) {
-            let arg_id = arg_expr.id();
-            let shape = arg.shape().ok_or(Error::UnbatchableArgument).unwrap();
-            let batch_axis = BatchAxis::Mapped {
-                index: *axis,
-                size: shape[*axis] as usize,
-            };
-            tracer.cache.insert(
-                arg_id,
-                BatchedExpr {
-                    inner: arg.clone(),
-                    batch_axis,
-                },
-            );
-        }
-        let expr = tracer.visit(&func.inner).unwrap();
-        let expr = expr
-            .move_batch_axis(tracer.out_axis)
-            .ok_or(Error::UnbatchableArgument)
-            .unwrap();
-        Ok(expr.inner)
-    }
-}
-
-impl<T: TensorItem, D: Dim + DefaultMap> Tensor<T, D, crate::Op> {
-    /// Vectorized map of a function over a tensor.
-    pub fn vmap<O: TensorItem + ReprMonad<Op>>(
-        &self,
-        func: impl CompFn<(T::Tensor<<D::DefaultMapDim as ReplaceDim<D>>::Item>,), O>,
-    ) -> Result<Tensor<O, DefaultMappedDim<D>, crate::Op>, Error> {
-        self.vmap_with_dim::<D::DefaultMapDim, O>(func)
-    }
-
-    /// Vectorized map of a function over a tensor with a specified mapping dimension.
-    pub fn vmap_with_dim<MDim: ReplaceDim<D>, O: TensorItem + ReprMonad<Op>>(
-        &self,
-        func: impl CompFn<(T::Tensor<MDim::Item>,), O>,
-    ) -> Result<Tensor<O, MDim::MappedDim, crate::Op>, Error> {
-        let func = func.build_expr()?;
-        let inner =
-            Noxpr::vmap_with_axis(func, &[MDim::MAPPED_DIM], std::slice::from_ref(&self.inner))?;
-        Ok(Tensor {
-            inner,
-            phantom: std::marker::PhantomData,
-        })
-    }
-
-    /// Applies a scan operation over a tensor, accumulating results using a specified function.
-    pub fn scan<O: ReprMonad<Op>>(
-        &self,
-        initial_state: O,
-        func: impl CompFn<(O, T::Tensor<<D::DefaultMapDim as ReplaceDim<D>>::Item>), O>,
-    ) -> Result<O, Error> {
-        let scan_fn = func.build_expr()?;
-        let initial_state = initial_state.into_inner();
-        let res = Noxpr::scan(vec![self.inner.clone()], initial_state.clone(), scan_fn);
-        Ok(O::from_inner(res))
-    }
-}
