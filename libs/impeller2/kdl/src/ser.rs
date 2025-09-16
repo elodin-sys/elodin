@@ -120,7 +120,6 @@ fn serialize_graph<T>(graph: &Graph<T>) -> KdlNode {
     let mut node = KdlNode::new("graph");
 
     // Add the EQL query as the first unnamed entry
-    // tracing::warn!("GRAPH EQL {:?}", &graph.eql); this shows the Rocket.Rocket.world...
     node.entries_mut().push(KdlEntry::new(graph.eql.clone()));
 
     if let Some(ref name) = graph.name {
