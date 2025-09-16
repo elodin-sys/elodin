@@ -4,6 +4,7 @@
     extra-trusted-public-keys = [
       "builder-cache-1:q7rDGIQgkg1nsxNEg7mHN1kEDuxPmJhQpuIXCCwLj8E="
     ];
+    fallback = true;
   };
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-24.11";
