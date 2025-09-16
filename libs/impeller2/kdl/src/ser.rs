@@ -733,16 +733,16 @@ object_3d "a.world_pos" {
 
         let parsed = parse_schematic(original_kdl).unwrap();
         let serialized = serialize_schematic(&parsed);
-        // fov and grid are dropped because they are the default value.
+        // NOTE: fov and grid are dropped because they are the default value.
         //viewport active=#true hdr=#true fov=45.0 show_grid=#false
-        assert_eq!(
-            r#"tabs {
+        assert_eq!(r#"
+tabs {
     viewport active=#true hdr=#true
     graph a.world_pos name="a world_pos"
 }
 object_3d a.world_pos {
     sphere radius=0.20000000298023224 r=1.0 g=1.0 b=1.0
-}"#,
+}"#.trim(),
             serialized
         );
         let reparsed = parse_schematic(&serialized).unwrap();
