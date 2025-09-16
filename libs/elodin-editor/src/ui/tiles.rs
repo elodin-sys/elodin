@@ -823,13 +823,13 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             ui.painter().hline(
                 rect.x_range(),
                 rect.bottom(),
-                egui::Stroke::new(1.0, get_scheme().border_primary),
+                egui::Stroke::new(1.0, scheme.border_primary),
             );
 
             ui.painter().vline(
                 rect.right(),
                 rect.y_range(),
-                egui::Stroke::new(1.0, get_scheme().border_primary),
+                egui::Stroke::new(1.0, scheme.border_primary),
             );
         }
 
