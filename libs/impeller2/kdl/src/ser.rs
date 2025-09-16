@@ -10,7 +10,9 @@ pub fn serialize_schematic<T>(schematic: &Schematic<T>) -> String {
     }
 
     doc.autoformat();
-    doc.to_string()
+    let mut s = doc.to_string();
+    s.truncate(s.trim_end().len());
+    s
 }
 
 fn serialize_schematic_elem<T>(elem: &SchematicElem<T>) -> KdlNode {
@@ -741,8 +743,7 @@ object_3d "a.world_pos" {
 }
 object_3d a.world_pos {
     sphere radius=0.20000000298023224 r=1.0 g=1.0 b=1.0
-}
-"#,
+}"#,
             serialized
         );
         let reparsed = parse_schematic(&serialized).unwrap();
@@ -757,8 +758,7 @@ object_3d a.world_pos {
         let parsed = parse_schematic(original_kdl).unwrap();
         let serialized = serialize_schematic(&parsed);
         assert_eq!(
-            r#"graph "rocket.fin_deflect[0]" name=Fin
-"#,
+            r#"graph "rocket.fin_deflect[0]" name=Fin"#,
             serialized
         );
         let reparsed = parse_schematic(&serialized).unwrap();
