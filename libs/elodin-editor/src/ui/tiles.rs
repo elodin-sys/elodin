@@ -71,6 +71,7 @@ pub struct TileState {
     pub tree: egui_tiles::Tree<Pane>,
     pub tree_actions: smallvec::SmallVec<[TreeAction; 4]>,
     pub graphs: HashMap<TileId, Entity>,
+    pub container_titles: HashMap<TileId, String>,
 }
 
 #[derive(Resource, Default)]
@@ -268,6 +269,29 @@ impl TileState {
             };
         };
     }
+
+    pub fn get_container_title(&self, id: TileId) -> Option<&str> {
+        self.container_titles.get(&id).map(|s| s.as_str())
+    }
+
+    pub fn set_container_title(&mut self, id: TileId, title: impl Into<String>) {
+        self.container_titles.insert(id, title.into());
+    }
+
+    pub fn clear_container_title(&mut self, id: TileId) {
+        self.container_titles.remove(&id);
+    }
+
+    pub fn container_title_or_default(&self, tiles: &egui_tiles::Tiles<Pane>, id: TileId) -> String {
+        if let Some(t) = self.get_container_title(id) {
+            return t.to_owned();
+        }
+        if let Some(egui_tiles::Tile::Container(c)) = tiles.get(id) {
+            format!("{:?}", c.kind()) // "Tabs" / "Horizontal" / "Vertical" / "Grid"
+        } else {
+            "Container".to_owned()
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -330,7 +354,6 @@ impl Pane {
     fn ui(
         &mut self,
         ui: &mut Ui,
-        //state: &mut TileLayout<'_, '_>,
         icons: &TileIcons,
         world: &mut World,
         tree_actions: &mut SmallVec<[TreeAction; 4]>,
@@ -594,6 +617,7 @@ impl Default for TileState {
             tree: egui_tiles::Tree::new_tabs("tab_tree", vec![]),
             tree_actions: SmallVec::new(),
             graphs: HashMap::new(),
+            container_titles: HashMap::new(),
         }
     }
 }
@@ -660,10 +684,33 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         } else {
             TabState::Inactive
         };
-        let text = self.tab_title_for_tile(tiles, tile_id);
+
+        // Inline containers renaming.
+        let is_container = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Container(_)));
+        let persist_id   = id.with(("rename_title", tile_id));
+        let edit_flag_id = id.with(("rename_editing", tile_id));
+        let edit_buf_id  = id.with(("rename_buffer",  tile_id));
+        let mut is_editing =
+            ui.ctx().data(|d| d.get_temp::<bool>(edit_flag_id)).unwrap_or(false);
+
+        let title_str: String = if is_container {
+            if let Some(custom) = ui.ctx().data(|d| d.get_temp::<String>(persist_id)) {
+                custom
+            } else {
+                match tiles.get(tile_id) {
+                    Some(egui_tiles::Tile::Container(c)) => format!("{:?}", c.kind()),
+                    _ => "Container".to_owned(),
+                }
+            }
+        } else {
+            self.tab_title_for_tile(tiles, tile_id).text().to_string()
+        };
+
         let mut font_id = egui::TextStyle::Button.resolve(ui.style());
         font_id.size = 11.0;
-        let galley = text.into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, font_id);
+        let mut galley = egui::WidgetText::from(title_str.clone())
+            .into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, font_id.clone());
+
         let x_margin = self.tab_title_spacing(ui.visuals());
         let (_, rect) = ui.allocate_space(vec2(
             galley.size().x + x_margin * 4.0,
@@ -673,6 +720,12 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             .shrink2(vec2(x_margin * 4.0, 0.0))
             .translate(vec2(-3.0 * x_margin, 0.0));
         let response = ui.interact(rect, id, egui::Sense::click_and_drag());
+
+        if is_container && response.double_clicked() && !is_editing {
+            ui.ctx().data_mut(|d| d.insert_temp(edit_buf_id, title_str.clone()));
+            ui.ctx().data_mut(|d| d.insert_temp(edit_flag_id, true));
+            is_editing = true;
+        }
 
         if ui.is_rect_visible(rect) && !state.is_being_dragged {
             let scheme = get_scheme();
@@ -687,13 +740,71 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             };
 
             ui.painter().rect_filled(rect, 0.0, bg_color);
-            ui.painter().galley(
-                egui::Align2::LEFT_CENTER
-                    .align_size_within_rect(galley.size(), text_rect)
-                    .min,
-                galley,
-                text_color,
-            );
+
+            if is_container && is_editing {
+                let label_rect = egui::Align2::LEFT_CENTER
+                    .align_size_within_rect(galley.size(), text_rect);
+                let edit_rect = label_rect.expand(1.0);
+
+                let mut buf = ui.ctx().data_mut(|d|
+                    d.get_temp_mut_or::<String>(edit_buf_id, String::new()).clone()
+                );
+
+                let resp = ui
+                    .scope(|ui| {
+                        ui.visuals_mut().override_text_color = Some(Color32::BLACK);
+                        ui.put(
+                            edit_rect,
+                            egui::TextEdit::singleline(&mut buf)
+                                .font(egui::TextStyle::Button)
+                                .clip_text(true)
+                                .desired_width(edit_rect.width())
+                                .frame(false),
+                        )
+                    })
+                    .inner;
+
+                let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let lost_focus   = resp.lost_focus();
+
+                if enter_pressed || lost_focus {
+                    let new_title = buf.trim().to_owned();
+
+                    ui.ctx().data_mut(|d| d.insert_temp(edit_flag_id, false));
+                    ui.ctx().data_mut(|d| d.insert_temp(edit_buf_id, new_title.clone()));
+                    ui.ctx().data_mut(|d| d.insert_temp(persist_id, new_title.clone()));
+                    ui.memory_mut(|m| m.surrender_focus(resp.id));
+
+                    galley = egui::WidgetText::from(new_title).into_galley(
+                        ui,
+                        Some(egui::TextWrapMode::Extend),
+                        f32::INFINITY,
+                        font_id.clone(),
+                    );
+
+                    ui.painter().galley(
+                        egui::Align2::LEFT_CENTER
+                            .align_size_within_rect(galley.size(), text_rect)
+                            .min,
+                        galley.clone(),
+                        text_color,
+                    );
+                } else {
+                    ui.ctx().data_mut(|d| d.insert_temp(edit_buf_id, buf));
+                    if !resp.has_focus() {
+                        resp.request_focus();
+                    }
+                }
+            } else {
+                ui.painter().galley(
+                    egui::Align2::LEFT_CENTER
+                        .align_size_within_rect(galley.size(), text_rect)
+                        .min,
+                    galley.clone(),
+                    text_color,
+                );
+            }
+
             ui.add_space(-3.0 * x_margin);
             let close_response = ui.add(
                 EImageButton::new(self.icons.close)
@@ -712,13 +823,13 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             ui.painter().hline(
                 rect.x_range(),
                 rect.bottom(),
-                egui::Stroke::new(1.0, scheme.border_primary),
+                egui::Stroke::new(1.0, get_scheme().border_primary),
             );
 
             ui.painter().vline(
                 rect.right(),
                 rect.y_range(),
-                egui::Stroke::new(1.0, scheme.border_primary),
+                egui::Stroke::new(1.0, get_scheme().border_primary),
             );
         }
 
