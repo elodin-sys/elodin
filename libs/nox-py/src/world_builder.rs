@@ -654,7 +654,7 @@ impl WorldBuilder {
 #[cfg(test)]
 mod test {
     use super::*;
-    use convert_case::{Boundary, Case, Casing};
+    use convert_case::Casing;
 
     #[test]
     fn test_snake_case() {
