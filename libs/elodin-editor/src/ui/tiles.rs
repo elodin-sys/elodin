@@ -775,6 +775,10 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                     ui.ctx().data_mut(|d| d.insert_temp(persist_id, new_title.clone()));
                     ui.memory_mut(|m| m.surrender_focus(resp.id));
 
+                    if let Some(mut state) = self.world.get_resource_mut::<TileState>() {
+                        state.set_container_title(tile_id, new_title.clone());
+                    }   
+
                     galley = egui::WidgetText::from(new_title).into_galley(
                         ui,
                         Some(egui::TextWrapMode::Extend),
