@@ -186,6 +186,7 @@ impl BatchTracer {
             #[cfg(feature = "jax")]
             NoxprNode::Jax(_) => Err(Error::Internal(TraversalError::UnsupportedNodeType)),
             NoxprNode::GetTupleElement(g) => {
+                // We still do this to process the errors.
                 let NoxprNode::Tuple(elems) = g.expr.deref() else {
                     return Err(Error::UnbatchableArgument);
                 };

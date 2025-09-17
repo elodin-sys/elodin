@@ -309,7 +309,16 @@ impl NoxprNode {
             NoxprNode::Tuple(children) => ChildrenIter::Vec(children.iter()),
 
             // GetTupleElement with single child
-            NoxprNode::GetTupleElement(get_tuple) => ChildrenIter::Single(Some(&get_tuple.expr)),
+            NoxprNode::GetTupleElement(g) => {
+                if let NoxprNode::Tuple(elems) = g.expr.deref() {
+                    ChildrenIter::Single(elems.get(g.index))
+                } else {
+                    // This is indicative of an error that is handled in the process_node().
+
+                    // return Err(Error::UnbatchableArgument);
+                    ChildrenIter::Empty
+                }
+            }
 
             // Concat with multiple children
             NoxprNode::Concat(concat) => ChildrenIter::Vec(concat.nodes.iter()),
