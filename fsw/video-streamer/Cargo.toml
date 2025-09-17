@@ -1,6 +1,6 @@
 [package]
 name = "video-streamer"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 description = "Streams video files to elodin-db after re-encoding to AV1"
 publish = false

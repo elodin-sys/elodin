@@ -1191,7 +1191,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "basilisk"
-version = "0.1.0"
+version = "0.15.0-alpha.1"
 dependencies = [
  "approx",
  "bindgen 0.70.1",
@@ -4673,7 +4673,7 @@ dependencies = [
 
 [[package]]
 name = "elodin-db-tests"
-version = "0.1.0"
+version = "0.15.0-alpha.1"
 dependencies = [
  "arrow",
  "elodin-db",
@@ -4942,7 +4942,7 @@ checksum = "9343d356d7cac894dacafc161b4654e0881301097bdf32a122ed503d97cb94b6"
 
 [[package]]
 name = "eql"
-version = "0.1.0"
+version = "0.15.0-alpha.1"
 dependencies = [
  "convert_case 0.8.0",
  "hifitime",
@@ -5977,7 +5977,7 @@ checksum = "36119f3a540b086b4e436bb2b588cf98a68863470e0e880f4d0842f112a3183a"
 
 [[package]]
 name = "gst-elodin-plugin"
-version = "0.1.0"
+version = "0.15.0-alpha.1"
 dependencies = [
  "anyhow",
  "gst-plugin-version-helper",
@@ -6772,7 +6772,7 @@ dependencies = [
 
 [[package]]
 name = "impeller2-bbq"
-version = "0.1.0"
+version = "0.15.0-alpha.1"
 dependencies = [
  "bbq2",
  "impeller2",
@@ -6781,7 +6781,7 @@ dependencies = [
 
 [[package]]
 name = "impeller2-bevy"
-version = "0.1.0"
+version = "0.15.0-alpha.1"
 dependencies = [
  "bbq2",
  "bevy",
@@ -6804,7 +6804,7 @@ dependencies = [
 
 [[package]]
 name = "impeller2-cli"
-version = "0.1.0"
+version = "0.15.0-alpha.1"
 dependencies = [
  "anyhow",
  "arrow",
@@ -6833,7 +6833,7 @@ dependencies = [
 
 [[package]]
 name = "impeller2-frame"
-version = "0.1.0"
+version = "0.15.0-alpha.1"
 dependencies = [
  "cobs",
  "impeller2",
@@ -6841,7 +6841,7 @@ dependencies = [
 
 [[package]]
 name = "impeller2-kdl"
-version = "0.1.0"
+version = "0.15.0-alpha.1"
 dependencies = [
  "impeller2",
  "impeller2-wkt",
@@ -6852,7 +6852,7 @@ dependencies = [
 
 [[package]]
 name = "impeller2-stellar"
-version = "0.1.0"
+version = "0.15.0-alpha.1"
 dependencies = [
  "bbq2",
  "futures-concurrency",
@@ -6871,7 +6871,7 @@ dependencies = [
 
 [[package]]
 name = "impeller2-wkt"
-version = "0.1.0"
+version = "0.15.0-alpha.1"
 dependencies = [
  "bevy",
  "compact_str",
@@ -8403,14 +8403,14 @@ dependencies = [
 
 [[package]]
 name = "nox-array"
-version = "0.1.0"
+version = "0.15.0-alpha.1"
 dependencies = [
  "zerocopy 0.8.14",
 ]
 
 [[package]]
 name = "nox-ecs"
-version = "0.1.0"
+version = "0.15.0-alpha.1"
 dependencies = [
  "approx",
  "arrow",
@@ -8441,7 +8441,7 @@ dependencies = [
 
 [[package]]
 name = "nox-ecs-macros"
-version = "0.1.0"
+version = "0.15.0-alpha.1"
 dependencies = [
  "convert_case 0.6.0",
  "darling",
@@ -8453,7 +8453,7 @@ dependencies = [
 
 [[package]]
 name = "nox-frames"
-version = "0.1.0"
+version = "0.15.0-alpha.1"
 dependencies = [
  "approx",
  "hifitime",
@@ -10570,7 +10570,7 @@ dependencies = [
 
 [[package]]
 name = "roci-adcs"
-version = "0.1.0"
+version = "0.15.0-alpha.1"
 dependencies = [
  "approx",
  "nox",
@@ -11370,11 +11370,11 @@ dependencies = [
 
 [[package]]
 name = "stellarator-buf"
-version = "0.1.0"
+version = "0.15.0-alpha.1"
 
 [[package]]
 name = "stellarator-macros"
-version = "0.1.0"
+version = "0.15.0-alpha.1"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -12748,7 +12748,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "video-streamer"
-version = "0.1.0"
+version = "0.15.0-alpha.1"
 dependencies = [
  "anyhow",
  "byteorder",
@@ -12767,7 +12767,7 @@ dependencies = [
 
 [[package]]
 name = "video-toolbox"
-version = "0.1.0"
+version = "0.15.0-alpha.1"
 dependencies = [
  "bitflags 2.9.0",
  "block2 0.6.1",

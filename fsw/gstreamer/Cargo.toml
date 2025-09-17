@@ -1,6 +1,6 @@
 [package]
 name = "gst-elodin-plugin"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 description = "GStreamer plugin that streams Annex B NAL units to elodin-db"
 
