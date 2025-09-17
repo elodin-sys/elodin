@@ -267,7 +267,7 @@ impl NoxprNode {
 
     /// Returns an iterator over the children of this node.
     /// This is equivalent to `push_children` but returns an iterator instead of pushing to a vector.
-    pub fn children<'a>(&'a self) -> ChildrenIter<'a> {
+    pub fn children(&self) -> ChildrenIter<'_> {
         match self {
             // Leaf nodes with no children
             NoxprNode::Param(_) | NoxprNode::Constant(_) | NoxprNode::Iota(_) => {

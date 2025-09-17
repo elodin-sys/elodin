@@ -75,7 +75,7 @@ impl BatchTracer {
         assert_eq!(node_stack.len(), 1);
         node_stack
             .pop()
-            .ok_or_else(|| Error::Internal(TraversalError::RootNodeFailed))
+            .ok_or(Error::Internal(TraversalError::RootNodeFailed))
     }
 
     /// Processes a single node during the DFS traversal
@@ -107,7 +107,7 @@ impl BatchTracer {
                 for _ in (0..inner.len()).rev() {
                     let mapped = stack
                         .pop()
-                        .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
+                        .ok_or(Error::Internal(TraversalError::ChildNotProcessed))?;
                     exprs.push(mapped.inner);
                     batch_axis = mapped.batch_axis;
                 }
@@ -194,13 +194,13 @@ impl BatchTracer {
                 // The tuple processing should have already pushed the individual elements
                 Ok(stack
                     .pop()
-                    .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?)
+                    .ok_or(Error::Internal(TraversalError::ChildNotProcessed))?)
             }
             NoxprNode::Scan(s) => self.process_scan(s, stack),
             NoxprNode::Convert(c) => {
                 let arg = stack
                     .pop()
-                    .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
+                    .ok_or(Error::Internal(TraversalError::ChildNotProcessed))?;
                 Ok(BatchedExpr {
                     inner: arg.inner.convert(c.ty),
                     batch_axis: arg.batch_axis,
@@ -211,7 +211,7 @@ impl BatchTracer {
             NoxprNode::Cholesky(c) => {
                 let arg = stack
                     .pop()
-                    .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
+                    .ok_or(Error::Internal(TraversalError::ChildNotProcessed))?;
                 let arg = arg
                     .move_batch_axis(self.out_axis.clone())
                     .ok_or(Error::UnbatchableArgument)?;
@@ -234,10 +234,10 @@ impl BatchTracer {
         // Pop rhs first, then lhs (reverse order)
         let rhs = stack
             .pop()
-            .ok_or_else(|| Error::Internal(TraversalError::RhsNotProcessed))?;
+            .ok_or(Error::Internal(TraversalError::RhsNotProcessed))?;
         let lhs = stack
             .pop()
-            .ok_or_else(|| Error::Internal(TraversalError::LhsNotProcessed))?;
+            .ok_or(Error::Internal(TraversalError::LhsNotProcessed))?;
 
         fn scalar_broadcast(
             _rank: usize,
@@ -318,7 +318,7 @@ impl BatchTracer {
     ) -> Result<BatchedExpr, Error> {
         let expr = stack
             .pop()
-            .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
+            .ok_or(Error::Internal(TraversalError::ChildNotProcessed))?;
 
         match expr.batch_axis {
             BatchAxis::NotMapped => Ok(expr
@@ -387,7 +387,7 @@ impl BatchTracer {
         for _ in (0..c.nodes.len()).rev() {
             let node = stack
                 .pop()
-                .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
+                .ok_or(Error::Internal(TraversalError::ChildNotProcessed))?;
             nodes.push(node);
         }
         // Reverse to get correct order
@@ -425,10 +425,10 @@ impl BatchTracer {
         // Pop rhs first, then lhs (reverse order)
         let rhs = stack
             .pop()
-            .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
+            .ok_or(Error::Internal(TraversalError::ChildNotProcessed))?;
         let lhs = stack
             .pop()
-            .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
+            .ok_or(Error::Internal(TraversalError::ChildNotProcessed))?;
         fn bump_dims(dims: &[i64], batch_dim: i64) -> impl Iterator<Item = i64> + '_ {
             dims.iter()
                 .cloned()
@@ -549,7 +549,7 @@ impl BatchTracer {
     ) -> Result<BatchedExpr, Error> {
         let expr = stack
             .pop()
-            .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
+            .ok_or(Error::Internal(TraversalError::ChildNotProcessed))?;
         match expr.batch_axis {
             BatchAxis::NotMapped => Ok(BatchedExpr {
                 inner: expr.inner.slice(
@@ -582,7 +582,7 @@ impl BatchTracer {
     ) -> Result<BatchedExpr, Error> {
         let expr = stack
             .pop()
-            .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
+            .ok_or(Error::Internal(TraversalError::ChildNotProcessed))?;
         let BatchAxis::Mapped { size, .. } = self.out_axis else {
             return Err(Error::UnbatchableArgument);
         };
@@ -628,7 +628,7 @@ impl BatchTracer {
     ) -> Result<BatchedExpr, Error> {
         let expr = stack
             .pop()
-            .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
+            .ok_or(Error::Internal(TraversalError::ChildNotProcessed))?;
         let BatchAxis::Mapped { size: out_size, .. } = self.out_axis else {
             unreachable!()
         };
@@ -670,7 +670,7 @@ impl BatchTracer {
     ) -> Result<BatchedExpr, Error> {
         let expr = stack
             .pop()
-            .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
+            .ok_or(Error::Internal(TraversalError::ChildNotProcessed))?;
         match expr.batch_axis {
             BatchAxis::NotMapped => Ok(expr
                 .move_batch_axis(self.out_axis.clone())
@@ -700,10 +700,10 @@ impl BatchTracer {
         // Pop indices first, then expr (reverse order)
         let indices = stack
             .pop()
-            .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
+            .ok_or(Error::Internal(TraversalError::ChildNotProcessed))?;
         let expr = stack
             .pop()
-            .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
+            .ok_or(Error::Internal(TraversalError::ChildNotProcessed))?;
         match (&expr.batch_axis, &indices.batch_axis) {
             (BatchAxis::Mapped { .. }, BatchAxis::NotMapped) => {
                 let expr = expr
@@ -860,14 +860,14 @@ impl BatchTracer {
         // Pop initial_state first, then inputs in reverse order
         let initial_state = stack
             .pop()
-            .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?
+            .ok_or(Error::Internal(TraversalError::ChildNotProcessed))?
             .move_batch_axis(self.out_axis.clone())
             .unwrap();
         let mut inputs: Vec<_> = Vec::with_capacity(s.inputs.len());
         for _ in (0..s.inputs.len()).rev() {
             let input = stack
                 .pop()
-                .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?
+                .ok_or(Error::Internal(TraversalError::ChildNotProcessed))?
                 .move_batch_axis(axis.clone())
                 .ok_or(Error::UnbatchableArgument)?;
             inputs.push(input);
@@ -876,8 +876,8 @@ impl BatchTracer {
         inputs.reverse();
         let batch_axis = inputs
             .iter()
-            .find(|i| (*i).batch_axis != BatchAxis::NotMapped)
-            .map(|i| (*i).batch_axis.clone())
+            .find(|i| i.batch_axis != BatchAxis::NotMapped)
+            .map(|i| i.batch_axis.clone())
             .unwrap_or(BatchAxis::NotMapped);
         match &batch_axis {
             BatchAxis::NotMapped => {
@@ -1144,7 +1144,7 @@ mod tests {
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
 
         for expr in expressions {
-            if let Ok(_) = compare_batch_results(&expr, out_axis.clone()) {
+            if compare_batch_results(&expr, out_axis.clone()).is_ok() {
                 // Test passed
             } else {
                 panic!("Binary operation consistency test failed for expression");

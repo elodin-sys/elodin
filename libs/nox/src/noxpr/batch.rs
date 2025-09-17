@@ -1,6 +1,6 @@
 use crate::{
-    ArrayTy, BinaryOp, CompFn, DefaultMap, DefaultMappedDim, Dim, DotDimensionNums, Error, Noxpr,
-    NoxprFn, NoxprId, NoxprNode, NoxprTy, ReplaceDim, ReprMonad, Tensor, TensorItem,
+    ArrayTy, BinaryOp, DotDimensionNums, Error, Noxpr,
+    NoxprFn, NoxprId, NoxprNode, NoxprTy, ReprMonad,
     xla::ElementType,
 };
 use core::{
@@ -10,7 +10,6 @@ use core::{
 use smallvec::{SmallVec, smallvec};
 use std::collections::HashMap;
 
-use super::Op;
 
 /// Helper class for tracing batch operations, useful for operations like batched matrix multiplication.
 #[derive(Clone)]
