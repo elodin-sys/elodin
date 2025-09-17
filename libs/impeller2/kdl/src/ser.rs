@@ -10,7 +10,9 @@ pub fn serialize_schematic<T>(schematic: &Schematic<T>) -> String {
     }
 
     doc.autoformat();
-    doc.to_string()
+    let mut s = doc.to_string();
+    s.truncate(s.trim_end().len());
+    s
 }
 
 fn serialize_schematic_elem<T>(elem: &SchematicElem<T>) -> KdlNode {
@@ -246,7 +248,8 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> KdlNode {
     match mesh {
         Object3DMesh::Glb(path) => {
             let mut node = KdlNode::new("glb");
-            node.entries_mut().push(KdlEntry::new(path.clone()));
+            node.entries_mut()
+                .push(KdlEntry::new_prop("path", path.clone()));
             node
         }
         Object3DMesh::Mesh { mesh, material } => match mesh {
@@ -730,9 +733,34 @@ object_3d "a.world_pos" {
 
         let parsed = parse_schematic(original_kdl).unwrap();
         let serialized = serialize_schematic(&parsed);
+        // NOTE: fov and grid are dropped because they are the default value.
+        //
+        //viewport active=#true hdr=#true fov=45.0 show_grid=#false
+        assert_eq!(
+            r#"
+tabs {
+    viewport active=#true hdr=#true
+    graph a.world_pos name="a world_pos"
+}
+object_3d a.world_pos {
+    sphere radius=0.20000000298023224 r=1.0 g=1.0 b=1.0
+}"#
+            .trim(),
+            serialized
+        );
         let reparsed = parse_schematic(&serialized).unwrap();
 
         // Check that the structure is preserved
+        assert_eq!(parsed.elems.len(), reparsed.elems.len());
+    }
+
+    #[test]
+    fn test_roundtrip_rocket_example() {
+        let original_kdl = r#"graph "rocket.fin_deflect[0]" name=Fin "#;
+        let parsed = parse_schematic(original_kdl).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        assert_eq!(r#"graph "rocket.fin_deflect[0]" name=Fin"#, serialized);
+        let reparsed = parse_schematic(&serialized).unwrap();
         assert_eq!(parsed.elems.len(), reparsed.elems.len());
     }
 

@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
+    path::{Path, PathBuf},
     str::FromStr,
     time::Duration,
 };
@@ -11,7 +12,7 @@ use bevy::{
         system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
         world::World,
     },
-    log::info,
+    log::{error, info},
     pbr::{StandardMaterial, wireframe::WireframeConfig},
     prelude::In,
     render::view::Visibility,
@@ -23,7 +24,7 @@ use impeller2::types::msg_id;
 use impeller2_bevy::{ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
 use impeller2_kdl::ToKdl;
 use impeller2_wkt::{
-    ComponentPath, ComponentValue, IsRecording, Material, Mesh, Object3D, SetDbConfig,
+    ComponentPath, ComponentValue, DbConfig, IsRecording, Material, Mesh, Object3D, SetDbConfig,
     SetStreamState,
 };
 use miette::IntoDiagnostic;
@@ -605,9 +606,25 @@ fn set_time_range_behavior() -> PaletteItem {
 }
 
 pub fn save_schematic() -> PaletteItem {
-    PaletteItem::new("Save Schematic", PRESETS_LABEL, |_name: In<String>| {
-        PalettePage::new(vec![save_preset_inner()]).into()
-    })
+    PaletteItem::new(
+        "Save Schematic",
+        PRESETS_LABEL,
+        |_name: In<String>, db_config: Res<DbConfig>, schematic: Res<CurrentSchematic>| {
+            match db_config.schematic_path() {
+                Some(path) => {
+                    let kdl = schematic.0.to_kdl();
+                    let path = Path::new(path).with_extension("kdl");
+                    if let Err(e) = std::fs::write(&path, kdl) {
+                        error!(?e, "saving schematic");
+                    } else {
+                        info!(?path, "saved schematic");
+                    }
+                    PaletteEvent::Exit
+                }
+                None => PalettePage::new(vec![save_preset_inner()]).into(),
+            }
+        },
+    )
 }
 
 pub fn save_schematic_db() -> PaletteItem {
@@ -632,13 +649,13 @@ pub fn save_preset_inner() -> PaletteItem {
         LabelSource::placeholder("Enter a name for the schematic"),
         "",
         move |In(name): In<String>, schematic: Res<CurrentSchematic>| {
-            let dirs = crate::dirs();
-            let dir = dirs.data_dir().join("schematics");
-            let _ = std::fs::create_dir(&dir);
             let kdl = schematic.0.to_kdl();
-            let path = dir.join(&name).with_extension("kdl");
-            info!(?path, "saving schematic");
-            let _ = std::fs::write(path, kdl);
+            let path = PathBuf::from(name).with_extension("kdl");
+            if let Err(e) = std::fs::write(&path, kdl) {
+                error!(?e, "saving schematic");
+            } else {
+                info!(?path, "saved schematic");
+            }
             PaletteEvent::Exit
         },
     )
@@ -647,10 +664,19 @@ pub fn save_preset_inner() -> PaletteItem {
 
 pub fn load_schematic() -> PaletteItem {
     PaletteItem::new("Load Schematic", PRESETS_LABEL, |_: In<String>| {
-        let dirs = crate::dirs();
-        let dir = dirs.data_dir().join("schematics");
-        let Ok(elems) = std::fs::read_dir(dir) else {
-            return PaletteEvent::Exit;
+        let dir = match std::env::current_dir() {
+            Ok(dir) => dir,
+            Err(e) => {
+                error!(?e, "getting schematic dir");
+                return PaletteEvent::Exit;
+            }
+        };
+        let elems = match std::fs::read_dir(dir) {
+            Ok(x) => x,
+            Err(e) => {
+                error!(?e, "reading schematic dir");
+                return PaletteEvent::Exit;
+            }
         };
 
         let mut items = vec![load_schematic_picker()];
@@ -660,6 +686,9 @@ pub fn load_schematic() -> PaletteItem {
             let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
                 continue;
             };
+            if path.extension().and_then(|e| e.to_str()) != Some("kdl") {
+                continue;
+            }
             items.push(load_schematic_inner(file_name.to_string()))
         }
         PalettePage::new(items).into()
@@ -668,14 +697,16 @@ pub fn load_schematic() -> PaletteItem {
 
 pub fn load_schematic_picker() -> PaletteItem {
     PaletteItem::new(
-        "From File",
+        "Use File Dialog",
         "",
-        move |_: In<String>, params: LoadSchematicParams, rx: ResMut<SchematicLiveReloadRx>| {
-            if let Some(path) = rfd::FileDialog::new()
-                .add_filter("kdl", &["kdl"])
-                .pick_file()
-            {
-                if let Err(err) = load_schematic_file(&path, params, rx)
+        move |_: In<String>, mut params: LoadSchematicParams, rx: ResMut<SchematicLiveReloadRx>| {
+            let mut dialog = rfd::FileDialog::new().add_filter("kdl", &["kdl"]);
+
+            if let Ok(cwd) = std::env::current_dir() {
+                dialog = dialog.set_directory(cwd);
+            }
+            if let Some(path) = dialog.pick_file() {
+                if let Err(err) = load_schematic_file(&path, &mut params, rx)
                     .inspect_err(|err| {
                         dbg!(err);
                     })
@@ -690,13 +721,12 @@ pub fn load_schematic_picker() -> PaletteItem {
 }
 
 pub fn load_schematic_inner(name: String) -> PaletteItem {
+    let path = PathBuf::from(name.clone());
     PaletteItem::new(
-        name.clone(),
+        name,
         "",
-        move |_: In<String>, params: LoadSchematicParams, rx: ResMut<SchematicLiveReloadRx>| {
-            let dirs = crate::dirs();
-            let path = dirs.data_dir().join("schematics").join(name.clone());
-            if let Err(err) = load_schematic_file(&path, params, rx) {
+        move |_: In<String>, mut params: LoadSchematicParams, rx: ResMut<SchematicLiveReloadRx>| {
+            if let Err(err) = load_schematic_file(&path, &mut params, rx) {
                 PaletteEvent::Error(err.to_string())
             } else {
                 PaletteEvent::Exit
@@ -1043,7 +1073,8 @@ impl Default for PalettePage {
             create_sidebars(),
             create_3d_object(),
             save_schematic(),
-            save_schematic_db(),
+            // TODO: Don't enable until we have a clear save and load story for db.
+            //save_schematic_db(),
             load_schematic(),
             set_color_scheme(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {

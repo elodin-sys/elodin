@@ -1,20 +1,15 @@
 use crate::*;
 use ::s10::{GroupRecipe, SimRecipe, cli::run_recipe};
 use clap::Parser;
+use convert_case::Casing;
 use impeller2::types::{PrimType, Timestamp};
 use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 use miette::miette;
 use nox_ecs::{ComponentSchema, IntoSystem, System as _, TimeStep, World, increment_sim_tick, nox};
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
 use pyo3::{IntoPyObjectExt, types::PyDict};
-use std::{
-    collections::HashMap,
-    iter,
-    net::SocketAddr,
-    path::{Path, PathBuf},
-    time,
-};
-use tracing::error;
+use std::{collections::HashMap, iter, net::SocketAddr, path::PathBuf, time};
+use tracing::{error, info};
 use zerocopy::{FromBytes, TryFromBytes};
 
 #[derive(Parser, Debug)]
@@ -67,25 +62,62 @@ impl WorldBuilder {
     }
 }
 
+fn is_snake_case(s: &str) -> bool {
+    // This may look dumb and it is, but the [`is_case()` implementation][1] is
+    // no better and less expressive in that you can't express boundaries.
+    //
+    // TODO: Don't allocate a string to test a string.
+    //
+    // [1]: https://github.com/rutrum/convert-case/blob/b9dd92b4394745e15943a604890cdc57fa6bd289/src/lib.rs#L366
+    let b = s
+        .without_boundaries(&convert_case::Boundary::digits())
+        .to_case(convert_case::Case::Snake);
+    b == s
+}
+
 #[pymethods]
 impl WorldBuilder {
     #[new]
     pub fn new() -> Self {
         Self::default()
     }
-    #[pyo3(signature = (spawnable, name=None))]
-    pub fn spawn(&mut self, spawnable: Spawnable, name: Option<String>) -> Result<EntityId, Error> {
+    #[pyo3(signature = (spawnable, name=None, id=None))]
+    pub fn spawn(
+        &mut self,
+        spawnable: Spawnable,
+        name: Option<String>,
+        id: Option<String>,
+    ) -> Result<EntityId, Error> {
         let entity_id = EntityId {
             inner: impeller2::types::EntityId(self.world.entity_len()),
         };
         self.insert(entity_id, spawnable)?;
         self.world.metadata.entity_len += 1;
-        if let Some(name) = name {
+        let derived_id = match (&name, id) {
+            (Some(name), None) => {
+                let new_id = name
+                    .without_boundaries(&convert_case::Boundary::digits())
+                    .to_case(convert_case::Case::Snake);
+                eprintln!("convert name {:?} to ID {:?}", &name, &new_id);
+                info!("convert name {:?} to ID {:?}", &name, &new_id);
+                Some(new_id)
+            }
+            (_, Some(id)) => Some(id),
+            _ => None,
+        };
+
+        if let Some(derived_id) = derived_id {
+            if !is_snake_case(&derived_id) {
+                error!("the ID should be snake_case but was {:?}", derived_id);
+            }
             self.world.metadata.entity_metadata.insert(
                 entity_id.inner,
                 EntityMetadata {
                     entity_id: entity_id.inner,
-                    name: name.to_string(),
+                    // TODO: Consider changing this `name` field to `id`.
+                    // Perhaps add a human-readable field `display_name` or
+                    // `name` after that.
+                    name: derived_id,
                     metadata: Default::default(),
                 },
             );
@@ -372,17 +404,35 @@ impl WorldBuilder {
     /// this function itself does not write to the `path`.
     #[pyo3(signature = (default_content = None, path = None,))]
     pub fn schematic(&mut self, default_content: Option<String>, path: Option<String>) {
-        let file_contents = path.as_deref().and_then(|path| {
-            let path = Path::new(path);
-            if path.exists() {
-                std::fs::read_to_string(path)
-                    .inspect_err(|err| error!(?err, "could not read schematic file at {path:?}"))
-                    .ok()
-            } else {
-                None
-            }
-        });
+        // TODO: It would be nice to allow for a schematic override environment
+        // variable. However, due to s10 process orchestration, it is not
+        // trivial to implement. Holding off for now.
+
+        // let override_file = env::var("SCHEMATIC_FILE").ok();
+        // if let Some(override_path) = &override_file {
+        //     tracing::log::warn!("Overriding schematic path {:?} with env \"SCHEMATIC_FILE\": {:?}",
+        //                         path.as_deref().unwrap_or("N/A"),
+        //                         override_path);
+        // }
+        // self.world.metadata.schematic_path = override_file.or(path).map(PathBuf::from);
         self.world.metadata.schematic_path = path.map(PathBuf::from);
+        let file_contents = self
+            .world
+            .metadata
+            .schematic_path
+            .as_ref()
+            .and_then(|path| {
+                if path.exists() {
+                    std::fs::read_to_string(path)
+                        .inspect(|_| info!("read schematic at {path:?}"))
+                        .inspect_err(|err| {
+                            error!(?err, "could not read schematic file at {path:?}")
+                        })
+                        .ok()
+                } else {
+                    None
+                }
+            });
         self.world.metadata.schematic = file_contents.or(default_content);
     }
 }
@@ -598,5 +648,34 @@ impl WorldBuilder {
             entity_dict,
             component_entity_dict,
         ))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use convert_case::Casing;
+
+    #[test]
+    fn test_snake_case() {
+        assert!(!"e1".is_case(convert_case::Case::Snake));
+        // We can't express this:
+        // assert!("e1"
+        //         .without_boundaries(&convert_case::Boundary::digits())
+        //         .is_case(convert_case::Case::Snake));
+        assert!("e_1".is_case(convert_case::Case::Snake));
+
+        assert_eq!(
+            "e1".without_boundaries(&convert_case::Boundary::digits())
+                .to_case(convert_case::Case::Snake),
+            String::from("e1")
+        );
+    }
+
+    #[test]
+    fn test_our_snake_case() {
+        assert!(is_snake_case("e1"));
+        assert!(is_snake_case("e_1"));
+        assert!(!is_snake_case("E1"));
     }
 }

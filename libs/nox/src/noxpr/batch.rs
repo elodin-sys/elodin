@@ -102,6 +102,7 @@ impl BatchTracer {
         self.visit_inner(expr)
     }
 
+    #[inline]
     /// Visits a `Noxpr` and applies any batch-specific transformations.
     pub fn visit_inner(&mut self, expr: &Noxpr) -> Result<BatchedExpr, Error> {
         let id = expr.id();

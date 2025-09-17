@@ -69,13 +69,20 @@ impl ComponentPath {
 
 impl Display for ComponentPath {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for (i, part) in self.path.iter().enumerate() {
-            if i > 0 {
-                write!(f, ".{}", part.name)?;
-            } else {
-                write!(f, "{}", part.name)?;
-            }
+        if let Some(part) = self.path.last() {
+            write!(f, "{}", part.name)?;
         }
+        // NOTE: This wrote it as though "a.b.c" was stored as ["a", "b", "c"] but
+        // it's actually stored ["a", "a.b", "a.b.c"], which seems strange.
+        // TODO: Consider changing it to store ["a", "b", "c"].
+
+        // for (i, part) in self.path.iter().enumerate() {
+        //     if i > 0 {
+        //         write!(f, ".{}", part.name)?;
+        //     } else {
+        //         write!(f, "{}", part.name)?;
+        //     }
+        // }
         Ok(())
     }
 }
@@ -95,5 +102,11 @@ mod tests {
                 ComponentPart::new("a.b.c"),
             ]
         );
+    }
+
+    #[test]
+    fn test_component_path_roundtrip() {
+        let path = ComponentPath::from_name("a.b.c");
+        assert_eq!("a.b.c", format!("{}", path).as_str());
     }
 }

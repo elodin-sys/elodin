@@ -46,7 +46,6 @@ stellarator.path = "../stellarator"
 tokio.version = "1.34"
 tokio.features = ["full"]
 
-
 # logs
 tracing = "0.1"
 tracing-subscriber.version = "0.3"
@@ -74,3 +73,5 @@ roci-adcs.path = "../roci/adcs"
 s10.path = "../s10"
 
 zerocopy.version = "0.8.2"
+env_logger = "0.11.8"
+convert_case = "0.8.0"

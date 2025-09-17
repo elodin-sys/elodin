@@ -2383,7 +2383,7 @@ dependencies = [
  "cexpr",
  "clang-sys",
  "clap 3.2.25",
- "env_logger",
+ "env_logger 0.9.3",
  "lazy_static",
  "lazycell",
  "log",
@@ -4639,7 +4639,7 @@ dependencies = [
  "axum 0.8.1",
  "axum-streams",
  "clap 4.5.37",
- "convert_case 0.6.0",
+ "convert_case 0.8.0",
  "datafusion",
  "directories",
  "fastrand 2.2.0",
@@ -4880,6 +4880,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "env_filter"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "186e05a59d4c50738528153b83b0b0194d3a29507dfec16eccd4b342903397d0"
+dependencies = [
+ "log",
+ "regex",
+]
+
+[[package]]
 name = "env_logger"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4890,6 +4900,19 @@ dependencies = [
  "log",
  "regex",
  "termcolor",
+]
+
+[[package]]
+name = "env_logger"
+version = "0.11.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13c863f0904021b108aa8b2f55046443e6b1ebde8fd4a15c399893aae4fa069f"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "env_filter",
+ "jiff",
+ "log",
 ]
 
 [[package]]
@@ -8444,8 +8467,10 @@ version = "0.15.0"
 dependencies = [
  "bytes",
  "clap 4.5.37",
+ "convert_case 0.8.0",
  "directories",
  "elodin-db",
+ "env_logger 0.11.8",
  "impeller2",
  "impeller2-wkt",
  "indicatif",
