@@ -43,7 +43,7 @@ impl BatchTracer {
                 crate::ChildrenIter::Empty
             }
         });
-        for (_depth, node) in first_traversal {
+        for (_depth, _node) in first_traversal {
             // Figure out which nodes we need to cache.
         }
         seen_once.clear();
@@ -328,53 +328,6 @@ impl BatchTracer {
                 .map_expr(func)),
             BatchAxis::Mapped { .. } => Ok(expr.map_expr(func)),
         }
-    }
-
-    /// Visits a `Noxpr` and applies any batch-specific transformations.
-    fn visit(&mut self, _expr: &Noxpr) -> Result<BatchedExpr, Error> {
-        // This method is kept for compatibility but should not be used
-        // Use walk() instead for the stack-based approach
-        todo!("Use walk() method instead of visit()")
-    }
-
-    /// Specifically handles the dot-general operation in a batched context.
-    fn visit_dot_general(
-        &mut self,
-        _lhs: &Noxpr,
-        _rhs: &Noxpr,
-        _dims: DotDimensionNums,
-    ) -> Result<BatchedExpr, Error> {
-        // This method is kept for compatibility but should not be used
-        // Use process_dot_general() instead for the stack-based approach
-        todo!("Use process_dot_general() method instead of visit_dot_general()")
-    }
-
-    /// Handles the broadcasting of expressions within a batched context.
-    fn visit_broadcast_in_dim(
-        &mut self,
-        _inner: &Noxpr,
-        _sizes: SmallVec<[i64; 4]>,
-        _broadcast_dims: SmallVec<[i64; 4]>,
-    ) -> Result<BatchedExpr, Error> {
-        todo!("Use process_broadcast_in_dim() method instead of visit_broadcast_in_dim()")
-    }
-
-    /// Manages binary operations in a batched context, considering batch axes.
-    fn visit_binary_op(
-        &mut self,
-        _op: &BinaryOp,
-        _func: impl Fn(Noxpr, Noxpr) -> Noxpr,
-    ) -> Result<BatchedExpr, Error> {
-        todo!("Use process_binary_op() method instead of visit_binary_op()")
-    }
-
-    /// Manages unary operations in a batched context.
-    fn visit_unary_op(
-        &mut self,
-        _expr: &Noxpr,
-        _func: impl Fn(Noxpr) -> Noxpr,
-    ) -> Result<BatchedExpr, Error> {
-        todo!("Use process_unary_op() method instead of visit_unary_op()")
     }
 
     /// Processes concat operations during DFS traversal

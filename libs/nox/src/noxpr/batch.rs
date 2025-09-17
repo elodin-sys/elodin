@@ -1,6 +1,6 @@
 use crate::{
     ArrayTy, BinaryOp, DotDimensionNums, Error, Noxpr, NoxprFn, NoxprId, NoxprNode, NoxprTy,
-    ReprMonad, xla::ElementType,
+    xla::ElementType,
 };
 use core::{
     iter,
@@ -86,6 +86,8 @@ pub enum BatchAxis {
     Mapped { index: usize, size: usize },
 }
 
+// TODO(shane): I want this around for compatibility testing with batch-dfs.rs.
+#[allow(dead_code)]
 impl BatchTracer {
     /// Creates a new `BatchTracer` for managing batch operation contexts.
     pub fn new(out_axis: BatchAxis) -> Self {
