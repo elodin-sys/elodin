@@ -721,7 +721,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             .translate(vec2(-3.0 * x_margin, 0.0));
         let response = ui.interact(rect, id, egui::Sense::click_and_drag());
 
-        if is_container && response.double_clicked() && !is_editing {
+        if is_container && state.active && response.clicked() && !is_editing {
             ui.ctx().data_mut(|d| d.insert_temp(edit_buf_id, title_str.clone()));
             ui.ctx().data_mut(|d| d.insert_temp(edit_flag_id, true));
             is_editing = true;
