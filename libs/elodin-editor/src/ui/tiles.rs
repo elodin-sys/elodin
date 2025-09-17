@@ -282,7 +282,11 @@ impl TileState {
         self.container_titles.remove(&id);
     }
 
-    pub fn container_title_or_default(&self, tiles: &egui_tiles::Tiles<Pane>, id: TileId) -> String {
+    pub fn container_title_or_default(
+        &self,
+        tiles: &egui_tiles::Tiles<Pane>,
+        id: TileId,
+    ) -> String {
         if let Some(t) = self.get_container_title(id) {
             return t.to_owned();
         }
@@ -687,11 +691,13 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
         // Inline containers renaming.
         let is_container = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Container(_)));
-        let persist_id   = id.with(("rename_title", tile_id));
+        let persist_id = id.with(("rename_title", tile_id));
         let edit_flag_id = id.with(("rename_editing", tile_id));
-        let edit_buf_id  = id.with(("rename_buffer",  tile_id));
-        let mut is_editing =
-            ui.ctx().data(|d| d.get_temp::<bool>(edit_flag_id)).unwrap_or(false);
+        let edit_buf_id = id.with(("rename_buffer", tile_id));
+        let mut is_editing = ui
+            .ctx()
+            .data(|d| d.get_temp::<bool>(edit_flag_id))
+            .unwrap_or(false);
 
         let title_str: String = if is_container {
             if let Some(custom) = ui.ctx().data(|d| d.get_temp::<String>(persist_id)) {
@@ -708,8 +714,12 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
         let mut font_id = egui::TextStyle::Button.resolve(ui.style());
         font_id.size = 11.0;
-        let mut galley = egui::WidgetText::from(title_str.clone())
-            .into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, font_id.clone());
+        let mut galley = egui::WidgetText::from(title_str.clone()).into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            font_id.clone(),
+        );
 
         let x_margin = self.tab_title_spacing(ui.visuals());
         let (_, rect) = ui.allocate_space(vec2(
@@ -722,7 +732,8 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         let response = ui.interact(rect, id, egui::Sense::click_and_drag());
 
         if is_container && state.active && response.clicked() && !is_editing {
-            ui.ctx().data_mut(|d| d.insert_temp(edit_buf_id, title_str.clone()));
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(edit_buf_id, title_str.clone()));
             ui.ctx().data_mut(|d| d.insert_temp(edit_flag_id, true));
             is_editing = true;
         }
@@ -742,13 +753,14 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             ui.painter().rect_filled(rect, 0.0, bg_color);
 
             if is_container && is_editing {
-                let label_rect = egui::Align2::LEFT_CENTER
-                    .align_size_within_rect(galley.size(), text_rect);
+                let label_rect =
+                    egui::Align2::LEFT_CENTER.align_size_within_rect(galley.size(), text_rect);
                 let edit_rect = label_rect.expand(1.0);
 
-                let mut buf = ui.ctx().data_mut(|d|
-                    d.get_temp_mut_or::<String>(edit_buf_id, String::new()).clone()
-                );
+                let mut buf = ui.ctx().data_mut(|d| {
+                    d.get_temp_mut_or::<String>(edit_buf_id, String::new())
+                        .clone()
+                });
 
                 let resp = ui
                     .scope(|ui| {
@@ -765,19 +777,21 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                     .inner;
 
                 let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                let lost_focus   = resp.lost_focus();
+                let lost_focus = resp.lost_focus();
 
                 if enter_pressed || lost_focus {
                     let new_title = buf.trim().to_owned();
 
                     ui.ctx().data_mut(|d| d.insert_temp(edit_flag_id, false));
-                    ui.ctx().data_mut(|d| d.insert_temp(edit_buf_id, new_title.clone()));
-                    ui.ctx().data_mut(|d| d.insert_temp(persist_id, new_title.clone()));
+                    ui.ctx()
+                        .data_mut(|d| d.insert_temp(edit_buf_id, new_title.clone()));
+                    ui.ctx()
+                        .data_mut(|d| d.insert_temp(persist_id, new_title.clone()));
                     ui.memory_mut(|m| m.surrender_focus(resp.id));
 
                     if let Some(mut state) = self.world.get_resource_mut::<TileState>() {
                         state.set_container_title(tile_id, new_title.clone());
-                    }   
+                    }
 
                     galley = egui::WidgetText::from(new_title).into_galley(
                         ui,
