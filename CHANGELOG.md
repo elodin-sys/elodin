@@ -5,6 +5,7 @@
 ## v0.15
 
 ### v0.15.0
+- **(fix)** Add auto-tick advancement to JaxSim.
 - **(breaking)** Handle UI and object visualization using new schematics format. See [migration guide](/reference/migration/to-0-15).
 - **(fix)** Stop endlessly creating entities for packet handling.
 - **(breaking)** Replace `set_component_name` with `set_component_metadata` in C++ API to support setting element names.
