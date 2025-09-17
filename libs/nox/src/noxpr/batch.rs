@@ -27,7 +27,6 @@ pub struct BatchedExpr {
 }
 
 impl BatchedExpr {
-    
     pub(crate) fn map_expr(self, func: impl FnOnce(Noxpr) -> Noxpr) -> Self {
         BatchedExpr {
             inner: func(self.inner),
@@ -869,4 +868,3 @@ impl BatchTracer {
         }
     }
 }
-

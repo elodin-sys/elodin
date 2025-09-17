@@ -131,7 +131,6 @@ impl<'a> Iterator for ChildrenIter<'a> {
 }
 
 impl NoxprNode {
-
     pub fn push_children<'a>(&'a self, accum: &mut Vec<&'a Noxpr>) {
         match self {
             // Leaf nodes with no children
@@ -274,7 +273,7 @@ impl NoxprNode {
             NoxprNode::Param(_) | NoxprNode::Constant(_) | NoxprNode::Iota(_) => {
                 ChildrenIter::Empty
             }
-            
+
             // Binary operations with lhs and rhs children
             NoxprNode::Add(binary_op)
             | NoxprNode::Sub(binary_op)
@@ -290,12 +289,12 @@ impl NoxprNode {
             | NoxprNode::Dot(binary_op) => {
                 ChildrenIter::Double(Some(&binary_op.lhs), Some(&binary_op.rhs))
             }
-            
+
             // DotGeneral has lhs and rhs
             NoxprNode::DotGeneral(dot_general) => {
                 ChildrenIter::Double(Some(&dot_general.lhs), Some(&dot_general.rhs))
             }
-            
+
             // Unary operations with single child
             NoxprNode::Sqrt(child)
             | NoxprNode::Neg(child)
@@ -304,112 +303,77 @@ impl NoxprNode {
             | NoxprNode::Cos(child)
             | NoxprNode::Abs(child)
             | NoxprNode::Acos(child)
-            | NoxprNode::Asin(child) => {
-                ChildrenIter::Single(Some(child))
-            }
-            
+            | NoxprNode::Asin(child) => ChildrenIter::Single(Some(child)),
+
             // Tuple with multiple children
-            NoxprNode::Tuple(children) => {
-                ChildrenIter::Vec(children.iter())
-            }
-            
+            NoxprNode::Tuple(children) => ChildrenIter::Vec(children.iter()),
+
             // GetTupleElement with single child
-            NoxprNode::GetTupleElement(get_tuple) => {
-                ChildrenIter::Single(Some(&get_tuple.expr))
-            }
-            
+            NoxprNode::GetTupleElement(get_tuple) => ChildrenIter::Single(Some(&get_tuple.expr)),
+
             // Concat with multiple children
-            NoxprNode::Concat(concat) => {
-                ChildrenIter::Vec(concat.nodes.iter())
-            }
-            
+            NoxprNode::Concat(concat) => ChildrenIter::Vec(concat.nodes.iter()),
+
             // Reshape operations with single child
-            NoxprNode::Reshape(reshape) => {
-                ChildrenIter::Single(Some(&reshape.expr))
-            }
-            
-            NoxprNode::Broadcast(broadcast) => {
-                ChildrenIter::Single(Some(&broadcast.expr))
-            }
-            
+            NoxprNode::Reshape(reshape) => ChildrenIter::Single(Some(&reshape.expr)),
+
+            NoxprNode::Broadcast(broadcast) => ChildrenIter::Single(Some(&broadcast.expr)),
+
             NoxprNode::BroadcastInDim(broadcast_in_dim) => {
                 ChildrenIter::Single(Some(&broadcast_in_dim.expr))
             }
-            
-            NoxprNode::Transpose(transpose) => {
-                ChildrenIter::Single(Some(&transpose.expr))
-            }
-            
+
+            NoxprNode::Transpose(transpose) => ChildrenIter::Single(Some(&transpose.expr)),
+
             // Slice operations
             NoxprNode::Gather(gather) => {
                 ChildrenIter::Double(Some(&gather.expr), Some(&gather.indices))
             }
-            
-            NoxprNode::Slice(slice) => {
-                ChildrenIter::Single(Some(&slice.expr))
-            }
-            
-            NoxprNode::DynamicSlice(dynamic_slice) => {
-                ChildrenIter::Chain(
-                    Box::new(ChildrenIter::Single(Some(&dynamic_slice.expr))),
-                    Box::new(ChildrenIter::Vec(dynamic_slice.start_indices.iter()))
-                )
-            }
-            
-            NoxprNode::DynamicUpdateSlice(dynamic_update_slice) => {
-                ChildrenIter::Chain(
-                    Box::new(ChildrenIter::Single(Some(&dynamic_update_slice.expr))),
-                    Box::new(ChildrenIter::Chain(
-                        Box::new(ChildrenIter::Vec(dynamic_update_slice.start_indices.iter())),
-                        Box::new(ChildrenIter::Single(Some(&dynamic_update_slice.update)))
-                    ))
-                )
-            }
-            
+
+            NoxprNode::Slice(slice) => ChildrenIter::Single(Some(&slice.expr)),
+
+            NoxprNode::DynamicSlice(dynamic_slice) => ChildrenIter::Chain(
+                Box::new(ChildrenIter::Single(Some(&dynamic_slice.expr))),
+                Box::new(ChildrenIter::Vec(dynamic_slice.start_indices.iter())),
+            ),
+
+            NoxprNode::DynamicUpdateSlice(dynamic_update_slice) => ChildrenIter::Chain(
+                Box::new(ChildrenIter::Single(Some(&dynamic_update_slice.expr))),
+                Box::new(ChildrenIter::Chain(
+                    Box::new(ChildrenIter::Vec(dynamic_update_slice.start_indices.iter())),
+                    Box::new(ChildrenIter::Single(Some(&dynamic_update_slice.update))),
+                )),
+            ),
+
             // Control flow operations
-            NoxprNode::Scan(scan) => {
-                ChildrenIter::Chain(
-                    Box::new(ChildrenIter::Vec(scan.inputs.iter())),
-                    Box::new(ChildrenIter::Single(Some(&scan.initial_state)))
-                )
-            }
-            
-            NoxprNode::Select(select) => {
-                ChildrenIter::Triple(
-                    Some(&select.cond),
-                    Some(&select.on_true),
-                    Some(&select.on_false)
-                )
-            }
-            
+            NoxprNode::Scan(scan) => ChildrenIter::Chain(
+                Box::new(ChildrenIter::Vec(scan.inputs.iter())),
+                Box::new(ChildrenIter::Single(Some(&scan.initial_state))),
+            ),
+
+            NoxprNode::Select(select) => ChildrenIter::Triple(
+                Some(&select.cond),
+                Some(&select.on_true),
+                Some(&select.on_false),
+            ),
+
             // Cast operations
-            NoxprNode::Convert(convert) => {
-                ChildrenIter::Single(Some(&convert.arg))
-            }
-            
+            NoxprNode::Convert(convert) => ChildrenIter::Single(Some(&convert.arg)),
+
             // Call operations
-            NoxprNode::Call(call) => {
-                ChildrenIter::Vec(call.args.iter())
-            }
-            
+            NoxprNode::Call(call) => ChildrenIter::Vec(call.args.iter()),
+
             // Triangle operations
-            NoxprNode::Cholesky(cholesky) => {
-                ChildrenIter::Single(Some(&cholesky.arg))
-            }
-            
-            NoxprNode::LuInverse(lu_inverse) => {
-                ChildrenIter::Single(Some(&lu_inverse.arg))
-            }
-            
+            NoxprNode::Cholesky(cholesky) => ChildrenIter::Single(Some(&cholesky.arg)),
+
+            NoxprNode::LuInverse(lu_inverse) => ChildrenIter::Single(Some(&lu_inverse.arg)),
+
             // Jax operations (no children to traverse)
             #[cfg(feature = "jax")]
-            NoxprNode::Jax(_) => {
-                ChildrenIter::Empty
-            }
+            NoxprNode::Jax(_) => ChildrenIter::Empty,
         }
     }
 }
-
 
 /// Represents a constant value within the Noxpr.
 #[derive(Clone)]
@@ -2952,17 +2916,17 @@ mod tests {
 
     #[test]
     fn test_children_iterator() {
-        use crate::{NoxprScalarExt, NoxprNode};
-        
+        use crate::{NoxprNode, NoxprScalarExt};
+
         // Create a simple binary operation: a + b
         let a = 1.0f32.constant();
         let b = 2.0f32.constant();
         let add = a + b;
-        
+
         // Test that we can iterate over children
         let children: Vec<_> = add.node.children().collect();
         assert_eq!(children.len(), 2);
-        
+
         // Test that the children are the operands
         match &*add.node {
             NoxprNode::Add(binary_op) => {
@@ -2975,16 +2939,16 @@ mod tests {
 
     #[test]
     fn test_children_iterator_unary() {
-        use crate::{NoxprScalarExt, NoxprNode};
-        
+        use crate::{NoxprNode, NoxprScalarExt};
+
         // Create a simple unary operation: sqrt(a)
         let a = 4.0f32.constant();
         let sqrt = a.sqrt();
-        
+
         // Test that we can iterate over children
         let children: Vec<_> = sqrt.node.children().collect();
         assert_eq!(children.len(), 1);
-        
+
         // Test that the child is the operand
         match &*sqrt.node {
             NoxprNode::Sqrt(child) => {
@@ -2997,7 +2961,7 @@ mod tests {
     #[test]
     fn test_children_iterator_leaf() {
         use crate::NoxprScalarExt;
-        
+
         // Test leaf nodes have no children
         let a = 1.0f32.constant();
         let children: Vec<_> = a.node.children().collect();

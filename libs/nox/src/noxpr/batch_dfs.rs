@@ -1,16 +1,16 @@
+use crate::noxpr::batch::{BatchAxis, BatchedExpr};
 use crate::{
     ArrayTy, BinaryOp, CompFn, DefaultMap, DefaultMappedDim, Dim, DotDimensionNums, Error, Noxpr,
-    NoxprFn, NoxprNode, NoxprTy, ReplaceDim, ReprMonad, Tensor, TensorItem, TraversalError,
-    xla::ElementType, NoxprId,
+    NoxprFn, NoxprId, NoxprNode, NoxprTy, ReplaceDim, ReprMonad, Tensor, TensorItem,
+    TraversalError, xla::ElementType,
 };
-use crate::noxpr::batch::{BatchAxis, BatchedExpr};
 use core::{
     iter,
     ops::{Add, Deref, Div, Mul, Neg, Sub},
 };
 use smallvec::{SmallVec, smallvec};
-use traversal::DftPost;
 use std::collections::HashMap;
+use traversal::DftPost;
 
 use super::Op;
 
@@ -20,7 +20,6 @@ pub struct BatchTracer {
     pub(crate) cache: HashMap<NoxprId, BatchedExpr>,
     pub(crate) out_axis: BatchAxis,
 }
-
 
 impl BatchTracer {
     /// Creates a new `BatchTracer` for managing batch operation contexts.
@@ -58,7 +57,7 @@ impl BatchTracer {
 
         // Collect nodes in a stack (post-order traversal gives us deepest first)
         let mut node_stack: Vec<BatchedExpr> = Vec::new();
-        
+
         for (_depth, node) in second_traversal {
             // Process the node based on its type
             let mut already_cached = false;
@@ -74,13 +73,17 @@ impl BatchTracer {
             node_stack.push(result);
         }
         assert_eq!(node_stack.len(), 1);
-        node_stack.pop()
-                  .ok_or_else(|| Error::Internal(TraversalError::RootNodeFailed))
+        node_stack
+            .pop()
+            .ok_or_else(|| Error::Internal(TraversalError::RootNodeFailed))
     }
 
-
     /// Processes a single node during the DFS traversal
-    fn process_node(&mut self, expr: &Noxpr, stack: &mut Vec<BatchedExpr>) -> Result<BatchedExpr, Error> {
+    fn process_node(
+        &mut self,
+        expr: &Noxpr,
+        stack: &mut Vec<BatchedExpr>,
+    ) -> Result<BatchedExpr, Error> {
         match expr.deref() {
             NoxprNode::Constant(_) => Ok(BatchedExpr {
                 inner: expr.clone(),
@@ -96,13 +99,14 @@ impl BatchTracer {
                         batch_axis: BatchAxis::NotMapped,
                     })
                 }
-            },
+            }
             NoxprNode::Tuple(inner) => {
                 let mut exprs = Vec::with_capacity(inner.len());
                 let mut batch_axis = BatchAxis::NotMapped;
                 // Pop children in reverse order (post-order traversal gives us deepest first)
                 for _ in (0..inner.len()).rev() {
-                    let mapped = stack.pop()
+                    let mapped = stack
+                        .pop()
                         .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
                     exprs.push(mapped.inner);
                     batch_axis = mapped.batch_axis;
@@ -118,7 +122,9 @@ impl BatchTracer {
             NoxprNode::Div(b) => self.process_binary_op(b, Noxpr::div, stack),
             NoxprNode::And(b) => self.process_binary_op(b, Noxpr::and, stack),
             NoxprNode::Or(b) => self.process_binary_op(b, Noxpr::or, stack),
-            NoxprNode::GreaterOrEqual(b) => self.process_binary_op(b, Noxpr::greater_or_equal, stack),
+            NoxprNode::GreaterOrEqual(b) => {
+                self.process_binary_op(b, Noxpr::greater_or_equal, stack)
+            }
             NoxprNode::LessOrEqual(b) => self.process_binary_op(b, Noxpr::less_or_equal, stack),
             NoxprNode::Less(b) => self.process_binary_op(b, Noxpr::less, stack),
             NoxprNode::Equal(b) => self.process_binary_op(b, Noxpr::eq, stack),
@@ -132,7 +138,9 @@ impl BatchTracer {
             NoxprNode::Acos(e) => self.process_unary_op(e, Noxpr::acos, stack),
             NoxprNode::Asin(e) => self.process_unary_op(e, Noxpr::asin, stack),
             NoxprNode::Concat(c) => self.process_concat(c, stack),
-            NoxprNode::DotGeneral(d) => self.process_dot_general(&d.lhs, &d.rhs, d.dimensions.clone(), stack),
+            NoxprNode::DotGeneral(d) => {
+                self.process_dot_general(&d.lhs, &d.rhs, d.dimensions.clone(), stack)
+            }
             NoxprNode::Dot(d) => {
                 let lhs_rank = d.lhs.shape().ok_or(Error::UnbatchableArgument)?.len();
                 let rhs_rank = d.rhs.shape().ok_or(Error::UnbatchableArgument)?.len();
@@ -148,18 +156,19 @@ impl BatchTracer {
                 )
             }
             NoxprNode::Slice(s) => self.process_slice(s, stack),
-            NoxprNode::DynamicSlice(_) => {
-                Err(Error::Internal(TraversalError::UnsupportedNodeType))
-            }
+            NoxprNode::DynamicSlice(_) => Err(Error::Internal(TraversalError::UnsupportedNodeType)),
             NoxprNode::Reshape(r) => self.process_reshape(r, stack),
             NoxprNode::Broadcast(b) => {
                 let shape = b.expr.shape().ok_or(Error::UnbatchableArgument)?;
                 let broadcast_dims = (0..shape.len() as i64).collect();
                 self.process_broadcast_in_dim(&b.expr, b.sizes.clone(), broadcast_dims, stack)
             }
-            NoxprNode::BroadcastInDim(b) => {
-                self.process_broadcast_in_dim(&b.expr, b.sizes.clone(), b.broadcast_dims.clone(), stack)
-            }
+            NoxprNode::BroadcastInDim(b) => self.process_broadcast_in_dim(
+                &b.expr,
+                b.sizes.clone(),
+                b.broadcast_dims.clone(),
+                stack,
+            ),
             NoxprNode::Transpose(t) => self.process_transpose(t, stack),
             NoxprNode::Gather(g) => self.process_gather(g, stack),
             NoxprNode::Iota(iota) => {
@@ -175,9 +184,7 @@ impl BatchTracer {
                 Err(Error::Internal(TraversalError::UnsupportedNodeType))
             }
             #[cfg(feature = "jax")]
-            NoxprNode::Jax(_) => {
-                Err(Error::Internal(TraversalError::UnsupportedNodeType))
-            }
+            NoxprNode::Jax(_) => Err(Error::Internal(TraversalError::UnsupportedNodeType)),
             NoxprNode::GetTupleElement(g) => {
                 let NoxprNode::Tuple(elems) = g.expr.deref() else {
                     return Err(Error::UnbatchableArgument);
@@ -185,12 +192,14 @@ impl BatchTracer {
                 let _expr = elems.get(g.index).ok_or(Error::UnbatchableArgument)?;
                 // For GetTupleElement, we need to pop the tuple result from the stack
                 // The tuple processing should have already pushed the individual elements
-                Ok(stack.pop()
+                Ok(stack
+                    .pop()
                     .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?)
             }
             NoxprNode::Scan(s) => self.process_scan(s, stack),
             NoxprNode::Convert(c) => {
-                let arg = stack.pop()
+                let arg = stack
+                    .pop()
                     .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
                 Ok(BatchedExpr {
                     inner: arg.inner.convert(c.ty),
@@ -198,22 +207,20 @@ impl BatchTracer {
                 })
             }
             NoxprNode::Select(s) => self.process_select(s, stack),
-            NoxprNode::Call(_) => {
-                Err(Error::Internal(TraversalError::UnsupportedNodeType))
-            }
+            NoxprNode::Call(_) => Err(Error::Internal(TraversalError::UnsupportedNodeType)),
             NoxprNode::Cholesky(c) => {
-                let arg = stack.pop()
+                let arg = stack
+                    .pop()
                     .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
-                let arg = arg.move_batch_axis(self.out_axis.clone())
+                let arg = arg
+                    .move_batch_axis(self.out_axis.clone())
                     .ok_or(Error::UnbatchableArgument)?;
                 Ok(BatchedExpr {
                     inner: arg.inner.cholesky(c.upper),
                     batch_axis: arg.batch_axis,
                 })
             }
-            NoxprNode::LuInverse(_lu) => {
-                Err(Error::Internal(TraversalError::UnsupportedNodeType))
-            }
+            NoxprNode::LuInverse(_lu) => Err(Error::Internal(TraversalError::UnsupportedNodeType)),
         }
     }
 
@@ -225,20 +232,32 @@ impl BatchTracer {
         stack: &mut Vec<BatchedExpr>,
     ) -> Result<BatchedExpr, Error> {
         // Pop rhs first, then lhs (reverse order)
-        let rhs = stack.pop()
+        let rhs = stack
+            .pop()
             .ok_or_else(|| Error::Internal(TraversalError::RhsNotProcessed))?;
-        let lhs = stack.pop()
+        let lhs = stack
+            .pop()
             .ok_or_else(|| Error::Internal(TraversalError::LhsNotProcessed))?;
-        
+
         fn scalar_broadcast(
             _rank: usize,
             expr: BatchedExpr,
             shape: SmallVec<[i64; 4]>,
         ) -> Result<BatchedExpr, Error> {
             let mut new_shape = shape.clone();
-            new_shape.insert(0, expr.inner.shape().ok_or(Error::Internal(TraversalError::ShapeOperationFailed))?.first().copied().unwrap_or(1));
+            new_shape.insert(
+                0,
+                expr.inner
+                    .shape()
+                    .ok_or(Error::Internal(TraversalError::ShapeOperationFailed))?
+                    .first()
+                    .copied()
+                    .unwrap_or(1),
+            );
             let expr = expr.inner.broadcast(new_shape);
-            let expr_shape = expr.shape().ok_or(Error::Internal(TraversalError::ShapeOperationFailed))?;
+            let expr_shape = expr
+                .shape()
+                .ok_or(Error::Internal(TraversalError::ShapeOperationFailed))?;
             Ok(BatchedExpr {
                 inner: expr,
                 batch_axis: BatchAxis::Mapped {
@@ -250,9 +269,11 @@ impl BatchTracer {
 
         match (&lhs.batch_axis, &rhs.batch_axis) {
             (BatchAxis::NotMapped, BatchAxis::NotMapped) => {
-                let lhs = lhs.move_batch_axis(self.out_axis.clone())
+                let lhs = lhs
+                    .move_batch_axis(self.out_axis.clone())
                     .ok_or(Error::UnbatchableArgument)?;
-                let rhs = rhs.move_batch_axis(self.out_axis.clone())
+                let rhs = rhs
+                    .move_batch_axis(self.out_axis.clone())
                     .ok_or(Error::UnbatchableArgument)?;
                 Ok(BatchedExpr {
                     inner: func(lhs.inner, rhs.inner),
@@ -260,35 +281,31 @@ impl BatchTracer {
                 })
             }
             (BatchAxis::Mapped { .. }, BatchAxis::NotMapped) => {
-                let lhs_shape = lhs.inner.shape().ok_or(Error::Internal(TraversalError::ShapeOperationFailed))?;
-                let rhs = scalar_broadcast(
-                    lhs_shape.len(),
-                    rhs,
-                    lhs_shape.clone(),
-                )?;
+                let lhs_shape = lhs
+                    .inner
+                    .shape()
+                    .ok_or(Error::Internal(TraversalError::ShapeOperationFailed))?;
+                let rhs = scalar_broadcast(lhs_shape.len(), rhs, lhs_shape.clone())?;
                 Ok(BatchedExpr {
                     inner: func(lhs.inner, rhs.inner),
                     batch_axis: lhs.batch_axis,
                 })
             }
             (BatchAxis::NotMapped, BatchAxis::Mapped { .. }) => {
-                let rhs_shape = rhs.inner.shape().ok_or(Error::Internal(TraversalError::ShapeOperationFailed))?;
-                let lhs = scalar_broadcast(
-                    rhs_shape.len(),
-                    lhs,
-                    rhs_shape.clone(),
-                )?;
+                let rhs_shape = rhs
+                    .inner
+                    .shape()
+                    .ok_or(Error::Internal(TraversalError::ShapeOperationFailed))?;
+                let lhs = scalar_broadcast(rhs_shape.len(), lhs, rhs_shape.clone())?;
                 Ok(BatchedExpr {
                     inner: func(lhs.inner, rhs.inner),
                     batch_axis: rhs.batch_axis,
                 })
             }
-            (BatchAxis::Mapped { .. }, BatchAxis::Mapped { .. }) => {
-                Ok(BatchedExpr {
-                    inner: func(lhs.inner, rhs.inner),
-                    batch_axis: lhs.batch_axis,
-                })
-            }
+            (BatchAxis::Mapped { .. }, BatchAxis::Mapped { .. }) => Ok(BatchedExpr {
+                inner: func(lhs.inner, rhs.inner),
+                batch_axis: lhs.batch_axis,
+            }),
         }
     }
 
@@ -299,9 +316,10 @@ impl BatchTracer {
         func: impl Fn(Noxpr) -> Noxpr,
         stack: &mut Vec<BatchedExpr>,
     ) -> Result<BatchedExpr, Error> {
-        let expr = stack.pop()
+        let expr = stack
+            .pop()
             .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
-        
+
         match expr.batch_axis {
             BatchAxis::NotMapped => Ok(expr
                 .move_batch_axis(self.out_axis.clone())
@@ -359,11 +377,16 @@ impl BatchTracer {
     }
 
     /// Processes concat operations during DFS traversal
-    fn process_concat(&mut self, c: &crate::Concat, stack: &mut Vec<BatchedExpr>) -> Result<BatchedExpr, Error> {
+    fn process_concat(
+        &mut self,
+        c: &crate::Concat,
+        stack: &mut Vec<BatchedExpr>,
+    ) -> Result<BatchedExpr, Error> {
         // Pop children in reverse order
         let mut nodes = Vec::with_capacity(c.nodes.len());
         for _ in (0..c.nodes.len()).rev() {
-            let node = stack.pop()
+            let node = stack
+                .pop()
                 .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
             nodes.push(node);
         }
@@ -400,9 +423,11 @@ impl BatchTracer {
         stack: &mut Vec<BatchedExpr>,
     ) -> Result<BatchedExpr, Error> {
         // Pop rhs first, then lhs (reverse order)
-        let rhs = stack.pop()
+        let rhs = stack
+            .pop()
             .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
-        let lhs = stack.pop()
+        let lhs = stack
+            .pop()
             .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
         fn bump_dims(dims: &[i64], batch_dim: i64) -> impl Iterator<Item = i64> + '_ {
             dims.iter()
@@ -517,8 +542,13 @@ impl BatchTracer {
     }
 
     /// Processes slice operations during DFS traversal
-    fn process_slice(&mut self, s: &crate::Slice, stack: &mut Vec<BatchedExpr>) -> Result<BatchedExpr, Error> {
-        let expr = stack.pop()
+    fn process_slice(
+        &mut self,
+        s: &crate::Slice,
+        stack: &mut Vec<BatchedExpr>,
+    ) -> Result<BatchedExpr, Error> {
+        let expr = stack
+            .pop()
             .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
         match expr.batch_axis {
             BatchAxis::NotMapped => Ok(BatchedExpr {
@@ -545,8 +575,13 @@ impl BatchTracer {
     }
 
     /// Processes reshape operations during DFS traversal
-    fn process_reshape(&mut self, r: &crate::Reshape, stack: &mut Vec<BatchedExpr>) -> Result<BatchedExpr, Error> {
-        let expr = stack.pop()
+    fn process_reshape(
+        &mut self,
+        r: &crate::Reshape,
+        stack: &mut Vec<BatchedExpr>,
+    ) -> Result<BatchedExpr, Error> {
+        let expr = stack
+            .pop()
             .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
         let BatchAxis::Mapped { size, .. } = self.out_axis else {
             return Err(Error::UnbatchableArgument);
@@ -591,7 +626,8 @@ impl BatchTracer {
         mut broadcast_dims: SmallVec<[i64; 4]>,
         stack: &mut Vec<BatchedExpr>,
     ) -> Result<BatchedExpr, Error> {
-        let expr = stack.pop()
+        let expr = stack
+            .pop()
             .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
         let BatchAxis::Mapped { size: out_size, .. } = self.out_axis else {
             unreachable!()
@@ -627,8 +663,13 @@ impl BatchTracer {
     }
 
     /// Processes transpose operations during DFS traversal
-    fn process_transpose(&mut self, t: &crate::Transpose, stack: &mut Vec<BatchedExpr>) -> Result<BatchedExpr, Error> {
-        let expr = stack.pop()
+    fn process_transpose(
+        &mut self,
+        t: &crate::Transpose,
+        stack: &mut Vec<BatchedExpr>,
+    ) -> Result<BatchedExpr, Error> {
+        let expr = stack
+            .pop()
             .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
         match expr.batch_axis {
             BatchAxis::NotMapped => Ok(expr
@@ -651,11 +692,17 @@ impl BatchTracer {
     }
 
     /// Processes gather operations during DFS traversal
-    fn process_gather(&mut self, g: &crate::Gather, stack: &mut Vec<BatchedExpr>) -> Result<BatchedExpr, Error> {
+    fn process_gather(
+        &mut self,
+        g: &crate::Gather,
+        stack: &mut Vec<BatchedExpr>,
+    ) -> Result<BatchedExpr, Error> {
         // Pop indices first, then expr (reverse order)
-        let indices = stack.pop()
+        let indices = stack
+            .pop()
             .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
-        let expr = stack.pop()
+        let expr = stack
+            .pop()
             .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?;
         match (&expr.batch_axis, &indices.batch_axis) {
             (BatchAxis::Mapped { .. }, BatchAxis::NotMapped) => {
@@ -736,8 +783,7 @@ impl BatchTracer {
                     })
                     .ok_or(Error::UnbatchableArgument)?;
 
-                let mut count_shape =
-                    indices.inner.shape().ok_or(Error::UnbatchableArgument)?;
+                let mut count_shape = indices.inner.shape().ok_or(Error::UnbatchableArgument)?;
                 if let Some(last) = count_shape.last_mut() {
                     *last = -1;
                 }
@@ -759,8 +805,7 @@ impl BatchTracer {
                     .chain(g.collapsed_slice_dims.iter().map(|x| x + 1))
                     .collect();
 
-                let offset_dims: SmallVec<[i64; 4]> =
-                    g.slice_sizes.iter().map(|x| x + 1).collect();
+                let offset_dims: SmallVec<[i64; 4]> = g.slice_sizes.iter().map(|x| x + 1).collect();
                 let start_index_map: SmallVec<[i64; 4]> = std::iter::once(0)
                     .chain(g.start_index_map.iter().map(|x| x + 1))
                     .collect();
@@ -800,7 +845,11 @@ impl BatchTracer {
     }
 
     /// Processes scan operations during DFS traversal
-    fn process_scan(&mut self, s: &crate::Scan, stack: &mut Vec<BatchedExpr>) -> Result<BatchedExpr, Error> {
+    fn process_scan(
+        &mut self,
+        s: &crate::Scan,
+        stack: &mut Vec<BatchedExpr>,
+    ) -> Result<BatchedExpr, Error> {
         let BatchAxis::Mapped { size: out_size, .. } = self.out_axis else {
             panic!();
         };
@@ -809,13 +858,15 @@ impl BatchTracer {
             size: out_size,
         };
         // Pop initial_state first, then inputs in reverse order
-        let initial_state = stack.pop()
+        let initial_state = stack
+            .pop()
             .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?
             .move_batch_axis(self.out_axis.clone())
             .unwrap();
         let mut inputs: Vec<_> = Vec::with_capacity(s.inputs.len());
         for _ in (0..s.inputs.len()).rev() {
-            let input = stack.pop()
+            let input = stack
+                .pop()
                 .ok_or_else(|| Error::Internal(TraversalError::ChildNotProcessed))?
                 .move_batch_axis(axis.clone())
                 .ok_or(Error::UnbatchableArgument)?;
@@ -854,8 +905,7 @@ impl BatchTracer {
                         panic!("non param arg in scan function")
                     };
                     let mut p = p.clone();
-                    let mut shape =
-                        input.inner.shape().ok_or(Error::UnbatchableArgument)?;
+                    let mut shape = input.inner.shape().ok_or(Error::UnbatchableArgument)?;
                     shape.remove(0);
                     match &mut p.ty {
                         NoxprTy::Tuple(_) => todo!(),
@@ -921,19 +971,26 @@ impl BatchTracer {
     }
 
     /// Processes select operations during DFS traversal
-    fn process_select(&mut self, _s: &crate::Select, stack: &mut Vec<BatchedExpr>) -> Result<BatchedExpr, Error> {
+    fn process_select(
+        &mut self,
+        _s: &crate::Select,
+        stack: &mut Vec<BatchedExpr>,
+    ) -> Result<BatchedExpr, Error> {
         // Pop on_false, on_true, then cond (reverse order)
-        let on_false = stack.pop()
+        let on_false = stack
+            .pop()
             .ok_or(Error::ExpectedArgument("on_false".into()))?
             .move_batch_axis(self.out_axis.clone())
             .ok_or(Error::UnbatchableArgument)?;
-        let on_true = stack.pop()
+        let on_true = stack
+            .pop()
             .ok_or(Error::ExpectedArgument("on_true".into()))?
             .move_batch_axis(self.out_axis.clone())
             .ok_or(Error::UnbatchableArgument)?;
-        let cond = stack.pop()
+        let cond = stack
+            .pop()
             .ok_or(Error::ExpectedArgument("cond".into()))?
-                      .move_batch_axis(self.out_axis.clone())
+            .move_batch_axis(self.out_axis.clone())
             .ok_or(Error::UnbatchableArgument)?;
         Ok(BatchedExpr {
             inner: Noxpr::select(&cond.inner, on_true.inner, on_false.inner),
@@ -1026,7 +1083,7 @@ impl<T: TensorItem, D: Dim + DefaultMap> Tensor<T, D, crate::Op> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{NoxprScalarExt};
+    use crate::NoxprScalarExt;
     use crate::noxpr::batch::BatchTracer as RecursiveBatchTracer;
 
     /// Helper function to create test expressions
@@ -1034,14 +1091,13 @@ mod tests {
         // Simple scalar operations
         let scalar_a = 2.0f32.constant();
         let scalar_b = 3.0f32.constant();
-        
+
         vec![
             // Binary operations
             scalar_a.clone() + scalar_b.clone(),
             scalar_a.clone() - scalar_b.clone(),
             scalar_a.clone() * scalar_b.clone(),
             scalar_a.clone() / scalar_b.clone(),
-            
             // Unary operations
             scalar_a.clone().sqrt(),
             scalar_a.clone().neg(),
@@ -1049,10 +1105,8 @@ mod tests {
             scalar_a.clone().sin(),
             scalar_a.clone().cos(),
             scalar_a.clone().abs(),
-            
             // Tuple operations
             Noxpr::tuple(vec![scalar_a.clone(), scalar_b.clone()]),
-            
             // Complex nested operations
             (scalar_a.clone() + scalar_b.clone()) * scalar_a.clone(),
         ]
@@ -1062,20 +1116,25 @@ mod tests {
     fn compare_batch_results(expr: &Noxpr, out_axis: BatchAxis) -> Result<(), Error> {
         let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
         let mut dfs_tracer = BatchTracer::new(out_axis);
-        
+
         let recursive_result = recursive_tracer.visit(expr)?;
         let dfs_result = dfs_tracer.walk(expr)?;
-        
+
         // Compare the batch axis information (the important functional comparison)
-        assert_eq!(recursive_result.batch_axis, dfs_result.batch_axis, 
-                  "Batch axis information should match between implementations");
-        
+        assert_eq!(
+            recursive_result.batch_axis, dfs_result.batch_axis,
+            "Batch axis information should match between implementations"
+        );
+
         // Note: Expression IDs will be different because the implementations
         // process nodes in different orders and create different intermediate expressions.
         // The important thing is that the batch axis information matches, which indicates
         // that both implementations produce functionally equivalent results.
-        println!("✓ Both implementations produced equivalent batch axis: {:?}", recursive_result.batch_axis);
-        
+        println!(
+            "✓ Both implementations produced equivalent batch axis: {:?}",
+            recursive_result.batch_axis
+        );
+
         Ok(())
     }
 
@@ -1083,7 +1142,7 @@ mod tests {
     fn test_binary_operations_consistency() {
         let expressions = create_test_expressions();
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
-        
+
         for expr in expressions {
             if let Ok(_) = compare_batch_results(&expr, out_axis.clone()) {
                 // Test passed
@@ -1097,7 +1156,7 @@ mod tests {
     fn test_unary_operations_consistency() {
         let scalar = 4.0f32.constant();
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
-        
+
         let unary_ops = vec![
             scalar.clone().sqrt(),
             scalar.clone().neg(),
@@ -1108,7 +1167,7 @@ mod tests {
             scalar.clone().acos(),
             scalar.clone().asin(),
         ];
-        
+
         for expr in unary_ops {
             compare_batch_results(&expr, out_axis.clone())
                 .expect("Unary operation consistency test failed");
@@ -1120,10 +1179,10 @@ mod tests {
         let scalar_a = 1.0f32.constant();
         let scalar_b = 2.0f32.constant();
         let scalar_c = 3.0f32.constant();
-        
+
         let tuple_expr = Noxpr::tuple(vec![scalar_a, scalar_b, scalar_c]);
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
-        
+
         compare_batch_results(&tuple_expr, out_axis)
             .expect("Tuple operation consistency test failed");
     }
@@ -1132,11 +1191,11 @@ mod tests {
     fn test_nested_operations_consistency() {
         let scalar_a = 2.0f32.constant();
         let scalar_b = 3.0f32.constant();
-        
+
         // Test nested binary operations
         let nested_expr = (scalar_a.clone() + scalar_b.clone()) * scalar_a.clone();
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
-        
+
         compare_batch_results(&nested_expr, out_axis)
             .expect("Nested operation consistency test failed");
     }
@@ -1148,14 +1207,14 @@ mod tests {
         let scalar_a = 2.0f32.constant();
         let scalar_b = 3.0f32.constant();
         let expr = scalar_a + scalar_b;
-        
+
         // Test with different batch axes
         let batch_axes = vec![
             BatchAxis::NotMapped,
             BatchAxis::Mapped { index: 0, size: 1 },
             BatchAxis::Mapped { index: 1, size: 2 },
         ];
-        
+
         for out_axis in batch_axes {
             compare_batch_results(&expr, out_axis)
                 .expect("Different batch axes consistency test failed");
@@ -1166,22 +1225,25 @@ mod tests {
     fn test_error_conditions_consistency() {
         let scalar = 1.0f32.constant();
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
-        
+
         // Test that both implementations handle errors consistently
         let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
         let mut dfs_tracer = BatchTracer::new(out_axis);
-        
+
         // Both should succeed for valid expressions
         let recursive_result = recursive_tracer.visit(&scalar);
         let dfs_result = dfs_tracer.walk(&scalar);
-        
+
         match (recursive_result, dfs_result) {
             (Ok(_), Ok(_)) => {
                 // Both succeeded - this is expected
             }
             (Err(e1), Err(e2)) => {
                 // Both failed - check if error types are similar
-                println!("Both implementations failed: recursive={:?}, dfs={:?}", e1, e2);
+                println!(
+                    "Both implementations failed: recursive={:?}, dfs={:?}",
+                    e1, e2
+                );
             }
             _ => {
                 panic!("Inconsistent error handling between implementations");
@@ -1193,16 +1255,15 @@ mod tests {
     fn test_caching_behavior() {
         let scalar_a = 2.0f32.constant();
         let scalar_b = 3.0f32.constant();
-        
+
         // Create an expression that uses the same sub-expression multiple times
         let shared_expr = scalar_a.clone() + scalar_b.clone();
         let expr = shared_expr.clone() * shared_expr.clone();
-        
+
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
-        
+
         // Both implementations should handle caching correctly
-        compare_batch_results(&expr, out_axis)
-            .expect("Caching behavior consistency test failed");
+        compare_batch_results(&expr, out_axis).expect("Caching behavior consistency test failed");
     }
 
     #[test]
@@ -1211,46 +1272,54 @@ mod tests {
         let scalar_a = 2.5f32.constant();
         let scalar_b = 3.7f32.constant();
         let expr = scalar_a + scalar_b; // This should evaluate to 6.2
-        
+
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
-        
+
         let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
         let mut dfs_tracer = BatchTracer::new(out_axis);
-        
-        let recursive_result = recursive_tracer.visit(&expr)
+
+        let recursive_result = recursive_tracer
+            .visit(&expr)
             .expect("Recursive tracer should succeed");
-        let dfs_result = dfs_tracer.walk(&expr)
-            .expect("DFS tracer should succeed");
-        
+        let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
+
         // Both should produce the same batch axis
-        assert_eq!(recursive_result.batch_axis, dfs_result.batch_axis, 
-                  "Batch axis should match between implementations");
-        
+        assert_eq!(
+            recursive_result.batch_axis, dfs_result.batch_axis,
+            "Batch axis should match between implementations"
+        );
+
         // Both should produce the same numerical result
         // Note: We can't directly compare the expressions since they have different IDs,
         // but we can verify they both represent the same computation by checking
         // that they're both addition operations with the same operands
-        
+
         // Both implementations should produce functionally equivalent results
         // The recursive implementation wraps the addition in a BroadcastInDim,
         // while the DFS implementation applies BroadcastInDim to the operands
         // Both are correct - they represent the same computation
-        
-        match (&recursive_result.inner.node.as_ref(), &dfs_result.inner.node.as_ref()) {
+
+        match (
+            &recursive_result.inner.node.as_ref(),
+            &dfs_result.inner.node.as_ref(),
+        ) {
             (NoxprNode::BroadcastInDim(rec_broadcast), NoxprNode::Add(dfs_add)) => {
                 // Recursive: BroadcastInDim(Add(...))
                 // DFS: Add(BroadcastInDim(...), BroadcastInDim(...))
                 println!("✓ Recursive implementation: BroadcastInDim wrapping addition");
                 println!("✓ DFS implementation: Addition with broadcasted operands");
-                
+
                 // Verify the recursive implementation has an addition inside the broadcast
                 match rec_broadcast.expr.node.as_ref() {
                     NoxprNode::Add(_rec_add) => {
                         println!("✓ Recursive implementation contains addition operation");
-                        
+
                         // Verify the DFS implementation has broadcasted operands
                         match (&dfs_add.lhs.node.as_ref(), &dfs_add.rhs.node.as_ref()) {
-                            (NoxprNode::BroadcastInDim(_dfs_lhs), NoxprNode::BroadcastInDim(_dfs_rhs)) => {
+                            (
+                                NoxprNode::BroadcastInDim(_dfs_lhs),
+                                NoxprNode::BroadcastInDim(_dfs_rhs),
+                            ) => {
                                 println!("✓ DFS implementation has broadcasted operands");
                             }
                             _ => panic!("DFS implementation should have broadcasted operands"),
@@ -1265,7 +1334,7 @@ mod tests {
                 panic!("Unexpected node types from implementations");
             }
         }
-        
+
         println!("✓ Numerical evaluation consistency test passed");
     }
 
@@ -1275,35 +1344,43 @@ mod tests {
         let scalar_a = 3.0f32.constant();
         let scalar_b = 4.0f32.constant();
         let expr = scalar_a * scalar_b; // This should evaluate to 12.0
-        
+
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
-        
+
         let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
         let mut dfs_tracer = BatchTracer::new(out_axis);
-        
-        let recursive_result = recursive_tracer.visit(&expr)
+
+        let recursive_result = recursive_tracer
+            .visit(&expr)
             .expect("Recursive tracer should succeed");
-        let dfs_result = dfs_tracer.walk(&expr)
-            .expect("DFS tracer should succeed");
-        
+        let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
+
         // Both should produce the same batch axis
-        assert_eq!(recursive_result.batch_axis, dfs_result.batch_axis, 
-                  "Batch axis should match between implementations");
-        
+        assert_eq!(
+            recursive_result.batch_axis, dfs_result.batch_axis,
+            "Batch axis should match between implementations"
+        );
+
         // Verify both results are multiplication operations
-        match (&recursive_result.inner.node.as_ref(), &dfs_result.inner.node.as_ref()) {
+        match (
+            &recursive_result.inner.node.as_ref(),
+            &dfs_result.inner.node.as_ref(),
+        ) {
             (NoxprNode::BroadcastInDim(rec_broadcast), NoxprNode::Mul(dfs_mul)) => {
                 println!("✓ Recursive implementation: BroadcastInDim wrapping multiplication");
                 println!("✓ DFS implementation: Multiplication with broadcasted operands");
-                
+
                 // Verify the recursive implementation has a multiplication inside the broadcast
                 match rec_broadcast.expr.node.as_ref() {
                     NoxprNode::Mul(_rec_mul) => {
                         println!("✓ Recursive implementation contains multiplication operation");
-                        
+
                         // Verify the DFS implementation has broadcasted operands
                         match (&dfs_mul.lhs.node.as_ref(), &dfs_mul.rhs.node.as_ref()) {
-                            (NoxprNode::BroadcastInDim(_dfs_lhs), NoxprNode::BroadcastInDim(_dfs_rhs)) => {
+                            (
+                                NoxprNode::BroadcastInDim(_dfs_lhs),
+                                NoxprNode::BroadcastInDim(_dfs_rhs),
+                            ) => {
                                 println!("✓ DFS implementation has broadcasted operands");
                             }
                             _ => panic!("DFS implementation should have broadcasted operands"),
@@ -1318,7 +1395,7 @@ mod tests {
                 panic!("Unexpected node types from implementations");
             }
         }
-        
+
         println!("✓ Multiplication consistency test passed");
     }
 
@@ -1327,29 +1404,37 @@ mod tests {
         // Test sqrt operation specifically
         let scalar = 16.0f32.constant();
         let expr = scalar.sqrt(); // This should evaluate to 4.0
-        
+
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
-        
+
         let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
         let mut dfs_tracer = BatchTracer::new(out_axis);
-        
-        let recursive_result = recursive_tracer.visit(&expr)
+
+        let recursive_result = recursive_tracer
+            .visit(&expr)
             .expect("Recursive tracer should succeed");
-        let dfs_result = dfs_tracer.walk(&expr)
-            .expect("DFS tracer should succeed");
-        
+        let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
+
         // Both should produce the same batch axis
-        assert_eq!(recursive_result.batch_axis, dfs_result.batch_axis, 
-                  "Batch axis should match between implementations");
-        
+        assert_eq!(
+            recursive_result.batch_axis, dfs_result.batch_axis,
+            "Batch axis should match between implementations"
+        );
+
         // Verify both results are sqrt operations
-        match (&recursive_result.inner.node.as_ref(), &dfs_result.inner.node.as_ref()) {
+        match (
+            &recursive_result.inner.node.as_ref(),
+            &dfs_result.inner.node.as_ref(),
+        ) {
             (NoxprNode::Sqrt(rec_sqrt), NoxprNode::Sqrt(dfs_sqrt)) => {
                 println!("✓ Both implementations produced sqrt operations");
-                
+
                 // Both should have broadcasted operands
                 match (&rec_sqrt.node.as_ref(), &dfs_sqrt.node.as_ref()) {
-                    (NoxprNode::BroadcastInDim(_rec_operand), NoxprNode::BroadcastInDim(_dfs_operand)) => {
+                    (
+                        NoxprNode::BroadcastInDim(_rec_operand),
+                        NoxprNode::BroadcastInDim(_dfs_operand),
+                    ) => {
                         println!("✓ Both implementations have broadcasted operands");
                     }
                     _ => {
@@ -1365,7 +1450,7 @@ mod tests {
                 panic!("Both implementations should produce sqrt operations");
             }
         }
-        
+
         println!("✓ Sqrt operation consistency test passed");
     }
 
@@ -1376,31 +1461,39 @@ mod tests {
         let scalar_b = 3.0f32.constant();
         let scalar_c = 4.0f32.constant();
         let expr = (scalar_a + scalar_b) * scalar_c; // This should evaluate to (2+3)*4 = 20.0
-        
+
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
-        
+
         let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
         let mut dfs_tracer = BatchTracer::new(out_axis);
-        
-        let recursive_result = recursive_tracer.visit(&expr)
+
+        let recursive_result = recursive_tracer
+            .visit(&expr)
             .expect("Recursive tracer should succeed");
-        let dfs_result = dfs_tracer.walk(&expr)
-            .expect("DFS tracer should succeed");
-        
+        let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
+
         // Both should produce the same batch axis
-        assert_eq!(recursive_result.batch_axis, dfs_result.batch_axis, 
-                  "Batch axis should match between implementations");
-        
+        assert_eq!(
+            recursive_result.batch_axis, dfs_result.batch_axis,
+            "Batch axis should match between implementations"
+        );
+
         // Verify both results are multiplication operations
-        match (&recursive_result.inner.node.as_ref(), &dfs_result.inner.node.as_ref()) {
+        match (
+            &recursive_result.inner.node.as_ref(),
+            &dfs_result.inner.node.as_ref(),
+        ) {
             (NoxprNode::Mul(rec_mul), NoxprNode::Mul(dfs_mul)) => {
                 println!("✓ Both implementations produced multiplication operations");
-                
+
                 // Both should have operands with broadcasts
-                match (&rec_mul.lhs.node.as_ref(), &rec_mul.rhs.node.as_ref(),
-                       &dfs_mul.lhs.node.as_ref(), &dfs_mul.rhs.node.as_ref()) {
-                    (NoxprNode::BroadcastInDim(_rec_lhs), _, 
-                     NoxprNode::Add(_dfs_lhs), _) => {
+                match (
+                    &rec_mul.lhs.node.as_ref(),
+                    &rec_mul.rhs.node.as_ref(),
+                    &dfs_mul.lhs.node.as_ref(),
+                    &dfs_mul.rhs.node.as_ref(),
+                ) {
+                    (NoxprNode::BroadcastInDim(_rec_lhs), _, NoxprNode::Add(_dfs_lhs), _) => {
                         println!("✓ Both implementations have appropriate operand structures");
                         println!("✓ Recursive: BroadcastInDim on LHS");
                         println!("✓ DFS: Add operation on LHS");
@@ -1420,7 +1513,7 @@ mod tests {
                 panic!("Both implementations should produce multiplication operations");
             }
         }
-        
+
         println!("✓ Complex nested expression consistency test passed");
     }
 
@@ -1430,35 +1523,43 @@ mod tests {
         let scalar_a = 15.0f32.constant();
         let scalar_b = 3.0f32.constant();
         let expr = scalar_a / scalar_b; // This should evaluate to 5.0
-        
+
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
-        
+
         let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
         let mut dfs_tracer = BatchTracer::new(out_axis);
-        
-        let recursive_result = recursive_tracer.visit(&expr)
+
+        let recursive_result = recursive_tracer
+            .visit(&expr)
             .expect("Recursive tracer should succeed");
-        let dfs_result = dfs_tracer.walk(&expr)
-            .expect("DFS tracer should succeed");
-        
+        let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
+
         // Both should produce the same batch axis
-        assert_eq!(recursive_result.batch_axis, dfs_result.batch_axis, 
-                  "Batch axis should match between implementations");
-        
+        assert_eq!(
+            recursive_result.batch_axis, dfs_result.batch_axis,
+            "Batch axis should match between implementations"
+        );
+
         // Verify both results are division operations
-        match (&recursive_result.inner.node.as_ref(), &dfs_result.inner.node.as_ref()) {
+        match (
+            &recursive_result.inner.node.as_ref(),
+            &dfs_result.inner.node.as_ref(),
+        ) {
             (NoxprNode::BroadcastInDim(rec_broadcast), NoxprNode::Div(dfs_div)) => {
                 println!("✓ Recursive implementation: BroadcastInDim wrapping division");
                 println!("✓ DFS implementation: Division with broadcasted operands");
-                
+
                 // Verify the recursive implementation has a division inside the broadcast
                 match rec_broadcast.expr.node.as_ref() {
                     NoxprNode::Div(_rec_div) => {
                         println!("✓ Recursive implementation contains division operation");
-                        
+
                         // Verify the DFS implementation has broadcasted operands
                         match (&dfs_div.lhs.node.as_ref(), &dfs_div.rhs.node.as_ref()) {
-                            (NoxprNode::BroadcastInDim(_dfs_lhs), NoxprNode::BroadcastInDim(_dfs_rhs)) => {
+                            (
+                                NoxprNode::BroadcastInDim(_dfs_lhs),
+                                NoxprNode::BroadcastInDim(_dfs_rhs),
+                            ) => {
                                 println!("✓ DFS implementation has broadcasted operands");
                             }
                             _ => panic!("DFS implementation should have broadcasted operands"),
@@ -1473,7 +1574,7 @@ mod tests {
                 panic!("Unexpected node types from implementations");
             }
         }
-        
+
         println!("✓ Division consistency test passed");
     }
 
@@ -1483,35 +1584,43 @@ mod tests {
         let scalar_a = 10.0f32.constant();
         let scalar_b = 3.0f32.constant();
         let expr = scalar_a - scalar_b; // This should evaluate to 7.0
-        
+
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
-        
+
         let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
         let mut dfs_tracer = BatchTracer::new(out_axis);
-        
-        let recursive_result = recursive_tracer.visit(&expr)
+
+        let recursive_result = recursive_tracer
+            .visit(&expr)
             .expect("Recursive tracer should succeed");
-        let dfs_result = dfs_tracer.walk(&expr)
-            .expect("DFS tracer should succeed");
-        
+        let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
+
         // Both should produce the same batch axis
-        assert_eq!(recursive_result.batch_axis, dfs_result.batch_axis, 
-                  "Batch axis should match between implementations");
-        
+        assert_eq!(
+            recursive_result.batch_axis, dfs_result.batch_axis,
+            "Batch axis should match between implementations"
+        );
+
         // Verify both results are subtraction operations
-        match (&recursive_result.inner.node.as_ref(), &dfs_result.inner.node.as_ref()) {
+        match (
+            &recursive_result.inner.node.as_ref(),
+            &dfs_result.inner.node.as_ref(),
+        ) {
             (NoxprNode::BroadcastInDim(rec_broadcast), NoxprNode::Sub(dfs_sub)) => {
                 println!("✓ Recursive implementation: BroadcastInDim wrapping subtraction");
                 println!("✓ DFS implementation: Subtraction with broadcasted operands");
-                
+
                 // Verify the recursive implementation has a subtraction inside the broadcast
                 match rec_broadcast.expr.node.as_ref() {
                     NoxprNode::Sub(_rec_sub) => {
                         println!("✓ Recursive implementation contains subtraction operation");
-                        
+
                         // Verify the DFS implementation has broadcasted operands
                         match (&dfs_sub.lhs.node.as_ref(), &dfs_sub.rhs.node.as_ref()) {
-                            (NoxprNode::BroadcastInDim(_dfs_lhs), NoxprNode::BroadcastInDim(_dfs_rhs)) => {
+                            (
+                                NoxprNode::BroadcastInDim(_dfs_lhs),
+                                NoxprNode::BroadcastInDim(_dfs_rhs),
+                            ) => {
                                 println!("✓ DFS implementation has broadcasted operands");
                             }
                             _ => panic!("DFS implementation should have broadcasted operands"),
@@ -1526,7 +1635,7 @@ mod tests {
                 panic!("Unexpected node types from implementations");
             }
         }
-        
+
         println!("✓ Subtraction consistency test passed");
     }
 
@@ -1535,26 +1644,31 @@ mod tests {
         // Test multiple unary operations: sin(cos(log(sqrt(x))))
         let scalar = 4.0f32.constant();
         let expr = scalar.sqrt().log().cos().sin(); // Complex unary chain
-        
+
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
-        
+
         let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
         let mut dfs_tracer = BatchTracer::new(out_axis);
-        
-        let recursive_result = recursive_tracer.visit(&expr)
+
+        let recursive_result = recursive_tracer
+            .visit(&expr)
             .expect("Recursive tracer should succeed");
-        let dfs_result = dfs_tracer.walk(&expr)
-            .expect("DFS tracer should succeed");
-        
+        let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
+
         // Both should produce the same batch axis
-        assert_eq!(recursive_result.batch_axis, dfs_result.batch_axis, 
-                  "Batch axis should match between implementations");
-        
+        assert_eq!(
+            recursive_result.batch_axis, dfs_result.batch_axis,
+            "Batch axis should match between implementations"
+        );
+
         // Verify both results are sin operations (the outermost operation)
-        match (&recursive_result.inner.node.as_ref(), &dfs_result.inner.node.as_ref()) {
+        match (
+            &recursive_result.inner.node.as_ref(),
+            &dfs_result.inner.node.as_ref(),
+        ) {
             (NoxprNode::Sin(_rec_sin), NoxprNode::Sin(_dfs_sin)) => {
                 println!("✓ Both implementations produced sin operations");
-                
+
                 // Both should have broadcasted operands somewhere in the chain
                 println!("✓ Both implementations have appropriate operand structures");
             }
@@ -1564,7 +1678,7 @@ mod tests {
                 panic!("Both implementations should produce sin operations");
             }
         }
-        
+
         println!("✓ Multiple unary operations consistency test passed");
     }
 
@@ -1576,23 +1690,28 @@ mod tests {
         let scalar_c = 6.0f32.constant();
         let scalar_d = 2.0f32.constant();
         let expr = (scalar_a + scalar_b) / (scalar_c - scalar_d); // (8+4)/(6-2) = 12/4 = 3.0
-        
+
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
-        
+
         let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
         let mut dfs_tracer = BatchTracer::new(out_axis);
-        
-        let recursive_result = recursive_tracer.visit(&expr)
+
+        let recursive_result = recursive_tracer
+            .visit(&expr)
             .expect("Recursive tracer should succeed");
-        let dfs_result = dfs_tracer.walk(&expr)
-            .expect("DFS tracer should succeed");
-        
+        let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
+
         // Both should produce the same batch axis
-        assert_eq!(recursive_result.batch_axis, dfs_result.batch_axis, 
-                  "Batch axis should match between implementations");
-        
+        assert_eq!(
+            recursive_result.batch_axis, dfs_result.batch_axis,
+            "Batch axis should match between implementations"
+        );
+
         // Verify both results are division operations
-        match (&recursive_result.inner.node.as_ref(), &dfs_result.inner.node.as_ref()) {
+        match (
+            &recursive_result.inner.node.as_ref(),
+            &dfs_result.inner.node.as_ref(),
+        ) {
             (NoxprNode::Div(_rec_div), NoxprNode::Div(_dfs_div)) => {
                 println!("✓ Both implementations produced division operations");
                 println!("✓ Both implementations have appropriate operand structures");
@@ -1603,7 +1722,7 @@ mod tests {
                 panic!("Both implementations should produce division operations");
             }
         }
-        
+
         println!("✓ Mixed operations consistency test passed");
     }
 
@@ -1614,23 +1733,28 @@ mod tests {
         let scalar_b = 2.0f32.constant();
         let scalar_c = 3.0f32.constant();
         let expr = Noxpr::tuple(vec![scalar_a, scalar_b, scalar_c]);
-        
+
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
-        
+
         let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
         let mut dfs_tracer = BatchTracer::new(out_axis);
-        
-        let recursive_result = recursive_tracer.visit(&expr)
+
+        let recursive_result = recursive_tracer
+            .visit(&expr)
             .expect("Recursive tracer should succeed");
-        let dfs_result = dfs_tracer.walk(&expr)
-            .expect("DFS tracer should succeed");
-        
+        let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
+
         // Both should produce the same batch axis
-        assert_eq!(recursive_result.batch_axis, dfs_result.batch_axis, 
-                  "Batch axis should match between implementations");
-        
+        assert_eq!(
+            recursive_result.batch_axis, dfs_result.batch_axis,
+            "Batch axis should match between implementations"
+        );
+
         // Verify both results are tuple operations
-        match (&recursive_result.inner.node.as_ref(), &dfs_result.inner.node.as_ref()) {
+        match (
+            &recursive_result.inner.node.as_ref(),
+            &dfs_result.inner.node.as_ref(),
+        ) {
             (NoxprNode::Tuple(_rec_tuple), NoxprNode::Tuple(_dfs_tuple)) => {
                 println!("✓ Both implementations produced tuple operations");
                 println!("✓ Tuple operations detailed consistency test passed");
@@ -1651,23 +1775,28 @@ mod tests {
         let scalar_c = 2.0f32.constant();
         let scalar_d = 4.0f32.constant();
         let expr = (scalar_a.greater_or_equal(scalar_b)).and(scalar_c.less(scalar_d));
-        
+
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
-        
+
         let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
         let mut dfs_tracer = BatchTracer::new(out_axis);
-        
-        let recursive_result = recursive_tracer.visit(&expr)
+
+        let recursive_result = recursive_tracer
+            .visit(&expr)
             .expect("Recursive tracer should succeed");
-        let dfs_result = dfs_tracer.walk(&expr)
-            .expect("DFS tracer should succeed");
-        
+        let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
+
         // Both should produce the same batch axis
-        assert_eq!(recursive_result.batch_axis, dfs_result.batch_axis, 
-                  "Batch axis should match between implementations");
-        
+        assert_eq!(
+            recursive_result.batch_axis, dfs_result.batch_axis,
+            "Batch axis should match between implementations"
+        );
+
         // Verify both results are logical operations
-        match (&recursive_result.inner.node.as_ref(), &dfs_result.inner.node.as_ref()) {
+        match (
+            &recursive_result.inner.node.as_ref(),
+            &dfs_result.inner.node.as_ref(),
+        ) {
             (NoxprNode::And(_rec_and), NoxprNode::And(_dfs_and)) => {
                 println!("✓ Both implementations produced logical AND operations");
                 println!("✓ Both implementations have appropriate operand structures");
@@ -1678,7 +1807,7 @@ mod tests {
                 panic!("Both implementations should produce logical AND operations");
             }
         }
-        
+
         println!("✓ Logical operations consistency test passed");
     }
 }

@@ -84,27 +84,27 @@ pub enum TraversalError {
     /// Error when a child node was not processed during traversal
     #[error("child node not processed")]
     ChildNotProcessed,
-    
+
     /// Error when the root node failed to process
     #[error("failed to process root node")]
     RootNodeFailed,
-    
+
     /// Error when LHS operand was not processed
     #[error("LHS not processed")]
     LhsNotProcessed,
-    
+
     /// Error when RHS operand was not processed
     #[error("RHS not processed")]
     RhsNotProcessed,
-    
+
     /// Error when an unsupported node type is encountered during traversal
     #[error("unsupported node type in DFS traversal")]
     UnsupportedNodeType,
-    
+
     /// Error when a shape operation fails during traversal
     #[error("shape operation failed")]
     ShapeOperationFailed,
-    
+
     /// Error when broadcast operation fails
     #[error("broadcast operation failed")]
     BroadcastFailed,
