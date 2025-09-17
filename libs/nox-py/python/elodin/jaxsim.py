@@ -73,11 +73,11 @@ class JaxSim:
             self.map = self.generate_index_map(self.inputs, self.outputs)
         else:
             self.map = map
-        
+
         # Auto-tick management configuration
         self.auto_manage_tick = auto_manage_tick
         self._tick_steps = 0  # Track total steps taken
-        
+
         # Find tick component location (it's always present when SimulationTick is used)
         self._tick_index = None
         if self.auto_manage_tick:
@@ -140,8 +140,8 @@ class JaxSim:
                 # SimulationTick is always F64, just increment it
                 self.state[self._tick_index] = self.state[self._tick_index] + 1.0
                 self._tick_steps += 1
-            
-            # Call the simulation function  
+
+            # Call the simulation function
             self.state = self.py_sim(*self.state)
             self.state = self.order_array(self.state)
 
@@ -232,24 +232,24 @@ class JaxSim:
                             shape = self.state[d_p][entity_index].shape
                             entity_names_shapes.append(f"{name} (shape: {shape})")
             print(f"{component_name}: {', '.join(entity_names_shapes)}")
-    
+
     def disable_auto_tick(self):
         """Disable automatic tick management.
-        
+
         Useful for advanced users who need manual tick control.
         """
         self.auto_manage_tick = False
-    
+
     def enable_auto_tick(self):
         """Enable automatic tick management.
-        
+
         Re-enables auto-tick if it was disabled.
         """
         self.auto_manage_tick = True
-    
+
     def get_tick_count(self):
         """Get the total number of steps taken with auto-tick management.
-        
+
         Returns:
             Number of steps taken since initialization or last reset
         """
@@ -288,8 +288,15 @@ class JaxSim:
         py_sim, inputs, outputs, dictionary, entity_dict, component_entity_dict, map = aux_data
 
         return JaxSim(
-            py_sim, inputs, outputs, cls, dictionary, entity_dict, component_entity_dict, map, 
-            auto_manage_tick=True  # Default to auto-manage tick for reconstructed objects
+            py_sim,
+            inputs,
+            outputs,
+            cls,
+            dictionary,
+            entity_dict,
+            component_entity_dict,
+            map,
+            auto_manage_tick=True,  # Default to auto-manage tick for reconstructed objects
         )
 
 
