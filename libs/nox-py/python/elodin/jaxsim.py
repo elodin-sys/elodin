@@ -35,7 +35,6 @@ class JaxSim:
         entity_dict,
         component_entity_dict,
         map=None,
-        auto_manage_tick=True,
     ):
         """
         Initializes the JaxSim class with a world, a system, and a simulation time step.
@@ -57,9 +56,6 @@ class JaxSim:
             A dictionary mapping component names to a list of their entity IDs.
         map : list, optional
             An index map for ordering inputs and outputs.
-        auto_manage_tick : bool, optional
-            If True (default), automatically increment SimulationTick on each step.
-            This ensures time-based systems work correctly in JaxSim mode.
         """
 
         self.py_sim = sim_obj
@@ -74,17 +70,14 @@ class JaxSim:
         else:
             self.map = map
 
-        # Auto-tick management configuration
-        self.auto_manage_tick = auto_manage_tick
         self._tick_steps = 0  # Track total steps taken
 
         # Find tick component location (it's always present when SimulationTick is used)
         self._tick_index = None
-        if self.auto_manage_tick:
-            for c_p, d_p, name in self.map:
-                if name == "tick":
-                    self._tick_index = d_p
-                    break
+        for c_p, d_p, name in self.map:
+            if name == "tick":
+                self._tick_index = d_p
+                break
 
     def generate_index_map(self, desired_order, current_order):
         """
@@ -136,7 +129,7 @@ class JaxSim:
         """
         for steps in range(max_steps):
             # Auto-increment tick if enabled
-            if self.auto_manage_tick and self._tick_index is not None:
+            if self._tick_index is not None:
                 # SimulationTick is always F64, just increment it
                 self.state[self._tick_index] = self.state[self._tick_index] + 1.0
                 self._tick_steps += 1
@@ -233,20 +226,6 @@ class JaxSim:
                             entity_names_shapes.append(f"{name} (shape: {shape})")
             print(f"{component_name}: {', '.join(entity_names_shapes)}")
 
-    def disable_auto_tick(self):
-        """Disable automatic tick management.
-
-        Useful for advanced users who need manual tick control.
-        """
-        self.auto_manage_tick = False
-
-    def enable_auto_tick(self):
-        """Enable automatic tick management.
-
-        Re-enables auto-tick if it was disabled.
-        """
-        self.auto_manage_tick = True
-
     def get_tick_count(self):
         """Get the total number of steps taken with auto-tick management.
 
@@ -296,7 +275,6 @@ class JaxSim:
             entity_dict,
             component_entity_dict,
             map,
-            auto_manage_tick=True,  # Default to auto-manage tick for reconstructed objects
         )
 
 

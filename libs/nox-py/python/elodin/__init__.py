@@ -432,7 +432,6 @@ class World(WorldBuilder):
         run_time_step: Optional[float] = None,
         default_playback_speed: float = 1.0,
         max_ticks: Optional[int] = None,
-        auto_manage_tick: bool = True,
     ) -> object:
         obj, ins, outs, state, dictionary, entity_dict, component_entity_dict = super().to_jax_func(
             system, sim_time_step, run_time_step, default_playback_speed, max_ticks
@@ -445,6 +444,5 @@ class World(WorldBuilder):
             dictionary,
             entity_dict,
             component_entity_dict,
-            auto_manage_tick=auto_manage_tick,
         )
         return sim_object
