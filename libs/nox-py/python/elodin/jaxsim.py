@@ -54,6 +54,8 @@ class JaxSim:
             A dictionary mapping entity names to their IDs.
         component_entity_dict : dict
             A dictionary mapping component names to a list of their entity IDs.
+        map : list, optional
+            An index map for ordering inputs and outputs.
         """
 
         self.py_sim = sim_obj
@@ -67,6 +69,15 @@ class JaxSim:
             self.map = self.generate_index_map(self.inputs, self.outputs)
         else:
             self.map = map
+
+        self._tick_steps = 0  # Track total steps taken
+
+        # Find tick component location (it's always present when SimulationTick is used)
+        self._tick_index = None
+        for c_p, d_p, name in self.map:
+            if name == "tick":
+                self._tick_index = d_p
+                break
 
     def generate_index_map(self, desired_order, current_order):
         """
@@ -117,6 +128,13 @@ class JaxSim:
             The maximum number of steps to simulate.
         """
         for steps in range(max_steps):
+            # Auto-increment tick if enabled
+            if self._tick_index is not None:
+                # SimulationTick is always F64, just increment it
+                self.state[self._tick_index] = self.state[self._tick_index] + 1.0
+                self._tick_steps += 1
+
+            # Call the simulation function
             self.state = self.py_sim(*self.state)
             self.state = self.order_array(self.state)
 
@@ -208,6 +226,14 @@ class JaxSim:
                             entity_names_shapes.append(f"{name} (shape: {shape})")
             print(f"{component_name}: {', '.join(entity_names_shapes)}")
 
+    def get_tick_count(self):
+        """Get the total number of steps taken with auto-tick management.
+
+        Returns:
+            Number of steps taken since initialization or last reset
+        """
+        return self._tick_steps
+
     def sim_flatten(self):
         """Flatten the JaxSim object for JAX.
 
@@ -241,7 +267,14 @@ class JaxSim:
         py_sim, inputs, outputs, dictionary, entity_dict, component_entity_dict, map = aux_data
 
         return JaxSim(
-            py_sim, inputs, outputs, cls, dictionary, entity_dict, component_entity_dict, map
+            py_sim,
+            inputs,
+            outputs,
+            cls,
+            dictionary,
+            entity_dict,
+            component_entity_dict,
+            map,
         )
 
 
