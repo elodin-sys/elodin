@@ -505,20 +505,76 @@ fn parse_line_3d(node: &KdlNode, src: &str) -> Result<Line3d, KdlSchematicError>
 }
 
 fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
-    if let (Some(r), Some(g), Some(b), a) = (
+    // First try to read from positional arguments (0,1,2,3)
+    let entries = node.entries();
+    if entries.len() >= 3 {
+        // Only look for positional arguments if there are entries with no name
+        let positional_entries: Vec<_> = entries.iter()
+            .filter(|e| e.name().is_none())
+            .collect();
+        
+        if positional_entries.len() >= 3 {
+            if let (Some(r), Some(g), Some(b)) = (
+                positional_entries.get(0).and_then(|e| e.value().as_float()),
+                positional_entries.get(1).and_then(|e| e.value().as_float()),
+                positional_entries.get(2).and_then(|e| e.value().as_float()),
+            ) {
+                let a = positional_entries.get(3)
+                    .and_then(|e| e.value().as_float())
+                    .unwrap_or(1.0);
+                
+                return Some(Color::rgba(
+                    r as f32,
+                    g as f32,
+                    b as f32,
+                    a as f32,
+                ));
+            }
+        }
+    }
+
+    // Fall back to named properties
+    let (r, g, b, a) = (
         node.get("r").and_then(|v| v.as_float()),
         node.get("g").and_then(|v| v.as_float()),
         node.get("b").and_then(|v| v.as_float()),
         node.get("a").and_then(|v| v.as_float()),
-    ) {
+    );
+    
+    if r.is_some() || g.is_some() || b.is_some() || a.is_some() {
         Some(Color::rgba(
-            r as f32,
-            g as f32,
-            b as f32,
+            r.unwrap_or(0.0) as f32,
+            g.unwrap_or(0.0) as f32,
+            b.unwrap_or(0.0) as f32,
             a.unwrap_or(1.0) as f32,
         ))
-    } else if let Some(color_name) = node.get("color").and_then(|v| v.as_string()) {
-        match color_name {
+    } else if let Some(color_value) = node.get("color").and_then(|v| v.as_string()) {
+        // Try to parse tuple format like "(0.0, 1.0, 0.0)" or "(0.0, 1.0, 0.0, 0.8)"
+        if color_value.starts_with('(') && color_value.ends_with(')') {
+            let values: Vec<&str> = color_value[1..color_value.len()-1]
+                .split(',')
+                .map(|s| s.trim())
+                .collect();
+            
+            if values.len() >= 3 {
+                if let (Ok(r), Ok(g), Ok(b)) = (
+                    values[0].parse::<f64>(),
+                    values[1].parse::<f64>(),
+                    values[2].parse::<f64>(),
+                ) {
+                    let a = if values.len() >= 4 {
+                        values[3].parse::<f64>().unwrap_or(1.0)
+                    } else {
+                        1.0
+                    };
+                    
+                    return Some(Color::rgba(r as f32, g as f32, b as f32, a as f32));
+                }
+            }
+        }
+        
+        // Fall back to named colors
+        match color_value {
             "black" => Some(Color::BLACK),
             "white" => Some(Color::WHITE),
             "turquoise" => Some(Color::TURQUOISE),
@@ -1135,6 +1191,78 @@ object_3d "a.world_pos" {
             match &obj.mesh {
                 Object3DMesh::Glb(s) => assert_eq!(s.as_str(), "hi"),
                 _ => panic!("Expected glb"),
+            }
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_color_tuple_rgba() {
+        let kdl = r#"
+object_3d "test" {
+    sphere radius=0.2 color="(1.0, 0.5, 0.0, 0.8)"
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            if let Object3DMesh::Mesh { material, .. } = &obj.mesh {
+                assert_eq!(material.base_color.r, 1.0);
+                assert_eq!(material.base_color.g, 0.5);
+                assert_eq!(material.base_color.b, 0.0);
+                assert_eq!(material.base_color.a, 0.8);
+            } else {
+                panic!("Expected mesh object");
+            }
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_color_tuple_rgb() {
+        let kdl = r#"
+object_3d "test" {
+    sphere radius=0.2 color="(0.0, 1.0, 0.0)"
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            if let Object3DMesh::Mesh { material, .. } = &obj.mesh {
+                assert_eq!(material.base_color.r, 0.0);
+                assert_eq!(material.base_color.g, 1.0);
+                assert_eq!(material.base_color.b, 0.0);
+                assert_eq!(material.base_color.a, 1.0); // Should default to 1.0
+            } else {
+                panic!("Expected mesh object");
+            }
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_color_tuple_rgb_no_quotes() {
+        let kdl = r#"
+object_3d "test" {
+    sphere radius=0.2 color=(0.0, 1.0, 0.0)
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            if let Object3DMesh::Mesh { material, .. } = &obj.mesh {
+                assert_eq!(material.base_color.r, 0.0);
+                assert_eq!(material.base_color.g, 1.0);
+                assert_eq!(material.base_color.b, 0.0);
+                assert_eq!(material.base_color.a, 1.0); // Should default to 1.0
+            } else {
+                panic!("Expected mesh object");
             }
         } else {
             panic!("Expected object_3d");
