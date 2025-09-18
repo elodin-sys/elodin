@@ -387,6 +387,43 @@ impl TimeseriesPlot {
         let response = ui.allocate_rect(self.rect, egui::Sense::click_and_drag());
         let pointer_pos = ui.input(|i| i.pointer.latest_pos());
 
+        // Small clickable lock in the top-right corner of the plot.
+        // It only toggles `graph_state.locked` (no functional effect yet).
+        {
+            let lock_size = egui::vec2(20.0, 20.0);
+            let lock_pos  = egui::pos2(
+                self.inner_rect.max.x - lock_size.x - 6.0,
+                self.rect.min.y + 6.0,
+            );
+
+            egui::Area::new(egui::Id::new(("plot_lock_btn", (graph_state as *const _) as usize)))
+                .order(egui::Order::Foreground)
+                .fixed_pos(lock_pos)
+                .show(ui.ctx(), |ui| {
+                    let (rect, resp) = ui.allocate_exact_size(lock_size, egui::Sense::click());
+
+                    // subtle hover feedback
+                    if resp.hovered() {
+                        ui.painter().rect_filled(
+                            rect.expand(2.0),
+                            egui::CornerRadius::same(6), // u8 with your egui version
+                            get_scheme().bg_secondary.opacity(0.6),
+                        );
+                    }
+
+                    // vector lock icon (defined at bottom)
+                    paint_lock_icon(ui, rect, graph_state.locked);
+
+                    // callback is intentionally "empty": toggle only
+                    if resp.clicked() {
+                        graph_state.locked = !graph_state.locked;
+                    }
+
+                    // tooltip
+                    resp.on_hover_text(if graph_state.locked { "Unlock" } else { "Lock" });
+                });
+        }
+
         response.context_menu(|ui| {
             if ui.button("Set Time Range to Viewport Bounds").clicked() {
                 let start = Timestamp((self.bounds.min_x as i64) + self.earliest_timestamp.0);
@@ -1265,3 +1302,51 @@ impl Vec2Ext for egui::Vec2 {
         DVec2::new(self.x as f64, self.y as f64)
     }
 }
+
+// drawing a lock icon: two positions locked & unlocked
+fn paint_lock_icon(ui: &mut egui::Ui, rect: egui::Rect, locked: bool) {
+    let scheme = get_scheme();
+    let stroke = egui::Stroke::new(1.5, scheme.text_primary);
+    let rounding = egui::CornerRadius::same(4); // u8 attendu
+
+    let mut body = rect.shrink2(egui::vec2(4.0, 3.0));
+    body.set_top(body.top() + 7.0);
+
+    ui.painter().rect(
+        body,
+        rounding,
+        egui::Color32::TRANSPARENT,
+        stroke,
+        egui::StrokeKind::Middle,
+    );
+
+    let key = egui::pos2(body.center().x, body.center().y + 1.0);
+    ui.painter().circle_stroke(key, 1.1, stroke);
+
+    let cx = body.center().x;
+    let base_y = body.top() + 1.0;
+    let r = 6.0;
+    let (start_deg, end_deg) = if locked { (210.0_f32, -30.0_f32) } else { (200.0, -10.0) };
+    let steps = 18;
+
+    let mut pts = Vec::with_capacity(steps + 1);
+    for i in 0..=steps {
+        let t = i as f32 / steps as f32;
+        let ang = egui::emath::lerp(start_deg..=end_deg, t).to_radians();
+        let x = cx + ang.cos() * r;
+        let y = base_y + ang.sin() * r;
+        pts.push(egui::pos2(x, y));
+    }
+
+    if !locked {
+        for p in &mut pts {
+            p.x += 2.0;
+        }
+        if pts.len() > 2 {
+            pts.truncate(pts.len() - 2);
+        }
+    }
+
+    ui.painter().line(pts, stroke);
+}
+ 
