@@ -130,6 +130,7 @@ impl Plugin for EditorPlugin {
         app
             // .insert_resource(AssetMetaCheck::Never)
             .add_plugins(plugins::WebAssetPlugin)
+            .add_plugins(plugins::env_asset_source::plugin)
             .add_plugins(
                 DefaultPlugins
                     .set(WindowPlugin {
