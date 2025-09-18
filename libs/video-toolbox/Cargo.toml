@@ -1,6 +1,6 @@
 [package]
 name = "video-toolbox"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 description = "High-level wrapper for Apple's VideoToolbox framework"
 license = "MIT OR Apache-2.0"
