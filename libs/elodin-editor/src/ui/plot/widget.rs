@@ -391,37 +391,40 @@ impl TimeseriesPlot {
         // It only toggles `graph_state.locked` (no functional effect yet).
         {
             let lock_size = egui::vec2(20.0, 20.0);
-            let lock_pos  = egui::pos2(
+            let lock_pos = egui::pos2(
                 self.inner_rect.max.x - lock_size.x - 6.0,
                 self.rect.min.y + 6.0,
             );
 
-            egui::Area::new(egui::Id::new(("plot_lock_btn", (graph_state as *const _) as usize)))
-                .order(egui::Order::Foreground)
-                .fixed_pos(lock_pos)
-                .show(ui.ctx(), |ui| {
-                    let (rect, resp) = ui.allocate_exact_size(lock_size, egui::Sense::click());
+            egui::Area::new(egui::Id::new((
+                "plot_lock_btn",
+                (graph_state as *const _) as usize,
+            )))
+            .order(egui::Order::Foreground)
+            .fixed_pos(lock_pos)
+            .show(ui.ctx(), |ui| {
+                let (rect, resp) = ui.allocate_exact_size(lock_size, egui::Sense::click());
 
-                    // subtle hover feedback
-                    if resp.hovered() {
-                        ui.painter().rect_filled(
-                            rect.expand(2.0),
-                            egui::CornerRadius::same(6), // u8 with your egui version
-                            get_scheme().bg_secondary.opacity(0.6),
-                        );
-                    }
+                // subtle hover feedback
+                if resp.hovered() {
+                    ui.painter().rect_filled(
+                        rect.expand(2.0),
+                        egui::CornerRadius::same(6), // u8 with your egui version
+                        get_scheme().bg_secondary.opacity(0.6),
+                    );
+                }
 
-                    // vector lock icon (defined at bottom)
-                    paint_lock_icon(ui, rect, graph_state.locked);
+                // vector lock icon (defined at bottom)
+                paint_lock_icon(ui, rect, graph_state.locked);
 
-                    // callback is intentionally "empty": toggle only
-                    if resp.clicked() {
-                        graph_state.locked = !graph_state.locked;
-                    }
+                // callback is intentionally "empty": toggle only
+                if resp.clicked() {
+                    graph_state.locked = !graph_state.locked;
+                }
 
-                    // tooltip
-                    resp.on_hover_text(if graph_state.locked { "Unlock" } else { "Lock" });
-                });
+                // tooltip
+                resp.on_hover_text(if graph_state.locked { "Unlock" } else { "Lock" });
+            });
         }
 
         response.context_menu(|ui| {
@@ -1326,7 +1329,11 @@ fn paint_lock_icon(ui: &mut egui::Ui, rect: egui::Rect, locked: bool) {
     let cx = body.center().x;
     let base_y = body.top() + 1.0;
     let r = 6.0;
-    let (start_deg, end_deg) = if locked { (210.0_f32, -30.0_f32) } else { (200.0, -10.0) };
+    let (start_deg, end_deg) = if locked {
+        (210.0_f32, -30.0_f32)
+    } else {
+        (200.0, -10.0)
+    };
     let steps = 18;
 
     let mut pts = Vec::with_capacity(steps + 1);
@@ -1349,4 +1356,3 @@ fn paint_lock_icon(ui: &mut egui::Ui, rect: egui::Rect, locked: bool) {
 
     ui.painter().line(pts, stroke);
 }
- 
