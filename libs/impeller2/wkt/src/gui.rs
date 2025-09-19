@@ -148,8 +148,6 @@ pub struct Split<T = ()> {
     pub panels: Vec<Panel<T>>,
     pub shares: HashMap<usize, f32>,
     pub active: bool,
-    #[serde(default)]
-    pub name: Option<String>,
 }
 
 impl<T> Split<T> {
@@ -158,7 +156,6 @@ impl<T> Split<T> {
             panels: self.panels.iter().map(|p| p.map_aux(&f)).collect(),
             shares: self.shares.clone(),
             active: self.active,
-            name: self.name.clone(),
         }
     }
 }

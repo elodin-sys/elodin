@@ -275,8 +275,7 @@ impl TileState {
     }
 
     pub fn set_container_title(&mut self, id: TileId, title: impl Into<String>) {
-        let title = title.into();
-        self.container_titles.insert(id, title);
+        self.container_titles.insert(id, title.into());
     }
 
     pub fn clear_container_title(&mut self, id: TileId) {
@@ -292,7 +291,7 @@ impl TileState {
             return t.to_owned();
         }
         if let Some(egui_tiles::Tile::Container(c)) = tiles.get(id) {
-            format!("{:?}", c.kind())
+            format!("{:?}", c.kind()) // "Tabs" / "Horizontal" / "Vertical" / "Grid"
         } else {
             "Container".to_owned()
         }
@@ -558,6 +557,7 @@ impl ViewportPane {
                 aperture_f_stops: 2.8,
                 shutter_speed_s: 1.0 / 200.0,
                 sensitivity_iso: 400.0,
+                // full frame sensor height
                 sensor_height: 24.0 / 1000.0,
             }),
             main_camera_layers,
@@ -630,7 +630,6 @@ struct TreeBehavior<'w> {
     icons: TileIcons,
     tree_actions: SmallVec<[TreeAction; 4]>,
     world: &'w mut World,
-    container_titles: HashMap<TileId, String>,
 }
 
 #[derive(Clone)]
@@ -690,6 +689,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             TabState::Inactive
         };
 
+        // Inline containers renaming.
         let is_container = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Container(_)));
         let persist_id = id.with(("rename_title", tile_id));
         let edit_flag_id = id.with(("rename_editing", tile_id));
@@ -702,18 +702,14 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         let title_str: String = if is_container {
             if let Some(custom) = ui.ctx().data(|d| d.get_temp::<String>(persist_id)) {
                 custom
-            } else if let Some(t) = self.container_titles.get(&tile_id) {
-                t.clone()
             } else {
-                let fallback = match tiles.get(tile_id) {
+                match tiles.get(tile_id) {
                     Some(egui_tiles::Tile::Container(c)) => format!("{:?}", c.kind()),
                     _ => "Container".to_owned(),
-                };
-                fallback
+                }
             }
         } else {
-            let text = self.tab_title_for_tile(tiles, tile_id).text().to_string();
-            text
+            self.tab_title_for_tile(tiles, tile_id).text().to_string()
         };
 
         let mut font_id = egui::TextStyle::Button.resolve(ui.style());
@@ -903,16 +899,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         frame.stroke = Stroke::NONE;
         frame.shadow = egui::epaint::Shadow::NONE;
         frame.show(ui, |ui| {
-            let text = match tiles.get(tile_id) {
-                Some(Tile::Container(_)) => {
-                    if let Some(t) = self.container_titles.get(&tile_id) {
-                        egui::WidgetText::from(t.clone())
-                    } else {
-                        self.tab_title_for_tile(tiles, tile_id)
-                    }
-                }
-                _ => self.tab_title_for_tile(tiles, tile_id),
-            };
+            let text = self.tab_title_for_tile(tiles, tile_id);
             let text = text.text();
             ui.label(
                 RichText::new(text)
@@ -1130,7 +1117,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     icons,
                     world,
                     tree_actions: tab_diffs,
-                    container_titles: ui_state.container_titles.clone(),
                 };
                 ui_state.tree.ui(&mut behavior, ui);
 
@@ -1292,7 +1278,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             &state_mut.node_updater_params,
                         ) {
                             Ok(entity) => entity,
-                            Err(_) => state_mut.commands.spawn(bevy::ui::Node::default()).id(),
+                            Err(_) => {
+                                // Handle error - create a default entity or show error message
+                                state_mut.commands.spawn(bevy::ui::Node::default()).id()
+                            }
                         };
                         let pane = Pane::Dashboard(DashboardPane { entity, label });
                         if let Some(tile_id) =
@@ -1463,7 +1452,9 @@ impl WidgetSystem for TileLayout<'_, '_> {
 }
 
 pub fn shortcuts(key_state: Res<LogicalKeyState>, mut ui_state: ResMut<TileState>) {
+    // tab switching
     if key_state.pressed(&Key::Control) && key_state.just_pressed(&Key::Tab) {
+        // TODO(sphw): we should have a more intelligent focus system
         let Some(tile_id) = ui_state.tree.root() else {
             return;
         };
