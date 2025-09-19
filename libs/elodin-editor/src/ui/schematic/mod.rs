@@ -134,6 +134,7 @@ impl SchematicParam<'_, '_> {
                         panels,
                         shares,
                         active: false,
+                        name: None,
                     };
 
                     match linear.dir {
