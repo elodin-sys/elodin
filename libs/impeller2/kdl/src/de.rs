@@ -96,10 +96,16 @@ fn parse_split(node: &KdlNode, src: &str, is_horizontal: bool) -> Result<Panel, 
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
+    let name = node
+        .get("name")
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string());
+
     let split = Split {
         panels,
         shares,
         active,
+        name,
     };
 
     if is_horizontal {
