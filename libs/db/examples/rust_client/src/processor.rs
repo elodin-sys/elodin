@@ -2,11 +2,12 @@ use anyhow::Result;
 use colored::*;
 use impeller2::com_de::Decomponentize;
 use impeller2::types::{ComponentId, ComponentView, OwnedPacket, OwnedTable, Timestamp};
-use impeller2_stellar::Client;
+use impeller2_stellar::{Client, SubStream};
+use impeller2_wkt::{StreamReply, VTableMsg};
 use stellarator::buf::Slice;
 use std::collections::HashMap;
-use std::time::Duration;
-use tracing::debug;
+use std::time::{Duration, Instant};
+use tracing::{debug, info};
 
 use crate::discovery::DiscoveredComponent;
 
@@ -26,30 +27,76 @@ impl TelemetryProcessor {
         }
     }
     
-    /// Process incoming packets from the stream
-    pub async fn process_stream(&mut self, _client: &mut Client) -> Result<()> {
+    /// Process incoming packets from a subscription stream
+    pub async fn process_sub_stream(&mut self, stream: &mut SubStream<'_, StreamReply<Slice<Vec<u8>>>>) -> Result<()> {
         println!("\n📡 Waiting for telemetry data...\n");
         
         loop {
-            // Note: In a complete implementation, we would receive packets from the stream here
-            // This would require access to the Client's internal rx field or an exposed method
-            // For demonstration purposes, we show the structure of packet processing
+            // Wait for packets (blocking)
+            match stream.next().await {
+                Ok(reply) => {
+                    match reply {
+                        StreamReply::Table(table) => {
+                            self.handle_table(table)?;
+                        }
+                        StreamReply::VTable(vtable_msg) => {
+                            self.handle_vtable(vtable_msg);
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("\n❌ Error receiving packet: {}", e);
+                    break;
+                }
+            }
             
-            println!("📡 Would listen for packets here...");
-            println!("    (Full packet reception requires extending the Client API)");
-            
-            // Simulated delay to show the concept
-            stellarator::sleep(Duration::from_secs(5)).await;
-            
-            // Show what would happen with received packets
-            println!("\n📊 With incoming packets, this client would:");
-            println!("  • Decompose packets using discovered schemas");
-            println!("  • Extract component values (mach, thrust, etc.)");
-            println!("  • Display telemetry in real-time");
-            println!("  • Optionally write data back to the database");
-            
-            break; // Exit after demonstration
-            
+            // Display status periodically
+            if self.packet_count > 0 && self.packet_count % 100 == 0 {
+                self.display_status();
+            }
+        }
+        
+        if self.packet_count > 0 {
+            println!("\n✅ Stream processing complete. Total packets received: {}", 
+                self.packet_count.to_string().green());
+        }
+        
+        Ok(())
+    }
+    
+    /// Process incoming packets from the stream (alternative method)
+    pub async fn process_stream(&mut self, _client: &mut Client) -> Result<()> {
+        // This method could be used if we had direct access to client.rx
+        // For now, we use process_sub_stream instead
+        println!("\n📡 This method would process packets directly from client.rx");
+        Ok(())
+    }
+    
+    /// Handle a VTable message
+    fn handle_vtable(&mut self, vtable: VTableMsg) {
+        info!("Received VTable with ID: {:?}", vtable.id);
+        println!("🎯 VTable received (ID: {:?}) - Structure for decoding telemetry", vtable.id);
+    }
+    
+    /// Handle a table packet  
+    fn handle_table(&mut self, table: OwnedTable<Slice<Vec<u8>>>) -> Result<()> {
+        self.packet_count += 1;
+        
+        if self.packet_count == 1 {
+            println!("🎉 First telemetry packet received!");
+            println!("  Table ID: {:?}", table.id);
+            println!("  Data size: {} bytes", table.buf.len());
+        }
+        
+        // Process the table using decomponentize
+        // Note: This would normally use the VTable to properly extract components
+        self.process_table(table)?;
+        
+        // Display periodic status
+        let now = std::time::Instant::now();
+        if now.duration_since(self.last_display_time) > Duration::from_secs(5) {
+            self.display_status();
+            self.last_display_time = now;
         }
         
         Ok(())
