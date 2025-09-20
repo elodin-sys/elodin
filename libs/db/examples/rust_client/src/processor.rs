@@ -102,7 +102,7 @@ impl TelemetryProcessor {
                 if let Some(sender) = &self.telemetry_sender {
                     for value in self.latest_values.values() {
                         let row = TelemetryRow {
-                            timestamp: Instant::now(),
+                            _timestamp: Instant::now(),
                             component_name: value.name.clone(),
                             values: value.values.clone(),
                             unit: value.unit.clone(),

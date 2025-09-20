@@ -10,7 +10,7 @@ use tracing::{debug, info};
 /// Component information discovered from the database
 #[derive(Debug, Clone)]
 pub struct DiscoveredComponent {
-    pub id: ComponentId,
+    pub _id: ComponentId,  // Kept for potential future use
     pub name: String,
     pub schema: Schema<Vec<u64>>,
     pub metadata: HashMap<String, String>,
@@ -45,7 +45,7 @@ pub async fn discover_components(client: &mut Client) -> Result<HashMap<Componen
             .map(|(_, s)| s.clone()) 
         {
             let component = DiscoveredComponent {
-                id: metadata.component_id,
+                _id: metadata.component_id,
                 name: metadata.name.clone(),
                 schema,
                 metadata: metadata.metadata.clone(),
@@ -111,6 +111,7 @@ fn format_prim_type(prim_type: PrimType) -> &'static str {
 }
 
 /// Subscribe to rocket-specific components
+#[allow(dead_code)]
 pub fn filter_rocket_components(
     components: &HashMap<ComponentId, DiscoveredComponent>
 ) -> Vec<&DiscoveredComponent> {
@@ -120,6 +121,7 @@ pub fn filter_rocket_components(
 }
 
 /// Display summary of discovered rocket components
+#[allow(dead_code)]
 pub fn display_rocket_summary(components: &HashMap<ComponentId, DiscoveredComponent>) {
     let rocket_components = filter_rocket_components(components);
     

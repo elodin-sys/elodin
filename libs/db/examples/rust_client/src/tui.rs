@@ -9,7 +9,7 @@ use iocraft::Props;
 
 #[derive(Clone, Debug)]
 pub struct TelemetryRow {
-    pub timestamp: Instant,
+    pub _timestamp: Instant,  // Kept for potential timing features
     pub component_name: String,
     pub values: Vec<f64>,
     pub unit: String,
@@ -20,7 +20,7 @@ impl TelemetryRow {
     /// Create a "waiting for connection" placeholder row
     pub fn waiting_for_connection() -> Self {
         TelemetryRow {
-            timestamp: Instant::now(),
+            _timestamp: Instant::now(),
             component_name: "waiting_for_connection".to_string(),
             values: Vec::new(),
             unit: String::new(),
@@ -31,7 +31,7 @@ impl TelemetryRow {
     /// Create a "waiting for reconnection" placeholder row
     pub fn waiting_for_reconnection() -> Self {
         TelemetryRow {
-            timestamp: Instant::now(),
+            _timestamp: Instant::now(),
             component_name: "waiting_for_reconnection".to_string(),
             values: Vec::new(),
             unit: String::new(),
@@ -42,7 +42,7 @@ impl TelemetryRow {
     /// Create a "connected" indicator row
     pub fn connected() -> Self {
         TelemetryRow {
-            timestamp: Instant::now(),
+            _timestamp: Instant::now(),
             component_name: "connected".to_string(),
             values: Vec::new(),
             unit: String::new(),
@@ -51,6 +51,7 @@ impl TelemetryRow {
     }
     
     /// Create a generic waiting row
+    #[allow(dead_code)]
     pub fn waiting() -> Self {
         Self::waiting_for_connection()
     }
