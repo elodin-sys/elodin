@@ -1,36 +1,27 @@
 use anyhow::{Context, Result};
 use colored::*;
-use impeller2::types::{ComponentId, IntoLenPacket, PacketId};
+use impeller2::types::PacketId;
 use impeller2_stellar::Client;
-use impeller2_wkt::{SetComponentMetadata, Stream, StreamBehavior, VTableStream};
-use tracing::{debug, info};
+use impeller2_wkt::{Stream, StreamBehavior, VTableStream};
+use tracing::info;
 
-/// Demonstrates basic connection and messaging with the database
+use crate::discovery::{discover_components, display_rocket_summary};
+
+/// Demonstrates connection and dynamic discovery with the database
 pub async fn demonstrate_connection(client: &mut Client) -> Result<()> {
-    info!("Demonstrating basic Elodin-DB connectivity");
+    info!("Demonstrating Elodin-DB connectivity with dynamic discovery");
     
-    // Register some example rocket components
-    println!("\n📝 Registering rocket components:");
+    // Discover what components are available in the database
+    println!("\n🔍 Discovering registered components:");
+    let components = discover_components(client).await?;
     
-    let components = vec![
-        ("rocket.mach", "Mach number"),
-        ("rocket.thrust", "Thrust force"),
-        ("rocket.altitude", "Altitude"),
-        ("rocket.velocity", "Velocity vector"),
-    ];
+    // Display summary of rocket components
+    display_rocket_summary(&components);
     
-    for (name, description) in components {
-        let component_id = ComponentId::new(name);
-        let metadata = SetComponentMetadata::new(component_id, name);
-        
-        // Send the metadata registration
-        client.send(&metadata)
-            .await
-            .0
-            .context(format!("Failed to register {}", name))?;
-            
-        println!("  {} Registered: {} - {}", "✓".green(), name.cyan(), description.dimmed());
-        debug!("Registered component {} with ID {:?}", name, component_id);
+    if components.is_empty() {
+        println!("\n⚠️  No components found in database!");
+        println!("     Make sure rocket.py or another simulation is running first.");
+        return Ok(());
     }
     
     // Subscribe to real-time stream
@@ -61,13 +52,18 @@ pub async fn demonstrate_connection(client: &mut Client) -> Result<()> {
         
     println!("  {} VTable stream started with ID {:?}", "✓".green(), vtable_id);
     
-    println!("\n{}", "✨ Successfully demonstrated Elodin-DB connectivity!".green().bold());
-    println!("\n{}", "Next steps:".bold());
-    println!("  1. Run the rocket.py simulation to generate data");
-    println!("  2. Extend this client to process incoming packets");
-    println!("  3. Add visualization and data analysis");
+    // Process incoming telemetry
+    println!("\n✨ Setup complete! Ready to process telemetry.");
     
-    info!("Connection demonstration complete");
+    if !components.is_empty() {
+        // Create processor with discovered components
+        let mut processor = crate::processor::TelemetryProcessor::new(components);
+        
+        // Process incoming packets
+        processor.process_stream(client).await?;
+    }
+    
+    info!("Client session complete");
     
     Ok(())
 }

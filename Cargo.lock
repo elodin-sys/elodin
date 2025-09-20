@@ -4691,6 +4691,7 @@ dependencies = [
  "impeller2",
  "impeller2-stellar",
  "impeller2-wkt",
+ "serde",
  "stellarator",
  "tracing",
  "tracing-subscriber",

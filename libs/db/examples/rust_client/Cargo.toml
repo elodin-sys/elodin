@@ -16,6 +16,9 @@ impeller2-wkt = { path = "../../../impeller2/wkt" }
 # Async runtime
 stellarator = { path = "../../../stellarator", features = ["tokio"] }
 
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+
 # Error handling
 anyhow = "1"
 

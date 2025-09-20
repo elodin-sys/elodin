@@ -7,6 +7,8 @@ use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod client;
+mod discovery;
+mod processor;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Rust client example for Elodin-DB rocket telemetry", long_about = None)]

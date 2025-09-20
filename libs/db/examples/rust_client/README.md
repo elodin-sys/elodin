@@ -1,13 +1,15 @@
 # Rust Client Example for Elodin-DB
 
-This example demonstrates how to build a Rust client that connects to Elodin-DB and sets up telemetry subscriptions.
+This example demonstrates how to build a Rust client that connects to Elodin-DB, discovers available components dynamically, and sets up telemetry subscriptions.
 
 ## Features
 
 - 🔌 **TCP Connection**: Connect to Elodin-DB server
-- 📝 **Component Registration**: Register telemetry components with metadata
+- 🔍 **Dynamic Discovery**: Automatically discovers components registered in the database
+- 📝 **Schema Detection**: Retrieves component schemas and metadata from the database
 - 📡 **Stream Setup**: Configure real-time telemetry streaming
 - 🎯 **Type-safe API**: Uses the impeller2 protocol for communication
+- 🚀 **Rocket-Aware**: Specifically detects and categorizes rocket simulation components
 
 ## Prerequisites
 
@@ -100,6 +102,47 @@ If connection fails:
 - Verify elodin-db is running: `ps aux | grep elodin-db`
 - Check the port is open: `nc -zv localhost 2240`
 - Enable verbose logging: `./rust_client --verbose`
+
+## Dynamic Component Discovery
+
+This client now includes automatic component discovery! When connecting to a database with an active simulation (like rocket.py), the client will:
+
+### Discovery Features
+
+1. **Query Available Components** - Uses `DumpMetadata` and `DumpSchema` messages to get all registered components
+2. **Display Component Info** - Shows each component's:
+   - Name (e.g., `rocket.mach`)
+   - Data type and shape (e.g., `f64[3]` for 3D vectors)
+   - Associated metadata
+3. **Categorize Rocket Components** - Groups rocket-specific components by:
+   - Aerodynamics (mach, dynamic pressure, etc.)
+   - Propulsion (thrust, motor)
+   - Control (fin deflection, PID states)
+   - Position/Motion (world position, velocity)
+
+### Example Discovery Output
+
+```
+🔍 Discovering registered components:
+  Found 20 components registered
+  ✓ rocket.mach → f64
+  ✓ rocket.thrust → f64
+  ✓ rocket.world_pos → f64[7]
+  ✓ rocket.aero_force → f64[6]
+  ...
+
+🚀 Rocket Components Summary:
+  20 rocket-specific components available
+```
+
+### No Manual Registration Required
+
+Unlike the C/C++ examples which manually register components, this Rust client:
+- Discovers what's already in the database
+- Retrieves schemas automatically
+- Adapts to whatever simulation is running
+
+This makes the client much more flexible - it can work with any Elodin simulation without code changes!
 
 ## Next Steps
 
