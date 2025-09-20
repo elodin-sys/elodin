@@ -28,6 +28,12 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 colored = "2"
 
+# TUI with IOCraft
+iocraft = "0.7"
+smol = "2"
+async-channel = "2"
+futures-lite = "2"
+
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

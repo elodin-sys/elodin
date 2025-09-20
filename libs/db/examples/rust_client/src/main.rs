@@ -1,6 +1,5 @@
 use anyhow::Result;
 use clap::Parser;
-use colored::*;
 use impeller2_stellar::Client;
 use std::net::SocketAddr;
 use tracing::{error, info};
@@ -9,6 +8,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 mod client;
 mod discovery;
 mod processor;
+mod tui;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Rust client example for Elodin-DB rocket telemetry", long_about = None)]
@@ -46,25 +46,22 @@ async fn main() -> Result<()> {
     // Parse address
     let addr: SocketAddr = format!("{}:{}", args.host, args.port).parse()?;
     
-    println!("\n{}", "🚀 Elodin-DB Rust Client Example".bold().green());
-    println!("{}", "================================".green());
-    
     info!("Connecting to Elodin-DB at {}", addr);
 
     // Connect to database
     match Client::connect(addr).await {
         Ok(mut client) => {
-            println!("\n{} Connected to database!", "✓".green());
+            info!("Connected to database!");
             
-            // Simple demonstration of sending a message
-            client::demonstrate_connection(&mut client).await?;
+            // Run the client with the TUI
+            client::run_with_tui(&mut client).await?;
         }
         Err(e) => {
             error!("Failed to connect: {}", e);
-            println!("\n{} Connection failed: {}", "✗".red(), e);
-            println!("\nMake sure:");
-            println!("  1. elodin-db is running (elodin-db run [::]:2240 ~/.elodin/db)");
-            println!("  2. The address {}:{} is correct", args.host, args.port);
+            eprintln!("\nConnection failed: {}", e);
+            eprintln!("\nMake sure:");
+            eprintln!("  1. elodin-db is running (elodin-db run [::]:2240 ~/.elodin/db)");
+            eprintln!("  2. The address {}:{} is correct", args.host, args.port);
         }
     }
 

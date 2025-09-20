@@ -130,7 +130,7 @@ dependencies = [
  "getrandom 0.2.15",
  "once_cell",
  "serde",
- "version_check",
+ "version_check 0.9.5",
  "zerocopy 0.7.35",
 ]
 
@@ -348,6 +348,16 @@ checksum = "2109dbce0e72be3ec00bed26e6a7479ca384ad226efdd66db8fa2e3a38c83125"
 dependencies = [
  "anstyle",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "any_key"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d21bb2cdab8087ed9d69411dd99c608dbede1df847c255b4d609f0399a3cb452"
+dependencies = [
+ "debugit",
+ "mopa",
 ]
 
 [[package]]
@@ -2282,7 +2292,7 @@ dependencies = [
  "derive_more 1.0.0",
  "nonmax",
  "smallvec",
- "taffy",
+ "taffy 0.7.7",
  "thiserror 2.0.12",
  "tracing",
 ]
@@ -3541,8 +3551,12 @@ checksum = "829d955a0bb380ef178a640b91779e3987da38c9aea133b20614cfed8cdea9c6"
 dependencies = [
  "bitflags 2.9.0",
  "crossterm_winapi",
+ "futures-core",
+ "mio 1.0.2",
  "parking_lot",
  "rustix 0.38.37",
+ "signal-hook",
+ "signal-hook-mio",
  "winapi",
 ]
 
@@ -4344,6 +4358,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "debugit"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63c2f7e3034df2b09f750327e23c1adfe33301e6b7388f05bb4fcc0fa46825e3"
+dependencies = [
+ "version_check 0.1.5",
+]
+
+[[package]]
 name = "deflate64"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4686,13 +4709,17 @@ name = "elodin-db-rust-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-channel",
  "clap 4.5.37",
  "colored",
+ "futures-lite 2.6.0",
  "impeller2",
  "impeller2-stellar",
  "impeller2-wkt",
+ "iocraft",
  "postcard",
  "serde",
+ "smol",
  "stellarator",
  "tracing",
  "tracing-subscriber",
@@ -5666,6 +5693,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "generational-box"
+version = "0.5.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "557cf2cbacd0504c6bf8c29f52f8071e0de1d9783346713dc6121d7fa1e5d0e0"
+dependencies = [
+ "parking_lot",
+]
+
+[[package]]
 name = "generativity"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5691,7 +5727,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
 dependencies = [
  "typenum",
- "version_check",
+ "version_check 0.9.5",
 ]
 
 [[package]]
@@ -5996,6 +6032,12 @@ checksum = "fdf242682df893b86f33a73828fb09ca4b2d3bb6cc95249707fc684d27484b91"
 dependencies = [
  "bitflags 2.9.0",
 ]
+
+[[package]]
+name = "grid"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be136d9dacc2a13cc70bb6c8f902b414fb2641f8db1314637c6b7933411a8f82"
 
 [[package]]
 name = "grid"
@@ -7074,6 +7116,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "iocraft"
+version = "0.7.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d2276ed525f48c3ebc83563eec6bdf726aa26d6a5f8ede6089e823f5649e6a7"
+dependencies = [
+ "any_key",
+ "bitflags 2.9.0",
+ "crossterm 0.28.1",
+ "futures",
+ "generational-box",
+ "iocraft-macros",
+ "taffy 0.5.2",
+ "unicode-width 0.1.14",
+]
+
+[[package]]
+name = "iocraft-macros"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2a8b12929295d5fea225570fd69a41084e2949d56ce0c20ff22494ef13e0d56"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.101",
+ "uuid",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8018,6 +8088,12 @@ dependencies = [
  "luajit-src",
  "pkg-config",
 ]
+
+[[package]]
+name = "mopa"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a785740271256c230f57462d3b83e52f998433a7062fc18f96d5999474a9f915"
 
 [[package]]
 name = "muldiv"
@@ -10707,7 +10783,7 @@ dependencies = [
  "primal-check",
  "strength_reduce",
  "transpose",
- "version_check",
+ "version_check 0.9.5",
 ]
 
 [[package]]
@@ -11188,7 +11264,7 @@ version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dbff4acf519f630b3a3ddcfaea6c06b42174d9a44bc70c620e9ed1649d58b82a"
 dependencies = [
- "version_check",
+ "version_check 0.9.5",
 ]
 
 [[package]]
@@ -11229,6 +11305,23 @@ dependencies = [
  "wayland-protocols-wlr",
  "wayland-scanner",
  "xkeysym",
+]
+
+[[package]]
+name = "smol"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a33bd3e260892199c3ccfc487c88b2da2265080acb316cd920da72fdfd7c599f"
+dependencies = [
+ "async-channel",
+ "async-executor",
+ "async-fs",
+ "async-io",
+ "async-lock",
+ "async-net",
+ "async-process",
+ "blocking",
+ "futures-lite 2.6.0",
 ]
 
 [[package]]
@@ -11789,12 +11882,25 @@ dependencies = [
 
 [[package]]
 name = "taffy"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cb893bff0f80ae17d3a57e030622a967b8dbc90e38284d9b4b1442e23873c94"
+dependencies = [
+ "arrayvec",
+ "grid 0.14.0",
+ "num-traits",
+ "serde",
+ "slotmap",
+]
+
+[[package]]
+name = "taffy"
 version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab4f4d046dd956a47a7e1a2947083d7ac3e6aa3cfaaead36173ceaa5ab11878c"
 dependencies = [
  "arrayvec",
- "grid",
+ "grid 0.15.0",
  "serde",
  "slotmap",
 ]
@@ -12767,6 +12873,12 @@ name = "version-compare"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "852e951cb7832cb45cb1169900d19760cfa39b82bc0ea9c0e5a14ae88411c98b"
+
+[[package]]
+name = "version_check"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "914b1a6776c4c929a602fafd8bc742e06365d4bcbe48c30f9cca5824f70dc9dd"
 
 [[package]]
 name = "version_check"
