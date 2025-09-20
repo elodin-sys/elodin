@@ -1,0 +1,28 @@
+[package]
+name = "elodin-db-rust-client"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "rust_client"
+path = "src/main.rs"
+
+[dependencies]
+# Core protocol
+impeller2 = { path = "../../../impeller2", features = ["std"] }
+impeller2-stellar = { path = "../../../impeller2/stellar" }
+impeller2-wkt = { path = "../../../impeller2/wkt" }
+
+# Async runtime
+stellarator = { path = "../../../stellarator", features = ["tokio"] }
+
+# Error handling
+anyhow = "1"
+
+# CLI and display
+clap = { version = "4", features = ["derive"] }
+colored = "2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
