@@ -29,6 +29,3 @@ colored = "2"
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-# Utils
-rand = "0.8"

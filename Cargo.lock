@@ -4691,7 +4691,6 @@ dependencies = [
  "impeller2",
  "impeller2-stellar",
  "impeller2-wkt",
- "rand 0.8.5",
  "serde",
  "stellarator",
  "tracing",
