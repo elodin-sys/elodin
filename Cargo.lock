@@ -4691,10 +4691,12 @@ dependencies = [
  "impeller2",
  "impeller2-stellar",
  "impeller2-wkt",
+ "postcard",
  "serde",
  "stellarator",
  "tracing",
  "tracing-subscriber",
+ "zerocopy 0.8.14",
 ]
 
 [[package]]

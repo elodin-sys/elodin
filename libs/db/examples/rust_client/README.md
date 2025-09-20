@@ -140,16 +140,16 @@ Options:
 Once streaming begins, the client displays a real-time dashboard:
 
 ```
-╔══════════════════════════════════════════════════════════════╗
-║  🚀 ROCKET TELEMETRY DASHBOARD  ║
-╚══════════════════════════════════════════════════════════════╝
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║  🚀 ROCKET TELEMETRY DASHBOARD - RAW VALUES  ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
 
 📡 Connected | 📦 Packets: 1250 | ⏱️  T: 12500000
 
 🔥 Propulsion
-══════════════════════════════════════════════════════════════
-  motor                     :     1.00                           
-  thrust                    : 50000.00                           
+════════════════════════════════════════════════════════════════════════════════
+  motor                       :     1.00
+  thrust                      : 50000.00                           
 
 🎯 Control
 ══════════════════════════════════════════════════════════════
@@ -265,19 +265,23 @@ The client leverages the Elodin ecosystem:
 - Packet counting and basic processing
 - Component categorization
 
-### 🔄 Demonstration Mode
-- **Telemetry Values**: Currently generates realistic synthetic data for visualization
-- **Why**: Full packet decoding requires VTable registry integration
-- **Impact**: Perfect for demonstrations and understanding the client architecture
+### ✅ Real Data Only
+- **Telemetry Values**: Shows only actual raw values from packets
+- **No Synthetic Data**: Displays real telemetry or nothing
+- **VTable Registry**: Automatically maintains registry from incoming VTable messages
+- **Smart Display**: 
+  - Normal arrays (<20 values): All values displayed
+  - Buffer components: Shows "[buffer: N values]" instead of data
+  - Very large arrays (>20 values): Summarized as "[N values]"
 
 ### 📝 Future Enhancements
 
-To build a production telemetry pipeline:
+To extend the telemetry pipeline:
 
-1. **Complete VTable Integration**
-   - Store VTable definitions from `StreamReply::VTable` messages
-   - Use VTables to properly decomponentize table packets
-   - Extract actual telemetry values from binary data
+1. **Enhanced Processing** *(VTable integration complete!)*
+   - ✅ Stores VTable definitions from `StreamReply::VTable` messages
+   - ✅ Uses VTables to properly decomponentize table packets
+   - ✅ Extracts actual telemetry values from binary data
 
 2. **Data Persistence**
    ```rust

@@ -1,13 +1,14 @@
 use anyhow::Result;
 use colored::*;
 use impeller2::com_de::Decomponentize;
-use impeller2::types::{ComponentId, ComponentView, OwnedPacket, OwnedTable, Timestamp, PrimType};
+use impeller2::registry::HashMapRegistry;
+use impeller2::types::{ComponentId, ComponentView, OwnedPacket, OwnedTable, Timestamp};
 use impeller2_stellar::{Client, SubStream};
 use impeller2_wkt::{StreamReply, VTableMsg};
 use stellarator::buf::Slice;
 use std::collections::HashMap;
 use std::time::Instant;
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::discovery::DiscoveredComponent;
 
@@ -26,6 +27,8 @@ pub struct TelemetryProcessor {
     last_display_time: Instant,
     latest_values: HashMap<ComponentId, TelemetryValue>,
     last_timestamp: Option<Timestamp>,
+    /// Registry of VTables for decomponentizing packets
+    vtable_registry: HashMapRegistry,
 }
 
 impl TelemetryProcessor {
@@ -36,6 +39,7 @@ impl TelemetryProcessor {
             last_display_time: Instant::now(),
             latest_values: HashMap::new(),
             last_timestamp: None,
+            vtable_registry: HashMapRegistry::default(),
         }
     }
     
@@ -90,91 +94,60 @@ impl TelemetryProcessor {
     }
     
     /// Handle a VTable message
-    fn handle_vtable(&mut self, vtable: VTableMsg) {
-        debug!("Received VTable with ID: {:?}", vtable.id);
+    fn handle_vtable(&mut self, vtable_msg: VTableMsg) {
+        debug!("Received VTable with ID: {:?}", vtable_msg.id);
+        info!("Storing VTable for packet ID: {:?}", vtable_msg.id);
+        
+        // Store the VTable in our registry
+        self.vtable_registry.map.insert(vtable_msg.id, vtable_msg.vtable);
     }
     
     /// Handle a table packet  
     fn handle_table(&mut self, table: OwnedTable<Slice<Vec<u8>>>) -> Result<()> {
         self.packet_count += 1;
         
-        // Update timestamp (use packet count as a proxy for now)
-        let timestamp = Timestamp(self.packet_count as i64 * 1000);
-        self.last_timestamp = Some(timestamp);
+        // Create extractor for this packet
+        let mut extractor = TelemetryExtractor::new(&self.components, &mut self.latest_values);
         
-        // To fully process table data, we would need a VTable registry.
-        // For this example, we'll demonstrate with synthetic data based on discovered components.
-        // In a production client, you would maintain a VTable registry from VTableMsg messages.
-        
-        // Generate realistic telemetry values for demonstration
-        self.update_telemetry_values();
+        // Use the VTable registry to decomponentize the table
+        match table.sink(&self.vtable_registry, &mut extractor) {
+            Ok(Ok(())) => {
+                // info!("Successfully extracted real data from table packet #{}", self.packet_count);
+                
+                // Update timestamp from latest values if available
+                if let Some(_first_value) = self.latest_values.values().next() {
+                    self.last_timestamp = Some(Timestamp(self.packet_count as i64 * 1000));
+                }
+            }
+            Ok(Err(e)) => {
+                debug!("Error in extractor: {:?}", e);
+                // Don't update values if extraction fails
+            }
+            Err(e) => {
+                if self.packet_count == 1 {
+                    info!("Waiting for VTable definitions...");
+                }
+                debug!("VTable not found for packet ID {:?}: {}", table.id, e);
+                // Don't update values if VTable not found
+            }
+        }
         
         debug!("Processed table packet #{} (ID: {:?})", self.packet_count, table.id);
         
         Ok(())
     }
     
-    /// Update telemetry values with realistic rocket data
-    fn update_telemetry_values(&mut self) {
-        let time = self.packet_count as f64 * 0.01; // 100Hz simulation
-        
-        for (id, component) in &self.components {
-            let values = if component.name.contains("world_pos") {
-                // Position: parabolic trajectory
-                let altitude = (time * 100.0 - 0.5 * 9.81 * time * time).max(0.0);
-                vec![time * 10.0, time * 5.0, altitude]
-            } else if component.name.contains("world_vel") {
-                // Velocity: decreasing due to gravity
-                vec![10.0, 5.0, (100.0 - 9.81 * time).max(-50.0)]
-            } else if component.name.contains("thrust") {
-                // Thrust: burns out after 10 seconds
-                vec![if time < 10.0 { 50000.0 } else { 0.0 }]
-            } else if component.name.contains("mach") {
-                // Mach number based on velocity
-                let vel = (100.0 - 9.81 * time).abs();
-                vec![vel / 343.0] // Speed of sound ~343 m/s
-            } else if component.name.contains("angle_of_attack") {
-                // Small oscillations
-                vec![(time * 2.0).sin() * 5.0]
-            } else if component.name.contains("dynamic_pressure") {
-                // Pressure decreases with altitude
-                let alt = (time * 100.0 - 0.5 * 9.81 * time * time).max(0.0);
-                vec![101325.0 * (-alt / 7000.0).exp()]
-            } else if component.name.contains("fin_deflect") {
-                // Control surface deflection
-                vec![(time * 3.0).sin() * 10.0]
-            } else if component.name.contains("motor") {
-                // Motor on/off
-                vec![if time < 10.0 { 1.0 } else { 0.0 }]
-            } else {
-                // Default: keep previous value or use zero
-                self.latest_values.get(id)
-                    .map(|v| v.values.clone())
-                    .unwrap_or_else(|| vec![0.0])
-            };
-            
-            let unit = component.metadata.get("unit")
-                .cloned()
-                .unwrap_or_default();
-            
-            self.latest_values.insert(*id, TelemetryValue {
-                name: component.name.clone(),
-                values,
-                unit,
-            });
-        }
-    }
     /// Display telemetry in a beautiful terminal format
     fn display_telemetry(&self) {
         // Move cursor to top-left without clearing (reduces flicker)
         print!("\x1B[1;1H");
         
         // Header
-        println!("{}", "╔══════════════════════════════════════════════════════════════╗".bright_blue());
+        println!("{}", "╔═══════════════════════════════════════════════════════════════════════════════╗".bright_blue());
         println!("{}  {}  {}", "║".bright_blue(), 
-            "🚀 ROCKET TELEMETRY DASHBOARD".bright_white().bold(), 
+            "🚀 ROCKET TELEMETRY DASHBOARD - RAW VALUES".bright_white().bold(), 
             "║".bright_blue());
-        println!("{}\n", "╚══════════════════════════════════════════════════════════════╝".bright_blue());
+        println!("{}\n", "╚═══════════════════════════════════════════════════════════════════════════════╝".bright_blue());
         
         // Status bar
         println!("📡 {} | 📦 {} | ⏱️  {}", 
@@ -182,7 +155,7 @@ impl TelemetryProcessor {
             format!("Packets: {}", self.packet_count).cyan(),
             self.last_timestamp.map_or("--".to_string(), |t| format!("T: {}", t.0)).yellow()
         );
-        println!("{}", "─".repeat(65).bright_black());
+        println!("{}", "─".repeat(80).bright_black());
         
         // Group components by category
         let mut categories: HashMap<&str, Vec<(&ComponentId, &TelemetryValue)>> = HashMap::new();
@@ -197,7 +170,7 @@ impl TelemetryProcessor {
         for category_name in &category_order {
             if let Some(mut components) = categories.remove(category_name) {
                 println!("\n{}", category_name.bright_white().bold());
-                println!("{}", "═".repeat(50).bright_black());
+                println!("{}", "═".repeat(80).bright_black());
                 
                 // Sort components by name for consistent display
                 components.sort_by_key(|(_, v)| &v.name);
@@ -208,31 +181,30 @@ impl TelemetryProcessor {
             }
         }
         
-        // Footer with padding to ensure consistent output
-        println!("\n{}", "─".repeat(65).bright_black());
+        // Footer
+        println!("\n{}", "─".repeat(80).bright_black());
         println!("💡 {} to exit", "Press Ctrl+C".bright_black());
-        
-        // Add some blank lines to prevent scrolling
-        for _ in 0..5 {
-            println!("{:65}", "");  // Padded blank lines
-        }
     }
     
     /// Display a single component's values  
     fn display_component(&self, value: &TelemetryValue) {
-        let name = value.name.replace("rocket.", "");
-        let formatted_name = format!("{:25}", name).bright_cyan();
+        let name = value.name.replace("rocket.", "").replace("Globals.", "");
+        let formatted_name = format!("{:28}", name).bright_cyan();
         
-        // Ensure consistent width for values to prevent artifacts
-        let formatted_values = format!("{:40}", format_values(&value.values));
-        
-        let unit = if !value.unit.is_empty() {
-            format!(" {:10}", value.unit).bright_black().to_string()
+        // Check if this is a buffer component and handle specially
+        let formatted_values = if name.to_lowercase().contains("buffer") {
+            format_buffer_values(&value.values)
         } else {
-            format!("{:11}", "")  // Empty padded space for alignment
+            format_values(&value.values)
         };
         
-        println!("  {} : {}{}", formatted_name, formatted_values, unit);
+        let unit = if !value.unit.is_empty() {
+            format!(" ({})", value.unit).bright_black().to_string()
+        } else {
+            String::new()
+        };
+        
+        println!("  {}: {}{}", formatted_name, formatted_values, unit);
     }
     
     /// Handle a single packet (unused in current implementation)
@@ -362,45 +334,51 @@ fn categorize_component(name: &str) -> &'static str {
     }
 }
 
-/// Format values for display
+/// Format values for display - show all values
 fn format_values(values: &[f64]) -> String {
     if values.is_empty() {
         "no data".bright_black().to_string()
     } else if values.len() == 1 {
         // Single value
         format_float(values[0])
-    } else if values.len() <= 3 {
-        // Vector (2D or 3D)
+    } else if values.len() > 20 {
+        // Very large arrays might be internal buffers - show summary
+        format!("[{} values]", values.len()).bright_black().to_string()
+    } else {
+        // Show all values in the array
         let vals: Vec<String> = values.iter()
             .map(|&v| format_float(v))
             .collect();
-        format!("[{}]", vals.join(", "))
-    } else if values.len() == 4 {
-        // Quaternion or 4D vector
-        let vals: Vec<String> = values.iter()
-            .map(|&v| format!("{:6.3}", v))
-            .collect();
-        format!("[{}]", vals.join(", ")).bright_magenta().to_string()
-    } else if values.len() <= 9 {
-        // Small matrix (3x3)
-        format!("[{} values]", values.len()).bright_blue().to_string()
-    } else {
-        // Large array
-        format!("[{} values]", values.len()).bright_black().to_string()
+        
+        // Format based on length for better display
+        if values.len() <= 4 {
+            format!("[{}]", vals.join(", "))
+        } else {
+            // For longer arrays, show on multiple lines if needed
+            format!("[{}]", vals.join(", "))
+        }
     }
 }
 
-/// Format a single float value with color coding
-fn format_float(value: f64) -> String {
-    if value.abs() < 0.0001 {
-        format!("{:8.4}", value).bright_black().to_string()
-    } else if value.abs() < 0.1 {
-        format!("{:8.4}", value).bright_yellow().to_string()
-    } else if value.abs() < 10.0 {
-        format!("{:8.2}", value).bright_green().to_string()
-    } else if value.abs() < 1000.0 {
-        format!("{:8.1}", value).bright_cyan().to_string()
+/// Format buffer values - show concise representation
+fn format_buffer_values(values: &[f64]) -> String {
+    if values.is_empty() {
+        "[empty buffer]".bright_black().to_string()
     } else {
-        format!("{:8.2e}", value).bright_magenta().to_string()
+        format!("[buffer: {} values]", values.len()).bright_black().to_string()
+    }
+}
+
+/// Format a single float value - just show the raw value
+fn format_float(value: f64) -> String {
+    // Show raw values with appropriate precision
+    if value.abs() < 0.0001 {
+        format!("{:8.4}", value)
+    } else if value.abs() < 1.0 {
+        format!("{:8.4}", value)
+    } else if value.abs() < 1000.0 {
+        format!("{:8.2}", value)
+    } else {
+        format!("{:8.2e}", value)
     }
 }
