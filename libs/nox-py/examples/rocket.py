@@ -61,6 +61,8 @@ FinControl = ty.Annotated[jax.Array, el.Component("fin_control", el.ComponentTyp
 
 FinDeflect = ty.Annotated[jax.Array, el.Component("fin_deflect", el.ComponentType.F64)]
 
+FinControlTrim = ty.Annotated[jax.Array, el.Component("fin_control_trim", el.ComponentType.F64)]
+
 VRelAccel = ty.Annotated[
     jax.Array,
     el.Component(
@@ -253,6 +255,7 @@ class Rocket(el.Archetype):
     motor: Motor = field(default_factory=lambda: jnp.float64(0.0))
     fin_deflect: FinDeflect = field(default_factory=lambda: jnp.float64(0.0))
     fin_control: FinControl = field(default_factory=lambda: jnp.float64(0.0))
+    fin_control_trim: FinControlTrim = field(default_factory=lambda: jnp.float64(0.0))
     v_rel_accel_buffer: VRelAccelBuffer = field(
         default_factory=lambda: jnp.zeros((lp_buffer_size, 3))
     )
@@ -311,7 +314,11 @@ def aero_coefs(
     mach: Mach,
     angle_of_attack: AngleOfAttack,
     fin_deflect: FinDeflect,
+    fin_trim: FinControlTrim,
 ) -> AeroCoefs:
+    # Apply trim to fin deflection
+    effective_fin_deflect = jnp.clip(fin_deflect + fin_trim, -40.0, 40.0)
+    
     aero = aero_interp_table(aero_df)
     aoa_sign = jax.lax.cond(
         jnp.abs(angle_of_attack) < 1e-6,
@@ -320,10 +327,10 @@ def aero_coefs(
         operand=None,
     )
     # aoa_sign is used to negate fin deflection angle as a way to interpolate negative angles of attack
-    fin_deflect *= aoa_sign
+    effective_fin_deflect *= aoa_sign
     coords = [
         to_coord(aero_df["Mach"], mach),
-        to_coord(aero_df["Delta"], fin_deflect),
+        to_coord(aero_df["Delta"], effective_fin_deflect),
         to_coord(aero_df["Alphac"], jnp.abs(angle_of_attack)),
     ]
     coefs = jnp.array([map_coordinates(coef, coords, 1, mode="nearest") for coef in aero])
