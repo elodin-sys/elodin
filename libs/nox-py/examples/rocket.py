@@ -497,4 +497,9 @@ non_effectors = (
 )
 effectors = gravity | apply_thrust | apply_aero_forces
 sys = non_effectors | el.six_dof(sys=effectors, integrator=el.Integrator.Rk4)
-w.run(sys, sim_time_step=SIM_TIME_STEP)
+w.run(
+    sys, 
+    sim_time_step=SIM_TIME_STEP,
+    run_time_step=SIM_TIME_STEP, # This creates real-time streaming
+    default_playback_speed=1.0
+)
