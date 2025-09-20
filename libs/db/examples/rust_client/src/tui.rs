@@ -13,6 +13,47 @@ pub struct TelemetryRow {
     pub component_name: String,
     pub values: Vec<f64>,
     pub unit: String,
+    pub is_waiting: bool,  // Indicates this is a "waiting for telemetry" placeholder
+}
+
+impl TelemetryRow {
+    /// Create a "waiting for connection" placeholder row
+    pub fn waiting_for_connection() -> Self {
+        TelemetryRow {
+            timestamp: Instant::now(),
+            component_name: "waiting_for_connection".to_string(),
+            values: Vec::new(),
+            unit: String::new(),
+            is_waiting: true,
+        }
+    }
+    
+    /// Create a "waiting for reconnection" placeholder row
+    pub fn waiting_for_reconnection() -> Self {
+        TelemetryRow {
+            timestamp: Instant::now(),
+            component_name: "waiting_for_reconnection".to_string(),
+            values: Vec::new(),
+            unit: String::new(),
+            is_waiting: true,
+        }
+    }
+    
+    /// Create a "connected" indicator row
+    pub fn connected() -> Self {
+        TelemetryRow {
+            timestamp: Instant::now(),
+            component_name: "connected".to_string(),
+            values: Vec::new(),
+            unit: String::new(),
+            is_waiting: true,
+        }
+    }
+    
+    /// Create a generic waiting row
+    pub fn waiting() -> Self {
+        Self::waiting_for_connection()
+    }
 }
 
 const CAPACITY: usize = 20_000;      // ring buffer size
@@ -145,45 +186,100 @@ pub fn TelemetryApp(
         let q = ring.lock().unwrap();
         let mut latest_values: HashMap<String, TelemetryRow> = HashMap::new();
         
-        // Get the latest value for each component
-        for row in q.iter().rev().take(1000) {  // Look at last 1000 entries max
-            latest_values.entry(row.component_name.clone()).or_insert(row.clone());
-        }
+        // Check if we have any real data or just waiting messages
+        let has_real_data = q.iter().any(|r| !r.is_waiting);
         
-        // Group by category
-        let mut by_category: HashMap<&str, Vec<TelemetryRow>> = HashMap::new();
-        for row in latest_values.values() {
-            let category = categorize_component(&row.component_name);
-            by_category.entry(category).or_insert_with(Vec::new).push(row.clone());
-        }
-        
-        // Sort within each category
-        for rows in by_category.values_mut() {
-            rows.sort_by(|a, b| a.component_name.cmp(&b.component_name));
-        }
-        
-        // Build display text
-        let mut lines = Vec::new();
-        let category_order = ["🔥 Propulsion", "🎯 Control", "💨 Aerodynamics", "📍 Position/Motion"];
-        
-        for category_name in &category_order {
-            if let Some(rows) = by_category.get(category_name) {
-                lines.push(String::new()); // spacer
-                lines.push(format!("{}", category_name));
-                lines.push("════════════════════════════════════════════════════════════════════════════════".to_string());
-                
-                for row in rows.iter().skip(scroll_back.get()).take(rows_visible) {
-                    lines.push(format!(
-                        "  {:<25}: {:>40} {}",
-                        row.component_name.replace("rocket.", ""),
-                        format_values(&row.values),
-                        row.unit
-                    ));
+        if !has_real_data && q.iter().any(|r| r.is_waiting) {
+            // Get the latest waiting state
+            let waiting_state = q.iter()
+                .rev()
+                .find(|r| r.is_waiting)
+                .map(|r| r.component_name.as_str())
+                .unwrap_or("waiting_for_connection");
+            
+            let lines = match waiting_state {
+                "waiting_for_connection" => vec![
+                    String::new(),
+                    String::new(),
+                    "🔌 Waiting for database connection...".to_string(),
+                    String::new(),
+                    "The client is waiting to connect to the database.".to_string(),
+                    String::new(),
+                    "Start the simulation with: python rocket.py run 0.0.0.0:2240".to_string(),
+                    "Or start elodin-db separately, then the simulation.".to_string(),
+                ],
+                "waiting_for_reconnection" => vec![
+                    String::new(),
+                    String::new(),
+                    "🔄 Reconnecting to database...".to_string(),
+                    String::new(),
+                    "Connection lost, attempting to reconnect automatically.".to_string(),
+                    String::new(),
+                    "The client will reconnect when the database becomes available.".to_string(),
+                ],
+                "connected" => vec![
+                    String::new(),
+                    String::new(),
+                    "✅ Connected! Waiting for telemetry data...".to_string(),
+                    String::new(),
+                    "Database connected, waiting for simulation to send data.".to_string(),
+                    String::new(),
+                    "The simulation should start sending telemetry shortly.".to_string(),
+                ],
+                _ => vec![
+                    String::new(),
+                    String::new(),
+                    "⏳ Waiting for telemetry data...".to_string(),
+                    String::new(),
+                    "Please start the simulation.".to_string(),
+                    String::new(),
+                    "The client will automatically connect when data becomes available.".to_string(),
+                ],
+            };
+            (lines.join("\n"), 0)
+        } else {
+            // Get the latest value for each component (skip waiting messages)
+            for row in q.iter().rev().take(1000) {  // Look at last 1000 entries max
+                if !row.is_waiting {
+                    latest_values.entry(row.component_name.clone()).or_insert(row.clone());
                 }
             }
+            
+            // Group by category
+            let mut by_category: HashMap<&str, Vec<TelemetryRow>> = HashMap::new();
+            for row in latest_values.values() {
+                let category = categorize_component(&row.component_name);
+                by_category.entry(category).or_insert_with(Vec::new).push(row.clone());
+            }
+            
+            // Sort within each category
+            for rows in by_category.values_mut() {
+                rows.sort_by(|a, b| a.component_name.cmp(&b.component_name));
+            }
+            
+            // Build display text
+            let mut lines = Vec::new();
+            let category_order = ["🔥 Propulsion", "🎯 Control", "💨 Aerodynamics", "📍 Position/Motion"];
+            
+            for category_name in &category_order {
+                if let Some(rows) = by_category.get(category_name) {
+                    lines.push(String::new()); // spacer
+                    lines.push(format!("{}", category_name));
+                    lines.push("════════════════════════════════════════════════════════════════════════════════".to_string());
+                    
+                    for row in rows.iter().skip(scroll_back.get()).take(rows_visible) {
+                        lines.push(format!(
+                            "  {:<25}: {:>40} {}",
+                            row.component_name.replace("rocket.", ""),
+                            format_values(&row.values),
+                            row.unit
+                        ));
+                    }
+                }
+            }
+            
+            (lines.join("\n"), q.iter().filter(|r| !r.is_waiting).count())
         }
-        
-        (lines.join("\n"), q.len())
     };
     
     let (telemetry_text, total_len) = display_text;
@@ -208,7 +304,11 @@ pub fn TelemetryApp(
                     weight: Weight::Bold,
                     color: Color::Cyan, 
                     align: TextAlign::Center,
-                    content: "║  🚀 ROCKET TELEMETRY DASHBOARD - REAL-TIME VALUES  ║".to_string()
+                    content: if total_len == 0 {
+                        "║  🚀 ROCKET TELEMETRY DASHBOARD - WAITING FOR DATA  ║".to_string()
+                    } else {
+                        "║  🚀 ROCKET TELEMETRY DASHBOARD - REAL-TIME VALUES  ║".to_string()
+                    }
                 )
                 Text(
                     weight: Weight::Bold,
@@ -217,8 +317,12 @@ pub fn TelemetryApp(
                 )
                 Text(content: "".to_string()) // Spacer
                 Text(
-                    color: Color::Green,
-                    content: format!("📡 Connected | 📦 Packets: ~{} | ⏱️  Tick: {}", packet_count, tick.get())
+                    color: if total_len == 0 { Color::Yellow } else { Color::Green },
+                    content: if total_len == 0 {
+                        "📡 Connected to database | ⏳ Waiting for simulation...".to_string()
+                    } else {
+                        format!("📡 Connected | 📦 Packets: ~{} | ⏱️  Tick: {}", packet_count, tick.get())
+                    }
                 )
             }
 

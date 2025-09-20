@@ -1,8 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
-use impeller2_stellar::Client;
 use std::net::SocketAddr;
-use tracing::{error, info};
+use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod client;
@@ -46,24 +45,10 @@ async fn main() -> Result<()> {
     // Parse address
     let addr: SocketAddr = format!("{}:{}", args.host, args.port).parse()?;
     
-    info!("Connecting to Elodin-DB at {}", addr);
+    info!("Starting Elodin-DB client for {}", addr);
 
-    // Connect to database
-    match Client::connect(addr).await {
-        Ok(mut client) => {
-            info!("Connected to database!");
-            
-            // Run the client with the TUI
-            client::run_with_tui(&mut client).await?;
-        }
-        Err(e) => {
-            error!("Failed to connect: {}", e);
-            eprintln!("\nConnection failed: {}", e);
-            eprintln!("\nMake sure:");
-            eprintln!("  1. elodin-db is running (elodin-db run [::]:2240 ~/.elodin/db)");
-            eprintln!("  2. The address {}:{} is correct", args.host, args.port);
-        }
-    }
+    // Run the client with connection retry and resilient TUI
+    client::run_resilient(addr).await?;
 
     Ok(())
 }

@@ -106,6 +106,7 @@ impl TelemetryProcessor {
                             component_name: value.name.clone(),
                             values: value.values.clone(),
                             unit: value.unit.clone(),
+                            is_waiting: false,  // This is real data
                         };
                         let _ = sender.send(row).await;
                     }
