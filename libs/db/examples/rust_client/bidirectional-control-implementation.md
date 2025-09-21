@@ -137,6 +137,19 @@ Enable verbose logging:
 RUST_LOG=debug ./target/release/rust_client --host 127.0.0.1 --port 2240 --verbose
 ```
 
+## Important: Timestamp Synchronization
+
+### Critical Update (v0.2.1)
+The initial implementation had a timestamp synchronization issue that caused "time travel" errors. This has been fixed by including explicit timestamps in the VTable definition and packets.
+
+**Key Requirements for Control Packets:**
+- Always include timestamp fields in VTable definitions
+- Send explicit timestamps with each packet
+- Use `Timestamp::now()` for real-time synchronization
+- Ensures compatibility with simulation timeline
+
+See `timestamp-fix.md` for technical details.
+
 ## Summary
 
 The Rust client now demonstrates full bidirectional communication with the Elodin ecosystem:
@@ -144,5 +157,6 @@ The Rust client now demonstrates full bidirectional communication with the Elodi
 - ✅ **Writes** control commands that affect simulations
 - ✅ **Concurrent** operation without blocking
 - ✅ **Real-time** control at 60 Hz
+- ✅ **Timestamp synchronized** to prevent conflicts
 
 This implementation proves that external clients can actively control simulations through elodin-db, enabling hardware-in-the-loop testing, remote control, and sophisticated control algorithms running outside the simulation environment.

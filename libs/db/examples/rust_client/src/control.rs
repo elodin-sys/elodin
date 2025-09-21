@@ -1,6 +1,6 @@
 use anyhow::Result;
 use impeller2::types::{ComponentId, LenPacket, PrimType, Timestamp};
-use impeller2::vtable::builder::{component, raw_field, schema, vtable};
+use impeller2::vtable::builder::{component, raw_field, raw_table, schema, timestamp, vtable};
 use impeller2_stellar::Client;
 use impeller2_wkt::VTableMsg;
 use std::time::{Duration, Instant};
@@ -18,6 +18,7 @@ impl ControlSender {
     pub fn new() -> Self {
         Self {
             trim_vtable_id: [3, 0],  // Use a unique VTable ID for control
+            // Back to the original component name
             trim_component_id: ComponentId::new("rocket.fin_control_trim"),
             start_time: Instant::now(),
             last_send_time: Instant::now(),
@@ -26,9 +27,10 @@ impl ControlSender {
     
     /// Send the VTable definition for trim control
     pub async fn send_vtable(&self, client: &mut Client) -> Result<()> {
-        // Create VTable for a single f64 value (no timestamp in vtable)
+        // Create VTable with timestamp field and f64 value
+        let time_field = raw_table(0, 8);  // First 8 bytes for timestamp
         let vtable = vtable(vec![
-            raw_field(0, 8, schema(PrimType::F64, &[], component(self.trim_component_id))),
+            raw_field(8, 8, schema(PrimType::F64, &[], timestamp(time_field, component(self.trim_component_id)))),
         ]);
         
         let vtable_msg = VTableMsg {
@@ -57,14 +59,15 @@ impl ControlSender {
         // Generate sinusoidal value: amplitude 2.0, period 4 seconds
         // This gives us a nice visible oscillation
         let frequency = 0.25; // 0.25 Hz = 4 second period
-        let amplitude = 2.0;  // ±2 degrees
+        let amplitude = 10.0;  // ±2 degrees
         let trim_value = amplitude * (2.0 * std::f64::consts::PI * frequency * elapsed).sin();
         
-        // Create timestamp (microseconds since epoch)
+        // Use current timestamp - the simulation now skips writing back fin_control_trim
         let timestamp = Timestamp::now();
         
-        // Build the packet with just the value (no timestamp)
-        let mut packet = LenPacket::table(self.trim_vtable_id, 8); // 8 bytes f64
+        // Build the packet with timestamp and value
+        let mut packet = LenPacket::table(self.trim_vtable_id, 16); // 8 bytes timestamp + 8 bytes f64
+        packet.extend_aligned(&timestamp.0.to_le_bytes());
         packet.extend_aligned(&trim_value.to_le_bytes());
         
         // Send the packet

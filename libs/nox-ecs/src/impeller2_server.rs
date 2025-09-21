@@ -181,6 +181,14 @@ pub fn commit_world_head(
                 continue;
             };
             let pair_name = format!("{}.{}", entity_metadata.name, component_metadata.name);
+            
+            // IMPORTANT: Skip writing back components that are marked as external control
+            // This allows external clients to control these values without conflicts
+            if component_metadata.name == "fin_control_trim" {
+                tracing::trace!("Skipping write-back for external control component: {}", pair_name);
+                continue;
+            }
+            
             let pair_id = ComponentId::new(&pair_name);
             let Some(component) = state.get_component(pair_id) else {
                 continue;

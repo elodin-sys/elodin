@@ -1,5 +1,23 @@
 # Rust Client Changelog
 
+## v0.3.0 - External Control Component Solution
+- Properly fixed time travel errors with external control mechanism
+- Modified nox-ecs to skip writing back fin_control_trim
+- Control client uses normal timestamps (no future timestamp hacks)
+- Clean separation of control authority
+- Simulation reads but doesn't write external control components
+- Requires rebuilding nox-ecs and nox-py
+
+## v0.2.2 - Future Timestamp Workaround (Deprecated)
+- Attempted to resolve time travel errors using future timestamps
+- Proved to be hacky and brittle
+- Replaced by proper external control solution in v0.3.0
+
+## v0.2.1 - Timestamp Synchronization Fix (Partial)
+- Added proper timestamps to VTable definition and packets
+- Fixed timestamp structure but conflict with simulation persisted
+- Led to discovery of write-back issue in v0.2.2
+
 ## v0.2.0 - Bidirectional Control Support
 - Added control module for sending commands to simulation
 - Implemented dual-client architecture (telemetry + control)
