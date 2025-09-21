@@ -380,3 +380,22 @@ async fn tick(...) {
 ```
 
 The system is ready - we just need to connect the client!
+
+## ✅ UPDATE: Solution Fully Implemented
+
+### Final Implementation: Metadata-Based External Control
+
+After discovering timestamp conflicts between the simulation and control client, we implemented a proper metadata-based solution:
+
+1. **Component Declaration**: Components marked with `metadata={"external_control": "true"}` 
+2. **Selective Write-Back**: Simulation skips writing back external control components
+3. **Clean Separation**: External clients have exclusive write access to these components
+
+**Key Changes:**
+- `libs/nox-py/examples/rocket.py`: Added metadata to `FinControlTrim` component
+- `libs/nox-ecs/src/impeller2_server.rs`: Check metadata instead of hardcoded names
+- `libs/db/examples/rust_client/src/control.rs`: Normal timestamps (no hacks needed)
+
+**Result**: The rocket successfully responds to sinusoidal trim commands (±10° @ 0.25Hz) without any timestamp conflicts!
+
+See [EXTERNAL_CONTROL_GUIDE.md](./EXTERNAL_CONTROL_GUIDE.md) for the complete implementation guide and best practices.

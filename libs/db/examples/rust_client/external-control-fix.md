@@ -1,17 +1,30 @@
-# External Control Component Fix
+# External Control Component Solution
 
-## The Final Solution
+## The Proper, Scalable Solution
 
-The simulation no longer writes back `fin_control_trim` to the database, preventing timestamp conflicts with external control clients.
+Components can now be marked as "external control" in their declaration, preventing the simulation from writing them back to the database while still allowing initialization and reading.
 
 ## Implementation
 
-### Modified `commit_world_head` in `libs/nox-ecs/src/impeller2_server.rs`
+### 1. Component Declaration in Python (`rocket.py`)
+
+```python
+FinControlTrim = ty.Annotated[
+    jax.Array, 
+    el.Component("fin_control_trim", el.ComponentType.F64, 
+                 metadata={"external_control": "true"})
+]
+
+# Initialize with default value (works before client connects)
+fin_control_trim: FinControlTrim = field(default_factory=lambda: jnp.float64(0.0))
+```
+
+### 2. Metadata Check in `libs/nox-ecs/src/impeller2_server.rs`
 
 ```rust
-// IMPORTANT: Skip writing back components that are marked as external control
+// Skip writing back components that are marked as external control
 // This allows external clients to control these values without conflicts
-if component_metadata.name == "fin_control_trim" {
+if component_metadata.metadata.get("external_control") == Some(&"true".to_string()) {
     tracing::trace!("Skipping write-back for external control component: {}", pair_name);
     continue;
 }
@@ -57,29 +70,33 @@ if component_metadata.name == "fin_control_trim" {
    RUST_LOG=info ./target/release/rust_client --host 127.0.0.1 --port 2240
    ```
 
-## Future Improvements
+## Key Features
 
-This hardcodes `fin_control_trim` as an external control component. A better solution would be to:
+✅ **Metadata-based**: No hardcoded component names
+✅ **Scalable**: Any component can be marked as external control
+✅ **Initialized**: Components have default values before client connects
+✅ **Clean**: Simulation reads values but doesn't write them back
 
-1. **Add metadata flag** to components marking them as "external_control"
-2. **Check metadata** in `commit_world_head` instead of hardcoding names
-3. **Allow multiple components** to be marked as external control
+## Adding More External Control Components
 
-Example future implementation:
+Simply add the metadata when declaring any component:
+
 ```python
-# In rocket.py
-FinControlTrim = ty.Annotated[
-    jax.Array, 
-    el.Component("fin_control_trim", el.ComponentType.F64, 
+# Example: External throttle control
+ThrottleOverride = ty.Annotated[
+    jax.Array,
+    el.Component("throttle_override", el.ComponentType.F64, 
                  metadata={"external_control": "true"})
 ]
-```
 
-Then in `commit_world_head`:
-```rust
-if component_metadata.metadata.get("external_control") == Some(&"true".to_string()) {
-    continue;  // Skip write-back
-}
+# Example: External guidance target
+GuidanceTarget = ty.Annotated[
+    jax.Array,
+    el.Component("guidance_target", 
+                 el.ComponentType(el.PrimitiveType.F64, (3,)),
+                 metadata={"external_control": "true", 
+                          "element_names": "x,y,z"})
+]
 ```
 
 ## Summary

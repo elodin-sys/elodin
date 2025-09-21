@@ -56,10 +56,10 @@ impl ControlSender {
         // Calculate time since start in seconds
         let elapsed = self.start_time.elapsed().as_secs_f64();
         
-        // Generate sinusoidal value: amplitude 2.0, period 4 seconds
+        // Generate sinusoidal value: amplitude 10.0, period 4 seconds
         // This gives us a nice visible oscillation
         let frequency = 0.25; // 0.25 Hz = 4 second period
-        let amplitude = 10.0;  // ±2 degrees
+        let amplitude = 10.0;  // ±10 degrees
         let trim_value = amplitude * (2.0 * std::f64::consts::PI * frequency * elapsed).sin();
         
         // Use current timestamp - the simulation now skips writing back fin_control_trim
@@ -90,7 +90,7 @@ impl ControlSender {
 
 /// Run the control loop that sends sinusoidal trim commands
 pub async fn run_control_loop(client: &mut Client) -> Result<()> {
-    info!("Starting sinusoidal trim control (±2° @ 0.25Hz)");
+    info!("Starting sinusoidal trim control (±10° @ 0.25Hz)");
     
     let mut controller = ControlSender::new();
     

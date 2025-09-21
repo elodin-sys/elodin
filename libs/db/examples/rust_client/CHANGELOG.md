@@ -1,11 +1,14 @@
 # Rust Client Changelog
 
 ## v0.3.0 - External Control Component Solution
-- Properly fixed time travel errors with external control mechanism
-- Modified nox-ecs to skip writing back fin_control_trim
+- Properly fixed time travel errors with metadata-based external control mechanism
+- Components marked with metadata={"external_control": "true"} are not written back
+- Modified nox-ecs to check component metadata instead of hardcoding names
 - Control client uses normal timestamps (no future timestamp hacks)
 - Clean separation of control authority
 - Simulation reads but doesn't write external control components
+- Scalable solution - any component can be marked as external control
+- Components can be initialized with default values for use before client connects
 - Requires rebuilding nox-ecs and nox-py
 
 ## v0.2.2 - Future Timestamp Workaround (Deprecated)
