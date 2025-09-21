@@ -5,6 +5,7 @@ use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod client;
+mod control;
 mod discovery;
 mod processor;
 mod tui;

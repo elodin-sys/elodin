@@ -1,5 +1,15 @@
 # Rust Client Changelog
 
+## v0.2.0 - Bidirectional Control Support
+- Added control module for sending commands to simulation
+- Implemented dual-client architecture (telemetry + control)
+- Sends sinusoidal trim commands to `rocket.fin_control_trim`
+- Control parameters: ±2° amplitude at 0.25Hz (4-second period)
+- 60Hz update rate for smooth control
+- Concurrent operation with telemetry streaming
+- Created test script for easy validation
+- Demonstrates full read/write capability with elodin-db
+
 ## v0.1.6 - Smart Buffer Detection
 - Detects buffer components (e.g., v_rel_accel_buffer) and displays "[buffer: N values]"
 - Very large arrays (>20 values) are summarized as "[N values]" to avoid clutter

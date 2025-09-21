@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tracing::{info, warn};
 
+use crate::control::run_control_loop;
 use crate::discovery::discover_components;
 use crate::processor::TelemetryProcessor;
 use crate::tui::{run_tui, TelemetryRow};
@@ -67,16 +68,19 @@ async fn connect_and_stream(
     addr: SocketAddr,
     sender: async_channel::Sender<TelemetryRow>,
 ) -> Result<()> {
-    // Try to connect with retries
+    // Try to connect with retries - we need two clients
     let mut attempt = 0;
-    let mut client = loop {
+    let (mut telemetry_client, mut control_client) = loop {
         attempt += 1;
-        match Client::connect(addr).await {
-            Ok(client) => {
+        match futures_lite::future::try_zip(
+            Client::connect(addr),
+            Client::connect(addr),
+        ).await {
+            Ok((client1, client2)) => {
                 info!("Connected to database at {} (attempt #{})", addr, attempt);
                 // Send "connected" indicator
                 let _ = sender.send(TelemetryRow::connected()).await;
-                break client;
+                break (client1, client2);
             }
             Err(e) => {
                 if attempt == 1 {
@@ -89,8 +93,22 @@ async fn connect_and_stream(
         }
     };
     
-    // Run the main streaming logic
-    stream_telemetry(&mut client, sender).await
+    // Run telemetry streaming and control loop concurrently
+    let telemetry_future = stream_telemetry(&mut telemetry_client, sender);
+    let control_future = run_control_loop(&mut control_client);
+    
+    // Race both futures - if either fails, we stop both
+    use futures_lite::future;
+    match future::race(telemetry_future, control_future).await {
+        Ok(_) => {
+            info!("Streaming completed normally");
+            Ok(())
+        }
+        Err(e) => {
+            warn!("Streaming/control error: {}", e);
+            Err(e)
+        }
+    }
 }
 
 /// Stream telemetry from the connected client
