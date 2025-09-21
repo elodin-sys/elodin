@@ -136,6 +136,10 @@ pub fn copy_db_to_world(state: &State, world: &mut WorldExec<Compiled>) {
         };
         let entity_ids = bytemuck::try_cast_slice::<_, u64>(column.entity_ids.as_slice()).unwrap();
         let size = schema.size();
+        
+        // Track if any values changed for this component
+        let mut component_changed = false;
+        
         for (i, entity_id) in entity_ids.iter().enumerate() {
             let offset = i * size;
             let entity_id = impeller2::types::EntityId(*entity_id);
@@ -149,11 +153,48 @@ pub fn copy_db_to_world(state: &State, world: &mut WorldExec<Compiled>) {
 
             let pair_name = format!("{}.{}", entity_metadata.name, component_metadata.name);
             let pair_id = ComponentId::new(&pair_name);
+            
+            // Debug logging for external control components
+            if component_metadata.metadata.get("external_control") == Some(&"true".to_string()) {
+                tracing::debug!("Reading external control component from DB: {}", pair_name);
+            }
+            
             let Some(component) = state.get_component(pair_id) else {
+                if component_metadata.metadata.get("external_control") == Some(&"true".to_string()) {
+                    tracing::debug!("External control component not found in DB: {}", pair_name);
+                }
                 continue;
             };
             let (_, head) = component.time_series.latest().unwrap();
+            
+            // Check if the value has changed
+            let current_value = &column.buffer[offset..offset + size];
+            if current_value != head {
+                component_changed = true;
+            }
+            
+            // Log the value being copied for external control components
+            if component_metadata.metadata.get("external_control") == Some(&"true".to_string()) {
+                if size == 8 {
+                    let value = f64::from_le_bytes(head[0..8].try_into().unwrap_or([0; 8]));
+                    // tracing::info!("Copying external control {} from DB: value={:.3}", pair_name, value);
+                }
+            }
+            
             column.buffer[offset..offset + size].copy_from_slice(head);
+        }
+        
+        // CRITICAL: Mark component as dirty if any value changed
+        // This ensures it gets copied to client buffers for GPU execution
+        if component_changed {
+            world.dirty_components.insert(*component_id);
+            
+            // Log when we mark external control components as dirty
+            if let Some((_, metadata)) = world.metadata.component_map.get(component_id) {
+                if metadata.metadata.get("external_control") == Some(&"true".to_string()) {
+                    tracing::debug!("Marked external control component {:?} as dirty", component_id);
+                }
+            }
         }
     }
 }

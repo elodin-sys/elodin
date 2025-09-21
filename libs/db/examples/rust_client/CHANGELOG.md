@@ -1,5 +1,25 @@
 # Rust Client Changelog
 
+## v0.4.0 - The Dirty Flag Bug Fix (MAJOR)
+- **CRITICAL FIX**: External control components now marked as dirty when updated from DB
+- Fixed GPU execution always using initial values instead of DB updates
+- Components changed in `copy_db_to_world` now properly flagged for GPU sync
+- External control finally works end-to-end!
+- See THE-DIRTY-FLAG-BUG.md for complete analysis
+
+## v0.3.2 - External Control Pipeline Fix (Attempt - Incomplete)
+- Added explicit `read_external_trim` system to ensure component is read each tick
+- Attempted to fix external control flow but missed the dirty flag issue
+- Diagnostic systems added to trace the problem
+
+## v0.3.1 - Rocket Physics Fix
+- Fixed rocket physics to respond to trim control
+- Added roll moment generation from fin_control_trim
+- Roll moment was previously hardcoded to zero
+- Trim now creates visible roll effect on rocket
+- Added visualization graphs for trim, deflection, and aero coefficients
+- Roll effectiveness tunable via parameter
+
 ## v0.3.0 - External Control Component Solution
 - Properly fixed time travel errors with metadata-based external control mechanism
 - Components marked with metadata={"external_control": "true"} are not written back

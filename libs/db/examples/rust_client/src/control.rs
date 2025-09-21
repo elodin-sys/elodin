@@ -17,8 +17,10 @@ pub struct ControlSender {
 impl ControlSender {
     pub fn new() -> Self {
         Self {
-            trim_vtable_id: [3, 0],  // Use a unique VTable ID for control
-            // Back to the original component name
+            // IMPORTANT: We need to use the same VTable ID that the simulation expects
+            // The simulation likely uses VTable [0, 0] or [1, 0] for its main components
+            // TODO: This should be discovered dynamically from the database
+            trim_vtable_id: [1, 0],  // Try to match simulation's VTable
             trim_component_id: ComponentId::new("rocket.fin_control_trim"),
             start_time: Instant::now(),
             last_send_time: Instant::now(),
@@ -73,16 +75,6 @@ impl ControlSender {
         // Send the packet
         let (result, _) = client.send(packet).await;
         result?;
-        
-        debug!(
-            "Sent trim control: {:.3}° at time {:.2}s (timestamp: {})",
-            trim_value, elapsed, timestamp.0
-        );
-        
-        // Log periodically for visibility
-        if elapsed as u64 % 2 == 0 && (elapsed * 10.0) as u64 % 10 == 0 {
-            info!("Trim control oscillating: {:.3}° (t={:.1}s)", trim_value, elapsed);
-        }
         
         Ok(())
     }

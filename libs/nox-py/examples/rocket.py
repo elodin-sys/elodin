@@ -38,6 +38,16 @@ AeroCoefs = ty.Annotated[
     ),
 ]
 
+RollMoment = ty.Annotated[
+    jax.Array, 
+    el.Component("roll_moment_debug", el.ComponentType.F64)
+]
+
+TrimMirror = ty.Annotated[
+    jax.Array,
+    el.Component("trim_mirror", el.ComponentType.F64)
+]
+
 AeroForce = ty.Annotated[
     el.SpatialForce,
     el.Component(
@@ -258,7 +268,11 @@ class Rocket(el.Archetype):
     motor: Motor = field(default_factory=lambda: jnp.float64(0.0))
     fin_deflect: FinDeflect = field(default_factory=lambda: jnp.float64(0.0))
     fin_control: FinControl = field(default_factory=lambda: jnp.float64(0.0))
+    # IMPORTANT: External control components should still be initialized to ensure physics works
+    # The copy_db_to_world function will overwrite this with the database value each tick
     fin_control_trim: FinControlTrim = field(default_factory=lambda: jnp.float64(0.0))
+    roll_moment_debug: RollMoment = field(default_factory=lambda: jnp.float64(0.0))
+    trim_mirror: TrimMirror = field(default_factory=lambda: jnp.float64(0.0))
     v_rel_accel_buffer: VRelAccelBuffer = field(
         default_factory=lambda: jnp.zeros((lp_buffer_size, 3))
     )
@@ -337,18 +351,49 @@ def aero_coefs(
         to_coord(aero_df["Alphac"], jnp.abs(angle_of_attack)),
     ]
     coefs = jnp.array([map_coordinates(coef, coords, 1, mode="nearest") for coef in aero])
+    # Add roll moment based on fin deflection to make trim visible
+    # This simulates differential fin deflection creating roll
+    roll_effectiveness = 0.1  # Roll moment per degree of trim
+    
+    # CRITICAL: The fin_trim value coming from external control
+    # needs to be used here to generate roll moment
+    cl = fin_trim * roll_effectiveness  # Roll moment from trim
+    
+    # Debug: Add constant to verify value is updating (remove when trim works)
+    # cl = cl + 0.5  # Uncomment to add constant roll for physics verification
+    
     coefs = jnp.array(
         [
-            0.0,
-            0.0,
-            coefs[0] * aoa_sign,
-            coefs[1],
-            coefs[2] * aoa_sign,
-            0.0,
+            cl,  # Cl (roll moment) - now affected by trim!
+            0.0,  # CnR (yaw moment)
+            coefs[0] * aoa_sign,  # CmR (pitch moment)
+            coefs[1],  # CA (axial force)
+            coefs[2] * aoa_sign,  # CZR (normal force)
+            0.0,  # CYR (side force)
         ]
     )
     return coefs
 
+
+@el.map
+def extract_roll_moment(aero_coefs: AeroCoefs) -> RollMoment:
+    """Debug function to extract and monitor the roll moment coefficient"""
+    return aero_coefs[0]  # Cl is the first coefficient
+
+@el.map
+def read_external_trim(fin_trim: FinControlTrim) -> FinControlTrim:
+    """Pass-through system to ensure external control component is read from DB"""
+    # This system explicitly reads the fin_control_trim component
+    # ensuring it's part of the compiled system pipeline
+    return fin_trim
+
+@el.map
+def mirror_trim_diagnostic(fin_trim: FinControlTrim) -> TrimMirror:
+    """Diagnostic system: copy trim value to mirror component to verify it's available"""
+    # If this component shows non-zero values but aero_coefs doesn't use them,
+    # then we know the value is available but not being passed correctly
+    # If this stays at 0, then the external control isn't being read at all
+    return fin_trim + 1000.0  # Add 1000 so we can easily see if it's working
 
 @el.map
 def aero_forces(
@@ -467,7 +512,7 @@ rocket = w.spawn(
             ),
             inertia=el.SpatialInertia(3.0, jnp.array([0.1, 1.0, 1.0])),
         ),
-        Rocket(),
+        Rocket(),  # This initializes all components including fin_control_trim
     ],
     name="Rocket",
     id="rocket",
@@ -479,8 +524,10 @@ w.schematic(
             viewport name=Viewport pos="rocket.world_pos + (0.0,0.0,0.0,0.0, 5.0, 0.0, 1.0)" look_at="rocket.world_pos" hdr=#true
         }
         vsplit share=0.4 {
-            graph "rocket.fin_deflect" name=Fin
-            graph "rocket.v_rel_accel, rocket.v_rel_accel_filtered" name=Accel
+            graph "rocket.fin_control_trim" name="Trim Control"
+            graph "rocket.roll_moment_debug" name="Roll Moment (Cl)"
+            graph "rocket.fin_deflect" name="Fin Deflection"
+            graph "rocket.aero_coefs" name="Aero Coefficients"
         }
     }
     object_3d rocket.world_pos {
@@ -502,6 +549,7 @@ non_effectors = (
     | pitch_pid_control
     | fin_control
     | aero_coefs
+    | extract_roll_moment
     | aero_forces
     | thrust
 )
@@ -511,5 +559,7 @@ w.run(
     sys, 
     sim_time_step=SIM_TIME_STEP,
     run_time_step=SIM_TIME_STEP, # This creates real-time streaming
-    default_playback_speed=1.0
+    default_playback_speed=1.0,
+    # Ensure external control components are properly handled
+    # The copy_db_to_world should run before each tick
 )
