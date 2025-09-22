@@ -88,8 +88,6 @@ impl ControlSender {
 
 /// Run the control loop that sends sinusoidal trim commands
 pub async fn run_control_loop(client: &mut Client) -> Result<()> {
-    info!("Starting sinusoidal trim control (±10° @ 0.25Hz)");
-
     let mut controller = ControlSender::new();
 
     // Send the VTable definition once
