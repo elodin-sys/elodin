@@ -58,7 +58,7 @@ async fn main() -> Result<()> {
 /// Supports formats like:
 /// - "127.0.0.1" (uses port argument)
 /// - "127.0.0.1:2290" (port in host string)
-/// - "[::1]" (IPv6, uses port argument) 
+/// - "[::1]" (IPv6, uses port argument)
 /// - "[::1]:2290" (IPv6 with port)
 /// - "[::]:2240" (IPv6 any address with port)
 /// - "localhost" (uses port argument)
@@ -68,17 +68,20 @@ fn parse_address(host_str: &str, default_port: u16) -> Result<SocketAddr> {
     if let Ok(addr) = host_str.parse::<SocketAddr>() {
         return Ok(addr);
     }
-    
+
     // Check if the host string contains a port
     // For IPv6, we need to handle the bracketed format specially
     let (host, port) = if host_str.starts_with('[') {
         // IPv6 address - look for "]:port" pattern
         if let Some(bracket_end) = host_str.find(']') {
             let host_part = &host_str[..=bracket_end];
-            if bracket_end + 1 < host_str.len() && &host_str[bracket_end + 1..bracket_end + 2] == ":" {
+            if bracket_end + 1 < host_str.len()
+                && &host_str[bracket_end + 1..bracket_end + 2] == ":"
+            {
                 // Has port after bracket
                 let port_str = &host_str[bracket_end + 2..];
-                let port = port_str.parse::<u16>()
+                let port = port_str
+                    .parse::<u16>()
                     .with_context(|| format!("Invalid port in '{}'", host_str))?;
                 (host_part.to_string(), port)
             } else {
@@ -106,7 +109,7 @@ fn parse_address(host_str: &str, default_port: u16) -> Result<SocketAddr> {
         // No colon, use the whole string as host and default port
         (host_str.to_string(), default_port)
     };
-    
+
     // Now parse the final address
     let addr_str = if host.starts_with('[') && host.ends_with(']') {
         // Already bracketed IPv6
@@ -118,7 +121,8 @@ fn parse_address(host_str: &str, default_port: u16) -> Result<SocketAddr> {
         // IPv4 or hostname
         format!("{}:{}", host, port)
     };
-    
-    addr_str.parse::<SocketAddr>()
+
+    addr_str
+        .parse::<SocketAddr>()
         .with_context(|| format!("Failed to parse address '{}'", addr_str))
 }
