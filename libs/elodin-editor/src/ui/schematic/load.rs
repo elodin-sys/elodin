@@ -364,8 +364,22 @@ pub fn viewport_label(viewport: &Viewport) -> String {
         .unwrap_or_else(|| "Viewport".to_string())
 }
 
+/// Prefer the explicit `name` when set (and not the generic "Graph").
+/// Otherwise, derive a readable label from the first EQL term.
 pub fn graph_label(graph: &Graph) -> String {
-    graph.name.clone().unwrap_or_else(|| "Graph".to_string())
+    if let Some(name) = graph.name.as_ref() {
+        let trimmed = name.trim();
+        if !trimmed.is_empty() && trimmed != "Graph" {
+            return trimmed.to_string();
+        }
+    }
+    graph
+        .eql
+        .split(',')
+        .next()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "Graph".to_string())
 }
 
 #[derive(Default, Deref, DerefMut, Resource)]

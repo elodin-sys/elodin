@@ -2,6 +2,7 @@ use bevy::{
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     ecs::system::{SystemParam, SystemState},
     input::keyboard::Key,
+    log::info,
     prelude::*,
 };
 use bevy_editor_cam::prelude::{EditorCam, EnabledMotion, OrbitConstraint};
@@ -21,7 +22,7 @@ use smallvec::SmallVec;
 use std::collections::{BTreeMap, HashMap};
 
 use super::{
-    SelectedObject, ViewportRect,
+    SaveKdlEvent, SelectedObject, ViewportRect,
     actions::ActionTileWidget,
     button::{EImageButton, ETileButton},
     colors::{self, get_scheme, with_opacity},
@@ -257,10 +258,6 @@ impl TileState {
                 }
                 _ => {}
             }
-
-            // if selected_object.is_tile_selected(*tile_id) {
-            //     *selected_object = SelectedObject::None;
-            // }
         }
 
         if let Some(root_id) = self.tree.root() {
@@ -630,6 +627,7 @@ struct TreeBehavior<'w> {
     icons: TileIcons,
     tree_actions: SmallVec<[TreeAction; 4]>,
     world: &'w mut World,
+    // IMPORTANT: lecture seule (copie) des titres pour l'affichage
     container_titles: HashMap<TileId, String>,
 }
 
@@ -649,6 +647,8 @@ pub enum TreeAction {
     AddSidebars,
     DeleteTab(TileId),
     SelectTile(TileId),
+    // NEW: renommage des conteneurs (tabs/linear) appliqué après le draw
+    RenameContainer(TileId, String),
 }
 
 enum TabState {
@@ -793,9 +793,9 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                         .data_mut(|d| d.insert_temp(persist_id, new_title.clone()));
                     ui.memory_mut(|m| m.surrender_focus(resp.id));
 
-                    if let Some(mut state) = self.world.get_resource_mut::<TileState>() {
-                        state.set_container_title(tile_id, new_title.clone());
-                    }
+                    // Au lieu de toucher ui_state ici, on envoie une action qui sera traitée après.
+                    self.tree_actions
+                        .push(TreeAction::RenameContainer(tile_id, new_title.clone()));
 
                     galley = egui::WidgetText::from(new_title).into_galley(
                         ui,
@@ -1401,6 +1401,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             .insert_new(Tile::Container(Container::Linear(linear)));
                         ui_state.tree.root = Some(root);
                     }
+                    // NEW: appliquer le renommage après le draw => pas de double emprunt
+                    TreeAction::RenameContainer(tile_id, title) => {
+                        ui_state.set_container_title(tile_id, title);
+                    }
                 }
             }
             let tiles = ui_state.tree.tiles.iter();
@@ -1497,5 +1501,13 @@ pub fn shortcuts(key_state: Res<LogicalKeyState>, mut ui_state: ResMut<TileState
             return;
         };
         tabs.set_active(*new_active_id);
+    }
+}
+
+/// Test purpose only
+pub fn kdl_save_shortcut(key_state: Res<LogicalKeyState>, mut ev_save: EventWriter<SaveKdlEvent>) {
+    if key_state.just_pressed(&Key::Space) {
+        info!("[Save KDL] requested (info!)");
+        ev_save.write(SaveKdlEvent);
     }
 }

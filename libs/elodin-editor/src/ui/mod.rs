@@ -33,6 +33,9 @@ use self::command_palette::CommandPalette;
 use self::widgets::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystemExt};
 use self::{button::EImageButton, utils::MarginSides};
 
+use bevy::log::{error, info};
+use std::{fs, path::PathBuf};
+
 pub mod actions;
 pub mod button;
 pub mod colors;
@@ -61,6 +64,10 @@ pub mod status_bar;
 
 #[cfg(not(target_family = "wasm"))]
 pub mod startup_window;
+
+/// Event used by tiles to trigger a KDL save from the UI.
+#[derive(Event)]
+pub struct SaveKdlEvent;
 
 #[derive(Resource, Default)]
 pub struct HdrEnabled(pub bool);
@@ -186,12 +193,18 @@ impl Plugin for UiPlugin {
             .init_resource::<HdrEnabled>()
             .init_resource::<timeline_slider::UITick>()
             .init_resource::<command_palette::CommandPaletteState>()
+            // Event registration for KDL save
+            .add_event::<SaveKdlEvent>()
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, shortcuts)
             .add_systems(Update, render_layout)
             .add_systems(Update, sync_hdr)
             .add_systems(Update, tiles::shortcuts)
+            // Emit save on Space
+            .add_systems(Update, tiles::kdl_save_shortcut)
+            // Handle save event and write file
+            .add_systems(Update, on_save_kdl_event)
             .add_systems(Update, set_camera_viewport.after(render_layout))
             .add_systems(Update, sync_camera_grid_cell.after(render_layout))
             .add_systems(Update, query_plot::auto_bounds)
@@ -627,5 +640,34 @@ fn sync_camera_grid_cell(
 fn sync_hdr(hdr_enabled: ResMut<HdrEnabled>, mut query: Query<&mut Camera>) {
     for mut cam in query.iter_mut() {
         cam.hdr = hdr_enabled.0;
+    }
+}
+
+// Save handler: serialize current layout to KDL and write export/layout.kdl
+fn on_save_kdl_event(
+    mut ev: EventReader<SaveKdlEvent>,
+    ui_state: Res<crate::ui::tiles::TileState>,
+) {
+    for _ in ev.read() {
+        info!("[Save KDL] event received");
+
+        let kdl = crate::ui::schematic::save::serialize_current_layout(&ui_state);
+
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let mut path = PathBuf::from("export");
+            let _ = fs::create_dir_all(&path);
+            path.push("layout.kdl");
+
+            match fs::write(&path, kdl.as_bytes()) {
+                Ok(_) => info!("[Save KDL] saved to {}", path.display()),
+                Err(e) => error!("[Save KDL] failed to save: {e}"),
+            }
+        }
+
+        #[cfg(target_family = "wasm")]
+        {
+            info!("[Save KDL] serialized (wasm): {}", kdl);
+        }
     }
 }

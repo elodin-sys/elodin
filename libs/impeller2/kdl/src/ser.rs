@@ -59,6 +59,11 @@ fn serialize_split<T>(split: &Split<T>, is_horizontal: bool) -> KdlNode {
         node.entries_mut().push(KdlEntry::new_prop("active", true));
     }
 
+    if let Some(ref name) = split.name {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("name", name.clone()));
+    }
+
     let mut children = KdlDocument::new();
 
     for (i, panel) in split.panels.iter().enumerate() {
