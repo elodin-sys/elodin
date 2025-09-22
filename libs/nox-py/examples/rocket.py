@@ -493,7 +493,9 @@ w.schematic(
     object_3d rocket.world_pos {
         glb path="https://storage.googleapis.com/elodin-assets/rocket.glb"
     }
-    line_3d rocket.world_pos line_width=11.0 color="yolk" perspective=#false
+    line_3d rocket.world_pos line_width=11.0 perspective=#false {
+        color yolk
+    }
 """,
     "rocket.kdl",
 )
