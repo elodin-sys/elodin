@@ -647,7 +647,6 @@ pub enum TreeAction {
     AddSidebars,
     DeleteTab(TileId),
     SelectTile(TileId),
-    // NEW: renommage des conteneurs (tabs/linear) appliqué après le draw
     RenameContainer(TileId, String),
 }
 
@@ -1401,7 +1400,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             .insert_new(Tile::Container(Container::Linear(linear)));
                         ui_state.tree.root = Some(root);
                     }
-                    // NEW: appliquer le renommage après le draw => pas de double emprunt
                     TreeAction::RenameContainer(tile_id, title) => {
                         ui_state.set_container_title(tile_id, title);
                     }
