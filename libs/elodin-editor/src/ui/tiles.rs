@@ -627,7 +627,6 @@ struct TreeBehavior<'w> {
     icons: TileIcons,
     tree_actions: SmallVec<[TreeAction; 4]>,
     world: &'w mut World,
-    // IMPORTANT: lecture seule (copie) des titres pour l'affichage
     container_titles: HashMap<TileId, String>,
 }
 
