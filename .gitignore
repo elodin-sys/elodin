@@ -9,6 +9,9 @@ result-bin
 .vscode
 node_modules
 
+# ai
+ai-context
+
 # kubernetes
 kubernetes/deploy
 out.yaml

@@ -136,6 +136,10 @@ pub fn copy_db_to_world(state: &State, world: &mut WorldExec<Compiled>) {
         };
         let entity_ids = bytemuck::try_cast_slice::<_, u64>(column.entity_ids.as_slice()).unwrap();
         let size = schema.size();
+
+        // Track if any values changed for this component
+        let mut component_changed = false;
+
         for (i, entity_id) in entity_ids.iter().enumerate() {
             let offset = i * size;
             let entity_id = impeller2::types::EntityId(*entity_id);
@@ -149,11 +153,25 @@ pub fn copy_db_to_world(state: &State, world: &mut WorldExec<Compiled>) {
 
             let pair_name = format!("{}.{}", entity_metadata.name, component_metadata.name);
             let pair_id = ComponentId::new(&pair_name);
+
             let Some(component) = state.get_component(pair_id) else {
                 continue;
             };
             let (_, head) = component.time_series.latest().unwrap();
+
+            // Check if the value has changed
+            let current_value = &column.buffer[offset..offset + size];
+            if current_value != head {
+                component_changed = true;
+            }
+
             column.buffer[offset..offset + size].copy_from_slice(head);
+        }
+
+        // Mark component as dirty if any value changed
+        // This ensures it gets copied to client buffers for GPU execution
+        if component_changed {
+            world.dirty_components.insert(*component_id);
         }
     }
 }
@@ -181,6 +199,12 @@ pub fn commit_world_head(
                 continue;
             };
             let pair_name = format!("{}.{}", entity_metadata.name, component_metadata.name);
+
+            // Skip writing back external control components
+            if component_metadata.metadata.get("external_control") == Some(&"true".to_string()) {
+                continue;
+            }
+
             let pair_id = ComponentId::new(&pair_name);
             let Some(component) = state.get_component(pair_id) else {
                 continue;
