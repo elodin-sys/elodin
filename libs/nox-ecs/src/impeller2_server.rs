@@ -201,7 +201,7 @@ pub fn commit_world_head(
             let pair_name = format!("{}.{}", entity_metadata.name, component_metadata.name);
 
             // Skip writing back external control components
-            if component_metadata.metadata.get("external_control") == Some(&"true".to_string()) {
+            if component_metadata.metadata.get("external_control").map(|s| s == "true").unwrap_or(false) {
                 continue;
             }
 

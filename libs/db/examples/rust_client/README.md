@@ -68,10 +68,31 @@ python rocket.py
 ./target/release/rust_client --help
 
 Options:
-  -H, --host <HOST>    Host address of the Elodin-DB server [default: 127.0.0.1]
-  -p, --port <PORT>    Port of the Elodin-DB server [default: 2240]
+  -H, --host <HOST>    Host address of the Elodin-DB server. Can be specified as 'host' or 'host:port'.
+                       If port is included here, it overrides the -p flag.
+                       Examples: "127.0.0.1", "[::1]", "localhost:2290", "[::]:2240"
+                       [default: 127.0.0.1:2240]
+  -p, --port <PORT>    Port of the Elodin-DB server (ignored if port is specified in --host)
+                       [default: 2240]
   -v, --verbose        Enable verbose logging
   -h, --help           Print help information
+```
+
+Examples:
+```bash
+# Using combined host:port notation (elodin-db style)
+./target/release/rust_client -H [::]:2240
+./target/release/rust_client -H localhost:2290
+./target/release/rust_client -H 127.0.0.1:2240
+
+# Using separate host and port
+./target/release/rust_client -H 127.0.0.1 -p 2240
+./target/release/rust_client -H localhost -p 2290
+
+# IPv6 examples
+./target/release/rust_client -H [::1]:2240        # IPv6 loopback with port
+./target/release/rust_client -H [::]:2240         # IPv6 any address with port
+./target/release/rust_client -H [::1] -p 2240     # IPv6 with separate port
 ```
 
 ## 📊 Example Output
@@ -204,10 +225,18 @@ This client demonstrates bidirectional communication with simulations, allowing 
          run_time_step=1/120.0)  # Real-time execution
    ```
 
-3. **Client Control**: The Rust client sends control commands:
+3. **Client Control**: The Rust client calculates and sends control commands:
    ```rust
-   // Sends sinusoidal trim commands (±10° @ 0.25Hz)
+   // Calculate sinusoidal trim value (±1° @ 0.25Hz)
    let trim_value = amplitude * (2.0 * PI * frequency * elapsed).sin();
+   
+   // Build packet with timestamp and value  
+   let mut packet = LenPacket::table(vtable_id, 16); // 8 bytes timestamp + 8 bytes f64
+   packet.extend_aligned(&timestamp.to_le_bytes());
+   packet.extend_aligned(&trim_value.to_le_bytes());
+   
+   // Send the packet to the database
+   let (result, _) = client.send(packet).await;
    ```
 
 ### Architecture Components
@@ -236,7 +265,11 @@ The rocket simulation includes a `fin_control_trim` component that accepts exter
 
 #### 2. Launch the Control Client
 ```bash
-./target/release/rust_client --host 127.0.0.1 --port 2240
+# Using the new combined host:port notation
+./target/release/rust_client -H 127.0.0.1:2240
+
+# Or if using a different port
+./target/release/rust_client -H localhost:2290
 ```
 
 The client automatically:
@@ -286,8 +319,14 @@ To add external control to your own simulations:
 
 3. **Send from Client**:
    ```rust
+   // Calculate control value
    let control_value = calculate_control();
-   send_component_update(client, "my_control", control_value).await?;
+   
+   // Build and send packet with the control value
+   let mut packet = LenPacket::table(vtable_id, 16);
+   packet.extend_aligned(&Timestamp::now().to_le_bytes());
+   packet.extend_aligned(&control_value.to_le_bytes());
+   client.send(packet).await?;
    ```
 
 ## 🏗️ Architecture

@@ -1,5 +1,13 @@
 # Rust Client Changelog
 
+## v0.4.1 - Command Line Enhancement & Documentation Improvements
+- **Host:Port Notation Support**: Added support for combined host:port notation in -H flag
+- Now accepts formats like `-H [::]:2240` to match elodin-db standard
+- Maintains backwards compatibility with separate `-H` and `-p` flags
+- Supports IPv4, IPv6, and hostname formats with optional port specification
+- Default changed to "127.0.0.1:2240" to be consistent with the new format
+- **Documentation**: Clarified control examples to show complete packet sending flow
+
 ## v0.4.0 - The Dirty Flag Bug Fix (MAJOR)
 - **CRITICAL FIX**: External control components now marked as dirty when updated from DB
 - Fixed GPU execution always using initial values instead of DB updates
