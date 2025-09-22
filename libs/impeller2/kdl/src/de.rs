@@ -310,7 +310,7 @@ fn parse_query_plot(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicErro
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let color = parse_color_from_node(node).unwrap_or(Color::WHITE);
+    let color = parse_color_from_node_or_children(node, None).unwrap_or(Color::WHITE);
 
     let query_type = node
         .get("type")
@@ -469,6 +469,7 @@ fn parse_object_3d_mesh(
     }
 }
 
+
 fn parse_line_3d(node: &KdlNode, src: &str) -> Result<Line3d, KdlSchematicError> {
     let eql = node
         .entries()
@@ -488,7 +489,7 @@ fn parse_line_3d(node: &KdlNode, src: &str) -> Result<Line3d, KdlSchematicError>
         .and_then(|v| v.as_float())
         .unwrap_or(1.0) as f32;
 
-    let color = parse_color_from_node(node).unwrap_or(Color::WHITE);
+    let color = parse_color_from_node_or_children(node, None).unwrap_or(Color::WHITE);
 
     let perspective = node
         .get("perspective")
@@ -504,52 +505,79 @@ fn parse_line_3d(node: &KdlNode, src: &str) -> Result<Line3d, KdlSchematicError>
     })
 }
 
+fn parse_color_from_node_or_children(node: &KdlNode, color_tag: Option<&str>) -> Option<Color> {
+    // First try to parse color from the node itself
+    if let Some(color) = parse_color_from_node(node) {
+        return Some(color);
+    }
+
+    let color_tag = color_tag.unwrap_or("color");
+    // If no color found on the node, look for color child nodes
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == color_tag {
+                if let Some(color) = parse_color_from_node(child) {
+                    return Some(color);
+                }
+            }
+        }
+    }
+    
+    None
+}
+
+/// Convert a float or an integer to a float value.
+pub(crate) fn to_float(value: &kdl::KdlValue) -> Option<f64> {
+    value.as_float().or_else(|| value.as_integer().map(|x| x as f64))
+}
+
 fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
     // First try to read from positional arguments (0,1,2,3)
     let entries = node.entries();
     if entries.len() >= 3 {
         // Only look for positional arguments if there are entries with no name
-        let positional_entries: Vec<_> = entries.iter()
-            .filter(|e| e.name().is_none())
-            .collect();
-        
-        if positional_entries.len() >= 3 {
-            if let (Some(r), Some(g), Some(b)) = (
-                positional_entries.get(0).and_then(|e| e.value().as_float()),
-                positional_entries.get(1).and_then(|e| e.value().as_float()),
-                positional_entries.get(2).and_then(|e| e.value().as_float()),
-            ) {
-                let a = positional_entries.get(3)
-                    .and_then(|e| e.value().as_float())
-                    .unwrap_or(1.0);
-                
-                return Some(Color::rgba(
-                    r as f32,
-                    g as f32,
-                    b as f32,
-                    a as f32,
-                ));
+        let mut positional_entries = entries.iter()
+            .filter(|e| e.name().is_none());
+
+        if let (Some(r), Some(g), Some(b)) = (
+            positional_entries.next().and_then(|e| to_float(e.value())),
+            positional_entries.next().and_then(|e| to_float(e.value())),
+            positional_entries.next().and_then(|e| to_float(e.value())),
+        ) {
+            let a = positional_entries.next()
+                .and_then(|e| to_float(e.value()))
+                .unwrap_or(1.0);
+
+            return Some(Color::rgba(
+                r as f32,
+                g as f32,
+                b as f32,
+                a as f32,
+            ));
+        }
+    } else if entries.len() == 1 {
+        let mut positional_entries = entries.iter()
+            .filter(|e| e.name().is_none());
+
+        if let Some(color_value) = entries.iter().next().and_then(|e| e.value().as_string()) {
+            // Fall back to named colors
+            return match color_value {
+                "black" => Some(Color::BLACK),
+                "white" => Some(Color::WHITE),
+                "turquoise" => Some(Color::TURQUOISE),
+                "slate" => Some(Color::SLATE),
+                "pumpkin" => Some(Color::PUMPKIN),
+                "yolk" => Some(Color::YOLK),
+                "peach" => Some(Color::PEACH),
+                "reddish" => Some(Color::REDDISH),
+                "hyperblue" => Some(Color::HYPERBLUE),
+                "mint" => Some(Color::MINT),
+                _ => None,
             }
         }
     }
 
-    // Fall back to named properties
-    let (r, g, b, a) = (
-        node.get("r").and_then(|v| v.as_float()),
-        node.get("g").and_then(|v| v.as_float()),
-        node.get("b").and_then(|v| v.as_float()),
-        node.get("a").and_then(|v| v.as_float()),
-    );
-    
-    if r.is_some() || g.is_some() || b.is_some() || a.is_some() {
-        Some(Color::rgba(
-            r.unwrap_or(0.0) as f32,
-            g.unwrap_or(0.0) as f32,
-            b.unwrap_or(0.0) as f32,
-            a.unwrap_or(1.0) as f32,
-        ))
-    } else if let Some(color_value) = node.get("color").and_then(|v| v.as_string()) {
-        // Try to parse tuple format like "(0.0, 1.0, 0.0)" or "(0.0, 1.0, 0.0, 0.8)"
+    if let Some(color_value) = node.get("color").and_then(|v| v.as_string()) {
         if color_value.starts_with('(') && color_value.ends_with(')') {
             let values: Vec<&str> = color_value[1..color_value.len()-1]
                 .split(',')
@@ -592,8 +620,23 @@ fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
     }
 }
 
+fn parse_color_children_from_node(node: &KdlNode) -> Vec<Color> {
+    let mut colors = Vec::new();
+
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if let Some(color) = parse_color_from_node(child) {
+                colors.push(color);
+            }
+        }
+    }
+
+    colors
+}
+
+
 fn parse_material_from_node(node: &KdlNode) -> Option<Material> {
-    parse_color_from_node(node).map(|color| Material { base_color: color })
+    parse_color_from_node_or_children(node, None).map(|color| Material { base_color: color })
 }
 
 fn parse_dashboard(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
@@ -1283,5 +1326,65 @@ object_3d "test" {
         } else {
             panic!("Expected object_3d");
         }
+    }
+
+    #[test]
+    fn test_parse_color_children_from_node() {
+        let kdl = r#"
+node {
+    color 1.0 0.0 0.0
+    color 0.0 1.0 0.0
+    color 0.0 0.0 1.0
+    other_node "not a color"
+}
+"#;
+        let doc = kdl.parse::<KdlDocument>().unwrap();
+        let node = &doc.nodes()[0];
+        
+        let colors = parse_color_children_from_node(node);
+        
+        assert_eq!(colors.len(), 3);
+        assert_eq!(colors[0].r, 1.0);
+        assert_eq!(colors[0].g, 0.0);
+        assert_eq!(colors[0].b, 0.0);
+        assert_eq!(colors[1].r, 0.0);
+        assert_eq!(colors[1].g, 1.0);
+        assert_eq!(colors[1].b, 0.0);
+        assert_eq!(colors[2].r, 0.0);
+        assert_eq!(colors[2].g, 0.0);
+        assert_eq!(colors[2].b, 1.0);
+    }
+
+    #[test]
+    fn test_parse_color_children_from_sphere() {
+
+        let kdl = r#"
+sphere radius=0.2 {
+        color 1 0 1
+    }
+"#;
+        let doc = kdl.parse::<KdlDocument>().unwrap();
+        let node = &doc.nodes()[0];
+        assert_eq!(node.name().to_string(), "sphere");
+        assert_eq!(node.children().iter().count(), 1);
+        let color_doc = node.children().iter().next().copied().unwrap();
+        let s = format!("{}", color_doc);
+        assert_eq!("color 1 0 1", s.as_str().trim());
+        let color_node = color_doc.get("color").unwrap();
+        assert_eq!(color_node.entries().len(), 3);
+        let mut entries = color_node.entries().iter().filter(|e| e.name().is_none());
+        assert_eq!(entries.clone().count(), 3);
+        let r = entries.next().and_then(|e| e.value().as_float().or_else(|| e.value().as_integer().map(|x| x as f64)));
+        assert_eq!(r, Some(1.0));
+        let color = parse_color_from_node(color_node);
+        assert!(color.is_some());
+
+        let colors = parse_color_children_from_node(node);
+
+        assert_eq!(colors.len(), 1);
+        assert_eq!(colors[0].r, 1.0);
+        assert_eq!(colors[0].g, 0.0);
+        assert_eq!(colors[0].b, 1.0);
+        assert_eq!(colors[0].a, 1.0);
     }
 }

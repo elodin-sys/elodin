@@ -307,13 +307,32 @@ fn serialize_line_3d<T>(line: &Line3d<T>) -> KdlNode {
     node
 }
 
+
 fn serialize_color_to_node(node: &mut KdlNode, color: &Color) {
-    node.entries_mut()
-        .push(KdlEntry::new_prop("r", color.r as f64));
-    node.entries_mut()
-        .push(KdlEntry::new_prop("g", color.g as f64));
-    node.entries_mut()
-        .push(KdlEntry::new_prop("b", color.b as f64));
+    serialize_color_to_node_named(node, color, None)
+}
+
+fn serialize_color_to_node_named(node: &mut KdlNode, color: &Color, name: Option<&str>) {
+    let mut color_node = KdlNode::new(name.unwrap_or("color"));
+    
+    // Add r, g, b as positional arguments
+    color_node.entries_mut().push(KdlEntry::new(color.r as f64));
+    color_node.entries_mut().push(KdlEntry::new(color.g as f64));
+    color_node.entries_mut().push(KdlEntry::new(color.b as f64));
+    
+    // Add alpha if it's not 1.0 (default)
+    if color.a != 1.0 {
+        color_node.entries_mut().push(KdlEntry::new(color.a as f64));
+    }
+    
+    // Add the color node as a child
+    if let Some(mut existing_children) = node.children_mut().as_mut() {
+        existing_children.nodes_mut().push(color_node);
+    } else {
+        let mut doc = KdlDocument::new();
+        doc.nodes_mut().push(color_node);
+        node.set_children(doc);
+    }
 }
 
 fn serialize_material_to_node(node: &mut KdlNode, material: &Material) {
@@ -359,9 +378,9 @@ fn serialize_dashboard_node<T>(dashboard_node: &DashboardNode<T>) -> KdlNode {
         children.nodes_mut().push(bg_node);
     }
 
-    let mut text_color_node = KdlNode::new("text_color");
-    serialize_color_to_node(&mut text_color_node, &dashboard_node.text_color);
-    children.nodes_mut().push(text_color_node);
+    // let mut text_color_node = KdlNode::new("text_color");
+    // serialize_color_to_node_named(&mut text_color_node, &dashboard_node.text_color, Some("text_color"));
+    // children.nodes_mut().push(text_color_node);
 
     // Add regular children
     for child in &dashboard_node.children {
@@ -370,6 +389,7 @@ fn serialize_dashboard_node<T>(dashboard_node: &DashboardNode<T>) -> KdlNode {
 
     node.set_children(children);
 
+    serialize_color_to_node_named(&mut node, &dashboard_node.text_color, Some("text_color"));
     node
 }
 
@@ -732,7 +752,9 @@ tabs {
 }
 
 object_3d "a.world_pos" {
-    sphere radius=0.2 color=mint
+    sphere radius=0.2 {
+        color mint
+    }
 }
 "#;
 
@@ -749,7 +771,7 @@ tabs {
 }
 object_3d a.world_pos {
     sphere radius=0.20000000298023224 {
-        color mint
+        color 0.5299999713897705 0.8700000047683716 0.6200000047683716
     }
 }"#
             .trim(),
@@ -788,7 +810,7 @@ tabs {
 }
 object_3d a.world_pos {
     sphere radius=0.20000000298023224 {
-        color 1 0 1
+        color 1.0 0.0 1.0
     }
 }"#
             .trim(),
