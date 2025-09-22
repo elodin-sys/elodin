@@ -732,7 +732,7 @@ tabs {
 }
 
 object_3d "a.world_pos" {
-    sphere radius=0.2
+    sphere radius=0.2 color=mint
 }
 "#;
 
@@ -748,7 +748,48 @@ tabs {
     graph a.world_pos name="a world_pos"
 }
 object_3d a.world_pos {
-    sphere radius=0.20000000298023224 r=1.0 g=1.0 b=1.0
+    sphere radius=0.20000000298023224 {
+        color mint
+    }
+}"#
+            .trim(),
+            serialized
+        );
+        let reparsed = parse_schematic(&serialized).unwrap();
+
+        // Check that the structure is preserved
+        assert_eq!(parsed.elems.len(), reparsed.elems.len());
+    }
+
+    #[test]
+    fn test_roundtrip_complex_example_color_tuple() {
+        let original_kdl = r#"
+tabs {
+    viewport fov=45.0 active=#true show_grid=#false hdr=#true
+    graph "a.world_pos" name="a world_pos"
+}
+
+object_3d "a.world_pos" {
+    sphere radius=0.2 {
+        color 1 0 1
+    }
+}
+"#;
+        let parsed = parse_schematic(original_kdl).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        // NOTE: fov and grid are dropped because they are the default value.
+        //
+        //viewport active=#true hdr=#true fov=45.0 show_grid=#false
+        assert_eq!(
+            r#"
+tabs {
+    viewport active=#true hdr=#true
+    graph a.world_pos name="a world_pos"
+}
+object_3d a.world_pos {
+    sphere radius=0.20000000298023224 {
+        color 1 0 1
+    }
 }"#
             .trim(),
             serialized

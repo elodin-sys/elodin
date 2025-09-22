@@ -976,11 +976,25 @@ mod tests {
         }
     }
 
+//     #[test]
+//     fn test_parse_object_3d_sphere_old() {
+//         let kdl = r#"
+// object_3d "a.world_pos" {
+//     sphere radius=0.2 {
+//         color r=1.0 g=0.0 b=0.0
+//     }
+// }
+// "#;
+//         assert!(parse_schematic(kdl).is_err());
+//     }
+
     #[test]
     fn test_parse_object_3d_sphere() {
         let kdl = r#"
 object_3d "a.world_pos" {
-    sphere radius=0.2 r=1.0 g=0.0 b=0.0
+    sphere radius=0.2 {
+        color 1.0 0.0 0.0
+    }
 }
 "#;
         let schematic = parse_schematic(kdl).unwrap();
@@ -1249,7 +1263,9 @@ object_3d "test" {
     fn test_parse_color_tuple_rgb_no_quotes() {
         let kdl = r#"
 object_3d "test" {
-    sphere radius=0.2 color=(0.0, 1.0, 0.0)
+    sphere radius=0.2 {
+       color 0.0 1.0 0.0
+    }
 }
 "#;
         let schematic = parse_schematic(kdl).unwrap();
