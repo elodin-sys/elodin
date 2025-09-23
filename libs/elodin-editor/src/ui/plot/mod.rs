@@ -8,25 +8,21 @@ pub use state::*;
 
 use bevy::{
     app::{Plugin, PostUpdate, Startup, Update},
-    ecs::schedule::IntoScheduleConfigs, // for `.after(...)`
+    ecs::schedule::IntoScheduleConfigs, 
 };
 
 pub struct PlotPlugin;
 impl Plugin for PlotPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app
-            // Resources
             .init_resource::<CollectedGraphData>()
             .init_resource::<LockedGraphsLeader>()
-            .init_resource::<LockTracker>() // Tracks per-entity lock state edges
-            // Systems
+            .init_resource::<LockTracker>()
             .add_systems(Startup, setup_pkt_handler)
-            // Input/interaction updates
             .add_systems(Update, zoom_graph)
             .add_systems(Update, graph_touch)
             .add_systems(Update, pan_graph)
             .add_systems(Update, reset_graph)
-            // Lock edge tracking must run after interaction updates
             .add_systems(
                 Update,
                 widget::track_lock_toggles
@@ -34,7 +30,6 @@ impl Plugin for PlotPlugin {
                     .after(pan_graph)
                     .after(reset_graph),
             )
-            // Leader-driven X-sync must run after lock edge handling
             .add_systems(
                 Update,
                 widget::sync_locked_graphs
@@ -43,7 +38,6 @@ impl Plugin for PlotPlugin {
                     .after(pan_graph)
                     .after(reset_graph),
             )
-            // Data lifecyle / GPU
             .add_systems(PostUpdate, queue_timestamp_read)
             .add_systems(Update, collect_garbage)
             .add_systems(Update, sync_graphs)

@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use std::collections::HashMap; // ParamSet, Query, Res, etc.
+use std::collections::HashMap; 
 
 use crate::{
     editor_cam_touch::*,
@@ -778,6 +778,7 @@ pub fn auto_y_bounds(
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub fn sync_graphs(
     mut graph_states: Query<&mut GraphState>,
     metadata_store: Res<ComponentMetadataRegistry>,
@@ -870,56 +871,44 @@ pub fn sync_graphs(
     }
 }
 
-/// Detect lock/unlock edges, assign/rotate leader, and copy leader X zoom/pan
-/// into graphs that just became locked (inherit-on-lock). Two-phase to avoid
-/// overlapping borrows of the ParamSet.
+#[allow(clippy::type_complexity)]
 pub fn track_lock_toggles(
     mut sets: ParamSet<(
-        Query<(Entity, &GraphState)>, // read-only snapshot
-        Query<&mut GraphState>,       // write to graphs
+        Query<(Entity, &GraphState)>, 
+        Query<&mut GraphState>,      
     )>,
     mut tracker: ResMut<LockTracker>,
     mut leader_res: ResMut<LockedGraphsLeader>,
 ) {
-    // 1) READ PASS — collect intentions and update tracker without any writes
     let mut newly_locked: Vec<Entity> = Vec::new();
     let mut leader_unlocked: Option<Entity> = None;
 
     {
-        // Limit the read borrow scope so it ends before we write
         let p0 = sets.p0();
         for (e, gs) in p0.iter() {
-            // Get previous 'locked' state (defaults to false if unseen), then store the current one
             let prev = tracker.0.insert(e, gs.locked).unwrap_or(false);
 
             match (prev, gs.locked) {
-                // Rising edge: just locked
                 (false, true) => {
                     if leader_res.leader.is_none() {
-                        // First locked graph becomes the leader
                         leader_res.leader = Some(e);
                     } else {
-                        // Defer inheritance to the write pass
                         newly_locked.push(e);
                     }
                 }
-                // Falling edge: just unlocked
                 (true, false) => {
                     if leader_res.leader == Some(e) {
-                        // Defer leader promotion to write pass
                         leader_unlocked = Some(e);
                     }
                 }
                 _ => {}
             }
         }
-    } // read borrow ends here
+    } 
 
-    // 2a) If the leader was unlocked, promote another locked graph as the new leader
     if let Some(old_leader) = leader_unlocked {
         let mut new_leader: Option<Entity> = None;
         {
-            // Fresh read borrow to scan candidates
             let p0 = sets.p0();
             for (ee, g) in p0.iter() {
                 if ee != old_leader && g.locked {
@@ -931,10 +920,8 @@ pub fn track_lock_toggles(
         leader_res.leader = new_leader;
     }
 
-    // 2b) Newly locked graphs inherit leader's X zoom/pan if a leader exists
     if let Some(leader_e) = leader_res.leader {
         if !newly_locked.is_empty() {
-            // Snapshot leader's X (separate read borrow)
             let leader_snapshot = {
                 let p0 = sets.p0();
                 p0.get(leader_e)
@@ -943,7 +930,6 @@ pub fn track_lock_toggles(
             };
 
             if let Some((zoom_x, pan_x)) = leader_snapshot {
-                // Apply to each newly locked graph (separate write borrow)
                 let mut p1 = sets.p1();
                 for e in newly_locked {
                     if let Ok(mut me) = p1.get_mut(e) {
@@ -956,10 +942,11 @@ pub fn track_lock_toggles(
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub fn sync_locked_graphs(
     mut sets: ParamSet<(
-        Query<(Entity, &GraphState)>,     // Reading
-        Query<(Entity, &mut GraphState)>, // Writing
+        Query<(Entity, &GraphState)>,     
+        Query<(Entity, &mut GraphState)>, 
     )>,
     leader_res: Res<LockedGraphsLeader>,
 ) {
@@ -967,7 +954,6 @@ pub fn sync_locked_graphs(
         return;
     };
 
-    // Snapshot reading of the leader
     let leader_snapshot = if let Ok((_, gs)) = sets.p0().get(leader_e) {
         Some((gs.zoom_factor.x, gs.pan_offset.x))
     } else {
@@ -977,7 +963,6 @@ pub fn sync_locked_graphs(
         return;
     };
 
-    // Updating every locked graph bu the leader
     for (e, mut gs) in sets.p1().iter_mut() {
         if e == leader_e {
             continue;
@@ -986,7 +971,6 @@ pub fn sync_locked_graphs(
             continue;
         }
 
-        // ne synchronise que l’axe X
         gs.zoom_factor.x = leader_zoom_x;
         gs.pan_offset.x = leader_pan_x;
     }
