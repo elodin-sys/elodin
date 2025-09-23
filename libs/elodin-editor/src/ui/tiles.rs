@@ -2,7 +2,6 @@ use bevy::{
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     ecs::system::{SystemParam, SystemState},
     input::keyboard::Key,
-    log::info,
     prelude::*,
 };
 use bevy_editor_cam::prelude::{EditorCam, EnabledMotion, OrbitConstraint};
@@ -22,7 +21,7 @@ use smallvec::SmallVec;
 use std::collections::{BTreeMap, HashMap};
 
 use super::{
-    SaveKdlEvent, SelectedObject, ViewportRect,
+    SelectedObject, ViewportRect,
     actions::ActionTileWidget,
     button::{EImageButton, ETileButton},
     colors::{self, get_scheme, with_opacity},
@@ -1498,13 +1497,5 @@ pub fn shortcuts(key_state: Res<LogicalKeyState>, mut ui_state: ResMut<TileState
             return;
         };
         tabs.set_active(*new_active_id);
-    }
-}
-
-/// Test purpose only
-pub fn kdl_save_shortcut(key_state: Res<LogicalKeyState>, mut ev_save: EventWriter<SaveKdlEvent>) {
-    if key_state.just_pressed(&Key::Space) {
-        info!("[Save KDL] requested (info!)");
-        ev_save.write(SaveKdlEvent);
     }
 }

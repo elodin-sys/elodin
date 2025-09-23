@@ -18,7 +18,6 @@ pub mod tree;
 pub use tree::*;
 mod load;
 pub use load::*;
-pub mod save;
 
 #[derive(Resource, Debug, Clone, Deref, DerefMut)]
 pub struct CurrentSchematic(pub Schematic<Entity>);
