@@ -113,27 +113,6 @@ let y_t = y.transpose(smallvec![1, 0]);
 let z = y_t.reshape(smallvec![12]);
 ```
 
-### Feature 5 — JAX bridge (optional)
-
-> Available when the `jax` feature is enabled. Handy for quick prototyping/debugging from Python.
-
-```rust
-#[cfg(feature = "jax")]
-{
-    use crate::noxpr::Noxpr;
-    use pyo3::prelude::*;
-
-    Python::with_gil(|py| {
-        let jnp = py.import("jax.numpy").unwrap();
-        let arr = jnp.call_method1("arange", (6,)).unwrap()
-                     .call_method1("reshape", (2, 3)).unwrap();
-        // Inject a JAX array into noxpr
-        let x = Noxpr::jax(arr.into_py(py));
-        let y = x.sin().log(); // freely compose noxpr ops
-        println!("y shape: {:?}", y.shape());
-    });
-}
-```
 ### Debug & helpers
 
 > Pretty-print the graph (human-readable IR)
