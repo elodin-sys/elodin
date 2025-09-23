@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use bevy_egui::EguiContexts;
 use egui_material_icons::{icon_button, icons::*};
 use std::collections::HashMap;
 
@@ -64,12 +63,6 @@ pub struct LockTracker(pub HashMap<Entity, bool>);
 /// Monotonic revision for X-sync (last-writer-wins)
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct XSyncClock(pub u64);
-
-/// Initialize Material Icons once (call in Startup)
-pub fn load_material_icons(mut egui_contexts: EguiContexts) {
-    let ctx = egui_contexts.ctx_mut();
-    egui_material_icons::initialize(&*ctx);
-}
 
 #[derive(SystemParam)]
 pub struct PlotWidget<'w, 's> {
