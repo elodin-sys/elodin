@@ -4567,6 +4567,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_material_icons"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a8fbdd1ecd47e2308795f3a79fc3b61456191b9276766b0009d9bcff72330ad"
+dependencies = [
+ "egui",
+]
+
+[[package]]
 name = "egui_table"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4714,6 +4723,7 @@ dependencies = [
  "convert_case 0.6.0",
  "directories",
  "egui",
+ "egui_material_icons",
  "egui_table",
  "egui_tiles",
  "eql",
