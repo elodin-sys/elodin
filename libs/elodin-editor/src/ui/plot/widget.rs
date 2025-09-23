@@ -870,8 +870,13 @@ pub fn track_lock_toggles(
     for (_e, g) in sets.p0().iter() {
         if g.locked {
             let cand = (g.zoom_factor.x, g.pan_offset.x, g.x_rev);
-            if source.map_or(true, |s| cand.2 > s.2) {
-                source = Some(cand);
+            match source {
+                None => source = Some(cand),
+                Some(s) => {
+                    if cand.2 > s.2 {
+                        source = Some(cand);
+                    }
+                }
             }
         }
     }
@@ -900,8 +905,13 @@ pub fn sync_locked_graphs(
     for (e, gs) in sets.p0().iter() {
         if gs.locked {
             let cand = (e, gs.zoom_factor.x, gs.pan_offset.x, gs.x_rev);
-            if src.map_or(true, |s| cand.3 > s.3) {
-                src = Some(cand);
+            match src {
+                None => src = Some(cand),
+                Some(s) => {
+                    if cand.3 > s.3 {
+                        src = Some(cand);
+                    }
+                }
             }
         }
     }
