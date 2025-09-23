@@ -8,14 +8,13 @@ pub use state::*;
 
 use bevy::{
     app::{Plugin, PostUpdate, Startup, Update},
-    ecs::schedule::IntoScheduleConfigs, 
+    ecs::schedule::IntoScheduleConfigs,
 };
 
 pub struct PlotPlugin;
 impl Plugin for PlotPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
-        app
-            .init_resource::<CollectedGraphData>()
+        app.init_resource::<CollectedGraphData>()
             .init_resource::<LockedGraphsLeader>()
             .init_resource::<LockTracker>()
             .add_systems(Startup, setup_pkt_handler)

@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use std::collections::HashMap; 
+use std::collections::HashMap;
 
 use crate::{
     editor_cam_touch::*,
@@ -873,10 +873,7 @@ pub fn sync_graphs(
 
 #[allow(clippy::type_complexity)]
 pub fn track_lock_toggles(
-    mut sets: ParamSet<(
-        Query<(Entity, &GraphState)>, 
-        Query<&mut GraphState>,      
-    )>,
+    mut sets: ParamSet<(Query<(Entity, &GraphState)>, Query<&mut GraphState>)>,
     mut tracker: ResMut<LockTracker>,
     mut leader_res: ResMut<LockedGraphsLeader>,
 ) {
@@ -904,7 +901,7 @@ pub fn track_lock_toggles(
                 _ => {}
             }
         }
-    } 
+    }
 
     if let Some(old_leader) = leader_unlocked {
         let mut new_leader: Option<Entity> = None;
@@ -945,8 +942,8 @@ pub fn track_lock_toggles(
 #[allow(clippy::type_complexity)]
 pub fn sync_locked_graphs(
     mut sets: ParamSet<(
-        Query<(Entity, &GraphState)>,     
-        Query<(Entity, &mut GraphState)>, 
+        Query<(Entity, &GraphState)>,
+        Query<(Entity, &mut GraphState)>,
     )>,
     leader_res: Res<LockedGraphsLeader>,
 ) {
