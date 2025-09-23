@@ -130,6 +130,25 @@ exec.run(1000)  # Run 1000 ticks
 df = exec.history(["satellite.world_pos", "satellite.world_vel"])
 ```
 
+### 6. External Control Mode (Real-Time with External Inputs)
+Enable external clients to control simulation components:
+```python
+# Define components with external control metadata
+ControlInput = ty.Annotated[
+    jax.Array, 
+    el.Component("control_input", el.ComponentType.F64, 
+                 metadata={"external_control": "true"})
+]
+
+# Run simulation in real-time with DB connection
+w.run(system, 
+      sim_time_step=1/120.0,     # Simulation timestep
+      run_time_step=1/120.0,      # Real-time execution rate
+      db_addr="0.0.0.0:2240")    # Listen for external connections
+```
+
+External clients can then connect and control these components in real-time. See the [Rust client example](../db/examples/rust_client/README.md) for a complete implementation.
+
 ## Database Integration
 
 ### Embedded Database (Default)
@@ -220,6 +239,108 @@ def spring_force(
         fold_fn=spring_calculation
     )
 ```
+
+## External Control & Hardware-in-the-Loop
+
+nox-py supports external control of simulation components, enabling hardware-in-the-loop testing and real-time control system development.
+
+### Setting Up External Control
+
+1. **Define External Control Components**:
+```python
+import typing as ty
+import elodin as el
+import jax.numpy as jnp
+
+# Component with external_control metadata won't be written back by simulation
+ThrustCommand = ty.Annotated[
+    jax.Array,
+    el.Component("thrust_command", el.ComponentType.F64,
+                 metadata={"external_control": "true"})
+]
+
+@el.dataclass
+class Spacecraft(el.Archetype):
+    # External control input
+    thrust_command: ThrustCommand = field(default_factory=lambda: jnp.float64(0.0))
+    # Regular simulation state
+    world_pos: el.WorldPos
+    world_vel: el.WorldVel
+```
+
+2. **Use in Physics Systems**:
+```python
+@el.map
+def apply_thrust(thrust_cmd: ThrustCommand, force: el.Force) -> el.Force:
+    # External control directly affects physics
+    return force + el.Force(linear=jnp.array([thrust_cmd, 0, 0]))
+```
+
+3. **Run in Real-Time Mode**:
+```python
+# Match simulation rate to real-time for responsive control
+w.run(physics_system,
+      sim_time_step=1/120.0,     # 120Hz simulation
+      run_time_step=1/120.0,      # Real-time playback
+      db_addr="0.0.0.0:2240")     # Accept external connections
+```
+
+### Connecting External Controllers
+
+External controllers (flight computers, ground stations, test harnesses) can connect via:
+- **TCP/UDP**: Using Impeller2 protocol
+- **Shared Memory**: For local hardware-in-the-loop
+- **Serial**: For embedded systems
+
+Example with Rust client:
+```rust
+// Connect to simulation
+let client = Client::connect("127.0.0.1:2240").await?;
+
+// Send control commands
+loop {
+    let thrust = calculate_thrust_command();
+    client.set_component("thrust_command", thrust).await?;
+    sleep(Duration::from_millis(10)).await;
+}
+```
+
+### Real-World Example: Rocket Fin Control
+
+The `rocket.py` example demonstrates external trim control:
+```python
+# External trim control for rocket fins
+FinControlTrim = ty.Annotated[
+    jax.Array,
+    el.Component("fin_control_trim", el.ComponentType.F64,
+                 metadata={"external_control": "true"})
+]
+
+@el.map
+def aero_coefs(fin_deflect: FinDeflect, fin_trim: FinControlTrim) -> AeroCoefs:
+    # Combine autonomous control with external trim
+    effective_deflect = jnp.clip(fin_deflect + fin_trim, -40.0, 40.0)
+    # ... calculate aerodynamics
+```
+
+Run the complete example:
+```bash
+# Terminal 1: Simulation
+python examples/rocket.py run 0.0.0.0:2240
+
+# Terminal 2: External controller
+cargo run --release -p elodin-db-rust-client
+
+# Terminal 3: Visualization
+elodin editor 127.0.0.1:2240
+```
+
+### Best Practices
+
+1. **Initialize External Components**: Provide default values for operation before external control connects
+2. **Validate Inputs**: Clamp or validate external inputs to prevent instability
+3. **Rate Limiting**: External controllers should respect simulation timestep
+4. **Failsafe**: Design systems to handle loss of external control gracefully
 
 ## Advanced Features
 

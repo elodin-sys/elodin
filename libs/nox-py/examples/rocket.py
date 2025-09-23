@@ -61,6 +61,11 @@ FinControl = ty.Annotated[jax.Array, el.Component("fin_control", el.ComponentTyp
 
 FinDeflect = ty.Annotated[jax.Array, el.Component("fin_deflect", el.ComponentType.F64)]
 
+FinControlTrim = ty.Annotated[
+    jax.Array,
+    el.Component("fin_control_trim", el.ComponentType.F64, metadata={"external_control": "true"}),
+]
+
 VRelAccel = ty.Annotated[
     jax.Array,
     el.Component(
@@ -253,6 +258,7 @@ class Rocket(el.Archetype):
     motor: Motor = field(default_factory=lambda: jnp.float64(0.0))
     fin_deflect: FinDeflect = field(default_factory=lambda: jnp.float64(0.0))
     fin_control: FinControl = field(default_factory=lambda: jnp.float64(0.0))
+    fin_control_trim: FinControlTrim = field(default_factory=lambda: jnp.float64(0.0))
     v_rel_accel_buffer: VRelAccelBuffer = field(
         default_factory=lambda: jnp.zeros((lp_buffer_size, 3))
     )
@@ -311,7 +317,11 @@ def aero_coefs(
     mach: Mach,
     angle_of_attack: AngleOfAttack,
     fin_deflect: FinDeflect,
+    fin_trim: FinControlTrim,
 ) -> AeroCoefs:
+    # Apply trim to fin deflection
+    effective_fin_deflect = jnp.clip(fin_deflect + fin_trim, -40.0, 40.0)
+
     aero = aero_interp_table(aero_df)
     aoa_sign = jax.lax.cond(
         jnp.abs(angle_of_attack) < 1e-6,
@@ -320,21 +330,27 @@ def aero_coefs(
         operand=None,
     )
     # aoa_sign is used to negate fin deflection angle as a way to interpolate negative angles of attack
-    fin_deflect *= aoa_sign
+    effective_fin_deflect *= aoa_sign
     coords = [
         to_coord(aero_df["Mach"], mach),
-        to_coord(aero_df["Delta"], fin_deflect),
+        to_coord(aero_df["Delta"], effective_fin_deflect),
         to_coord(aero_df["Alphac"], jnp.abs(angle_of_attack)),
     ]
     coefs = jnp.array([map_coordinates(coef, coords, 1, mode="nearest") for coef in aero])
+
+    # Roll moment based on external trim control
+    # Simulates differential fin deflection creating roll
+    roll_effectiveness = 0.1  # Roll moment per degree of trim
+    cl = fin_trim * roll_effectiveness
+
     coefs = jnp.array(
         [
-            0.0,
-            0.0,
-            coefs[0] * aoa_sign,
-            coefs[1],
-            coefs[2] * aoa_sign,
-            0.0,
+            cl,  # Cl (roll moment)
+            0.0,  # CnR (yaw moment)
+            coefs[0] * aoa_sign,  # CmR (pitch moment)
+            coefs[1],  # CA (axial force)
+            coefs[2] * aoa_sign,  # CZR (normal force)
+            0.0,  # CYR (side force)
         ]
     )
     return coefs
@@ -457,7 +473,7 @@ rocket = w.spawn(
             ),
             inertia=el.SpatialInertia(3.0, jnp.array([0.1, 1.0, 1.0])),
         ),
-        Rocket(),
+        Rocket(),  # This initializes all components including fin_control_trim
     ],
     name="Rocket",
     id="rocket",
@@ -469,8 +485,9 @@ w.schematic(
             viewport name=Viewport pos="rocket.world_pos + (0.0,0.0,0.0,0.0, 5.0, 0.0, 1.0)" look_at="rocket.world_pos" hdr=#true
         }
         vsplit share=0.4 {
-            graph "rocket.fin_deflect" name=Fin
-            graph "rocket.v_rel_accel, rocket.v_rel_accel_filtered" name=Accel
+            graph "rocket.fin_control_trim" name="Trim Control"
+            graph "rocket.fin_deflect" name="Fin Deflection"
+            graph "rocket.aero_coefs" name="Aero Coefficients"
         }
     }
     object_3d rocket.world_pos {
@@ -497,4 +514,11 @@ non_effectors = (
 )
 effectors = gravity | apply_thrust | apply_aero_forces
 sys = non_effectors | el.six_dof(sys=effectors, integrator=el.Integrator.Rk4)
-w.run(sys, sim_time_step=SIM_TIME_STEP)
+w.run(
+    sys,
+    sim_time_step=SIM_TIME_STEP,
+    run_time_step=SIM_TIME_STEP,  # This creates real-time streaming
+    default_playback_speed=1.0,
+    # Ensure external control components are properly handled
+    # The copy_db_to_world should run before each tick
+)
