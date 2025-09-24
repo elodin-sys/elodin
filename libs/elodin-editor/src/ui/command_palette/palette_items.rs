@@ -605,6 +605,16 @@ fn set_time_range_behavior() -> PaletteItem {
     })
 }
 
+pub fn save_schematic_as() -> PaletteItem {
+    PaletteItem::new(
+        "Save Schematic As...",
+        PRESETS_LABEL,
+        |_name: In<String>| {
+            PalettePage::new(vec![save_schematic_inner()]).into()
+        },
+    )
+}
+
 pub fn save_schematic() -> PaletteItem {
     PaletteItem::new(
         "Save Schematic",
@@ -621,7 +631,7 @@ pub fn save_schematic() -> PaletteItem {
                     }
                     PaletteEvent::Exit
                 }
-                None => PalettePage::new(vec![save_preset_inner()]).into(),
+                None => PalettePage::new(vec![save_schematic_inner()]).into(),
             }
         },
     )
@@ -644,7 +654,7 @@ pub fn save_schematic_db() -> PaletteItem {
     )
 }
 
-pub fn save_preset_inner() -> PaletteItem {
+pub fn save_schematic_inner() -> PaletteItem {
     PaletteItem::new(
         LabelSource::placeholder("Enter a name for the schematic"),
         "",
@@ -1073,6 +1083,7 @@ impl Default for PalettePage {
             create_sidebars(),
             create_3d_object(),
             save_schematic(),
+            save_schematic_as(),
             // TODO: Don't enable until we have a clear save and load story for db.
             //save_schematic_db(),
             load_schematic(),
