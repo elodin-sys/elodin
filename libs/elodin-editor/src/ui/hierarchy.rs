@@ -7,8 +7,7 @@ use bevy::prelude::Res;
 use bevy_egui::egui;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2_bevy::EntityMap;
-use std::collections::HashMap;
-
+use std::collections::BTreeMap;
 use crate::ui::{EntityFilter, EntityPair, SelectedObject, colors::get_scheme};
 
 use super::{inspector::search, schematic::Branch, widgets::WidgetSystem};
@@ -166,7 +165,7 @@ fn component_part(
 }
 
 fn filter_component_parts<'a, 'b>(
-    children: &'b HashMap<String, eql::ComponentPart>,
+    children: &'b BTreeMap<String, eql::ComponentPart>,
     matcher: &SkimMatcherV2,
     str: &'a str,
 ) -> (Vec<(i64, String, &'b eql::ComponentPart)>, &'a str) {

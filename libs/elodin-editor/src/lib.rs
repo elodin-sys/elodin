@@ -981,18 +981,8 @@ pub fn clamp_current_time(
     }
 }
 
-#[derive(Resource)]
+#[derive(Default, Resource)]
 pub struct EqlContext(pub eql::Context);
-
-impl Default for EqlContext {
-    fn default() -> Self {
-        Self(eql::Context::new(
-            HashMap::new(),
-            Timestamp(i64::MIN),
-            Timestamp(i64::MAX),
-        ))
-    }
-}
 
 pub fn update_eql_context(
     component_metadata_registry: Res<ComponentMetadataRegistry>,

@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     path::{Path, PathBuf},
     str::FromStr,
     time::Duration,
@@ -298,7 +298,7 @@ pub fn create_graph(tile_id: Option<TileId>) -> PaletteItem {
 }
 
 fn graph_parts(
-    parts: &HashMap<String, eql::ComponentPart>,
+    parts: &BTreeMap<String, eql::ComponentPart>,
     tile_id: Option<TileId>,
 ) -> Vec<PaletteItem> {
     parts
@@ -361,7 +361,7 @@ pub fn create_monitor(tile_id: Option<TileId>) -> PaletteItem {
 }
 
 fn monitor_parts(
-    parts: &HashMap<String, eql::ComponentPart>,
+    parts: &BTreeMap<String, eql::ComponentPart>,
     tile_id: Option<TileId>,
 ) -> Vec<PaletteItem> {
     parts
