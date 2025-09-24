@@ -1,4 +1,4 @@
-# nox/array
+# nox_array
 
 ## Description
 A small building block of the `nox` crate for representing n‑dimensional arrays (tensors) in a zero‑copy friendly way thanks to `ArrayView`.
@@ -29,16 +29,15 @@ assert_eq!(view.shape(), &shape);
 ### From raw bytes
 ```rust
 use nox_array::ArrayView;
-use zerocopy::{Immutable, TryFromBytes};
+use zerocopy::byteorder::{LE, U32};
 
+// [1u32, 2u32] as little-endian bytes
+let bytes: &[u8] = &[
+    0x01, 0x00, 0x00, 0x00,
+    0x02, 0x00, 0x00, 0x00,
+];
 
-#[derive(TryFromBytes, Immutable)]
-#[repr(C)]
-struct F32(f32);
-
-
-let bytes: &[u8] = &[0, 0, 0, 0, 0, 0, 0x80, 0x3f]; // [0.0, 1.0] as f32 LE
-let view = ArrayView::<F32>::from_bytes_shape_unchecked(bytes, &[2]).unwrap();
+let view = ArrayView::<U32<LE>>::from_bytes_shape_unchecked(bytes, &[2]).unwrap();
 assert_eq!(view.len(), 2);
 ```
 
@@ -46,10 +45,12 @@ assert_eq!(view.len(), 2);
 ```rust
 #[cfg(feature = "std")]
 {
-   let data: Vec<i32> = (0..20).collect();
-   let v = ArrayView::from_buf_shape_unchecked(&data, &[4, 5]);
+    use nox_array::ArrayView;
 
-   println!("{}", v); // uses ellipses if needed
-   println!("{:#}", v); // shows everything without ellipses
+    let data: Vec<i32> = (0..20).collect();
+    let v = ArrayView::from_buf_shape_unchecked(&data, &[4, 5]);
+
+    println!("{}", v);   // uses ellipses if needed
+    println!("{:#}", v); // shows everything without ellipses
 }
 ```
