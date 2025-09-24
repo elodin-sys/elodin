@@ -326,7 +326,7 @@ fn serialize_color_to_node_named(node: &mut KdlNode, color: &Color, name: Option
     }
     
     // Add the color node as a child
-    if let Some(mut existing_children) = node.children_mut().as_mut() {
+    if let Some(existing_children) = node.children_mut().as_mut() {
         existing_children.nodes_mut().push(color_node);
     } else {
         let mut doc = KdlDocument::new();

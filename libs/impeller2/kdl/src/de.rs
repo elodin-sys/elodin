@@ -199,6 +199,7 @@ fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
     } else {
         0.0..1.0
     };
+    let colors: Vec<_> = parse_color_children_from_node(&node).collect();
 
     Ok(Panel::Graph(Graph {
         eql,
@@ -207,6 +208,7 @@ fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
         auto_y_range,
         y_range,
         aux: (),
+        colors,
     }))
 }
 
@@ -559,7 +561,7 @@ fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
         let mut positional_entries = entries.iter()
             .filter(|e| e.name().is_none());
 
-        if let Some(color_value) = entries.iter().next().and_then(|e| e.value().as_string()) {
+        if let Some(color_value) = positional_entries.next().and_then(|e| e.value().as_string()) {
             // Fall back to named colors
             return match color_value {
                 "black" => Some(Color::BLACK),
@@ -620,20 +622,9 @@ fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
     }
 }
 
-fn parse_color_children_from_node(node: &KdlNode) -> Vec<Color> {
-    let mut colors = Vec::new();
-
-    if let Some(children) = node.children() {
-        for child in children.nodes() {
-            if let Some(color) = parse_color_from_node(child) {
-                colors.push(color);
-            }
-        }
-    }
-
-    colors
+fn parse_color_children_from_node(node: &KdlNode) -> impl Iterator<Item = Color> {
+    node.children().into_iter().flat_map(|c| c.nodes()).filter_map(parse_color_from_node)
 }
-
 
 fn parse_material_from_node(node: &KdlNode) -> Option<Material> {
     parse_color_from_node_or_children(node, None).map(|color| Material { base_color: color })
@@ -1341,7 +1332,7 @@ node {
         let doc = kdl.parse::<KdlDocument>().unwrap();
         let node = &doc.nodes()[0];
         
-        let colors = parse_color_children_from_node(node);
+        let colors = parse_color_children_from_node(node).collect::<Vec<_>>();
         
         assert_eq!(colors.len(), 3);
         assert_eq!(colors[0].r, 1.0);
@@ -1379,7 +1370,7 @@ sphere radius=0.2 {
         let color = parse_color_from_node(color_node);
         assert!(color.is_some());
 
-        let colors = parse_color_children_from_node(node);
+        let colors = parse_color_children_from_node(node).collect::<Vec<_>>();
 
         assert_eq!(colors.len(), 1);
         assert_eq!(colors[0].r, 1.0);

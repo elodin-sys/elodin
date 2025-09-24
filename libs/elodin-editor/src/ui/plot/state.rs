@@ -133,7 +133,7 @@ pub fn default_component_values(
     component_value
         .iter()
         .enumerate()
-        .map(|(i, _)| (component_id.0) as usize + i)
+        .map(|(i, _)| component_id.0 as usize + i)
         .map(|i| (true, colors::get_color_by_index_all(i)))
         .collect::<Vec<(bool, egui::Color32)>>()
 }
