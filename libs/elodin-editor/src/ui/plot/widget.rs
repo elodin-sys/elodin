@@ -707,10 +707,10 @@ pub fn sync_bounds(
     let outer_ratio = (rect.size() / inner_rect.size()).as_dvec2();
     let pan_offset = graph_state.pan_offset.as_dvec2() * DVec2::new(-1.0, 1.0);
     PlotBounds::from_lines(&selected_range, earliest_timestamp, y_min, y_max)
-        .zoom_at(outer_ratio, DVec2::new(1.0, 0.5))
-        .offset_by_norm(pan_offset)
-        .zoom(graph_state.zoom_factor.as_dvec2())
-        .normalize()
+        .zoom_at(outer_ratio, DVec2::new(1.0, 0.5)) // Zoom the bounds out so the graph takes up the entire screen.
+        .offset_by_norm(pan_offset) // Pan the bounds by the amount the cursor has moved.
+        .zoom(graph_state.zoom_factor.as_dvec2()) // Zoom the bounds based on the current zoom factor.
+        .normalize() // Clamp the bounds so max > min.
 }
 
 pub fn auto_y_bounds(
@@ -1326,12 +1326,15 @@ fn sigfig_round(x: f64, mut digits: i32) -> f64 {
 pub fn pretty_round(num: f64) -> f64 {
     let mut multiplier = 1.0;
     let mut n = num;
+    // Handle negative numbers.
     let is_negative = n < 0.0;
     n = n.abs();
+    // Find the appropriate multiplier for the decimal places.
     while n < 1.0 {
         n *= 10.0;
         multiplier *= 10.0;
     }
+    // Round to nearest 5.
     let rounded = (n * 2.0).round() / 2.0;
     let result = rounded / multiplier;
     if is_negative { -result } else { result }
