@@ -188,6 +188,9 @@ impl LoadSchematicParams<'_, '_> {
                     parent_id,
                     false,
                 );
+                if let (Some(tile_id), Some(name)) = (tile_id, split.name.clone()) {
+                    self.tile_state.container_titles.insert(tile_id, name);
+                }
                 for (i, panel) in split.panels.iter().enumerate() {
                     let child_id = self.spawn_panel(panel, tile_id);
                     let Some(tile_id) = tile_id else {
@@ -265,13 +268,11 @@ impl LoadSchematicParams<'_, '_> {
                     .insert_tile(Tile::Pane(Pane::Graph(graph)), parent_id, false)
             }
             Panel::ComponentMonitor(monitor) => {
-                // Create a MonitorPane and add it to the UI
                 let pane = MonitorPane::new("Monitor".to_string(), monitor.component_id);
                 self.tile_state
                     .insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
             }
             Panel::QueryTable(data) => {
-                // Create a new SQL table entity
                 let entity = self
                     .commands
                     .spawn(super::query_table::QueryTableData {
@@ -284,7 +285,6 @@ impl LoadSchematicParams<'_, '_> {
                     .insert_tile(Tile::Pane(Pane::QueryTable(pane)), parent_id, false)
             }
             Panel::ActionPane(action) => {
-                // Create a new action tile entity
                 let entity = self
                     .commands
                     .spawn(super::actions::ActionTile {
@@ -364,9 +364,22 @@ pub fn viewport_label(viewport: &Viewport) -> String {
         .unwrap_or_else(|| "Viewport".to_string())
 }
 
+/// Prefer the explicit `name` when set (and not the generic "Graph").
+/// Otherwise, derive a readable label from the first EQL term.
 pub fn graph_label(graph: &Graph) -> String {
-    // TODO: Update graph labeling once Graph structure is migrated to use ComponentPath
-    graph.name.clone().unwrap_or_else(|| "Graph".to_string())
+    if let Some(name) = graph.name.as_ref() {
+        let trimmed = name.trim();
+        if !trimmed.is_empty() && trimmed != "Graph" {
+            return trimmed.to_string();
+        }
+    }
+    graph
+        .eql
+        .split(',')
+        .next()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "Graph".to_string())
 }
 
 #[derive(Default, Deref, DerefMut, Resource)]
