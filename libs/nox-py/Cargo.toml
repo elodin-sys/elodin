@@ -20,13 +20,20 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # python
-pyo3 = "0.23.0"
-numpy.version = "0.23"
+pyo3 = "0.25.1"
+numpy.version = "0.25.0"
 
 # nox
 nox-ecs.path = "../nox-ecs"
 nox-ecs.features = ["pyo3"]
 nox-ecs-macros.path = "../nox-ecs-macros"
+
+# noxla - a wrapper around raw xla
+xla = { workspace = true, default-features = false, features = ["shared"] }
+
+lapack-sys = "0.14"
+lapack-src = { version = "0.12", features = ["netlib"] }
+netlib-src = { version = "0.9", features = ["static"] }
 
 # types
 postcard.version = "1.0"
