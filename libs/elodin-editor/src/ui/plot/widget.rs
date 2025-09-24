@@ -1,3 +1,7 @@
+use bevy::prelude::*;
+use egui_material_icons::{icon_button, icons::*};
+use std::collections::HashMap;
+
 use crate::{
     editor_cam_touch::*,
     ui::{theme::corner_radius_sm, utils::Shrink4},
@@ -7,6 +11,7 @@ use bevy::{
     ecs::{
         entity::Entity,
         event::EventReader,
+        prelude::Resource,
         query::With,
         system::{Commands, Local, Query, Res, SystemParam},
     },
@@ -20,8 +25,7 @@ use bevy::{
     render::camera::{Camera, OrthographicProjection, Projection, ScalingMode},
     window::{PrimaryWindow, Window},
 };
-use bevy_egui::egui::{self, Align, Layout};
-use egui::{CornerRadius, Frame, Margin, RichText, Stroke};
+use bevy_egui::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke};
 use impeller2::types::Timestamp;
 use impeller2_bevy::{ComponentMetadataRegistry, ComponentPath};
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp};
@@ -52,6 +56,14 @@ use super::{
     gpu::{self, LineHandle, LineVisibleRange, LineWidgetWidth},
 };
 
+/// Tracks locked state transitions
+#[derive(Resource, Default)]
+pub struct LockTracker(pub HashMap<Entity, bool>);
+
+/// Monotonic revision for X-sync (last-writer-wins)
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub struct XSyncClock(pub u64);
+
 #[derive(SystemParam)]
 pub struct PlotWidget<'w, 's> {
     collected_graph_data: ResMut<'w, CollectedGraphData>,
@@ -67,7 +79,6 @@ pub struct PlotWidget<'w, 's> {
 
 impl WidgetSystem for PlotWidget<'_, '_> {
     type Args = (Entity, egui::TextureId);
-
     type Output = ();
 
     fn ui_system(
@@ -135,7 +146,6 @@ pub struct TimeseriesPlot {
     bounds: PlotBounds,
     rect: egui::Rect,
     inner_rect: egui::Rect,
-
     steps_x: usize,
     steps_y: usize,
 }
@@ -146,7 +156,6 @@ pub const MARGIN: egui::Margin = egui::Margin {
     top: 35,
     bottom: 35,
 };
-
 pub const TICK_MARK_LINE_WIDTH: f32 = 1.0;
 pub const TICK_MARK_ASPECT_RATIO: f32 = 12.0 / 30.0;
 pub const NOTCH_LENGTH: f32 = 10.0;
@@ -192,11 +201,9 @@ impl TimeseriesPlot {
             selected_range,
             current_timestamp,
             earliest_timestamp,
-
             bounds,
             rect,
             inner_rect,
-
             steps_x,
             steps_y,
         }
@@ -265,7 +272,7 @@ impl TimeseriesPlot {
         pointer_pos: egui::Pos2,
         timestamp: Timestamp,
     ) {
-        let anchor_left = pointer_pos.x + MODAL_WIDTH + MODAL_MARGIN < self.rect.right(); // NOTE: might want to replace pointer_pos with x_offset from `render`
+        let anchor_left = pointer_pos.x + MODAL_WIDTH + MODAL_MARGIN < self.rect.right();
 
         let (pivot, fixed_pos) = if anchor_left {
             (
@@ -387,6 +394,37 @@ impl TimeseriesPlot {
         let response = ui.allocate_rect(self.rect, egui::Sense::click_and_drag());
         let pointer_pos = ui.input(|i| i.pointer.latest_pos());
 
+        // Lock toggle (icons)
+        {
+            let lock_size = egui::vec2(20.0, 20.0);
+            let lock_pos = egui::pos2(
+                self.inner_rect.max.x - lock_size.x - 6.0,
+                self.rect.min.y + 6.0,
+            );
+
+            egui::Area::new(egui::Id::new((
+                "plot_lock_btn",
+                (graph_state as *const _) as usize,
+            )))
+            .order(egui::Order::Foreground)
+            .fixed_pos(lock_pos)
+            .show(ui.ctx(), |ui| {
+                let old_pad = ui.spacing().button_padding;
+                ui.style_mut().spacing.button_padding = egui::vec2(2.0, 2.0);
+                let icon = if graph_state.locked {
+                    ICON_LOCK
+                } else {
+                    ICON_LOCK_OPEN_RIGHT
+                };
+                let resp = icon_button(ui, icon);
+                if resp.clicked() {
+                    graph_state.locked = !graph_state.locked;
+                }
+                resp.on_hover_text(if graph_state.locked { "Unlock" } else { "Lock" });
+                ui.style_mut().spacing.button_padding = old_pad;
+            });
+        }
+
         response.context_menu(|ui| {
             if ui.button("Set Time Range to Viewport Bounds").clicked() {
                 let start = Timestamp((self.bounds.min_x as i64) + self.earliest_timestamp.0);
@@ -411,14 +449,12 @@ impl TimeseriesPlot {
                 font_id.clone(),
                 get_scheme().text_primary,
             );
-
             return;
         }
 
         font_id.size = 11.0;
 
         draw_borders(ui, self.rect, self.inner_rect);
-
         self.draw_x_axis(ui, &font_id);
         draw_y_axis(ui, self.bounds, self.steps_y, self.rect, self.inner_rect);
 
@@ -441,8 +477,6 @@ impl TimeseriesPlot {
                     self.rect,
                     self.inner_rect,
                 );
-
-                // Draw highlight circles on lines
 
                 for ((_, _), (entity, color)) in graph_state.enabled_lines.iter() {
                     let Ok(line_handle) = line_handles.get(*entity) else {
@@ -487,7 +521,6 @@ impl TimeseriesPlot {
                     (self.timestamp_to_x(self.current_timestamp), 0.0).into(),
                 )
                 .x;
-
             draw_tick_mark(ui, self.rect, self.inner_rect, tick_pos, *scrub_icon);
         }
     }
@@ -531,6 +564,7 @@ pub fn draw_y_axis(
             scheme.text_primary,
         );
     };
+
     if !bounds.min_y.is_finite() || !bounds.max_y.is_finite() {
         return;
     }
@@ -556,7 +590,6 @@ pub fn draw_y_axis(
     } else {
         let step_size = pretty_round(bounds.height() / steps_y as f64);
         let steps_y = (0..=steps_y).map(|i| bounds.min_y + (i as f64) * step_size);
-
         for y_step in steps_y {
             draw_tick(y_step);
         }
@@ -619,7 +652,6 @@ pub fn draw_cursor(
 }
 
 pub fn draw_borders(ui: &mut egui::Ui, rect: egui::Rect, inner_rect: egui::Rect) {
-    // draw bg
     let border_bg_color = get_scheme().bg_secondary.opacity(0.9);
     let y_bg_rect = egui::Rect::from_min_max(rect.min, inner_rect.min).with_max_y(rect.max.y);
     ui.painter()
@@ -675,10 +707,10 @@ pub fn sync_bounds(
     let outer_ratio = (rect.size() / inner_rect.size()).as_dvec2();
     let pan_offset = graph_state.pan_offset.as_dvec2() * DVec2::new(-1.0, 1.0);
     PlotBounds::from_lines(&selected_range, earliest_timestamp, y_min, y_max)
-        .zoom_at(outer_ratio, DVec2::new(1.0, 0.5)) // zoom the bounds out so the graph takes up the entire screen
-        .offset_by_norm(pan_offset) // pan the bounds by the amount the cursor has moved
-        .zoom(graph_state.zoom_factor.as_dvec2()) // zoom the bounds based on the current zoom factor
-        .normalize() // clamp the bounds so max > min
+        .zoom_at(outer_ratio, DVec2::new(1.0, 0.5)) // Zoom the bounds out so the graph takes up the entire screen.
+        .offset_by_norm(pan_offset) // Pan the bounds by the amount the cursor has moved.
+        .zoom(graph_state.zoom_factor.as_dvec2()) // Zoom the bounds based on the current zoom factor.
+        .normalize() // Clamp the bounds so max > min.
 }
 
 pub fn auto_y_bounds(
@@ -702,28 +734,28 @@ pub fn auto_y_bounds(
                 if let gpu::LineMut::Timeseries(line) = line {
                     let summary = line.data.range_summary(selected_range.0.clone());
                     if let Some(min) = summary.min {
-                        if let Some(y_min) = &mut y_min {
-                            *y_min = y_min.min(min);
+                        if let Some(v) = &mut y_min {
+                            *v = v.min(min);
                         } else {
                             y_min = Some(min)
                         }
                     }
                     if let Some(max) = summary.max {
-                        if let Some(y_max) = &mut y_max {
-                            *y_max = y_max.max(max);
+                        if let Some(v) = &mut y_max {
+                            *v = v.max(max);
                         } else {
                             y_max = Some(max)
                         }
                     }
                 }
             }
-
             graph_state.y_range =
                 y_min.unwrap_or_default() as f64..y_max.unwrap_or_default() as f64;
         }
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub fn sync_graphs(
     mut graph_states: Query<&mut GraphState>,
     metadata_store: Res<ComponentMetadataRegistry>,
@@ -758,7 +790,6 @@ pub fn sync_graphs(
                 let entity = graph_state
                     .enabled_lines
                     .get_mut(&(component_path.clone(), value_index));
-
                 let Some(line) = component.lines.get(&value_index) else {
                     continue;
                 };
@@ -816,6 +847,314 @@ pub fn sync_graphs(
     }
 }
 
+/// New locks adopt X from current leader but don't become leader yet.
+#[allow(clippy::type_complexity)]
+pub fn track_lock_toggles(
+    mut sets: ParamSet<(Query<(Entity, &GraphState)>, Query<&mut GraphState>)>,
+    mut tracker: ResMut<LockTracker>,
+) {
+    let mut newly_locked: Vec<Entity> = Vec::new();
+
+    for (e, gs) in sets.p0().iter() {
+        let prev = tracker.0.insert(e, gs.locked).unwrap_or(false);
+        if !prev && gs.locked {
+            newly_locked.push(e);
+        }
+    }
+    if newly_locked.is_empty() {
+        return;
+    }
+
+    // pick source (locked with max x_rev)
+    let mut source: Option<(f32, f32, u64)> = None;
+    for (_e, g) in sets.p0().iter() {
+        if g.locked {
+            let cand = (g.zoom_factor.x, g.pan_offset.x, g.x_rev);
+            match source {
+                None => source = Some(cand),
+                Some(s) => {
+                    if cand.2 > s.2 {
+                        source = Some(cand);
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some((zx, px, rev)) = source {
+        let mut p1 = sets.p1();
+        for e in newly_locked {
+            if let Ok(mut me) = p1.get_mut(e) {
+                me.zoom_factor.x = zx;
+                me.pan_offset.x = px;
+                me.x_rev = rev.saturating_sub(1);
+            }
+        }
+    }
+}
+
+/// Propagate X from latest locked graph (last-writer-wins).
+#[allow(clippy::type_complexity)]
+pub fn sync_locked_graphs(
+    mut sets: ParamSet<(
+        Query<(Entity, &GraphState)>,
+        Query<(Entity, &mut GraphState)>,
+    )>,
+) {
+    let mut src: Option<(Entity, f32, f32, u64)> = None;
+    for (e, gs) in sets.p0().iter() {
+        if gs.locked {
+            let cand = (e, gs.zoom_factor.x, gs.pan_offset.x, gs.x_rev);
+            match src {
+                None => src = Some(cand),
+                Some(s) => {
+                    if cand.3 > s.3 {
+                        src = Some(cand);
+                    }
+                }
+            }
+        }
+    }
+    let Some((src_e, zx, px, _rev)) = src else {
+        return;
+    };
+
+    for (e, mut gs) in sets.p1().iter_mut() {
+        if e == src_e || !gs.locked {
+            continue;
+        }
+        gs.zoom_factor.x = zx;
+        gs.pan_offset.x = px;
+    }
+}
+
+pub fn zoom_graph(
+    mut query: Query<(&mut GraphState, &Camera)>,
+    scroll_events: EventReader<MouseWheel>,
+    primary_window: Query<&Window, With<PrimaryWindow>>,
+    key_state: Res<LogicalKeyState>,
+    mut xclock: ResMut<XSyncClock>,
+) {
+    let scroll_offset = scroll_offset_from_events(scroll_events);
+    if scroll_offset == 0. {
+        return;
+    }
+
+    let Ok(window) = primary_window.single() else {
+        return;
+    };
+    let cursor_pos = window.physical_cursor_position();
+
+    for (mut graph_state, camera) in &mut query {
+        let Some(cursor_pos) = cursor_pos else {
+            continue;
+        };
+        let Some(viewport) = &camera.viewport else {
+            continue;
+        };
+
+        let physical_size = viewport.physical_size.as_vec2();
+        let physical_pos = viewport.physical_position.as_vec2();
+        let viewport_rect = Rect::from_corners(physical_pos, physical_pos + physical_size);
+
+        if !viewport_rect.contains(cursor_pos) {
+            continue;
+        }
+
+        let offset_mask = if key_state.pressed(&Key::Control) {
+            Vec2::new(1.0, 0.0)
+        } else if key_state.pressed(&Key::Shift) {
+            Vec2::new(0.0, 1.0)
+        } else {
+            Vec2::new(1.0, 1.0)
+        };
+
+        let old_scale = graph_state.zoom_factor;
+        graph_state.zoom_factor *= 1. - scroll_offset * ZOOM_SENSITIVITY * offset_mask;
+        graph_state.zoom_factor = graph_state.zoom_factor.clamp(Vec2::ZERO, Vec2::ONE);
+
+        let cursor_pos = (cursor_pos - viewport.physical_position.as_vec2())
+            - viewport.physical_size.as_vec2() / 2.;
+        let cursor_normalized_screen_pos = cursor_pos / viewport.physical_size.as_vec2();
+        let cursor_normalized_screen_pos = Vec2::new(
+            cursor_normalized_screen_pos.x,
+            cursor_normalized_screen_pos.y,
+        );
+
+        let delta = (old_scale - graph_state.zoom_factor) * cursor_normalized_screen_pos;
+
+        let old_pan = graph_state.pan_offset;
+        graph_state.pan_offset -= delta * offset_mask;
+
+        // bump only if locked and X changed
+        let x_changed = graph_state.locked
+            && (offset_mask.x != 0.0)
+            && ((graph_state.zoom_factor.x != old_scale.x)
+                || (graph_state.pan_offset.x != old_pan.x));
+        if x_changed {
+            xclock.0 += 1;
+            graph_state.x_rev = xclock.0;
+        }
+    }
+}
+
+#[derive(Component)]
+pub struct LastPos(Option<Vec2>);
+
+pub fn pan_graph(
+    mut query: Query<(Entity, &mut GraphState, &Camera, Option<&LastPos>)>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    primary_window: Query<&Window, With<PrimaryWindow>>,
+    key_state: Res<LogicalKeyState>,
+    mut commands: Commands,
+    mut xclock: ResMut<XSyncClock>,
+) {
+    let Ok(window) = primary_window.single() else {
+        return;
+    };
+    let Some(cursor_pos) = window.physical_cursor_position() else {
+        return;
+    };
+
+    for (entity, mut graph_state, camera, last_pos) in &mut query {
+        let last_pos = last_pos.and_then(|p| p.0);
+        let Some(viewport) = &camera.viewport else {
+            continue;
+        };
+
+        let physical_size = viewport.physical_size.as_vec2();
+        let physical_pos = viewport.physical_position.as_vec2();
+        let viewport_rect = Rect::from_corners(physical_pos, physical_pos + physical_size);
+
+        if !viewport_rect.contains(cursor_pos) {
+            if let Ok(mut e) = commands.get_entity(entity) {
+                e.try_insert(LastPos(None));
+            }
+            continue;
+        }
+
+        if mouse_buttons.just_pressed(MouseButton::Left) {
+            if let Ok(mut e) = commands.get_entity(entity) {
+                e.try_insert(LastPos(Some(cursor_pos)));
+            }
+            continue;
+        }
+
+        if !mouse_buttons.pressed(MouseButton::Left) {
+            if let Ok(mut e) = commands.get_entity(entity) {
+                e.try_insert(LastPos(None));
+            }
+            continue;
+        }
+
+        let Some(last_pos) = last_pos else {
+            continue;
+        };
+
+        let delta_device_pixels = cursor_pos - last_pos;
+
+        let offset_mask = if key_state.pressed(&Key::Control) {
+            Vec2::new(1.0, 0.0)
+        } else if key_state.pressed(&Key::Shift) {
+            Vec2::new(0.0, 1.0)
+        } else {
+            Vec2::new(1.0, 1.0)
+        };
+
+        let delta =
+            delta_device_pixels / viewport_rect.size() * graph_state.zoom_factor * offset_mask;
+
+        let old_pan = graph_state.pan_offset;
+        graph_state.pan_offset += delta;
+
+        // bump only if locked and X changed
+        let x_changed =
+            graph_state.locked && (offset_mask.x != 0.0) && (graph_state.pan_offset.x != old_pan.x);
+        if x_changed {
+            xclock.0 += 1;
+            graph_state.x_rev = xclock.0;
+        }
+
+        if let Ok(mut e) = commands.get_entity(entity) {
+            e.try_insert(LastPos(Some(cursor_pos)));
+        }
+    }
+}
+
+pub fn reset_graph(
+    mut last_click: Local<Option<Instant>>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    mut query: Query<(&mut GraphState, &Camera)>,
+    primary_window: Query<&Window, With<PrimaryWindow>>,
+    mut xclock: ResMut<XSyncClock>,
+) {
+    if mouse_buttons.just_released(MouseButton::Left) {
+        *last_click = Some(Instant::now());
+    }
+
+    let Ok(window) = primary_window.single() else {
+        return;
+    };
+    let Some(cursor_pos) = window.physical_cursor_position() else {
+        return;
+    };
+
+    if mouse_buttons.just_pressed(MouseButton::Left)
+        && last_click
+            .map(|t| t.elapsed() < Duration::from_millis(250))
+            .unwrap_or_default()
+    {
+        for (mut graph_state, camera) in &mut query {
+            let Some(viewport) = &camera.viewport else {
+                continue;
+            };
+
+            let physical_size = viewport.physical_size.as_vec2();
+            let physical_pos = viewport.physical_position.as_vec2();
+            let viewport_rect = Rect::from_corners(physical_pos, physical_pos + physical_size);
+            if !viewport_rect.contains(cursor_pos) {
+                continue;
+            }
+
+            let prev_zoom = graph_state.zoom_factor;
+            let prev_pan = graph_state.pan_offset;
+
+            graph_state.pan_offset = Vec2::ZERO;
+            graph_state.zoom_factor = Vec2::ONE;
+
+            // bump only if locked and X changed
+            let x_changed = graph_state.locked
+                && ((graph_state.zoom_factor.x != prev_zoom.x)
+                    || (graph_state.pan_offset.x != prev_pan.x));
+            if x_changed {
+                xclock.0 += 1;
+                graph_state.x_rev = xclock.0;
+            }
+        }
+    }
+}
+
+fn scroll_offset_from_events(mut scroll_events: EventReader<MouseWheel>) -> f32 {
+    let pixels_per_line = SCROLL_PIXELS_PER_LINE;
+    scroll_events
+        .read()
+        .map(|ev| match ev.unit {
+            MouseScrollUnit::Pixel => ev.y,
+            MouseScrollUnit::Line => ev.y * pixels_per_line,
+        })
+        .sum::<f32>()
+}
+
+pub trait Vec2Ext {
+    fn as_dvec2(&self) -> DVec2;
+}
+
+impl Vec2Ext for egui::Vec2 {
+    fn as_dvec2(&self) -> DVec2 {
+        DVec2::new(self.x as f64, self.y as f64)
+    }
+}
+
 #[derive(Debug, Clone, Default, Copy)]
 pub struct PlotBounds {
     pub min_x: f64,
@@ -861,19 +1200,15 @@ impl PlotBounds {
     pub fn min(&self) -> DVec2 {
         DVec2::new(self.min_x, self.min_y)
     }
-
     pub fn max(&self) -> DVec2 {
         DVec2::new(self.max_x, self.max_y)
     }
-
     pub fn width(&self) -> f64 {
         self.max_x - self.min_x
     }
-
     pub fn height(&self) -> f64 {
         self.max_y - self.min_y
     }
-
     pub fn size(&self) -> DVec2 {
         DVec2::new(self.width(), self.height())
     }
@@ -881,7 +1216,6 @@ impl PlotBounds {
     pub fn range_x_f32(&self) -> RangeInclusive<f32> {
         (self.min_x as f32)..=(self.max_x as f32)
     }
-
     pub fn range_y_f32(&self) -> RangeInclusive<f32> {
         (self.min_y as f32)..=(self.max_y as f32)
     }
@@ -906,7 +1240,6 @@ impl PlotBounds {
 
     pub fn zoom_at(self, zoom_factor: DVec2, anchor: DVec2) -> Self {
         let offset = self.size() * (zoom_factor - DVec2::ONE);
-
         Self {
             min_x: self.min_x + -offset.x * anchor.x,
             max_x: self.max_x + offset.x * (1.0 - anchor.x),
@@ -981,7 +1314,6 @@ fn sigfig_round(x: f64, mut digits: i32) -> f64 {
     if x == 0.0 || !x.is_finite() {
         return x;
     }
-
     digits -= x.abs().log10().ceil() as i32;
     let y = (10.0f64).powi(digits);
     if x.is_sign_positive() {
@@ -994,21 +1326,17 @@ fn sigfig_round(x: f64, mut digits: i32) -> f64 {
 pub fn pretty_round(num: f64) -> f64 {
     let mut multiplier = 1.0;
     let mut n = num;
-
-    // Handle negative numbers
+    // Handle negative numbers.
     let is_negative = n < 0.0;
     n = n.abs();
-
-    // Find the appropriate multiplier for the decimal places
+    // Find the appropriate multiplier for the decimal places.
     while n < 1.0 {
         n *= 10.0;
         multiplier *= 10.0;
     }
-
-    // Round to nearest 5
+    // Round to nearest 5.
     let rounded = (n * 2.0).round() / 2.0;
     let result = rounded / multiplier;
-
     if is_negative { -result } else { result }
 }
 
@@ -1020,7 +1348,6 @@ pub fn graph_touch(
     let Ok(window) = primary_window.single() else {
         return;
     };
-
     let touch_gestures = touch_tracker.get_touch_gestures();
 
     let midpoint = match touch_gestures {
@@ -1033,7 +1360,6 @@ pub fn graph_touch(
         let Some(viewport_rect) = cam.logical_viewport_rect() else {
             continue;
         };
-
         let Some(viewport) = &cam.viewport else {
             continue;
         };
@@ -1044,12 +1370,13 @@ pub fn graph_touch(
         let area = (viewport_rect.height() * viewport_rect.width()).sqrt();
 
         match touch_gestures {
-            // orbit
+            // pan
             TouchGestures::OneFinger(gesture) => {
                 let delta_device_pixels = gesture.motion;
                 let delta = delta_device_pixels / viewport_rect.size() * graph_state.zoom_factor;
                 graph_state.pan_offset += delta;
             }
+            // pinch zoom
             TouchGestures::TwoFinger(gesture) => {
                 let cursor_pos = midpoint * window.scale_factor();
                 let scroll_offset = gesture.pinch / area * window.scale_factor();
@@ -1066,202 +1393,9 @@ pub fn graph_touch(
                 );
 
                 let delta = (old_scale - graph_state.zoom_factor) * cursor_normalized_screen_pos;
-
                 graph_state.pan_offset -= delta;
             }
             TouchGestures::None => {}
         }
-    }
-}
-
-pub fn zoom_graph(
-    mut query: Query<(&mut GraphState, &Camera)>,
-    scroll_events: EventReader<MouseWheel>,
-    primary_window: Query<&Window, With<PrimaryWindow>>,
-    key_state: Res<LogicalKeyState>,
-) {
-    let scroll_offset = scroll_offset_from_events(scroll_events);
-    if scroll_offset == 0. {
-        return;
-    }
-
-    let Ok(window) = primary_window.single() else {
-        return;
-    };
-
-    let cursor_pos = window.physical_cursor_position();
-
-    for (mut graph_state, camera) in &mut query {
-        let Some(cursor_pos) = cursor_pos else {
-            continue;
-        };
-
-        let Some(viewport) = &camera.viewport else {
-            continue;
-        };
-
-        let physical_size = viewport.physical_size.as_vec2();
-        let physical_pos = viewport.physical_position.as_vec2();
-        let viewport_rect = Rect::from_corners(physical_pos, physical_pos + physical_size);
-
-        if !viewport_rect.contains(cursor_pos) {
-            continue;
-        }
-
-        let offset_mask = if key_state.pressed(&Key::Control) {
-            Vec2::new(1.0, 0.0)
-        } else if key_state.pressed(&Key::Shift) {
-            Vec2::new(0.0, 1.0)
-        } else {
-            Vec2::new(1.0, 1.0)
-        };
-
-        let old_scale = graph_state.zoom_factor;
-        graph_state.zoom_factor *= 1. - scroll_offset * ZOOM_SENSITIVITY * offset_mask;
-        graph_state.zoom_factor = graph_state.zoom_factor.clamp(Vec2::ZERO, Vec2::ONE);
-
-        let cursor_pos = (cursor_pos - viewport.physical_position.as_vec2())
-            - viewport.physical_size.as_vec2() / 2.;
-        let cursor_normalized_screen_pos = cursor_pos / viewport.physical_size.as_vec2();
-        let cursor_normalized_screen_pos = Vec2::new(
-            cursor_normalized_screen_pos.x,
-            cursor_normalized_screen_pos.y,
-        );
-
-        let delta = (old_scale - graph_state.zoom_factor) * cursor_normalized_screen_pos;
-
-        graph_state.pan_offset -= delta * offset_mask;
-    }
-}
-
-#[derive(Component)]
-pub struct LastPos(Option<Vec2>);
-
-pub fn pan_graph(
-    mut query: Query<(Entity, &mut GraphState, &Camera, Option<&LastPos>)>,
-    mouse_buttons: Res<ButtonInput<MouseButton>>,
-    primary_window: Query<&Window, With<PrimaryWindow>>,
-    key_state: Res<LogicalKeyState>,
-    mut commands: Commands,
-) {
-    let Ok(window) = primary_window.single() else {
-        return;
-    };
-
-    let cursor_pos = window.physical_cursor_position();
-    let Some(cursor_pos) = cursor_pos else { return };
-
-    for (entity, mut graph_state, camera, last_pos) in &mut query {
-        let last_pos = last_pos.and_then(|p| p.0);
-        let Some(viewport) = &camera.viewport else {
-            continue;
-        };
-
-        let physical_size = viewport.physical_size.as_vec2();
-        let physical_pos = viewport.physical_position.as_vec2();
-        let viewport_rect = Rect::from_corners(physical_pos, physical_pos + physical_size);
-
-        if !viewport_rect.contains(cursor_pos) {
-            if let Ok(mut e) = commands.get_entity(entity) {
-                e.try_insert(LastPos(None));
-            }
-            continue;
-        }
-
-        if mouse_buttons.just_pressed(MouseButton::Left) {
-            if let Ok(mut e) = commands.get_entity(entity) {
-                e.try_insert(LastPos(Some(cursor_pos)));
-            }
-            continue;
-        }
-
-        if !mouse_buttons.pressed(MouseButton::Left) {
-            if let Ok(mut e) = commands.get_entity(entity) {
-                e.try_insert(LastPos(None));
-            }
-            continue;
-        }
-
-        let Some(last_pos) = last_pos else {
-            continue;
-        };
-
-        let delta_device_pixels = cursor_pos - last_pos;
-
-        let offset_mask = if key_state.pressed(&Key::Control) {
-            Vec2::new(1.0, 0.0)
-        } else if key_state.pressed(&Key::Shift) {
-            Vec2::new(0.0, 1.0)
-        } else {
-            Vec2::new(1.0, 1.0)
-        };
-
-        let delta =
-            delta_device_pixels / viewport_rect.size() * graph_state.zoom_factor * offset_mask;
-        graph_state.pan_offset += delta;
-
-        if let Ok(mut e) = commands.get_entity(entity) {
-            e.try_insert(LastPos(Some(cursor_pos)));
-        }
-    }
-}
-
-pub fn reset_graph(
-    mut last_click: Local<Option<Instant>>,
-    mouse_buttons: Res<ButtonInput<MouseButton>>,
-    mut query: Query<(&mut GraphState, &Camera)>,
-    primary_window: Query<&Window, With<PrimaryWindow>>,
-) {
-    if mouse_buttons.just_released(MouseButton::Left) {
-        *last_click = Some(Instant::now());
-    }
-
-    let Ok(window) = primary_window.single() else {
-        return;
-    };
-
-    let cursor_pos = window.physical_cursor_position();
-    let Some(cursor_pos) = cursor_pos else { return };
-
-    if mouse_buttons.just_pressed(MouseButton::Left)
-        && last_click
-            .map(|t| t.elapsed() < Duration::from_millis(250))
-            .unwrap_or_default()
-    {
-        for (mut graph_state, camera) in &mut query {
-            let Some(viewport) = &camera.viewport else {
-                continue;
-            };
-
-            let physical_size = viewport.physical_size.as_vec2();
-            let physical_pos = viewport.physical_position.as_vec2();
-            let viewport_rect = Rect::from_corners(physical_pos, physical_pos + physical_size);
-            if !viewport_rect.contains(cursor_pos) {
-                continue;
-            }
-            graph_state.pan_offset = Vec2::ZERO;
-            graph_state.zoom_factor = Vec2::ONE;
-        }
-    }
-}
-
-fn scroll_offset_from_events(mut scroll_events: EventReader<MouseWheel>) -> f32 {
-    let pixels_per_line = SCROLL_PIXELS_PER_LINE;
-    scroll_events
-        .read()
-        .map(|ev| match ev.unit {
-            MouseScrollUnit::Pixel => ev.y,
-            MouseScrollUnit::Line => ev.y * pixels_per_line,
-        })
-        .sum::<f32>()
-}
-
-pub trait Vec2Ext {
-    fn as_dvec2(&self) -> DVec2;
-}
-
-impl Vec2Ext for egui::Vec2 {
-    fn as_dvec2(&self) -> DVec2 {
-        DVec2::new(self.x as f64, self.y as f64)
     }
 }

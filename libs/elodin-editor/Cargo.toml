@@ -14,6 +14,7 @@ inspector = ["dep:bevy-inspector-egui"]
 # math
 nox.path = "../nox"
 nox.default-features = false
+egui_material_icons = "0.3"
 
 # bevy
 bevy.version = "0.16"
