@@ -1,4 +1,5 @@
 use crate::EqlContext;
+use crate::ui::{EntityFilter, EntityPair, SelectedObject, colors::get_scheme};
 use bevy::ecs::{
     system::{ResMut, SystemParam, SystemState},
     world::World,
@@ -8,7 +9,6 @@ use bevy_egui::egui;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2_bevy::EntityMap;
 use std::collections::BTreeMap;
-use crate::ui::{EntityFilter, EntityPair, SelectedObject, colors::get_scheme};
 
 use super::{inspector::search, schematic::Branch, widgets::WidgetSystem};
 
