@@ -82,7 +82,6 @@ println!("{}", comp.to_hlo_text()?);
 
 ```rust
 use nox::{Client, tensor};
-use xla::XlaComputation;
 # fn main() -> Result<(), nox::Error> {
 let client = Client::cpu()?;
 
@@ -90,9 +89,9 @@ let client = Client::cpu()?;
 # let xla_op = f.build("feat1_example")?;   // Built via XlaTracer
 # let comp   = xla_op.build()?;             // xla::XlaComputation
 
-let exec   = comp.compile(&client)?;
+let exec   = client.compile(&comp)?;
 let input  = tensor![1.0f32, 2.0, 3.0];
-let out    = exec.run(&client, input)?.to_host();
+let out    = exec.execute_buffers(input)?.to_host();
 # Ok(())
 # }
 ```
