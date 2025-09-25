@@ -28,7 +28,7 @@ All snippets are supposed to be within the `nox` crate (or its internal modules)
 > Example: define `a`, `b` (f32 vectors of length 3), then `expr = dot(((a + 1) * b), a)` and wrap it in a `NoxprFn`.
 
 ```rust
-use crate::noxpr::{Noxpr, NoxprFn, ArrayTy, NoxprTy, NoxprScalarExt};
+use crate::nox::{Noxpr, NoxprFn, ArrayTy, NoxprTy, NoxprScalarExt};
 use smallvec::smallvec;
 use xla::ElementType;
 
@@ -61,11 +61,16 @@ println!("{}", f);
 > Starting from a `NoxprFn`, produce an `xla::XlaOp` then an `xla::XlaComputation`.  
 
 ```rust
-use crate::noxpr::NoxprFn;
+use nox::NoxprFn;
+
+# fn main() -> Result<(), nox::Error> {
+# let f = nox::doctest::noxpr::example_function();
 
 let xla_op = f.build("feat1_example")?;   // Built via XlaTracer
 let comp   = xla_op.build()?;             // xla::XlaComputation
 println!("{}", comp.to_hlo_text()?);
+# Ok(())
+# }
 ```
 
 ---
@@ -76,13 +81,20 @@ println!("{}", comp.to_hlo_text()?);
 > *Note:* input types/shapes must match the XLA signature.
 
 ```rust
-use crate::{Client, tensor};
-
+use nox::{Client, tensor};
+use xla::XlaComputation;
+# fn main() -> Result<(), nox::Error> {
 let client = Client::cpu()?;
-let exec   = comp.compile(&client)?;
 
+# let f = nox::doctest::noxpr::example_function();
+# let xla_op = f.build("feat1_example")?;   // Built via XlaTracer
+# let comp   = xla_op.build()?;             // xla::XlaComputation
+
+let exec   = comp.compile(&client)?;
 let input  = tensor![1.0f32, 2.0, 3.0];
 let out    = exec.run(&client, input)?.to_host();
+# Ok(())
+# }
 ```
 
 ---
@@ -92,7 +104,7 @@ let out    = exec.run(&client, input)?.to_host();
 > Tiny recipes around typed operators. All start from `Noxpr`.
 
 ```rust
-use crate::noxpr::{Noxpr, ArrayTy, NoxprTy};
+use nox::{Noxpr, ArrayTy, NoxprTy};
 use smallvec::smallvec;
 use xla::ElementType;
 
@@ -118,10 +130,11 @@ let z = y_t.reshape(smallvec![12]);
 > Pretty-print the graph (human-readable IR)
 
 ```rust
-use crate::noxpr::PrettyPrintTracer;
+use nox::PrettyPrintTracer;
 
 let mut pp = PrettyPrintTracer::default();
 let mut s = String::new();
+let f = nox::doctest::noxpr::example_function();
 pp.visit(&f.inner, &mut s).unwrap();
 println!("{s}");
 ```

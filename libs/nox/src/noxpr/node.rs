@@ -2048,7 +2048,7 @@ impl PrettyPrintTracer {
     }
 
     /// Visits a `Noxpr` and prints it in a readable format.
-    fn visit<W: std::fmt::Write>(
+    pub fn visit<W: std::fmt::Write>(
         &mut self,
         expr: &Noxpr,
         writer: &mut W,
