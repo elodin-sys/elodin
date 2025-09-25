@@ -199,7 +199,7 @@ fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
     } else {
         0.0..1.0
     };
-    let colors: Vec<_> = parse_color_children_from_node(&node).collect();
+    let colors: Vec<_> = parse_color_children_from_node(node).collect();
 
     Ok(Panel::Graph(Graph {
         eql,

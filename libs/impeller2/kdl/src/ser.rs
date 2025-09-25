@@ -616,6 +616,7 @@ mod tests {
                 auto_y_range: true,
                 y_range: 0.0..1.0,
                 aux: (),
+                colors: vec![],
             })));
 
         let serialized = serialize_schematic(&schematic);
@@ -689,6 +690,7 @@ mod tests {
                 auto_y_range: true,
                 y_range: 0.0..1.0,
                 aux: (),
+                colors: vec![],
             }),
         ])));
 
