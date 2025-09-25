@@ -1011,17 +1011,22 @@ mod tests {
         }
     }
 
-    //     #[test]
-    //     fn test_parse_object_3d_sphere_old() {
-    //         let kdl = r#"
-    // object_3d "a.world_pos" {
-    //     sphere radius=0.2 {
-    //         color r=1.0 g=0.0 b=0.0
-    //     }
-    // }
-    // "#;
-    //         assert!(parse_schematic(kdl).is_err());
-    //     }
+    /// I would like for this test to pass in the future. That is, I want the
+    /// parsing to fail because color is given no positional arguments, but it
+    /// looks sensible given its keyword arguments. Currently this will parse
+    /// without error and the sphere will be white instead of red.
+    #[ignore]
+    #[test]
+    fn test_parse_object_3d_sphere_old() {
+        let kdl = r#"
+object_3d "a.world_pos" {
+    sphere radius=0.2 {
+        color r=1.0 g=0.0 b=0.0
+    }
+}
+    "#;
+        assert!(parse_schematic(kdl).is_err());
+    }
 
     #[test]
     fn test_parse_object_3d_sphere() {
