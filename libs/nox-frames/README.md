@@ -12,6 +12,7 @@ A quaternion is a mathematical structure (four components: w, x, y, z) used to r
 A pose describes the complete spatial state of an object:
 - its position (a 3D vector),
 - its orientation (a rotation, often represented as a quaternion).
+
 In `nox_frames`, a pose is expressed as a rigid transformation `Pose3<From, To>`, defining how to move from one frame to another.
 
 ## Glossary
