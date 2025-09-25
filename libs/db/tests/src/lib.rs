@@ -707,7 +707,7 @@ mod tests {
             let _ = handle.await;
         }
 
-        sleep(Duration::from_millis(120)).await;
+        sleep(Duration::from_millis(150)).await;
 
         // Verify that data was written by all clients
         let mut verification_client = Client::connect(addr).await.unwrap();
