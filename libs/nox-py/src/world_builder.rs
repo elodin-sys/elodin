@@ -7,7 +7,10 @@ use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 use miette::miette;
 use nox_ecs::{ComponentSchema, IntoSystem, System as _, TimeStep, World, increment_sim_tick, nox};
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
-use pyo3::{IntoPyObjectExt, types::{PyDict, PyList}};
+use pyo3::{
+    IntoPyObjectExt,
+    types::{PyDict, PyList},
+};
 use std::{collections::HashMap, iter, net::SocketAddr, path::PathBuf, time};
 use tracing::{error, info};
 use zerocopy::{FromBytes, TryFromBytes};
@@ -294,12 +297,12 @@ impl WorldBuilder {
             Args::Components => {
                 // Discover components and entities without running the simulation
                 let discovery_result = self.discover_components(py)?;
-                
+
                 // Convert to JSON and print
                 let json_module = py.import("json")?;
-                let json_str = json_module.call_method1("dumps", (discovery_result, ))?;
+                let json_str = json_module.call_method1("dumps", (discovery_result,))?;
                 println!("{}", json_str.extract::<String>()?);
-                
+
                 Ok(None)
             }
         }
@@ -447,22 +450,25 @@ impl WorldBuilder {
             });
         self.world.metadata.schematic = file_contents.or(default_content);
     }
-    
+
     pub fn discover_components(&self, py: Python<'_>) -> Result<Py<PyAny>, Error> {
         // Create lists for components and entities
         let components = PyList::empty(py);
         let entities = PyList::empty(py);
-        
+
         // Get entity metadata for hierarchical naming
-        let _entity_names: HashMap<impeller2::types::EntityId, String> = self.world.metadata
+        let _entity_names: HashMap<impeller2::types::EntityId, String> = self
+            .world
+            .metadata
             .entity_metadata
             .iter()
             .map(|(id, meta)| (*id, meta.name.clone()))
             .collect();
-        
+
         // Build a map of entity_id -> list of component names
-        let mut entity_components: HashMap<impeller2::types::EntityId, Vec<String>> = HashMap::new();
-        
+        let mut entity_components: HashMap<impeller2::types::EntityId, Vec<String>> =
+            HashMap::new();
+
         // Iterate through all components in the world
         for (component_id, (schema, metadata)) in &self.world.metadata.component_map {
             // Track which entities have this component
@@ -478,7 +484,7 @@ impl WorldBuilder {
                     }
                 }
             }
-            
+
             // Extract type information
             let type_str = match schema.prim_type {
                 PrimType::U8 => "u8",
@@ -493,7 +499,7 @@ impl WorldBuilder {
                 PrimType::F32 => "f32",
                 PrimType::F64 => "f64",
             };
-            
+
             // Extract shape if it's a tensor
             let shape_vec = schema.shape();
             let shape = if !shape_vec.is_empty() {
@@ -501,16 +507,16 @@ impl WorldBuilder {
             } else {
                 None
             };
-            
+
             // Convert metadata to Python dict
             let py_metadata = PyDict::new(py);
             for (key, value) in &metadata.metadata {
                 py_metadata.set_item(key, value)?;
             }
-            
+
             // For hierarchical names (e.g., "rocket.world_pos")
             let component_name = metadata.name.clone();
-            
+
             // Create component dictionary for JSON
             let component_dict = PyDict::new(py);
             component_dict.set_item("name", component_name)?;
@@ -521,26 +527,26 @@ impl WorldBuilder {
             if !metadata.metadata.is_empty() {
                 component_dict.set_item("metadata", py_metadata)?;
             }
-            
+
             components.append(component_dict)?;
         }
-        
+
         // Create entity dictionaries for JSON
         for (entity_id, entity_meta) in &self.world.metadata.entity_metadata {
             let entity_dict = PyDict::new(py);
             entity_dict.set_item("id", entity_id.0)?;
             entity_dict.set_item("name", &entity_meta.name)?;
-            
+
             // Get components for this entity
             if let Some(component_names) = entity_components.get(entity_id) {
                 entity_dict.set_item("components", component_names)?;
             } else {
                 entity_dict.set_item("components", Vec::<String>::new())?;
             }
-            
+
             entities.append(entity_dict)?;
         }
-        
+
         // Also include entities without metadata but with components
         for (entity_id, component_names) in &entity_components {
             if !self.world.metadata.entity_metadata.contains_key(entity_id) {
@@ -548,18 +554,18 @@ impl WorldBuilder {
                 entity_dict.set_item("id", entity_id.0)?;
                 entity_dict.set_item("name", format!("entity_{}", entity_id.0))?;
                 entity_dict.set_item("components", component_names)?;
-                
+
                 entities.append(entity_dict)?;
             }
         }
-        
+
         // Create result dictionary
         let result = PyDict::new(py);
         result.set_item("components", components)?;
         result.set_item("entities", entities)?;
         result.set_item("total_components", self.world.metadata.component_map.len())?;
         result.set_item("total_entities", entity_components.len())?;
-        
+
         Ok(result.into_py(py))
     }
 }
