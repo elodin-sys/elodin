@@ -471,7 +471,6 @@ fn parse_object_3d_mesh(
     }
 }
 
-
 fn parse_line_3d(node: &KdlNode, src: &str) -> Result<Line3d, KdlSchematicError> {
     let eql = node
         .entries()
@@ -524,13 +523,15 @@ fn parse_color_from_node_or_children(node: &KdlNode, color_tag: Option<&str>) ->
             }
         }
     }
-    
+
     None
 }
 
 /// Convert a float or an integer to a float value.
 pub(crate) fn to_float(value: &kdl::KdlValue) -> Option<f64> {
-    value.as_float().or_else(|| value.as_integer().map(|x| x as f64))
+    value
+        .as_float()
+        .or_else(|| value.as_integer().map(|x| x as f64))
 }
 
 fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
@@ -538,30 +539,27 @@ fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
     let entries = node.entries();
     if entries.len() >= 3 {
         // Only look for positional arguments if there are entries with no name
-        let mut positional_entries = entries.iter()
-            .filter(|e| e.name().is_none());
+        let mut positional_entries = entries.iter().filter(|e| e.name().is_none());
 
         if let (Some(r), Some(g), Some(b)) = (
             positional_entries.next().and_then(|e| to_float(e.value())),
             positional_entries.next().and_then(|e| to_float(e.value())),
             positional_entries.next().and_then(|e| to_float(e.value())),
         ) {
-            let a = positional_entries.next()
+            let a = positional_entries
+                .next()
                 .and_then(|e| to_float(e.value()))
                 .unwrap_or(1.0);
 
-            return Some(Color::rgba(
-                r as f32,
-                g as f32,
-                b as f32,
-                a as f32,
-            ));
+            return Some(Color::rgba(r as f32, g as f32, b as f32, a as f32));
         }
     } else if entries.len() == 1 {
-        let mut positional_entries = entries.iter()
-            .filter(|e| e.name().is_none());
+        let mut positional_entries = entries.iter().filter(|e| e.name().is_none());
 
-        if let Some(color_value) = positional_entries.next().and_then(|e| e.value().as_string()) {
+        if let Some(color_value) = positional_entries
+            .next()
+            .and_then(|e| e.value().as_string())
+        {
             // Fall back to named colors
             return match color_value {
                 "black" => Some(Color::BLACK),
@@ -575,17 +573,17 @@ fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
                 "hyperblue" => Some(Color::HYPERBLUE),
                 "mint" => Some(Color::MINT),
                 _ => None,
-            }
+            };
         }
     }
 
     if let Some(color_value) = node.get("color").and_then(|v| v.as_string()) {
         if color_value.starts_with('(') && color_value.ends_with(')') {
-            let values: Vec<&str> = color_value[1..color_value.len()-1]
+            let values: Vec<&str> = color_value[1..color_value.len() - 1]
                 .split(',')
                 .map(|s| s.trim())
                 .collect();
-            
+
             if values.len() >= 3 {
                 if let (Ok(r), Ok(g), Ok(b)) = (
                     values[0].parse::<f64>(),
@@ -597,12 +595,12 @@ fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
                     } else {
                         1.0
                     };
-                    
+
                     return Some(Color::rgba(r as f32, g as f32, b as f32, a as f32));
                 }
             }
         }
-        
+
         // Fall back to named colors
         match color_value {
             "black" => Some(Color::BLACK),
@@ -623,7 +621,10 @@ fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
 }
 
 fn parse_color_children_from_node(node: &KdlNode) -> impl Iterator<Item = Color> {
-    node.children().into_iter().flat_map(|c| c.nodes()).filter_map(parse_color_from_node)
+    node.children()
+        .into_iter()
+        .flat_map(|c| c.nodes())
+        .filter_map(parse_color_from_node)
 }
 
 fn parse_material_from_node(node: &KdlNode) -> Option<Material> {
@@ -1010,17 +1011,17 @@ mod tests {
         }
     }
 
-//     #[test]
-//     fn test_parse_object_3d_sphere_old() {
-//         let kdl = r#"
-// object_3d "a.world_pos" {
-//     sphere radius=0.2 {
-//         color r=1.0 g=0.0 b=0.0
-//     }
-// }
-// "#;
-//         assert!(parse_schematic(kdl).is_err());
-//     }
+    //     #[test]
+    //     fn test_parse_object_3d_sphere_old() {
+    //         let kdl = r#"
+    // object_3d "a.world_pos" {
+    //     sphere radius=0.2 {
+    //         color r=1.0 g=0.0 b=0.0
+    //     }
+    // }
+    // "#;
+    //         assert!(parse_schematic(kdl).is_err());
+    //     }
 
     #[test]
     fn test_parse_object_3d_sphere() {
@@ -1331,9 +1332,9 @@ node {
 "#;
         let doc = kdl.parse::<KdlDocument>().unwrap();
         let node = &doc.nodes()[0];
-        
+
         let colors = parse_color_children_from_node(node).collect::<Vec<_>>();
-        
+
         assert_eq!(colors.len(), 3);
         assert_eq!(colors[0].r, 1.0);
         assert_eq!(colors[0].g, 0.0);
@@ -1348,7 +1349,6 @@ node {
 
     #[test]
     fn test_parse_color_children_from_sphere() {
-
         let kdl = r#"
 sphere radius=0.2 {
         color 1 0 1
@@ -1365,7 +1365,11 @@ sphere radius=0.2 {
         assert_eq!(color_node.entries().len(), 3);
         let mut entries = color_node.entries().iter().filter(|e| e.name().is_none());
         assert_eq!(entries.clone().count(), 3);
-        let r = entries.next().and_then(|e| e.value().as_float().or_else(|| e.value().as_integer().map(|x| x as f64)));
+        let r = entries.next().and_then(|e| {
+            e.value()
+                .as_float()
+                .or_else(|| e.value().as_integer().map(|x| x as f64))
+        });
         assert_eq!(r, Some(1.0));
         let color = parse_color_from_node(color_node);
         assert!(color.is_some());

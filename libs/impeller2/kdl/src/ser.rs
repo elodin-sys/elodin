@@ -307,24 +307,23 @@ fn serialize_line_3d<T>(line: &Line3d<T>) -> KdlNode {
     node
 }
 
-
 fn serialize_color_to_node(node: &mut KdlNode, color: &Color) {
     serialize_color_to_node_named(node, color, None)
 }
 
 fn serialize_color_to_node_named(node: &mut KdlNode, color: &Color, name: Option<&str>) {
     let mut color_node = KdlNode::new(name.unwrap_or("color"));
-    
+
     // Add r, g, b as positional arguments
     color_node.entries_mut().push(KdlEntry::new(color.r as f64));
     color_node.entries_mut().push(KdlEntry::new(color.g as f64));
     color_node.entries_mut().push(KdlEntry::new(color.b as f64));
-    
+
     // Add alpha if it's not 1.0 (default)
     if color.a != 1.0 {
         color_node.entries_mut().push(KdlEntry::new(color.a as f64));
     }
-    
+
     // Add the color node as a child
     if let Some(existing_children) = node.children_mut().as_mut() {
         existing_children.nodes_mut().push(color_node);
