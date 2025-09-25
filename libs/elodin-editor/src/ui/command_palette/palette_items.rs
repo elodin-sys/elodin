@@ -609,9 +609,7 @@ pub fn save_schematic_as() -> PaletteItem {
     PaletteItem::new(
         "Save Schematic As...",
         PRESETS_LABEL,
-        |_name: In<String>| {
-            PalettePage::new(vec![save_schematic_inner()]).into()
-        },
+        |_name: In<String>| PalettePage::new(vec![save_schematic_inner()]).into(),
     )
 }
 

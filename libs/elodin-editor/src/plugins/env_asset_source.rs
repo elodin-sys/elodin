@@ -1,13 +1,8 @@
 use bevy::{
-    asset::{
-        io::{AssetSourceBuilder, AssetSourceId},
-    },
+    asset::io::{AssetSourceBuilder, AssetSourceId},
     prelude::*,
 };
-use std::{
-    env,
-    path::PathBuf,
-};
+use std::{env, path::PathBuf};
 
 const DEFAULT_ASSETS_DIR: Option<&str> = Some("assets");
 
@@ -25,7 +20,9 @@ const DEFAULT_ASSETS_DIR: Option<&str> = Some("assets");
 /// report the likely path Bevy will use to look for assets.
 pub(crate) fn plugin(app: &mut App) {
     let var_set = env::var_os("ELODIN_ASSETS_DIR").is_some();
-    if let Some(dir_name) = env::var_os("ELODIN_ASSETS_DIR").or_else(|| DEFAULT_ASSETS_DIR.map(|s| std::ffi::OsString::from(String::from(s)))) {
+    if let Some(dir_name) = env::var_os("ELODIN_ASSETS_DIR")
+        .or_else(|| DEFAULT_ASSETS_DIR.map(|s| std::ffi::OsString::from(String::from(s))))
+    {
         let mut assets_dir: PathBuf = dir_name.into();
         if var_set {
             info!("ELODIN_ASSETS_DIR set to {:?}", assets_dir.display());
@@ -44,19 +41,31 @@ pub(crate) fn plugin(app: &mut App) {
             &AssetSourceId::Default,
             AssetSourceBuilder::platform_default(assets_dir.to_str().expect("asset dir"), None),
         );
-        if ! assets_dir.exists() {
-            warn!("ELODIN_ASSETS_DIR {:?} does not exist.", assets_dir.display());
-        } else if ! assets_dir.is_dir() {
-            warn!("ELODIN_ASSETS_DIR {:?} is not a directory.", assets_dir.display());
+        if !assets_dir.exists() {
+            warn!(
+                "ELODIN_ASSETS_DIR {:?} does not exist.",
+                assets_dir.display()
+            );
+        } else if !assets_dir.is_dir() {
+            warn!(
+                "ELODIN_ASSETS_DIR {:?} is not a directory.",
+                assets_dir.display()
+            );
         }
     } else {
         // No assets directory. Report which one will likely be used by Bevy.
         match env::current_exe() {
             Ok(bin_path) => {
                 if let Some(dir) = bin_path.parent() {
-                    info!("ELODIN_ASSETS_DIR env not set; use {:?} by default.", dir.display());
+                    info!(
+                        "ELODIN_ASSETS_DIR env not set; use {:?} by default.",
+                        dir.display()
+                    );
                 } else {
-                    warn!("ELODIN_ASSETS_DIR env not set, for binary {:?}.", bin_path.display());
+                    warn!(
+                        "ELODIN_ASSETS_DIR env not set, for binary {:?}.",
+                        bin_path.display()
+                    );
                 }
             }
             Err(e) => {

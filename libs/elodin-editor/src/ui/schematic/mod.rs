@@ -3,8 +3,10 @@ use std::collections::HashMap;
 use crate::{
     object_3d::Object3DState,
     ui::{
-        actions, inspector, plot, query_plot, query_table,
-        tiles::{self, Pane}, colors::EColor
+        actions,
+        colors::EColor,
+        inspector, plot, query_plot, query_table,
+        tiles::{self, Pane},
     },
 };
 use bevy::{ecs::system::SystemParam, prelude::*};
