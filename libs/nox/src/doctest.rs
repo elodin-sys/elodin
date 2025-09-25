@@ -1,6 +1,6 @@
 #[cfg(feature = "noxpr")]
 pub mod noxpr {
-    use crate::{Noxpr, NoxprFn, ArrayTy, NoxprTy, NoxprScalarExt};
+    use crate::{ArrayTy, Noxpr, NoxprFn, NoxprScalarExt, NoxprTy};
     use smallvec::smallvec;
     use xla::ElementType;
 
@@ -9,12 +9,12 @@ pub mod noxpr {
         let a = Noxpr::parameter(
             0,
             NoxprTy::ArrayTy(ArrayTy::new(ElementType::F32, smallvec![3])),
-            "a".into()
+            "a".into(),
         );
         let b = Noxpr::parameter(
             1,
             NoxprTy::ArrayTy(ArrayTy::new(ElementType::F32, smallvec![3])),
-            "b".into()
+            "b".into(),
         );
 
         // ((a + 1) * b).dot(a)
