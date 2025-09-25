@@ -67,8 +67,8 @@ use nox::NoxprFn;
 # let f = nox::doctest::noxpr::example_function();
 
 let xla_op = f.build("feat1_example")?;   // Built via XlaTracer
-let comp   = xla_op.build()?;             // xla::XlaComputation
-println!("{}", comp.to_hlo_text()?);
+let comp_f   = xla_op.build()?;           // xla::XlaComputation
+println!("{}", comp_f.to_hlo_text()?);
 # Ok(())
 # }
 ```
@@ -81,17 +81,39 @@ println!("{}", comp.to_hlo_text()?);
 > *Note:* input types/shapes must match the XLA signature.
 
 ```rust
-use nox::{Client, tensor};
+use nox::{Client, Tensor, FromTypedBuffers, tensor, AsTypedBuffer, TypedBuffer};
+use xla::BufferArgsRef;
+use std::marker::PhantomData;
 # fn main() -> Result<(), nox::Error> {
 let client = Client::cpu()?;
 
+// Use same f and compiled f as before ((a + 1) * b).dot(a)
 # let f = nox::doctest::noxpr::example_function();
 # let xla_op = f.build("feat1_example")?;   // Built via XlaTracer
-# let comp   = xla_op.build()?;             // xla::XlaComputation
+# let comp_f = xla_op.build()?;             // xla::XlaComputation
 
-let exec   = client.compile(&comp)?;
-let input  = tensor![1.0f32, 2.0, 3.0];
-let out    = exec.execute_buffers(input)?.to_host();
+let exec = client.compile(&comp_f)?;
+// Here are the arguments: a and b.
+let a = tensor![1.0f32, 2.0, 3.0];
+let b = tensor![4.0f32, 5.0, 6.0];
+
+// Create BufferArgsRef and add the arguments.
+let mut args = BufferArgsRef::default();
+
+// Convert tensor arguments to typed buffers.
+let typed_buffer_a = a.as_typed_buffer(&client)?;
+let typed_buffer_b = a.as_typed_buffer(&client)?;
+args.push(&typed_buffer_a.as_ref().buffer);
+args.push(&typed_buffer_b.as_ref().buffer);
+
+// Execute the expression.
+let mut out = exec.execute_buffers(args)?;
+
+// Create a tensor from the output buffer.
+let tensor_out = Tensor::from_typed_buffers(&Tensor::from_pjrt_buffers(&mut out))?;
+
+// Check the result.
+assert_eq!(tensor_out, tensor![50.0f32]);
 # Ok(())
 # }
 ```
