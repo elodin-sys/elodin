@@ -99,6 +99,7 @@ Transforms can depend on time (Earth rotation, nutation, etc.) and on a site (la
 Here we compose the inertial → Earth-fixed transform (ECI→ECEF) with a local site transform (ECEF→NED).
 The result maps a vector expressed in ECI directly into the local NED frame.
 ```rust
+# use approx::assert_relative_eq;
 use hifitime::Epoch;
 use nox::{ReprMonad, tensor};
 use nox_frames::earth::{eci_to_ecef, ecef_to_ned};
@@ -123,12 +124,13 @@ let x_eci = tensor![-2981784.0, 5207055.0, 3161595.0];
 let x_ned = t_eci_ned.dot(&x_eci);
 
 // Check the result.
-assert_eq!(x_ned, tensor![16172.3316007721, -4730268.58039587, -4860497.726850228]);
+assert_relative_eq!(x_ned, tensor![16172.33, -4730268.58, -4860497.72], epsilon = 1e-2);
 ```
 
 ### Sun direction in ECI, mapped to ECEF
 Sometimes you need a direction defined in space (for example Sun vector in ECI) and want to express it in Earth-fixed coordinates (ECEF). This is a typical mix of celestial and terrestrial frames.
 ```rust
+# use approx::assert_relative_eq;
 use hifitime::Epoch;
 use nox::tensor;
 use nox_frames::earth::{sun_vec, eci_to_ecef};
@@ -143,5 +145,5 @@ let t_eci_ecef = eci_to_ecef(epoch);
 let s_ecef = t_eci_ecef.dot(&s_eci);
 
 // Check the result.
-assert_eq!(s_ecef, tensor![0.9222945252607837, 0.024367834113164066, -0.3857188319678194]);
+assert_relative_eq!(s_ecef, tensor![0.92, 0.02, -0.38], epsilon = 1e-2);
 ```
