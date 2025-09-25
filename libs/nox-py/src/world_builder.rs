@@ -11,7 +11,13 @@ use pyo3::{
     IntoPyObjectExt,
     types::{PyDict, PyList},
 };
-use std::{collections::HashMap, iter, net::SocketAddr, path::PathBuf, time};
+use std::{
+    collections::{HashMap, HashSet},
+    iter,
+    net::SocketAddr,
+    path::PathBuf,
+    time,
+};
 use tracing::{error, info};
 use zerocopy::{FromBytes, TryFromBytes};
 
@@ -456,23 +462,42 @@ impl WorldBuilder {
         let components = PyList::empty(py);
         let entities = PyList::empty(py);
 
-        // Build a map of entity_id -> list of component names
-        let mut entity_components: HashMap<impeller2::types::EntityId, Vec<String>> =
+        // Build a map of entity_id -> set of component names (using HashSet to avoid duplicates)
+        let mut entity_components: HashMap<impeller2::types::EntityId, HashSet<String>> =
             HashMap::new();
 
         // Iterate through all components in the world
         for (component_id, (schema, metadata)) in &self.world.metadata.component_map {
             // Track which entities have this component
             if let Some(buffer) = self.world.host.get(component_id) {
-                for chunk in buffer.entity_ids.chunks(8) {
-                    if chunk.len() == 8 {
-                        let entity_id = u64::from_le_bytes(chunk.try_into().unwrap());
-                        let entity_id = impeller2::types::EntityId(entity_id);
-                        entity_components
-                            .entry(entity_id)
-                            .or_default()
-                            .push(metadata.name.clone());
-                    }
+                // Validate that entity_ids buffer is properly aligned
+                if buffer.entity_ids.len() % 8 != 0 {
+                    tracing::warn!(
+                        "Component '{}' has misaligned entity_ids buffer (size: {}). \
+                         Some entities may be missing from discovery.",
+                        metadata.name,
+                        buffer.entity_ids.len()
+                    );
+                }
+
+                // Process entity IDs - using chunks_exact to ensure we only process complete IDs
+                for chunk in buffer.entity_ids.chunks_exact(8) {
+                    let entity_id = u64::from_le_bytes(chunk.try_into().unwrap());
+                    let entity_id = impeller2::types::EntityId(entity_id);
+                    entity_components
+                        .entry(entity_id)
+                        .or_default()
+                        .insert(metadata.name.clone());
+                }
+
+                // Check if there's a remainder (incomplete ID) that was skipped
+                let remainder = buffer.entity_ids.chunks_exact(8).remainder();
+                if !remainder.is_empty() {
+                    tracing::warn!(
+                        "Component '{}' has {} bytes of incomplete entity ID data",
+                        metadata.name,
+                        remainder.len()
+                    );
                 }
             }
 
@@ -529,7 +554,9 @@ impl WorldBuilder {
 
             // Get components for this entity
             if let Some(component_names) = entity_components.get(entity_id) {
-                entity_dict.set_item("components", component_names)?;
+                // Convert HashSet to Vec for JSON serialization
+                let component_list: Vec<String> = component_names.iter().cloned().collect();
+                entity_dict.set_item("components", component_list)?;
             } else {
                 entity_dict.set_item("components", Vec::<String>::new())?;
             }
@@ -543,7 +570,9 @@ impl WorldBuilder {
                 let entity_dict = PyDict::new(py);
                 entity_dict.set_item("id", entity_id.0)?;
                 entity_dict.set_item("name", format!("entity_{}", entity_id.0))?;
-                entity_dict.set_item("components", component_names)?;
+                // Convert HashSet to Vec for JSON serialization
+                let component_list: Vec<String> = component_names.iter().cloned().collect();
+                entity_dict.set_item("components", component_list)?;
 
                 entities.append(entity_dict)?;
             }
