@@ -479,7 +479,7 @@ impl WorldBuilder {
                         let entity_id = impeller2::types::EntityId(entity_id);
                         entity_components
                             .entry(entity_id)
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push(metadata.name.clone());
                     }
                 }
@@ -566,7 +566,7 @@ impl WorldBuilder {
         result.set_item("total_components", self.world.metadata.component_map.len())?;
         result.set_item("total_entities", entity_components.len())?;
 
-        Ok(result.into_py(py))
+        Ok(result.into_py_any(py)?)
     }
 }
 
