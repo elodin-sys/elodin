@@ -8,7 +8,7 @@ publish = false
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 default = ["earth"]
-earth = ["dep:rsofa", "hifitime"]
+earth = ["dep:rsofa", "hifitime", "std"]
 std = []
 
 [dependencies]

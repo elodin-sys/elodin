@@ -1,4 +1,4 @@
-# nox_frames
+# nox-frames
 
 ## Description
 `nox_frames` is a Rust crate from the Elodin workspace. It provides lightweight and safe types to represent coordinate frames and transformations (poses, rotations, geodetic conversions). The goal is to manipulate vectors and poses while avoiding confusion between frames (for example `Body` vs `World`), and to remain compatible with constrained environments (`no_std`).
