@@ -1,4 +1,4 @@
-#![doc = include_str!("README.md")]
+#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/noxpr/README.md"))]
 mod batch;
 mod builder;
 mod client;
