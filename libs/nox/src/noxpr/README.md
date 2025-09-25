@@ -102,7 +102,7 @@ let mut args = BufferArgsRef::default();
 
 // Convert tensor arguments to typed buffers.
 let typed_buffer_a = a.as_typed_buffer(&client)?;
-let typed_buffer_b = a.as_typed_buffer(&client)?;
+let typed_buffer_b = b.as_typed_buffer(&client)?;
 args.push(&typed_buffer_a.as_ref().buffer);
 args.push(&typed_buffer_b.as_ref().buffer);
 
@@ -113,7 +113,7 @@ let mut out = exec.execute_buffers(args)?;
 let tensor_out = Tensor::from_typed_buffers(&Tensor::from_pjrt_buffers(&mut out))?;
 
 // Check the result.
-assert_eq!(tensor_out, tensor![50.0f32]);
+assert_eq!(tensor_out, tensor![110.0f32]);
 # Ok(())
 # }
 ```
