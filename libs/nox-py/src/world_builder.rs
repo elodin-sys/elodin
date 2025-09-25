@@ -456,15 +456,6 @@ impl WorldBuilder {
         let components = PyList::empty(py);
         let entities = PyList::empty(py);
 
-        // Get entity metadata for hierarchical naming
-        let _entity_names: HashMap<impeller2::types::EntityId, String> = self
-            .world
-            .metadata
-            .entity_metadata
-            .iter()
-            .map(|(id, meta)| (*id, meta.name.clone()))
-            .collect();
-
         // Build a map of entity_id -> list of component names
         let mut entity_components: HashMap<impeller2::types::EntityId, Vec<String>> =
             HashMap::new();
@@ -514,7 +505,6 @@ impl WorldBuilder {
                 py_metadata.set_item(key, value)?;
             }
 
-            // For hierarchical names (e.g., "rocket.world_pos")
             let component_name = metadata.name.clone();
 
             // Create component dictionary for JSON
@@ -562,9 +552,9 @@ impl WorldBuilder {
         // Create result dictionary
         let result = PyDict::new(py);
         result.set_item("components", components)?;
-        result.set_item("entities", entities)?;
+        result.set_item("entities", &entities)?;
         result.set_item("total_components", self.world.metadata.component_map.len())?;
-        result.set_item("total_entities", entity_components.len())?;
+        result.set_item("total_entities", entities.len())?;
 
         Ok(result.into_py_any(py)?)
     }
