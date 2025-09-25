@@ -37,20 +37,35 @@ pub(crate) fn plugin(app: &mut App) {
             cur_dir.push(&assets_dir);
             assets_dir = cur_dir;
         }
-        app.register_asset_source(
-            &AssetSourceId::Default,
-            AssetSourceBuilder::platform_default(assets_dir.to_str().expect("asset dir"), None),
-        );
-        if !assets_dir.exists() {
-            warn!(
-                "ELODIN_ASSETS_DIR {:?} does not exist.",
-                assets_dir.display()
+        // Bevy requires a UTF-8 string path.
+        let str_path = assets_dir.to_str().or_else(|| {
+            if let Some(default_dir) = &DEFAULT_ASSETS_DIR {
+                error!(
+                    "ELODIN_ASSETS_DIR contains invalid UTF-8 characters, falling back to {:?}",
+                    default_dir
+                );
+            } else {
+                error!("ELODIN_ASSETS_DIR contains invalid UTF-8 characters; no default available");
+            }
+            DEFAULT_ASSETS_DIR
+        });
+
+        if let Some(str_path) = str_path {
+            app.register_asset_source(
+                &AssetSourceId::Default,
+                AssetSourceBuilder::platform_default(str_path, None),
             );
-        } else if !assets_dir.is_dir() {
-            warn!(
-                "ELODIN_ASSETS_DIR {:?} is not a directory.",
-                assets_dir.display()
-            );
+            if !assets_dir.exists() {
+                warn!(
+                    "ELODIN_ASSETS_DIR {:?} does not exist.",
+                    assets_dir.display()
+                );
+            } else if !assets_dir.is_dir() {
+                warn!(
+                    "ELODIN_ASSETS_DIR {:?} is not a directory.",
+                    assets_dir.display()
+                );
+            }
         }
     } else {
         // No assets directory. Report which one will likely be used by Bevy.
