@@ -9,6 +9,7 @@ publish = false
 [features]
 default = ["earth"]
 earth = ["dep:rsofa", "hifitime"]
+std = []
 
 [dependencies]
 nox.path = "../nox"
