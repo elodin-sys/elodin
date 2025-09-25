@@ -639,7 +639,7 @@ pub fn save_schematic() -> PaletteItem {
 
 pub fn save_schematic_db() -> PaletteItem {
     PaletteItem::new(
-        "Save Schematic To Db",
+        "Save Schematic To DB",
         PRESETS_LABEL,
         |_name: In<String>, tx: Res<PacketTx>, schematic: Res<CurrentSchematic>| {
             let kdl = schematic.0.to_kdl();
@@ -1084,8 +1084,7 @@ impl Default for PalettePage {
             create_3d_object(),
             save_schematic(),
             save_schematic_as(),
-            // TODO: Don't enable until we have a clear save and load story for db.
-            //save_schematic_db(),
+            save_schematic_db(),
             load_schematic(),
             set_color_scheme(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {
