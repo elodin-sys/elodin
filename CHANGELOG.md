@@ -5,6 +5,9 @@
 ## v0.15
 
 ### v0.15.0
+- **(feature)** Lock graphs to same x-axis zoom
+- **(feature)** Editable panel titles
+- **(feature)** Components sorted alphabetically
 - **(fix)** Add auto-tick advancement to JaxSim.
 - **(breaking)** Handle UI and object visualization using new schematics format. See [migration guide](/reference/migration/to-0-15).
 - **(fix)** Stop endlessly creating entities for packet handling.
