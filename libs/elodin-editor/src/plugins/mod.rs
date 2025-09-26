@@ -1,6 +1,7 @@
 mod asset_cache;
 pub mod editor_cam_touch;
 //pub mod gizmos;
+pub(crate) mod env_asset_source;
 mod logical_key;
 pub mod navigation_gizmo;
 mod web_asset;

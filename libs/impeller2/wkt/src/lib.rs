@@ -20,6 +20,7 @@ mod gui;
 #[cfg(feature = "gui")]
 pub use gui::*;
 
+// TODO: Consider making this an enum so we can round-trip color names.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
 pub struct Color {
     pub r: f32,

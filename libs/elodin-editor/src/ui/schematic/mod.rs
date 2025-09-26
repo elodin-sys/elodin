@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use crate::{
     object_3d::Object3DState,
     ui::{
-        actions, inspector, plot, query_plot, query_table,
+        actions,
+        colors::EColor,
+        inspector, plot, query_plot, query_table,
         tiles::{self, Pane},
     },
 };
@@ -63,13 +65,15 @@ impl SchematicParam<'_, '_> {
                 Pane::Graph(graph) => {
                     let graph_state = self.graph_states.get(graph.id).ok()?;
                     let mut eql = String::new();
-
+                    let mut colors: Vec<impeller2_wkt::Color> = vec![];
                     // Build EQL from enabled lines
                     if !graph_state.enabled_lines.is_empty() {
                         let mut parts: Vec<String> =
                             Vec::with_capacity(graph_state.enabled_lines.len());
-                        for ((path, index), ..) in graph_state.enabled_lines.iter() {
+                        for ((path, index), (_, color)) in graph_state.enabled_lines.iter() {
+                            let c: egui::Color32 = *color;
                             parts.push(format!("{}[{}]", path, index));
+                            colors.push(impeller2_wkt::Color::from_color32(c));
                         }
                         eql = parts.join(",");
                     }
@@ -86,6 +90,7 @@ impl SchematicParam<'_, '_> {
                         auto_y_range: graph_state.auto_y_range,
                         y_range: graph_state.y_range.clone(),
                         aux: graph.id,
+                        colors,
                     }))
                 }
 

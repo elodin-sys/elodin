@@ -135,6 +135,7 @@ impl EColor for Color {
 pub trait ColorExt {
     fn into_bevy(self) -> ::bevy::prelude::Color;
     fn opacity(self, opacity: f32) -> Self;
+    fn from_bevy(c: ::bevy::prelude::Color) -> Self;
 }
 
 impl ColorExt for Color32 {
@@ -145,6 +146,12 @@ impl ColorExt for Color32 {
 
     fn opacity(self, opacity: f32) -> Self {
         with_opacity(self, opacity)
+    }
+
+    fn from_bevy(c: ::bevy::prelude::Color) -> Self {
+        use ::bevy::color::ColorToPacked;
+        let [r, g, b, a] = c.to_srgba().to_u8_array();
+        Color32::from_rgba_unmultiplied(r, g, b, a)
     }
 }
 
