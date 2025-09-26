@@ -414,6 +414,10 @@
                 <ul>
                     
                     <li>
+                        <a href="/reference/migration/to-0-15/#el-material-color-to-color">el.Material.color to color</a>
+                    </li>
+                    
+                    <li>
                         <a href="/reference/migration/to-0-15/#el-panel-hsplit-to-hsplit">el.Panel.hsplit to hsplit</a>
                     </li>
                     
@@ -507,13 +511,46 @@
 </span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">            viewport name=Viewport pos=&quot;(0,0,0,1, 8,2,4)&quot; look_at=&quot;(0,0,0,1, 0,0,3)&quot; hdr=#true show_grid=#true active=#true
 </span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">        }
 </span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">        object_3d ball.world_pos {
-</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">            sphere radius=0.2 r=12.7 g=9.2 b=0.5
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">            sphere radius=0.2 {
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">                color 12.7 9.2 0.5
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">            }
 </span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">        }
-</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">        line_3d ball.world_pos line_width=2.0 color=&quot;yolk&quot;
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">        line_3d ball.world_pos line_width=2.0 {
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">            color yolk
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">        }
 </span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">    <span class="z-punctuation z-definition z-string z-end z-python">&quot;&quot;&quot;</span></span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
 </span></code></pre>
 <h2 id="details">Details</h2>
 <p>The old code is python, and the new code is specified in a <a href="https://docs.rs/kdl/latest/kdl/">KDL</a> string to the <code>world.schematic()</code> method.</p>
+<h3 id="el-material-color-to-color"><code>el.Material.color</code> to <code>color</code></h3>
+<p>A color can be specified by its red, green, blue, and optionally its alpha components.</p>
+<p>OLD</p>
+<pre data-lang="python" class="language-python z-code"><code class="language-python" data-lang="python"><span class="z-source z-python"><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">el</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">Material</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">color</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-constant z-numeric z-float z-decimal z-python">12<span class="z-punctuation z-separator z-decimal z-python">.</span>7</span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-constant z-numeric z-float z-decimal z-python">9<span class="z-punctuation z-separator z-decimal z-python">.</span>2</span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-constant z-numeric z-float z-decimal z-python">0<span class="z-punctuation z-separator z-decimal z-python">.</span>5</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-invalid z-illegal z-stray z-brace z-round z-python">)</span>
+</span></code></pre>
+<p>NEW</p>
+<pre data-lang="python" class="language-python z-code"><code class="language-python" data-lang="python"><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">color</span></span> <span class="z-constant z-numeric z-float z-decimal z-python">12<span class="z-punctuation z-separator z-decimal z-python">.</span>7</span> <span class="z-constant z-numeric z-float z-decimal z-python">9<span class="z-punctuation z-separator z-decimal z-python">.</span>2</span> <span class="z-constant z-numeric z-float z-decimal z-python">0<span class="z-punctuation z-separator z-decimal z-python">.</span>5</span> 
+</span></code></pre>
+<p>It can also be specified by a few names:</p>
+<ul>
+<li>black</li>
+<li>white</li>
+<li>turquoise</li>
+<li>slate</li>
+<li>pumpkin</li>
+<li>yolk</li>
+<li>peach</li>
+<li>reddish</li>
+<li>hyperblue</li>
+<li>mint</li>
+</ul>
+<p>NEW</p>
+<pre data-lang="python" class="language-python z-code"><code class="language-python" data-lang="python"><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">color</span></span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">mint</span></span>
+</span></code></pre>
+<p>It is often specified as a child of what its describing, e.g., this sphere is reddish.</p>
+<pre class="z-code"><code><span class="z-text z-plain">    sphere radius=0.2 {
+</span><span class="z-text z-plain">        color reddish
+</span><span class="z-text z-plain">    }
+</span></code></pre>
 <h3 id="el-panel-hsplit-to-hsplit"><code>el.Panel.hsplit</code> to <code>hsplit</code></h3>
 <p>OLD</p>
 <pre data-lang="python" class="language-python z-code"><code class="language-python" data-lang="python"><span class="z-source z-python"><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">el</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">Panel</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">hsplit</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span>
@@ -578,7 +615,9 @@
 <pre data-lang="python" class="language-python z-code"><code class="language-python" data-lang="python"><span class="z-source z-python"><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">el</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">Line3d</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python"><span class="z-punctuation z-definition z-string z-begin z-python">&quot;</span></span></span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python">ball.world_pos<span class="z-punctuation z-definition z-string z-end z-python">&quot;</span></span></span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-variable z-parameter z-python">line_width</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-constant z-numeric z-float z-decimal z-python">2<span class="z-punctuation z-separator z-decimal z-python">.</span>0</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
 </span></code></pre>
 <p>NEW</p>
-<pre data-lang="kdl" class="language-kdl z-code"><code class="language-kdl" data-lang="kdl"><span class="z-text z-plain">line_3d ball.world_pos line_width=2.0 color=&quot;yolk&quot; perspective=#true
+<pre data-lang="kdl" class="language-kdl z-code"><code class="language-kdl" data-lang="kdl"><span class="z-text z-plain">line_3d ball.world_pos line_width=2.0 perspective=#true {
+</span><span class="z-text z-plain">    color yolk
+</span><span class="z-text z-plain">}
 </span></code></pre>
 <h3 id="el-shape-insert-shape-insert-asset-to-object-3d"><code>el.Shape</code>, <code>insert_shape</code>, <code>insert_asset</code> to <code>object_3d</code></h3>
 <p>OLD</p>
@@ -588,7 +627,9 @@
 </span></code></pre>
 <p>NEW</p>
 <pre data-lang="kdl" class="language-kdl z-code"><code class="language-kdl" data-lang="kdl"><span class="z-text z-plain">object_3d ball.world_pos {
-</span><span class="z-text z-plain">    sphere radius=0.2 r=12.7 g=9.2 b=0.5
+</span><span class="z-text z-plain">    sphere radius=0.2 {
+</span><span class="z-text z-plain">        color 12.7 9.2 0.5 // red green blue [alpha]
+</span><span class="z-text z-plain">    }
 </span><span class="z-text z-plain">}
 </span></code></pre>
 <h3 id="world-glb-to-glb"><code>world.glb()</code> to <code>glb</code></h3>
