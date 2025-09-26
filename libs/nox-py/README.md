@@ -173,6 +173,61 @@ exec.run(1000)
 exec.save_archive("simulation.arrow", format="arrow")  # Also: "parquet", "csv"
 ```
 
+## Component Discovery
+
+Discover all components and entities in a simulation without running it:
+
+```bash
+# Output JSON with all components and entities
+python examples/rocket.py components
+```
+
+**Output Example:**
+```json
+{
+  "components": [
+    {
+      "name": "world_pos",
+      "type": "f64",
+      "shape": [7],
+      "metadata": {
+        "element_names": "q0,q1,q2,q3,x,y,z",
+        "priority": "5"
+      }
+    },
+    {
+      "name": "thrust",
+      "type": "f64",
+      "metadata": {
+        "priority": "17"
+      }
+    }
+    // ... more components
+  ],
+  "entities": [
+    {
+      "id": 1,
+      "name": "rocket",
+      "components": ["world_pos", "thrust", "fin_control", ...]
+    },
+    {
+      "id": 0,
+      "name": "Globals",
+      "components": ["tick", "simulation_time_step"]
+    }
+  ],
+  "total_components": 26,
+  "total_entities": 2
+}
+```
+
+This feature is useful for:
+- Understanding simulation structure before running
+- Integration with external tools (pipe to `jq` for queries)
+- Generating documentation of simulation interfaces
+- Debugging component registration and entity relationships
+- Discovering which components belong to which entities
+
 ## Core Concepts
 
 ### World
