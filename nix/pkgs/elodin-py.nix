@@ -26,7 +26,7 @@
   version = (craneLib.crateNameFromCargoToml {cargoToml = ../../Cargo.toml;}).version;
 
   pyFilter = path: _type: builtins.match ".*py$" path != null;
-  mdFilter = path: _type: builtins.match ".*nox-py.*md$" path != null;
+  mdFilter = path: _type: builtins.match ".*md$" path != null;
   protoFilter = path: _type: builtins.match ".*proto$" path != null;
   assetFilter = path: _type: builtins.match ".*assets.*$" path != null;
   cppFilter = path: _type: builtins.match ".*[h|(cpp)|(cpp.jinja)]$" path != null;

@@ -39,7 +39,7 @@ pub use vector::*;
 pub mod jax;
 
 #[cfg(feature = "noxpr")]
-mod noxpr;
+pub mod noxpr;
 #[cfg(feature = "noxpr")]
 pub use noxpr::*;
 

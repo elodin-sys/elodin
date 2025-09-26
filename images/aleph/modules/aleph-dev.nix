@@ -63,6 +63,7 @@ in {
     GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" [
       gst_all_1.gstreamer
       aravis
+      deepstreamer
     ];
   };
   hardware.graphics.enable = true;
@@ -124,5 +125,6 @@ in {
     aleph-status
     video-streamer
     elodinsink
+    deepstreamer
   ];
 }
