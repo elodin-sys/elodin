@@ -36,7 +36,7 @@ Below is the comprehensive list of all dependencies with their current and lates
 |------------|---------|--------|---------------|-------|
 | **Rust** | 1.85.0 | **1.90.0** | [releases.rs](https://releases.rs/) | ✅ Confirmed |
 | **PyO3** | 0.23.0 | **0.26.0** | [GitHub Releases](https://github.com/PyO3/pyo3/releases) | ✅ Confirmed - Breaking changes |
-| **numpy** | 0.23.0 | **0.23.2** | [crates.io](https://crates.io/crates/numpy) | ⚠️ Must match PyO3 version |
+| **numpy** | 0.23.0 | **0.26.0** | [crates.io](https://crates.io/crates/numpy) | ⚠️ Must match PyO3 version |
 | **Maturin** | 1.4-2.0 | **1.7.5** | [GitHub](https://github.com/PyO3/maturin/releases) | ✅ Latest confirmed |
 | **JAX** | 0.4.31 | **0.4.35** | [PyPI](https://pypi.org/project/jax/) | 🔍 Verify on PyPI |
 
@@ -281,7 +281,7 @@ Special attention required for flight software:
 
 | Category | Priority | Dependencies | Status | Notes |
 |----------|----------|-------------|--------|-------|
-| Rust Compiler | 🔴 1 | 1.85.0→1.90.0 | ⬜ Not Started | **DO FIRST - 5 versions behind** |
+| Rust Compiler | 🔴 1 | 1.85.0→1.90.0 | ✅ Completed | **Successfully updated to 1.90.0** |
 | Simple Bumps | 🟢 2 | serde, clap, etc. | ⬜ Not Started | |
 | Git Migrations | 🟡 3 | fatfs, stm32-hal2 | ⬜ Not Started | **2 can migrate now** |
 | Minor Breaking | 🟡 3 | Tokio, reqwest, etc. | ⬜ Not Started | |
@@ -365,7 +365,7 @@ These dependencies should be migrated to crates.io versions when possible:
 ## Next Steps
 
 1. ✅ Review this plan and adjust priorities based on team needs
-2. ⬜ **Update Rust compiler to 1.90.0** (Priority 1 - DO FIRST)
+2. ✅ **Update Rust compiler to 1.90.0** (Completed successfully!)
 3. ⬜ Create feature branch for Phase 1 updates  
 4. ⬜ Begin with simple version bumps (Priority 2)
 5. ⬜ Standardize Python to 3.12 across all configs

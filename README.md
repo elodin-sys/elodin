@@ -24,29 +24,45 @@ This monorepo contains the source code for all Elodin simulation and flight soft
 
 ## Dependencies
 
-Rust 1.85.0
-Preference for Arm based Macs
+### Core Requirements
+- **Rust 1.90.0** (managed via `rust-toolchain.toml`)
+  - The project uses Rust 2024 edition (stable since Rust 1.85.0)
+  - Includes targets: `wasm32-unknown-unknown`, `thumbv7em-none-eabihf`
+- **Python 3.12** (standardizing across the project)
+- **Preference for ARM-based Macs** (M1/M2/M3)
 
 ### macOS
 
-Validated on M1 architecture, macOS 15.1.1 on 2025-08-26.
+Validated on M1 architecture, macOS 15.1.1 on 2025-09-28.
+
+#### System Dependencies
+Install required system packages using Homebrew:
+
+```sh
+# One-liner to install all dependencies
+brew install pkg-config gstreamer ffmpeg python@3.12 gfortran openblas uv
+```
 
 ### Build & Run
+
+#### Quick Install
 ```sh
 just install
 ```
 
-#### Elodin App & SDK Development
-(See [apps/elodin/README.md](apps/elodin/README.md))
-``` sh
-brew install gstreamer python gfortran openblas uv
+#### Full Development Setup
+(See [apps/elodin/README.md](apps/elodin/README.md) for detailed instructions)
 
+```sh
+# Set up Python environment
 cd libs/nox-py
 uv venv --python 3.12
 source .venv/bin/activate
+
+# Build and install the Python bindings
 uvx maturin develop --uv
 uv sync
 
+# Run the Elodin editor with an example
 cargo run --manifest-path=../../apps/elodin/Cargo.toml editor examples/three-body.py
 ```
-
