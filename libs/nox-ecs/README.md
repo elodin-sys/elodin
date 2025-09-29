@@ -34,7 +34,7 @@ In practice: you declare a `struct`, add a `#[derive(...)]`, and the connection 
 ## Some examples
 
 ### Defining a custom component
-Rather than hand-implementing multiple traits, you can derive them automatically with the `#[derive(Component, ReprMonad)]` macros from `nox-ecs-macros:
+Rather than hand-implementing multiple traits, you can derive them automatically with the `#[derive(Component, ReprMonad)]` macros from `nox-ecs-macros`:
 
 ```rust
 use nox_ecs::{Op, OwnedRepr};       // core types re-exported by nox-ecs
