@@ -80,4 +80,3 @@ let m2: Mass<Op> = Mass(2.5.into());
 
 // This builds a graph expression (not an immediate f64)
 let total = Mass(m1.0 + m2.0);
-```
