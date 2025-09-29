@@ -5,9 +5,18 @@
 ## v0.15
 
 ### v0.15.0
+- **(feat)** UI: Lock graphs to same x-axis zoom
+- **(feat)** UI: Editable panel titles
+- **(feat)** UI: Sort components alphabetically by name
+- **(feat)** Add DeepStream binary to Aleph
+- **(feat)** Add Rust example: Rocket Trim Client Control
+- **(feat)** Allow custom save location for DB
+- **(feat)** Add component discovery Python command
+- **(doc)** Add READMEs for `nox/noxpr`, `nox_frames`, `nox_array`
 - **(fix)** Add auto-tick advancement to JaxSim.
 - **(breaking)** Handle UI and object visualization using new schematics format. See [migration guide](/reference/migration/to-0-15).
 - **(fix)** Stop endlessly creating entities for packet handling.
+- **(breaking)** The entity concept was removed from the DB, breaking previous saves.
 - **(breaking)** Replace `set_component_name` with `set_component_metadata` in C++ API to support setting element names.
 - **(breaking)** `exec.history()` now expects a component name, or a list of component names. If multiple component names are provided, they will be joined on the "time" column.
 - **(fix)** Fix bug where component values for tick 0 (initial component values before simulating) and tick 1 would have the same timestamps.
