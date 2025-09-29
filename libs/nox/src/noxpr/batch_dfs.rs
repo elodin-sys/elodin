@@ -84,7 +84,7 @@ impl BatchedExpr {
 }
 
 /// Describes the axis along which batch operations are performed.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Copy)]
 pub enum BatchAxis {
     NotMapped,
     Mapped { index: usize, size: usize },
@@ -1586,7 +1586,17 @@ mod tests {
             .visit(&expr)
             .expect("Recursive tracer should succeed");
         let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
+        assert_eq!(
+            "Noxpr { node: Div(BinaryOp { lhs: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(0), backtrace: <disabled> }, rhs: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(1), backtrace: <disabled> } }), id: NoxprId(2), backtrace: <disabled> }",
+            &format!("{:?}", &expr));
 
+        assert_eq!(
+            "BatchedExpr { inner: Noxpr { node: BroadcastInDim(BroadcastInDim { expr: Noxpr { node: Div(BinaryOp { lhs: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(0), backtrace: <disabled> }, rhs: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(1), backtrace: <disabled> } }), id: NoxprId(3), backtrace: <disabled> }, sizes: [1], broadcast_dims: [] }), id: NoxprId(4), backtrace: <disabled> }, batch_axis: Mapped { index: 0, size: 1 } }",
+            &format!("{:?}", &recursive_result));
+
+        assert_eq!(
+            "BatchedExpr { inner: Noxpr { node: Div(BinaryOp { lhs: Noxpr { node: BroadcastInDim(BroadcastInDim { expr: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(0), backtrace: <disabled> }, sizes: [1], broadcast_dims: [] }), id: NoxprId(5), backtrace: <disabled> }, rhs: Noxpr { node: BroadcastInDim(BroadcastInDim { expr: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(1), backtrace: <disabled> }, sizes: [1], broadcast_dims: [] }), id: NoxprId(6), backtrace: <disabled> } }), id: NoxprId(7), backtrace: <disabled> }, batch_axis: Mapped { index: 0, size: 1 } }",
+            &format!("{:#?}", &dfs_result));
         // Both should produce the same batch axis
         assert_eq!(
             recursive_result.batch_axis, dfs_result.batch_axis,

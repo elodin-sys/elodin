@@ -749,7 +749,7 @@ impl BatchTracer {
                     Ok(func(lhs, rhs))
                 }
             };
-        match (lhs.batch_axis.clone(), rhs.batch_axis.clone()) {
+        match (lhs.batch_axis, rhs.batch_axis) {
             (BatchAxis::NotMapped, BatchAxis::NotMapped) => {
                 let expr = BatchedExpr {
                     inner: scalar_broadcast_func(lhs, rhs)?,
