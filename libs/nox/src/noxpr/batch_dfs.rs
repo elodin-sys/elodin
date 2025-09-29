@@ -21,7 +21,7 @@ pub struct BatchTracer {
     out_axis: BatchAxis,
 }
 /// Represents an expression along with its batch axis information.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BatchedExpr {
     pub(crate) inner: Noxpr,
     pub(crate) batch_axis: BatchAxis,
@@ -1153,6 +1153,12 @@ mod tests {
             "Batch axis information should match between implementations"
         );
 
+        // Both should produce the same batch axis
+        assert_eq!(
+            recursive_result, dfs_result,
+            "Batch results should match between implementations"
+        );
+
         // Note: Expression IDs will be different because the implementations
         // process nodes in different orders and create different intermediate expressions.
         // The important thing is that the batch axis information matches, which indicates
@@ -1316,6 +1322,11 @@ mod tests {
             "Batch axis should match between implementations"
         );
 
+        // Both should produce the same batch axis
+        assert_eq!(
+            recursive_result, dfs_result,
+            "Batch results should match between implementations"
+        );
         // Both should produce the same numerical result
         // Note: We can't directly compare the expressions since they have different IDs,
         // but we can verify they both represent the same computation by checking
@@ -1388,6 +1399,11 @@ mod tests {
             "Batch axis should match between implementations"
         );
 
+        // Both should produce the same batch axis
+        assert_eq!(
+            recursive_result, dfs_result,
+            "Batch results should match between implementations"
+        );
         // Verify both results are multiplication operations
         match (
             &recursive_result.inner.node.as_ref(),
@@ -1448,6 +1464,11 @@ mod tests {
             "Batch axis should match between implementations"
         );
 
+        // Both should produce the same batch axis
+        assert_eq!(
+            recursive_result, dfs_result,
+            "Batch results should match between implementations"
+        );
         // Verify both results are sqrt operations
         match (
             &recursive_result.inner.node.as_ref(),
@@ -1505,6 +1526,11 @@ mod tests {
             "Batch axis should match between implementations"
         );
 
+        // Both should produce the same batch axis
+        assert_eq!(
+            recursive_result, dfs_result,
+            "Batch results should match between implementations"
+        );
         // Verify both results are multiplication operations
         match (
             &recursive_result.inner.node.as_ref(),
@@ -1565,6 +1591,12 @@ mod tests {
         assert_eq!(
             recursive_result.batch_axis, dfs_result.batch_axis,
             "Batch axis should match between implementations"
+        );
+
+        // Both should produce the same batch axis
+        assert_eq!(
+            recursive_result, dfs_result,
+            "Batch results should match between implementations"
         );
 
         // Verify both results are division operations
@@ -1628,6 +1660,12 @@ mod tests {
             "Batch axis should match between implementations"
         );
 
+        // Both should produce the same batch axis
+        assert_eq!(
+            recursive_result, dfs_result,
+            "Batch results should match between implementations"
+        );
+
         // Verify both results are subtraction operations
         match (
             &recursive_result.inner.node.as_ref(),
@@ -1688,6 +1726,12 @@ mod tests {
             "Batch axis should match between implementations"
         );
 
+        // Both should produce the same batch axis
+        assert_eq!(
+            recursive_result, dfs_result,
+            "Batch results should match between implementations"
+        );
+
         // Verify both results are sin operations (the outermost operation)
         match (
             &recursive_result.inner.node.as_ref(),
@@ -1734,6 +1778,11 @@ mod tests {
             "Batch axis should match between implementations"
         );
 
+        assert_eq!(
+            recursive_result, dfs_result,
+            "Batch results should match between implementations"
+        );
+
         // Verify both results are division operations
         match (
             &recursive_result.inner.node.as_ref(),
@@ -1777,6 +1826,12 @@ mod tests {
             "Batch axis should match between implementations"
         );
 
+        // Both should produce the same batch axis
+        assert_eq!(
+            recursive_result, dfs_result,
+            "Batch results should match between implementations"
+        );
+
         // Verify both results are tuple operations
         match (
             &recursive_result.inner.node.as_ref(),
@@ -1817,6 +1872,12 @@ mod tests {
         assert_eq!(
             recursive_result.batch_axis, dfs_result.batch_axis,
             "Batch axis should match between implementations"
+        );
+
+        // Both should produce the same batch axis
+        assert_eq!(
+            recursive_result, dfs_result,
+            "Batch results should match between implementations"
         );
 
         // Verify both results are logical operations

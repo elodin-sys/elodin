@@ -12,7 +12,7 @@ use smallvec::{SmallVec, smallvec};
 use xla::{ArrayElement, ElementType, NativeType, XlaBuilder, XlaComputation, XlaOp, XlaOpRef};
 
 /// Represents various types of nodes in an expression tree (Noxpr) for tensor computations.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum NoxprNode {
     // Params / Variables
     Param(ParamExpr),
@@ -385,7 +385,7 @@ impl NoxprNode {
 }
 
 /// Represents a constant value within the Noxpr.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Constant {
     pub data: xla::Literal, // NOTE: it might make more sense to use the xla independent store below
     // pub data: SmallVec<[u8; size_of::<f64>()]>,
@@ -399,7 +399,7 @@ impl std::fmt::Debug for Constant {
 }
 
 /// Represents the type of a node in the Noxpr, either a tuple or array type.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NoxprTy {
     Tuple(Vec<NoxprTy>),
     ArrayTy(ArrayTy),
@@ -424,7 +424,7 @@ impl NoxprTy {
 }
 
 /// Represents a type of array including its element type and shape.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArrayTy {
     pub element_type: ElementType,
     pub shape: SmallVec<[i64; 4]>,
@@ -464,14 +464,14 @@ impl From<NoxprTy> for xla::Shape {
 }
 
 /// Represents an operation producing an array of sequential integers.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Iota {
     pub shape: ArrayTy,
     pub dim: usize,
 }
 
 /// Represents a binary operation in the Noxpr.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct BinaryOp {
     pub lhs: Noxpr,
     pub rhs: Noxpr,
@@ -523,7 +523,7 @@ pub(crate) fn broadcast_dims(lhs: &[i64], rhs: &[i64]) -> Option<SmallVec<[i64; 
 }
 
 /// Represents a generalized dot product operation for matrix or tensor multiplication.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct DotGeneral {
     pub lhs: Noxpr,
     pub rhs: Noxpr,
@@ -630,7 +630,7 @@ impl DotGeneral {
 }
 
 /// Stores dimensions specifications for generalized dot product operations.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DotDimensionNums {
     pub lhs_contracting_dimensions: SmallVec<[i64; 2]>,
     pub rhs_contracting_dimensions: SmallVec<[i64; 2]>,
@@ -669,14 +669,14 @@ impl DotDimensionNums {
 }
 
 /// Stores the details for concatenation operations within the Noxpr.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Concat {
     pub nodes: Vec<Noxpr>,
     pub dimension: usize,
 }
 
 /// Represents slicing operations within the Noxpr.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Slice {
     pub expr: Noxpr,
     pub start_indices: SmallVec<[i64; 4]>,
@@ -685,7 +685,7 @@ pub struct Slice {
 }
 
 /// Represents dynamic slicing operations within the Noxpr.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct DynamicSlice {
     pub expr: Noxpr,
     pub start_indices: Vec<Noxpr>,
@@ -693,21 +693,21 @@ pub struct DynamicSlice {
 }
 
 /// Represents reshaping operations within the Noxpr.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Reshape {
     pub expr: Noxpr,
     pub new_sizes: SmallVec<[i64; 4]>,
 }
 
 /// Represents a broadcast operation within the Noxpr.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Broadcast {
     pub expr: Noxpr,
     pub sizes: SmallVec<[i64; 4]>,
 }
 
 /// Represents a broadcast operation with specific dimensions.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct BroadcastInDim {
     pub expr: Noxpr,
     pub sizes: SmallVec<[i64; 4]>,
@@ -715,14 +715,14 @@ pub struct BroadcastInDim {
 }
 
 /// Represents a transpose operation within the Noxpr.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Transpose {
     pub expr: Noxpr,
     pub permutation: SmallVec<[i64; 4]>,
 }
 
 /// Represents a gather operation, a form of advanced indexing.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Gather {
     pub expr: Noxpr,
     pub indices: Noxpr,
@@ -734,7 +734,7 @@ pub struct Gather {
 }
 
 /// Represents a dynamic update slice operation, updating slices of a tensor dynamically.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct DynamicUpdateSlice {
     pub expr: Noxpr,
     pub start_indices: Vec<Noxpr>,
@@ -742,7 +742,7 @@ pub struct DynamicUpdateSlice {
 }
 
 /// Represents the operation to extract an element from a tuple.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct GetTupleElement {
     pub expr: Noxpr,
     pub index: usize,
@@ -756,8 +756,17 @@ pub struct Noxpr {
     pub backtrace: Arc<std::backtrace::Backtrace>,
 }
 
+impl PartialEq for Noxpr {
+    fn eq(&self, other: &Self) -> bool {
+        self.node == other.node && self.id == other.id
+        // Note: backtrace field is intentionally excluded from equality comparison.
+    }
+}
+
+impl Eq for Noxpr {}
+
 /// Represents a scan operation, a form of reduction across one dimension.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scan {
     pub inputs: Vec<Noxpr>,
     pub initial_state: Noxpr,
@@ -765,7 +774,7 @@ pub struct Scan {
 }
 
 /// Represents a scan operation, a form of reduction across one dimension.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Select {
     pub cond: Noxpr,
     pub on_true: Noxpr,
@@ -773,13 +782,13 @@ pub struct Select {
 }
 
 /// Represents a conversion operation from one type to another
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Convert {
     pub arg: Noxpr,
     pub ty: ElementType,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct NoxprComp {
     pub func: Arc<NoxprFn>,
     pub id: NoxprId,
@@ -805,19 +814,19 @@ impl NoxprComp {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Call {
     pub comp: NoxprComp,
     pub args: Vec<Noxpr>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cholesky {
     pub arg: Noxpr,
     pub upper: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LuInverse {
     pub arg: Noxpr,
 }
@@ -1684,7 +1693,7 @@ fn get_tuple_shape(index: usize, expr: &NoxprNode) -> Option<SmallVec<[i64; 4]>>
 }
 
 /// Represents a parameter in the Noxpr.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParamExpr {
     pub number: i64,
     pub name: String,
@@ -2063,7 +2072,7 @@ impl XlaTracer {
 }
 
 /// A function that encapsulates a `Noxpr` and its arguments.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoxprFn {
     pub args: Vec<Noxpr>,
     pub inner: Noxpr,
