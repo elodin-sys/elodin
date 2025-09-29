@@ -1,3 +1,4 @@
+#![doc = include_str!("../README.md")]
 extern crate self as nox_ecs;
 
 use crate::utils::SchemaExt;
@@ -15,7 +16,10 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 use std::{collections::BTreeMap, marker::PhantomData};
 
+pub use crate::archetype::ComponentExt;
+pub use crate::component::Component;
 pub use nox;
+pub use nox::{DefaultRepr, Op, OwnedRepr};
 
 mod archetype;
 mod component;

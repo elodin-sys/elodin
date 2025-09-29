@@ -4,6 +4,7 @@ license = "MIT OR Apache-2.0"
 version.workspace = true
 edition = "2024"
 publish = false
+readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 #
