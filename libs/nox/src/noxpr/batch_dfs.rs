@@ -1,4 +1,4 @@
-use crate::noxpr::batch::{BatchAxis, BatchedExpr};
+// use crate::noxpr::batch::{BatchAxis, BatchedExpr};
 use crate::{
     ArrayTy, BinaryOp, CompFn, DefaultMap, DefaultMappedDim, Dim, DotDimensionNums, Error, Noxpr,
     NoxprFn, NoxprId, NoxprNode, NoxprTy, ReplaceDim, ReprMonad, Tensor, TensorItem,
@@ -17,8 +17,77 @@ use super::Op;
 /// Helper class for tracing batch operations, useful for operations like batched matrix multiplication.
 #[derive(Clone)]
 pub struct BatchTracer {
-    pub(crate) cache: HashMap<NoxprId, BatchedExpr>,
-    pub(crate) out_axis: BatchAxis,
+    cache: HashMap<NoxprId, BatchedExpr>,
+    out_axis: BatchAxis,
+}
+/// Represents an expression along with its batch axis information.
+#[derive(Clone, Debug)]
+pub struct BatchedExpr {
+    pub(crate) inner: Noxpr,
+    pub(crate) batch_axis: BatchAxis,
+}
+
+impl BatchedExpr {
+    pub(crate) fn map_expr(self, func: impl FnOnce(Noxpr) -> Noxpr) -> Self {
+        BatchedExpr {
+            inner: func(self.inner),
+            batch_axis: self.batch_axis,
+        }
+    }
+
+    pub(crate) fn move_batch_axis(self, dest: BatchAxis) -> Option<Self> {
+        let BatchAxis::Mapped {
+            index: dest_axis,
+            size: dest_size,
+        } = dest
+        else {
+            return Some(self);
+        };
+        match self.batch_axis {
+            BatchAxis::NotMapped => {
+                let mut new_shape = self.inner.shape()?;
+                if dest_axis > new_shape.len() {
+                    for _ in new_shape.len()..dest_axis {
+                        new_shape.push(1);
+                    }
+                }
+                new_shape.insert(dest_axis, dest_size as i64);
+                let broadcast_dims = (0..new_shape.len())
+                    .filter(|x| *x != dest_axis)
+                    .map(|x| x as i64)
+                    .collect();
+                let inner = self.inner.broadcast_in_dim(new_shape, broadcast_dims);
+                Some(Self {
+                    inner,
+                    batch_axis: dest,
+                })
+            }
+            BatchAxis::Mapped { index, .. } if index == dest_axis => self.into(),
+            BatchAxis::Mapped { index, .. } => {
+                let shape = self.inner.shape()?;
+                let mut perm = (0..shape.len())
+                    .filter(|i| *i != index)
+                    .map(|x| x as i64)
+                    .collect::<SmallVec<[i64; 4]>>();
+                perm.insert(dest_axis, index as i64);
+                let inner = self.inner.transpose(perm);
+                Some(Self {
+                    inner,
+                    batch_axis: BatchAxis::Mapped {
+                        index: dest_axis,
+                        size: shape[index] as usize,
+                    },
+                })
+            }
+        }
+    }
+}
+
+/// Describes the axis along which batch operations are performed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BatchAxis {
+    NotMapped,
+    Mapped { index: usize, size: usize },
 }
 
 impl BatchTracer {
@@ -856,13 +925,17 @@ impl BatchTracer {
                 for (arg, input) in args.iter_mut().rev().zip(inputs.iter().rev()) {
                     let id = arg.id();
                     let NoxprNode::Param(p) = arg.node.as_ref() else {
-                        panic!("non param arg in scan function")
+                        return Err(Error::ScanMissingParam);
                     };
                     let mut p = p.clone();
                     let mut shape = input.inner.shape().ok_or(Error::UnbatchableArgument)?;
                     shape.remove(0);
                     match &mut p.ty {
-                        NoxprTy::Tuple(_) => todo!(),
+                        NoxprTy::Tuple(_) => {
+                            return Err(Error::Unsupported(
+                                "Tuple types are not supported yet.".into(),
+                            ));
+                        }
                         NoxprTy::ArrayTy(ty) => {
                             ty.shape = shape;
                         }
