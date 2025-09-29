@@ -74,15 +74,10 @@ use nox_ecs_macros::ReprMonad;
 #[derive(nox_ecs::Component, ReprMonad)]
 struct Mass<R: OwnedRepr = Op>(Scalar<f64, R>);
 
-fn main() {
-    // Constant nodes in the computation graph (symbolic under `Op`)
-    let m1: Mass<Op> = Mass(1.0.into());
-    let m2: Mass<Op> = Mass(2.5.into());
+// Constant nodes in the computation graph (symbolic under `Op`)
+let m1: Mass<Op> = Mass(1.0.into());
+let m2: Mass<Op> = Mass(2.5.into());
 
-    // This builds a graph expression (not an immediate f64)
-    let total = Mass(m1.0 + m2.0);
-
-    // Debug-print the graph node (implementation-specific format)
-    println!("{:?}", total.0);
-}
+// This builds a graph expression (not an immediate f64)
+let total = Mass(m1.0 + m2.0);
 ```
