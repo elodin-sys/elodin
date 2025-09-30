@@ -83,10 +83,6 @@ impl BatchedExpr {
         }
     }
 
-    /// Return true if the other expression is equal to this one except for its IDs.
-    fn is_equal_ignoring_ids(&self, other: &BatchedExpr) -> bool {
-        self.batch_axis == self.batch_axis && self.inner.is_equal_ignoring_ids(&other.inner)
-    }
 }
 
 /// Helper class for tracing batch operations, useful for operations like batched matrix multiplication.
@@ -252,7 +248,7 @@ impl BatchTracer {
                     inner: expr,
                     batch_axis: BatchAxis::NotMapped,
                 }
-                .move_batch_axis(self.out_axis.clone())
+                .move_batch_axis(self.out_axis)
                 .ok_or(Error::UnbatchableArgument)
             }
             NoxprNode::DynamicUpdateSlice(_) => {
@@ -289,7 +285,7 @@ impl BatchTracer {
                     .pop()
                     .ok_or(Error::Internal(TraversalError::ChildNotProcessed))?;
                 let arg = arg
-                    .move_batch_axis(self.out_axis.clone())
+                    .move_batch_axis(self.out_axis)
                     .ok_or(Error::UnbatchableArgument)?;
                 Ok(BatchedExpr {
                     inner: arg.inner.cholesky(c.upper),
@@ -349,7 +345,7 @@ impl BatchTracer {
                     batch_axis: BatchAxis::NotMapped,
                 };
                 Ok(expr
-                    .move_batch_axis(self.out_axis.clone())
+                    .move_batch_axis(self.out_axis)
                     .ok_or(Error::UnbatchableArgument)?)
             }
 
@@ -363,12 +359,12 @@ impl BatchTracer {
             }
             (lhs_axis @ BatchAxis::Mapped { .. }, BatchAxis::Mapped { .. }) => {
                 let rhs = rhs
-                    .move_batch_axis(lhs_axis.clone())
+                    .move_batch_axis(lhs_axis)
                     .ok_or(Error::UnbatchableArgument)?;
                 let inner = scalar_broadcast_func(lhs, rhs)?;
                 Ok(BatchedExpr {
                     inner,
-                    batch_axis: lhs_axis.clone(),
+                    batch_axis: lhs_axis,
                 })
             }
         }
@@ -387,7 +383,7 @@ impl BatchTracer {
 
         match expr.batch_axis {
             BatchAxis::NotMapped => Ok(expr
-                .move_batch_axis(self.out_axis.clone())
+                .move_batch_axis(self.out_axis)
                 .ok_or(Error::UnbatchableArgument)?
                 .map_expr(func)),
             BatchAxis::Mapped { .. } => Ok(expr.map_expr(func)),
@@ -554,7 +550,7 @@ impl BatchTracer {
                 inner: lhs.inner.dot_general(rhs.inner, dims),
                 batch_axis: BatchAxis::NotMapped,
             }
-            .move_batch_axis(self.out_axis.clone())
+            .move_batch_axis(self.out_axis)
             .ok_or(Error::UnbatchableArgument)?),
         }
     }
@@ -609,7 +605,7 @@ impl BatchTracer {
                 inner: expr.inner.reshape(r.new_sizes.clone()),
                 batch_axis: BatchAxis::NotMapped,
             }
-            .move_batch_axis(self.out_axis.clone())
+            .move_batch_axis(self.out_axis)
             .ok_or(Error::UnbatchableArgument),
             BatchAxis::Mapped {
                 size: batch_size, ..
@@ -674,7 +670,7 @@ impl BatchTracer {
                 let inner = expr.inner.broadcast_in_dim(sizes, broadcast_dims);
                 Ok(BatchedExpr {
                     inner,
-                    batch_axis: batch_axis.clone(),
+                    batch_axis: *batch_axis,
                 })
             }
         }
@@ -691,7 +687,7 @@ impl BatchTracer {
             .ok_or(Error::Internal(TraversalError::ChildNotProcessed))?;
         match expr.batch_axis {
             BatchAxis::NotMapped => Ok(expr
-                .move_batch_axis(self.out_axis.clone())
+                .move_batch_axis(self.out_axis)
                 .ok_or(Error::UnbatchableArgument)?
                 .map_expr(|inner| inner.transpose(t.permutation.clone()))),
             BatchAxis::Mapped { index, size } => {
@@ -856,7 +852,7 @@ impl BatchTracer {
                     inner,
                     batch_axis: BatchAxis::NotMapped,
                 }
-                .move_batch_axis(self.out_axis.clone())
+                .move_batch_axis(self.out_axis)
                 .ok_or(Error::UnbatchableArgument)?)
             }
         }
@@ -879,14 +875,14 @@ impl BatchTracer {
         let initial_state = stack
             .pop()
             .ok_or(Error::Internal(TraversalError::ChildNotProcessed))?
-            .move_batch_axis(self.out_axis.clone())
+            .move_batch_axis(self.out_axis)
             .unwrap();
         let mut inputs: Vec<_> = Vec::with_capacity(s.inputs.len());
         for _ in (0..s.inputs.len()).rev() {
             let input = stack
                 .pop()
                 .ok_or(Error::Internal(TraversalError::ChildNotProcessed))?
-                .move_batch_axis(axis.clone())
+                .move_batch_axis(axis)
                 .ok_or(Error::UnbatchableArgument)?;
             inputs.push(input);
         }
@@ -895,7 +891,7 @@ impl BatchTracer {
         let batch_axis = inputs
             .iter()
             .find(|i| i.batch_axis != BatchAxis::NotMapped)
-            .map(|i| i.batch_axis.clone())
+            .map(|i| i.batch_axis)
             .unwrap_or(BatchAxis::NotMapped);
         match &batch_axis {
             BatchAxis::NotMapped => {
@@ -905,14 +901,14 @@ impl BatchTracer {
                     inner,
                     batch_axis: BatchAxis::NotMapped,
                 }
-                .move_batch_axis(self.out_axis.clone())
+                .move_batch_axis(self.out_axis)
                 .ok_or(Error::UnbatchableArgument)?)
             }
             BatchAxis::Mapped { .. } => {
                 for input in &mut inputs {
                     *input = input
                         .clone()
-                        .move_batch_axis(batch_axis.clone())
+                        .move_batch_axis(batch_axis)
                         .ok_or(Error::UnbatchableArgument)?;
                 }
                 let mut inner_batcher = self.clone();
@@ -938,9 +934,9 @@ impl BatchTracer {
                     let inner = Noxpr::parameter(p.number, p.ty, p.name);
                     let mut batched_expr = BatchedExpr {
                         inner,
-                        batch_axis: input.batch_axis.clone(),
+                        batch_axis: input.batch_axis,
                     }
-                    .move_batch_axis(axis.clone())
+                    .move_batch_axis(axis)
                     .unwrap();
                     if let BatchAxis::Mapped { ref mut index, .. } = batched_expr.batch_axis {
                         *index = 0;
@@ -966,7 +962,7 @@ impl BatchTracer {
                     let inner = Noxpr::parameter(p.number, p.ty, p.name);
                     let mut batched_expr = BatchedExpr {
                         inner,
-                        batch_axis: axis.clone(),
+                        batch_axis: axis,
                     };
                     if let BatchAxis::Mapped { ref mut index, .. } = batched_expr.batch_axis {
                         *index = 0;
@@ -986,7 +982,7 @@ impl BatchTracer {
                         initial_state.inner,
                         scan_fn,
                     ),
-                    batch_axis: self.out_axis.clone(),
+                    batch_axis: self.out_axis,
                 })
             }
         }
@@ -1002,17 +998,17 @@ impl BatchTracer {
         let on_false = stack
             .pop()
             .ok_or(Error::ExpectedArgument("on_false".into()))?
-            .move_batch_axis(self.out_axis.clone())
+            .move_batch_axis(self.out_axis)
             .ok_or(Error::UnbatchableArgument)?;
         let on_true = stack
             .pop()
             .ok_or(Error::ExpectedArgument("on_true".into()))?
-            .move_batch_axis(self.out_axis.clone())
+            .move_batch_axis(self.out_axis)
             .ok_or(Error::UnbatchableArgument)?;
         let cond = stack
             .pop()
             .ok_or(Error::ExpectedArgument("cond".into()))?
-            .move_batch_axis(self.out_axis.clone())
+            .move_batch_axis(self.out_axis)
             .ok_or(Error::UnbatchableArgument)?;
         Ok(BatchedExpr {
             inner: Noxpr::select(&cond.inner, on_true.inner, on_false.inner),
@@ -1136,7 +1132,7 @@ mod tests {
 
     /// Helper function to compare results from both implementations
     fn compare_batch_results(expr: &Noxpr, out_axis: BatchAxis) -> Result<(), Error> {
-        let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
+        let mut recursive_tracer = RecursiveBatchTracer::new(out_axis);
         let mut dfs_tracer = BatchTracer::new(out_axis);
 
         let recursive_result = recursive_tracer.visit(expr)?;
@@ -1158,7 +1154,7 @@ mod tests {
 
         // Both should produce the same batch
         assert!(
-            recursive_result.is_equal_ignoring_ids(&dfs_result),
+            recursive_result.inner.is_equal_ignoring_ids(&dfs_result.inner),
             "Batch results should match between implementations"
         );
 
@@ -1176,7 +1172,7 @@ mod tests {
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
 
         for expr in expressions {
-            if compare_batch_results(&expr, out_axis.clone()).is_ok() {
+            if compare_batch_results(&expr, out_axis).is_ok() {
                 // Test passed
             } else {
                 panic!("Binary operation consistency test failed for expression");
@@ -1201,7 +1197,7 @@ mod tests {
         ];
 
         for expr in unary_ops {
-            compare_batch_results(&expr, out_axis.clone())
+            compare_batch_results(&expr, out_axis)
                 .expect("Unary operation consistency test failed");
         }
     }
@@ -1259,7 +1255,7 @@ mod tests {
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
 
         // Test that both implementations handle errors consistently
-        let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
+        let mut recursive_tracer = RecursiveBatchTracer::new(out_axis);
         let mut dfs_tracer = BatchTracer::new(out_axis);
 
         // Both should succeed for valid expressions
@@ -1353,7 +1349,7 @@ mod tests {
 
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
 
-        let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
+        let mut recursive_tracer = RecursiveBatchTracer::new(out_axis);
         let mut dfs_tracer = BatchTracer::new(out_axis);
 
         let recursive_result = recursive_tracer
@@ -1387,7 +1383,7 @@ mod tests {
 
         // Both should produce the same batch
         assert!(
-            recursive_result.is_equal_ignoring_ids(&dfs_result),
+            recursive_result.inner.is_equal_ignoring_ids(&dfs_result.inner),
             "Batch results should match between implementations"
         );
     }
@@ -1401,7 +1397,7 @@ mod tests {
 
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
 
-        let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
+        let mut recursive_tracer = RecursiveBatchTracer::new(out_axis);
         let recursive_result = recursive_tracer
             .visit(&expr)
             .expect("Recursive tracer should succeed");
@@ -1420,13 +1416,14 @@ mod tests {
         );
 
         assert!(
-            !recursive_result.is_equal_ignoring_ids(&dfs_result),
+            !recursive_result.inner.is_equal_ignoring_ids(&dfs_result.inner),
             "Batch results should not match"
         );
         let recur_labels: Vec<usize> = recursive_result.inner.labels().collect();
         let dfs_labels: Vec<usize> = dfs_result.inner.labels().collect();
         // assert_eq!(recur_labels, vec![4,3,0,1]);
         // assert_eq!(dfs_labels, vec![9,8,5,6]);
+        assert_eq!(recur_labels.len(), dfs_labels.len());
     }
 
     #[test]

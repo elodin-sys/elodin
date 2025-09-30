@@ -1140,11 +1140,6 @@ impl Noxpr {
         }))
     }
 
-    #[cfg(test)]
-    pub fn relabel(&mut self, id: NoxprId) {
-        self.id = id;
-    }
-
     /// Return the labels for the graph in depth first pre-order.
     pub fn labels(&self) -> impl Iterator<Item = usize> {
         let mut seen_once = std::collections::HashSet::new();
