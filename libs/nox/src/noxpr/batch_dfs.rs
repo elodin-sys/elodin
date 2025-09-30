@@ -14,12 +14,13 @@ use traversal::DftPost;
 
 use super::Op;
 
-/// Helper class for tracing batch operations, useful for operations like batched matrix multiplication.
-#[derive(Clone)]
-pub struct BatchTracer {
-    cache: HashMap<NoxprId, BatchedExpr>,
-    out_axis: BatchAxis,
+/// Describes the axis along which batch operations are performed.
+#[derive(Clone, Debug, PartialEq, Eq, Copy)]
+pub enum BatchAxis {
+    NotMapped,
+    Mapped { index: usize, size: usize },
 }
+
 /// Represents an expression along with its batch axis information.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BatchedExpr {
@@ -83,11 +84,11 @@ impl BatchedExpr {
     }
 }
 
-/// Describes the axis along which batch operations are performed.
-#[derive(Clone, Debug, PartialEq, Eq, Copy)]
-pub enum BatchAxis {
-    NotMapped,
-    Mapped { index: usize, size: usize },
+/// Helper class for tracing batch operations, useful for operations like batched matrix multiplication.
+#[derive(Clone)]
+pub struct BatchTracer {
+    cache: HashMap<NoxprId, BatchedExpr>,
+    out_axis: BatchAxis,
 }
 
 impl BatchTracer {
@@ -308,74 +309,65 @@ impl BatchTracer {
         let lhs = stack
             .pop()
             .ok_or(Error::Internal(TraversalError::LhsNotProcessed))?;
-
         fn scalar_broadcast(
-            _rank: usize,
+            rank: usize,
             expr: BatchedExpr,
             shape: SmallVec<[i64; 4]>,
-        ) -> Result<BatchedExpr, Error> {
-            let mut new_shape = shape.clone();
-            new_shape.insert(
-                0,
-                expr.inner
-                    .shape()
-                    .ok_or(Error::Internal(TraversalError::ShapeOperationFailed))?
-                    .first()
-                    .copied()
-                    .unwrap_or(1),
-            );
-            let expr = expr.inner.broadcast(new_shape);
-            let expr_shape = expr
-                .shape()
-                .ok_or(Error::Internal(TraversalError::ShapeOperationFailed))?;
-            Ok(BatchedExpr {
-                inner: expr,
-                batch_axis: BatchAxis::Mapped {
-                    index: 0,
-                    size: expr_shape.first().copied().unwrap_or(1) as usize,
-                },
-            })
+        ) -> Option<Noxpr> {
+            if expr.batch_axis == BatchAxis::NotMapped || shape.len() == rank {
+                Some(expr.inner)
+            } else {
+                expr.inner.expand_rank(rank)
+            }
         }
 
-        match (&lhs.batch_axis, &rhs.batch_axis) {
+
+        let scalar_broadcast_func =
+            move |lhs: BatchedExpr, rhs: BatchedExpr| -> Result<Noxpr, Error> {
+                let rhs_shape = rhs.inner.shape().ok_or(Error::UnbatchableArgument)?;
+                let lhs_shape = lhs.inner.shape().ok_or(Error::UnbatchableArgument)?;
+                if rhs_shape.len() == lhs_shape.len() {
+                    Ok(func(lhs.inner, rhs.inner))
+                } else {
+                    let rank = rhs_shape.len().max(lhs_shape.len());
+                    let lhs =
+                        scalar_broadcast(rank, lhs, lhs_shape).ok_or(Error::UnbatchableArgument)?;
+                    let rhs =
+                        scalar_broadcast(rank, rhs, rhs_shape).ok_or(Error::UnbatchableArgument)?;
+                    Ok(func(lhs, rhs))
+                }
+            };
+
+        match (lhs.batch_axis, rhs.batch_axis) {
             (BatchAxis::NotMapped, BatchAxis::NotMapped) => {
-                let lhs = lhs
+                eprintln!("DFS out axis {:?}", &self.out_axis);
+                let expr = BatchedExpr {
+                    inner: scalar_broadcast_func(lhs, rhs)?,
+                    batch_axis: BatchAxis::NotMapped,
+                };
+                Ok(expr
                     .move_batch_axis(self.out_axis.clone())
-                    .ok_or(Error::UnbatchableArgument)?;
+                    .ok_or(Error::UnbatchableArgument)?)
+            }
+
+            (BatchAxis::NotMapped, mapped @ BatchAxis::Mapped { .. })
+                | (mapped @ BatchAxis::Mapped { .. }, BatchAxis::NotMapped) => {
+                let inner = scalar_broadcast_func(lhs, rhs)?;
+                Ok(BatchedExpr {
+                    inner,
+                    batch_axis: mapped,
+                })
+            }
+            (lhs_axis @ BatchAxis::Mapped { .. }, BatchAxis::Mapped { .. }) => {
                 let rhs = rhs
-                    .move_batch_axis(self.out_axis.clone())
+                    .move_batch_axis(lhs_axis.clone())
                     .ok_or(Error::UnbatchableArgument)?;
+                let inner = scalar_broadcast_func(lhs, rhs)?;
                 Ok(BatchedExpr {
-                    inner: func(lhs.inner, rhs.inner),
-                    batch_axis: self.out_axis.clone(),
+                    inner,
+                    batch_axis: lhs_axis.clone(),
                 })
             }
-            (BatchAxis::Mapped { .. }, BatchAxis::NotMapped) => {
-                let lhs_shape = lhs
-                    .inner
-                    .shape()
-                    .ok_or(Error::Internal(TraversalError::ShapeOperationFailed))?;
-                let rhs = scalar_broadcast(lhs_shape.len(), rhs, lhs_shape.clone())?;
-                Ok(BatchedExpr {
-                    inner: func(lhs.inner, rhs.inner),
-                    batch_axis: lhs.batch_axis,
-                })
-            }
-            (BatchAxis::NotMapped, BatchAxis::Mapped { .. }) => {
-                let rhs_shape = rhs
-                    .inner
-                    .shape()
-                    .ok_or(Error::Internal(TraversalError::ShapeOperationFailed))?;
-                let lhs = scalar_broadcast(rhs_shape.len(), lhs, rhs_shape.clone())?;
-                Ok(BatchedExpr {
-                    inner: func(lhs.inner, rhs.inner),
-                    batch_axis: rhs.batch_axis,
-                })
-            }
-            (BatchAxis::Mapped { .. }, BatchAxis::Mapped { .. }) => Ok(BatchedExpr {
-                inner: func(lhs.inner, rhs.inner),
-                batch_axis: lhs.batch_axis,
-            }),
         }
     }
 
@@ -1595,8 +1587,8 @@ mod tests {
             &format!("{:?}", &recursive_result));
 
         assert_eq!(
-            "BatchedExpr { inner: Noxpr { node: Div(BinaryOp { lhs: Noxpr { node: BroadcastInDim(BroadcastInDim { expr: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(0), backtrace: <disabled> }, sizes: [1], broadcast_dims: [] }), id: NoxprId(5), backtrace: <disabled> }, rhs: Noxpr { node: BroadcastInDim(BroadcastInDim { expr: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(1), backtrace: <disabled> }, sizes: [1], broadcast_dims: [] }), id: NoxprId(6), backtrace: <disabled> } }), id: NoxprId(7), backtrace: <disabled> }, batch_axis: Mapped { index: 0, size: 1 } }",
-            &format!("{:#?}", &dfs_result));
+            "BatchedExpr { inner: Noxpr { node: BroadcastInDim(BroadcastInDim { expr: Noxpr { node: Div(BinaryOp { lhs: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(0), backtrace: <disabled> }, rhs: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(1), backtrace: <disabled> } }), id: NoxprId(5), backtrace: <disabled> }, sizes: [1], broadcast_dims: [] }), id: NoxprId(6), backtrace: <disabled> }, batch_axis: Mapped { index: 0, size: 1 } }",
+            &format!("{:?}", &dfs_result));
         // Both should produce the same batch axis
         assert_eq!(
             recursive_result.batch_axis, dfs_result.batch_axis,
