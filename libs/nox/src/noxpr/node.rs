@@ -1125,6 +1125,19 @@ impl Noxpr {
         self.id = id;
     }
 
+    /// Return the labels for the graph in depth first pre-order.
+    pub fn labels(&self) -> impl Iterator<Item = usize> {
+        let mut seen_once = std::collections::HashSet::new();
+        let traversal = traversal::DftPre::new(self, move |node: &Noxpr| {
+            if seen_once.insert(node.id()) {
+                node.node.children()
+            } else {
+                crate::ChildrenIter::Empty
+            }
+        });
+        traversal.map(move |(_, node)| node.id().0)
+    }
+
     /// Creates a logarithmic transformation of the `Noxpr`.
     pub fn log(self) -> Self {
         Self::new(NoxprNode::Log(self))

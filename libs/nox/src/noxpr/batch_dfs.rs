@@ -1582,17 +1582,19 @@ mod tests {
             .visit(&expr)
             .expect("Recursive tracer should succeed");
         let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
-        assert_eq!(
-            "Noxpr { node: Div(BinaryOp { lhs: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(0), backtrace: <disabled> }, rhs: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(1), backtrace: <disabled> } }), id: NoxprId(2), backtrace: <disabled> }",
-            &format!("{:?}", &expr));
+        // NOTE: The IDs change depending onthe test order so these assertions cannot
+        // be evaluated unless only this one test is run.
+        // assert_eq!(
+        //     "Noxpr { node: Div(BinaryOp { lhs: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(0), backtrace: <disabled> }, rhs: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(1), backtrace: <disabled> } }), id: NoxprId(2), backtrace: <disabled> }",
+        //     &format!("{:?}", &expr));
 
-        assert_eq!(
-            "BatchedExpr { inner: Noxpr { node: BroadcastInDim(BroadcastInDim { expr: Noxpr { node: Div(BinaryOp { lhs: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(0), backtrace: <disabled> }, rhs: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(1), backtrace: <disabled> } }), id: NoxprId(3), backtrace: <disabled> }, sizes: [1], broadcast_dims: [] }), id: NoxprId(4), backtrace: <disabled> }, batch_axis: Mapped { index: 0, size: 1 } }",
-            &format!("{:?}", &recursive_result));
+        // assert_eq!(
+        //     "BatchedExpr { inner: Noxpr { node: BroadcastInDim(BroadcastInDim { expr: Noxpr { node: Div(BinaryOp { lhs: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(0), backtrace: <disabled> }, rhs: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(1), backtrace: <disabled> } }), id: NoxprId(3), backtrace: <disabled> }, sizes: [1], broadcast_dims: [] }), id: NoxprId(4), backtrace: <disabled> }, batch_axis: Mapped { index: 0, size: 1 } }",
+        //     &format!("{:?}", &recursive_result));
 
-        assert_eq!(
-            "BatchedExpr { inner: Noxpr { node: BroadcastInDim(BroadcastInDim { expr: Noxpr { node: Div(BinaryOp { lhs: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(0), backtrace: <disabled> }, rhs: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(1), backtrace: <disabled> } }), id: NoxprId(5), backtrace: <disabled> }, sizes: [1], broadcast_dims: [] }), id: NoxprId(6), backtrace: <disabled> }, batch_axis: Mapped { index: 0, size: 1 } }",
-            &format!("{:?}", &dfs_result));
+        // assert_eq!(
+        //     "BatchedExpr { inner: Noxpr { node: BroadcastInDim(BroadcastInDim { expr: Noxpr { node: Div(BinaryOp { lhs: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(0), backtrace: <disabled> }, rhs: Noxpr { node: Constant(Constant { ty: ArrayTy { element_type: F32, shape: [] } }), id: NoxprId(1), backtrace: <disabled> } }), id: NoxprId(5), backtrace: <disabled> }, sizes: [1], broadcast_dims: [] }), id: NoxprId(6), backtrace: <disabled> }, batch_axis: Mapped { index: 0, size: 1 } }",
+        //     &format!("{:?}", &dfs_result));
         // Both should produce the same batch axis
         assert_eq!(
             recursive_result.batch_axis, dfs_result.batch_axis,
@@ -1643,6 +1645,10 @@ mod tests {
             !recursive_result.is_equal_ignoring_ids(&dfs_result),
             "Batch results should not match"
         );
+        let recur_labels: Vec<usize> = recursive_result.inner.labels().collect();
+        let dfs_labels: Vec<usize> = dfs_result.inner.labels().collect();
+        // assert_eq!(recur_labels, vec![4,3,0,1]);
+        // assert_eq!(dfs_labels, vec![9,8,5,6]);
     }
 
     #[test]
