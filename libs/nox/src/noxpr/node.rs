@@ -1078,7 +1078,13 @@ impl Default for NoxprId {
     /// Provides default generation of unique identifiers for expressions.
     fn default() -> Self {
         static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        Self(COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
+        Self::with_atomic(&COUNTER)
+    }
+}
+
+impl NoxprId {
+    fn with_atomic(counter: &std::sync::atomic::AtomicUsize) -> Self {
+        Self(counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
     }
 }
 
@@ -1112,6 +1118,11 @@ impl Noxpr {
             rhs,
             dimensions,
         }))
+    }
+
+    #[cfg(test)]
+    pub fn relabel(&mut self, id: NoxprId) {
+        self.id = id;
     }
 
     /// Creates a logarithmic transformation of the `Noxpr`.
