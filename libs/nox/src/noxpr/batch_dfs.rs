@@ -326,7 +326,6 @@ impl BatchTracer {
             }
         }
 
-
         let scalar_broadcast_func =
             move |lhs: BatchedExpr, rhs: BatchedExpr| -> Result<Noxpr, Error> {
                 let rhs_shape = rhs.inner.shape().ok_or(Error::UnbatchableArgument)?;
@@ -355,7 +354,7 @@ impl BatchTracer {
             }
 
             (BatchAxis::NotMapped, mapped @ BatchAxis::Mapped { .. })
-                | (mapped @ BatchAxis::Mapped { .. }, BatchAxis::NotMapped) => {
+            | (mapped @ BatchAxis::Mapped { .. }, BatchAxis::NotMapped) => {
                 let inner = scalar_broadcast_func(lhs, rhs)?;
                 Ok(BatchedExpr {
                     inner,
@@ -1163,8 +1162,10 @@ mod tests {
             "Batch results should match between implementations"
         );
 
-        assert_eq!(recursive_result.inner.labels().count(),
-                   dfs_result.inner.labels().count());
+        assert_eq!(
+            recursive_result.inner.labels().count(),
+            dfs_result.inner.labels().count()
+        );
 
         Ok(())
     }

@@ -481,7 +481,8 @@ impl NoxprNode {
             // Tuple operations
             (NoxprNode::Tuple(t1), NoxprNode::Tuple(t2)) => {
                 t1.len() == t2.len()
-                    && t1.iter()
+                    && t1
+                        .iter()
                         .zip(t2.iter())
                         .all(|(e1, e2)| e1.is_equal_ignoring_ids_with_map(e2, id_map))
             }
@@ -494,7 +495,8 @@ impl NoxprNode {
             (NoxprNode::Concat(c1), NoxprNode::Concat(c2)) => {
                 c1.dimension == c2.dimension
                     && c1.nodes.len() == c2.nodes.len()
-                    && c1.nodes
+                    && c1
+                        .nodes
                         .iter()
                         .zip(c2.nodes.iter())
                         .all(|(n1, n2)| n1.is_equal_ignoring_ids_with_map(n2, id_map))
@@ -508,8 +510,7 @@ impl NoxprNode {
 
             // Broadcast operations
             (NoxprNode::Broadcast(b1), NoxprNode::Broadcast(b2)) => {
-                b1.sizes == b2.sizes
-                    && b1.expr.is_equal_ignoring_ids_with_map(&b2.expr, id_map)
+                b1.sizes == b2.sizes && b1.expr.is_equal_ignoring_ids_with_map(&b2.expr, id_map)
             }
             (NoxprNode::BroadcastInDim(b1), NoxprNode::BroadcastInDim(b2)) => {
                 b1.sizes == b2.sizes
@@ -535,7 +536,8 @@ impl NoxprNode {
             (NoxprNode::DynamicSlice(ds1), NoxprNode::DynamicSlice(ds2)) => {
                 ds1.size_indices == ds2.size_indices
                     && ds1.start_indices.len() == ds2.start_indices.len()
-                    && ds1.start_indices
+                    && ds1
+                        .start_indices
                         .iter()
                         .zip(ds2.start_indices.iter())
                         .all(|(e1, e2)| e1.is_equal_ignoring_ids_with_map(e2, id_map))
@@ -545,11 +547,14 @@ impl NoxprNode {
             // Dynamic update slice operations
             (NoxprNode::DynamicUpdateSlice(dus1), NoxprNode::DynamicUpdateSlice(dus2)) => {
                 dus1.start_indices.len() == dus2.start_indices.len()
-                    && dus1.start_indices
+                    && dus1
+                        .start_indices
                         .iter()
                         .zip(dus2.start_indices.iter())
                         .all(|(e1, e2)| e1.is_equal_ignoring_ids_with_map(e2, id_map))
-                    && dus1.update.is_equal_ignoring_ids_with_map(&dus2.update, id_map)
+                    && dus1
+                        .update
+                        .is_equal_ignoring_ids_with_map(&dus2.update, id_map)
                     && dus1.expr.is_equal_ignoring_ids_with_map(&dus2.expr, id_map)
             }
 
@@ -561,30 +566,44 @@ impl NoxprNode {
                     && g1.slice_sizes == g2.slice_sizes
                     && g1.index_vector_dim == g2.index_vector_dim
                     && g1.expr.is_equal_ignoring_ids_with_map(&g2.expr, id_map)
-                    && g1.indices.is_equal_ignoring_ids_with_map(&g2.indices, id_map)
+                    && g1
+                        .indices
+                        .is_equal_ignoring_ids_with_map(&g2.indices, id_map)
             }
 
             // Scan operations
             (NoxprNode::Scan(s1), NoxprNode::Scan(s2)) => {
                 s1.inputs.len() == s2.inputs.len()
-                    && s1.inputs
+                    && s1
+                        .inputs
                         .iter()
                         .zip(s2.inputs.iter())
                         .all(|(i1, i2)| i1.is_equal_ignoring_ids_with_map(i2, id_map))
-                    && s1.initial_state.is_equal_ignoring_ids_with_map(&s2.initial_state, id_map)
+                    && s1
+                        .initial_state
+                        .is_equal_ignoring_ids_with_map(&s2.initial_state, id_map)
                     && s1.scan_fn.args.len() == s2.scan_fn.args.len()
-                    && s1.scan_fn.args
+                    && s1
+                        .scan_fn
+                        .args
                         .iter()
                         .zip(s2.scan_fn.args.iter())
                         .all(|(a1, a2)| a1.is_equal_ignoring_ids_with_map(a2, id_map))
-                    && s1.scan_fn.inner.is_equal_ignoring_ids_with_map(&s2.scan_fn.inner, id_map)
+                    && s1
+                        .scan_fn
+                        .inner
+                        .is_equal_ignoring_ids_with_map(&s2.scan_fn.inner, id_map)
             }
 
             // Select operations
             (NoxprNode::Select(s1), NoxprNode::Select(s2)) => {
                 s1.cond.is_equal_ignoring_ids_with_map(&s2.cond, id_map)
-                    && s1.on_true.is_equal_ignoring_ids_with_map(&s2.on_true, id_map)
-                    && s1.on_false.is_equal_ignoring_ids_with_map(&s2.on_false, id_map)
+                    && s1
+                        .on_true
+                        .is_equal_ignoring_ids_with_map(&s2.on_true, id_map)
+                    && s1
+                        .on_false
+                        .is_equal_ignoring_ids_with_map(&s2.on_false, id_map)
             }
 
             // Convert operations
@@ -597,7 +616,8 @@ impl NoxprNode {
                 c1.comp.id == c2.comp.id
                     && c1.comp.ty == c2.comp.ty
                     && c1.args.len() == c2.args.len()
-                    && c1.args
+                    && c1
+                        .args
                         .iter()
                         .zip(c2.args.iter())
                         .all(|(a1, a2)| a1.is_equal_ignoring_ids_with_map(a2, id_map))
@@ -1918,7 +1938,8 @@ impl Noxpr {
     /// Compares two expressions for structural equality while ignoring ID values.
     /// Returns true if the expressions have the same structure, with consistent ID mappings.
     pub fn is_equal_ignoring_ids(&self, other: &Noxpr) -> bool {
-        let mut id_map: std::collections::HashMap<NoxprId, NoxprId> = std::collections::HashMap::new();
+        let mut id_map: std::collections::HashMap<NoxprId, NoxprId> =
+            std::collections::HashMap::new();
         self.is_equal_ignoring_ids_with_map(other, &mut id_map)
     }
 
@@ -1942,7 +1963,8 @@ impl Noxpr {
         id_map.insert(self.id, other.id);
 
         // Compare the nodes structurally
-        self.node.is_equal_ignoring_ids_with_map(&other.node, id_map)
+        self.node
+            .is_equal_ignoring_ids_with_map(&other.node, id_map)
     }
 }
 
@@ -2362,7 +2384,6 @@ impl XlaTracer {
     fn visit_binary_op(&mut self, op: &BinaryOp) -> Result<(XlaOp, XlaOp), Error> {
         Ok((self.visit(&op.lhs)?, self.visit(&op.rhs)?))
     }
-
 }
 
 /// A function that encapsulates a `Noxpr` and its arguments.
