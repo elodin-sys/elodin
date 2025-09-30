@@ -177,13 +177,13 @@ impl Expr {
     /// Converts an Expr to a qualified SQL field name (table.field) for use in JOINs.
     fn to_qualified_field(&self) -> Result<String, Error> {
         match self {
-            Expr::Norm(e) => { 
+            Expr::Norm(e) => {
                 let part = match e.as_ref() {
                     Expr::ComponentPart(p) => p.clone(),
                     _ => {
                         return Err(Error::InvalidMethodCall(
                             "norm() expects a vector component".to_string(),
-                        ))
+                        ));
                     }
                 };
                 let comp = part.component.as_ref().ok_or_else(|| {
@@ -576,9 +576,7 @@ impl Context {
                 .map(|ast_node| self.parse(ast_node))
                 .collect::<Result<Vec<_>, _>>()
                 .map(Expr::Tuple),
-            AstNode::StringLiteral(s) => {
-                Ok(Expr::StringLiteral(s.to_string()))
-            }
+            AstNode::StringLiteral(s) => Ok(Expr::StringLiteral(s.to_string())),
             AstNode::BinaryOp(left, right, op) => {
                 let left = self.parse(left)?;
                 let right = self.parse(right)?;
@@ -617,7 +615,8 @@ impl Context {
                 let mut suggestions: Vec<String> = part.children.keys().cloned().collect();
                 if let Some(component) = &part.component {
                     suggestions.extend(component.element_names.iter().map(|name| name.to_string()));
-                    if !component.schema.dim().is_empty() { // norm()
+                    if !component.schema.dim().is_empty() {
+                        // norm()
                         suggestions.push("norm()".to_string());
                     }
                     suggestions.push("last(".to_string());
@@ -1013,7 +1012,8 @@ mod tests {
     }
 
     #[test]
-    fn test_norm_sql() { // norm()
+    fn test_norm_sql() {
+        // norm()
         let part = create_test_component_part();
         let context = create_test_context();
         let expr = Expr::Norm(Box::new(Expr::ComponentPart(part)));
