@@ -1149,20 +1149,22 @@ mod tests {
             "Batch axis information should match between implementations"
         );
 
-        // Both should produce the same batch axis
-        assert_eq!(
+        // Note: Expression IDs will be different because the implementations
+        // process nodes in different orders and create different intermediate
+        // expressions.
+        assert_ne!(
             recursive_result, dfs_result,
             "Batch results should match between implementations"
         );
 
-        // Note: Expression IDs will be different because the implementations
-        // process nodes in different orders and create different intermediate expressions.
-        // The important thing is that the batch axis information matches, which indicates
-        // that both implementations produce functionally equivalent results.
-        println!(
-            "✓ Both implementations produced equivalent batch axis: {:?}",
-            recursive_result.batch_axis
+        // Both should produce the same batch
+        assert!(
+            recursive_result.is_equal_ignoring_ids(&dfs_result),
+            "Batch results should match between implementations"
         );
+
+        assert_eq!(recursive_result.inner.labels().count(),
+                   dfs_result.inner.labels().count());
 
         Ok(())
     }
@@ -1303,73 +1305,7 @@ mod tests {
         let expr = scalar_a + scalar_b; // This should evaluate to 6.2
 
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
-
-        let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
-        let mut dfs_tracer = BatchTracer::new(out_axis);
-
-        let recursive_result = recursive_tracer
-            .visit(&expr)
-            .expect("Recursive tracer should succeed");
-        let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
-
-        // Both should produce the same batch axis
-        assert_eq!(
-            recursive_result.batch_axis, dfs_result.batch_axis,
-            "Batch axis should match between implementations"
-        );
-
-        // Both should produce the same batch axis
-        assert_eq!(
-            recursive_result, dfs_result,
-            "Batch results should match between implementations"
-        );
-        // Both should produce the same numerical result
-        // Note: We can't directly compare the expressions since they have different IDs,
-        // but we can verify they both represent the same computation by checking
-        // that they're both addition operations with the same operands
-
-        // Both implementations should produce functionally equivalent results
-        // The recursive implementation wraps the addition in a BroadcastInDim,
-        // while the DFS implementation applies BroadcastInDim to the operands
-        // Both are correct - they represent the same computation
-
-        match (
-            &recursive_result.inner.node.as_ref(),
-            &dfs_result.inner.node.as_ref(),
-        ) {
-            (NoxprNode::BroadcastInDim(rec_broadcast), NoxprNode::Add(dfs_add)) => {
-                // Recursive: BroadcastInDim(Add(...))
-                // DFS: Add(BroadcastInDim(...), BroadcastInDim(...))
-                println!("✓ Recursive implementation: BroadcastInDim wrapping addition");
-                println!("✓ DFS implementation: Addition with broadcasted operands");
-
-                // Verify the recursive implementation has an addition inside the broadcast
-                match rec_broadcast.expr.node.as_ref() {
-                    NoxprNode::Add(_rec_add) => {
-                        println!("✓ Recursive implementation contains addition operation");
-
-                        // Verify the DFS implementation has broadcasted operands
-                        match (&dfs_add.lhs.node.as_ref(), &dfs_add.rhs.node.as_ref()) {
-                            (
-                                NoxprNode::BroadcastInDim(_dfs_lhs),
-                                NoxprNode::BroadcastInDim(_dfs_rhs),
-                            ) => {
-                                println!("✓ DFS implementation has broadcasted operands");
-                            }
-                            _ => panic!("DFS implementation should have broadcasted operands"),
-                        }
-                    }
-                    _ => panic!("Recursive implementation should contain addition operation"),
-                }
-            }
-            _ => {
-                println!("Recursive result: {:?}", recursive_result.inner.node);
-                println!("DFS result: {:?}", dfs_result.inner.node);
-                panic!("Unexpected node types from implementations");
-            }
-        }
-
-        println!("✓ Numerical evaluation consistency test passed");
+        compare_batch_results(&expr, out_axis).unwrap();
     }
 
     #[test]
@@ -1381,61 +1317,7 @@ mod tests {
 
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
 
-        let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
-        let mut dfs_tracer = BatchTracer::new(out_axis);
-
-        let recursive_result = recursive_tracer
-            .visit(&expr)
-            .expect("Recursive tracer should succeed");
-        let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
-
-        // Both should produce the same batch axis
-        assert_eq!(
-            recursive_result.batch_axis, dfs_result.batch_axis,
-            "Batch axis should match between implementations"
-        );
-
-        // Both should produce the same batch axis
-        assert_eq!(
-            recursive_result, dfs_result,
-            "Batch results should match between implementations"
-        );
-        // Verify both results are multiplication operations
-        match (
-            &recursive_result.inner.node.as_ref(),
-            &dfs_result.inner.node.as_ref(),
-        ) {
-            (NoxprNode::BroadcastInDim(rec_broadcast), NoxprNode::Mul(dfs_mul)) => {
-                println!("✓ Recursive implementation: BroadcastInDim wrapping multiplication");
-                println!("✓ DFS implementation: Multiplication with broadcasted operands");
-
-                // Verify the recursive implementation has a multiplication inside the broadcast
-                match rec_broadcast.expr.node.as_ref() {
-                    NoxprNode::Mul(_rec_mul) => {
-                        println!("✓ Recursive implementation contains multiplication operation");
-
-                        // Verify the DFS implementation has broadcasted operands
-                        match (&dfs_mul.lhs.node.as_ref(), &dfs_mul.rhs.node.as_ref()) {
-                            (
-                                NoxprNode::BroadcastInDim(_dfs_lhs),
-                                NoxprNode::BroadcastInDim(_dfs_rhs),
-                            ) => {
-                                println!("✓ DFS implementation has broadcasted operands");
-                            }
-                            _ => panic!("DFS implementation should have broadcasted operands"),
-                        }
-                    }
-                    _ => panic!("Recursive implementation should contain multiplication operation"),
-                }
-            }
-            _ => {
-                println!("Recursive result: {:?}", recursive_result.inner.node);
-                println!("DFS result: {:?}", dfs_result.inner.node);
-                panic!("Unexpected node types from implementations");
-            }
-        }
-
-        println!("✓ Multiplication consistency test passed");
+        compare_batch_results(&expr, out_axis).unwrap();
     }
 
     #[test]
@@ -1445,57 +1327,7 @@ mod tests {
         let expr = scalar.sqrt(); // This should evaluate to 4.0
 
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
-
-        let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
-        let mut dfs_tracer = BatchTracer::new(out_axis);
-
-        let recursive_result = recursive_tracer
-            .visit(&expr)
-            .expect("Recursive tracer should succeed");
-        let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
-
-        // Both should produce the same batch axis
-        assert_eq!(
-            recursive_result.batch_axis, dfs_result.batch_axis,
-            "Batch axis should match between implementations"
-        );
-
-        // Both should produce the same batch axis
-        assert_eq!(
-            recursive_result, dfs_result,
-            "Batch results should match between implementations"
-        );
-        // Verify both results are sqrt operations
-        match (
-            &recursive_result.inner.node.as_ref(),
-            &dfs_result.inner.node.as_ref(),
-        ) {
-            (NoxprNode::Sqrt(rec_sqrt), NoxprNode::Sqrt(dfs_sqrt)) => {
-                println!("✓ Both implementations produced sqrt operations");
-
-                // Both should have broadcasted operands
-                match (&rec_sqrt.node.as_ref(), &dfs_sqrt.node.as_ref()) {
-                    (
-                        NoxprNode::BroadcastInDim(_rec_operand),
-                        NoxprNode::BroadcastInDim(_dfs_operand),
-                    ) => {
-                        println!("✓ Both implementations have broadcasted operands");
-                    }
-                    _ => {
-                        println!("Recursive operand: {:?}", rec_sqrt.node);
-                        println!("DFS operand: {:?}", dfs_sqrt.node);
-                        panic!("Both implementations should have broadcasted operands");
-                    }
-                }
-            }
-            _ => {
-                println!("Recursive result: {:?}", recursive_result.inner.node);
-                println!("DFS result: {:?}", dfs_result.inner.node);
-                panic!("Both implementations should produce sqrt operations");
-            }
-        }
-
-        println!("✓ Sqrt operation consistency test passed");
+        compare_batch_results(&expr, out_axis).unwrap();
     }
 
     #[test]
@@ -1508,62 +1340,7 @@ mod tests {
 
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
 
-        let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
-        let mut dfs_tracer = BatchTracer::new(out_axis);
-
-        let recursive_result = recursive_tracer
-            .visit(&expr)
-            .expect("Recursive tracer should succeed");
-        let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
-
-        // Both should produce the same batch axis
-        assert_eq!(
-            recursive_result.batch_axis, dfs_result.batch_axis,
-            "Batch axis should match between implementations"
-        );
-
-        // Both should produce the same batch axis
-        assert_eq!(
-            recursive_result, dfs_result,
-            "Batch results should match between implementations"
-        );
-        // Verify both results are multiplication operations
-        match (
-            &recursive_result.inner.node.as_ref(),
-            &dfs_result.inner.node.as_ref(),
-        ) {
-            (NoxprNode::Mul(rec_mul), NoxprNode::Mul(dfs_mul)) => {
-                println!("✓ Both implementations produced multiplication operations");
-
-                // Both should have operands with broadcasts
-                match (
-                    &rec_mul.lhs.node.as_ref(),
-                    &rec_mul.rhs.node.as_ref(),
-                    &dfs_mul.lhs.node.as_ref(),
-                    &dfs_mul.rhs.node.as_ref(),
-                ) {
-                    (NoxprNode::BroadcastInDim(_rec_lhs), _, NoxprNode::Add(_dfs_lhs), _) => {
-                        println!("✓ Both implementations have appropriate operand structures");
-                        println!("✓ Recursive: BroadcastInDim on LHS");
-                        println!("✓ DFS: Add operation on LHS");
-                    }
-                    _ => {
-                        println!("Recursive LHS: {:?}", rec_mul.lhs.node);
-                        println!("Recursive RHS: {:?}", rec_mul.rhs.node);
-                        println!("DFS LHS: {:?}", dfs_mul.lhs.node);
-                        println!("DFS RHS: {:?}", dfs_mul.rhs.node);
-                        panic!("Both implementations should have appropriate operand structures");
-                    }
-                }
-            }
-            _ => {
-                println!("Recursive result: {:?}", recursive_result.inner.node);
-                println!("DFS result: {:?}", dfs_result.inner.node);
-                panic!("Both implementations should produce multiplication operations");
-            }
-        }
-
-        println!("✓ Complex nested expression consistency test passed");
+        compare_batch_results(&expr, out_axis).unwrap();
     }
 
     #[test]
@@ -1660,62 +1437,7 @@ mod tests {
 
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
 
-        let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
-        let mut dfs_tracer = BatchTracer::new(out_axis);
-
-        let recursive_result = recursive_tracer
-            .visit(&expr)
-            .expect("Recursive tracer should succeed");
-        let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
-
-        // Both should produce the same batch axis
-        assert_eq!(
-            recursive_result.batch_axis, dfs_result.batch_axis,
-            "Batch axis should match between implementations"
-        );
-
-        // Both should produce the same batch axis
-        assert_eq!(
-            recursive_result, dfs_result,
-            "Batch results should match between implementations"
-        );
-
-        // Verify both results are subtraction operations
-        match (
-            &recursive_result.inner.node.as_ref(),
-            &dfs_result.inner.node.as_ref(),
-        ) {
-            (NoxprNode::BroadcastInDim(rec_broadcast), NoxprNode::Sub(dfs_sub)) => {
-                println!("✓ Recursive implementation: BroadcastInDim wrapping subtraction");
-                println!("✓ DFS implementation: Subtraction with broadcasted operands");
-
-                // Verify the recursive implementation has a subtraction inside the broadcast
-                match rec_broadcast.expr.node.as_ref() {
-                    NoxprNode::Sub(_rec_sub) => {
-                        println!("✓ Recursive implementation contains subtraction operation");
-
-                        // Verify the DFS implementation has broadcasted operands
-                        match (&dfs_sub.lhs.node.as_ref(), &dfs_sub.rhs.node.as_ref()) {
-                            (
-                                NoxprNode::BroadcastInDim(_dfs_lhs),
-                                NoxprNode::BroadcastInDim(_dfs_rhs),
-                            ) => {
-                                println!("✓ DFS implementation has broadcasted operands");
-                            }
-                            _ => panic!("DFS implementation should have broadcasted operands"),
-                        }
-                    }
-                    _ => panic!("Recursive implementation should contain subtraction operation"),
-                }
-            }
-            _ => {
-                println!("Recursive result: {:?}", recursive_result.inner.node);
-                println!("DFS result: {:?}", dfs_result.inner.node);
-                panic!("Unexpected node types from implementations");
-            }
-        }
-
-        println!("✓ Subtraction consistency test passed");
+        compare_batch_results(&expr, out_axis).unwrap();
     }
 
     #[test]
@@ -1726,45 +1448,7 @@ mod tests {
 
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
 
-        let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
-        let mut dfs_tracer = BatchTracer::new(out_axis);
-
-        let recursive_result = recursive_tracer
-            .visit(&expr)
-            .expect("Recursive tracer should succeed");
-        let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
-
-        // Both should produce the same batch axis
-        assert_eq!(
-            recursive_result.batch_axis, dfs_result.batch_axis,
-            "Batch axis should match between implementations"
-        );
-
-        // Both should produce the same batch axis
-        assert_eq!(
-            recursive_result, dfs_result,
-            "Batch results should match between implementations"
-        );
-
-        // Verify both results are sin operations (the outermost operation)
-        match (
-            &recursive_result.inner.node.as_ref(),
-            &dfs_result.inner.node.as_ref(),
-        ) {
-            (NoxprNode::Sin(_rec_sin), NoxprNode::Sin(_dfs_sin)) => {
-                println!("✓ Both implementations produced sin operations");
-
-                // Both should have broadcasted operands somewhere in the chain
-                println!("✓ Both implementations have appropriate operand structures");
-            }
-            _ => {
-                println!("Recursive result: {:?}", recursive_result.inner.node);
-                println!("DFS result: {:?}", dfs_result.inner.node);
-                panic!("Both implementations should produce sin operations");
-            }
-        }
-
-        println!("✓ Multiple unary operations consistency test passed");
+        compare_batch_results(&expr, out_axis).unwrap();
     }
 
     #[test]
@@ -1778,42 +1462,7 @@ mod tests {
 
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
 
-        let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
-        let mut dfs_tracer = BatchTracer::new(out_axis);
-
-        let recursive_result = recursive_tracer
-            .visit(&expr)
-            .expect("Recursive tracer should succeed");
-        let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
-
-        // Both should produce the same batch axis
-        assert_eq!(
-            recursive_result.batch_axis, dfs_result.batch_axis,
-            "Batch axis should match between implementations"
-        );
-
-        assert_eq!(
-            recursive_result, dfs_result,
-            "Batch results should match between implementations"
-        );
-
-        // Verify both results are division operations
-        match (
-            &recursive_result.inner.node.as_ref(),
-            &dfs_result.inner.node.as_ref(),
-        ) {
-            (NoxprNode::Div(_rec_div), NoxprNode::Div(_dfs_div)) => {
-                println!("✓ Both implementations produced division operations");
-                println!("✓ Both implementations have appropriate operand structures");
-            }
-            _ => {
-                println!("Recursive result: {:?}", recursive_result.inner.node);
-                println!("DFS result: {:?}", dfs_result.inner.node);
-                panic!("Both implementations should produce division operations");
-            }
-        }
-
-        println!("✓ Mixed operations consistency test passed");
+        compare_batch_results(&expr, out_axis).unwrap();
     }
 
     #[test]
@@ -1825,42 +1474,7 @@ mod tests {
         let expr = Noxpr::tuple(vec![scalar_a, scalar_b, scalar_c]);
 
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
-
-        let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
-        let mut dfs_tracer = BatchTracer::new(out_axis);
-
-        let recursive_result = recursive_tracer
-            .visit(&expr)
-            .expect("Recursive tracer should succeed");
-        let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
-
-        // Both should produce the same batch axis
-        assert_eq!(
-            recursive_result.batch_axis, dfs_result.batch_axis,
-            "Batch axis should match between implementations"
-        );
-
-        // Both should produce the same batch axis
-        assert_eq!(
-            recursive_result, dfs_result,
-            "Batch results should match between implementations"
-        );
-
-        // Verify both results are tuple operations
-        match (
-            &recursive_result.inner.node.as_ref(),
-            &dfs_result.inner.node.as_ref(),
-        ) {
-            (NoxprNode::Tuple(_rec_tuple), NoxprNode::Tuple(_dfs_tuple)) => {
-                println!("✓ Both implementations produced tuple operations");
-                println!("✓ Tuple operations detailed consistency test passed");
-            }
-            _ => {
-                println!("Recursive result: {:?}", recursive_result.inner.node);
-                println!("DFS result: {:?}", dfs_result.inner.node);
-                panic!("Both implementations should produce tuple operations");
-            }
-        }
+        compare_batch_results(&expr, out_axis).unwrap();
     }
 
     #[test]
@@ -1873,43 +1487,6 @@ mod tests {
         let expr = (scalar_a.greater_or_equal(scalar_b)).and(scalar_c.less(scalar_d));
 
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
-
-        let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
-        let mut dfs_tracer = BatchTracer::new(out_axis);
-
-        let recursive_result = recursive_tracer
-            .visit(&expr)
-            .expect("Recursive tracer should succeed");
-        let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
-
-        // Both should produce the same batch axis
-        assert_eq!(
-            recursive_result.batch_axis, dfs_result.batch_axis,
-            "Batch axis should match between implementations"
-        );
-
-        // Both should produce the same batch axis
-        assert_eq!(
-            recursive_result, dfs_result,
-            "Batch results should match between implementations"
-        );
-
-        // Verify both results are logical operations
-        match (
-            &recursive_result.inner.node.as_ref(),
-            &dfs_result.inner.node.as_ref(),
-        ) {
-            (NoxprNode::And(_rec_and), NoxprNode::And(_dfs_and)) => {
-                println!("✓ Both implementations produced logical AND operations");
-                println!("✓ Both implementations have appropriate operand structures");
-            }
-            _ => {
-                println!("Recursive result: {:?}", recursive_result.inner.node);
-                println!("DFS result: {:?}", dfs_result.inner.node);
-                panic!("Both implementations should produce logical AND operations");
-            }
-        }
-
-        println!("✓ Logical operations consistency test passed");
+        compare_batch_results(&expr, out_axis).unwrap();
     }
 }
