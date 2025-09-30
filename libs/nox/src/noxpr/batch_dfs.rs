@@ -82,7 +82,6 @@ impl BatchedExpr {
             }
         }
     }
-
 }
 
 /// Helper class for tracing batch operations, useful for operations like batched matrix multiplication.
@@ -1154,7 +1153,9 @@ mod tests {
 
         // Both should produce the same batch
         assert!(
-            recursive_result.inner.is_equal_ignoring_ids(&dfs_result.inner),
+            recursive_result
+                .inner
+                .is_equal_ignoring_ids(&dfs_result.inner),
             "Batch results should match between implementations"
         );
 
@@ -1383,7 +1384,9 @@ mod tests {
 
         // Both should produce the same batch
         assert!(
-            recursive_result.inner.is_equal_ignoring_ids(&dfs_result.inner),
+            recursive_result
+                .inner
+                .is_equal_ignoring_ids(&dfs_result.inner),
             "Batch results should match between implementations"
         );
     }
@@ -1416,7 +1419,9 @@ mod tests {
         );
 
         assert!(
-            !recursive_result.inner.is_equal_ignoring_ids(&dfs_result.inner),
+            !recursive_result
+                .inner
+                .is_equal_ignoring_ids(&dfs_result.inner),
             "Batch results should not match"
         );
         let recur_labels: Vec<usize> = recursive_result.inner.labels().collect();

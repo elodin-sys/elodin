@@ -396,9 +396,7 @@ impl BatchTracer {
                     .iter()
                     .map(|e| {
                         self.visit(e).and_then(|b| {
-                            let out = b
-                                .move_batch_axis(axis)
-                                .ok_or(Error::UnbatchableArgument)?;
+                            let out = b.move_batch_axis(axis).ok_or(Error::UnbatchableArgument)?;
                             Ok(out)
                         })
                     })
