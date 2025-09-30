@@ -82,6 +82,11 @@ impl BatchedExpr {
             }
         }
     }
+
+    /// Return true if the other expression is equal to this one except for its IDs.
+    fn is_equal_ignoring_ids(&self, other: &BatchedExpr) -> bool {
+        self.batch_axis == self.batch_axis && self.inner.is_equal_ignoring_ids(&other.inner)
+    }
 }
 
 /// Helper class for tracing batch operations, useful for operations like batched matrix multiplication.
@@ -340,7 +345,6 @@ impl BatchTracer {
 
         match (lhs.batch_axis, rhs.batch_axis) {
             (BatchAxis::NotMapped, BatchAxis::NotMapped) => {
-                eprintln!("DFS out axis {:?}", &self.out_axis);
                 let expr = BatchedExpr {
                     inner: scalar_broadcast_func(lhs, rhs)?,
                     batch_axis: BatchAxis::NotMapped,
@@ -1595,48 +1599,50 @@ mod tests {
             "Batch axis should match between implementations"
         );
 
-        // Both should produce the same batch axis
-        assert_eq!(
+        // Both will produce different ids
+        assert_ne!(
             recursive_result, dfs_result,
             "Batch results should match between implementations"
         );
 
-        // Verify both results are division operations
-        match (
-            &recursive_result.inner.node.as_ref(),
-            &dfs_result.inner.node.as_ref(),
-        ) {
-            (NoxprNode::BroadcastInDim(rec_broadcast), NoxprNode::Div(dfs_div)) => {
-                println!("✓ Recursive implementation: BroadcastInDim wrapping division");
-                println!("✓ DFS implementation: Division with broadcasted operands");
+        // Both should produce the same batch
+        assert!(
+            recursive_result.is_equal_ignoring_ids(&dfs_result),
+            "Batch results should match between implementations"
+        );
+    }
 
-                // Verify the recursive implementation has a division inside the broadcast
-                match rec_broadcast.expr.node.as_ref() {
-                    NoxprNode::Div(_rec_div) => {
-                        println!("✓ Recursive implementation contains division operation");
+    #[test]
+    fn test_ignore_ids() {
+        // Test division operation
+        let scalar_a = 15.0f32.constant();
+        let scalar_b = 3.0f32.constant();
+        let expr = scalar_a / scalar_b; // This should evaluate to 5.0
 
-                        // Verify the DFS implementation has broadcasted operands
-                        match (&dfs_div.lhs.node.as_ref(), &dfs_div.rhs.node.as_ref()) {
-                            (
-                                NoxprNode::BroadcastInDim(_dfs_lhs),
-                                NoxprNode::BroadcastInDim(_dfs_rhs),
-                            ) => {
-                                println!("✓ DFS implementation has broadcasted operands");
-                            }
-                            _ => panic!("DFS implementation should have broadcasted operands"),
-                        }
-                    }
-                    _ => panic!("Recursive implementation should contain division operation"),
-                }
-            }
-            _ => {
-                println!("Recursive result: {:?}", recursive_result.inner.node);
-                println!("DFS result: {:?}", dfs_result.inner.node);
-                panic!("Unexpected node types from implementations");
-            }
-        }
+        let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
 
-        println!("✓ Division consistency test passed");
+        let mut recursive_tracer = RecursiveBatchTracer::new(out_axis.clone());
+        let recursive_result = recursive_tracer
+            .visit(&expr)
+            .expect("Recursive tracer should succeed");
+
+        let scalar_a = 15.0f32.constant();
+        let scalar_b = 30000.0f32.constant();
+        let expr = scalar_a / scalar_b; // This should evaluate to 5.0
+        let mut dfs_tracer = BatchTracer::new(out_axis);
+
+        let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
+
+        // Both should produce the same batch
+        assert_ne!(
+            recursive_result, dfs_result,
+            "Batch results should match between implementations"
+        );
+
+        assert!(
+            !recursive_result.is_equal_ignoring_ids(&dfs_result),
+            "Batch results should not match"
+        );
     }
 
     #[test]
