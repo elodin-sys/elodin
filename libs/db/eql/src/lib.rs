@@ -105,6 +105,9 @@ pub enum Expr {
     FloatLiteral(f64),
     StringLiteral(String),
 
+    // norm()
+    Norm(Box<Expr>),
+
     // ffts
     Fft(Box<Expr>),
     FftFreq(Box<Expr>),
@@ -153,6 +156,7 @@ impl Expr {
             Expr::ComponentPart(component) => Ok(component.name.replace(".", "_")),
 
             Expr::Time(component) => Ok(component.name.replace(".", "_")),
+            Expr::Norm(e) => e.to_table(), // norm()
             Expr::FftFreq(e) => e.to_table(),
             Expr::Fft(e) => e.to_table(),
             Expr::BinaryOp(left, _, _) => left.to_table(),
@@ -173,6 +177,33 @@ impl Expr {
     /// Converts an Expr to a qualified SQL field name (table.field) for use in JOINs.
     fn to_qualified_field(&self) -> Result<String, Error> {
         match self {
+            Expr::Norm(e) => { 
+                let part = match e.as_ref() {
+                    Expr::ComponentPart(p) => p.clone(),
+                    _ => {
+                        return Err(Error::InvalidMethodCall(
+                            "norm() expects a vector component".to_string(),
+                        ))
+                    }
+                };
+                let comp = part.component.as_ref().ok_or_else(|| {
+                    Error::InvalidFieldAccess("norm() on non-leaf component".to_string())
+                })?;
+                let dims = comp.schema.dim();
+                if dims.is_empty() {
+                    return Err(Error::InvalidMethodCall(
+                        "norm() on scalar component".to_string(),
+                    ));
+                }
+                let n_elems: usize = dims.iter().copied().map(|d| d as usize).product();
+                let mut terms = Vec::with_capacity(n_elems);
+                for i in 0..n_elems {
+                    let qi = Expr::ArrayAccess(Box::new(Expr::ComponentPart(part.clone())), i)
+                        .to_qualified_field()?;
+                    terms.push(format!("{qi} * {qi}")); // <- sans parenthèses, pour matcher les tests
+                }
+                Ok(format!("sqrt({})", terms.join(" + ")))
+            }
             Expr::Fft(e) => Ok(format!("fft({})", e.to_qualified_field()?)),
             Expr::FftFreq(e) => Ok(format!("fftfreq({})", e.to_qualified_field()?)),
             Expr::BinaryOp(left, right, op) => Ok(format!(
@@ -192,6 +223,7 @@ impl Expr {
 
     fn to_column_name(&self) -> Option<String> {
         match self {
+            Expr::Norm(e) => Some(format!("norm({})", e.to_column_name()?)), // norm()
             Expr::Fft(e) => Some(format!("fft({})", e.to_column_name()?)),
             Expr::FftFreq(e) => Some(format!("fftfreq({})", e.to_column_name()?)),
             Expr::ComponentPart(e) => Some(e.name.clone()),
@@ -527,6 +559,7 @@ impl Context {
                     .map(|ast_node| self.parse(ast_node))
                     .collect::<Result<Vec<_>, _>>()?;
                 match (cow.as_ref(), &recv, &args[..]) {
+                    ("norm", Expr::ComponentPart(_), &[]) => Ok(Expr::Norm(Box::new(recv))), // norm()
                     ("fft", Expr::ArrayAccess(_, _), &[]) => Ok(Expr::Fft(Box::new(recv))),
                     ("fftfreq", Expr::Time(_), &[]) => Ok(Expr::FftFreq(Box::new(recv))),
                     ("last", _, &[Expr::StringLiteral(ref d)]) => {
@@ -545,8 +578,6 @@ impl Context {
                 .map(Expr::Tuple),
             AstNode::StringLiteral(s) => {
                 Ok(Expr::StringLiteral(s.to_string()))
-                // // Parse duration strings like "5m", "10s", "1h"
-                // self.parse_duration(s.as_ref()).map(Expr::DurationLiteral)
             }
             AstNode::BinaryOp(left, right, op) => {
                 let left = self.parse(left)?;
@@ -586,6 +617,9 @@ impl Context {
                 let mut suggestions: Vec<String> = part.children.keys().cloned().collect();
                 if let Some(component) = &part.component {
                     suggestions.extend(component.element_names.iter().map(|name| name.to_string()));
+                    if !component.schema.dim().is_empty() { // norm()
+                        suggestions.push("norm()".to_string());
+                    }
                     suggestions.push("last(".to_string());
                     suggestions.push("first(".to_string());
                 }
@@ -975,6 +1009,18 @@ mod tests {
         assert_eq!(
             result_str,
             "select a_world_pos.a_world_pos as 'a.world_pos', b_velocity.b_velocity as 'b.velocity', c_acceleration.c_acceleration as 'c.acceleration' from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time JOIN c_acceleration ON a_world_pos.time = c_acceleration.time"
+        );
+    }
+
+    #[test]
+    fn test_norm_sql() { // norm()
+        let part = create_test_component_part();
+        let context = create_test_context();
+        let expr = Expr::Norm(Box::new(Expr::ComponentPart(part)));
+        let sql = expr.to_sql(&context).unwrap();
+        assert_eq!(
+            sql,
+            "select sqrt(a_world_pos.a_world_pos[1] * a_world_pos.a_world_pos[1] + a_world_pos.a_world_pos[2] * a_world_pos.a_world_pos[2] + a_world_pos.a_world_pos[3] * a_world_pos.a_world_pos[3]) as 'norm(a.world_pos)' from a_world_pos"
         );
     }
 

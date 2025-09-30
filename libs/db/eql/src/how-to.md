@@ -1,1 +1,0 @@
-# How-to add a new "EQL formula"
