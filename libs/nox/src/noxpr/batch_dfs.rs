@@ -1155,7 +1155,7 @@ mod tests {
         assert!(
             recursive_result
                 .inner
-                .is_equal_ignoring_ids(&dfs_result.inner),
+                .is_equal_modulo_ids(&dfs_result.inner),
             "Batch results should match between implementations"
         );
 
@@ -1269,7 +1269,7 @@ mod tests {
             }
             (Err(e1), Err(e2)) => {
                 // Both failed - check if error types are similar
-                println!(
+                panic!(
                     "Both implementations failed: recursive={:?}, dfs={:?}",
                     e1, e2
                 );
@@ -1386,7 +1386,7 @@ mod tests {
         assert!(
             recursive_result
                 .inner
-                .is_equal_ignoring_ids(&dfs_result.inner),
+                .is_equal_modulo_ids(&dfs_result.inner),
             "Batch results should match between implementations"
         );
     }
@@ -1421,14 +1421,12 @@ mod tests {
         assert!(
             !recursive_result
                 .inner
-                .is_equal_ignoring_ids(&dfs_result.inner),
+                .is_equal_modulo_ids(&dfs_result.inner),
             "Batch results should not match"
         );
-        let recur_labels: Vec<usize> = recursive_result.inner.labels().collect();
-        let dfs_labels: Vec<usize> = dfs_result.inner.labels().collect();
-        // assert_eq!(recur_labels, vec![4,3,0,1]);
-        // assert_eq!(dfs_labels, vec![9,8,5,6]);
-        assert_eq!(recur_labels.len(), dfs_labels.len());
+        let recur_count = recursive_result.inner.labels().count();
+        let dfs_count = dfs_result.inner.labels().count();
+        assert_eq!(recur_count, dfs_count);
     }
 
     #[test]

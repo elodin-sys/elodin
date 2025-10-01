@@ -12,7 +12,7 @@ use smallvec::{SmallVec, smallvec};
 use xla::{ArrayElement, ElementType, NativeType, XlaBuilder, XlaComputation, XlaOp, XlaOpRef};
 
 /// Represents various types of nodes in an expression tree (Noxpr) for tensor computations.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum NoxprNode {
     // Params / Variables
     Param(ParamExpr),
@@ -131,139 +131,6 @@ impl<'a> Iterator for ChildrenIter<'a> {
 }
 
 impl NoxprNode {
-    pub fn push_children<'a>(&'a self, accum: &mut Vec<&'a Noxpr>) {
-        match self {
-            // Leaf nodes with no children
-            NoxprNode::Param(_) | NoxprNode::Constant(_) | NoxprNode::Iota(_) => {
-                // No children to push
-            }
-
-            // Binary operations with lhs and rhs children
-            NoxprNode::Add(binary_op)
-            | NoxprNode::Sub(binary_op)
-            | NoxprNode::Mul(binary_op)
-            | NoxprNode::Div(binary_op)
-            | NoxprNode::And(binary_op)
-            | NoxprNode::Or(binary_op)
-            | NoxprNode::GreaterOrEqual(binary_op)
-            | NoxprNode::LessOrEqual(binary_op)
-            | NoxprNode::Less(binary_op)
-            | NoxprNode::Equal(binary_op)
-            | NoxprNode::Atan2(binary_op)
-            | NoxprNode::Dot(binary_op) => {
-                accum.push(&binary_op.lhs);
-                accum.push(&binary_op.rhs);
-            }
-
-            // DotGeneral has lhs and rhs
-            NoxprNode::DotGeneral(dot_general) => {
-                accum.push(&dot_general.lhs);
-                accum.push(&dot_general.rhs);
-            }
-
-            // Unary operations with single child
-            NoxprNode::Sqrt(child)
-            | NoxprNode::Neg(child)
-            | NoxprNode::Log(child)
-            | NoxprNode::Sin(child)
-            | NoxprNode::Cos(child)
-            | NoxprNode::Abs(child)
-            | NoxprNode::Acos(child)
-            | NoxprNode::Asin(child) => {
-                accum.push(child);
-            }
-
-            // Tuple with multiple children
-            NoxprNode::Tuple(children) => {
-                accum.extend(children.iter());
-            }
-
-            // GetTupleElement with single child
-            NoxprNode::GetTupleElement(get_tuple) => {
-                accum.push(&get_tuple.expr);
-            }
-
-            // Concat with multiple children
-            NoxprNode::Concat(concat) => {
-                accum.extend(concat.nodes.iter());
-            }
-
-            // Reshape operations with single child
-            NoxprNode::Reshape(reshape) => {
-                accum.push(&reshape.expr);
-            }
-
-            NoxprNode::Broadcast(broadcast) => {
-                accum.push(&broadcast.expr);
-            }
-
-            NoxprNode::BroadcastInDim(broadcast_in_dim) => {
-                accum.push(&broadcast_in_dim.expr);
-            }
-
-            NoxprNode::Transpose(transpose) => {
-                accum.push(&transpose.expr);
-            }
-
-            // Slice operations
-            NoxprNode::Gather(gather) => {
-                accum.push(&gather.expr);
-                accum.push(&gather.indices);
-            }
-
-            NoxprNode::Slice(slice) => {
-                accum.push(&slice.expr);
-            }
-
-            NoxprNode::DynamicSlice(dynamic_slice) => {
-                accum.push(&dynamic_slice.expr);
-                accum.extend(dynamic_slice.start_indices.iter());
-            }
-
-            NoxprNode::DynamicUpdateSlice(dynamic_update_slice) => {
-                accum.push(&dynamic_update_slice.expr);
-                accum.extend(dynamic_update_slice.start_indices.iter());
-                accum.push(&dynamic_update_slice.update);
-            }
-
-            // Control flow operations
-            NoxprNode::Scan(scan) => {
-                accum.extend(scan.inputs.iter());
-                accum.push(&scan.initial_state);
-            }
-
-            NoxprNode::Select(select) => {
-                accum.push(&select.cond);
-                accum.push(&select.on_true);
-                accum.push(&select.on_false);
-            }
-
-            // Cast operations
-            NoxprNode::Convert(convert) => {
-                accum.push(&convert.arg);
-            }
-
-            // Call operations
-            NoxprNode::Call(call) => {
-                accum.extend(call.args.iter());
-            }
-
-            // Triangle operations
-            NoxprNode::Cholesky(cholesky) => {
-                accum.push(&cholesky.arg);
-            }
-
-            NoxprNode::LuInverse(lu_inverse) => {
-                accum.push(&lu_inverse.arg);
-            }
-
-            // Jax operations (no children to traverse)
-            #[cfg(feature = "jax")]
-            NoxprNode::Jax(_) => {
-                // No children to push
-            }
-        }
-    }
 
     /// Returns an iterator over the children of this node.
     /// This is equivalent to `push_children` but returns an iterator instead of pushing to a vector.
@@ -384,10 +251,10 @@ impl NoxprNode {
     }
 
     /// Compares two nodes for structural equality while ignoring ID values.
-    fn is_equal_ignoring_ids_with_map(
+    fn is_equal(
         &self,
         other: &NoxprNode,
-        id_map: &mut std::collections::HashMap<NoxprId, NoxprId>,
+        id_map: Option<&std::collections::HashMap<NoxprId, NoxprId>>,
     ) -> bool {
         match (self, other) {
             // Leaf nodes - compare directly
@@ -397,85 +264,85 @@ impl NoxprNode {
 
             // Binary operations
             (NoxprNode::Add(op1), NoxprNode::Add(op2)) => {
-                op1.lhs.is_equal_ignoring_ids_with_map(&op2.lhs, id_map)
-                    && op1.rhs.is_equal_ignoring_ids_with_map(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map)
+                    && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::Sub(op1), NoxprNode::Sub(op2)) => {
-                op1.lhs.is_equal_ignoring_ids_with_map(&op2.lhs, id_map)
-                    && op1.rhs.is_equal_ignoring_ids_with_map(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map)
+                    && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::Mul(op1), NoxprNode::Mul(op2)) => {
-                op1.lhs.is_equal_ignoring_ids_with_map(&op2.lhs, id_map)
-                    && op1.rhs.is_equal_ignoring_ids_with_map(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map)
+                    && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::Div(op1), NoxprNode::Div(op2)) => {
-                op1.lhs.is_equal_ignoring_ids_with_map(&op2.lhs, id_map)
-                    && op1.rhs.is_equal_ignoring_ids_with_map(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map)
+                    && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::And(op1), NoxprNode::And(op2)) => {
-                op1.lhs.is_equal_ignoring_ids_with_map(&op2.lhs, id_map)
-                    && op1.rhs.is_equal_ignoring_ids_with_map(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map)
+                    && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::Or(op1), NoxprNode::Or(op2)) => {
-                op1.lhs.is_equal_ignoring_ids_with_map(&op2.lhs, id_map)
-                    && op1.rhs.is_equal_ignoring_ids_with_map(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map)
+                    && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::GreaterOrEqual(op1), NoxprNode::GreaterOrEqual(op2)) => {
-                op1.lhs.is_equal_ignoring_ids_with_map(&op2.lhs, id_map)
-                    && op1.rhs.is_equal_ignoring_ids_with_map(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map)
+                    && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::LessOrEqual(op1), NoxprNode::LessOrEqual(op2)) => {
-                op1.lhs.is_equal_ignoring_ids_with_map(&op2.lhs, id_map)
-                    && op1.rhs.is_equal_ignoring_ids_with_map(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map)
+                    && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::Less(op1), NoxprNode::Less(op2)) => {
-                op1.lhs.is_equal_ignoring_ids_with_map(&op2.lhs, id_map)
-                    && op1.rhs.is_equal_ignoring_ids_with_map(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map)
+                    && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::Equal(op1), NoxprNode::Equal(op2)) => {
-                op1.lhs.is_equal_ignoring_ids_with_map(&op2.lhs, id_map)
-                    && op1.rhs.is_equal_ignoring_ids_with_map(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map)
+                    && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::Atan2(op1), NoxprNode::Atan2(op2)) => {
-                op1.lhs.is_equal_ignoring_ids_with_map(&op2.lhs, id_map)
-                    && op1.rhs.is_equal_ignoring_ids_with_map(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map)
+                    && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::Dot(op1), NoxprNode::Dot(op2)) => {
-                op1.lhs.is_equal_ignoring_ids_with_map(&op2.lhs, id_map)
-                    && op1.rhs.is_equal_ignoring_ids_with_map(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map)
+                    && op1.rhs.is_equal(&op2.rhs, id_map)
             }
 
             // DotGeneral
             (NoxprNode::DotGeneral(dg1), NoxprNode::DotGeneral(dg2)) => {
-                dg1.lhs.is_equal_ignoring_ids_with_map(&dg2.lhs, id_map)
-                    && dg1.rhs.is_equal_ignoring_ids_with_map(&dg2.rhs, id_map)
+                dg1.lhs.is_equal(&dg2.lhs, id_map)
+                    && dg1.rhs.is_equal(&dg2.rhs, id_map)
                     && dg1.dimensions == dg2.dimensions
             }
 
             // Unary operations
             (NoxprNode::Sqrt(e1), NoxprNode::Sqrt(e2)) => {
-                e1.is_equal_ignoring_ids_with_map(e2, id_map)
+                e1.is_equal(e2, id_map)
             }
             (NoxprNode::Neg(e1), NoxprNode::Neg(e2)) => {
-                e1.is_equal_ignoring_ids_with_map(e2, id_map)
+                e1.is_equal(e2, id_map)
             }
             (NoxprNode::Log(e1), NoxprNode::Log(e2)) => {
-                e1.is_equal_ignoring_ids_with_map(e2, id_map)
+                e1.is_equal(e2, id_map)
             }
             (NoxprNode::Sin(e1), NoxprNode::Sin(e2)) => {
-                e1.is_equal_ignoring_ids_with_map(e2, id_map)
+                e1.is_equal(e2, id_map)
             }
             (NoxprNode::Cos(e1), NoxprNode::Cos(e2)) => {
-                e1.is_equal_ignoring_ids_with_map(e2, id_map)
+                e1.is_equal(e2, id_map)
             }
             (NoxprNode::Abs(e1), NoxprNode::Abs(e2)) => {
-                e1.is_equal_ignoring_ids_with_map(e2, id_map)
+                e1.is_equal(e2, id_map)
             }
             (NoxprNode::Acos(e1), NoxprNode::Acos(e2)) => {
-                e1.is_equal_ignoring_ids_with_map(e2, id_map)
+                e1.is_equal(e2, id_map)
             }
             (NoxprNode::Asin(e1), NoxprNode::Asin(e2)) => {
-                e1.is_equal_ignoring_ids_with_map(e2, id_map)
+                e1.is_equal(e2, id_map)
             }
 
             // Tuple operations
@@ -484,11 +351,11 @@ impl NoxprNode {
                     && t1
                         .iter()
                         .zip(t2.iter())
-                        .all(|(e1, e2)| e1.is_equal_ignoring_ids_with_map(e2, id_map))
+                        .all(|(e1, e2)| e1.is_equal(e2, id_map))
             }
             (NoxprNode::GetTupleElement(gte1), NoxprNode::GetTupleElement(gte2)) => {
                 gte1.index == gte2.index
-                    && gte1.expr.is_equal_ignoring_ids_with_map(&gte2.expr, id_map)
+                    && gte1.expr.is_equal(&gte2.expr, id_map)
             }
 
             // Concat operations
@@ -499,29 +366,29 @@ impl NoxprNode {
                         .nodes
                         .iter()
                         .zip(c2.nodes.iter())
-                        .all(|(n1, n2)| n1.is_equal_ignoring_ids_with_map(n2, id_map))
+                        .all(|(n1, n2)| n1.is_equal(n2, id_map))
             }
 
             // Reshape operations
             (NoxprNode::Reshape(r1), NoxprNode::Reshape(r2)) => {
                 r1.new_sizes == r2.new_sizes
-                    && r1.expr.is_equal_ignoring_ids_with_map(&r2.expr, id_map)
+                    && r1.expr.is_equal(&r2.expr, id_map)
             }
 
             // Broadcast operations
             (NoxprNode::Broadcast(b1), NoxprNode::Broadcast(b2)) => {
-                b1.sizes == b2.sizes && b1.expr.is_equal_ignoring_ids_with_map(&b2.expr, id_map)
+                b1.sizes == b2.sizes && b1.expr.is_equal(&b2.expr, id_map)
             }
             (NoxprNode::BroadcastInDim(b1), NoxprNode::BroadcastInDim(b2)) => {
                 b1.sizes == b2.sizes
                     && b1.broadcast_dims == b2.broadcast_dims
-                    && b1.expr.is_equal_ignoring_ids_with_map(&b2.expr, id_map)
+                    && b1.expr.is_equal(&b2.expr, id_map)
             }
 
             // Transpose operations
             (NoxprNode::Transpose(t1), NoxprNode::Transpose(t2)) => {
                 t1.permutation == t2.permutation
-                    && t1.expr.is_equal_ignoring_ids_with_map(&t2.expr, id_map)
+                    && t1.expr.is_equal(&t2.expr, id_map)
             }
 
             // Slice operations
@@ -529,7 +396,7 @@ impl NoxprNode {
                 s1.start_indices == s2.start_indices
                     && s1.stop_indices == s2.stop_indices
                     && s1.strides == s2.strides
-                    && s1.expr.is_equal_ignoring_ids_with_map(&s2.expr, id_map)
+                    && s1.expr.is_equal(&s2.expr, id_map)
             }
 
             // Dynamic slice operations
@@ -540,8 +407,8 @@ impl NoxprNode {
                         .start_indices
                         .iter()
                         .zip(ds2.start_indices.iter())
-                        .all(|(e1, e2)| e1.is_equal_ignoring_ids_with_map(e2, id_map))
-                    && ds1.expr.is_equal_ignoring_ids_with_map(&ds2.expr, id_map)
+                        .all(|(e1, e2)| e1.is_equal(e2, id_map))
+                    && ds1.expr.is_equal(&ds2.expr, id_map)
             }
 
             // Dynamic update slice operations
@@ -551,11 +418,11 @@ impl NoxprNode {
                         .start_indices
                         .iter()
                         .zip(dus2.start_indices.iter())
-                        .all(|(e1, e2)| e1.is_equal_ignoring_ids_with_map(e2, id_map))
+                        .all(|(e1, e2)| e1.is_equal(e2, id_map))
                     && dus1
                         .update
-                        .is_equal_ignoring_ids_with_map(&dus2.update, id_map)
-                    && dus1.expr.is_equal_ignoring_ids_with_map(&dus2.expr, id_map)
+                        .is_equal(&dus2.update, id_map)
+                    && dus1.expr.is_equal(&dus2.expr, id_map)
             }
 
             // Gather operations
@@ -565,10 +432,10 @@ impl NoxprNode {
                     && g1.start_index_map == g2.start_index_map
                     && g1.slice_sizes == g2.slice_sizes
                     && g1.index_vector_dim == g2.index_vector_dim
-                    && g1.expr.is_equal_ignoring_ids_with_map(&g2.expr, id_map)
+                    && g1.expr.is_equal(&g2.expr, id_map)
                     && g1
                         .indices
-                        .is_equal_ignoring_ids_with_map(&g2.indices, id_map)
+                        .is_equal(&g2.indices, id_map)
             }
 
             // Scan operations
@@ -578,37 +445,37 @@ impl NoxprNode {
                         .inputs
                         .iter()
                         .zip(s2.inputs.iter())
-                        .all(|(i1, i2)| i1.is_equal_ignoring_ids_with_map(i2, id_map))
+                        .all(|(i1, i2)| i1.is_equal(i2, id_map))
                     && s1
                         .initial_state
-                        .is_equal_ignoring_ids_with_map(&s2.initial_state, id_map)
+                        .is_equal(&s2.initial_state, id_map)
                     && s1.scan_fn.args.len() == s2.scan_fn.args.len()
                     && s1
                         .scan_fn
                         .args
                         .iter()
                         .zip(s2.scan_fn.args.iter())
-                        .all(|(a1, a2)| a1.is_equal_ignoring_ids_with_map(a2, id_map))
+                        .all(|(a1, a2)| a1.is_equal(a2, id_map))
                     && s1
                         .scan_fn
                         .inner
-                        .is_equal_ignoring_ids_with_map(&s2.scan_fn.inner, id_map)
+                        .is_equal(&s2.scan_fn.inner, id_map)
             }
 
             // Select operations
             (NoxprNode::Select(s1), NoxprNode::Select(s2)) => {
-                s1.cond.is_equal_ignoring_ids_with_map(&s2.cond, id_map)
+                s1.cond.is_equal(&s2.cond, id_map)
                     && s1
                         .on_true
-                        .is_equal_ignoring_ids_with_map(&s2.on_true, id_map)
+                        .is_equal(&s2.on_true, id_map)
                     && s1
                         .on_false
-                        .is_equal_ignoring_ids_with_map(&s2.on_false, id_map)
+                        .is_equal(&s2.on_false, id_map)
             }
 
             // Convert operations
             (NoxprNode::Convert(c1), NoxprNode::Convert(c2)) => {
-                c1.ty == c2.ty && c1.arg.is_equal_ignoring_ids_with_map(&c2.arg, id_map)
+                c1.ty == c2.ty && c1.arg.is_equal(&c2.arg, id_map)
             }
 
             // Call operations
@@ -620,28 +487,212 @@ impl NoxprNode {
                         .args
                         .iter()
                         .zip(c2.args.iter())
-                        .all(|(a1, a2)| a1.is_equal_ignoring_ids_with_map(a2, id_map))
+                        .all(|(a1, a2)| a1.is_equal(a2, id_map))
             }
 
             // Cholesky operations
             (NoxprNode::Cholesky(c1), NoxprNode::Cholesky(c2)) => {
-                c1.upper == c2.upper && c1.arg.is_equal_ignoring_ids_with_map(&c2.arg, id_map)
+                c1.upper == c2.upper && c1.arg.is_equal(&c2.arg, id_map)
             }
 
             // LuInverse operations
             (NoxprNode::LuInverse(lu1), NoxprNode::LuInverse(lu2)) => {
-                lu1.arg.is_equal_ignoring_ids_with_map(&lu2.arg, id_map)
+                lu1.arg.is_equal(&lu2.arg, id_map)
             }
 
             // Jax operations
-            #[cfg(feature = "jax")]
-            (NoxprNode::Jax(j1), NoxprNode::Jax(j2)) => j1 == j2,
+            // #[cfg(feature = "jax")]
+            // (NoxprNode::Jax(j1), NoxprNode::Jax(j2)) => j1 == j2,
 
             // Different node types
             _ => false,
         }
     }
 }
+
+impl PartialEq for NoxprNode {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            // Leaf nodes - compare directly
+            (NoxprNode::Param(p1), NoxprNode::Param(p2)) => p1 == p2,
+            (NoxprNode::Constant(c1), NoxprNode::Constant(c2)) => c1 == c2,
+            (NoxprNode::Iota(i1), NoxprNode::Iota(i2)) => i1 == i2,
+
+            // Binary operations
+            (NoxprNode::Add(op1), NoxprNode::Add(op2)) => {
+                op1.lhs == op2.lhs && op1.rhs == op2.rhs
+            }
+            (NoxprNode::Sub(op1), NoxprNode::Sub(op2)) => {
+                op1.lhs == op2.lhs && op1.rhs == op2.rhs
+            }
+            (NoxprNode::Mul(op1), NoxprNode::Mul(op2)) => {
+                op1.lhs == op2.lhs && op1.rhs == op2.rhs
+            }
+            (NoxprNode::Div(op1), NoxprNode::Div(op2)) => {
+                op1.lhs == op2.lhs && op1.rhs == op2.rhs
+            }
+            (NoxprNode::And(op1), NoxprNode::And(op2)) => {
+                op1.lhs == op2.lhs && op1.rhs == op2.rhs
+            }
+            (NoxprNode::Or(op1), NoxprNode::Or(op2)) => {
+                op1.lhs == op2.lhs && op1.rhs == op2.rhs
+            }
+            (NoxprNode::GreaterOrEqual(op1), NoxprNode::GreaterOrEqual(op2)) => {
+                op1.lhs == op2.lhs && op1.rhs == op2.rhs
+            }
+            (NoxprNode::LessOrEqual(op1), NoxprNode::LessOrEqual(op2)) => {
+                op1.lhs == op2.lhs && op1.rhs == op2.rhs
+            }
+            (NoxprNode::Less(op1), NoxprNode::Less(op2)) => {
+                op1.lhs == op2.lhs && op1.rhs == op2.rhs
+            }
+            (NoxprNode::Equal(op1), NoxprNode::Equal(op2)) => {
+                op1.lhs == op2.lhs && op1.rhs == op2.rhs
+            }
+            (NoxprNode::Atan2(op1), NoxprNode::Atan2(op2)) => {
+                op1.lhs == op2.lhs && op1.rhs == op2.rhs
+            }
+            (NoxprNode::Dot(op1), NoxprNode::Dot(op2)) => {
+                op1.lhs == op2.lhs && op1.rhs == op2.rhs
+            }
+
+            // DotGeneral
+            (NoxprNode::DotGeneral(dg1), NoxprNode::DotGeneral(dg2)) => {
+                dg1.lhs == dg2.lhs && dg1.rhs == dg2.rhs && dg1.dimensions == dg2.dimensions
+            }
+
+            // Unary operations
+            (NoxprNode::Sqrt(e1), NoxprNode::Sqrt(e2)) => e1 == e2,
+            (NoxprNode::Neg(e1), NoxprNode::Neg(e2)) => e1 == e2,
+            (NoxprNode::Log(e1), NoxprNode::Log(e2)) => e1 == e2,
+            (NoxprNode::Sin(e1), NoxprNode::Sin(e2)) => e1 == e2,
+            (NoxprNode::Cos(e1), NoxprNode::Cos(e2)) => e1 == e2,
+            (NoxprNode::Abs(e1), NoxprNode::Abs(e2)) => e1 == e2,
+            (NoxprNode::Acos(e1), NoxprNode::Acos(e2)) => e1 == e2,
+            (NoxprNode::Asin(e1), NoxprNode::Asin(e2)) => e1 == e2,
+
+            // Tuple operations
+            (NoxprNode::Tuple(t1), NoxprNode::Tuple(t2)) => {
+                t1.len() == t2.len() && t1.iter().zip(t2.iter()).all(|(e1, e2)| e1 == e2)
+            }
+            (NoxprNode::GetTupleElement(gte1), NoxprNode::GetTupleElement(gte2)) => {
+                gte1.index == gte2.index && gte1.expr == gte2.expr
+            }
+
+            // Concat operations
+            (NoxprNode::Concat(c1), NoxprNode::Concat(c2)) => {
+                c1.dimension == c2.dimension
+                    && c1.nodes.len() == c2.nodes.len()
+                    && c1.nodes.iter().zip(c2.nodes.iter()).all(|(n1, n2)| n1 == n2)
+            }
+
+            // Reshape operations
+            (NoxprNode::Reshape(r1), NoxprNode::Reshape(r2)) => {
+                r1.new_sizes == r2.new_sizes && r1.expr == r2.expr
+            }
+
+            // Broadcast operations
+            (NoxprNode::Broadcast(b1), NoxprNode::Broadcast(b2)) => {
+                b1.sizes == b2.sizes && b1.expr == b2.expr
+            }
+            (NoxprNode::BroadcastInDim(b1), NoxprNode::BroadcastInDim(b2)) => {
+                b1.sizes == b2.sizes
+                    && b1.broadcast_dims == b2.broadcast_dims
+                    && b1.expr == b2.expr
+            }
+
+            // Transpose operations
+            (NoxprNode::Transpose(t1), NoxprNode::Transpose(t2)) => {
+                t1.permutation == t2.permutation && t1.expr == t2.expr
+            }
+
+            // Slice operations
+            (NoxprNode::Slice(s1), NoxprNode::Slice(s2)) => {
+                s1.start_indices == s2.start_indices
+                    && s1.stop_indices == s2.stop_indices
+                    && s1.strides == s2.strides
+                    && s1.expr == s2.expr
+            }
+
+            // Dynamic slice operations
+            (NoxprNode::DynamicSlice(ds1), NoxprNode::DynamicSlice(ds2)) => {
+                ds1.size_indices == ds2.size_indices
+                    && ds1.start_indices.len() == ds2.start_indices.len()
+                    && ds1.start_indices.iter().zip(ds2.start_indices.iter()).all(|(e1, e2)| e1 == e2)
+                    && ds1.expr == ds2.expr
+            }
+
+            // Dynamic update slice operations
+            (NoxprNode::DynamicUpdateSlice(dus1), NoxprNode::DynamicUpdateSlice(dus2)) => {
+                dus1.start_indices.len() == dus2.start_indices.len()
+                    && dus1.start_indices.iter().zip(dus2.start_indices.iter()).all(|(e1, e2)| e1 == e2)
+                    && dus1.update == dus2.update
+                    && dus1.expr == dus2.expr
+            }
+
+            // Gather operations
+            (NoxprNode::Gather(g1), NoxprNode::Gather(g2)) => {
+                g1.offset_dims == g2.offset_dims
+                    && g1.collapsed_slice_dims == g2.collapsed_slice_dims
+                    && g1.start_index_map == g2.start_index_map
+                    && g1.slice_sizes == g2.slice_sizes
+                    && g1.index_vector_dim == g2.index_vector_dim
+                    && g1.expr == g2.expr
+                    && g1.indices == g2.indices
+            }
+
+            // Scan operations
+            (NoxprNode::Scan(s1), NoxprNode::Scan(s2)) => {
+                s1.inputs.len() == s2.inputs.len()
+                    && s1.inputs.iter().zip(s2.inputs.iter()).all(|(i1, i2)| i1 == i2)
+                    && s1.initial_state == s2.initial_state
+                    && s1.scan_fn.args.len() == s2.scan_fn.args.len()
+                    && s1.scan_fn.args.iter().zip(s2.scan_fn.args.iter()).all(|(a1, a2)| a1 == a2)
+                    && s1.scan_fn.inner == s2.scan_fn.inner
+            }
+
+            // Select operations
+            (NoxprNode::Select(s1), NoxprNode::Select(s2)) => {
+                s1.cond == s2.cond && s1.on_true == s2.on_true && s1.on_false == s2.on_false
+            }
+
+            // Convert operations
+            (NoxprNode::Convert(c1), NoxprNode::Convert(c2)) => {
+                c1.ty == c2.ty && c1.arg == c2.arg
+            }
+
+            // Call operations
+            (NoxprNode::Call(c1), NoxprNode::Call(c2)) => {
+                c1.comp.id == c2.comp.id
+                    && c1.comp.ty == c2.comp.ty
+                    && c1.args.len() == c2.args.len()
+                    && c1.args.iter().zip(c2.args.iter()).all(|(a1, a2)| a1 == a2)
+            }
+
+            // Cholesky operations
+            (NoxprNode::Cholesky(c1), NoxprNode::Cholesky(c2)) => {
+                c1.upper == c2.upper && c1.arg == c2.arg
+            }
+
+            // LuInverse operations
+            (NoxprNode::LuInverse(lu1), NoxprNode::LuInverse(lu2)) => {
+                lu1.arg == lu2.arg
+            }
+
+            // Jax operations
+            #[cfg(feature = "jax")]
+            (NoxprNode::Jax(_j1), NoxprNode::Jax(_j2)) => {
+                tracing::warn!("NoxprNode cannot test for equal jax nodes, returning false.");
+                false
+            }
+
+            // Different node types
+            _ => false,
+        }
+    }
+}
+
+impl Eq for NoxprNode {}
 
 /// Represents a constant value within the Noxpr.
 #[derive(Clone, PartialEq, Eq)]
@@ -1001,7 +1052,8 @@ pub struct DynamicUpdateSlice {
 }
 
 /// Represents the operation to extract an element from a tuple.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
+#[cfg_attr(not(feature = "jax"), derive(PartialEq, Eq))]
 pub struct GetTupleElement {
     pub expr: Noxpr,
     pub index: usize,
@@ -1015,14 +1067,6 @@ pub struct Noxpr {
     pub backtrace: Arc<std::backtrace::Backtrace>,
 }
 
-impl PartialEq for Noxpr {
-    fn eq(&self, other: &Self) -> bool {
-        self.node == other.node && self.id == other.id
-        // Note: backtrace field is intentionally excluded from equality comparison.
-    }
-}
-
-impl Eq for Noxpr {}
 
 /// Represents a scan operation, a form of reduction across one dimension.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1141,7 +1185,7 @@ impl Noxpr {
     }
 
     /// Return the labels for the graph in depth first pre-order.
-    pub fn labels(&self) -> impl Iterator<Item = usize> {
+    pub fn labels(&self) -> impl Iterator<Item = NoxprId> {
         let mut seen_once = std::collections::HashSet::new();
         let traversal = traversal::DftPre::new(self, move |node: &Noxpr| {
             if seen_once.insert(node.id()) {
@@ -1150,7 +1194,7 @@ impl Noxpr {
                 crate::ChildrenIter::Empty
             }
         });
-        traversal.map(move |(_, node)| node.id().0)
+        traversal.map(move |(_, node)| node.id())
     }
 
     /// Creates a logarithmic transformation of the `Noxpr`.
@@ -1932,36 +1976,56 @@ impl Noxpr {
 
     /// Compares two expressions for structural equality while ignoring ID values.
     /// Returns true if the expressions have the same structure, with consistent ID mappings.
-    pub fn is_equal_ignoring_ids(&self, other: &Noxpr) -> bool {
-        let mut id_map: std::collections::HashMap<NoxprId, NoxprId> =
-            std::collections::HashMap::new();
-        self.is_equal_ignoring_ids_with_map(other, &mut id_map)
+    pub fn is_equal_modulo_ids(&self, other: &Noxpr) -> bool {
+        let a = self.labels();
+        let b = other.labels();
+        let id_map: std::collections::HashMap<NoxprId, NoxprId> =
+            a.zip(b).collect();
+
+        self.is_equal(other, Some(&id_map))
     }
 
-    /// Internal method that compares expressions with ID mapping tracking.
-    fn is_equal_ignoring_ids_with_map(
+    /// Internal method that compares expressions.
+    ///
+    /// If no `id_map` is given is a strict comparison.
+    ///
+    /// If an `id_map is given, it ensures the IDs in the map are correct. So if
+    /// two expressions are basically the same with different IDs, one can
+    /// collect the labels of both, create a map and then test for their
+    /// equality modulo their IDs.
+    fn is_equal(
         &self,
         other: &Noxpr,
-        id_map: &mut std::collections::HashMap<NoxprId, NoxprId>,
+        id_map: Option<&std::collections::HashMap<NoxprId, NoxprId>>,
     ) -> bool {
-        // Check if we've already mapped these IDs
-        if let Some(&mapped_id) = id_map.get(&self.id()) {
-            return mapped_id == other.id();
+        if let Some(id_map) = id_map {
+            // Check if we've already mapped these IDs
+            if let Some(&mapped_id) = id_map.get(&self.id()) {
+                if mapped_id != other.id() {
+                    return false;
+                }
+            } else {
+                // We don't have an ID for the given one.
+                return false;
+            }
+        } else {
+            if self.id() != other.id() {
+                return false;
+            }
         }
 
-        // Check if the other ID is already mapped to a different ID
-        if id_map.values().any(|&id| id == other.id) {
-            return false;
-        }
-
-        // Map the IDs
-        id_map.insert(self.id, other.id);
-
-        // Compare the nodes structurally
-        self.node
-            .is_equal_ignoring_ids_with_map(&other.node, id_map)
+        // Compare the nodes structurally.
+        self.node.is_equal(&other.node, id_map)
     }
 }
+
+impl PartialEq for Noxpr {
+    fn eq(&self, other: &Noxpr) -> bool {
+        self.is_equal(other, None)
+    }
+}
+
+impl Eq for Noxpr {}
 
 impl Display for Noxpr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

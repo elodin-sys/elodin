@@ -1,5 +1,5 @@
 //! This file is no longer included as part of the regular build. It has been
-//! superceded by batch_dfs. However, it remains part of the test implementation
+//! superseded by batch_dfs. However, it remains part of the test implementation
 //! of batch_dfs.
 
 use crate::{

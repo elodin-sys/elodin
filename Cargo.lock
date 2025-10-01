@@ -8396,6 +8396,7 @@ dependencies = [
  "serde",
  "smallvec",
  "thiserror 2.0.12",
+ "tracing",
  "traversal",
  "typenum",
  "which 6.0.3",
