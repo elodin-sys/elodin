@@ -8,11 +8,17 @@ use nox_ecs::{
     ErasedSystem,
     nox::{self, Noxpr},
 };
+
 use numpy::PyUntypedArray;
 use pyo3::exceptions::PyOSError;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyAnyMethods;
+
+#[cfg(target_os = "linux")]
+extern crate lapack_src as _;
+#[cfg(target_os = "linux")]
+extern crate lapack_sys as _;
 
 mod archetype;
 mod component;
@@ -149,4 +155,22 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     s10::register(m)?;
     env_logger::init();
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+mod keepalive {
+    unsafe extern "C" {
+        fn lapack_dgetrf_ffi();
+        fn _gfortran_stop_string();
+    }
+
+    #[used]
+    #[unsafe(no_mangle)]
+    static __elodin_keep_noxla_kernels: unsafe extern "C" fn() =
+        unsafe { core::mem::transmute(lapack_dgetrf_ffi as *const ()) };
+
+    #[used]
+    #[unsafe(no_mangle)]
+    static __elodin_keep_gfortran: unsafe extern "C" fn() =
+        unsafe { core::mem::transmute(_gfortran_stop_string as *const ()) };
 }

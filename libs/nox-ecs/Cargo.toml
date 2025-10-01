@@ -61,7 +61,7 @@ postcard.version = "1.0.8"
 postcard.features = ["alloc"]
 
 # python
-pyo3.version = "0.23.0"
+pyo3.version = "0.25.1"
 pyo3.optional = true
 
 

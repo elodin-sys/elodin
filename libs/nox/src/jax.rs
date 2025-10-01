@@ -191,9 +191,9 @@ impl JaxTracer {
                         py,
                         "GatherDimensionNumbers",
                         (
-                            g.offset_dims.to_vec(),
-                            g.collapsed_slice_dims.to_vec(),
-                            g.start_index_map.to_vec(),
+                            vec_to_tuple(py, g.offset_dims.to_vec())?,
+                            vec_to_tuple(py, g.collapsed_slice_dims.to_vec())?,
+                            vec_to_tuple(py, g.start_index_map.to_vec())?,
                         ),
                     )
                 })?;
@@ -485,6 +485,15 @@ pub fn call_comp_fn<T, R: ReprMonad<crate::Op>>(
     tracer.visit(&func.inner)
 }
 
+/// Convert a Rust vector to a Python tuple.
+fn vec_to_tuple<'py, T>(py: Python<'py>, data: Vec<T>) -> PyResult<Py<PyTuple>>
+where
+    T: IntoPyObject<'py>,
+{
+    let py_tuple = PyTuple::new(py, data)?;
+    Ok(py_tuple.into())
+}
+
 #[cfg(test)]
 mod tests {
     use numpy::PyArrayLike0;
@@ -535,7 +544,7 @@ mod tests {
                     }
 
                     // Initialize Python with the config
-                    let init_status = ffi::Py_InitializeFromConfig(&mut config);
+                    let init_status = ffi::Py_InitializeFromConfig(&config);
                     if init_status._type == ffi::_PyStatus_TYPE::_PyStatus_TYPE_ERROR {
                         panic!(
                             "Failed to initialize Python: {}",

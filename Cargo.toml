@@ -42,8 +42,9 @@ members = [
     "fsw/video-streamer",
     "fsw/gstreamer",
     "libs/db/eql",
-    "libs/impeller2/kdl"
- ]
+    "libs/impeller2/kdl",
+    # "fsw/sensor-fw",
+]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 
 [workspace.package]
@@ -73,6 +74,8 @@ lto = "thin"
 # set workspace version as the version of xla
 xla.package = "noxla"
 xla.path = "libs/noxla"
+xla.default-features = false
+xla.features = ["shared"]
 roci-macros.path = "libs/roci/macros"
 roci.path = "libs/roci"
 roci.default-features = false
@@ -87,3 +90,6 @@ wmm.path = "libs/wmm"
 [profile.release-with-debug]
 inherits = "release"
 debug = true
+
+[patch.crates-io]
+lapack-src = { git = "https://github.com/elodin-sys/lapack-src.git" }

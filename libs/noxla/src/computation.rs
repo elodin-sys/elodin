@@ -4,8 +4,8 @@ use crate::{Error, HloModuleProto, Status, XlaOp, XlaOpRaw};
 use cpp::{cpp, cpp_class};
 use cxx::{CxxString, UniquePtr};
 cpp! {{
-    #include "xla/client/xla_builder.h"
-    #include "xla/client/lib/constants.h"
+    #include "xla/hlo/builder/xla_builder.h"
+    #include "xla/hlo/builder/lib/constants.h"
 
     #include "mlir/Dialect/Arith/IR/Arith.h"               // from @llvm-project
     #include "mlir/Dialect/Func/IR/FuncOps.h"              // from @llvm-project
@@ -15,12 +15,12 @@ cpp! {{
     #include "mlir/IR/BuiltinOps.h"                        // from @llvm-project
     #include "mlir/IR/BuiltinTypes.h"                      // from @llvm-project
     #include "mlir/IR/MLIRContext.h"                       // from @llvm-project
+    #include "mlir/IR/ImplicitLocOpBuilder.h"
     #include "mlir/Parser/Parser.h"                        // from @llvm-project
     #include "mlir/Pass/PassManager.h"                     // from @llvm-project
     #include "xla/mlir_hlo/mhlo/IR/hlo_ops.h"
     #include "xla/mlir_hlo/mhlo/transforms/passes.h"
-    #include "xla/translate/hlo_to_mhlo/hlo_to_mlir_hlo.h"
-
+    #include "xla/hlo/translate/hlo_to_mhlo/hlo_to_mlir_hlo.h"
     using namespace xla;
 }}
 
@@ -41,7 +41,7 @@ impl XlaComputation {
     pub fn to_hlo_text(&self) -> Result<String, Error> {
         let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
         let cxx_string = unsafe {
-            cpp!([self as "const XlaComputation*", out_status as "Status*"] -> UniquePtr<CxxString> as "std::unique_ptr<std::string>" {
+            cpp!([self as "const XlaComputation*", out_status as "absl::Status*"] -> UniquePtr<CxxString> as "std::unique_ptr<std::string>" {
                     CompileOptions options;
                     mlir::MLIRContext context;
                     mlir::OwningOpRef<mlir::ModuleOp> module =
@@ -57,7 +57,7 @@ impl XlaComputation {
                     //pm.addPass(mlir::mhlo::createCollapseElementwiseMapPass());
                     //pm.addPass(mlir::mhlo::createOptimizeMhloPass());
                     if (pm.run(*module).failed()) {
-                        *out_status = Status(InvalidArgument("Failed to convert xla computation to mlir"));
+                        *out_status = absl::Status(InvalidArgument("Failed to convert xla computation to mlir"));
                         return std::make_unique<std::string>();
                     }
 

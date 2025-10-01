@@ -39,7 +39,7 @@ elodin-editor.default-features = false
 impeller2-bevy.path = "../../libs/impeller2/bevy"
 
 # crypto
-ring = "0.17"
+ring = "0.17.14"
 
 # machine id
 machine-uid = "0.5.1"
