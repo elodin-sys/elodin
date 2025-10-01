@@ -131,7 +131,6 @@ impl<'a> Iterator for ChildrenIter<'a> {
 }
 
 impl NoxprNode {
-
     /// Returns an iterator over the children of this node.
     /// This is equivalent to `push_children` but returns an iterator instead of pushing to a vector.
     pub fn children(&self) -> ChildrenIter<'_> {
@@ -264,52 +263,40 @@ impl NoxprNode {
 
             // Binary operations
             (NoxprNode::Add(op1), NoxprNode::Add(op2)) => {
-                op1.lhs.is_equal(&op2.lhs, id_map)
-                    && op1.rhs.is_equal(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map) && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::Sub(op1), NoxprNode::Sub(op2)) => {
-                op1.lhs.is_equal(&op2.lhs, id_map)
-                    && op1.rhs.is_equal(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map) && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::Mul(op1), NoxprNode::Mul(op2)) => {
-                op1.lhs.is_equal(&op2.lhs, id_map)
-                    && op1.rhs.is_equal(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map) && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::Div(op1), NoxprNode::Div(op2)) => {
-                op1.lhs.is_equal(&op2.lhs, id_map)
-                    && op1.rhs.is_equal(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map) && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::And(op1), NoxprNode::And(op2)) => {
-                op1.lhs.is_equal(&op2.lhs, id_map)
-                    && op1.rhs.is_equal(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map) && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::Or(op1), NoxprNode::Or(op2)) => {
-                op1.lhs.is_equal(&op2.lhs, id_map)
-                    && op1.rhs.is_equal(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map) && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::GreaterOrEqual(op1), NoxprNode::GreaterOrEqual(op2)) => {
-                op1.lhs.is_equal(&op2.lhs, id_map)
-                    && op1.rhs.is_equal(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map) && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::LessOrEqual(op1), NoxprNode::LessOrEqual(op2)) => {
-                op1.lhs.is_equal(&op2.lhs, id_map)
-                    && op1.rhs.is_equal(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map) && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::Less(op1), NoxprNode::Less(op2)) => {
-                op1.lhs.is_equal(&op2.lhs, id_map)
-                    && op1.rhs.is_equal(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map) && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::Equal(op1), NoxprNode::Equal(op2)) => {
-                op1.lhs.is_equal(&op2.lhs, id_map)
-                    && op1.rhs.is_equal(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map) && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::Atan2(op1), NoxprNode::Atan2(op2)) => {
-                op1.lhs.is_equal(&op2.lhs, id_map)
-                    && op1.rhs.is_equal(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map) && op1.rhs.is_equal(&op2.rhs, id_map)
             }
             (NoxprNode::Dot(op1), NoxprNode::Dot(op2)) => {
-                op1.lhs.is_equal(&op2.lhs, id_map)
-                    && op1.rhs.is_equal(&op2.rhs, id_map)
+                op1.lhs.is_equal(&op2.lhs, id_map) && op1.rhs.is_equal(&op2.rhs, id_map)
             }
 
             // DotGeneral
@@ -320,30 +307,14 @@ impl NoxprNode {
             }
 
             // Unary operations
-            (NoxprNode::Sqrt(e1), NoxprNode::Sqrt(e2)) => {
-                e1.is_equal(e2, id_map)
-            }
-            (NoxprNode::Neg(e1), NoxprNode::Neg(e2)) => {
-                e1.is_equal(e2, id_map)
-            }
-            (NoxprNode::Log(e1), NoxprNode::Log(e2)) => {
-                e1.is_equal(e2, id_map)
-            }
-            (NoxprNode::Sin(e1), NoxprNode::Sin(e2)) => {
-                e1.is_equal(e2, id_map)
-            }
-            (NoxprNode::Cos(e1), NoxprNode::Cos(e2)) => {
-                e1.is_equal(e2, id_map)
-            }
-            (NoxprNode::Abs(e1), NoxprNode::Abs(e2)) => {
-                e1.is_equal(e2, id_map)
-            }
-            (NoxprNode::Acos(e1), NoxprNode::Acos(e2)) => {
-                e1.is_equal(e2, id_map)
-            }
-            (NoxprNode::Asin(e1), NoxprNode::Asin(e2)) => {
-                e1.is_equal(e2, id_map)
-            }
+            (NoxprNode::Sqrt(e1), NoxprNode::Sqrt(e2)) => e1.is_equal(e2, id_map),
+            (NoxprNode::Neg(e1), NoxprNode::Neg(e2)) => e1.is_equal(e2, id_map),
+            (NoxprNode::Log(e1), NoxprNode::Log(e2)) => e1.is_equal(e2, id_map),
+            (NoxprNode::Sin(e1), NoxprNode::Sin(e2)) => e1.is_equal(e2, id_map),
+            (NoxprNode::Cos(e1), NoxprNode::Cos(e2)) => e1.is_equal(e2, id_map),
+            (NoxprNode::Abs(e1), NoxprNode::Abs(e2)) => e1.is_equal(e2, id_map),
+            (NoxprNode::Acos(e1), NoxprNode::Acos(e2)) => e1.is_equal(e2, id_map),
+            (NoxprNode::Asin(e1), NoxprNode::Asin(e2)) => e1.is_equal(e2, id_map),
 
             // Tuple operations
             (NoxprNode::Tuple(t1), NoxprNode::Tuple(t2)) => {
@@ -354,8 +325,7 @@ impl NoxprNode {
                         .all(|(e1, e2)| e1.is_equal(e2, id_map))
             }
             (NoxprNode::GetTupleElement(gte1), NoxprNode::GetTupleElement(gte2)) => {
-                gte1.index == gte2.index
-                    && gte1.expr.is_equal(&gte2.expr, id_map)
+                gte1.index == gte2.index && gte1.expr.is_equal(&gte2.expr, id_map)
             }
 
             // Concat operations
@@ -371,8 +341,7 @@ impl NoxprNode {
 
             // Reshape operations
             (NoxprNode::Reshape(r1), NoxprNode::Reshape(r2)) => {
-                r1.new_sizes == r2.new_sizes
-                    && r1.expr.is_equal(&r2.expr, id_map)
+                r1.new_sizes == r2.new_sizes && r1.expr.is_equal(&r2.expr, id_map)
             }
 
             // Broadcast operations
@@ -387,8 +356,7 @@ impl NoxprNode {
 
             // Transpose operations
             (NoxprNode::Transpose(t1), NoxprNode::Transpose(t2)) => {
-                t1.permutation == t2.permutation
-                    && t1.expr.is_equal(&t2.expr, id_map)
+                t1.permutation == t2.permutation && t1.expr.is_equal(&t2.expr, id_map)
             }
 
             // Slice operations
@@ -419,9 +387,7 @@ impl NoxprNode {
                         .iter()
                         .zip(dus2.start_indices.iter())
                         .all(|(e1, e2)| e1.is_equal(e2, id_map))
-                    && dus1
-                        .update
-                        .is_equal(&dus2.update, id_map)
+                    && dus1.update.is_equal(&dus2.update, id_map)
                     && dus1.expr.is_equal(&dus2.expr, id_map)
             }
 
@@ -433,9 +399,7 @@ impl NoxprNode {
                     && g1.slice_sizes == g2.slice_sizes
                     && g1.index_vector_dim == g2.index_vector_dim
                     && g1.expr.is_equal(&g2.expr, id_map)
-                    && g1
-                        .indices
-                        .is_equal(&g2.indices, id_map)
+                    && g1.indices.is_equal(&g2.indices, id_map)
             }
 
             // Scan operations
@@ -446,9 +410,7 @@ impl NoxprNode {
                         .iter()
                         .zip(s2.inputs.iter())
                         .all(|(i1, i2)| i1.is_equal(i2, id_map))
-                    && s1
-                        .initial_state
-                        .is_equal(&s2.initial_state, id_map)
+                    && s1.initial_state.is_equal(&s2.initial_state, id_map)
                     && s1.scan_fn.args.len() == s2.scan_fn.args.len()
                     && s1
                         .scan_fn
@@ -456,21 +418,14 @@ impl NoxprNode {
                         .iter()
                         .zip(s2.scan_fn.args.iter())
                         .all(|(a1, a2)| a1.is_equal(a2, id_map))
-                    && s1
-                        .scan_fn
-                        .inner
-                        .is_equal(&s2.scan_fn.inner, id_map)
+                    && s1.scan_fn.inner.is_equal(&s2.scan_fn.inner, id_map)
             }
 
             // Select operations
             (NoxprNode::Select(s1), NoxprNode::Select(s2)) => {
                 s1.cond.is_equal(&s2.cond, id_map)
-                    && s1
-                        .on_true
-                        .is_equal(&s2.on_true, id_map)
-                    && s1
-                        .on_false
-                        .is_equal(&s2.on_false, id_map)
+                    && s1.on_true.is_equal(&s2.on_true, id_map)
+                    && s1.on_false.is_equal(&s2.on_false, id_map)
             }
 
             // Convert operations
@@ -519,24 +474,12 @@ impl PartialEq for NoxprNode {
             (NoxprNode::Iota(i1), NoxprNode::Iota(i2)) => i1 == i2,
 
             // Binary operations
-            (NoxprNode::Add(op1), NoxprNode::Add(op2)) => {
-                op1.lhs == op2.lhs && op1.rhs == op2.rhs
-            }
-            (NoxprNode::Sub(op1), NoxprNode::Sub(op2)) => {
-                op1.lhs == op2.lhs && op1.rhs == op2.rhs
-            }
-            (NoxprNode::Mul(op1), NoxprNode::Mul(op2)) => {
-                op1.lhs == op2.lhs && op1.rhs == op2.rhs
-            }
-            (NoxprNode::Div(op1), NoxprNode::Div(op2)) => {
-                op1.lhs == op2.lhs && op1.rhs == op2.rhs
-            }
-            (NoxprNode::And(op1), NoxprNode::And(op2)) => {
-                op1.lhs == op2.lhs && op1.rhs == op2.rhs
-            }
-            (NoxprNode::Or(op1), NoxprNode::Or(op2)) => {
-                op1.lhs == op2.lhs && op1.rhs == op2.rhs
-            }
+            (NoxprNode::Add(op1), NoxprNode::Add(op2)) => op1.lhs == op2.lhs && op1.rhs == op2.rhs,
+            (NoxprNode::Sub(op1), NoxprNode::Sub(op2)) => op1.lhs == op2.lhs && op1.rhs == op2.rhs,
+            (NoxprNode::Mul(op1), NoxprNode::Mul(op2)) => op1.lhs == op2.lhs && op1.rhs == op2.rhs,
+            (NoxprNode::Div(op1), NoxprNode::Div(op2)) => op1.lhs == op2.lhs && op1.rhs == op2.rhs,
+            (NoxprNode::And(op1), NoxprNode::And(op2)) => op1.lhs == op2.lhs && op1.rhs == op2.rhs,
+            (NoxprNode::Or(op1), NoxprNode::Or(op2)) => op1.lhs == op2.lhs && op1.rhs == op2.rhs,
             (NoxprNode::GreaterOrEqual(op1), NoxprNode::GreaterOrEqual(op2)) => {
                 op1.lhs == op2.lhs && op1.rhs == op2.rhs
             }
@@ -552,9 +495,7 @@ impl PartialEq for NoxprNode {
             (NoxprNode::Atan2(op1), NoxprNode::Atan2(op2)) => {
                 op1.lhs == op2.lhs && op1.rhs == op2.rhs
             }
-            (NoxprNode::Dot(op1), NoxprNode::Dot(op2)) => {
-                op1.lhs == op2.lhs && op1.rhs == op2.rhs
-            }
+            (NoxprNode::Dot(op1), NoxprNode::Dot(op2)) => op1.lhs == op2.lhs && op1.rhs == op2.rhs,
 
             // DotGeneral
             (NoxprNode::DotGeneral(dg1), NoxprNode::DotGeneral(dg2)) => {
@@ -583,7 +524,11 @@ impl PartialEq for NoxprNode {
             (NoxprNode::Concat(c1), NoxprNode::Concat(c2)) => {
                 c1.dimension == c2.dimension
                     && c1.nodes.len() == c2.nodes.len()
-                    && c1.nodes.iter().zip(c2.nodes.iter()).all(|(n1, n2)| n1 == n2)
+                    && c1
+                        .nodes
+                        .iter()
+                        .zip(c2.nodes.iter())
+                        .all(|(n1, n2)| n1 == n2)
             }
 
             // Reshape operations
@@ -596,9 +541,7 @@ impl PartialEq for NoxprNode {
                 b1.sizes == b2.sizes && b1.expr == b2.expr
             }
             (NoxprNode::BroadcastInDim(b1), NoxprNode::BroadcastInDim(b2)) => {
-                b1.sizes == b2.sizes
-                    && b1.broadcast_dims == b2.broadcast_dims
-                    && b1.expr == b2.expr
+                b1.sizes == b2.sizes && b1.broadcast_dims == b2.broadcast_dims && b1.expr == b2.expr
             }
 
             // Transpose operations
@@ -618,14 +561,22 @@ impl PartialEq for NoxprNode {
             (NoxprNode::DynamicSlice(ds1), NoxprNode::DynamicSlice(ds2)) => {
                 ds1.size_indices == ds2.size_indices
                     && ds1.start_indices.len() == ds2.start_indices.len()
-                    && ds1.start_indices.iter().zip(ds2.start_indices.iter()).all(|(e1, e2)| e1 == e2)
+                    && ds1
+                        .start_indices
+                        .iter()
+                        .zip(ds2.start_indices.iter())
+                        .all(|(e1, e2)| e1 == e2)
                     && ds1.expr == ds2.expr
             }
 
             // Dynamic update slice operations
             (NoxprNode::DynamicUpdateSlice(dus1), NoxprNode::DynamicUpdateSlice(dus2)) => {
                 dus1.start_indices.len() == dus2.start_indices.len()
-                    && dus1.start_indices.iter().zip(dus2.start_indices.iter()).all(|(e1, e2)| e1 == e2)
+                    && dus1
+                        .start_indices
+                        .iter()
+                        .zip(dus2.start_indices.iter())
+                        .all(|(e1, e2)| e1 == e2)
                     && dus1.update == dus2.update
                     && dus1.expr == dus2.expr
             }
@@ -644,10 +595,19 @@ impl PartialEq for NoxprNode {
             // Scan operations
             (NoxprNode::Scan(s1), NoxprNode::Scan(s2)) => {
                 s1.inputs.len() == s2.inputs.len()
-                    && s1.inputs.iter().zip(s2.inputs.iter()).all(|(i1, i2)| i1 == i2)
+                    && s1
+                        .inputs
+                        .iter()
+                        .zip(s2.inputs.iter())
+                        .all(|(i1, i2)| i1 == i2)
                     && s1.initial_state == s2.initial_state
                     && s1.scan_fn.args.len() == s2.scan_fn.args.len()
-                    && s1.scan_fn.args.iter().zip(s2.scan_fn.args.iter()).all(|(a1, a2)| a1 == a2)
+                    && s1
+                        .scan_fn
+                        .args
+                        .iter()
+                        .zip(s2.scan_fn.args.iter())
+                        .all(|(a1, a2)| a1 == a2)
                     && s1.scan_fn.inner == s2.scan_fn.inner
             }
 
@@ -657,9 +617,7 @@ impl PartialEq for NoxprNode {
             }
 
             // Convert operations
-            (NoxprNode::Convert(c1), NoxprNode::Convert(c2)) => {
-                c1.ty == c2.ty && c1.arg == c2.arg
-            }
+            (NoxprNode::Convert(c1), NoxprNode::Convert(c2)) => c1.ty == c2.ty && c1.arg == c2.arg,
 
             // Call operations
             (NoxprNode::Call(c1), NoxprNode::Call(c2)) => {
@@ -675,9 +633,7 @@ impl PartialEq for NoxprNode {
             }
 
             // LuInverse operations
-            (NoxprNode::LuInverse(lu1), NoxprNode::LuInverse(lu2)) => {
-                lu1.arg == lu2.arg
-            }
+            (NoxprNode::LuInverse(lu1), NoxprNode::LuInverse(lu2)) => lu1.arg == lu2.arg,
 
             // Jax operations
             #[cfg(feature = "jax")]
@@ -1066,7 +1022,6 @@ pub struct Noxpr {
     pub id: NoxprId,
     pub backtrace: Arc<std::backtrace::Backtrace>,
 }
-
 
 /// Represents a scan operation, a form of reduction across one dimension.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1979,8 +1934,7 @@ impl Noxpr {
     pub fn is_equal_modulo_ids(&self, other: &Noxpr) -> bool {
         let a = self.labels();
         let b = other.labels();
-        let id_map: std::collections::HashMap<NoxprId, NoxprId> =
-            a.zip(b).collect();
+        let id_map: std::collections::HashMap<NoxprId, NoxprId> = a.zip(b).collect();
 
         self.is_equal(other, Some(&id_map))
     }
