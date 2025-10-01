@@ -1,3 +1,4 @@
+#![doc = include_str!("README.md")]
 use convert_case::Casing;
 use std::{
     borrow::Cow,

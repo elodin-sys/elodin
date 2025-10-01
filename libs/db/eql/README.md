@@ -1,8 +1,8 @@
-# eql
+# Elodin Query Language
 
 ## Introduction to Elodin-db and EQL
-**Elodin-db** relies on a robust relational backend (Postgres/TimescaleDB) to store and query time-series signals.  
-To simplify access to hierarchical, time-oriented data, we introduce **EQL** (Elodin Query Language).
+**Elodin-db** relies on a relational backend similar to the TimescaleDB extension for Postgres to store and query time-series signals.  
+To simplify access to hierarchical, time-oriented data, we introduce **Elodin Query Language** (EQL).
 
 EQL is a **lightweight query language dedicated to time-series signals**.  
 It allows you to easily select components (e.g. `a.world_pos.x`, `rocket.fin_deflect[0]`), automatically handle time-based joins, and work with time windows (`.last("5m")`, `.first("10s")`).  
@@ -10,7 +10,7 @@ EQL also provides specialized signal-oriented functions such as `fft` or `fftfre
 
 ## From EQL to SQL
 
-EQL is not an independent engine: every EQL query is **translated into SQL** and then executed by Postgres/TimescaleDB.  
+EQL is not an independent engine: every EQL query is **translated into SQL** and then executed by Elodin-db. 
 This process can be seen as *source-to-source compilation* (similar to TypeScript → JavaScript).
 
 ### First example
