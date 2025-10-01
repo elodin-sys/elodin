@@ -49,3 +49,4 @@ uv sync
 
 cargo run --manifest-path=../../apps/elodin/Cargo.toml editor examples/three-body.py
 ```
+

@@ -1,7 +1,7 @@
 use convert_case::Casing;
 use std::{
     borrow::Cow,
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet},
     str::FromStr,
     sync::Arc,
 };
@@ -351,7 +351,7 @@ pub struct ComponentPart {
     pub name: String,
     pub id: ComponentId,
     pub component: Option<Arc<Component>>,
-    pub children: HashMap<String, ComponentPart>,
+    pub children: BTreeMap<String, ComponentPart>,
 }
 
 #[derive(Clone, Debug)]
@@ -398,7 +398,7 @@ fn default_element_names(shape: &[u64]) -> Vec<String> {
 
 #[derive(Debug)]
 pub struct Context {
-    pub component_parts: HashMap<String, ComponentPart>,
+    pub component_parts: BTreeMap<String, ComponentPart>,
     pub earliest_timestamp: Timestamp,
     pub last_timestamp: Timestamp,
 }
@@ -406,7 +406,7 @@ pub struct Context {
 impl Default for Context {
     fn default() -> Self {
         Context {
-            component_parts: HashMap::new(),
+            component_parts: BTreeMap::new(),
             earliest_timestamp: Timestamp(i64::MIN),
             last_timestamp: Timestamp(i64::MAX),
         }
@@ -419,7 +419,7 @@ impl Context {
         earliest_timestamp: Timestamp,
         last_timestamp: Timestamp,
     ) -> Self {
-        let mut component_parts = HashMap::new();
+        let mut component_parts = BTreeMap::new();
         for component in components.into_iter() {
             let path = ComponentPath::from_name(&component.name);
             let nodes = component.name.split('.');
@@ -435,7 +435,7 @@ impl Context {
                     .or_insert_with(|| ComponentPart {
                         id: part.id,
                         name: part.name.to_string(),
-                        children: HashMap::new(),
+                        children: BTreeMap::new(),
                         component: None,
                     });
                 component_parts = &mut part.children;
@@ -446,12 +446,12 @@ impl Context {
                 ComponentPart {
                     id: component.id,
                     name: component.name.clone(),
-                    children: HashMap::new(),
+                    children: BTreeMap::new(),
                     component: Some(component),
                 },
             );
         }
-        // let mut component_parts = HashMap::new();
+        // let mut component_parts = BTreeMap::new();
         // for component in components {
         //     component_parts.insert(component.name.clone(), component);
         // }
@@ -463,7 +463,7 @@ impl Context {
     }
 
     pub fn new(
-        component_parts: HashMap<String, ComponentPart>,
+        component_parts: BTreeMap<String, ComponentPart>,
         earliest_timestamp: Timestamp,
         last_timestamp: Timestamp,
     ) -> Self {
@@ -895,7 +895,7 @@ mod tests {
             name: "b.velocity".to_string(),
             id: ComponentId::new("b.velocity"),
             component: Some(component2),
-            children: HashMap::default(),
+            children: BTreeMap::default(),
         });
 
         // Test Tuple with components from different tables
@@ -949,7 +949,7 @@ mod tests {
             name: "b.velocity".to_string(),
             id: ComponentId::new("b.velocity"),
             component: Some(component2),
-            children: HashMap::default(),
+            children: BTreeMap::default(),
         });
 
         let component3 = Arc::new(Component::new(
@@ -962,7 +962,7 @@ mod tests {
             name: "c.acceleration".to_string(),
             id: ComponentId::new("c.acceleration"),
             component: Some(component3),
-            children: HashMap::default(),
+            children: BTreeMap::default(),
         });
 
         let expr = Expr::Tuple(vec![

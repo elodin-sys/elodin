@@ -42,7 +42,8 @@ members = [
     "fsw/video-streamer",
     "fsw/gstreamer",
     "libs/db/eql",
-    "libs/impeller2/kdl"
+    "libs/impeller2/kdl",
+    "libs/db/examples/rust_client"
  ]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 

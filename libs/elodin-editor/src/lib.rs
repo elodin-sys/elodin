@@ -130,6 +130,7 @@ impl Plugin for EditorPlugin {
         app
             // .insert_resource(AssetMetaCheck::Never)
             .add_plugins(plugins::WebAssetPlugin)
+            .add_plugins(plugins::env_asset_source::plugin)
             .add_plugins(
                 DefaultPlugins
                     .set(WindowPlugin {
@@ -981,18 +982,8 @@ pub fn clamp_current_time(
     }
 }
 
-#[derive(Resource)]
+#[derive(Default, Resource)]
 pub struct EqlContext(pub eql::Context);
-
-impl Default for EqlContext {
-    fn default() -> Self {
-        Self(eql::Context::new(
-            HashMap::new(),
-            Timestamp(i64::MIN),
-            Timestamp(i64::MAX),
-        ))
-    }
-}
 
 pub fn update_eql_context(
     component_metadata_registry: Res<ComponentMetadataRegistry>,

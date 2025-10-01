@@ -73,13 +73,55 @@ All the preceding information can now be specified via schematics.
             viewport name=Viewport pos="(0,0,0,1, 8,2,4)" look_at="(0,0,0,1, 0,0,3)" hdr=#true show_grid=#true active=#true
         }
         object_3d ball.world_pos {
-            sphere radius=0.2 r=12.7 g=9.2 b=0.5
+            sphere radius=0.2 {
+                color 12.7 9.2 0.5
+            }
         }
-        line_3d ball.world_pos line_width=2.0 color="yolk"
+        line_3d ball.world_pos line_width=2.0 {
+            color yolk
+        }
     """)
 ```
 ## Details
-The old code is python, and the new code is specified in a [KDL](https://docs.rs/kdl/latest/kdl/) string to the `world.schematics()` method.
+The old code is python, and the new code is specified in a [KDL](https://docs.rs/kdl/latest/kdl/) string to the `world.schematic()` method.
+
+
+### `el.Material.color` to `color`
+A color can be specified by its red, green, blue, and optionally its alpha components. 
+
+OLD
+```python
+el.Material.color(12.7, 9.2, 0.5))
+```
+NEW
+```python
+color 12.7 9.2 0.5 
+```
+
+It can also be specified by a few names:
+
+* black
+* white
+* turquoise
+* slate
+* pumpkin
+* yolk
+* peach
+* reddish
+* hyperblue
+* mint
+
+NEW
+```python
+color mint
+```
+
+It is often specified as a child of what its describing, e.g., this sphere is reddish.
+```
+    sphere radius=0.2 {
+        color reddish
+    }
+```
 
 ### `el.Panel.hsplit` to `hsplit`
 OLD
@@ -159,7 +201,9 @@ el.Line3d("ball.world_pos", line_width=2.0)
 ```
 NEW
 ```kdl
-line_3d ball.world_pos line_width=2.0 color="yolk" perspective=#true
+line_3d ball.world_pos line_width=2.0 perspective=#true {
+    color yolk
+}
 ```
 
 ### `el.Shape`, `insert_shape`, `insert_asset` to `object_3d`
@@ -172,7 +216,9 @@ ball_shape = el.Shape(ball_mesh, ball_color)
 NEW
 ```kdl
 object_3d ball.world_pos {
-    sphere radius=0.2 r=12.7 g=9.2 b=0.5
+    sphere radius=0.2 {
+        color 12.7 9.2 0.5 // red green blue [alpha]
+    }
 }
 ```
 

@@ -22,7 +22,7 @@ auto-tag:
 promote tag:
   #!/usr/bin/env sh
   dir=$(mktemp -d)
-  gh release download {{tag}} --pattern 'elodin-*' --dir $dir
+  gh release download {{tag}} --pattern 'elodin-*.whl' --dir $dir
   uv publish "$dir/*.whl"
 
 public-changelog:

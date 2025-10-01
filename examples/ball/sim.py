@@ -27,9 +27,13 @@ def world(seed: int = 0) -> el.World:
             viewport name=Viewport pos="(0,0,0,0, 8,2,4)" look_at="(0,0,0,0, 0,0,3)" hdr=#true show_grid=#true active=#true
         }
         object_3d ball.world_pos {
-            sphere radius=0.2 r=12.7 g=9.2 b=0.5
+            sphere radius=0.2 {
+                color 12.7 9.2 0.5
+            }
         }
-        line_3d ball.world_pos line_width=2.0 color="yolk"
+        line_3d ball.world_pos line_width=2.0 {
+            color yolk
+        }
     """)
     return world
 

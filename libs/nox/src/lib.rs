@@ -39,9 +39,16 @@ pub use vector::*;
 pub mod jax;
 
 #[cfg(feature = "noxpr")]
-mod noxpr;
+pub mod noxpr;
 #[cfg(feature = "noxpr")]
 pub use noxpr::*;
+
+// NOTE(shane): I would like to gate this behind `doctest` since that is all it
+// is used for. However, I can't at least not for the tests present in the
+// README. As a substitute I am making it hidden.
+#[doc(hidden)]
+// #[cfg(doctest)]
+pub mod doctest;
 
 #[cfg(feature = "xla")]
 pub use xla;

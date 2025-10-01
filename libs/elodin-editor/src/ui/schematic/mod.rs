@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use crate::{
     object_3d::Object3DState,
     ui::{
-        actions, inspector, plot, query_plot, query_table,
+        actions,
+        colors::EColor,
+        inspector, plot, query_plot, query_table,
         tiles::{self, Pane},
     },
 };
@@ -42,6 +44,7 @@ impl SchematicParam<'_, '_> {
 
         match tile {
             Tile::Pane(pane) => match pane {
+                // ---- Viewport ----
                 Pane::Viewport(viewport) => {
                     let cam_entity = viewport.camera?;
                     let viewport_data = self.viewports.get(cam_entity).ok()?;
@@ -57,51 +60,78 @@ impl SchematicParam<'_, '_> {
                         aux: cam_entity,
                     }))
                 }
+
+                // ---- Graph ----
                 Pane::Graph(graph) => {
                     let graph_state = self.graph_states.get(graph.id).ok()?;
-                    let mut eql = vec![];
-                    for ((path, index), (_, _color)) in graph_state.enabled_lines.iter() {
-                        // TODO(sphw): add back color support
-                        eql.push(format!("{}[{}]", path, index));
+                    let mut eql = String::new();
+                    let mut colors: Vec<impeller2_wkt::Color> = vec![];
+                    // Build EQL from enabled lines
+                    if !graph_state.enabled_lines.is_empty() {
+                        let mut parts: Vec<String> =
+                            Vec::with_capacity(graph_state.enabled_lines.len());
+                        for ((path, index), (_, color)) in graph_state.enabled_lines.iter() {
+                            let c: egui::Color32 = *color;
+                            parts.push(format!("{}[{}]", path, index));
+                            colors.push(impeller2_wkt::Color::from_color32(c));
+                        }
+                        eql = parts.join(",");
                     }
+
+                    // Fallback: if no explicit lines, use the non-editable label as EQL (e.g. "drone.motor_pwm")
+                    if eql.is_empty() && !graph_state.label.is_empty() {
+                        eql = graph_state.label.clone();
+                    }
+
                     Some(Panel::Graph(impeller2_wkt::Graph {
-                        eql: eql.join(","),
+                        eql,
                         name: Some(graph_state.label.clone()),
                         graph_type: graph_state.graph_type,
                         auto_y_range: graph_state.auto_y_range,
                         y_range: graph_state.y_range.clone(),
                         aux: graph.id,
+                        colors,
                     }))
                 }
+
                 Pane::Monitor(monitor) => Some(Panel::ComponentMonitor(ComponentMonitor {
                     component_id: monitor.component_id,
                 })),
+
                 Pane::QueryTable(query_table) => {
                     let query_table = self.query_tables.get(query_table.entity).ok()?;
-
                     Some(Panel::QueryTable(query_table.data.clone()))
                 }
+
                 Pane::QueryPlot(plot) => {
                     let query_plot = self.query_plots.get(plot.entity).ok()?;
                     Some(Panel::QueryPlot(query_plot.data.map_aux(|_| plot.entity)))
                 }
+
                 Pane::ActionTile(action) => {
                     let action_tile = self.action_tiles.get(action.entity).ok()?;
-
                     Some(Panel::ActionPane(ActionPane {
                         label: action_tile.button_name.clone(),
                         lua: action_tile.lua.clone(),
                     }))
                 }
+
+                // Not exported
                 Pane::VideoStream(_) => None,
+
+                // Structural panes
                 Pane::Hierarchy => Some(Panel::Hierarchy),
                 Pane::Inspector => Some(Panel::Inspector),
                 Pane::SchematicTree(_) => Some(Panel::SchematicTree),
+
+                // Dashboard
                 Pane::Dashboard(dash) => {
                     let dashboard = self.dashboards.get(dash.entity).ok()?;
                     Some(Panel::Dashboard(Box::new(dashboard.clone())))
                 }
             },
+
+            // ---- Containers ----
             Tile::Container(container) => match container {
                 egui_tiles::Container::Tabs(t) => {
                     let mut tabs = vec![];
@@ -112,9 +142,11 @@ impl SchematicParam<'_, '_> {
                     }
                     Some(Panel::Tabs(tabs))
                 }
+
                 egui_tiles::Container::Linear(linear) => {
                     let mut panels = Vec::new();
                     let mut shares = HashMap::new();
+
                     for child_id in &linear.children {
                         if let Some(panel) = self.get_panel(*child_id) {
                             if let Some((_, share)) =
@@ -130,10 +162,17 @@ impl SchematicParam<'_, '_> {
                         return None;
                     }
 
+                    // >>> FIX: pull the edited title from TileState <<<
+                    let name = self
+                        .ui_state
+                        .get_container_title(tile_id)
+                        .map(|s| s.to_string());
+
                     let split = Split {
                         panels,
                         shares,
                         active: false,
+                        name,
                     };
 
                     match linear.dir {
@@ -141,6 +180,7 @@ impl SchematicParam<'_, '_> {
                         egui_tiles::LinearDir::Vertical => Some(Panel::VSplit(split)),
                     }
                 }
+
                 _ => None,
             },
         }

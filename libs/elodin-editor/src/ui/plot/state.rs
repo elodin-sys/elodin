@@ -2,10 +2,8 @@ use std::collections::BTreeMap;
 use std::ops::Range;
 
 use bevy::core_pipeline::tonemapping::Tonemapping;
-
-use bevy::render::camera::ScalingMode;
-
 use bevy::prelude::*;
+use bevy::render::camera::ScalingMode;
 use bevy::render::view::RenderLayers;
 use bevy_egui::egui::{self, Color32};
 
@@ -49,6 +47,11 @@ pub struct GraphState {
     pub x_range: Range<f64>,
     pub widget_width: f64,
     pub visible_range: LineVisibleRange,
+    pub locked: bool,
+
+    // peer-ready metadata (not used until widget.rs switches to peers)
+    pub x_rev: u64,
+    pub x_dirty: bool,
 }
 
 impl GraphBundle {
@@ -76,6 +79,9 @@ impl GraphBundle {
             auto_x_range: true,
             widget_width: 1920.0,
             visible_range: LineVisibleRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)),
+            locked: false,
+            x_rev: 0,
+            x_dirty: false,
         };
         GraphBundle {
             camera: Camera {
@@ -107,8 +113,6 @@ impl GraphBundle {
 impl GraphState {
     pub fn remove_component(&mut self, component_path: &ComponentPath) {
         self.components.remove(component_path);
-
-        // Also remove from enabled_lines
         self.enabled_lines
             .retain(|(path, _), _| path != component_path);
     }
@@ -129,7 +133,7 @@ pub fn default_component_values(
     component_value
         .iter()
         .enumerate()
-        .map(|(i, _)| (component_id.0) as usize + i)
+        .map(|(i, _)| component_id.0 as usize + i)
         .map(|i| (true, colors::get_color_by_index_all(i)))
         .collect::<Vec<(bool, egui::Color32)>>()
 }

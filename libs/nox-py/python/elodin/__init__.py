@@ -437,6 +437,12 @@ class World(WorldBuilder):
             system, sim_time_step, run_time_step, default_playback_speed, max_ticks
         )
         sim_object = jaxsim.JaxSim(
-            obj, ins, outs, state, dictionary, entity_dict, component_entity_dict
+            obj,
+            ins,
+            outs,
+            state,
+            dictionary,
+            entity_dict,
+            component_entity_dict,
         )
         return sim_object

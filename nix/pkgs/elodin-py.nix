@@ -26,7 +26,7 @@
   version = (craneLib.crateNameFromCargoToml {cargoToml = ../../Cargo.toml;}).version;
 
   pyFilter = path: _type: builtins.match ".*py$" path != null;
-  mdFilter = path: _type: builtins.match ".*nox-py.*md$" path != null;
+  mdFilter = path: _type: builtins.match ".*md$" path != null;
   protoFilter = path: _type: builtins.match ".*proto$" path != null;
   assetFilter = path: _type: builtins.match ".*assets.*$" path != null;
   cppFilter = path: _type: builtins.match ".*[h|(cpp)|(cpp.jinja)]$" path != null;
@@ -62,19 +62,21 @@
 
   wheelName = "elodin";
   wheelSuffix = "cp310-abi3-linux_${arch}";
+  # Convert version format from 0.15.0-alpha.1 to 0.15.0a1 for wheel filename
+  wheelVersion = lib.strings.replaceStrings ["-alpha."] ["a"] version;
   wheel = craneLib.buildPackage (commonArgs
     // {
       inherit cargoArtifacts;
       pname = "elodin";
       buildPhase = "maturin build --offline --target-dir ./target -m libs/nox-py/Cargo.toml --release";
-      installPhase = "install -D target/wheels/${wheelName}-${version}-${wheelSuffix}.whl -t $out/";
+      installPhase = "install -D target/wheels/${wheelName}-${wheelVersion}-${wheelSuffix}.whl -t $out/";
     });
   elodin = ps:
     ps.buildPythonPackage {
       pname = wheelName;
       format = "wheel";
       version = version;
-      src = "${wheel}/${wheelName}-${version}-${wheelSuffix}.whl";
+      src = "${wheel}/${wheelName}-${wheelVersion}-${wheelSuffix}.whl";
       doCheck = false;
       propagatedBuildInputs = with ps; [jax jaxlib typing-extensions numpy polars pytest];
       pythonImportsCheck = [wheelName];
