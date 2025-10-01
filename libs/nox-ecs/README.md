@@ -64,8 +64,6 @@ type MassOp = Mass<Op>;
 ```
 
 ### Working with symbolic components
-> **Note:** This is a very simple example that only demonstrates building the symbolic graph.  
-> Evaluation of this symbolic graph is covered in the [`nox` README](../nox/README.md).
 
 By fixing the backend to `Op`, components become symbolic nodes in the `Nox computation graph`.
 This is useful when building systems that rely on automatic differentiation or symbolic transformations:
