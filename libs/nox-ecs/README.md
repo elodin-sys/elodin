@@ -1,7 +1,7 @@
 # nox-ecs
 
 **nox-ecs** provides the core traits and types for the ECS-like layer of the
-[Nox engine](../nox).<!-- TODO: replace with link to Nox README once available -->
+[Nox engine](../nox).
 
 Nox is a Rust implementation of [JAX](https://github.com/google/jax), inspired by
 NumPy for expressive numerical computing, but built in Rust for performance,
@@ -29,7 +29,7 @@ The derive macros save you from writing verbose and repetitive code:
 - `#[derive(IntoOp)]`, `#[derive(FromOp)]`
 - etc.
 
-In practice: you declare a `struct`, add a `#[derive(...)]`, and the connection with the Nox engine is generated automatically.
+In practice you declare a `struct`, add a `#[derive(...)]`, and the connection with the Nox engine is generated automatically.
 
 ## Some examples
 
@@ -64,6 +64,9 @@ type MassOp = Mass<Op>;
 ```
 
 ### Working with symbolic components
+> **Note:** This is a very simple example that only demonstrates building the symbolic graph.  
+> Evaluation of this symbolic graph is covered in the [`nox` README](../nox/README.md).
+
 By fixing the backend to `Op`, components become symbolic nodes in the `Nox computation graph`.
 This is useful when building systems that rely on automatic differentiation or symbolic transformations:
 ```rust
@@ -80,3 +83,4 @@ let m2: Mass<Op> = Mass(2.5.into());
 
 // This builds a graph expression (not an immediate f64)
 let total = Mass(m1.0 + m2.0);
+```
