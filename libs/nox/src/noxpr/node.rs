@@ -1962,10 +1962,8 @@ impl Noxpr {
                 // We don't have an ID for the given one.
                 return false;
             }
-        } else {
-            if self.id() != other.id() {
-                return false;
-            }
+        } else if self.id() != other.id() {
+            return false;
         }
 
         // Compare the nodes structurally.
