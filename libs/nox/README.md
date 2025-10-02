@@ -11,7 +11,7 @@ For a broader introduction to the project, see the [overview documentation](../.
 
 ## Role of this crate
 - Defines the fundamental tensor types (`Scalar`, `Vector`, `Matrix`, `Tensor<_, _, Op>`). 
-- Provides an Intermediate Representation (IR) for mathematical expressions and integrates with XLA via the `nox` crate for compilation and execution. 
+- Provides an Intermediate Representation (IR) for mathematical expressions and integrates with XLA via the `noxla` crate for compilation and execution. 
 - Implements differentiable programming utilities used across the Nox ecosystem. 
 - Serves as the foundation for domain-specific layers (ECS, world management, bindings, etc.).
 
