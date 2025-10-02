@@ -12,17 +12,16 @@
   common = import ./common.nix {inherit lib;};
   src = common.src;
 
-  commonArgs = {
+  commonArgs = with pkgs; {
     inherit pname version;
     inherit src;
     doCheck = false;
     cargoExtraArgs = "--package=${pname}";
-    HOST_CC = "${pkgs.stdenv.cc.nativePrefix}cc";
-    TARGET_CC = "${pkgs.stdenv.cc.targetPrefix}cc";
-    buildInputs = [
-      pkgs.buildPackages.clang
-    ];
-    LIBCLANG_PATH = "${pkgs.buildPackages.libclang.lib}/lib";
+    HOST_CC = "${stdenv.cc.nativePrefix}cc";
+    TARGET_CC = "${stdenv.cc.targetPrefix}cc";
+    buildInputs = [buildPackages.clang];
+    nativeBuildInputs = [cmake gfortran];
+    LIBCLANG_PATH = "${buildPackages.libclang.lib}/lib";
   };
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
   bin = craneLib.buildPackage (commonArgs

@@ -12,13 +12,14 @@
   common = import ./common.nix {inherit lib;};
   src = common.src;
 
-  commonArgs = {
+  commonArgs = with pkgs; {
     inherit (crateName) pname;
     inherit src version;
+    nativeBuildInputs = [cmake gfortran];
     doCheck = false;
     cargoExtraArgs = "--package=${crateName.pname}";
-    HOST_CC = "${pkgs.stdenv.cc.nativePrefix}cc";
-    TARGET_CC = "${pkgs.stdenv.cc.targetPrefix}cc";
+    HOST_CC = "${stdenv.cc.nativePrefix}cc";
+    TARGET_CC = "${stdenv.cc.targetPrefix}cc";
   };
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
   bin = craneLib.buildPackage (commonArgs
