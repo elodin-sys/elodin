@@ -6,9 +6,9 @@ use num_traits::FromPrimitive;
 use std::pin::Pin;
 
 cpp! {{
-    #include "xla/client/lib/constants.h"
-    #include "xla/client/lib/matrix.h"
-    #include "xla/statusor.h"
+    #include "xla/hlo/builder/lib/constants.h"
+    #include "xla/hlo/builder/lib/matrix.h"
+    #include "xla/tsl/platform/status.h"
     #include "xla/literal_util.h"
     using namespace xla;
 }}
@@ -63,12 +63,12 @@ impl Literal {
         let dims_ptr = dims.as_ptr();
         let dims_len = dims.len();
         let lit = unsafe {
-            cpp!([self as "std::shared_ptr<Literal>*", dims_ptr as "const int64_t*", dims_len as "size_t", out_status as "Status*"] -> Literal as "std::shared_ptr<Literal>" {
+            cpp!([self as "std::shared_ptr<Literal>*", dims_ptr as "const int64_t*", dims_len as "size_t", out_status as "absl::Status*"] -> Literal as "std::shared_ptr<Literal>" {
                 auto status = (*self)->Reshape(absl::Span(dims_ptr, dims_len));
                 if (status.ok()) {
                     return std::make_shared<Literal>(std::move(status.value()));
                 }else{
-                    *out_status = Status(status.status());
+                    *out_status = absl::Status(status.status());
                     return std::make_shared<Literal>(Literal());
                 }
             })
