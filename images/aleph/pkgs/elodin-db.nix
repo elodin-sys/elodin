@@ -15,7 +15,6 @@
   commonArgs = with pkgs; {
     inherit pname version;
     inherit src;
-    doCheck = false;
     cargoExtraArgs = "--package=${pname}";
     HOST_CC = "${stdenv.cc.nativePrefix}cc";
     TARGET_CC = "${stdenv.cc.targetPrefix}cc";

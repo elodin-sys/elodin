@@ -13,7 +13,6 @@
   commonArgs = {
     inherit pname version;
     inherit src;
-    doCheck = false;
     cargoExtraArgs = "--package=${pname}";
     buildInputs = with pkgs;
       [
