@@ -825,7 +825,7 @@ impl<B: IoBuf> MsgBuf<B> {
     }
 
     pub fn try_parse<'a, T: Msg + Deserialize<'a> + 'a>(&'a self) -> Option<Result<T, Error>> {
-        if T::ID == self.id {
+        if T::ID != self.id {
             return None;
         }
         Some(self.parse())

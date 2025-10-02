@@ -989,8 +989,8 @@ mod tests {
         if let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] {
             assert_eq!(viewport.name, Some("main".to_string()));
             assert_eq!(viewport.fov, 60.0);
-            assert_eq!(viewport.active, true);
-            assert_eq!(viewport.show_grid, true);
+            assert!(viewport.active);
+            assert!(viewport.show_grid);
         } else {
             panic!("Expected viewport panel");
         }
@@ -1102,7 +1102,7 @@ tabs {
             assert_eq!(line.color.r, Color::MINT.r);
             assert_eq!(line.color.g, Color::MINT.g);
             assert_eq!(line.color.b, Color::MINT.b);
-            assert_eq!(line.perspective, false);
+            assert!(!line.perspective);
         } else {
             panic!("Expected line_3d");
         }
