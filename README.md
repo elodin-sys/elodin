@@ -50,3 +50,18 @@ uv sync
 cargo run --manifest-path=../../apps/elodin/Cargo.toml editor examples/three-body.py
 ```
 
+Alternatively, install [Determinate Systems Nix](https://determinate.systems/nix-installer/) which will give you exactly the same development environment that we are using. Once you have Nix installed, switch to the top of the Elodin repo. Then you can do 
+
+```
+nix develop .#rust
+cargo ...
+```
+
+or, for Python, 
+
+```
+nix develop .#python 
+python ...
+```
+
+Note that BuildKite uses exactly this infrastructure to run tests! It sets up the environment using Nix commands above and then runs the steps in `pipeline.py` under the `.buildkite` directory. You should be able to run the same steps locally just by copying the code from BuildKite steps. 
