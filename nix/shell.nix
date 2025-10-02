@@ -3,53 +3,67 @@
   pkgs,
   rustToolchain,
   ...
-}: {
-  c = (pkgs.mkShell.override {stdenv = pkgs.llvmPackages_19.libcxxStdenv;}) {
+}:
+with pkgs; let
+  xla_ext = pkgs.callPackage ./pkgs/xla-ext.nix {};
+  llvm = llvmPackages_latest;
+in {
+  c = (mkShell.override {stdenv = llvm.libcxxStdenv;}) {
     name = "elo-c-shell";
     buildInputs = [];
     doCheck = false;
   };
-  rust = pkgs.mkShell {
+  rust = mkShell {
     name = "elo-rust-shell";
-    buildInputs = with pkgs; [
-      buildkite-test-collector-rust
-      (rustToolchain pkgs)
-      pkg-config
-      python3
-      python3Packages.jax
-      python3Packages.jaxlib
-      python3Packages.typing-extensions
-      python3Packages.pytest
-      python3Packages.matplotlib
-      python3Packages.polars
-      openssl
-      clang
-      alsa-lib
-      alsa-oss
-      alsa-utils
-      vulkan-loader
-      wayland
-      gtk3
-      udev
-      libxkbcommon
-      fontconfig
-      maturin
-      cmake
-      openssl
-      libclang
-      gfortran
-      gfortran.cc.lib
-      ffmpeg-full
-      gst_all_1.gstreamer
-      gst_all_1.gst-plugins-base
-      gst_all_1.gst-plugins-good
-    ];
-    LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
+    buildInputs =
+      [
+        buildkite-test-collector-rust
+        (rustToolchain pkgs)
+        cargo-nextest
+        pkg-config
+        python3
+        python3Packages.jax
+        python3Packages.jaxlib
+        python3Packages.typing-extensions
+        python3Packages.pytest
+        python3Packages.matplotlib
+        python3Packages.polars
+        openssl
+        clang
+        maturin
+        cmake
+        openssl
+        xz
+        libclang
+        gfortran
+        gfortran.cc.lib
+        ffmpeg-full
+        gst_all_1.gstreamer
+        gst_all_1.gst-plugins-base
+        gst_all_1.gst-plugins-good
+        flip-link
+      ]
+      ++ lib.optionals stdenv.isLinux [
+        alsa-lib
+        alsa-oss
+        alsa-utils
+        vulkan-loader
+        wayland
+        gtk3
+        udev
+        libxkbcommon
+        fontconfig
+        lldb
+      ];
+    LIBCLANG_PATH = "${libclang.lib}/lib";
     doCheck = false;
+
+    LLDB_DEBUGSERVER_PATH = lib.optionalString stdenv.isDarwin "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/Resources/debugserver";
+    XLA_EXTENSION_DIR = "${xla_ext}";
   };
-  ops = pkgs.mkShell {
+  ops = mkShell {
     name = "elo-ops-shell";
-    buildInputs = with pkgs; [
+    buildInputs = [
       skopeo
       gettext
       just
@@ -58,34 +72,42 @@
       jq
       yq
       git-filter-repo
-      (google-cloud-sdk.withExtraComponents (with google-cloud-sdk.components; [gke-gcloud-auth-plugin]))
+      (google-cloud-sdk.withExtraComponents (
+        with google-cloud-sdk.components; [gke-gcloud-auth-plugin]
+      ))
       azure-cli
     ];
     doCheck = false;
   };
-  python = pkgs.mkShell {
+  python = mkShell {
     name = "elo-py-shell";
-    buildInputs = with pkgs; [
+    buildInputs = [
       ruff
+      cmake
       python3Packages.pytest
       python3Packages.pytest-json-report
-      config.packages.elodin-py
+      config.packages.elodin-py.py
     ];
+    nativeBuildInputs = with pkgs; (
+      lib.optionals stdenv.isLinux [autoPatchelfHook]
+      ++ lib.optionals stdenv.isDarwin [fixDarwinDylibNames]
+    );
+    XLA_EXTENSION_DIR = "${xla_ext}";
   };
 
-  nix-tools = pkgs.mkShell {
+  nix-tools = mkShell {
     name = "elo-nix-shell";
-    buildInputs = with pkgs; [
+    buildInputs = [
       alejandra
     ];
   };
-  writing = pkgs.mkShell {
+  writing = mkShell {
     name = "elo-writing-shell";
-    buildInputs = with pkgs; [typos];
+    buildInputs = [typos];
   };
-  docs = pkgs.mkShell {
+  docs = mkShell {
     name = "elo-docs-shell";
-    buildInputs = with pkgs; [
+    buildInputs = [
       typos
       zola
       ffmpeg
