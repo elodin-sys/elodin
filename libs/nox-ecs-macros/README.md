@@ -15,14 +15,14 @@ In **nox/nox-ecs**, doing things “by hand” means:
 - handling `IntoOp` / `FromOp` conversions (to/from `Noxpr`),
 - writing boilerplate to insert into the `World`, initialize systems, etc.
 
-→ So a lot of repetitive and fragile code.
+→ So a lot of repetition and fragile code.
 
 ---
 
 ## What the Derives automate
 
 - **`#[derive(Component)]`**  
-  Turns a 1-field newtype into a recognized ECS component  
+  Turns a struct (newtype or multi-field) into a recognized ECS component
   (stable name, Impeller schema, required `nox` traits).
 
 - **`#[derive(Archetype)]`**  
@@ -43,7 +43,7 @@ In **nox/nox-ecs**, doing things “by hand” means:
 - **`#[derive(ReprMonad)]`**  
   For 1-field wrappers parameterized by `R: Repr`,  
   provides the `nox` “representation monad” interface  
-  (⚠️ `map` is still `todo!()`).
+ 
 
 ---
 
