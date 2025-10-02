@@ -615,8 +615,8 @@ impl WorldBuilder {
         self.world.set_globals();
 
         let world = std::mem::take(&mut self.world);
-        let xla_exec = increment_sim_tick.pipe(sys).compile(&world).unwrap();
-        let tick_exec = xla_exec.compile_hlo_module(py, &world).unwrap();
+        let xla_exec = increment_sim_tick.pipe(sys).compile(&world)?;
+        let tick_exec = xla_exec.compile_hlo_module(py, &world)?;
 
         let mut exec = nox_ecs::WorldExec::new(world, tick_exec, None);
         exec.profiler.build.observe(&mut start);

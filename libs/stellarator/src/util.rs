@@ -250,7 +250,7 @@ mod tests {
     #[test]
     async fn test_simple_cancel() {
         let token = CancelToken::default();
-        assert_eq!(token.is_cancelled(), false);
+        assert!(!token.is_cancelled());
         token.cancel();
         token.wait().await;
     }
@@ -260,10 +260,10 @@ mod tests {
         let parent = CancelToken::default();
         let a = parent.child();
         let b = parent.child();
-        assert_eq!(a.is_cancelled(), false);
+        assert!(!a.is_cancelled());
         b.cancel();
-        assert_eq!(parent.is_cancelled(), false);
+        assert!(!parent.is_cancelled());
         parent.cancel();
-        assert_eq!(a.is_cancelled(), true);
+        assert!(a.is_cancelled());
     }
 }
