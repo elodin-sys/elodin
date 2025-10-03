@@ -13,18 +13,47 @@
   commonArgs = {
     inherit pname version;
     inherit src;
-    doCheck = false;
     cargoExtraArgs = "--package=${pname}";
     buildInputs = with pkgs;
       [
         pkg-config
+        python3
+        cmake
+        gfortran
       ]
-      ++ lib.optionals stdenv.isLinux [alsa-lib udev];
+      ++ lib.optionals stdenv.isLinux [
+        alsa-lib
+        udev
+      ];
   };
+
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-  bin = craneLib.buildPackage (commonArgs
+
+  clippy = craneLib.cargoClippy (
+    commonArgs
     // {
       inherit cargoArtifacts;
-    });
-in
-  bin
+      cargoClippyExtraArgs = "--all-targets -- --deny warnings --allow deprecated";
+    }
+  );
+
+  bin = craneLib.buildPackage (
+    commonArgs
+    // {
+      inherit cargoArtifacts;
+      doCheck = false;
+    }
+  );
+
+  test = craneLib.cargoNextest (
+    commonArgs
+    // {
+      inherit cargoArtifacts;
+      partitions = 1;
+      partitionType = "count";
+      cargoNextestPartitionsExtraArgs = "--no-tests=pass";
+    }
+  );
+in {
+  inherit bin clippy test;
+}

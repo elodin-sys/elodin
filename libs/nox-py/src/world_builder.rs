@@ -168,7 +168,7 @@ impl WorldBuilder {
         }
     }
 
-    fn recipe(&mut self, py: Python<'_>, recipe_obj: PyObject) -> PyResult<()> {
+    fn recipe(&mut self, py: Python<'_>, recipe_obj: Py<PyAny>) -> PyResult<()> {
         // Extract PyRecipe instead of Recipe directly
         let pyrecipe = recipe_obj.extract::<crate::s10::PyRecipe>(py)?;
         let name = pyrecipe.name();
@@ -255,16 +255,14 @@ impl WorldBuilder {
                 if let Some(port) = liveness_port {
                     stellarator::struc_con::stellar(move || ::s10::liveness::monitor(port));
                 }
-                py.allow_threads(|| {
+                py.detach(|| {
                     stellarator::run(|| {
-                        let tmpfile = tempfile::tempdir().unwrap().into_path();
+                        let tmpfile = tempfile::tempdir().unwrap().keep();
                         nox_ecs::impeller2_server::Server::new(
                             elodin_db::Server::new(tmpfile.join("db"), addr).unwrap(),
                             exec,
                         )
-                        .run_with_cancellation(|| {
-                            Python::with_gil(|py| py.check_signals().is_err())
-                        })
+                        .run_with_cancellation(|| Python::attach(|py| py.check_signals().is_err()))
                     })?;
 
                     Ok(None)
@@ -347,7 +345,7 @@ impl WorldBuilder {
         }
         let mut exec = exec.compile(client.clone())?;
         let db_dir = tempfile::tempdir()?;
-        let db_dir = db_dir.into_path();
+        let db_dir = db_dir.keep();
         let db = elodin_db::DB::create(db_dir.join("db"))?;
         nox_ecs::impeller2_server::init_db(&db, &mut exec.world, Timestamp::now())?;
         Ok(Exec { exec, db })

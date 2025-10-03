@@ -60,8 +60,6 @@ pub use native_type::*;
 pub use op::*;
 pub use shape::*;
 
-extern crate lapack_src as _;
-
 #[derive(Debug, Copy, Clone)]
 pub enum TfLogLevel {
     Info,
