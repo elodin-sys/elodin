@@ -1412,21 +1412,26 @@ mod tests {
 
         let dfs_result = dfs_tracer.walk(&expr).expect("DFS tracer should succeed");
 
-        // Both should produce the same batch
+        // Graphs can have the same number of labels and still differ.
+        let recur_count = recursive_result.inner.labels().count();
+        let dfs_count = dfs_result.inner.labels().count();
+        assert_eq!(recur_count, dfs_count);
+
+        // Both will produce a similar batch but they're not the same because of
+        // IDs.
         assert_ne!(
             recursive_result, dfs_result,
             "Batch results should match between implementations"
         );
 
+        // Even ignoring the IDs, however, these shouldn't match because they
+        // use different constants.
         assert!(
             !recursive_result
                 .inner
                 .is_equal_modulo_ids(&dfs_result.inner),
             "Batch results should not match"
         );
-        let recur_count = recursive_result.inner.labels().count();
-        let dfs_count = dfs_result.inner.labels().count();
-        assert_eq!(recur_count, dfs_count);
     }
 
     #[test]
