@@ -373,7 +373,7 @@ fn monitor_parts(
                 "Component",
                 move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
                     if let Some(component) = &part.component {
-                        tile_state.create_monitor_tile(component.id, tile_id);
+                        tile_state.create_monitor_tile(component.name.clone(), tile_id);
                         PaletteEvent::Exit
                     } else {
                         PalettePage::new(monitor_parts(&part.children, tile_id)).into()

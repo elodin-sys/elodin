@@ -386,7 +386,11 @@ impl Asset for Object3D {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct ComponentMonitor {
-    pub component_id: ComponentId,
+    /// The component name that we are monitoring.
+    ///
+    /// NOTE: It may be nice to allow this to be an EQL expression that we
+    /// monitor, which can be a simple component_name.
+    pub component_name: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
