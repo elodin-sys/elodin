@@ -95,7 +95,7 @@ impl SchematicParam<'_, '_> {
                 }
 
                 Pane::Monitor(monitor) => Some(Panel::ComponentMonitor(ComponentMonitor {
-                    component_id: monitor.component_id,
+                    eql: monitor.eql.clone(),
                 })),
 
                 Pane::QueryTable(query_table) => {

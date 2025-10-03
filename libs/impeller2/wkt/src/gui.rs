@@ -386,7 +386,7 @@ impl Asset for Object3D {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct ComponentMonitor {
-    pub component_id: ComponentId,
+    pub eql: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]

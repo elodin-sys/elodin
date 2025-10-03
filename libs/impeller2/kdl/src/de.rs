@@ -213,18 +213,17 @@ fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
 }
 
 fn parse_component_monitor(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
-    let component_id = node
+    let eql = node
         .get("component_id")
         .and_then(|v| v.as_string())
-        .map(ComponentId::new)
         .ok_or_else(|| KdlSchematicError::MissingProperty {
-            property: "component_id".to_string(),
+            property: "eql".to_string(),
             node: "component_monitor".to_string(),
             src: src.to_string(),
             span: node.span(),
         })?;
 
-    Ok(Panel::ComponentMonitor(ComponentMonitor { component_id }))
+    Ok(Panel::ComponentMonitor(ComponentMonitor { eql: eql.to_string() }))
 }
 
 fn parse_action_pane(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {

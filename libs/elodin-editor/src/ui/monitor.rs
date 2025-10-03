@@ -10,14 +10,14 @@ use super::{colors::get_scheme, widgets::WidgetSystem};
 #[derive(Clone)]
 pub struct MonitorPane {
     pub label: String,
-    pub component_id: ComponentId,
+    pub eql: String,
 }
 
 impl MonitorPane {
-    pub fn new(label: String, component_id: ComponentId) -> Self {
+    pub fn new(label: String, eql: String) -> Self {
         Self {
             label,
-            component_id,
+            eql,
         }
     }
 }
@@ -45,10 +45,11 @@ impl WidgetSystem for MonitorWidget<'_, '_> {
             mut component_value_query,
             entity_map,
         } = state.get_mut(world);
-        let Some(entity) = entity_map.get(&pane.component_id) else {
+        let component_id = ComponentId::new("world_pos");
+        let Some(entity) = entity_map.get(&component_id) else {
             return;
         };
-        let Some(metadata) = metadata_store.get_metadata(&pane.component_id) else {
+        let Some(metadata) = metadata_store.get_metadata(&component_id) else {
             return;
         };
 
