@@ -633,7 +633,7 @@ impl BatchTracer {
                 })
             }
             (BatchAxis::NotMapped, BatchAxis::Mapped { index, .. }) => {
-                let shape = lhs.inner.shape().ok_or(Error::UnbatchableArgument)?;
+                let shape = rhs.inner.shape().ok_or(Error::UnbatchableArgument)?;
                 let rhs_tensor: SmallVec<[i64; 4]> = (0..shape.len() as i64)
                     .filter(|&d| {
                         !dims.rhs_batch_dimensions.contains(&d)

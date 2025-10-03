@@ -515,7 +515,7 @@ impl BatchTracer {
                 })
             }
             (BatchAxis::NotMapped, BatchAxis::Mapped { index, .. }) => {
-                let shape = lhs.inner.shape().ok_or(Error::UnbatchableArgument)?;
+                let shape = rhs.inner.shape().ok_or(Error::UnbatchableArgument)?;
                 let rhs_tensor: SmallVec<[i64; 4]> = (0..shape.len() as i64)
                     .filter(|&d| {
                         !dims.rhs_batch_dimensions.contains(&d)
@@ -864,7 +864,7 @@ impl BatchTracer {
         stack: &mut Vec<BatchedExpr>,
     ) -> Result<BatchedExpr, Error> {
         let BatchAxis::Mapped { size: out_size, .. } = self.out_axis else {
-            panic!();
+            return Err(Error::ScanUnmappedAxis);
         };
         let axis = BatchAxis::Mapped {
             index: 1,

@@ -3110,7 +3110,7 @@ mod tests {
                 panic!("{}", msg);
             }
             Err(e) => {
-                panic!("{:?}", e);
+                panic!("{}", e);
             }
         };
         let out = exec

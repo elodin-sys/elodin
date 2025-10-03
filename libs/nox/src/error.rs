@@ -59,6 +59,9 @@ pub enum Error {
     #[error("all scan arguments must have the same first dim")]
     ScanShapeMismatch,
 
+    #[error("scan expects a mapped axis")]
+    ScanUnmappedAxis,
+
     /// Error when matrix inversion failed
     #[error("matrix inversion failed with {0} arg illegal")]
     InvertFailed(i32),
