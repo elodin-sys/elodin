@@ -251,9 +251,8 @@ impl LoadSchematicParams<'_, '_> {
                             continue;
                         };
                         let len: usize = schema.shape().iter().copied().product();
-                        let mut elements: Vec<(bool, Color32)> = (0..len)
-                            .map(|_| (false, line_color))
-                            .collect();
+                        let mut elements: Vec<(bool, Color32)> =
+                            (0..len).map(|_| (false, line_color)).collect();
                         elements[*i] = (true, line_color);
                         components_tree.insert(component.clone(), elements);
                     }

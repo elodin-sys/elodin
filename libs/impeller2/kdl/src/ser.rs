@@ -638,15 +638,17 @@ mod tests {
     #[test]
     fn test_serialize_graph_with_colors() {
         let mut schematic = Schematic::default();
-        schematic.elems.push(SchematicElem::Panel(Panel::Graph(Graph {
-            eql: "rocket.fins[2], rocket.fins[3]".to_string(),
-            name: None,
-            graph_type: GraphType::Line,
-            auto_y_range: true,
-            y_range: 0.0..1.0,
-            aux: (),
-            colors: vec![Color::rgb(1.0, 0.0, 0.0), Color::rgb(0.0, 1.0, 0.0)],
-        })));
+        schematic
+            .elems
+            .push(SchematicElem::Panel(Panel::Graph(Graph {
+                eql: "rocket.fins[2], rocket.fins[3]".to_string(),
+                name: None,
+                graph_type: GraphType::Line,
+                auto_y_range: true,
+                y_range: 0.0..1.0,
+                aux: (),
+                colors: vec![Color::rgb(1.0, 0.0, 0.0), Color::rgb(0.0, 1.0, 0.0)],
+            })));
 
         let serialized = serialize_schematic(&schematic);
         let parsed = parse_schematic(&serialized).unwrap();
