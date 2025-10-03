@@ -105,8 +105,6 @@
               then "manylinux2014_x86_64"
               else if system == "aarch64-linux"
               then "manylinux2014_aarch64"
-              else if system == "x86_64-darwin"
-              then "macosx_10_14_x86_64"
               else "macosx_11_0_arm64";
             wheelName = "jaxlib-${version}-cp312-cp312-${platform}.whl";
             # Base URL for jaxlib wheels on PyPI
@@ -115,7 +113,6 @@
             wheelUrls = {
               "manylinux2014_x86_64" = "${baseUrl}/b1/09/58d35465d48c8bee1d9a4e7a3c5db2edaabfc7ac94f4576c9f8c51b83e70/${wheelName}";
               "manylinux2014_aarch64" = "${baseUrl}/e0/af/10b49f8de2acc7abc871478823579d7241be52ca0d6bb0d2b2c476cc1b68/${wheelName}";
-              "macosx_10_14_x86_64" = "${baseUrl}/fa/27/3eee15d1b168d434498c388780114d7629f715e19c2d08754ab4be82ad2d/${wheelName}";
               "macosx_11_0_arm64" = "${baseUrl}/68/cf/28895a4a89d88d18592507d7a35218b6bb2d8bced13615065c9f925f2ae1/${wheelName}";
             };
           in
@@ -125,9 +122,7 @@
                 if system == "x86_64-linux"
                 then "sha256-Hxr6X9WKYPZ/DKWG4mcUrs5i6qLIM0wk0OgoWvxKfM0="
                 else if system == "aarch64-linux"
-                then "sha256-0K8QtJj4LsJ7yHGUSIM5fSQb5SzKDWu7DSKyzGzBtog="
-                else if system == "x86_64-darwin"
-                then "sha256-+ic+7hFdGxaNQ0TIw4gBFHZ2n3FejxzuT+CtWukC2t0="
+                then "sha256-TYZ6GgVlsxz9qrvsgeAwLGRhuyrEuSwEZwMo15WBmAM="
                 else "sha256-aPzyiJWkqonYjRhVkgfXo1KLsi287BMWFgXJvJL2Kh4="; # macosx_11_0_arm64
             };
         });
