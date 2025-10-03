@@ -222,7 +222,9 @@ fn parse_component_monitor(node: &KdlNode, src: &str) -> Result<Panel, KdlSchema
             span: node.span(),
         })?;
 
-    Ok(Panel::ComponentMonitor(ComponentMonitor { component_name: component_name.to_string() }))
+    Ok(Panel::ComponentMonitor(ComponentMonitor {
+        component_name: component_name.to_string(),
+    }))
 }
 
 fn parse_action_pane(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
