@@ -268,7 +268,7 @@ impl LoadSchematicParams<'_, '_> {
                     .insert_tile(Tile::Pane(Pane::Graph(graph)), parent_id, false)
             }
             Panel::ComponentMonitor(monitor) => {
-                let pane = MonitorPane::new("Monitor".to_string(), monitor.eql.clone());
+                let pane = MonitorPane::new("Monitor".to_string(), monitor.component_name.clone());
                 self.tile_state
                     .insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
             }

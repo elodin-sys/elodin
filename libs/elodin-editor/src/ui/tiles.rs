@@ -15,7 +15,6 @@ use bevy_render::{
 };
 use egui::UiBuilder;
 use egui_tiles::{Container, Tile, TileId, Tiles};
-use impeller2::types::ComponentId;
 use impeller2_wkt::{Dashboard, Graph, Viewport};
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, HashMap};
@@ -155,8 +154,7 @@ impl TileState {
     }
 
     pub fn create_monitor_tile(&mut self, eql: String, tile_id: Option<TileId>) {
-        self.tree_actions
-            .push(TreeAction::AddMonitor(tile_id, eql));
+        self.tree_actions.push(TreeAction::AddMonitor(tile_id, eql));
     }
 
     pub fn create_action_tile(

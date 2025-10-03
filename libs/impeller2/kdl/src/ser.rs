@@ -161,8 +161,8 @@ fn serialize_graph<T>(graph: &Graph<T>) -> KdlNode {
 fn serialize_component_monitor(monitor: &ComponentMonitor) -> KdlNode {
     let mut node = KdlNode::new("component_monitor");
     node.entries_mut().push(KdlEntry::new_prop(
-        "eql",
-        monitor.eql.clone(),
+        "component_name",
+        monitor.component_name.clone(),
     ));
     node
 }

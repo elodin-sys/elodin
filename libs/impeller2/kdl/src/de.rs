@@ -1,4 +1,3 @@
-use impeller2::types::ComponentId;
 use impeller2_wkt::{Color, Schematic, SchematicElem};
 use kdl::{KdlDocument, KdlNode};
 use std::collections::HashMap;
@@ -213,17 +212,17 @@ fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
 }
 
 fn parse_component_monitor(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
-    let eql = node
-        .get("component_id")
+    let component_name = node
+        .get("component_name")
         .and_then(|v| v.as_string())
         .ok_or_else(|| KdlSchematicError::MissingProperty {
-            property: "eql".to_string(),
+            property: "component_name".to_string(),
             node: "component_monitor".to_string(),
             src: src.to_string(),
             span: node.span(),
         })?;
 
-    Ok(Panel::ComponentMonitor(ComponentMonitor { eql: eql.to_string() }))
+    Ok(Panel::ComponentMonitor(ComponentMonitor { component_name: component_name.to_string() }))
 }
 
 fn parse_action_pane(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
@@ -1140,15 +1139,15 @@ object_3d "a.world_pos" {
 
     #[test]
     fn test_component_monitor() {
-        let kdl = r#"component_monitor component_id="a.world_pos""#;
+        let kdl = r#"component_monitor component_name="a.world_pos""#;
         let schematic = parse_schematic(kdl).unwrap();
 
         assert_eq!(schematic.elems.len(), 1);
 
         if let SchematicElem::Panel(Panel::ComponentMonitor(monitor)) = &schematic.elems[0] {
-            assert_eq!(monitor.component_id, ComponentId::new("a.world_pos"));
+            assert_eq!(monitor.component_name, "a.world_pos");
         } else {
-            panic!("Expected object_3d");
+            panic!("Expected component_monitor");
         }
     }
 
