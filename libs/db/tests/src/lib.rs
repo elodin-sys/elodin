@@ -122,7 +122,7 @@ mod tests {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut client = Client::connect(addr).await.unwrap();
         let component_id = ComponentId::new("test_component");
-        let component_metadata = SetComponentMetadata::new(component_id.clone(), "Test Component")
+        let component_metadata = SetComponentMetadata::new(component_id, "Test Component")
             .metadata(
                 [("baz".to_string(), "bang".to_string())]
                     .into_iter()
@@ -482,7 +482,7 @@ mod tests {
         assert_eq!(response.path, archive_path);
         assert!(archive_path.exists());
 
-        let file = std::fs::File::open(&archive_path.join("TestComponent.arrow")).unwrap();
+        let file = std::fs::File::open(archive_path.join("TestComponent.arrow")).unwrap();
         let mut reader = arrow::ipc::reader::FileReader::try_new(file, None).unwrap();
         let batch = reader.next().unwrap().unwrap();
         assert_eq!(batch.num_columns(), 2);
@@ -881,7 +881,7 @@ mod tests {
 
         let time_series_all = client.request(&query_all).await.unwrap();
 
-        assert!(time_series_all.timestamps().unwrap().len() > 0);
+        assert!(!time_series_all.timestamps().unwrap().is_empty());
 
         let data_flat = time_series_all.data().unwrap();
         assert_eq!(data_flat.len() % (100 * 8), 0);
