@@ -155,6 +155,10 @@ fn serialize_graph<T>(graph: &Graph<T>) -> KdlNode {
             .push(KdlEntry::new_prop("y_max", graph.y_range.end));
     }
 
+    for color in &graph.colors {
+        serialize_color_to_node(&mut node, color);
+    }
+
     node
 }
 
@@ -629,6 +633,31 @@ mod tests {
         } else {
             panic!("Expected graph panel");
         }
+    }
+
+    #[test]
+    fn test_serialize_graph_with_colors() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Panel(Panel::Graph(Graph {
+            eql: "rocket.fins[2], rocket.fins[3]".to_string(),
+            name: None,
+            graph_type: GraphType::Line,
+            auto_y_range: true,
+            y_range: 0.0..1.0,
+            aux: (),
+            colors: vec![Color::rgb(1.0, 0.0, 0.0), Color::rgb(0.0, 1.0, 0.0)],
+        })));
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert_eq!(parsed.elems.len(), 1);
+        let SchematicElem::Panel(Panel::Graph(graph)) = &parsed.elems[0] else {
+            panic!("Expected graph panel");
+        };
+        assert_eq!(graph.colors.len(), 2);
+        assert_eq!(graph.colors[0], Color::rgb(1.0, 0.0, 0.0));
+        assert_eq!(graph.colors[1], Color::rgb(0.0, 1.0, 0.0));
     }
 
     #[test]

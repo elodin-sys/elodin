@@ -1011,6 +1011,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_parse_graph_colors() {
+        let kdl = r#"
+graph "rocket.fins[2], rocket.fins[3]" {
+    color 1.0 0.0 0.0
+    color 0.0 1.0 0.0
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        let SchematicElem::Panel(Panel::Graph(graph)) = &schematic.elems[0] else {
+            panic!("Expected graph panel");
+        };
+        assert_eq!(graph.colors.len(), 2);
+        assert_eq!(graph.colors[0], Color::rgb(1.0, 0.0, 0.0));
+        assert_eq!(graph.colors[1], Color::rgb(0.0, 1.0, 0.0));
+    }
+
     /// I would like for this test to pass in the future. That is, I want the
     /// parsing to fail because color is given no positional arguments, but it
     /// looks sensible given its keyword arguments. Currently this will parse
