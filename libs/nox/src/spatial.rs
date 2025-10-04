@@ -600,6 +600,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_spatial_transform_mul() {
         let a = SpatialTransform::new(
             Quaternion::<_, ArrayRepr>::from_axis_angle(tensor![0.0, 0.0, 1.0], 45f64.to_radians()),
@@ -620,7 +621,7 @@ mod tests {
                 0.0,
                 1.0,
                 -0.41421356237309515,
-                core::f64::consts::SQRT_2,
+                1.414213562373095,
                 0.0
             ]
         )

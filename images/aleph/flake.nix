@@ -7,7 +7,7 @@
     fallback = true;
   };
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-24.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
     jetpack.url = "github:anduril/jetpack-nixos/master";
     rust-overlay.url = "github:oxalica/rust-overlay";
