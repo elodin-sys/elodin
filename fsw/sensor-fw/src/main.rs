@@ -226,9 +226,10 @@ fn main() -> ! {
             last_can_update = now;
             defmt::trace!("{}: CAN update", ts);
             if let Some(msg) = can.read(now)
-                && let Ok(msg) = dronecan::Message::try_from(msg) {
-                    defmt::debug!("{}: Received message: {}", ts, msg);
-                }
+                && let Ok(msg) = dronecan::Message::try_from(msg)
+            {
+                defmt::debug!("{}: Received message: {}", ts, msg);
+            }
         } else if now.checked_duration_since(last_usb_log).unwrap() > USB_LOG_PERIOD {
             last_usb_log = now;
             let record = blackbox::Record {
