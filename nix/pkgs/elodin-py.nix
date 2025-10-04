@@ -32,7 +32,11 @@
 
   arch = with pkgs;
     if stdenv.isDarwin
-    then stdenv.hostPlatform.ubootArch
+    then
+      # Python wheels require "arm64" for ARM Macs, not "aarch64"
+      if stdenv.hostPlatform.ubootArch == "aarch64"
+      then "arm64"
+      else stdenv.hostPlatform.ubootArch
     else builtins.elemAt (lib.strings.splitString "-" system) 0;
 
   commonArgs = {
