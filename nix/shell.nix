@@ -5,7 +5,7 @@
   ...
 }:
 with pkgs; let
-  xla_ext = pkgs.callPackage ./pkgs/xla-ext.nix {};
+  xla_ext = pkgs.callPackage ./pkgs/xla-ext.nix {system = pkgs.stdenv.hostPlatform.system;};
   llvm = llvmPackages_latest;
 in {
   c = (mkShell.override {stdenv = llvm.libcxxStdenv;}) {

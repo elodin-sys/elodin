@@ -6,7 +6,7 @@
   system,
   ...
 }: let
-  xla_ext = pkgs.callPackage ./xla-ext.nix {};
+  xla_ext = pkgs.callPackage ./xla-ext.nix {inherit system;};
   craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
   pname = (craneLib.crateNameFromCargoToml {cargoToml = ../../libs/nox-py/Cargo.toml;}).pname;
   version = (craneLib.crateNameFromCargoToml {cargoToml = ../../Cargo.toml;}).version;
@@ -112,8 +112,6 @@
         numpy
         polars
         pytest
-        xla_ext
-        pkgs.gfortran.cc.lib
       ];
       buildInputs = [
         xla_ext
