@@ -14,7 +14,7 @@ use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
         HdrEnabled, SelectedObject,
-        colors::{self},
+        colors::{self, EColor},
         dashboard::{NodeUpdaterParams, spawn_dashboard},
         monitor::MonitorPane,
         plot::GraphBundle,
@@ -238,17 +238,22 @@ impl LoadSchematicParams<'_, '_> {
                 let mut components_tree: BTreeMap<ComponentPath, Vec<(bool, Color32)>> =
                     BTreeMap::new();
                 for (j, (component, i)) in component_vec.iter().enumerate() {
+                    let line_color = graph
+                        .colors
+                        .get(j)
+                        .copied()
+                        .map(EColor::into_color32)
+                        .unwrap_or_else(|| colors::get_color_by_index_all(j));
                     if let Some(elements) = components_tree.get_mut(component) {
-                        elements[*i] = (true, colors::get_color_by_index_all(j));
+                        elements[*i] = (true, line_color);
                     } else {
                         let Some(schema) = self.schema_reg.0.get(&component.id) else {
                             continue;
                         };
                         let len: usize = schema.shape().iter().copied().product();
-                        let mut elements: Vec<(bool, Color32)> = (0..len)
-                            .map(|_| (false, colors::get_color_by_index_all(j)))
-                            .collect();
-                        elements[*i] = (true, colors::get_color_by_index_all(j));
+                        let mut elements: Vec<(bool, Color32)> =
+                            (0..len).map(|_| (false, line_color)).collect();
+                        elements[*i] = (true, line_color);
                         components_tree.insert(component.clone(), elements);
                     }
                 }
