@@ -106,10 +106,10 @@ impl Client {
                     request = request.header("If-None-Match", etag);
                 }
                 let response = request.send().await.map_err(http_err)?;
-                if let Some(CachedAsset { data, .. }) = cached_asset {
-                    if response.status() == StatusCode::NOT_MODIFIED {
-                        return Ok((data, None));
-                    }
+                if let Some(CachedAsset { data, .. }) = cached_asset
+                    && response.status() == StatusCode::NOT_MODIFIED
+                {
+                    return Ok((data, None));
                 }
                 let etag = response
                     .headers()

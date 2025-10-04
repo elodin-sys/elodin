@@ -14,11 +14,10 @@ fn run_python_command(cmd: &str) -> String {
     }
 
     // Get the stdlib path from the command output
-    let output = String::from_utf8(output.stdout)
+    String::from_utf8(output.stdout)
         .expect("Invalid UTF-8 output")
         .trim()
-        .to_string();
-    output
+        .to_string()
 }
 
 #[cfg(not(feature = "jax"))]

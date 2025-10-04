@@ -24,8 +24,7 @@ lapack-sys = "0.14.0"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 lapack-src = { version = "0.10", features = ["netlib"] }
-netlib-src.version = "0.8"
-netlib-src.features = ["static"]
+netlib-src = { version = "0.8", features = ["static"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 lapack-src = { version = "0.10", features = ["accelerate"] }
 

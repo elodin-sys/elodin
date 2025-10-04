@@ -82,10 +82,10 @@ fn parse_split(node: &KdlNode, src: &str, is_horizontal: bool) -> Result<Panel, 
             panels.push(parse_panel(child, src)?);
 
             // Look for share property on child
-            if let Some(share_val) = child.get("share") {
-                if let Some(share) = share_val.as_float() {
-                    shares.insert(i, share as f32);
-                }
+            if let Some(share_val) = child.get("share")
+                && let Some(share) = share_val.as_float()
+            {
+                shares.insert(i, share as f32);
             }
         }
     }
@@ -516,10 +516,10 @@ fn parse_color_from_node_or_children(node: &KdlNode, color_tag: Option<&str>) ->
     // If no color found on the node, look for color child nodes
     if let Some(children) = node.children() {
         for child in children.nodes() {
-            if child.name().value() == color_tag {
-                if let Some(color) = parse_color_from_node(child) {
-                    return Some(color);
-                }
+            if child.name().value() == color_tag
+                && let Some(color) = parse_color_from_node(child)
+            {
+                return Some(color);
             }
         }
     }
@@ -584,20 +584,20 @@ fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
                 .map(|s| s.trim())
                 .collect();
 
-            if values.len() >= 3 {
-                if let (Ok(r), Ok(g), Ok(b)) = (
+            if values.len() >= 3
+                && let (Ok(r), Ok(g), Ok(b)) = (
                     values[0].parse::<f64>(),
                     values[1].parse::<f64>(),
                     values[2].parse::<f64>(),
-                ) {
-                    let a = if values.len() >= 4 {
-                        values[3].parse::<f64>().unwrap_or(1.0)
-                    } else {
-                        1.0
-                    };
+                )
+            {
+                let a = if values.len() >= 4 {
+                    values[3].parse::<f64>().unwrap_or(1.0)
+                } else {
+                    1.0
+                };
 
-                    return Some(Color::rgba(r as f32, g as f32, b as f32, a as f32));
-                }
+                return Some(Color::rgba(r as f32, g as f32, b as f32, a as f32));
             }
         }
 

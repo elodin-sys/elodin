@@ -34,10 +34,12 @@ in {
         cmake
         openssl
         xz
+        bzip2
         libclang
         gfortran
         gfortran.cc.lib
         ffmpeg-full
+        ffmpeg-full.dev
         gst_all_1.gstreamer
         gst_all_1.gst-plugins-base
         gst_all_1.gst-plugins-good
@@ -57,6 +59,10 @@ in {
       ];
     LIBCLANG_PATH = "${libclang.lib}/lib";
     doCheck = false;
+
+    # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
+    # GCC 14 treats -Wincompatible-pointer-types as error by default
+    NIX_CFLAGS_COMPILE = lib.optionalString stdenv.isLinux "-Wno-error=incompatible-pointer-types";
 
     LLDB_DEBUGSERVER_PATH = lib.optionalString stdenv.isDarwin "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/Resources/debugserver";
     XLA_EXTENSION_DIR = "${xla_ext}";

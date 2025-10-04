@@ -266,7 +266,7 @@ mod tests {
         let ref_a = tensor![0.0, 1.0, 0.0].normalize();
         let ref_b = tensor![1.0, 0.0, 0.0].normalize();
         let mut q: Quaternion<f64, ArrayRepr> =
-            Quaternion::from_axis_angle(Vector::z_axis(), 3.14 / 4.0);
+            Quaternion::from_axis_angle(Vector::z_axis(), core::f64::consts::PI / 4.0);
         let body_a = (q.inverse() * ref_a).normalize();
         let body_b = (q.inverse() * ref_b).normalize();
         let dt = 1.0 / 120.0;

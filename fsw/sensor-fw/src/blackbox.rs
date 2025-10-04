@@ -146,7 +146,7 @@ impl SdmmcFs {
         }
     }
 
-    pub fn blackbox(&mut self, now: Instant) -> Blackbox {
+    pub fn blackbox(&mut self, now: Instant) -> Blackbox<'_> {
         // Try connecting to the SD card and initializing the file system
         if self.fs.is_none() || !self.sdmmc.connected() {
             self.fs = None;
@@ -216,18 +216,18 @@ fn append<'a>(
 
 impl Blackbox<'_> {
     pub fn write_record(&mut self, record: Record) {
-        if let Some(Files { data_file, .. }) = &mut self.files {
-            if let Err(err) = data_file.write(record.as_bytes(), &mut self.led) {
-                self.led.set_low();
-                if err == Error::BufferOverrun {
-                    // Clear the buffer
-                    let dropped_records = data_file.buf_len / core::mem::size_of::<Record>();
-                    data_file.buf_len %= core::mem::size_of::<Record>();
-                    defmt::warn!("Dropped {} records due to buffer overrun", dropped_records);
-                } else {
-                    self.files = None;
-                    defmt::warn!("Failed to write record: {}", err);
-                }
+        if let Some(Files { data_file, .. }) = &mut self.files
+            && let Err(err) = data_file.write(record.as_bytes(), &mut self.led)
+        {
+            self.led.set_low();
+            if err == Error::BufferOverrun {
+                // Clear the buffer
+                let dropped_records = data_file.buf_len / core::mem::size_of::<Record>();
+                data_file.buf_len %= core::mem::size_of::<Record>();
+                defmt::warn!("Dropped {} records due to buffer overrun", dropped_records);
+            } else {
+                self.files = None;
+                defmt::warn!("Failed to write record: {}", err);
             }
         }
     }

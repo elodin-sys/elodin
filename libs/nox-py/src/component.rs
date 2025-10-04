@@ -110,8 +110,8 @@ impl Component {
                     .and_then(|item| item.extract::<Component>())
             })?;
 
-        if component_data.ty.is_none() {
-            if let Some(base_ty) = component
+        if component_data.ty.is_none()
+            && let Some(base_ty) = component
                 .getattr(py, intern!(py, "__origin__"))
                 .and_then(|origin| origin.getattr(py, intern!(py, "__metadata__")))
                 .and_then(|metadata| {
@@ -123,9 +123,8 @@ impl Component {
                 })
                 .ok()
                 .and_then(|component| component.ty)
-            {
-                component_data.ty = Some(base_ty);
-            }
+        {
+            component_data.ty = Some(base_ty);
         }
 
         if component_data.ty.is_none() {

@@ -1,3 +1,5 @@
+#![allow(unused_parens)] // False positives from bitfield-struct macro in Rust 1.90
+
 use core::ops::DerefMut;
 
 use bitfield_struct::bitfield;
@@ -211,6 +213,7 @@ impl Averaging {
     }
 }
 
+#[allow(unused_parens)] // False positive from bitfield-struct macro
 #[bitfield(u8)]
 #[derive(defmt::Format)]
 struct PmuCmdStatus0 {
@@ -223,6 +226,7 @@ struct PmuCmdStatus0 {
     pmu_cmd_value: u8,
 }
 
+#[allow(unused_parens)] // False positive from bitfield-struct macro
 #[bitfield(u8)]
 struct OdrAverage {
     #[bits(4)]

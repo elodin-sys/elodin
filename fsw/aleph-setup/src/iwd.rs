@@ -119,7 +119,7 @@ impl Iwd {
         Ok(Self { objects })
     }
 
-    pub async fn station(&self, connection: &Connection) -> Option<StationProxy> {
+    pub async fn station(&self, connection: &Connection) -> Option<StationProxy<'_>> {
         let (path, _) = self
             .objects
             .iter()
@@ -130,11 +130,11 @@ impl Iwd {
 }
 
 pub trait StationExt {
-    async fn networks(&self, connection: &Connection) -> zbus::Result<Vec<NetworkProxy>>;
+    async fn networks(&self, connection: &Connection) -> zbus::Result<Vec<NetworkProxy<'_>>>;
 }
 
 impl StationExt for StationProxy<'_> {
-    async fn networks(&self, conn: &Connection) -> zbus::Result<Vec<NetworkProxy>> {
+    async fn networks(&self, conn: &Connection) -> zbus::Result<Vec<NetworkProxy<'_>>> {
         let mut networks = vec![];
         for (path, _) in self.get_ordered_networks().await? {
             networks.push(NetworkProxy::builder(conn).path(path)?.build().await?);

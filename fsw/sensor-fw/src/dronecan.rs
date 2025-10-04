@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![allow(unused_parens)] // False positives from modular-bitfield macro in Rust 1.90
 
 use modular_bitfield::prelude::*;
 
@@ -42,6 +43,7 @@ impl From<core::str::Utf8Error> for Error {
     }
 }
 
+#[allow(unused_parens)] // False positive from modular-bitfield macro
 #[bitfield(bits = 29)]
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Id {
@@ -51,6 +53,7 @@ pub struct Id {
     priority_bits: Priority,
 }
 
+#[allow(unused_parens)] // False positive from modular-bitfield macro
 #[bitfield(bits = 7)]
 #[derive(BitfieldSpecifier, Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub struct NodeId {
@@ -173,7 +176,7 @@ impl DroneCan {
         }
     }
 
-    pub fn read(&mut self, now: monotonic::Instant) -> Option<RawMessage> {
+    pub fn read(&mut self, now: monotonic::Instant) -> Option<RawMessage<'_>> {
         let frame_info = match self.can.receive0(&mut self.buf).ok()? {
             fdcan::ReceiveOverrun::Overrun(frame_info) => {
                 self.can
@@ -268,6 +271,7 @@ impl DroneCan {
     }
 }
 
+#[allow(unused_parens)] // False positive from modular-bitfield macro
 #[bitfield(bits = 8)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub struct TailByte {
@@ -312,6 +316,7 @@ impl Default for Priority {
     }
 }
 
+#[allow(unused_parens)] // False positive from modular-bitfield macro
 #[bitfield(bits = 16)]
 #[derive(Copy, Clone, Debug, defmt::Format, Default)]
 pub struct AnonymousFrameType {
@@ -319,6 +324,7 @@ pub struct AnonymousFrameType {
     discriminator: B14,
 }
 
+#[allow(unused_parens)] // False positive from modular-bitfield macro
 #[bitfield(bits = 16)]
 #[derive(Copy, Clone, Debug, defmt::Format, Default)]
 pub struct ServiceFrameType {
@@ -462,7 +468,7 @@ mod dsdl {
         // in the libcanard repository: https://github.com/dronecan/libcanard/tree/master.
         const SIGNATURE: u64;
         const MAX_BIT_LEN: usize;
-        const MAX_BYTE_LEN: usize = (Self::MAX_BIT_LEN + 7) / 8;
+        const MAX_BYTE_LEN: usize = Self::MAX_BIT_LEN.div_ceil(8);
     }
 
     #[derive(BitfieldSpecifier, Copy, Clone, Debug, PartialEq, Eq, defmt::Format)]
@@ -484,6 +490,7 @@ mod dsdl {
         Offline = 7,
     }
 
+    #[allow(unused_parens)] // False positive from modular-bitfield macro
     #[bitfield(bits = 56)]
     #[derive(Default)]
     pub struct NodeStatusType {

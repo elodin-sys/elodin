@@ -185,18 +185,17 @@ pub fn set_viewport_pos(
             continue;
         };
         if let Some(compiled_expr) = &viewport.pos.compiled_expr {
-            if let Ok(val) = compiled_expr.execute(&entity_map, &values) {
-                if let Some(world_pos) = val.as_world_pos() {
-                    *pos = world_pos;
-                }
+            if let Ok(val) = compiled_expr.execute(&entity_map, &values)
+                && let Some(world_pos) = val.as_world_pos()
+            {
+                *pos = world_pos;
             }
-            if let Some(compiled_expr) = &viewport.look_at.compiled_expr {
-                if let Ok(val) = compiled_expr.execute(&entity_map, &values) {
-                    if let Some(look_at) = val.as_world_pos() {
-                        let dir = (look_at.pos - pos.pos).normalize();
-                        pos.att = nox::Quaternion::look_at_rh(dir, nox::Vec3::z_axis());
-                    }
-                }
+            if let Some(compiled_expr) = &viewport.look_at.compiled_expr
+                && let Ok(val) = compiled_expr.execute(&entity_map, &values)
+                && let Some(look_at) = val.as_world_pos()
+            {
+                let dir = (look_at.pos - pos.pos).normalize();
+                pos.att = nox::Quaternion::look_at_rh(dir, nox::Vec3::z_axis());
             }
         }
     }

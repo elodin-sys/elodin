@@ -1,3 +1,6 @@
+//! GPU rendering for plot data
+#![allow(dead_code)] // Shader struct fields appear unused to Rust but are used by GPU
+
 use bevy::asset::{AssetApp, Assets, weak_handle};
 use bevy::color::ColorToComponents;
 use bevy::core_pipeline::core_2d::CORE_2D_DEPTH_FORMAT;
@@ -239,6 +242,8 @@ pub struct LineBundle {
     pub graph_type: GraphType,
 }
 
+// These fields are used by GPU shaders, not Rust code, so dead_code warnings are false positives
+#[allow(dead_code)]
 #[derive(Component, ShaderType, Clone, Copy, ExtractComponent)]
 pub struct LineUniform {
     pub line_width: f32,

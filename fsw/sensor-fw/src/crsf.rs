@@ -1,3 +1,5 @@
+#![allow(unused_parens)] // False positives from modular-bitfield macro in Rust 1.90
+
 use alloc::boxed::Box;
 use embedded_io::{ErrorType, Read, ReadReady, Write, WriteReady};
 use fugit::MicrosDuration;
@@ -51,6 +53,7 @@ pub enum Error {
     BufferOverflow,
 }
 
+#[allow(unused_parens)] // False positive from modular-bitfield macro
 #[bitfield(bits = 176)] // 16 channels * 11 bits = 176 bits = 22 bytes
 #[derive(Default, Debug, Clone, Copy, defmt::Format)]
 pub struct RcChannels {
