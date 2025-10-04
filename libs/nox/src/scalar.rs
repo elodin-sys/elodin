@@ -17,7 +17,7 @@ mod tests {
         let comp = (|a: Scalar<f32>| a.sqrt().log()).build().unwrap();
         let exec = comp.compile(&client).unwrap();
         let out = exec
-            .run(&client, Scalar::from(3.141_592_7))
+            .run(&client, Scalar::from(core::f32::consts::PI))
             .unwrap()
             .to_host();
         assert_eq!(out, 0.5723649.into());

@@ -328,11 +328,8 @@ fn setup_titlebar(
     mut commands: Commands,
 ) {
     use objc2::rc::Retained;
-    use objc2::{msg_send, msg_send_id, ClassType};
-    use objc2_app_kit::{
-        NSColor, NSToolbar, NSWindow, NSWindowStyleMask,
-        NSWindowToolbarStyle,
-    };
+    use objc2::{ClassType, msg_send, msg_send_id};
+    use objc2_app_kit::{NSColor, NSToolbar, NSWindow, NSWindowStyleMask, NSWindowToolbarStyle};
 
     for id in &windows {
         let Some(window) = winit_windows.get_window(id) else {
@@ -351,7 +348,7 @@ fn setup_titlebar(
         }
         unsafe {
             let window = &*window;
-            
+
             // Create a simple toolbar without delegate for now
             // The delegate isn't strictly necessary for basic toolbar functionality
             use objc2_foundation::NSString;
@@ -360,9 +357,9 @@ fn setup_titlebar(
                 msg_send_id![NSToolbar::class(), alloc],
                 initWithIdentifier: &*identifier
             ];
-            
+
             window.setTitlebarAppearsTransparent(true);
-            
+
             // Create color with RGBA
             let color = NSColor::colorWithRed_green_blue_alpha(
                 (0x0C as f64) / (0xFF as f64),
@@ -371,7 +368,7 @@ fn setup_titlebar(
                 0.7,
             );
             window.setBackgroundColor(Some(&color));
-            
+
             window.setStyleMask(
                 NSWindowStyleMask::FullSizeContentView
                     | NSWindowStyleMask::Resizable
@@ -546,7 +543,7 @@ fn set_icon_windows() {
 #[cfg(target_os = "macos")]
 fn set_icon_mac() {
     use objc2::rc::Retained;
-    use objc2::{msg_send, msg_send_id, ClassType};
+    use objc2::{ClassType, msg_send, msg_send_id};
     use objc2_app_kit::{NSApplication, NSImage};
     use objc2_foundation::NSData;
 

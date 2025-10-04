@@ -39,6 +39,7 @@ in {
         gfortran
         gfortran.cc.lib
         ffmpeg-full
+        ffmpeg-full.dev
         gst_all_1.gstreamer
         gst_all_1.gst-plugins-base
         gst_all_1.gst-plugins-good
