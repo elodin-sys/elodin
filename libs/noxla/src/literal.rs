@@ -12,7 +12,19 @@ cpp! {{
     #include "xla/literal_util.h"
     using namespace xla;
 }}
-cpp_class!(pub unsafe struct Literal as "std::shared_ptr<Literal>");
+cpp_class!(#[derive(Eq)] pub unsafe struct Literal as "std::shared_ptr<Literal>");
+
+impl PartialEq for Literal {
+    fn eq(&self, other: &Self) -> bool {
+        // First check if they're pointing to the same underlying object
+        if std::ptr::eq(self, other) {
+            return true;
+        }
+
+        // If not the same object, compare raw buffers
+        self.raw_buf() == other.raw_buf()
+    }
+}
 
 impl Literal {
     pub fn raw_buf(&self) -> &[u8] {

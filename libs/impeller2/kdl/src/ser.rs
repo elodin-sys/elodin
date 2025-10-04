@@ -161,8 +161,8 @@ fn serialize_graph<T>(graph: &Graph<T>) -> KdlNode {
 fn serialize_component_monitor(monitor: &ComponentMonitor) -> KdlNode {
     let mut node = KdlNode::new("component_monitor");
     node.entries_mut().push(KdlEntry::new_prop(
-        "component_id",
-        monitor.component_id.to_string(),
+        "component_name",
+        monitor.component_name.clone(),
     ));
     node
 }
@@ -596,8 +596,8 @@ mod tests {
         if let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] {
             assert_eq!(viewport.name, Some("main".to_string()));
             assert_eq!(viewport.fov, 60.0);
-            assert_eq!(viewport.active, true);
-            assert_eq!(viewport.show_grid, true);
+            assert!(viewport.active);
+            assert!(viewport.show_grid);
         } else {
             panic!("Expected viewport panel");
         }
@@ -738,7 +738,7 @@ mod tests {
             assert_eq!(line.color.r, Color::MINT.r);
             assert_eq!(line.color.g, Color::MINT.g);
             assert_eq!(line.color.b, Color::MINT.b);
-            assert_eq!(line.perspective, false);
+            assert!(!line.perspective);
         } else {
             panic!("Expected line_3d");
         }

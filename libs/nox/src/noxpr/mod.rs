@@ -1,4 +1,7 @@
 #![doc = include_str!("README.md")]
+pub mod batch_dfs;
+// We only use the batch module for testing purposes.
+#[cfg(test)]
 mod batch;
 mod builder;
 mod client;

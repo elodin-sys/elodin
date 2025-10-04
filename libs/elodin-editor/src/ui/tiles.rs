@@ -15,7 +15,6 @@ use bevy_render::{
 };
 use egui::UiBuilder;
 use egui_tiles::{Container, Tile, TileId, Tiles};
-use impeller2::types::ComponentId;
 use impeller2_wkt::{Dashboard, Graph, Viewport};
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, HashMap};
@@ -154,9 +153,8 @@ impl TileState {
         self.tree_actions.push(TreeAction::AddViewport(None));
     }
 
-    pub fn create_monitor_tile(&mut self, component_id: ComponentId, tile_id: Option<TileId>) {
-        self.tree_actions
-            .push(TreeAction::AddMonitor(tile_id, component_id));
+    pub fn create_monitor_tile(&mut self, eql: String, tile_id: Option<TileId>) {
+        self.tree_actions.push(TreeAction::AddMonitor(tile_id, eql));
     }
 
     pub fn create_action_tile(
@@ -633,7 +631,7 @@ struct TreeBehavior<'w> {
 pub enum TreeAction {
     AddViewport(Option<TileId>),
     AddGraph(Option<TileId>, Option<GraphBundle>),
-    AddMonitor(Option<TileId>, ComponentId),
+    AddMonitor(Option<TileId>, String),
     AddQueryTable(Option<TileId>),
     AddQueryPlot(Option<TileId>),
     AddActionTile(Option<TileId>, String, String),
@@ -1242,8 +1240,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             ui_state.graphs.insert(tile_id, graph_id);
                         }
                     }
-                    TreeAction::AddMonitor(parent_tile_id, component_id) => {
-                        let monitor = MonitorPane::new("Monitor".to_string(), component_id);
+                    TreeAction::AddMonitor(parent_tile_id, eql) => {
+                        let monitor = MonitorPane::new("Monitor".to_string(), eql);
 
                         let pane = Pane::Monitor(monitor);
                         if let Some(tile_id) =
