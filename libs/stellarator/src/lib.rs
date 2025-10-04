@@ -117,10 +117,10 @@ impl<R: Reactor> Executor<R> {
             if let Poll::Ready(o) = main_task.as_mut().poll(&mut cx) {
                 output = Some(o.unwrap());
             }
-            if !tick.has_remaining {
-                if let Some(output) = output {
-                    break output;
-                }
+            if !tick.has_remaining
+                && let Some(output) = output
+            {
+                break output;
             }
             let turn = self.timer.try_turn();
             if !tick.has_remaining && turn.as_ref().map(|t| t.expired == 0).unwrap_or(true) {

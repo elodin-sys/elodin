@@ -185,11 +185,10 @@ impl VideoDecoderHandle {
             stream.current_frame = Some(frame);
             stream.frame_timestamp = Some(timestamp);
             stream.frame_count += 1;
-            if stream.size == Vec2::ZERO && stream.current_frame.is_some() {
-                if let Some(ref img) = stream.current_frame {
+            if stream.size == Vec2::ZERO && stream.current_frame.is_some()
+                && let Some(ref img) = stream.current_frame {
                     stream.size = Vec2::new(img.width() as f32, img.height() as f32);
                 }
-            }
         }
     }
 }
@@ -252,13 +251,11 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                 },
                 move |InRef(pkt): InRef<OwnedPacket<PacketGrantR>>,
                       mut decoders: Query<&mut VideoDecoderHandle>| {
-                    if let OwnedPacket::Msg(msg_buf) = pkt {
-                        if let Ok(mut decoder) = decoders.get_mut(entity) {
-                            if let Some(timestamp) = msg_buf.timestamp {
-                                decoder.process_frame(timestamp, &msg_buf.buf);
-                            }
+                    if let OwnedPacket::Msg(msg_buf) = pkt
+                        && let Ok(mut decoder) = decoders.get_mut(entity)
+                        && let Some(timestamp) = msg_buf.timestamp {
+                            decoder.process_frame(timestamp, &msg_buf.buf);
                         }
-                    }
                     false
                 },
             );
@@ -311,8 +308,8 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                     image_node.image = state.images.add(frame);
                 }
 
-                if let Some(frame_timestamp) = stream.frame_timestamp {
-                    if (frame_timestamp.0 - state.current_time.0.0).abs() > 500000 {
+                if let Some(frame_timestamp) = stream.frame_timestamp
+                    && (frame_timestamp.0 - state.current_time.0.0).abs() > 500000 {
                         ui.painter()
                             .rect_filled(max_rect, 0, Color32::BLACK.opacity(0.75));
                         ui.put(
@@ -329,7 +326,6 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                             ),
                         );
                     }
-                }
             }
             StreamState::Error(error) => {
                 ui.centered_and_justified(|ui| {

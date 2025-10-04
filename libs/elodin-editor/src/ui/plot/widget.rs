@@ -192,7 +192,7 @@ impl TimeseriesPlot {
         }
 
         let mut steps_y = ((inner_rect.height() / STEPS_Y_HEIGHT_DIVISOR) as usize).max(1);
-        if steps_y % 2 != 0 {
+        if !steps_y.is_multiple_of(2) {
             steps_y += 1;
         }
         let steps_x = ((inner_rect.width() / STEPS_X_WIDTH_DIVISOR) as usize).max(1);
@@ -458,8 +458,8 @@ impl TimeseriesPlot {
         self.draw_x_axis(ui, &font_id);
         draw_y_axis(ui, self.bounds, self.steps_y, self.rect, self.inner_rect);
 
-        if let Some(pointer_pos) = pointer_pos {
-            if self.inner_rect.contains(pointer_pos) && ui.ui_contains_pointer() {
+        if let Some(pointer_pos) = pointer_pos
+            && self.inner_rect.contains(pointer_pos) && ui.ui_contains_pointer() {
                 let plot_point = self.bounds.screen_pos_to_value(self.rect, pointer_pos);
                 draw_y_axis_flag(ui, pointer_pos, plot_point.y, self.inner_rect, font_id);
 
@@ -511,7 +511,6 @@ impl TimeseriesPlot {
                     timestamp,
                 );
             }
-        }
 
         if self.selected_range.contains(&self.current_timestamp) {
             let tick_pos = self

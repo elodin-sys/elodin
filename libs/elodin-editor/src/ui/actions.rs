@@ -111,15 +111,14 @@ impl WidgetSystem for ActionTileWidget<'_, '_> {
                     Status::Completed(Err(_)) => EButton::red(&tile.button_name),
                 });
 
-                if button.clicked() {
-                    if let Some(lua) = state.lua {
+                if button.clicked()
+                    && let Some(lua) = state.lua {
                         let rx = lua.send(tile.lua.clone());
                         tile.status = Status::Sent {
                             rx,
                             sent: Instant::now(),
                         };
                     }
-                }
                 ui.add_space(32.0);
                 match tile.status.clone() {
                     Status::Pending => {}
@@ -180,11 +179,10 @@ pub fn spawn_lua_actor(
         return;
     }
     *last_status = Some(status);
-    if let Some(addr) = addr {
-        if lua.is_none() && status == ConnectionStatus::Success {
+    if let Some(addr) = addr
+        && lua.is_none() && status == ConnectionStatus::Success {
             commands.insert_resource(LuaActor::spawn(addr.0));
         }
-    }
     if lua.is_some() {
         match status {
             impeller2_bevy::ConnectionStatus::NoConnection

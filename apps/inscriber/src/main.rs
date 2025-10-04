@@ -232,7 +232,7 @@ fn list_external_disks() -> anyhow::Result<Vec<ExternalDisk>> {
         if line.starts_with("/dev/disk") && line.contains("external") {
             let parts: Vec<&str> = line.split_whitespace().collect();
             let path = parts[0].to_string();
-            let identifier = path.split('/').last().unwrap_or("").to_string();
+            let identifier = path.split('/').next_back().unwrap_or("").to_string();
 
             disks.push(ExternalDisk {
                 path,

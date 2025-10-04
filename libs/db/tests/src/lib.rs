@@ -712,12 +712,12 @@ mod tests {
         // Note: With concurrent clients and auto-assigned timestamps, we might
         // occasionally lose a packet to time-travel errors, so we accept >= 95% success
         let mut verification_client = Client::connect(addr).await.unwrap();
-        
+
         let expected_count = NUM_CLIENTS * WRITES_PER_CLIENT;
         let min_acceptable = (expected_count * 95) / 100; // Accept 95% success rate
         let timeout = Duration::from_secs(2);
         let start = std::time::Instant::now();
-        
+
         let actual_count = loop {
             let query = GetTimeSeries {
                 id: vtable_id,
@@ -729,12 +729,12 @@ mod tests {
             let time_series = verification_client.request(&query).await.unwrap();
             let data = <[f64]>::ref_from_bytes(time_series.data().unwrap()).unwrap();
             let count = data.len();
-            
+
             // Accept if we have at least the minimum acceptable count
             if count >= min_acceptable {
                 break count;
             }
-            
+
             if start.elapsed() > timeout {
                 panic!(
                     "Timeout waiting for data: expected {}, got {} (min acceptable: {}) after {:?}",
@@ -744,10 +744,10 @@ mod tests {
                     start.elapsed()
                 );
             }
-            
+
             sleep(Duration::from_millis(10)).await;
         };
-        
+
         // Verify we got at least 95% of expected packets
         assert!(
             actual_count >= min_acceptable,

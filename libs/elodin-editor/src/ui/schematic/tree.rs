@@ -208,8 +208,8 @@ fn panel(
             _ => {}
         }
     }
-    if branch_res.extra_clicked {
-        if let Panel::Dashboard(d) = p {
+    if branch_res.extra_clicked
+        && let Panel::Dashboard(d) = p {
             spawn_child_node(
                 &DashboardNodePath {
                     root: d.aux,
@@ -219,7 +219,6 @@ fn panel(
                 d.aux,
             );
         }
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -477,12 +476,11 @@ impl Branch {
                         egui::vec2(18., 18.),
                     );
 
-                    if let Some(pos) = response.interact_pointer_pos() {
-                        if response.clicked() && chevron_rect.contains(pos) {
+                    if let Some(pos) = response.interact_pointer_pos()
+                        && response.clicked() && chevron_rect.contains(pos) {
                             response.flags &= !egui::response::Flags::CLICKED;
                             state.toggle(ui);
                         }
-                    }
                     egui::Image::from_texture(chevron)
                         .tint(icon_color)
                         .rotate(openness * f32::consts::FRAC_PI_2, egui::vec2(0.5, 0.5))
@@ -524,12 +522,11 @@ impl Branch {
                         .tint(icon_color)
                         .paint_at(ui, extra_rect);
 
-                    if let Some(pos) = response.interact_pointer_pos() {
-                        if response.clicked() && extra_rect.contains(pos) {
+                    if let Some(pos) = response.interact_pointer_pos()
+                        && response.clicked() && extra_rect.contains(pos) {
                             response.flags &= !egui::response::Flags::CLICKED;
                             extra_clicked = true;
                         }
-                    }
                 }
 
                 BranchResponse {

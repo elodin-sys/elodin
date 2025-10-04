@@ -107,9 +107,9 @@ extern "C-unwind" fn decompress_callback(
             return;
         }
 
-        let width = unsafe { CVPixelBufferGetWidth(out_buffer.as_ref()) } as usize;
-        let height = unsafe { CVPixelBufferGetHeight(out_buffer.as_ref()) } as usize;
-        let stride = unsafe { CVPixelBufferGetBytesPerRow(out_buffer.as_ref()) } as usize / 3;
+        let width = unsafe { CVPixelBufferGetWidth(out_buffer.as_ref()) };
+        let height = unsafe { CVPixelBufferGetHeight(out_buffer.as_ref()) };
+        let stride = unsafe { CVPixelBufferGetBytesPerRow(out_buffer.as_ref()) } / 3;
 
         unsafe {
             CVPixelBufferLockBaseAddress(out_buffer.as_ref(), CVPixelBufferLockFlags::ReadOnly)

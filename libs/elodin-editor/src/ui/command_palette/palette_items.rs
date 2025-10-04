@@ -713,8 +713,8 @@ pub fn load_schematic_picker() -> PaletteItem {
             if let Ok(cwd) = std::env::current_dir() {
                 dialog = dialog.set_directory(cwd);
             }
-            if let Some(path) = dialog.pick_file() {
-                if let Err(err) = load_schematic_file(&path, &mut params, rx)
+            if let Some(path) = dialog.pick_file()
+                && let Err(err) = load_schematic_file(&path, &mut params, rx)
                     .inspect_err(|err| {
                         dbg!(err);
                     })
@@ -722,7 +722,6 @@ pub fn load_schematic_picker() -> PaletteItem {
                 {
                     return PaletteEvent::Error(err.to_string());
                 }
-            }
             PaletteEvent::Exit
         },
     )
