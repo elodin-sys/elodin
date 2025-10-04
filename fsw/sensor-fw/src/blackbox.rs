@@ -146,7 +146,7 @@ impl SdmmcFs {
         }
     }
 
-    pub fn blackbox(&mut self, now: Instant) -> Blackbox {
+    pub fn blackbox(&mut self, now: Instant) -> Blackbox<'_> {
         // Try connecting to the SD card and initializing the file system
         if self.fs.is_none() || !self.sdmmc.connected() {
             self.fs = None;
@@ -216,8 +216,8 @@ fn append<'a>(
 
 impl Blackbox<'_> {
     pub fn write_record(&mut self, record: Record) {
-        if let Some(Files { data_file, .. }) = &mut self.files {
-            if let Err(err) = data_file.write(record.as_bytes(), &mut self.led) {
+        if let Some(Files { data_file, .. }) = &mut self.files
+            && let Err(err) = data_file.write(record.as_bytes(), &mut self.led) {
                 self.led.set_low();
                 if err == Error::BufferOverrun {
                     // Clear the buffer
@@ -229,7 +229,6 @@ impl Blackbox<'_> {
                     defmt::warn!("Failed to write record: {}", err);
                 }
             }
-        }
     }
 
     pub fn needs_reset(&self, now: Instant) -> bool {

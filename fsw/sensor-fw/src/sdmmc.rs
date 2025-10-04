@@ -220,7 +220,7 @@ impl Sdmmc {
         match SD_KERNEL_FREQ.raw().div_ceil(sdmmc_ck.raw()) {
             0 | 1 => Ok((0, SD_KERNEL_FREQ)),
             x @ 2..=2046 => {
-                let clk_div = ((x + 1) / 2) as u16;
+                let clk_div = x.div_ceil(2) as u16;
                 let clk = Hertz::from_raw(SD_KERNEL_FREQ.raw() / (clk_div as u32 * 2));
 
                 Ok((clk_div, clk))
@@ -430,7 +430,7 @@ impl Sdmmc {
         let start = self.dwt.now();
         let n_blocks = buffer.len() as u32 / 512;
         assert!(
-            buffer.len() % 512 == 0,
+            buffer.len().is_multiple_of(512),
             "Buffer length must be a multiple of 512"
         );
         assert!(

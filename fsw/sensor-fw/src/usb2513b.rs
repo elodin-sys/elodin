@@ -1,3 +1,5 @@
+#![allow(unused_parens)] // False positives from bitfield-struct macro in Rust 1.90
+
 use crate::i2c_dma::I2cRegs;
 use bitfield_struct::bitfield;
 use embedded_hal::i2c::{I2c, Operation};
@@ -5,6 +7,7 @@ use hal::i2c;
 
 const ADDR: u8 = 0b0101100;
 
+#[allow(unused_parens)] // False positive from bitfield-struct macro
 #[bitfield(u8)]
 pub struct ConfigByte1 {
     pub power_switching: bool,
@@ -17,6 +20,7 @@ pub struct ConfigByte1 {
     pub self_powered: bool,
 }
 
+#[allow(unused_parens)] // False positive from bitfield-struct macro
 #[bitfield(u8)]
 pub struct ConfigByte2 {
     #[bits(3)]
