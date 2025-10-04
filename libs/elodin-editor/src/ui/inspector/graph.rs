@@ -175,9 +175,10 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                             });
                         if let (QueryType::EQL, QueryType::SQL) =
                             (prev_query_type, query_plot.data.query_type)
-                            && let Ok(sql) = eql_context.0.sql(&query_plot.data.query) {
-                                query_plot.data.query = sql;
-                            }
+                            && let Ok(sql) = eql_context.0.sql(&query_plot.data.query)
+                        {
+                            query_plot.data.query = sql;
+                        }
                     });
                     ui.separator();
                     ui.label(egui::RichText::new("Query").color(get_scheme().text_secondary));

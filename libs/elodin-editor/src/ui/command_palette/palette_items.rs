@@ -719,9 +719,9 @@ pub fn load_schematic_picker() -> PaletteItem {
                         dbg!(err);
                     })
                     .into_diagnostic()
-                {
-                    return PaletteEvent::Error(err.to_string());
-                }
+            {
+                return PaletteEvent::Error(err.to_string());
+            }
             PaletteEvent::Exit
         },
     )

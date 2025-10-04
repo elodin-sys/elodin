@@ -127,10 +127,9 @@ impl TileState {
 
         container.add_child(tile_id);
 
-        if active
-            && let Container::Tabs(tabs) = container {
-                tabs.set_active(tile_id);
-            }
+        if active && let Container::Tabs(tabs) = container {
+            tabs.set_active(tile_id);
+        }
 
         Some(tile_id)
     }
@@ -141,7 +140,8 @@ impl TileState {
     }
 
     pub fn create_graph_tile_empty(&mut self) {
-        self.tree_actions.push(TreeAction::AddGraph(None, Box::new(None)));
+        self.tree_actions
+            .push(TreeAction::AddGraph(None, Box::new(None)));
     }
 
     pub fn create_viewport_tile(&mut self, tile_id: Option<TileId>) {
@@ -257,9 +257,10 @@ impl TileState {
         }
 
         if let Some(root_id) = self.tree.root()
-            && let Some(Tile::Container(root)) = self.tree.tiles.get_mut(root_id) {
-                root.retain(|_| false);
-            };
+            && let Some(Tile::Container(root)) = self.tree.tiles.get_mut(root_id)
+        {
+            root.retain(|_| false);
+        };
     }
 
     pub fn get_container_title(&self, id: TileId) -> Option<&str> {

@@ -2272,9 +2272,10 @@ impl XlaTracer {
                     if xs_shape.is_none() {
                         xs_shape = Some(shape);
                     } else if let Some(xs_shape) = xs_shape.as_mut()
-                        && xs_shape.first() != shape.first() {
-                            //return Err(Error::ScanShapeMismatch);
-                        }
+                        && xs_shape.first() != shape.first()
+                    {
+                        //return Err(Error::ScanShapeMismatch);
+                    }
                 }
                 let arg_shape = xs_shape.unwrap();
                 if s.inputs.is_empty() {

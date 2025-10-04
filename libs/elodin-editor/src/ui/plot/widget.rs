@@ -459,58 +459,60 @@ impl TimeseriesPlot {
         draw_y_axis(ui, self.bounds, self.steps_y, self.rect, self.inner_rect);
 
         if let Some(pointer_pos) = pointer_pos
-            && self.inner_rect.contains(pointer_pos) && ui.ui_contains_pointer() {
-                let plot_point = self.bounds.screen_pos_to_value(self.rect, pointer_pos);
-                draw_y_axis_flag(ui, pointer_pos, plot_point.y, self.inner_rect, font_id);
+            && self.inner_rect.contains(pointer_pos)
+            && ui.ui_contains_pointer()
+        {
+            let plot_point = self.bounds.screen_pos_to_value(self.rect, pointer_pos);
+            draw_y_axis_flag(ui, pointer_pos, plot_point.y, self.inner_rect, font_id);
 
-                let inner_point_pos = pointer_pos - self.rect.min;
-                let timestamp = Timestamp(
-                    (((inner_point_pos.x / self.rect.width()) as f64 * self.bounds.width()
-                        + self.bounds.min_x) as i64)
-                        + self.earliest_timestamp.0,
-                );
+            let inner_point_pos = pointer_pos - self.rect.min;
+            let timestamp = Timestamp(
+                (((inner_point_pos.x / self.rect.width()) as f64 * self.bounds.width()
+                    + self.bounds.min_x) as i64)
+                    + self.earliest_timestamp.0,
+            );
 
-                draw_cursor(
-                    ui,
-                    pointer_pos,
-                    inner_point_pos.x,
-                    self.rect,
-                    self.inner_rect,
-                );
+            draw_cursor(
+                ui,
+                pointer_pos,
+                inner_point_pos.x,
+                self.rect,
+                self.inner_rect,
+            );
 
-                for ((_, _), (entity, color)) in graph_state.enabled_lines.iter() {
-                    let Ok(line_handle) = line_handles.get(*entity) else {
-                        continue;
-                    };
-                    let Some(line_handle) = line_handle.as_timeseries() else {
-                        continue;
-                    };
-                    let Some(line) = lines.get(line_handle) else {
-                        continue;
-                    };
-                    let Some((timestamp, y)) = line.data.get_nearest(timestamp) else {
-                        continue;
-                    };
-                    let value = DVec2::new(self.timestamp_to_x(timestamp), *y as f64);
-                    let pos = self.bounds.value_to_screen_pos(self.rect, value);
-                    ui.painter().circle(
-                        pos,
-                        4.5,
-                        get_scheme().bg_secondary,
-                        egui::Stroke::new(2.0, *color),
-                    );
-                }
-
-                self.draw_modal(
-                    ui,
-                    lines,
-                    line_handles,
-                    graph_state,
-                    collected_graph_data,
-                    pointer_pos,
-                    timestamp,
+            for ((_, _), (entity, color)) in graph_state.enabled_lines.iter() {
+                let Ok(line_handle) = line_handles.get(*entity) else {
+                    continue;
+                };
+                let Some(line_handle) = line_handle.as_timeseries() else {
+                    continue;
+                };
+                let Some(line) = lines.get(line_handle) else {
+                    continue;
+                };
+                let Some((timestamp, y)) = line.data.get_nearest(timestamp) else {
+                    continue;
+                };
+                let value = DVec2::new(self.timestamp_to_x(timestamp), *y as f64);
+                let pos = self.bounds.value_to_screen_pos(self.rect, value);
+                ui.painter().circle(
+                    pos,
+                    4.5,
+                    get_scheme().bg_secondary,
+                    egui::Stroke::new(2.0, *color),
                 );
             }
+
+            self.draw_modal(
+                ui,
+                lines,
+                line_handles,
+                graph_state,
+                collected_graph_data,
+                pointer_pos,
+                timestamp,
+            );
+        }
 
         if self.selected_range.contains(&self.current_timestamp) {
             let tick_pos = self

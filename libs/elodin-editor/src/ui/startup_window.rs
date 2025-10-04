@@ -302,9 +302,9 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                                     .add_filter("python", &["py"])
                                     .add_filter("s10", &["toml"])
                                     .pick_file()
-                                {
-                                    state.open_file(file);
-                                }
+                            {
+                                state.open_file(file);
+                            }
                             ui.add_space(10.0);
                         }
                         if ui
@@ -589,9 +589,10 @@ fn recent_item_button(
                         let dir = path.parent().unwrap_or_else(|| &path);
                         let mut path_display = format!("{}", dir.display());
                         if let Some(dirs) = directories::UserDirs::new()
-                            && let Some(home_dir) = dirs.home_dir().to_str() {
-                                path_display = path_display.replace(home_dir, "~");
-                            }
+                            && let Some(home_dir) = dirs.home_dir().to_str()
+                        {
+                            path_display = path_display.replace(home_dir, "~");
+                        }
                         let name = if path
                             .file_name()
                             .map(|name| name == "main.py")

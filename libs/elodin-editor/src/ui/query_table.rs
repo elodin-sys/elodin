@@ -226,9 +226,10 @@ impl WidgetSystem for QueryTableWidget<'_, '_> {
                             });
                         if let (QueryType::EQL, QueryType::SQL) =
                             (prev_query_type, table.data.query_type)
-                            && let Ok(sql) = eql_context.0.sql(&table.data.query) {
-                                table.data.query = sql;
-                            }
+                            && let Ok(sql) = eql_context.0.sql(&table.data.query)
+                        {
+                            table.data.query = sql;
+                        }
                     });
                     ui.add_space(8.0);
                     let query_res = ui.add_sized([55., 32.], EButton::highlight("QUERY"));

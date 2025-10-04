@@ -107,9 +107,10 @@ impl Client {
                 }
                 let response = request.send().await.map_err(http_err)?;
                 if let Some(CachedAsset { data, .. }) = cached_asset
-                    && response.status() == StatusCode::NOT_MODIFIED {
-                        return Ok((data, None));
-                    }
+                    && response.status() == StatusCode::NOT_MODIFIED
+                {
+                    return Ok((data, None));
+                }
                 let etag = response
                     .headers()
                     .get("ETag")

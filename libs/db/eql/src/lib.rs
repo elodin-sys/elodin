@@ -475,7 +475,10 @@ impl Context {
             }
             let mut nodes = component.name.split('.');
             component_parts.insert(
-                nodes.next_back().unwrap().to_case(convert_case::Case::Snake),
+                nodes
+                    .next_back()
+                    .unwrap()
+                    .to_case(convert_case::Case::Snake),
                 ComponentPart {
                     id: component.id,
                     name: component.name.clone(),

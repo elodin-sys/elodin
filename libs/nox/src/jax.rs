@@ -332,9 +332,10 @@ impl JaxTracer {
     fn visit_comp(&mut self, comp: &NoxprComp) -> PyObject {
         Python::with_gil(|py| {
             if let NoxprNode::Jax(obj) = &*comp.func.inner.node
-                && obj.getattr(py, "__call__").is_ok() {
-                    return obj.clone_ref(py);
-                }
+                && obj.getattr(py, "__call__").is_ok()
+            {
+                return obj.clone_ref(py);
+            }
             JaxNoxprFn {
                 tracer: JaxTracer::default(),
                 inner: comp.func.clone(),
