@@ -644,7 +644,6 @@ impl Schedule for &'static StaticScheduler {
         self.0.wake(task)
     }
 
-    #[must_use]
     fn current_task(&self) -> Option<TaskRef> {
         self.0.current_task()
     }
@@ -774,7 +773,6 @@ impl Schedule for &'static LocalStaticScheduler {
         self.core.wake(task)
     }
 
-    #[must_use]
     fn current_task(&self) -> Option<TaskRef> {
         self.core.current_task()
     }
@@ -1259,7 +1257,6 @@ feature! {
             self.0.wake(task)
         }
 
-        #[must_use]
         fn current_task(&self) -> Option<TaskRef> {
             self.0.current_task()
         }
@@ -1638,7 +1635,6 @@ feature! {
             self.waker.wake();
         }
 
-        #[must_use]
         fn current_task(&self) -> Option<TaskRef> {
             self.core.current_task()
         }

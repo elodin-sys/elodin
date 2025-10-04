@@ -85,7 +85,7 @@ pub struct NalUnit<'a> {
 }
 
 /// Helper function to find NAL units in an Annex-B formatted buffer
-pub fn find_nal_units(data: &[u8]) -> Vec<NalUnit> {
+pub fn find_nal_units(data: &[u8]) -> Vec<NalUnit<'_>> {
     let mut nal_units = Vec::new();
     let mut pos = 0;
 

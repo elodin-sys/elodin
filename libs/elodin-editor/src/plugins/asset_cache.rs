@@ -20,9 +20,11 @@ pub struct CachedAsset {
     pub etag: String,
 }
 
+#[cfg(target_family = "wasm")]
 #[derive(Clone)]
 pub struct NoCache;
 
+#[cfg(target_family = "wasm")]
 impl AssetCache for NoCache {
     fn get(&self, _url: &str) -> Option<CachedAsset> {
         None

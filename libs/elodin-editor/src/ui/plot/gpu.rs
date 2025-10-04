@@ -241,8 +241,11 @@ pub struct LineBundle {
 
 #[derive(Component, ShaderType, Clone, Copy, ExtractComponent)]
 pub struct LineUniform {
+    #[allow(dead_code)]
     pub line_width: f32,
+    #[allow(dead_code)]
     pub color: Vec4,
+    #[allow(dead_code)]
     pub chunk_size: f32,
     #[cfg(target_arch = "wasm32")]
     _padding: bevy::math::Vec2,

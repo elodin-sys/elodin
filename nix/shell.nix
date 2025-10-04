@@ -34,6 +34,7 @@ in {
         cmake
         openssl
         xz
+        bzip2
         libclang
         gfortran
         gfortran.cc.lib
