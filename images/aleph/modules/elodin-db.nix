@@ -4,6 +4,7 @@
   config,
   ...
 }: let
+  elodin-db = pkgs.elodin-db.bin;
   cfg = config.services.elodin-db;
 in {
   options.services.elodin-db = {
@@ -59,7 +60,7 @@ in {
       overrideStrategy = "asDropin";
     };
 
-    environment.systemPackages = [pkgs.elodin-db];
+    environment.systemPackages = [elodin-db];
     networking.firewall.allowedTCPPorts = lib.optionals cfg.openFirewall [2240 2248];
   };
 }
