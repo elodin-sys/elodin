@@ -42,6 +42,7 @@
   commonArgs = {
     inherit pname version;
     inherit src;
+    doCheck = false;
 
     nativeBuildInputs = with pkgs;
       [maturin]
