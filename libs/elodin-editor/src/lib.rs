@@ -550,15 +550,21 @@ fn set_icon_mac() {
     let png_bytes = include_bytes!("../assets/512x512@2x.png");
 
     unsafe {
-        let app: Retained<NSApplication> = msg_send_id![NSApplication::class(), sharedApplication];
+        // Get unowned reference to shared app singleton (+0 retain count)
+        // Do NOT wrap in Retained - sharedApplication returns a non-owning reference
+        let app: *mut NSApplication = msg_send![NSApplication::class(), sharedApplication];
+        if app.is_null() {
+            return;
+        }
 
         // Create NSData from bytes
         let data = NSData::with_bytes(png_bytes);
 
-        // Create NSImage from NSData
+        // Create NSImage from NSData (this is +1, owned by Retained)
         let app_icon: Retained<NSImage> = msg_send_id![NSImage::alloc(), initWithData: &*data];
 
-        let _: () = msg_send![&app, setApplicationIconImage: &*app_icon];
+        // Set the icon using the unowned app pointer
+        let _: () = msg_send![app, setApplicationIconImage: &*app_icon];
     }
 }
 
