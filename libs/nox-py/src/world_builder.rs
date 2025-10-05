@@ -257,7 +257,7 @@ impl WorldBuilder {
                 }
                 py.allow_threads(|| {
                     stellarator::run(|| {
-                        let tmpfile = tempfile::tempdir().unwrap().keep().0;
+                        let tmpfile = tempfile::tempdir().unwrap().keep();
                         nox_ecs::impeller2_server::Server::new(
                             elodin_db::Server::new(tmpfile.join("db"), addr).unwrap(),
                             exec,
@@ -347,7 +347,7 @@ impl WorldBuilder {
         }
         let mut exec = exec.compile(client.clone())?;
         let db_dir = tempfile::tempdir()?;
-        let db_dir = db_dir.keep().0;
+        let db_dir = db_dir.keep();
         let db = elodin_db::DB::create(db_dir.join("db"))?;
         nox_ecs::impeller2_server::init_db(&db, &mut exec.world, Timestamp::now())?;
         Ok(Exec { exec, db })
