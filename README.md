@@ -24,33 +24,7 @@ This monorepo contains the source code for all Elodin simulation and flight soft
 
 ## Dependencies
 
-Rust 1.85.0
-Preference for Arm based Macs
-
-### macOS
-
-Validated on M1 architecture, macOS 15.1.1 on 2025-08-26.
-
-### Build & Run
-```sh
-just install
-```
-
-#### Elodin App & SDK Development
-(See [apps/elodin/README.md](apps/elodin/README.md))
-``` sh
-brew install gstreamer python gfortran openblas uv
-
-cd libs/nox-py
-uv venv --python 3.12
-source .venv/bin/activate
-uvx maturin develop --uv
-uv sync
-
-cargo run --manifest-path=../../apps/elodin/Cargo.toml editor examples/three-body.py
-```
-
-Alternatively, install [Determinate Systems Nix](https://determinate.systems/nix-installer/) which will give you exactly the same development environment that we are using. Once you have Nix installed, switch to the top of the Elodin repo. Then you can do 
+Install [Determinate Systems Nix](https://determinate.systems/nix-installer/) which will give you exactly the same development environment that we are using. Once installed, then you can do 
 
 ```
 nix develop .#rust
@@ -64,4 +38,21 @@ nix develop .#python
 python ...
 ```
 
-Note that BuildKite uses exactly this infrastructure to run tests! It sets up the environment using Nix commands above and then runs the steps in `pipeline.py` under the `.buildkite` directory. You should be able to run the same steps locally just by copying the code from BuildKite steps. 
+### Build & Install Elodin & Elodin DB
+```sh
+just install
+```
+
+#### Elodin App & SDK Development
+(See [apps/elodin/README.md](apps/elodin/README.md))
+``` sh
+nix develop .#python 
+
+cd libs/nox-py
+uv venv --python 3.12
+source .venv/bin/activate
+uvx maturin develop --uv
+uv sync
+
+cargo run --manifest-path=../../apps/elodin/Cargo.toml editor examples/three-body.py
+```

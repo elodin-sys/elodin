@@ -35,5 +35,5 @@ public-changelog:
 
 install:
   @echo "🚧 Installing elodin and elodin-db to ~/.local/bin"
-  cargo build --release --package elodin --package elodin-db
+  nix develop .#rust --command cargo build --release --package elodin --package elodin-db
   cp target/release/elodin target/release/elodin-db ~/.local/bin
