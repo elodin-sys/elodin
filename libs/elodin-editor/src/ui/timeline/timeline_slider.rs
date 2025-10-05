@@ -79,14 +79,12 @@ impl<'a> Timeline<'a> {
         active_range: RangeInclusive<i64>,
     ) -> Self {
         let range_f64 = (*active_range.start() as f64)..=(*active_range.end() as f64);
-        let timeline = Self::from_get_set(range_f64, move |v: Option<f64>| {
+        Self::from_get_set(range_f64, move |v: Option<f64>| {
             if let Some(v) = v {
                 *value = Num::from_f64(v);
             }
             value.to_f64()
-        });
-
-        timeline
+        })
     }
 
     pub fn from_get_set(

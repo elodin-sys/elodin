@@ -11,24 +11,7 @@
   pname = (craneLib.crateNameFromCargoToml {cargoToml = ../../libs/nox-py/Cargo.toml;}).pname;
   version = (craneLib.crateNameFromCargoToml {cargoToml = ../../Cargo.toml;}).version;
 
-  pyFilter = path: _type: builtins.match ".*py$" path != null;
-  mdFilter = path: _type: builtins.match ".*md$" path != null;
-  protoFilter = path: _type: builtins.match ".*proto$" path != null;
-  assetFilter = path: _type: builtins.match ".*assets.*$" path != null;
-  cppFilter = path: _type: builtins.match ".*[h|(cpp)|(cpp.jinja)]$" path != null;
-
-  srcFilter = path: type:
-    (pyFilter path type)
-    || (mdFilter path type)
-    || (protoFilter path type)
-    || (assetFilter path type)
-    || (cppFilter path type)
-    || (craneLib.filterCargoSources path type);
-
-  src = lib.cleanSourceWith {
-    src = craneLib.path ./../..;
-    filter = srcFilter;
-  };
+  src = pkgs.nix-gitignore.gitignoreSource [] ../..;
 
   arch = with pkgs;
     if stdenv.isDarwin
@@ -72,6 +55,10 @@
     OPENSSL_DIR = "${pkgs.openssl.dev}";
     OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
     OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include/";
+
+    # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
+    # GCC 14 treats -Wincompatible-pointer-types as error by default
+    NIX_CFLAGS_COMPILE = lib.optionalString pkgs.stdenv.isLinux "-Wno-error=incompatible-pointer-types";
   };
 
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
@@ -103,20 +90,79 @@
     }
   );
 
-  elodin = ps:
-    ps.buildPythonPackage {
+  elodin = ps: let
+    # Create a modified Python package set with our JAX/jaxlib overrides
+    # This ensures all packages use the same jaxlib version
+    ps' = ps.override {
+      overrides = self: super: {
+        # Override jaxlib globally in this package set
+        jaxlib = super.jaxlib-bin.overridePythonAttrs (old: rec {
+          version = "0.4.31";
+          src = let
+            system = pkgs.stdenv.system;
+            platform =
+              if system == "x86_64-linux"
+              then "manylinux2014_x86_64"
+              else if system == "aarch64-linux"
+              then "manylinux2014_aarch64"
+              else if system == "x86_64-darwin"
+              then "macosx_10_14_x86_64"
+              else "macosx_11_0_arm64";
+            wheelName = "jaxlib-${version}-cp312-cp312-${platform}.whl";
+            # Base URL for jaxlib wheels on PyPI
+            baseUrl = "https://files.pythonhosted.org/packages";
+            # These are the specific paths for each platform's wheel
+            wheelUrls = {
+              "manylinux2014_x86_64" = "${baseUrl}/b1/09/58d35465d48c8bee1d9a4e7a3c5db2edaabfc7ac94f4576c9f8c51b83e70/${wheelName}";
+              "manylinux2014_aarch64" = "${baseUrl}/e0/af/10b49f8de2acc7abc871478823579d7241be52ca0d6bb0d2b2c476cc1b68/${wheelName}";
+              "macosx_10_14_x86_64" = "${baseUrl}/fa/27/3eee15d1b168d434498c388780114d7629f715e19c2d08754ab4be82ad2d/${wheelName}";
+              "macosx_11_0_arm64" = "${baseUrl}/68/cf/28895a4a89d88d18592507d7a35218b6bb2d8bced13615065c9f925f2ae1/${wheelName}";
+            };
+          in
+            pkgs.fetchurl {
+              url = wheelUrls.${platform} or (throw "Unsupported platform: ${platform}");
+              hash =
+                if system == "x86_64-linux"
+                then "sha256-Hxr6X9WKYPZ/DKWG4mcUrs5i6qLIM0wk0OgoWvxKfM0="
+                else if system == "aarch64-linux"
+                then "sha256-0K8QtJj4LsJ7yHGUSIM5fSQb5SzKDWu7DSKyzGzBtog="
+                else if system == "x86_64-darwin"
+                then "sha256-+ic+7hFdGxaNQ0TIw4gBFHZ2n3FejxzuT+CtWukC2t0="
+                else "sha256-aPzyiJWkqonYjRhVkgfXo1KLsi287BMWFgXJvJL2Kh4="; # macosx_11_0_arm64
+            };
+        });
+        jaxlib-bin = self.jaxlib; # Make jaxlib-bin point to our overridden jaxlib
+
+        # Override JAX to use version 0.4.31
+        jax = super.jax.overridePythonAttrs (old: rec {
+          version = "0.4.31";
+          src = super.fetchPypi {
+            inherit (old) pname;
+            inherit version;
+            hash = "sha256-/S1HBkOgBz2CJzfweI9xORZWr35izFsueZXuOQzqwoc=";
+          };
+          # Dependencies will automatically use the overridden jaxlib from this package set
+          # Skip version check during build
+          pythonImportsCheck = [];
+          doCheck = false;
+        });
+      };
+    };
+  in
+    ps'.buildPythonPackage {
       pname = wheelName;
       format = "wheel";
       version = version;
       src = "${wheel}/${wheelName}-${wheelVersion}-${wheelSuffix}.whl";
       doCheck = false;
-      propagatedBuildInputs = with ps; [
+      propagatedBuildInputs = with ps'; [
         jax
         jaxlib
         typing-extensions
         numpy
         polars
         pytest
+        matplotlib
       ];
       buildInputs = [
         xla_ext

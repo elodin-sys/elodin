@@ -7,12 +7,14 @@
     fallback = true;
   };
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-24.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
-    jetpack.url = "github:anduril/jetpack-nixos/master";
+    # Pin to version before kernelPackages.devicetree was removed
+    jetpack.url = "github:anduril/jetpack-nixos/eb413a5739515086f33c611376075bd869574f4f";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
-    crane.url = "github:ipetkov/crane";
+    # Pin crane to May 2025 version to avoid Cargo.lock path resolution bug
+    crane.url = "github:ipetkov/crane/dfd9a8dfd09db9aad544c4d3b6c47b12562544a5";
     agenix.url = "github:ryantm/agenix";
 
     jetpack.inputs.nixpkgs.follows = "nixpkgs";
@@ -40,11 +42,12 @@
       // {
         memserve = final.callPackage ../../nix/pkgs/memserve.nix {inherit crane rustToolchain;};
       }
-      // (rust-overlay.overlays.default final prev)
-      // {
-        inherit (final.nvidia-jetpack) cudaPackages;
-        opencv4 = prev.opencv4.override {inherit (final) cudaPackages;};
-      };
+      // (rust-overlay.overlays.default final prev);
+    # Temporarily disabled for nixpkgs 25.05 compatibility (CUDA issues)
+    # // {
+    #   inherit (final.nvidia-jetpack) cudaPackages;
+    #   opencv4 = prev.opencv4.override {inherit (final) cudaPackages;};
+    # };
     baseModules = {
       default = defaultModule;
       jetpack = jetpack.nixosModules.default;
@@ -63,7 +66,8 @@
       mekf = ./modules/mekf.nix;
     };
     devModules = {
-      aleph-dev = ./modules/aleph-dev.nix;
+      # Temporarily disabled for nixpkgs 25.05 compatibility (CUDA issues)
+      # aleph-dev = ./modules/aleph-dev.nix;
     };
     defaultModule = {config, ...}: {
       imports = [
@@ -73,7 +77,7 @@
         jetpack.overlays.default
         overlay
       ];
-      system.stateVersion = "24.11";
+      system.stateVersion = "25.05";
       i18n.supportedLocales = [(config.i18n.defaultLocale + "/UTF-8")];
       services.openssh.settings.PasswordAuthentication = true;
       services.openssh.enable = true;

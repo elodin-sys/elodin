@@ -127,10 +127,8 @@ impl TileState {
 
         container.add_child(tile_id);
 
-        if active {
-            if let Container::Tabs(tabs) = container {
-                tabs.set_active(tile_id);
-            }
+        if active && let Container::Tabs(tabs) = container {
+            tabs.set_active(tile_id);
         }
 
         Some(tile_id)
@@ -138,11 +136,12 @@ impl TileState {
 
     pub fn create_graph_tile(&mut self, parent_id: Option<TileId>, graph_state: GraphBundle) {
         self.tree_actions
-            .push(TreeAction::AddGraph(parent_id, Some(graph_state)));
+            .push(TreeAction::AddGraph(parent_id, Box::new(Some(graph_state))));
     }
 
     pub fn create_graph_tile_empty(&mut self) {
-        self.tree_actions.push(TreeAction::AddGraph(None, None));
+        self.tree_actions
+            .push(TreeAction::AddGraph(None, Box::new(None)));
     }
 
     pub fn create_viewport_tile(&mut self, tile_id: Option<TileId>) {
@@ -257,10 +256,10 @@ impl TileState {
             }
         }
 
-        if let Some(root_id) = self.tree.root() {
-            if let Some(Tile::Container(root)) = self.tree.tiles.get_mut(root_id) {
-                root.retain(|_| false);
-            };
+        if let Some(root_id) = self.tree.root()
+            && let Some(Tile::Container(root)) = self.tree.tiles.get_mut(root_id)
+        {
+            root.retain(|_| false);
         };
     }
 
@@ -630,7 +629,7 @@ struct TreeBehavior<'w> {
 #[derive(Clone)]
 pub enum TreeAction {
     AddViewport(Option<TileId>),
-    AddGraph(Option<TileId>, Option<GraphBundle>),
+    AddGraph(Option<TileId>, Box<Option<GraphBundle>>),
     AddMonitor(Option<TileId>, String),
     AddQueryTable(Option<TileId>),
     AddQueryPlot(Option<TileId>),
@@ -700,15 +699,13 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             } else if let Some(t) = self.container_titles.get(&tile_id) {
                 t.clone()
             } else {
-                let fallback = match tiles.get(tile_id) {
+                match tiles.get(tile_id) {
                     Some(egui_tiles::Tile::Container(c)) => format!("{:?}", c.kind()),
                     _ => "Container".to_owned(),
-                };
-                fallback
+                }
             }
         } else {
-            let text = self.tab_title_for_tile(tiles, tile_id).text().to_string();
-            text
+            self.tab_title_for_tile(tiles, tile_id).text().to_string()
         };
 
         let mut font_id = egui::TextStyle::Button.resolve(ui.style());
@@ -1218,7 +1215,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     TreeAction::AddGraph(parent_tile_id, graph_bundle) => {
                         let graph_label = graph_label(&Graph::default());
 
-                        let graph_bundle = if let Some(graph_bundle) = graph_bundle {
+                        let graph_bundle = if let Some(graph_bundle) = *graph_bundle {
                             graph_bundle
                         } else {
                             GraphBundle::new(

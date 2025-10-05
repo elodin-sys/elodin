@@ -617,10 +617,10 @@ fn sync_camera_grid_cell(
     entity_transform_query: Query<&GridCell<i128>, Without<MainCamera>>,
 ) {
     for (parent, mut grid_cell) in query.iter_mut() {
-        if let Some(parent) = parent {
-            if let Ok(entity_cell) = entity_transform_query.get(parent.parent()) {
-                *grid_cell = *entity_cell;
-            }
+        if let Some(parent) = parent
+            && let Ok(entity_cell) = entity_transform_query.get(parent.parent())
+        {
+            *grid_cell = *entity_cell;
         }
     }
 }

@@ -281,7 +281,7 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                     .id();
 
                 let mut steps_y = ((inner_rect.height() / STEPS_Y_HEIGHT_DIVISOR) as usize).max(1);
-                if steps_y % 2 != 0 {
+                if !steps_y.is_multiple_of(2) {
                     steps_y += 1;
                 }
 

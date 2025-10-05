@@ -22,10 +22,14 @@
         cmake
         gfortran
       ]
-      ++ lib.optionals stdenv.isLinux [
+      ++ lib.optionals pkgs.stdenv.isLinux [
         alsa-lib
         udev
       ];
+
+    # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
+    # GCC 14 treats -Wincompatible-pointer-types as error by default
+    NIX_CFLAGS_COMPILE = lib.optionalString pkgs.stdenv.isLinux "-Wno-error=incompatible-pointer-types";
   };
 
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
