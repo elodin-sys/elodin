@@ -104,21 +104,21 @@ w.schematic("""
     }
     object_3d a.world_pos {
         sphere radius=0.2 {
-            color 10.0 10.0 0.0
+            color yellow
         }
     }
     object_3d b.world_pos {
         sphere radius=0.2 {
-            color 10.0 0.0 10.0
+            color pink
         }
     }
     object_3d c.world_pos {
         sphere radius=0.2 {
-            color 0.0 1.0 10.0
+            color blue
         }
     }
     line_3d b.world_pos line_width=10.0 perspective=#false {
-        color yolk
+        color orange
     }
 """)
 

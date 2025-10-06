@@ -569,6 +569,7 @@ fn parse_named_color(name: &str) -> Option<Color> {
         "blue" => Some(Color::rgb(0.0, 0.0, 1.0)),
         "orange" => Some(Color::rgb(1.0, 0.5, 0.0)),
         "yellow" => Some(Color::rgb(1.0, 1.0, 0.0)),
+        "yalk" => Some(Color::rgb(1.0, 0.9, 0.2)),
         "pink" => Some(Color::rgb(1.0, 0.75, 0.8)),
         "cyan" => Some(Color::rgb(0.0, 1.0, 1.0)),
         "gray" => Some(Color::rgb(0.5, 0.5, 0.5)),
@@ -1419,5 +1420,24 @@ sphere radius=0.2 {
         assert_eq!(colors[0].g, 0.0);
         assert_eq!(colors[0].b, 1.0);
         assert_eq!(colors[0].a, 1.0);
+    }
+
+    #[test]
+    fn test_parse_named_color_yalk() {
+        let kdl = r#"
+graph "value" {
+    color yalk
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        let SchematicElem::Panel(Panel::Graph(graph)) = &schematic.elems[0] else {
+            panic!("Expected graph panel");
+        };
+        assert_eq!(graph.colors.len(), 1);
+        let color = graph.colors[0];
+        assert!((color.r - 1.0).abs() < f32::EPSILON);
+        assert!((color.g - 0.9).abs() < f32::EPSILON);
+        assert!((color.b - 0.2).abs() < f32::EPSILON);
     }
 }

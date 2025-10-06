@@ -32,7 +32,7 @@ def world(seed: int = 0) -> el.World:
             }
         }
         line_3d ball.world_pos line_width=2.0 {
-            color 255 255 0
+            color yalk
         }
     """)
     return world
