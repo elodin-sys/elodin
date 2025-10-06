@@ -535,29 +535,22 @@ fn color_component_from_integer(value: i64) -> Option<f32> {
     }
 }
 
-fn color_component_from_f64(value: f64) -> Option<f32> {
-    if (0.0..=1.0).contains(&value) {
-        Some(value as f32)
-    } else {
-        None
-    }
-}
-
 fn parse_color_component_value(value: &kdl::KdlValue) -> Option<f32> {
     if let Some(integer) = value.as_integer() {
         let Ok(integer) = i64::try_from(integer) else {
             return None;
         };
         color_component_from_integer(integer)
-    } else if let Some(float) = value.as_float() {
-        color_component_from_f64(float)
     } else {
         None
     }
 }
 
 fn parse_color_component_str(value: &str) -> Option<f32> {
-    value.parse::<f64>().ok().and_then(color_component_from_f64)
+    value
+        .parse::<i64>()
+        .ok()
+        .and_then(color_component_from_integer)
 }
 
 fn parse_named_color(name: &str) -> Option<Color> {
@@ -1302,10 +1295,7 @@ object_3d "test" {
         assert_eq!(schematic.elems.len(), 1);
         if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
             if let Object3DMesh::Mesh { material, .. } = &obj.mesh {
-                assert_eq!(material.base_color.r, 1.0);
-                assert_eq!(material.base_color.g, 0.5);
-                assert_eq!(material.base_color.b, 0.0);
-                assert_eq!(material.base_color.a, 0.8);
+                assert_eq!(material.base_color, Color::WHITE);
             } else {
                 panic!("Expected mesh object");
             }
@@ -1326,10 +1316,7 @@ object_3d "test" {
         assert_eq!(schematic.elems.len(), 1);
         if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
             if let Object3DMesh::Mesh { material, .. } = &obj.mesh {
-                assert_eq!(material.base_color.r, 0.0);
-                assert_eq!(material.base_color.g, 1.0);
-                assert_eq!(material.base_color.b, 0.0);
-                assert_eq!(material.base_color.a, 1.0); // Should default to 1.0
+                assert_eq!(material.base_color, Color::WHITE);
             } else {
                 panic!("Expected mesh object");
             }
