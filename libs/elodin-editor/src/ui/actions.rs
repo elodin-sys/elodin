@@ -37,20 +37,18 @@ impl LuaActor {
                 warn!(?err, "error spawning lua client");
                 return;
             }
-            loop {
-                if let Ok((cmd, res_tx)) = cmd_rx.recv() {
-                    match lua.load(&cmd).eval_async::<MultiValue>().await {
-                        Ok(values) => {
-                            let val = values
-                                .iter()
-                                .map(|value| format!("{:#?}", value))
-                                .collect::<Vec<_>>()
-                                .join("\t");
-                            let _ = res_tx.send(Ok(val));
-                        }
-                        Err(err) => {
-                            let _ = res_tx.send(Err(err.to_string()));
-                        }
+            while let Ok((cmd, res_tx)) = cmd_rx.recv() {
+                match lua.load(&cmd).eval_async::<MultiValue>().await {
+                    Ok(values) => {
+                        let val = values
+                            .iter()
+                            .map(|value| format!("{:#?}", value))
+                            .collect::<Vec<_>>()
+                            .join("\t");
+                        let _ = res_tx.send(Ok(val));
+                    }
+                    Err(err) => {
+                        let _ = res_tx.send(Err(err.to_string()));
                     }
                 }
             }
