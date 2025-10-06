@@ -100,6 +100,12 @@ impl TileState {
             .any(|(_, tile)| matches!(tile, Tile::Pane(Pane::Inspector)))
     }
 
+    pub fn inspector_pending(&self) -> bool {
+        self.tree_actions
+            .iter()
+            .any(|action| matches!(action, TreeAction::AddInspector(_)))
+    }
+
     pub fn insert_tile(
         &mut self,
         tile: Tile<Pane>,
@@ -1313,11 +1319,25 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                     Pane::Graph(graph) => {
                                         *state_mut.selected_object =
                                             SelectedObject::Graph { graph_id: graph.id };
+                                        if !ui_state.has_inspector()
+                                            && !ui_state.inspector_pending()
+                                        {
+                                            ui_state
+                                                .tree_actions
+                                                .push(TreeAction::AddInspector(None));
+                                        }
                                     }
                                     Pane::QueryPlot(plot) => {
                                         *state_mut.selected_object = SelectedObject::Graph {
                                             graph_id: plot.entity,
                                         };
+                                        if !ui_state.has_inspector()
+                                            && !ui_state.inspector_pending()
+                                        {
+                                            ui_state
+                                                .tree_actions
+                                                .push(TreeAction::AddInspector(None));
+                                        }
                                     }
                                     Pane::Viewport(viewport) => {
                                         if let Some(camera) = viewport.camera {
@@ -1430,17 +1450,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         ui_state.set_container_title(tile_id, title);
                     }
                 }
-            }
-
-            let inspector_pending = ui_state
-                .tree_actions
-                .iter()
-                .any(|action| matches!(action, TreeAction::AddInspector(_)));
-            if matches!(*state_mut.selected_object, SelectedObject::Graph { .. })
-                && !ui_state.has_inspector()
-                && !inspector_pending
-            {
-                ui_state.tree_actions.push(TreeAction::AddInspector(None));
             }
             let tiles = ui_state.tree.tiles.iter();
             let active_tiles = ui_state.tree.active_tiles();
