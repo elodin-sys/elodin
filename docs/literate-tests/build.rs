@@ -49,12 +49,18 @@ fn process_file(source: &str, output_file_name: &str, language: Language) {
 
     let mut output = PathBuf::from(env::var("OUT_DIR").unwrap());
     output.push(output_file_name);
-    // Tell Cargo to re-run the build script if the Markdown file changes
-    println!("cargo:rerun-if-changed={}", source);
 
     let mut input = PathBuf::from("../..");
     input.push(source);
-    let _ = extract_file(&input, &output, language)
+    // Tell Cargo to re-run the build script if the Markdown file changes
+    println!("cargo:rerun-if-changed={}", input.display());
+
+    let comment_prefix = language.comment();
+    // Write a warning header comment to put the file into read-only mode in Emacs and vim.
+    let header = format!(r#"{} vim:set ro: -*- buffer-read-only:t -*-
+{} This file was automatically generated from {:?}. Please edit that file."#, comment_prefix, comment_prefix, source);
+
+    let _ = extract_file(&input, &output, language, Some(&header))
         .expect("Failed to process literate file");
 
     match language {
@@ -71,7 +77,7 @@ fn process_file(source: &str, output_file_name: &str, language: Language) {
 }
 
 // This will extract code blocks and write them to a new file.
-fn extract_file(source: &Path, target: &Path, language: Language) -> Result<usize, LiterateError> {
+fn extract_file(source: &Path, target: &Path, language: Language, header: Option<&str>) -> Result<usize, LiterateError> {
     // Read the source markdown file
     let input = BufReader::new(File::open(source)?);
 
@@ -82,11 +88,9 @@ fn extract_file(source: &Path, target: &Path, language: Language) -> Result<usiz
     
     // Create the output file
     let mut output = BufWriter::new(File::create(target)?);
-
-    let comment_prefix = language.comment();
-    // Write a warning header comment to put the file into read-only mode in Emacs and vim.
-    writeln!(output, r#"{} vim:set ro: -*- buffer-read-only:t -*-
-{} This file was automatically generated from {:?}. Please edit that file."#, comment_prefix, comment_prefix, source)?;
+    if let Some(header) = header {
+        writeln!(output, "{}", header)?;
+    }
 
     // Extract Rust code blocks using literate
     literate::extract(input, output, language.block())
