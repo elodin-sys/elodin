@@ -566,15 +566,15 @@ fn parse_named_color(name: &str) -> Option<Color> {
     match name {
         "black" => Some(Color::BLACK),
         "white" => Some(Color::WHITE),
-        "blue" => Some(Color::rgb(0.0, 0.0, 1.0)),
-        "orange" => Some(Color::rgb(1.0, 0.5, 0.0)),
-        "yellow" => Some(Color::rgb(1.0, 1.0, 0.0)),
-        "yalk" => Some(Color::rgb(1.0, 0.9, 0.2)),
-        "pink" => Some(Color::rgb(1.0, 0.75, 0.8)),
-        "cyan" => Some(Color::rgb(0.0, 1.0, 1.0)),
-        "gray" => Some(Color::rgb(0.5, 0.5, 0.5)),
-        "green" => Some(Color::rgb(0.0, 1.0, 0.0)),
-        "mint" => Some(Color::MINT),
+        "blue" => Some(Color::BLUE),
+        "orange" => Some(Color::ORANGE),
+        "yellow" => Some(Color::YELLOW),
+        "pink" => Some(Color::PINK),
+        "cyan" => Some(Color::CYAN),
+        "gray" => Some(Color::GRAY),
+        "green" => Some(Color::GREEN),
+        "mint" => Some(Color::rgb(0.0, 0.9, 0.7)), // custom
+        "yolk" => Some(Color::rgb(1.0, 0.9, 0.2)), // custom
         _ => None,
     }
 }
