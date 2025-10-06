@@ -28,11 +28,11 @@ def world(seed: int = 0) -> el.World:
         }
         object_3d ball.world_pos {
             sphere radius=0.2 {
-                color 12.7 9.2 0.5
+                color orange
             }
         }
         line_3d ball.world_pos line_width=2.0 {
-            color yolk
+            color 255 255 0
         }
     """)
     return world
