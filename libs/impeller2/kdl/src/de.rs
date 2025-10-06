@@ -527,53 +527,84 @@ fn parse_color_from_node_or_children(node: &KdlNode, color_tag: Option<&str>) ->
     None
 }
 
-/// Convert a float or an integer to a float value.
-pub(crate) fn to_float(value: &kdl::KdlValue) -> Option<f64> {
+fn color_component_from_integer(value: i64) -> Option<f32> {
+    if (0..=255).contains(&value) {
+        Some((value as f32) / 255.0)
+    } else {
+        None
+    }
+}
+
+fn color_component_from_f64(value: f64) -> Option<f32> {
+    if (0.0..=1.0).contains(&value) {
+        Some(value as f32)
+    } else if (0.0..=255.0).contains(&value) {
+        Some((value as f32) / 255.0)
+    } else {
+        None
+    }
+}
+
+fn parse_color_component_value(value: &kdl::KdlValue) -> Option<f32> {
+    if let Some(integer) = value.as_integer() {
+        let Ok(integer) = i64::try_from(integer) else {
+            return None;
+        };
+        color_component_from_integer(integer)
+    } else if let Some(float) = value.as_float() {
+        color_component_from_f64(float)
+    } else {
+        None
+    }
+}
+
+fn parse_color_component_str(value: &str) -> Option<f32> {
     value
-        .as_float()
-        .or_else(|| value.as_integer().map(|x| x as f64))
+        .parse::<f64>()
+        .ok()
+        .and_then(color_component_from_f64)
+}
+
+fn parse_named_color(name: &str) -> Option<Color> {
+    match name {
+        "black" => Some(Color::BLACK),
+        "white" => Some(Color::WHITE),
+        "blue" => Some(Color::rgb(0.0, 0.0, 1.0)),
+        "orange" => Some(Color::rgb(1.0, 0.5, 0.0)),
+        "yellow" => Some(Color::rgb(1.0, 1.0, 0.0)),
+        "pink" => Some(Color::rgb(1.0, 0.75, 0.8)),
+        "red" => Some(Color::rgb(1.0, 0.0, 0.0)),
+        "cyan" => Some(Color::rgb(0.0, 1.0, 1.0)),
+        "gray" => Some(Color::rgb(0.5, 0.5, 0.5)),
+        "green" => Some(Color::rgb(0.0, 1.0, 0.0)),
+        "mint" => Some(Color::MINT),
+        _ => None,
+    }
 }
 
 fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
     // First try to read from positional arguments (0,1,2,3)
     let entries = node.entries();
-    if entries.len() >= 3 {
-        // Only look for positional arguments if there are entries with no name
-        let mut positional_entries = entries.iter().filter(|e| e.name().is_none());
+    let positional_entries: Vec<_> = entries.iter().filter(|e| e.name().is_none()).collect();
 
+    if positional_entries.len() >= 3 {
         if let (Some(r), Some(g), Some(b)) = (
-            positional_entries.next().and_then(|e| to_float(e.value())),
-            positional_entries.next().and_then(|e| to_float(e.value())),
-            positional_entries.next().and_then(|e| to_float(e.value())),
+            parse_color_component_value(positional_entries[0].value()),
+            parse_color_component_value(positional_entries[1].value()),
+            parse_color_component_value(positional_entries[2].value()),
         ) {
             let a = positional_entries
-                .next()
-                .and_then(|e| to_float(e.value()))
+                .get(3)
+                .and_then(|entry| parse_color_component_value(entry.value()))
                 .unwrap_or(1.0);
 
-            return Some(Color::rgba(r as f32, g as f32, b as f32, a as f32));
+            return Some(Color::rgba(r, g, b, a));
         }
-    } else if entries.len() == 1 {
-        let mut positional_entries = entries.iter().filter(|e| e.name().is_none());
-
-        if let Some(color_value) = positional_entries
-            .next()
-            .and_then(|e| e.value().as_string())
-        {
-            // Fall back to named colors
-            return match color_value {
-                "black" => Some(Color::BLACK),
-                "white" => Some(Color::WHITE),
-                "turquoise" => Some(Color::TURQUOISE),
-                "slate" => Some(Color::SLATE),
-                "pumpkin" => Some(Color::PUMPKIN),
-                "yolk" => Some(Color::YOLK),
-                "peach" => Some(Color::PEACH),
-                "reddish" => Some(Color::REDDISH),
-                "hyperblue" => Some(Color::HYPERBLUE),
-                "mint" => Some(Color::MINT),
-                _ => None,
-            };
+    } else if positional_entries.len() == 1 {
+        if let Some(color_value) = positional_entries[0].value().as_string() {
+            if let Some(color) = parse_named_color(color_value) {
+                return Some(color);
+            }
         }
     }
 
@@ -585,36 +616,23 @@ fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
                 .collect();
 
             if values.len() >= 3 {
-                if let (Ok(r), Ok(g), Ok(b)) = (
-                    values[0].parse::<f64>(),
-                    values[1].parse::<f64>(),
-                    values[2].parse::<f64>(),
+                if let (Some(r), Some(g), Some(b)) = (
+                    parse_color_component_str(values[0]),
+                    parse_color_component_str(values[1]),
+                    parse_color_component_str(values[2]),
                 ) {
-                    let a = if values.len() >= 4 {
-                        values[3].parse::<f64>().unwrap_or(1.0)
-                    } else {
-                        1.0
-                    };
+                    let a = values
+                        .get(3)
+                        .and_then(|v| parse_color_component_str(v))
+                        .unwrap_or(1.0);
 
-                    return Some(Color::rgba(r as f32, g as f32, b as f32, a as f32));
+                    return Some(Color::rgba(r, g, b, a));
                 }
             }
         }
 
         // Fall back to named colors
-        match color_value {
-            "black" => Some(Color::BLACK),
-            "white" => Some(Color::WHITE),
-            "turquoise" => Some(Color::TURQUOISE),
-            "slate" => Some(Color::SLATE),
-            "pumpkin" => Some(Color::PUMPKIN),
-            "yolk" => Some(Color::YOLK),
-            "peach" => Some(Color::PEACH),
-            "reddish" => Some(Color::REDDISH),
-            "hyperblue" => Some(Color::HYPERBLUE),
-            "mint" => Some(Color::MINT),
-            _ => None,
-        }
+        parse_named_color(color_value)
     } else {
         None
     }
@@ -1015,8 +1033,8 @@ mod tests {
     fn test_parse_graph_colors() {
         let kdl = r#"
 graph "rocket.fins[2], rocket.fins[3]" {
-    color 1.0 0.0 0.0
-    color 0.0 1.0 0.0
+    color 255 0 0
+    color 0 255 0
 }
 "#;
         let schematic = parse_schematic(kdl).unwrap();
@@ -1052,7 +1070,7 @@ object_3d "a.world_pos" {
         let kdl = r#"
 object_3d "a.world_pos" {
     sphere radius=0.2 {
-        color 1.0 0.0 0.0
+        color 255 0 0
     }
 }
 "#;
@@ -1323,7 +1341,7 @@ object_3d "test" {
         let kdl = r#"
 object_3d "test" {
     sphere radius=0.2 {
-       color 0.0 1.0 0.0
+       color 0 255 0
     }
 }
 "#;
@@ -1348,9 +1366,9 @@ object_3d "test" {
     fn test_parse_color_children_from_node() {
         let kdl = r#"
 node {
-    color 1.0 0.0 0.0
-    color 0.0 1.0 0.0
-    color 0.0 0.0 1.0
+    color 255 0 0
+    color 0 255 0
+    color 0 0 255
     other_node "not a color"
 }
 "#;
@@ -1375,7 +1393,7 @@ node {
     fn test_parse_color_children_from_sphere() {
         let kdl = r#"
 sphere radius=0.2 {
-        color 1 0 1
+        color 255 0 255
     }
 "#;
         let doc = kdl.parse::<KdlDocument>().unwrap();
@@ -1384,7 +1402,7 @@ sphere radius=0.2 {
         assert_eq!(node.children().iter().count(), 1);
         let color_doc = node.children().iter().next().copied().unwrap();
         let s = format!("{}", color_doc);
-        assert_eq!("color 1 0 1", s.as_str().trim());
+        assert_eq!("color 255 0 255", s.as_str().trim());
         let color_node = color_doc.get("color").unwrap();
         assert_eq!(color_node.entries().len(), 3);
         let mut entries = color_node.entries().iter().filter(|e| e.name().is_none());
@@ -1394,7 +1412,7 @@ sphere radius=0.2 {
                 .as_float()
                 .or_else(|| e.value().as_integer().map(|x| x as f64))
         });
-        assert_eq!(r, Some(1.0));
+        assert_eq!(r, Some(255.0));
         let color = parse_color_from_node(color_node);
         assert!(color.is_some());
 
