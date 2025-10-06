@@ -559,10 +559,7 @@ fn parse_color_component_value(value: &kdl::KdlValue) -> Option<f32> {
 }
 
 fn parse_color_component_str(value: &str) -> Option<f32> {
-    value
-        .parse::<f64>()
-        .ok()
-        .and_then(color_component_from_f64)
+    value.parse::<f64>().ok().and_then(color_component_from_f64)
 }
 
 fn parse_named_color(name: &str) -> Option<Color> {
@@ -573,7 +570,6 @@ fn parse_named_color(name: &str) -> Option<Color> {
         "orange" => Some(Color::rgb(1.0, 0.5, 0.0)),
         "yellow" => Some(Color::rgb(1.0, 1.0, 0.0)),
         "pink" => Some(Color::rgb(1.0, 0.75, 0.8)),
-        "red" => Some(Color::rgb(1.0, 0.0, 0.0)),
         "cyan" => Some(Color::rgb(0.0, 1.0, 1.0)),
         "gray" => Some(Color::rgb(0.5, 0.5, 0.5)),
         "green" => Some(Color::rgb(0.0, 1.0, 0.0)),
@@ -1195,7 +1191,7 @@ object_3d "a.world_pos" {
         let kdl = r#"
 dashboard label="Styled Dashboard" {
     node display="flex" flex_direction="column" text="Hello World" font_size=24.0  {
-        text_color color="hyperblue"
+        text_color color="blue"
         node width="100px" height="50px" text="Child Text" font_size=12.0 {
             text_color color="mint"
         }
@@ -1212,7 +1208,7 @@ dashboard label="Styled Dashboard" {
             let node = &dashboard.root.children[0];
             assert!(matches!(node.display, Display::Flex));
             assert_eq!(node.font_size, 24.0);
-            assert_eq!(node.text_color, Color::HYPERBLUE);
+            assert_eq!(node.text_color, Color::rgb(0.0, 0.0, 1.0));
             assert_eq!(node.text, Some("Hello World".to_string()));
 
             assert_eq!(node.children.len(), 1);

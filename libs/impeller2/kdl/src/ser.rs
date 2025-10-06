@@ -589,14 +589,30 @@ mod tests {
     const COLOR_EPSILON: f32 = 1.0 / 255.0 + 1e-6;
 
     fn assert_color_close(actual: Color, expected: Color) {
-        assert!((actual.r - expected.r).abs() <= COLOR_EPSILON,
-            "expected r ~= {} got {}", expected.r, actual.r);
-        assert!((actual.g - expected.g).abs() <= COLOR_EPSILON,
-            "expected g ~= {} got {}", expected.g, actual.g);
-        assert!((actual.b - expected.b).abs() <= COLOR_EPSILON,
-            "expected b ~= {} got {}", expected.b, actual.b);
-        assert!((actual.a - expected.a).abs() <= COLOR_EPSILON,
-            "expected a ~= {} got {}", expected.a, actual.a);
+        assert!(
+            (actual.r - expected.r).abs() <= COLOR_EPSILON,
+            "expected r ~= {} got {}",
+            expected.r,
+            actual.r
+        );
+        assert!(
+            (actual.g - expected.g).abs() <= COLOR_EPSILON,
+            "expected g ~= {} got {}",
+            expected.g,
+            actual.g
+        );
+        assert!(
+            (actual.b - expected.b).abs() <= COLOR_EPSILON,
+            "expected b ~= {} got {}",
+            expected.b,
+            actual.b
+        );
+        assert!(
+            (actual.a - expected.a).abs() <= COLOR_EPSILON,
+            "expected a ~= {} got {}",
+            expected.a,
+            actual.a
+        );
     }
 
     #[test]
