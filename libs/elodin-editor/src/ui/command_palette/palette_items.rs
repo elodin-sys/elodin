@@ -24,8 +24,8 @@ use impeller2::types::{Timestamp, msg_id};
 use impeller2_bevy::{ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
 use impeller2_kdl::ToKdl;
 use impeller2_wkt::{
-    ComponentPath, ComponentValue, CurrentTimestamp, DbConfig, IsRecording, Material, Mesh,
-    Object3D, SetDbConfig, SetStreamState,
+    ComponentPath, ComponentValue, CurrentTimestamp, DbConfig, EarliestTimestamp, IsRecording,
+    Material, Mesh, Object3D, SetDbConfig, SetStreamState, SimulationTimeStep,
 };
 use miette::IntoDiagnostic;
 use nox::ArrayBuf;
@@ -617,7 +617,9 @@ fn goto_tick() -> PaletteItem {
                       mut ui_tick: ResMut<UITick>,
                       mut paused: ResMut<Paused>,
                       stream_id: Res<CurrentStreamId>,
-                      packet_tx: Res<PacketTx>| {
+                      packet_tx: Res<PacketTx>,
+                      earliest_timestamp: Res<EarliestTimestamp>,
+                      tick_time: Res<SimulationTimeStep>| {
                     let trimmed = tick_str.trim();
                     if trimmed.is_empty() {
                         return PaletteEvent::Error(
@@ -636,7 +638,32 @@ fn goto_tick() -> PaletteItem {
                         return PaletteEvent::Error("Tick value is too large".to_string());
                     }
 
-                    let timestamp = Timestamp(parsed_tick as i64);
+                    let tick_duration_us = (hifitime::Duration::from_seconds(tick_time.0)
+                        .total_nanoseconds()
+                        / 1000) as i64;
+
+                    if tick_duration_us <= 0 {
+                        return PaletteEvent::Error(
+                            "Simulation tick duration must be positive to compute timestamp"
+                                .to_string(),
+                        );
+                    }
+
+                    let parsed_tick = parsed_tick as i64;
+                    let Some(offset_us) = tick_duration_us.checked_mul(parsed_tick) else {
+                        return PaletteEvent::Error(
+                            "Tick value is too large to convert to a timestamp".to_string(),
+                        );
+                    };
+
+                    let base_timestamp = earliest_timestamp.0.0;
+                    let Some(target_us) = base_timestamp.checked_add(offset_us) else {
+                        return PaletteEvent::Error(
+                            "Computed timestamp is out of range".to_string(),
+                        );
+                    };
+
+                    let timestamp = Timestamp(target_us);
                     paused.0 = true;
                     current_tick.0 = timestamp;
                     ui_tick.0 = timestamp.0;
