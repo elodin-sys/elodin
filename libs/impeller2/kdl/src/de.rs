@@ -538,8 +538,6 @@ fn color_component_from_integer(value: i64) -> Option<f32> {
 fn color_component_from_f64(value: f64) -> Option<f32> {
     if (0.0..=1.0).contains(&value) {
         Some(value as f32)
-    } else if (0.0..=255.0).contains(&value) {
-        Some((value as f32) / 255.0)
     } else {
         None
     }
@@ -575,6 +573,13 @@ fn parse_named_color(name: &str) -> Option<Color> {
         "gray" => Some(Color::GRAY),
         "green" => Some(Color::GREEN),
         "mint" => Some(Color::MINT),
+        "turquoise" => Some(Color::TURQUOISE),
+        "slate" => Some(Color::SLATE),
+        "pumpkin" => Some(Color::PUMPKIN),
+        "yolk" => Some(Color::YOLK),
+        "peach" => Some(Color::PEACH),
+        "reddish" => Some(Color::REDDISH),
+        "hyperblue" => Some(Color::HYPERBLUE),
         _ => None,
     }
 }
