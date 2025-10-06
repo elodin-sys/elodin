@@ -138,38 +138,18 @@ def world() -> tuple[el.World, el.EntityId]:
             hsplit name = "Viewport" {
                 viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 2,2,2)" look_at="drone.world_pos" show_grid=#true active=#true
                 vsplit share=0.4 {
-                    graph "drone.angle_desired" name="angle_desired" {
-                        color black
-                        color cyan
-                        color green
-                    }
-                    graph "drone.world_pos.q0, drone.world_pos.q1, drone.world_pos.q2, drone.world_pos.q3, drone.attitude_target" name="World Pos" {
-                        color blue
-                        color orange
-                        color pink
-                        color gray
-                        color mint
-                    }
-                    graph "drone.ang_vel_setpoint" {
-                        color blue
-                    }
+                    graph "drone.angle_desired" name="angle_desired"
+                    graph "drone.world_pos.q0, drone.world_pos.q1, drone.world_pos.q2, drone.world_pos.q3, drone.attitude_target" name="World Pos"
+                    graph "drone.ang_vel_setpoint"
                 }
             }
             hsplit name = "Motor Panel" {
                 vsplit share=0.4 {
-                    graph "drone.motor_input" {
-                        color green
-                    }
-                    graph "drone.motor_pwm" {
-                        color yalk
-                    }
-                    graph "drone.motor_rpm" {
-                        color pink
-                    }
+                    graph "drone.motor_input"
+                    graph "drone.motor_pwm"
+                    graph "drone.motor_rpm"
                 }
-                graph "drone.thrust" {
-                    color yellow
-                }
+                graph "drone.thrust"
             }
             hsplit name="Rate Control Panel" {
                 vsplit {
