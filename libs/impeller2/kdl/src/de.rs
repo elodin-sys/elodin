@@ -569,12 +569,12 @@ fn parse_named_color(name: &str) -> Option<Color> {
         "blue" => Some(Color::BLUE),
         "orange" => Some(Color::ORANGE),
         "yellow" => Some(Color::YELLOW),
+        "yalk" => Some(Color::YALK),
         "pink" => Some(Color::PINK),
         "cyan" => Some(Color::CYAN),
         "gray" => Some(Color::GRAY),
         "green" => Some(Color::GREEN),
-        "mint" => Some(Color::rgb(0.0, 0.9, 0.7)), // custom
-        "yolk" => Some(Color::rgb(1.0, 0.9, 0.2)), // custom
+        "mint" => Some(Color::MINT),
         _ => None,
     }
 }
@@ -1436,8 +1436,6 @@ graph "value" {
         };
         assert_eq!(graph.colors.len(), 1);
         let color = graph.colors[0];
-        assert!((color.r - 1.0).abs() < f32::EPSILON);
-        assert!((color.g - 0.9).abs() < f32::EPSILON);
-        assert!((color.b - 0.2).abs() < f32::EPSILON);
+        assert_eq!(color, Color::YALK);
     }
 }
