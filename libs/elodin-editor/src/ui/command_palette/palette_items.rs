@@ -20,12 +20,12 @@ use bevy::{
 use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::TileId;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
-use impeller2::types::msg_id;
+use impeller2::types::{Timestamp, msg_id};
 use impeller2_bevy::{ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
 use impeller2_kdl::ToKdl;
 use impeller2_wkt::{
-    ComponentPath, ComponentValue, DbConfig, IsRecording, Material, Mesh, Object3D, SetDbConfig,
-    SetStreamState,
+    ComponentPath, ComponentValue, CurrentTimestamp, DbConfig, IsRecording, Material, Mesh,
+    Object3D, SetDbConfig, SetStreamState,
 };
 use miette::IntoDiagnostic;
 use nox::ArrayBuf;
@@ -34,12 +34,13 @@ use crate::{
     EqlContext, Offset, SelectedTimeRange, TimeRangeBehavior,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        HdrEnabled, colors,
+        HdrEnabled, Paused, colors,
         plot::{GraphBundle, default_component_values},
         schematic::{
             CurrentSchematic, LoadSchematicParams, SchematicLiveReloadRx, load_schematic_file,
         },
         tiles::{self, TileState},
+        timeline::timeline_slider::UITick,
     },
 };
 
@@ -605,6 +606,52 @@ fn set_time_range_behavior() -> PaletteItem {
     })
 }
 
+fn goto_tick() -> PaletteItem {
+    PaletteItem::new("Goto Tick...", TIME_LABEL, |_: In<String>| {
+        PalettePage::new(vec![
+            PaletteItem::new(
+                LabelSource::placeholder("Enter tick number"),
+                "",
+                move |In(tick_str): In<String>,
+                      mut current_tick: ResMut<CurrentTimestamp>,
+                      mut ui_tick: ResMut<UITick>,
+                      mut paused: ResMut<Paused>,
+                      stream_id: Res<CurrentStreamId>,
+                      packet_tx: Res<PacketTx>| {
+                    let trimmed = tick_str.trim();
+                    if trimmed.is_empty() {
+                        return PaletteEvent::Error(
+                            "Tick value cannot be empty. Please enter a non-negative integer."
+                                .into(),
+                        );
+                    }
+
+                    let Ok(parsed_tick) = trimmed.parse::<u64>() else {
+                        return PaletteEvent::Error(format!(
+                            "Invalid tick value: {trimmed}. Please enter a non-negative integer."
+                        ));
+                    };
+
+                    if parsed_tick > i64::MAX as u64 {
+                        return PaletteEvent::Error("Tick value is too large".to_string());
+                    }
+
+                    let timestamp = Timestamp(parsed_tick as i64);
+                    paused.0 = true;
+                    current_tick.0 = timestamp;
+                    ui_tick.0 = timestamp.0;
+                    packet_tx.send_msg(SetStreamState::rewind(**stream_id, timestamp));
+
+                    PaletteEvent::Exit
+                },
+            )
+            .default(),
+        ])
+        .prompt("Enter the tick to jump to")
+        .into()
+    })
+}
+
 pub fn save_schematic_as() -> PaletteItem {
     PaletteItem::new(
         "Save Schematic As...",
@@ -1065,6 +1112,7 @@ impl Default for PalettePage {
                 },
             ),
             set_playback_speed(),
+            goto_tick(),
             fix_current_time_range(),
             set_time_range_behavior(),
             create_graph(None),

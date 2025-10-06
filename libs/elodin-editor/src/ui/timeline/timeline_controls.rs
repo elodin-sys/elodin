@@ -175,6 +175,20 @@ impl WidgetSystem for TimelineControls<'_> {
                                     ui.add(egui::Label::new(time_label).selectable(false));
 
                                     ui.add_space(24.0);
+
+                                    let tick_value = egui::RichText::new(tick.0.0.to_string())
+                                        .color(get_scheme().text_primary);
+                                    ui.add(
+                                        egui::Label::new(tick_value)
+                                            .selectable(false)
+                                            .halign(egui::Align::BOTTOM),
+                                    );
+
+                                    let tick_label = egui::RichText::new("TICK")
+                                        .color(get_scheme().text_secondary);
+                                    ui.add_space(8.0);
+
+                                    ui.add(egui::Label::new(tick_label).selectable(false));
                                 });
                         },
                     );
