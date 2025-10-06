@@ -36,7 +36,7 @@ use std::{
 };
 
 use crate::{
-    Offset, SelectedTimeRange, TimeRangeBehavior,
+    Offset, SelectedObject, SelectedTimeRange, TimeRangeBehavior,
     plugins::LogicalKeyState,
     ui::{
         colors::{ColorExt, get_scheme, with_opacity},
@@ -75,6 +75,7 @@ pub struct PlotWidget<'w, 's> {
     current_timestamp: Res<'w, CurrentTimestamp>,
     time_range_behavior: ResMut<'w, TimeRangeBehavior>,
     line_query: Query<'w, 's, &'static LineHandle>,
+    selected_object: ResMut<'w, SelectedObject>,
 }
 
 impl WidgetSystem for PlotWidget<'_, '_> {
@@ -97,6 +98,7 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             current_timestamp,
             mut time_range_behavior,
             line_query,
+            mut selected_object,
         } = state.get_mut(world);
 
         let Ok(mut graph_state) = graphs_state.get_mut(id) else {
@@ -133,6 +135,8 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             &collected_graph_data,
             &mut graph_state,
             &scrub_icon,
+            id,
+            &mut *selected_object,
             &mut time_range_behavior,
         );
     }
@@ -389,10 +393,18 @@ impl TimeseriesPlot {
         collected_graph_data: &CollectedGraphData,
         graph_state: &mut GraphState,
         scrub_icon: &egui::TextureId,
+        graph_entity: Entity,
+        selected_object: &mut SelectedObject,
         time_range_behavior: &mut TimeRangeBehavior,
     ) {
         let response = ui.allocate_rect(self.rect, egui::Sense::click_and_drag());
         let pointer_pos = ui.input(|i| i.pointer.latest_pos());
+
+        if response.clicked() {
+            *selected_object = SelectedObject::Graph {
+                graph_id: graph_entity,
+            };
+        }
 
         // Lock toggle (icons)
         {
