@@ -62,7 +62,10 @@ pub fn sync_schematic(
         }
     }
     if let Some(content) = config.schematic_content() {
-        let schematic = impeller2_wkt::Schematic::from_kdl(content).expect("schematic error");
+        let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(content)
+            .inspect_err(|e| bevy::log::error!(?e, "invalid schematic content")) else {
+                return;
+            };
         params.load_schematic(&schematic);
     }
 }
