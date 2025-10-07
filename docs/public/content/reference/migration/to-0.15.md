@@ -74,7 +74,7 @@ All the preceding information can now be specified via schematics.
         }
         object_3d ball.world_pos {
             sphere radius=0.2 {
-                color 25 50 255
+                color 25 50 255 128
             }
         }
         line_3d ball.world_pos line_width=2.0 {
@@ -87,7 +87,7 @@ The old code is python, and the new code is specified in a [KDL](https://docs.rs
 
 
 ### `el.Material.color` to `color`
-A color can be specified by its red, green, blue, and optionally its alpha components as an integer from 0 to 255.
+A color can be specified by its red, green, blue, and optionally its alpha components as integers from 0 (fully transparent) to 255 (fully opaque).
 
 OLD
 ```python
@@ -95,8 +95,18 @@ el.Material.color(0.1, 0.2, 1.0))
 ```
 NEW
 ```python
-color 25 50 255
+color 25 50 255 128
 ```
+
+Omit the fourth value if you want the color to remain fully opaque. The same syntax works with named colors:
+
+```
+    graph "value" {
+        color yolk 120
+    }
+```
+
+Here `yolk` is the base color and `120` sets a partially transparent alpha.
 
 It can also be specified by a few names:
 
@@ -122,6 +132,19 @@ It is often specified as a child of what its describing, e.g., this sphere is re
         color reddish
     }
 ```
+
+### `object_3d` ellipsoid
+An `ellipsoid` block renders an ellipsoidal volume aligned with an entity's `world_pos`. Provide a scale expression that evaluates to three components (literal values or an EQL expression) and an optional translucent color.
+
+```
+    object_3d drone.world_pos {
+        ellipsoid scale="(0.75, 0.35, 0.95)" {
+            color 255 255 0 120
+        }
+    }
+```
+
+Because the scale expression is re-evaluated every frame, you can reference live data such as `rocket.ellipsoid_scale` to animate the ellipsoid.
 
 ### `el.Panel.hsplit` to `hsplit`
 OLD

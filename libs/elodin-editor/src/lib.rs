@@ -18,6 +18,7 @@ use bevy::{
     winit::WinitSettings,
 };
 use bevy_egui::{EguiContextSettings, EguiPlugin};
+use bevy_render::alpha::AlphaMode;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use convert_case::{Case, Casing};
 use impeller2::types::{ComponentId, OwnedPacket};
@@ -699,8 +700,21 @@ impl BevyExt for impeller2_wkt::Material {
     type Bevy = StandardMaterial;
 
     fn into_bevy(self) -> Self::Bevy {
+        let base_color = Color::srgba(
+            self.base_color.r,
+            self.base_color.g,
+            self.base_color.b,
+            self.base_color.a,
+        );
+        let alpha_mode = if self.base_color.a < 1.0 {
+            AlphaMode::Blend
+        } else {
+            AlphaMode::Opaque
+        };
+
         bevy::prelude::StandardMaterial {
-            base_color: Color::srgb(self.base_color.r, self.base_color.g, self.base_color.b),
+            base_color,
+            alpha_mode,
             ..Default::default()
         }
     }
@@ -774,6 +788,7 @@ fn sync_object_3d(
                 aux: (),
             },
             expr,
+            &ctx.0,
             &mut material_assets,
             &mut mesh_assets,
             &assets,

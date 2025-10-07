@@ -794,6 +794,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                         aux: (),
                     },
                     expr.clone(),
+                    &eql_ctx.0,
                     &mut material_assets,
                     &mut mesh_assets,
                     &assets,
@@ -857,19 +858,20 @@ pub fn create_3d_object() -> PaletteItem {
                                             "Enter path to GLTF file for the 3D object visualization",
                                             move |In(gltf_path): In<String>,
                                                   mut commands: Commands,
+                                                  eql_ctx: Res<EqlContext>,
                                                   mut material_assets: ResMut<Assets<StandardMaterial>>,
                                                   mut mesh_assets: ResMut<Assets<bevy::prelude::Mesh>>,
-                                                  assets: Res<AssetServer>,
-                                                  | {
+                                                  assets: Res<AssetServer>| {
                                                 let obj = impeller2_wkt::Object3DMesh::Glb(gltf_path.trim().to_string());
 
                                                 crate::object_3d::create_object_3d_entity(
                                                     &mut commands,
                                                     Object3D { eql: eql.clone(), mesh: obj, aux: () },
                                                     expr.clone(),
+                                                    &eql_ctx.0,
                                                     &mut material_assets,
                                                     &mut mesh_assets,
-                                                    &assets
+                                                    &assets,
                                                 );
 
                                                 PaletteEvent::Exit

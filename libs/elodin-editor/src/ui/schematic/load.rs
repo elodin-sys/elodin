@@ -143,6 +143,7 @@ impl LoadSchematicParams<'_, '_> {
             &mut self.commands,
             object_3d.clone(),
             expr,
+            &self.eql.0,
             &mut self.materials,
             &mut self.meshes,
             &self.asset_server,
