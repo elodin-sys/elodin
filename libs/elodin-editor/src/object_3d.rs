@@ -404,24 +404,23 @@ pub fn create_object_3d_entity(
         _ => (None, None),
     };
 
-    let entity_commands = commands.spawn((
-        Object3DState {
-            compiled_expr: Some(compile_eql_expr(expr)),
-            scale_expr,
-            scale_error,
-            data: data.clone(),
-        },
-        Transform::default(),
-        GlobalTransform::default(),
-        Visibility::default(),
-        InheritedVisibility::default(),
-        ViewVisibility::default(),
-        GridCell::<i128>::default(),
-        impeller2_wkt::WorldPos::default(),
-    ));
-
-    let entity_id = entity_commands.id();
-    drop(entity_commands);
+    let entity_id = commands
+        .spawn((
+            Object3DState {
+                compiled_expr: Some(compile_eql_expr(expr)),
+                scale_expr,
+                scale_error,
+                data: data.clone(),
+            },
+            Transform::default(),
+            GlobalTransform::default(),
+            Visibility::default(),
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+            GridCell::<i128>::default(),
+            impeller2_wkt::WorldPos::default(),
+        ))
+        .id();
 
     if let Some(ellipse) = spawn_mesh(
         commands,
@@ -496,7 +495,7 @@ pub fn spawn_mesh(
 
             Some(EllipsoidVisual {
                 child,
-                color: color.clone(),
+                color: *color,
                 oversized: false,
                 max_extent: 0.0,
             })
