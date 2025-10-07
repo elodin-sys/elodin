@@ -118,7 +118,8 @@ impl LoadSchematicParams<'_, '_> {
         self.tile_state
             .clear(&mut self.commands, &mut self.selected_object);
         for entity in self.objects_3d.iter() {
-            self.commands.entity(entity).despawn_recursive();
+            // Bevy's despawn() is recursive in this version
+            self.commands.entity(entity).despawn();
         }
         for elem in &schematic.elems {
             match elem {
