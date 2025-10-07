@@ -16,30 +16,34 @@ use impeller2_bevy::{ComponentMetadataRegistry, ComponentPathRegistry};
 // 
 // ## Simple Error Dialog
 // ```rust
-// // In any system with access to SettingModalState
-// setting_modal_state.show_error("Error", "Something went wrong!");
+// // In any system with access to ModalDialog
+// fn my_system(mut modal_dialog: ModalDialog) {
+//     modal_dialog.show_error("Error", "Something went wrong!");
+// }
 // ```
 // 
 // ## Custom Dialog with Multiple Buttons
 // ```rust
 // use crate::ui::{Dialog, DialogButton, DialogAction};
 // 
-// let dialog = Dialog {
-//     id: "confirm_delete".to_string(),
-//     title: "Confirm Action".to_string(),
-//     message: "Are you sure you want to delete this item?".to_string(),
-//     buttons: vec![
-//         DialogButton {
-//             text: "Cancel".to_string(),
-//             action: DialogAction::Close,
-//         },
-//         DialogButton {
-//             text: "Delete".to_string(),
-//             action: DialogAction::Custom("delete".to_string()),
-//         },
-//     ],
-// };
-// setting_modal_state.show_dialog(dialog);
+// fn my_system(mut modal_dialog: ModalDialog) {
+//     let dialog = Dialog {
+//         id: "confirm_delete".to_string(),
+//         title: "Confirm Action".to_string(),
+//         message: "Are you sure you want to delete this item?".to_string(),
+//         buttons: vec![
+//             DialogButton {
+//                 text: "Cancel".to_string(),
+//                 action: DialogAction::Close,
+//             },
+//             DialogButton {
+//                 text: "Delete".to_string(),
+//                 action: DialogAction::Custom("delete".to_string()),
+//             },
+//         ],
+//     };
+//     modal_dialog.show_dialog(dialog);
+// }
 // ```
 // 
 // ## Listening for Dialog Events
@@ -79,7 +83,7 @@ use impeller2_bevy::{ComponentMetadataRegistry, ComponentPathRegistry};
 
 use bevy::prelude::*;
 use crate::ui::{
-    EntityData, InspectorAnchor, SettingModal, SettingModalState, Dialog, DialogAction, DialogEvent,
+    EntityData, InspectorAnchor, SettingModal, SettingModalState, Dialog, DialogButton, DialogAction, DialogEvent,
     colors::get_scheme, images, theme, utils::MarginSides,
 };
 
@@ -101,10 +105,10 @@ pub struct ModalWithSettings<'w, 's> {
 }
 
 pub fn dialog_err<E: std::error::Error>(In(result): In<Result<(), E>>,
-                                        mut setting_modal_state: ResMut<SettingModalState>) {
+                                        mut modal_dialog: ModalDialog) {
     if let Err(e) = result {
         bevy::log::warn!("Showing error dialog: {}", e);
-        setting_modal_state.show_error("Error", format!("{}", e));
+        modal_dialog.show_error("Error", format!("{}", e));
     }
 }
 
@@ -430,5 +434,26 @@ impl WidgetSystem for ModalDialog<'_, '_> {
                 }
             });
         });
+    }
+}
+
+impl ModalDialog<'_, '_> {
+    /// Show a simple error dialog with just a close button
+    pub fn show_error(&mut self, title: impl Into<String>, message: impl Into<String>) {
+        let id = format!("error_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
+        self.setting_modal_state.0 = Some(SettingModal::Dialog(Dialog {
+            id,
+            title: title.into(),
+            message: message.into(),
+            buttons: vec![DialogButton {
+                text: "OK".to_string(),
+                action: DialogAction::Close,
+            }],
+        }));
+    }
+
+    /// Show a custom dialog with multiple buttons
+    pub fn show_dialog(&mut self, dialog: Dialog) {
+        self.setting_modal_state.0 = Some(SettingModal::Dialog(dialog));
     }
 }

@@ -240,25 +240,6 @@ pub struct DialogEvent {
 pub struct SettingModalState(pub Option<SettingModal>);
 
 impl SettingModalState {
-    /// Show a simple error dialog with just a close button
-    pub fn show_error(&mut self, title: impl Into<String>, message: impl Into<String>) {
-        let id = format!("error_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
-        self.0 = Some(SettingModal::Dialog(Dialog {
-            id,
-            title: title.into(),
-            message: message.into(),
-            buttons: vec![DialogButton {
-                text: "OK".to_string(),
-                action: DialogAction::Close,
-            }],
-        }));
-    }
-
-    /// Show a custom error dialog with multiple buttons
-    pub fn show_dialog(&mut self, dialog: Dialog) {
-        self.0 = Some(SettingModal::Dialog(dialog));
-    }
-
     /// Close any open modal
     pub fn close(&mut self) {
         self.0 = None;
