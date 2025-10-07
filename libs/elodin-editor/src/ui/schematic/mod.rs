@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
     object_3d::Object3DState,
     ui::{
-        modal::dialog_err,
+        modal::action::dialog_err,
         actions,
         colors::EColor,
         inspector, plot, query_plot, query_table,
@@ -216,7 +216,8 @@ impl Plugin for SchematicPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(CurrentSchematic(Default::default()))
             .add_systems(PostUpdate, tiles_to_schematic)
-            .add_systems(PostUpdate, sync_schematic.pipe(dialog_err).before(tiles_to_schematic))
+            // .add_systems(PostUpdate, sync_schematic.pipe(dialog_err).before(tiles_to_schematic))
+            .add_systems(PostUpdate, sync_schematic.before(tiles_to_schematic))
             .init_resource::<SchematicLiveReloadRx>()
             .add_systems(PreUpdate, load::schematic_live_reload);
     }

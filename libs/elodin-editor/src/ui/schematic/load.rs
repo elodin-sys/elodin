@@ -13,6 +13,7 @@ use crate::{
     object_3d::Object3DState,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
+        modal::ModalDialog,
         HdrEnabled, SelectedObject,
         colors::{self, EColor},
         dashboard::{NodeUpdaterParams, spawn_dashboard},
@@ -43,30 +44,62 @@ pub struct LoadSchematicParams<'w, 's> {
     objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
 }
 
+// pub fn sync_schematic(
+//     config: Res<DbConfig>,
+//     mut params: LoadSchematicParams,
+//     live_reload_rx: ResMut<SchematicLiveReloadRx>,
+// ) -> Result<(), KdlSchematicError> {
+//     if !config.is_changed() {
+//         return Ok(());
+//     }
+//     if let Some(path) = config.schematic_path() {
+//         let path = Path::new(path);
+//         if path.try_exists().unwrap_or(false) {
+//             if let Err(e) = load_schematic_file(path, &mut params, live_reload_rx) {
+//                 bevy::log::error!(?e, "invalid schematic for {path:?}");
+//             } else {
+//                 return Ok(());
+//             }
+//         }
+//     }
+//     if let Some(content) = config.schematic_content() {
+//         let schematic = impeller2_wkt::Schematic::from_kdl(content)
+//             .inspect_err(|e| bevy::log::error!(?e, "invalid schematic content"))?;
+//         params.load_schematic(&schematic);
+//     }
+//     Ok(())
+// }
+
 pub fn sync_schematic(
     config: Res<DbConfig>,
     mut params: LoadSchematicParams,
     live_reload_rx: ResMut<SchematicLiveReloadRx>,
-) -> Result<(), KdlSchematicError> {
+    mut modal: ModalDialog,
+) {
     if !config.is_changed() {
-        return Ok(());
+        return;
     }
     if let Some(path) = config.schematic_path() {
         let path = Path::new(path);
         if path.try_exists().unwrap_or(false) {
             if let Err(e) = load_schematic_file(path, &mut params, live_reload_rx) {
+                modal.dialog_error("Invalid Schematic", &e);
                 bevy::log::error!(?e, "invalid schematic for {path:?}");
             } else {
-                return Ok(());
+                return;
             }
         }
     }
     if let Some(content) = config.schematic_content() {
-        let schematic = impeller2_wkt::Schematic::from_kdl(content)
-            .inspect_err(|e| bevy::log::error!(?e, "invalid schematic content"))?;
+        let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(content)
+            .inspect_err(|e| {
+                         modal.dialog_error("Invalid Schematic", &e);
+                         bevy::log::error!(?e, "invalid schematic content")
+            }) else {
+                return;
+            };
         params.load_schematic(&schematic);
     }
-    Ok(())
 }
 
 pub fn load_schematic_file(

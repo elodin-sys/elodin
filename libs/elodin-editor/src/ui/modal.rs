@@ -10,15 +10,15 @@ use bevy_egui::{EguiContexts, egui};
 use impeller2::types::ComponentId;
 use impeller2_bevy::{ComponentMetadataRegistry, ComponentPathRegistry};
 
-// Modal system for displaying dialogs and error messages.
+// Modal system for displaying dialogs and messages.
 // 
 // # Examples
 // 
-// ## Simple Error Dialog
+// ## Simple Message Dialog
 // ```rust
 // // In any system with access to ModalDialog
 // fn my_system(mut modal_dialog: ModalDialog) {
-//     modal_dialog.show_error("Error", "Something went wrong!");
+//     modal_dialog.show_message("Info", "Operation completed successfully!");
 // }
 // ```
 // 
@@ -104,11 +104,17 @@ pub struct ModalWithSettings<'w, 's> {
     setting_modal_state: Res<'w, SettingModalState>,
 }
 
-pub fn dialog_err<E: std::error::Error>(In(result): In<Result<(), E>>,
-                                        mut modal_dialog: ModalDialog) {
-    if let Err(e) = result {
-        bevy::log::warn!("Showing error dialog: {}", e);
-        modal_dialog.show_error("Error", format!("{}", e));
+pub mod action {
+    use super::*;
+
+    /// Any system producing a `Result` may pipe to this so that any errors produced
+    /// will show a dialog.
+    pub fn dialog_err<E: std::error::Error>(In(result): In<Result<(), E>>,
+                                            mut modal_dialog: ModalDialog) {
+        if let Err(e) = result {
+            bevy::log::warn!("Show error dialog: {}", e);
+            modal_dialog.show_message("Error", format!("{}", e));
+        }
     }
 }
 
@@ -438,9 +444,9 @@ impl WidgetSystem for ModalDialog<'_, '_> {
 }
 
 impl ModalDialog<'_, '_> {
-    /// Show a simple error dialog with just a close button
-    pub fn show_error(&mut self, title: impl Into<String>, message: impl Into<String>) {
-        let id = format!("error_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
+    /// Show a simple message dialog with just a close button
+    pub fn show_message(&mut self, title: impl Into<String>, message: impl Into<String>) {
+        let id = format!("message_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
         self.setting_modal_state.0 = Some(SettingModal::Dialog(Dialog {
             id,
             title: title.into(),
@@ -453,7 +459,22 @@ impl ModalDialog<'_, '_> {
     }
 
     /// Show a custom dialog with multiple buttons
-    pub fn show_dialog(&mut self, dialog: Dialog) {
+    pub fn show(&mut self, dialog: Dialog) {
         self.setting_modal_state.0 = Some(SettingModal::Dialog(dialog));
+    }
+
+    /// Any system producing a `Result` may pipe to this so that any errors produced
+    /// will show a dialog.
+    pub fn dialog_err<T, E: std::error::Error>(&mut self, title: impl Into<String>, result: Result<T, E>) -> Result<T,E> {
+        if let Err(e) = &result {
+            self.show_message(title, format!("{}", e));
+        }
+        result
+    }
+
+    /// Any system producing a `Result` may pipe to this so that any errors produced
+    /// will show a dialog.
+    pub fn dialog_error<E: std::error::Error>(&mut self, title: impl Into<String>, error: &E) {
+        self.show_message(title, format!("{}", error));
     }
 }
