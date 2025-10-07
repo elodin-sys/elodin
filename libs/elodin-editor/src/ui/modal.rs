@@ -3,7 +3,7 @@ use bevy::{
         system::{Local, Query, Res, ResMut, SystemParam, SystemState},
         world::World,
     },
-    prelude::{In, Children},
+    prelude::{Children, In},
     window::Window,
 };
 use bevy_egui::{EguiContexts, egui};
@@ -11,9 +11,9 @@ use impeller2::types::ComponentId;
 use impeller2_bevy::{ComponentMetadataRegistry, ComponentPathRegistry};
 
 // Modal system for displaying dialogs and messages.
-// 
+//
 // # Examples
-// 
+//
 // ## Simple Message Dialog
 // ```rust
 // // In any system with access to ModalDialog
@@ -21,11 +21,11 @@ use impeller2_bevy::{ComponentMetadataRegistry, ComponentPathRegistry};
 //     modal_dialog.show_message("Info", "Operation completed successfully!");
 // }
 // ```
-// 
+//
 // ## Custom Dialog with Multiple Buttons
 // ```rust
 // use crate::ui::{Dialog, DialogButton, DialogAction};
-// 
+//
 // fn my_system(mut modal_dialog: ModalDialog) {
 //     let dialog = Dialog {
 //         id: "confirm_delete".to_string(),
@@ -45,12 +45,12 @@ use impeller2_bevy::{ComponentMetadataRegistry, ComponentPathRegistry};
 //     modal_dialog.show_dialog(dialog);
 // }
 // ```
-// 
+//
 // ## Listening for Dialog Events
 // ```rust
 // use bevy::prelude::*;
 // use crate::ui::{DialogEvent, DialogAction};
-// 
+//
 // fn handle_dialog_events(mut dialog_events: EventReader<DialogEvent>) {
 //     for event in dialog_events.read() {
 //         match &event.action {
@@ -75,17 +75,17 @@ use impeller2_bevy::{ComponentMetadataRegistry, ComponentPathRegistry};
 //     }
 // }
 // ```
-// 
+//
 // ## Closing a Modal
 // ```rust
 // setting_modal_state.close();
 // ```
 
-use bevy::prelude::*;
 use crate::ui::{
-    EntityData, InspectorAnchor, SettingModal, SettingModalState, Dialog, DialogButton, DialogAction, DialogEvent,
-    colors::get_scheme, images, theme, utils::MarginSides,
+    Dialog, DialogAction, DialogButton, DialogEvent, EntityData, InspectorAnchor, SettingModal,
+    SettingModalState, colors::get_scheme, images, theme, utils::MarginSides,
 };
+use bevy::prelude::*;
 
 use super::{
     RootWidgetSystem, WidgetSystemExt,
@@ -109,15 +109,16 @@ pub mod action {
 
     /// Any system producing a `Result` may pipe to this so that any errors produced
     /// will show a dialog.
-    pub fn dialog_err<E: std::error::Error>(In(result): In<Result<(), E>>,
-                                            mut modal_dialog: ModalDialog) {
+    pub fn dialog_err<E: std::error::Error>(
+        In(result): In<Result<(), E>>,
+        mut modal_dialog: ModalDialog,
+    ) {
         if let Err(e) = result {
             bevy::log::warn!("Show error dialog: {}", e);
             modal_dialog.show_message("Error", format!("{}", e));
         }
     }
 }
-
 
 impl RootWidgetSystem for ModalWithSettings<'_, '_> {
     type Args = ();
@@ -234,7 +235,6 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
         let SettingModal::Graph(m_graph_id, m_component_id) = setting_modal else {
             return;
         };
-        
 
         // Reset modal if Graph was removed
         let Ok(_graph_state) = graph_states.get_mut(*m_graph_id) else {
@@ -310,9 +310,9 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
                 })
                 .collect();
 
-            let selected_component = available_components
-                .iter()
-                .find(|(component_id, _, _)| m_component_id.is_some_and(|cid| cid == **component_id));
+            let selected_component = available_components.iter().find(|(component_id, _, _)| {
+                m_component_id.is_some_and(|cid| cid == **component_id)
+            });
 
             let selected_component_label = selected_component
                 .map(|(_, _, metadata)| metadata.name.as_ref())
@@ -387,7 +387,7 @@ impl WidgetSystem for ModalDialog<'_, '_> {
             get_scheme().text_primary,
             title_margin,
         );
-        
+
         if close_clicked {
             state_mut.dialog_events.write(DialogEvent {
                 action: DialogAction::Close,
@@ -413,7 +413,7 @@ impl WidgetSystem for ModalDialog<'_, '_> {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 for (i, button) in dialog.buttons.iter().enumerate() {
                     let button_ui = ui.add(EButton::new(&button.text));
-                    
+
                     if button_ui.clicked() {
                         match &button.action {
                             DialogAction::Close => {
@@ -432,7 +432,7 @@ impl WidgetSystem for ModalDialog<'_, '_> {
                             }
                         }
                     }
-                    
+
                     // Add space between buttons (except after the last button)
                     if i < dialog.buttons.len() - 1 {
                         ui.add_space(8.0);
@@ -446,7 +446,13 @@ impl WidgetSystem for ModalDialog<'_, '_> {
 impl ModalDialog<'_, '_> {
     /// Show a simple message dialog with just a close button
     pub fn show_message(&mut self, title: impl Into<String>, message: impl Into<String>) {
-        let id = format!("message_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
+        let id = format!(
+            "message_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        );
         self.setting_modal_state.0 = Some(SettingModal::Dialog(Dialog {
             id,
             title: title.into(),
@@ -465,7 +471,11 @@ impl ModalDialog<'_, '_> {
 
     /// Any system producing a `Result` may pipe to this so that any errors produced
     /// will show a dialog.
-    pub fn dialog_err<T, E: std::error::Error>(&mut self, title: impl Into<String>, result: Result<T, E>) -> Result<T,E> {
+    pub fn dialog_err<T, E: std::error::Error>(
+        &mut self,
+        title: impl Into<String>,
+        result: Result<T, E>,
+    ) -> Result<T, E> {
         if let Err(e) = &result {
             self.show_message(title, format!("{}", e));
         }

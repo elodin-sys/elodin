@@ -13,10 +13,10 @@ use crate::{
     object_3d::Object3DState,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        modal::ModalDialog,
         HdrEnabled, SelectedObject,
         colors::{self, EColor},
         dashboard::{NodeUpdaterParams, spawn_dashboard},
+        modal::ModalDialog,
         monitor::MonitorPane,
         plot::GraphBundle,
         query_plot::QueryPlotData,
@@ -91,13 +91,12 @@ pub fn sync_schematic(
         }
     }
     if let Some(content) = config.schematic_content() {
-        let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(content)
-            .inspect_err(|e| {
-                         modal.dialog_error("Invalid Schematic", &e);
-                         bevy::log::error!(?e, "invalid schematic content")
-            }) else {
-                return;
-            };
+        let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(content).inspect_err(|e| {
+            modal.dialog_error("Invalid Schematic", &e);
+            bevy::log::error!(?e, "invalid schematic content")
+        }) else {
+            return;
+        };
         params.load_schematic(&schematic);
     }
 }

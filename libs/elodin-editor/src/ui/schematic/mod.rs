@@ -3,10 +3,11 @@ use std::collections::HashMap;
 use crate::{
     object_3d::Object3DState,
     ui::{
-        modal::action::dialog_err,
         actions,
         colors::EColor,
-        inspector, plot, query_plot, query_table,
+        inspector,
+        modal::action::dialog_err,
+        plot, query_plot, query_table,
         tiles::{self, Pane},
     },
 };
