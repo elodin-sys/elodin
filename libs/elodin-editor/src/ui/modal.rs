@@ -25,6 +25,7 @@ use impeller2_bevy::{ComponentMetadataRegistry, ComponentPathRegistry};
 // use crate::ui::{Dialog, DialogButton, DialogAction};
 // 
 // let dialog = Dialog {
+//     id: "confirm_delete".to_string(),
 //     title: "Confirm Action".to_string(),
 //     message: "Are you sure you want to delete this item?".to_string(),
 //     buttons: vec![
@@ -41,13 +42,44 @@ use impeller2_bevy::{ComponentMetadataRegistry, ComponentPathRegistry};
 // setting_modal_state.show_dialog(dialog);
 // ```
 // 
+// ## Listening for Dialog Events
+// ```rust
+// use bevy::prelude::*;
+// use crate::ui::{DialogEvent, DialogAction};
+// 
+// fn handle_dialog_events(mut dialog_events: EventReader<DialogEvent>) {
+//     for event in dialog_events.read() {
+//         match &event.action {
+//             DialogAction::Close => {
+//                 println!("Dialog '{}' was closed", event.id);
+//             }
+//             DialogAction::Custom(action_id) => {
+//                 println!("Custom action '{}' triggered for dialog '{}'", action_id, event.id);
+//                 match (event.id.as_str(), action_id.as_str()) {
+//                     ("confirm_delete", "delete") => {
+//                         // Handle delete confirmation
+//                     }
+//                     ("save_changes", "save") => {
+//                         // Handle save confirmation
+//                     }
+//                     _ => {
+//                         // Handle other combinations
+//                     }
+//                 }
+//             }
+//         }
+//     }
+// }
+// ```
+// 
 // ## Closing a Modal
 // ```rust
 // setting_modal_state.close();
 // ```
 
+use bevy::prelude::*;
 use crate::ui::{
-    EntityData, InspectorAnchor, SettingModal, SettingModalState, Dialog, DialogAction,
+    EntityData, InspectorAnchor, SettingModal, SettingModalState, Dialog, DialogAction, DialogEvent,
     colors::get_scheme, images, theme, utils::MarginSides,
 };
 
@@ -320,6 +352,7 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
 #[derive(SystemParam)]
 pub struct ModalDialog<'w, 's> {
     setting_modal_state: ResMut<'w, SettingModalState>,
+    dialog_events: EventWriter<'w, DialogEvent>,
     _phantom: std::marker::PhantomData<&'s ()>,
 }
 
@@ -346,6 +379,10 @@ impl WidgetSystem for ModalDialog<'_, '_> {
         );
         
         if close_clicked {
+            state_mut.dialog_events.write(DialogEvent {
+                action: DialogAction::Close,
+                id: dialog.id.clone(),
+            });
             state_mut.setting_modal_state.close();
             return;
         }
@@ -370,11 +407,17 @@ impl WidgetSystem for ModalDialog<'_, '_> {
                     if button_ui.clicked() {
                         match &button.action {
                             DialogAction::Close => {
+                                state_mut.dialog_events.write(DialogEvent {
+                                    action: DialogAction::Close,
+                                    id: dialog.id.clone(),
+                                });
                                 state_mut.setting_modal_state.close();
                             }
-                            DialogAction::Custom(_action_id) => {
-                                // TODO: Handle custom actions
-                                // For now, just close the dialog
+                            DialogAction::Custom(action_id) => {
+                                state_mut.dialog_events.write(DialogEvent {
+                                    action: DialogAction::Custom(action_id.clone()),
+                                    id: dialog.id.clone(),
+                                });
                                 state_mut.setting_modal_state.close();
                             }
                         }

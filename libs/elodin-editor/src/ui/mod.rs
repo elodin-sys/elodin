@@ -187,6 +187,7 @@ impl Plugin for UiPlugin {
             .init_resource::<HdrEnabled>()
             .init_resource::<timeline_slider::UITick>()
             .init_resource::<command_palette::CommandPaletteState>()
+            .add_event::<DialogEvent>()
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, shortcuts)
@@ -211,6 +212,7 @@ pub enum SettingModal {
 
 #[derive(Clone, Debug)]
 pub struct Dialog {
+    pub id: String,
     pub title: String,
     pub message: String,
     pub buttons: Vec<DialogButton>,
@@ -228,13 +230,21 @@ pub enum DialogAction {
     Custom(String), // Custom action identifier
 }
 
+#[derive(Clone, Debug, Event)]
+pub struct DialogEvent {
+    pub action: DialogAction,
+    pub id: String,
+}
+
 #[derive(Resource, Default, Clone, Debug)]
 pub struct SettingModalState(pub Option<SettingModal>);
 
 impl SettingModalState {
     /// Show a simple error dialog with just a close button
     pub fn show_error(&mut self, title: impl Into<String>, message: impl Into<String>) {
+        let id = format!("error_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
         self.0 = Some(SettingModal::Dialog(Dialog {
+            id,
             title: title.into(),
             message: message.into(),
             buttons: vec![DialogButton {
