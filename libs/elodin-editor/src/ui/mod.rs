@@ -206,10 +206,54 @@ impl Plugin for UiPlugin {
 pub enum SettingModal {
     Graph(Entity, Option<ComponentId>),
     GraphRename(Entity, String),
+    ErrorDialog(ErrorDialog),
+}
+
+#[derive(Clone, Debug)]
+pub struct ErrorDialog {
+    pub title: String,
+    pub message: String,
+    pub buttons: Vec<ErrorDialogButton>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ErrorDialogButton {
+    pub text: String,
+    pub action: ErrorDialogAction,
+}
+
+#[derive(Clone, Debug)]
+pub enum ErrorDialogAction {
+    Close,
+    Custom(String), // Custom action identifier
 }
 
 #[derive(Resource, Default, Clone, Debug)]
 pub struct SettingModalState(pub Option<SettingModal>);
+
+impl SettingModalState {
+    /// Show a simple error dialog with just a close button
+    pub fn show_error(&mut self, title: impl Into<String>, message: impl Into<String>) {
+        self.0 = Some(SettingModal::ErrorDialog(ErrorDialog {
+            title: title.into(),
+            message: message.into(),
+            buttons: vec![ErrorDialogButton {
+                text: "OK".to_string(),
+                action: ErrorDialogAction::Close,
+            }],
+        }));
+    }
+
+    /// Show a custom error dialog with multiple buttons
+    pub fn show_error_dialog(&mut self, dialog: ErrorDialog) {
+        self.0 = Some(SettingModal::ErrorDialog(dialog));
+    }
+
+    /// Close any open modal
+    pub fn close(&mut self) {
+        self.0 = None;
+    }
+}
 
 #[derive(Resource, Default)]
 pub struct FullscreenState(pub bool);

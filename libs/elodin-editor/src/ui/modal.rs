@@ -10,9 +10,45 @@ use bevy_egui::{EguiContexts, egui};
 use impeller2::types::ComponentId;
 use impeller2_bevy::{ComponentMetadataRegistry, ComponentPathRegistry};
 
+// Modal system for displaying dialogs and error messages.
+// 
+// # Examples
+// 
+// ## Simple Error Dialog
+// ```rust
+// // In any system with access to SettingModalState
+// setting_modal_state.show_error("Error", "Something went wrong!");
+// ```
+// 
+// ## Custom Error Dialog with Multiple Buttons
+// ```rust
+// use crate::ui::{ErrorDialog, ErrorDialogButton, ErrorDialogAction};
+// 
+// let dialog = ErrorDialog {
+//     title: "Confirm Action".to_string(),
+//     message: "Are you sure you want to delete this item?".to_string(),
+//     buttons: vec![
+//         ErrorDialogButton {
+//             text: "Cancel".to_string(),
+//             action: ErrorDialogAction::Close,
+//         },
+//         ErrorDialogButton {
+//             text: "Delete".to_string(),
+//             action: ErrorDialogAction::Custom("delete".to_string()),
+//         },
+//     ],
+// };
+// setting_modal_state.show_error_dialog(dialog);
+// ```
+// 
+// ## Closing a Modal
+// ```rust
+// setting_modal_state.close();
+// ```
+
 use crate::ui::{
-    EntityData, InspectorAnchor, SettingModal, SettingModalState, colors::get_scheme, images,
-    theme, utils::MarginSides,
+    EntityData, InspectorAnchor, SettingModal, SettingModalState, ErrorDialog, ErrorDialogAction,
+    colors::get_scheme, images, theme, utils::MarginSides,
 };
 
 use super::{
@@ -93,6 +129,13 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
                         }
                         SettingModal::GraphRename(_, _) => {
                             // TODO: Rename graph
+                        }
+                        SettingModal::ErrorDialog(dialog) => {
+                            ui.add_widget_with::<ModalErrorDialog>(
+                                world,
+                                "modal_error_dialog",
+                                (close_icon, dialog.clone()),
+                            );
                         }
                     }
                 });
@@ -262,5 +305,83 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
                 }
             }
         }
+    }
+}
+
+#[derive(SystemParam)]
+pub struct ModalErrorDialog<'w, 's> {
+    setting_modal_state: ResMut<'w, SettingModalState>,
+    _phantom: std::marker::PhantomData<&'s ()>,
+}
+
+impl WidgetSystem for ModalErrorDialog<'_, '_> {
+    type Args = (egui::TextureId, ErrorDialog);
+    type Output = ();
+
+    fn ui_system(
+        world: &mut World,
+        state: &mut SystemState<Self>,
+        ui: &mut egui::Ui,
+        args: <Self as WidgetSystem>::Args,
+    ) {
+        let mut state_mut = state.get_mut(world);
+        let (close_icon, dialog) = args;
+
+        let title_margin = egui::Margin::same(8).bottom(16.0);
+        let [close_clicked] = label::label_with_buttons(
+            ui,
+            [close_icon],
+            &dialog.title,
+            get_scheme().text_primary,
+            title_margin,
+        );
+        
+        if close_clicked {
+            state_mut.setting_modal_state.close();
+            return;
+        }
+
+        ui.add(egui::Separator::default().spacing(0.0));
+
+        // Display the error message
+        ui.add_space(16.0);
+        ui.add(
+            ELabel::new(&dialog.message)
+                .text_color(get_scheme().text_secondary)
+                .padding(egui::Margin::same(0).bottom(16.0)),
+        );
+
+        // Add buttons
+        ui.add_space(16.0);
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Debug: Print button count
+                println!("Error dialog has {} buttons", dialog.buttons.len());
+                
+                for (i, button) in dialog.buttons.iter().enumerate() {
+                    println!("Adding button {}: '{}'", i, button.text);
+                    let button_ui = ui.add(EButton::new(&button.text));
+                    
+                    if button_ui.clicked() {
+                        println!("Button '{}' clicked", button.text);
+                        match &button.action {
+                            ErrorDialogAction::Close => {
+                                state_mut.setting_modal_state.close();
+                            }
+                            ErrorDialogAction::Custom(_action_id) => {
+                                // TODO: Handle custom actions
+                                // For now, just close the dialog
+                                state_mut.setting_modal_state.close();
+                            }
+                        }
+                    }
+                    
+                    // Add space between buttons (except after the last button)
+                    // if i < dialog.buttons.len() - 1 {
+                    //     ui.add_space(8.0);
+                    // }
+                }
+            });
+        });
     }
 }
