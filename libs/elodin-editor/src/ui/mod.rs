@@ -42,6 +42,7 @@ pub mod hierarchy;
 pub mod images;
 pub mod inspector;
 pub mod label;
+pub mod modal;
 pub mod monitor;
 pub mod plot;
 pub mod plot_3d;
@@ -552,7 +553,7 @@ pub fn render_layout(world: &mut World) {
 
     world.add_root_widget::<ViewportOverlay>("viewport_overlay");
 
-    //world.add_root_widget::<ModalWithSettings>("modal_graph");
+    world.add_root_widget::<modal::ModalWithSettings>("modal_graph");
 
     world.add_root_widget::<CommandPalette>("command_palette");
 }

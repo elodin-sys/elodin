@@ -3,10 +3,12 @@ use bevy::{
         system::{Local, Query, Res, ResMut, SystemParam, SystemState},
         world::World,
     },
+    prelude::Children,
     window::Window,
 };
 use bevy_egui::{EguiContexts, egui};
-use impeller2_bevy::{ComponentMetadataRegistry, ComponentPath, ComponentPathRegistry};
+use impeller2::types::ComponentId;
+use impeller2_bevy::{ComponentMetadataRegistry, ComponentPathRegistry};
 
 use crate::ui::{
     EntityData, InspectorAnchor, SettingModal, SettingModalState, colors::get_scheme, images,
@@ -14,10 +16,11 @@ use crate::ui::{
 };
 
 use super::{
-    RootWidgetSystem, WidgetSystem, WidgetSystemExt,
+    RootWidgetSystem, WidgetSystemExt,
     button::EButton,
     label::{self, ELabel},
-    plot::{GraphState, default_component_values},
+    plot::GraphState,
+    widgets::WidgetSystem,
 };
 
 #[derive(SystemParam)]
@@ -104,6 +107,8 @@ pub struct ModalUpdateGraph<'w, 's> {
     metadata_store: Res<'w, ComponentMetadataRegistry>,
     path_reg: Res<'w, ComponentPathRegistry>,
     graph_states: Query<'w, 's, &'static mut GraphState>,
+    component_ids: Query<'w, 's, &'static ComponentId>,
+    children: Query<'w, 's, &'static Children>,
 }
 
 impl WidgetSystem for ModalUpdateGraph<'_, '_> {
@@ -114,7 +119,7 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
         world: &mut World,
         state: &mut SystemState<Self>,
         ui: &mut egui::Ui,
-        args: Self::Args,
+        args: <Self as WidgetSystem>::Args,
     ) {
         let state_mut = state.get_mut(world);
         let close_icon = args;
@@ -123,8 +128,10 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
             entities_meta,
             mut setting_modal_state,
             metadata_store,
-            path_reg,
+            path_reg: _path_reg,
             mut graph_states,
+            component_ids,
+            children,
         } = state_mut;
 
         let Some(setting_modal) = setting_modal_state.0.as_mut() else {
@@ -133,9 +140,10 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
         let SettingModal::Graph(m_graph_id, m_component_id) = setting_modal else {
             return;
         };
+        
 
         // Reset modal if Graph was removed
-        let Ok(mut graph_state) = graph_states.get_mut(*m_graph_id) else {
+        let Ok(_graph_state) = graph_states.get_mut(*m_graph_id) else {
             setting_modal_state.0 = None;
             return;
         };
@@ -163,7 +171,7 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
 
         let selected_entity = entities_meta
             .iter()
-            .find(|(entity_id, _, _, _)| m_entity_id.is_some_and(|eid| eid == **entity_id));
+            .find(|(entity_id, _, _, _)| m_component_id.is_some_and(|eid| eid == **entity_id));
 
         let selected_entity_label =
             selected_entity.map_or("NONE", |(_, _, _, metadata)| &metadata.name);
@@ -178,11 +186,11 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
                 .show_ui(ui, |ui| {
                     theme::configure_combo_item(ui.style_mut());
 
-                    ui.selectable_value(m_entity_id, None, "NONE");
+                    ui.selectable_value(m_component_id, None, "NONE");
 
                     for (entity_id, _, _, metadata) in entities_meta.iter() {
                         ui.selectable_value(
-                            m_entity_id,
+                            m_component_id,
                             Some(*entity_id),
                             metadata.name.to_string(),
                         );
@@ -190,21 +198,30 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
                 });
         });
 
-        if let Some((entity_id, _, components, _)) = selected_entity {
+        if let Some((_entity_id, bevy_entity, _, _)) = selected_entity {
             ui.add(
                 ELabel::new("COMPONENT")
                     .text_color(get_scheme().text_secondary)
                     .padding(egui::Margin::same(0).top(16.0).bottom(8.0)),
             );
 
-            let selected_component = components
-                .0
+            // Get available components for the selected entity
+            let available_components: Vec<_> = children
+                .iter_descendants(bevy_entity)
+                .chain(std::iter::once(bevy_entity))
+                .filter_map(|child| {
+                    let component_id = component_ids.get(child).ok()?;
+                    let metadata = metadata_store.get_metadata(component_id)?;
+                    Some((component_id, child, metadata))
+                })
+                .collect();
+
+            let selected_component = available_components
                 .iter()
-                .find(|(component_id, _)| m_component_id.is_some_and(|cid| cid == **component_id));
+                .find(|(component_id, _, _)| m_component_id.is_some_and(|cid| cid == **component_id));
 
             let selected_component_label = selected_component
-                .and_then(|(component_id, _)| metadata_store.get_metadata(component_id))
-                .map(|m| m.name.as_ref())
+                .map(|(_, _, metadata)| metadata.name.as_ref())
                 .unwrap_or_else(|| "NONE");
 
             ui.scope(|ui| {
@@ -217,25 +234,23 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
 
                         ui.selectable_value(m_component_id, None, "NONE");
 
-                        for (component_id, _) in components.0.iter() {
-                            let Some(metadata) = metadata_store.get_metadata(component_id) else {
-                                continue;
-                            };
+                        for (component_id, _, metadata) in &available_components {
                             ui.selectable_value(
                                 m_component_id,
-                                Some(*component_id),
+                                Some(**component_id),
                                 metadata.name.clone(),
                             );
                         }
                     });
             });
 
-            if let Some((component_id, component)) = selected_component {
+            if let Some((_component_id, _, _metadata)) = selected_component {
                 ui.add_space(16.0);
 
                 let add_component_btn = ui.add(EButton::green("ADD COMPONENT"));
 
                 if add_component_btn.clicked() {
+                    // TODO: Implement adding component to graph
                     // let values = default_component_values(entity_id, component_id, component);
                     // let component_path = path_reg
                     //     .get(component_id)
