@@ -355,15 +355,10 @@ impl WidgetSystem for ModalErrorDialog<'_, '_> {
         ui.add_space(16.0);
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Debug: Print button count
-                println!("Error dialog has {} buttons", dialog.buttons.len());
-                
                 for (i, button) in dialog.buttons.iter().enumerate() {
-                    println!("Adding button {}: '{}'", i, button.text);
                     let button_ui = ui.add(EButton::new(&button.text));
                     
                     if button_ui.clicked() {
-                        println!("Button '{}' clicked", button.text);
                         match &button.action {
                             ErrorDialogAction::Close => {
                                 state_mut.setting_modal_state.close();
@@ -377,9 +372,9 @@ impl WidgetSystem for ModalErrorDialog<'_, '_> {
                     }
                     
                     // Add space between buttons (except after the last button)
-                    // if i < dialog.buttons.len() - 1 {
-                    //     ui.add_space(8.0);
-                    // }
+                    if i < dialog.buttons.len() - 1 {
+                        ui.add_space(8.0);
+                    }
                 }
             });
         });

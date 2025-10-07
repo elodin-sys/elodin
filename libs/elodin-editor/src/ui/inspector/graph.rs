@@ -126,6 +126,17 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                 };
                 setting_modal_state.show_error_dialog(dialog);
             }
+            
+            ui.add_space(8.0);
+            
+            // Test: Multiple buttons in horizontal layout (should work now!)
+            let test_layout_btn = ui.add(EButton::new("Test Layout"));
+            if test_layout_btn.clicked() {
+                setting_modal_state.show_error(
+                    "Layout Test",
+                    "This dialog tests that multiple buttons work correctly in horizontal layout!"
+                );
+            }
         });
         
         ui.separator();
