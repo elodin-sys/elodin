@@ -20,25 +20,25 @@ use impeller2_bevy::{ComponentMetadataRegistry, ComponentPathRegistry};
 // setting_modal_state.show_error("Error", "Something went wrong!");
 // ```
 // 
-// ## Custom Error Dialog with Multiple Buttons
+// ## Custom Dialog with Multiple Buttons
 // ```rust
-// use crate::ui::{ErrorDialog, ErrorDialogButton, ErrorDialogAction};
+// use crate::ui::{Dialog, DialogButton, DialogAction};
 // 
-// let dialog = ErrorDialog {
+// let dialog = Dialog {
 //     title: "Confirm Action".to_string(),
 //     message: "Are you sure you want to delete this item?".to_string(),
 //     buttons: vec![
-//         ErrorDialogButton {
+//         DialogButton {
 //             text: "Cancel".to_string(),
-//             action: ErrorDialogAction::Close,
+//             action: DialogAction::Close,
 //         },
-//         ErrorDialogButton {
+//         DialogButton {
 //             text: "Delete".to_string(),
-//             action: ErrorDialogAction::Custom("delete".to_string()),
+//             action: DialogAction::Custom("delete".to_string()),
 //         },
 //     ],
 // };
-// setting_modal_state.show_error_dialog(dialog);
+// setting_modal_state.show_dialog(dialog);
 // ```
 // 
 // ## Closing a Modal
@@ -47,7 +47,7 @@ use impeller2_bevy::{ComponentMetadataRegistry, ComponentPathRegistry};
 // ```
 
 use crate::ui::{
-    EntityData, InspectorAnchor, SettingModal, SettingModalState, ErrorDialog, ErrorDialogAction,
+    EntityData, InspectorAnchor, SettingModal, SettingModalState, Dialog, DialogAction,
     colors::get_scheme, images, theme, utils::MarginSides,
 };
 
@@ -139,10 +139,10 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
                         SettingModal::GraphRename(_, _) => {
                             // TODO: Rename graph
                         }
-                        SettingModal::ErrorDialog(dialog) => {
-                            ui.add_widget_with::<ModalErrorDialog>(
+                        SettingModal::Dialog(dialog) => {
+                            ui.add_widget_with::<ModalDialog>(
                                 world,
-                                "modal_error_dialog",
+                                "modal_dialog",
                                 (close_icon, dialog.clone()),
                             );
                         }
@@ -318,13 +318,13 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
 }
 
 #[derive(SystemParam)]
-pub struct ModalErrorDialog<'w, 's> {
+pub struct ModalDialog<'w, 's> {
     setting_modal_state: ResMut<'w, SettingModalState>,
     _phantom: std::marker::PhantomData<&'s ()>,
 }
 
-impl WidgetSystem for ModalErrorDialog<'_, '_> {
-    type Args = (egui::TextureId, ErrorDialog);
+impl WidgetSystem for ModalDialog<'_, '_> {
+    type Args = (egui::TextureId, Dialog);
     type Output = ();
 
     fn ui_system(
@@ -369,10 +369,10 @@ impl WidgetSystem for ModalErrorDialog<'_, '_> {
                     
                     if button_ui.clicked() {
                         match &button.action {
-                            ErrorDialogAction::Close => {
+                            DialogAction::Close => {
                                 state_mut.setting_modal_state.close();
                             }
-                            ErrorDialogAction::Custom(_action_id) => {
+                            DialogAction::Custom(_action_id) => {
                                 // TODO: Handle custom actions
                                 // For now, just close the dialog
                                 state_mut.setting_modal_state.close();
