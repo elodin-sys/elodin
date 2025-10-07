@@ -47,9 +47,9 @@ pub fn sync_schematic(
     config: Res<DbConfig>,
     mut params: LoadSchematicParams,
     live_reload_rx: ResMut<SchematicLiveReloadRx>,
-) {
+) -> Result<(), KdlSchematicError> {
     if !config.is_changed() {
-        return;
+        return Ok(());
     }
     if let Some(path) = config.schematic_path() {
         let path = Path::new(path);
@@ -57,17 +57,16 @@ pub fn sync_schematic(
             if let Err(e) = load_schematic_file(path, &mut params, live_reload_rx) {
                 bevy::log::error!(?e, "invalid schematic for {path:?}");
             } else {
-                return;
+                return Ok(());
             }
         }
     }
     if let Some(content) = config.schematic_content() {
-        let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(content)
-            .inspect_err(|e| bevy::log::error!(?e, "invalid schematic content")) else {
-                return;
-            };
+        let schematic = impeller2_wkt::Schematic::from_kdl(content)
+            .inspect_err(|e| bevy::log::error!(?e, "invalid schematic content"))?;
         params.load_schematic(&schematic);
     }
+    Ok(())
 }
 
 pub fn load_schematic_file(

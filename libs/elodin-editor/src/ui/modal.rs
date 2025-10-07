@@ -3,7 +3,7 @@ use bevy::{
         system::{Local, Query, Res, ResMut, SystemParam, SystemState},
         world::World,
     },
-    prelude::Children,
+    prelude::{In, Children},
     window::Window,
 };
 use bevy_egui::{EguiContexts, egui};
@@ -67,6 +67,15 @@ pub struct ModalWithSettings<'w, 's> {
     inspector_anchor: Res<'w, InspectorAnchor>,
     setting_modal_state: Res<'w, SettingModalState>,
 }
+
+pub fn dialog_err<E: std::error::Error>(In(result): In<Result<(), E>>,
+                                        mut setting_modal_state: ResMut<SettingModalState>) {
+    if let Err(e) = result {
+        bevy::log::warn!("Showing error dialog: {}", e);
+        setting_modal_state.show_error("Error", format!("{}", e));
+    }
+}
+
 
 impl RootWidgetSystem for ModalWithSettings<'_, '_> {
     type Args = ();

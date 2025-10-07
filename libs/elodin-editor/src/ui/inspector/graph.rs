@@ -91,55 +91,6 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
 
         ui.separator();
         
-        // Example: Test error dialog buttons
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            let test_error_btn = ui.add(EButton::new("Simple Error"));
-            // let test_error_btn = ui.button("simple error");
-            if test_error_btn.clicked() {
-                setting_modal_state.show_error(
-                    "Test Error",
-                    "This is a simple error dialog with just an OK button!"
-                );
-            }
-            
-            // ui.add_space(8.0);
-            
-            let test_custom_btn = ui.add(EButton::new("Custom Dialog"));
-            // let test_custom_btn = ui.button("Custom Dialog");
-            if test_custom_btn.clicked() {
-                use crate::ui::{ErrorDialog, ErrorDialogButton, ErrorDialogAction};
-                
-                let dialog = ErrorDialog {
-                    title: "Confirm Action".to_string(),
-                    message: "Are you sure you want to perform this action? This cannot be undone.".to_string(),
-                    buttons: vec![
-                        ErrorDialogButton {
-                            text: "Cancel".to_string(),
-                            action: ErrorDialogAction::Close,
-                        },
-                        ErrorDialogButton {
-                            text: "Confirm".to_string(),
-                            action: ErrorDialogAction::Custom("confirm".to_string()),
-                        },
-                    ],
-                };
-                setting_modal_state.show_error_dialog(dialog);
-            }
-            
-            ui.add_space(8.0);
-            
-            // Test: Multiple buttons in horizontal layout (should work now!)
-            let test_layout_btn = ui.add(EButton::new("Test Layout"));
-            if test_layout_btn.clicked() {
-                setting_modal_state.show_error(
-                    "Layout Test",
-                    "This dialog tests that multiple buttons work correctly in horizontal layout!"
-                );
-            }
-        });
-        
-        ui.separator();
         egui::Frame::NONE
             .inner_margin(egui::Margin::symmetric(0, 8))
             .show(ui, |ui| {
