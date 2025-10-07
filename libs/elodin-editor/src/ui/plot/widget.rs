@@ -136,7 +136,7 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             &mut graph_state,
             &scrub_icon,
             id,
-            &mut *selected_object,
+            selected_object.as_mut(),
             &mut time_range_behavior,
         );
     }

@@ -1313,40 +1313,31 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     TreeAction::SelectTile(tile_id) => {
                         ui_state.tree.make_active(|id, _| id == tile_id);
 
-                        if let Some(tile) = ui_state.tree.tiles.get(tile_id) {
-                            if let egui_tiles::Tile::Pane(pane) = tile {
-                                match pane {
-                                    Pane::Graph(graph) => {
-                                        *state_mut.selected_object =
-                                            SelectedObject::Graph { graph_id: graph.id };
-                                        if !ui_state.has_inspector()
-                                            && !ui_state.inspector_pending()
-                                        {
-                                            ui_state
-                                                .tree_actions
-                                                .push(TreeAction::AddInspector(None));
-                                        }
+                        if let Some(egui_tiles::Tile::Pane(pane)) = ui_state.tree.tiles.get(tile_id)
+                        {
+                            match pane {
+                                Pane::Graph(graph) => {
+                                    *state_mut.selected_object =
+                                        SelectedObject::Graph { graph_id: graph.id };
+                                    if !ui_state.has_inspector() && !ui_state.inspector_pending() {
+                                        ui_state.tree_actions.push(TreeAction::AddInspector(None));
                                     }
-                                    Pane::QueryPlot(plot) => {
-                                        *state_mut.selected_object = SelectedObject::Graph {
-                                            graph_id: plot.entity,
-                                        };
-                                        if !ui_state.has_inspector()
-                                            && !ui_state.inspector_pending()
-                                        {
-                                            ui_state
-                                                .tree_actions
-                                                .push(TreeAction::AddInspector(None));
-                                        }
-                                    }
-                                    Pane::Viewport(viewport) => {
-                                        if let Some(camera) = viewport.camera {
-                                            *state_mut.selected_object =
-                                                SelectedObject::Viewport { camera };
-                                        }
-                                    }
-                                    _ => {}
                                 }
+                                Pane::QueryPlot(plot) => {
+                                    *state_mut.selected_object = SelectedObject::Graph {
+                                        graph_id: plot.entity,
+                                    };
+                                    if !ui_state.has_inspector() && !ui_state.inspector_pending() {
+                                        ui_state.tree_actions.push(TreeAction::AddInspector(None));
+                                    }
+                                }
+                                Pane::Viewport(viewport) => {
+                                    if let Some(camera) = viewport.camera {
+                                        *state_mut.selected_object =
+                                            SelectedObject::Viewport { camera };
+                                    }
+                                }
+                                _ => {}
                             }
                         }
                     }
