@@ -40,7 +40,7 @@ use crate::{
             CurrentSchematic, LoadSchematicParams, SchematicLiveReloadRx, load_schematic_file,
         },
         tiles::{self, TileState},
-        timeline::timeline_slider::UITick,
+        timeline::{StreamTickOrigin, timeline_slider::UITick},
     },
 };
 
@@ -619,6 +619,7 @@ fn goto_tick() -> PaletteItem {
                       stream_id: Res<CurrentStreamId>,
                       packet_tx: Res<PacketTx>,
                       earliest_timestamp: Res<EarliestTimestamp>,
+                      mut tick_origin: ResMut<StreamTickOrigin>,
                       tick_time: Res<SimulationTimeStep>| {
                     let trimmed = tick_str.trim();
                     if trimmed.is_empty() {
@@ -634,7 +635,7 @@ fn goto_tick() -> PaletteItem {
                         ));
                     };
 
-                    if parsed_tick > i64::MAX as u64 {
+                    if parsed_tick >= i64::MAX as u64 {
                         return PaletteEvent::Error("Tick value is too large".to_string());
                     }
 
@@ -656,7 +657,7 @@ fn goto_tick() -> PaletteItem {
                         );
                     };
 
-                    let base_timestamp = earliest_timestamp.0.0;
+                    let base_timestamp = tick_origin.origin(earliest_timestamp.0).0;
                     let Some(target_us) = base_timestamp.checked_add(offset_us) else {
                         return PaletteEvent::Error(
                             "Computed timestamp is out of range".to_string(),
@@ -667,6 +668,9 @@ fn goto_tick() -> PaletteItem {
                     paused.0 = true;
                     current_tick.0 = timestamp;
                     ui_tick.0 = timestamp.0;
+                    if parsed_tick == 0 {
+                        tick_origin.request_rebase();
+                    }
                     packet_tx.send_msg(SetStreamState::rewind(**stream_id, timestamp));
 
                     PaletteEvent::Exit

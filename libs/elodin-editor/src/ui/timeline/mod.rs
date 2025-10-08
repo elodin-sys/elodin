@@ -3,7 +3,7 @@ use bevy::ecs::{
     world::World,
 };
 use bevy_egui::{EguiContexts, egui};
-use impeller2_wkt::SimulationTimeStep;
+use impeller2_wkt::{SimulationTimeStep, StreamId};
 use timeline_controls::TimelineControls;
 
 use std::ops::RangeInclusive;
@@ -18,6 +18,53 @@ use super::widgets::{WidgetSystem, WidgetSystemExt};
 
 pub mod timeline_controls;
 pub mod timeline_slider;
+
+#[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug)]
+pub struct StreamTickOrigin {
+    stream_id: Option<StreamId>,
+    timestamp: Option<impeller2::types::Timestamp>,
+    pending_rebase: bool,
+}
+
+impl StreamTickOrigin {
+    pub fn observe_stream(&mut self, stream_id: StreamId) {
+        if self.stream_id != Some(stream_id) {
+            self.stream_id = Some(stream_id);
+            self.timestamp = None;
+            self.pending_rebase = false;
+        }
+    }
+
+    pub fn request_rebase(&mut self) {
+        self.pending_rebase = true;
+    }
+
+    pub fn observe_tick(
+        &mut self,
+        tick: impeller2::types::Timestamp,
+        earliest: impeller2::types::Timestamp,
+    ) {
+        if tick < earliest {
+            return;
+        }
+
+        if self.pending_rebase {
+            self.timestamp = Some(match self.timestamp {
+                Some(origin) => origin.min(tick),
+                None => tick,
+            });
+            self.pending_rebase = false;
+        } else if let Some(origin) = self.timestamp {
+            if tick < origin {
+                self.timestamp = Some(tick);
+            }
+        }
+    }
+
+    pub fn origin(&self, fallback: impeller2::types::Timestamp) -> impeller2::types::Timestamp {
+        self.timestamp.unwrap_or(fallback)
+    }
+}
 
 #[derive(Clone)]
 pub struct TimelineArgs {
