@@ -33,6 +33,15 @@ impl Color {
     pub const BLACK: Self = Self::rgb(0., 0., 0.);
     pub const WHITE: Self = Self::rgb(1., 1., 1.);
 
+    pub const BLUE: Self = Self::rgb(0., 0., 1.);
+    pub const ORANGE: Self = Self::rgb(1., 0.5, 0.);
+    pub const YELLOW: Self = Self::rgb(1., 1., 0.);
+    pub const CYAN: Self = Self::rgb(0., 1., 1.);
+    pub const GRAY: Self = Self::rgb(0.5, 0.5, 0.5);
+    pub const GREEN: Self = Self::rgb(0., 1., 0.);
+    pub const PINK: Self = Self::rgb(1., 0.752_941_2, 0.796_078_44);
+    pub const YALK: Self = Self::rgb(1., 0.9, 0.2);
+
     pub const TURQUOISE: Self = Self::rgb(0.41, 0.7, 0.75);
     pub const SLATE: Self = Self::rgb(0.5, 0.44, 1.);
     pub const PUMPKIN: Self = Self::rgb(1.0, 0.44, 0.12);

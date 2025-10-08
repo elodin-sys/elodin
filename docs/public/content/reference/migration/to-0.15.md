@@ -25,7 +25,7 @@ The ball example had the following code from v0.14.2:
 
 ```python
 ball_mesh = world.insert_asset(el.Mesh.sphere(BALL_RADIUS))
-ball_color = world.insert_asset(el.Material.color(12.7, 9.2, 0.5))
+ball_color = world.insert_asset(el.Material.color(0.1, 0.2, 1.0))
 world.spawn(
     [
         el.Body(world_pos=el.SpatialTransform(linear=jnp.array([0.0, 0.0, 6.0]))),
@@ -38,7 +38,7 @@ world.spawn(
 We can remove the asset handling.
 ```diff
 -ball_mesh = world.insert_asset(el.Mesh.sphere(BALL_RADIUS))
--ball_color = world.insert_asset(el.Material.color(12.7, 9.2, 0.5))
+-ball_color = world.insert_asset(el.Material.color(0.1, 0.2, 1.0))
 world.spawn(
     [
         el.Body(world_pos=el.SpatialTransform(linear=jnp.array([0.0, 0.0, 6.0]))),
@@ -74,7 +74,7 @@ All the preceding information can now be specified via schematics.
         }
         object_3d ball.world_pos {
             sphere radius=0.2 {
-                color 12.7 9.2 0.5
+                color 25 50 255
             }
         }
         line_3d ball.world_pos line_width=2.0 {
@@ -87,15 +87,15 @@ The old code is python, and the new code is specified in a [KDL](https://docs.rs
 
 
 ### `el.Material.color` to `color`
-A color can be specified by its red, green, blue, and optionally its alpha components. 
+A color can be specified by its red, green, blue, and optionally its alpha components as an integer from 0 to 255.
 
 OLD
 ```python
-el.Material.color(12.7, 9.2, 0.5))
+el.Material.color(0.1, 0.2, 1.0))
 ```
 NEW
 ```python
-color 12.7 9.2 0.5 
+color 25 50 255
 ```
 
 It can also be specified by a few names:
@@ -210,14 +210,14 @@ line_3d ball.world_pos line_width=2.0 perspective=#true {
 OLD
 ```python
 ball_mesh = world.insert_asset(el.Mesh.sphere(0.2))
-ball_color = world.insert_asset(el.Material.color(12.7, 9.2, 0.5))
+ball_color = world.insert_asset(el.Material.color(0.1, 0.2, 1.0))
 ball_shape = el.Shape(ball_mesh, ball_color)
 ```
 NEW
 ```kdl
 object_3d ball.world_pos {
     sphere radius=0.2 {
-        color 12.7 9.2 0.5 // red green blue [alpha]
+        color 25 50 255 // red green blue [alpha]
     }
 }
 ```

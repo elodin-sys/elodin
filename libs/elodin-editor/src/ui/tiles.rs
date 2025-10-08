@@ -93,6 +93,19 @@ pub struct DashboardPane {
 }
 
 impl TileState {
+    pub fn has_inspector(&self) -> bool {
+        self.tree
+            .tiles
+            .iter()
+            .any(|(_, tile)| matches!(tile, Tile::Pane(Pane::Inspector)))
+    }
+
+    pub fn inspector_pending(&self) -> bool {
+        self.tree_actions
+            .iter()
+            .any(|action| matches!(action, TreeAction::AddInspector(_)))
+    }
+
     pub fn insert_tile(
         &mut self,
         tile: Tile<Pane>,
@@ -1299,6 +1312,34 @@ impl WidgetSystem for TileLayout<'_, '_> {
 
                     TreeAction::SelectTile(tile_id) => {
                         ui_state.tree.make_active(|id, _| id == tile_id);
+
+                        if let Some(egui_tiles::Tile::Pane(pane)) = ui_state.tree.tiles.get(tile_id)
+                        {
+                            match pane {
+                                Pane::Graph(graph) => {
+                                    *state_mut.selected_object =
+                                        SelectedObject::Graph { graph_id: graph.id };
+                                    if !ui_state.has_inspector() && !ui_state.inspector_pending() {
+                                        ui_state.tree_actions.push(TreeAction::AddInspector(None));
+                                    }
+                                }
+                                Pane::QueryPlot(plot) => {
+                                    *state_mut.selected_object = SelectedObject::Graph {
+                                        graph_id: plot.entity,
+                                    };
+                                    if !ui_state.has_inspector() && !ui_state.inspector_pending() {
+                                        ui_state.tree_actions.push(TreeAction::AddInspector(None));
+                                    }
+                                }
+                                Pane::Viewport(viewport) => {
+                                    if let Some(camera) = viewport.camera {
+                                        *state_mut.selected_object =
+                                            SelectedObject::Viewport { camera };
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
                     }
                     TreeAction::AddActionTile(parent_tile_id, button_name, lua_code) => {
                         let entity = state_mut
