@@ -24,19 +24,21 @@ This monorepo contains the source code for all Elodin simulation and flight soft
 
 ## Dependencies
 
-Install [Determinate Systems Nix](https://determinate.systems/nix-installer/) which will give you exactly the same development environment that we are using. Once installed, then you can do 
+Install [Determinate Systems Nix](https://determinate.systems/nix-installer/) which will give you exactly the same development environment that we are using. Once installed, then you can set up a development environment with all the requisite packages by running  
 
-```
+```sh
 nix develop .#rust
 cargo ...
 ```
 
 or, for Python, 
 
-```
+```sh
 nix develop .#python 
 python ...
 ```
+
+Note that the former will also give you the Python binary and packages. 
 
 ### Build & Install Elodin & Elodin DB
 ```sh
@@ -45,7 +47,16 @@ just install
 
 #### Elodin App & SDK Development
 (See [apps/elodin/README.md](apps/elodin/README.md))
-``` sh
+
+If you are using Nix and don't want to install the editor binary then run 
+
+```sh
+nix run .#elodin-cli editor libs/nox-py/examples/three-body.py
+```
+
+or
+
+```sh
 nix develop .#python 
 
 cd libs/nox-py
