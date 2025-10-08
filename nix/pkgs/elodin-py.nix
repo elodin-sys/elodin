@@ -4,6 +4,8 @@
   crane,
   rustToolchain,
   system,
+  python,
+  pythonPackages,
   ...
 }: let
   xla_ext = pkgs.callPackage ./xla-ext.nix {inherit system;};
@@ -22,12 +24,12 @@
       else stdenv.hostPlatform.ubootArch
     else builtins.elemAt (lib.strings.splitString "-" system) 0;
 
-  commonArgs = {
+  commonArgs = with pkgs; {
     inherit pname version;
     inherit src;
     doCheck = false;
 
-    nativeBuildInputs = with pkgs;
+    nativeBuildInputs =
       [maturin]
       ++ lib.optionals stdenv.isLinux [
         autoPatchelfHook
@@ -37,16 +39,16 @@
         fixDarwinDylibNames
         darwin.cctools
       ];
-    buildInputs = with pkgs;
+    buildInputs =
       [
         pkg-config
-        python3
         openssl
         cmake
         gfortran
         gfortran.cc.lib
         xla_ext
       ]
+      ++ [python]
       ++ lib.optionals stdenv.isDarwin [pkgs.libiconv];
 
     cargoExtraArgs = "--package=nox-py";
@@ -175,7 +177,7 @@
       );
       pythonImportsCheck = [wheelName];
     };
-  py = elodin pkgs.python3Packages;
+  py = elodin pythonPackages;
 in {
-  inherit py clippy;
+  inherit py clippy python pythonPackages;
 }

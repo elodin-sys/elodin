@@ -3,12 +3,17 @@
   crane,
   rustToolchain,
   lib,
+  elodinPy,
+  python,
+  pythonPackages,
   ...
 }: let
   craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
   pname = (craneLib.crateNameFromCargoToml {cargoToml = ../../apps/elodin/Cargo.toml;}).pname;
   version = (craneLib.crateNameFromCargoToml {cargoToml = ../../Cargo.toml;}).version;
   src = pkgs.nix-gitignore.gitignoreSource [] ../../.;
+  pythonPath = pythonPackages.makePythonPath [elodinPy];
+  pythonMajorMinor = lib.versions.majorMinor python.version;
 
   propagatedBuildInputs = with pkgs; [
     libGL
@@ -18,29 +23,28 @@
     mesa
   ];
 
-  commonArgs = {
+  commonArgs = with pkgs; {
     inherit pname version src propagatedBuildInputs;
     doCheck = false;
     cargoExtraArgs = "--package=${pname}";
-    buildInputs = with pkgs;
+    buildInputs =
       [
         pkg-config
-        python3
         cmake
         gfortran
-        libGL
+        python
       ]
-      ++ lib.optionals pkgs.stdenv.isLinux [
+      ++ lib.optionals stdenv.isLinux [
         alsa-lib
         alsa-lib.dev
         udev
+        libGL
       ];
 
-    nativeBuildInputs = with pkgs;
-      lib.optionals pkgs.stdenv.isLinux [
-        pkg-config
-        makeWrapper
-      ];
+    nativeBuildInputs = with pkgs; [
+      makeWrapper
+      pkg-config
+    ];
 
     # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
     # GCC 14 treats -Wincompatible-pointer-types as error by default
@@ -66,11 +70,17 @@
         inherit cargoArtifacts;
         doCheck = false;
       }
-      // lib.optionalAttrs stdenv.isLinux {
-        postInstall = ''
-          wrapProgram $out/bin/elodin \
+      // {
+        postInstall =
+          ''
+            wrapProgram $out/bin/elodin \
+              --prefix PATH : "${python}/bin" \
+              --prefix PYTHONPATH : "${pythonPath}" \
+              --prefix PYTHONPATH : "${python}/lib/python${pythonMajorMinor}" \
+          ''
+          + lib.optionalAttrs stdenv.isLinux ''
             --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath propagatedBuildInputs}
-        '';
+          '';
         CARGO_PROFILE = "dev";
         CARGO_PROFILE_RELEASE_DEBUG = true;
         LD_LIBRARY_PATH = lib.makeLibraryPath propagatedBuildInputs;

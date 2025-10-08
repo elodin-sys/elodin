@@ -25,10 +25,19 @@
   }: let
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
     elodinOverlay = final: prev: {
-      elodin = {
+      elodin = rec {
         memserve = final.callPackage ./nix/pkgs/memserve.nix {inherit crane rustToolchain;};
-        elodin-cli = final.callPackage ./nix/pkgs/elodin-cli.nix {inherit crane rustToolchain;};
-        elodin-py = final.callPackage ./nix/pkgs/elodin-py.nix {inherit crane rustToolchain;};
+        elodin-py = final.callPackage ./nix/pkgs/elodin-py.nix {
+          inherit crane rustToolchain;
+          python = final.python312Full;
+          pythonPackages = final.python312Packages;
+        };
+        elodin-cli = final.callPackage ./nix/pkgs/elodin-cli.nix {
+          inherit crane rustToolchain;
+          elodinPy = elodin-py.py;
+          python = elodin-py.python;
+          pythonPackages = elodin-py.pythonPackages;
+        };
         elodin-db = final.callPackage ./images/aleph/pkgs/elodin-db.nix {inherit crane rustToolchain;};
         # sensor-fw = final.callPackage ./nix/pkgs/sensor-fw.nix {inherit crane rustToolchain;};
       };
