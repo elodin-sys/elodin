@@ -39,7 +39,7 @@ just install
 #### Elodin App & SDK Development
 (See [apps/elodin/README.md](apps/elodin/README.md))
 ``` sh
-brew install gstreamer python gfortran openblas uv
+brew install gstreamer python gfortran openblas uv git-lfs
 
 cd libs/nox-py
 uv venv --python 3.12
