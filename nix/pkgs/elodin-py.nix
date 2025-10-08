@@ -123,7 +123,7 @@
                 then "sha256-Hxr6X9WKYPZ/DKWG4mcUrs5i6qLIM0wk0OgoWvxKfM0="
                 else if system == "aarch64-linux"
                 then "sha256-TYZ6GgVlsxz9qrvsgeAwLGRhuyrEuSwEZwMo15WBmAM="
-                else "sha256-aPzyiJWkqonYjRhVkgfXo1KLsi287BMWFgXJvJL2Kh4="; # macosx_11_0_arm64
+                else "sha256-yficGFKH5A7oFzpxQtZJUxHncs0TmpPcqT8NmcGHKDI="; # macosx_11_0_arm64
             };
         });
         jaxlib-bin = self.jaxlib; # Make jaxlib-bin point to our overridden jaxlib
