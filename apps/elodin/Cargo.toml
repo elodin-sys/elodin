@@ -23,14 +23,11 @@ serde_json = "1.0.113"
 toml.version = "0.8"
 postcard = "1"
 
-ignore = "0.4"
-tar = "0.4.40"
 tokio = { version = "1.35.1", features = ["full"] }
 tonic = { version = "0.12", features = ["tls", "tls-webpki-roots"] }
 stellarator.path = "../../libs/stellarator"
 uuid = "1.7.0"
 directories = "5.0.1"
-zstd = "0.13.0"
 bevy.version = "0.16"
 tracing-subscriber = { version = "0.3", features = ["chrono"] }
 
@@ -45,12 +42,6 @@ ring = "0.17"
 machine-uid = "0.5.1"
 
 s10.path = "../../libs/s10"
-
-[build-dependencies]
-anyhow = "1.0.79"
-ignore = "0.4"
-tar = "0.4.40"
-zstd = "0.13.0"
 
 [package.metadata.deb]
 maintainer = "info@elodin.systems"
