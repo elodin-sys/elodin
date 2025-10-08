@@ -17,7 +17,7 @@ fn main() {
     // size 133872
     // ```
     // let path = Path::new("test_lfs_pointer.txt");
-    check_lfs(&path);
+    check_lfs(path);
 }
 
 fn check_lfs(path: &Path) {
