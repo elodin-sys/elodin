@@ -202,45 +202,15 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
     }
 }
 
-fn parse_scale_literal(scale: &str) -> Option<CompiledExpr> {
-    let trimmed = scale.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let inner = trimmed.trim_start_matches('(').trim_end_matches(')');
-
-    let mut values = Vec::new();
-    for part in inner.split(|c: char| c == ',' || c.is_whitespace()) {
-        let trimmed = part.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if let Ok(value) = trimmed.parse::<f64>() {
-            values.push(value);
-        } else {
-            return None;
-        }
-    }
-
-    if values.len() != 3 {
-        return None;
-    }
-
-    let array = Array::from_shape_vec(smallvec![3], values)?;
-    Some(CompiledExpr::Value(ComponentValue::F64(array)))
-}
-
-pub fn compile_scale_expression(scale: &str, ctx: &eql::Context) -> Result<CompiledExpr, String> {
+pub fn compile_scale_eql(scale: &str, ctx: &eql::Context) -> Result<CompiledExpr, String> {
     let trimmed = scale.trim();
     if trimmed.is_empty() {
         return Err("scale expression cannot be empty".to_string());
     }
 
-    match ctx.parse_str(trimmed) {
-        Ok(expr) => Ok(compile_eql_expr(expr)),
-        Err(parse_error) => parse_scale_literal(trimmed).ok_or_else(|| parse_error.to_string()),
-    }
+    ctx.parse_str(trimmed)
+        .map(compile_eql_expr)
+        .map_err(|err| err.to_string())
 }
 
 const ELLIPSOID_OVERSIZED_THRESHOLD: f32 = 10_000.0;
@@ -396,7 +366,7 @@ pub fn create_object_3d_entity(
 ) -> Entity {
     let (scale_expr, scale_error) = match &data.mesh {
         impeller2_wkt::Object3DMesh::Ellipsoid { scale, .. } => {
-            match compile_scale_expression(scale, ctx) {
+            match compile_scale_eql(scale, ctx) {
                 Ok(expr) => (Some(expr), None),
                 Err(err) => (None, Some(err)),
             }

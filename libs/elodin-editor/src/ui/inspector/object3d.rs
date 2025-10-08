@@ -13,7 +13,7 @@ use impeller2_wkt::{
 };
 use smallvec::SmallVec;
 
-use crate::object_3d::{EllipsoidVisual, compile_scale_expression, spawn_mesh};
+use crate::object_3d::{EllipsoidVisual, compile_scale_eql, spawn_mesh};
 use crate::ui::inspector::{eql_textfield, node_color_picker};
 use crate::{
     object_3d::Object3DState,
@@ -205,7 +205,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                             scale: default_scale.clone(),
                             color: impeller2_wkt::Color::WHITE,
                         };
-                        match compile_scale_expression(&default_scale, &eql_context.0) {
+                        match compile_scale_eql(&default_scale, &eql_context.0) {
                             Ok(expr) => {
                                 object_3d_state.scale_expr = Some(expr);
                                 object_3d_state.scale_error = None;
@@ -317,7 +317,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                             object_3d_state.scale_expr = None;
                             object_3d_state.scale_error = None;
                         } else {
-                            match compile_scale_expression(scale, &eql_context.0) {
+                            match compile_scale_eql(scale, &eql_context.0) {
                                 Ok(expr) => {
                                     object_3d_state.scale_expr = Some(expr);
                                     object_3d_state.scale_error = None;
