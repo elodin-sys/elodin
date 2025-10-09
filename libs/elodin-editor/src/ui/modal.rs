@@ -164,7 +164,10 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
                 .resizable(false)
                 .frame(egui::Frame {
                     fill: get_scheme().bg_secondary,
-                    stroke: egui::Stroke::NONE,
+                    stroke: egui::Stroke {
+                        width: 1.0,
+                        color: get_scheme().text_secondary,
+                    },
                     inner_margin: egui::Margin::same(16),
                     outer_margin: egui::Margin::symmetric(4, 0),
                     ..Default::default()
