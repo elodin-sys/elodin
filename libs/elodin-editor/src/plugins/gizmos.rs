@@ -8,11 +8,12 @@ use bevy::{
     math::Vec3,
     transform::components::Transform,
 };
+use impeller2::types::ComponentId;
 use impeller2_bevy::{ComponentValueMap, EntityMap};
 use impeller2_wkt::{
     BodyAxes, ComponentValue as WktComponentValue, VectorArrow, VectorArrow3d, WorldPos,
 };
-use nox::{Quaternion, Vector3};
+use nox::{ArrayBuf, Quaternion, Vector3};
 
 use crate::{
     WorldPosExt,
@@ -117,7 +118,7 @@ fn render_vector_arrow(
         } else {
             (Vec3::ZERO, vec * *scale)
         };
-        let color = bevy::prelude::Color::rgba(color.r, color.g, color.b, color.a);
+        let color = bevy::prelude::Color::srgba(color.r, color.g, color.b, color.a);
         gizmos.arrow(start, end, color);
     }
 
@@ -169,7 +170,7 @@ fn render_body_axis(
     for gizmo in arrows.iter() {
         let BodyAxes { entity_id, scale } = gizmo;
 
-        let Some(entity_id) = entity_map.get(entity_id) else {
+        let Some(entity_id) = entity_map.get(&ComponentId(entity_id.0)) else {
             println!("entity not found");
             continue;
         };
