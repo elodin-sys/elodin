@@ -15,7 +15,7 @@ pub fn component_value_tail_to_vec3(value: &ComponentValue) -> Option<Vec3> {
     match value {
         ComponentValue::F32(array) => {
             let data = array.buf.as_buf();
-            tail_to_vec3(data.iter().copied().map(|v| f64::from(v)))
+            tail_to_vec3(data.iter().copied().map(f64::from))
         }
         ComponentValue::F64(array) => {
             let data = array.buf.as_buf();

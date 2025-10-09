@@ -152,7 +152,7 @@ fn component_value_slice_to_bevy_vec(
     match value {
         WktComponentValue::F32(arr) => {
             let data = arr.buf.as_buf();
-            array_slice_to_bevy_vec(data, range, |value| f64::from(value))
+            array_slice_to_bevy_vec(data, range, f64::from)
         }
         WktComponentValue::F64(arr) => {
             let data = arr.buf.as_buf();
