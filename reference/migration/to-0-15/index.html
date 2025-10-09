@@ -418,6 +418,10 @@
                     </li>
                     
                     <li>
+                        <a href="/reference/migration/to-0-15/#object-3d-ellipsoid">object_3d ellipsoid</a>
+                    </li>
+                    
+                    <li>
                         <a href="/reference/migration/to-0-15/#el-panel-hsplit-to-hsplit">el.Panel.hsplit to hsplit</a>
                     </li>
                     
@@ -512,7 +516,7 @@
 </span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">        }
 </span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">        object_3d ball.world_pos {
 </span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">            sphere radius=0.2 {
-</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">                color 25 50 255
+</span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">                color 25 50 255 128
 </span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">            }
 </span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">        }
 </span></span></span></span><span class="z-source z-python"><span class="z-meta z-function-call z-arguments z-python"><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-block z-python">        line_3d ball.world_pos line_width=2.0 {
@@ -523,13 +527,19 @@
 <h2 id="details">Details</h2>
 <p>The old code is python, and the new code is specified in a <a href="https://docs.rs/kdl/latest/kdl/">KDL</a> string to the <code>world.schematic()</code> method.</p>
 <h3 id="el-material-color-to-color"><code>el.Material.color</code> to <code>color</code></h3>
-<p>A color can be specified by its red, green, blue, and optionally its alpha components as an integer from 0 to 255.</p>
+<p>A color can be specified by its red, green, blue, and optionally its alpha components as integers from 0 (fully transparent) to 255 (fully opaque).</p>
 <p>OLD</p>
 <pre data-lang="python" class="language-python z-code"><code class="language-python" data-lang="python"><span class="z-source z-python"><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">el</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">Material</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">color</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-constant z-numeric z-float z-decimal z-python">0<span class="z-punctuation z-separator z-decimal z-python">.</span>1</span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-constant z-numeric z-float z-decimal z-python">0<span class="z-punctuation z-separator z-decimal z-python">.</span>2</span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-constant z-numeric z-float z-decimal z-python">1<span class="z-punctuation z-separator z-decimal z-python">.</span>0</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-invalid z-illegal z-stray z-brace z-round z-python">)</span>
 </span></code></pre>
 <p>NEW</p>
-<pre data-lang="python" class="language-python z-code"><code class="language-python" data-lang="python"><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">color</span></span> <span class="z-constant z-numeric z-integer z-decimal z-python">25</span> <span class="z-constant z-numeric z-integer z-decimal z-python">50</span> <span class="z-constant z-numeric z-integer z-decimal z-python">255</span>
+<pre data-lang="python" class="language-python z-code"><code class="language-python" data-lang="python"><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">color</span></span> <span class="z-constant z-numeric z-integer z-decimal z-python">25</span> <span class="z-constant z-numeric z-integer z-decimal z-python">50</span> <span class="z-constant z-numeric z-integer z-decimal z-python">255</span> <span class="z-constant z-numeric z-integer z-decimal z-python">128</span>
 </span></code></pre>
+<p>Omit the fourth value if you want the color to remain fully opaque. The same syntax works with named colors:</p>
+<pre class="z-code"><code><span class="z-text z-plain">    graph &quot;value&quot; {
+</span><span class="z-text z-plain">        color yolk 120
+</span><span class="z-text z-plain">    }
+</span></code></pre>
+<p>Here <code>yolk</code> is the base color and <code>120</code> sets a partially transparent alpha.</p>
 <p>It can also be specified by a few names:</p>
 <ul>
 <li>black</li>
@@ -551,6 +561,15 @@
 </span><span class="z-text z-plain">        color reddish
 </span><span class="z-text z-plain">    }
 </span></code></pre>
+<h3 id="object-3d-ellipsoid"><code>object_3d</code> ellipsoid</h3>
+<p>An <code>ellipsoid</code> block renders an ellipsoidal volume aligned with an entity's <code>world_pos</code>. Provide a scale expression that evaluates to three components (literal values or an EQL expression) and an optional translucent color.</p>
+<pre class="z-code"><code><span class="z-text z-plain">    object_3d drone.world_pos {
+</span><span class="z-text z-plain">        ellipsoid scale=&quot;(0.75, 0.35, 0.95)&quot; {
+</span><span class="z-text z-plain">            color 255 255 0 120
+</span><span class="z-text z-plain">        }
+</span><span class="z-text z-plain">    }
+</span></code></pre>
+<p>Because the scale expression is re-evaluated every frame, you can reference live data such as <code>rocket.ellipsoid_scale</code> to animate the ellipsoid.</p>
 <h3 id="el-panel-hsplit-to-hsplit"><code>el.Panel.hsplit</code> to <code>hsplit</code></h3>
 <p>OLD</p>
 <pre data-lang="python" class="language-python z-code"><code class="language-python" data-lang="python"><span class="z-source z-python"><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">el</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">Panel</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">hsplit</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span>
