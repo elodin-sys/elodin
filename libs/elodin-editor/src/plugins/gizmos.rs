@@ -115,17 +115,17 @@ fn render_vector_arrow(
             continue;
         };
 
-        let Some(mut direction) = component_value_tail_to_vec3(&vector_value) else {
+        let Some(direction_value) = component_value_tail_to_vec3(&vector_value) else {
             continue;
         };
 
-        direction *= arrow.scale;
+        let direction = impeller_vec3_to_bevy(direction_value) * arrow.scale;
 
         let mut start = Vec3::ZERO;
         if let Some(origin_expr) = &state.origin_expr {
             if let Ok(origin_value) = origin_expr.execute(&entity_map, &values) {
                 if let Some(origin) = component_value_tail_to_vec3(&origin_value) {
-                    start = origin;
+                    start = impeller_vec3_to_bevy(origin);
                 }
             }
         }
@@ -134,6 +134,15 @@ fn render_vector_arrow(
         let color = bevy::prelude::Color::srgb(arrow.color.r, arrow.color.g, arrow.color.b);
         gizmos.arrow(start, end, color);
     }
+}
+
+fn impeller_vec3_to_bevy(vec: Vec3) -> Vec3 {
+    WorldPos {
+        att: Quaternion::identity(),
+        pos: Vector3::new(vec.x as f64, vec.y as f64, vec.z as f64),
+    }
+    .bevy_pos()
+    .as_vec3()
 }
 
 fn render_body_axis(
