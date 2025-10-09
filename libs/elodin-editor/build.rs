@@ -1,7 +1,7 @@
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-use std::ffi::OsStr;
 
 fn main() {
     // We're picking one file out of the handful of git LFS files present. It is
@@ -22,7 +22,10 @@ fn main() {
 }
 
 fn check_lfs(path: &Path) {
-    if std::env::var_os("BUILDKITE").map(|value| value == OsStr::new("true")).unwrap_or(false) {
+    if std::env::var_os("BUILDKITE")
+        .map(|value| value == OsStr::new("true"))
+        .unwrap_or(false)
+    {
         eprintln!("WARN: Skipping LFS check on buildkite. See issue #208.");
         eprintln!("https://github.com/elodin-sys/elodin/issues/208");
         return;
