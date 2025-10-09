@@ -50,12 +50,12 @@ fn render_vector_arrow(
             color,
             range,
             attached,
-            entity_id,
             body_frame,
             scale,
+            ..
         } = gizmo;
 
-        let Some(entity_id) = entity_map.get(entity_id) else {
+        let Some(entity_id) = entity_map.get(id) else {
             continue;
         };
 
@@ -67,13 +67,27 @@ fn render_vector_arrow(
             continue;
         };
         let vec = match value {
-            WktComponentValue::F32(arr) => Vector3::new(
-                arr[range.start] as f64,
-                arr[range.start + 1] as f64,
-                arr[range.start + 2] as f64,
-            ),
+            WktComponentValue::F32(arr) => {
+                let data = arr.buf.as_buf();
+                if range.start + 2 >= data.len() {
+                    continue;
+                }
+                Vector3::new(
+                    data[range.start] as f64,
+                    data[range.start + 1] as f64,
+                    data[range.start + 2] as f64,
+                )
+            }
             WktComponentValue::F64(arr) => {
-                Vector3::new(arr[range.start], arr[range.start + 1], arr[range.start + 2])
+                let data = arr.buf.as_buf();
+                if range.start + 2 >= data.len() {
+                    continue;
+                }
+                Vector3::new(
+                    data[range.start],
+                    data[range.start + 1],
+                    data[range.start + 2],
+                )
             }
             _ => {
                 continue;
@@ -103,7 +117,8 @@ fn render_vector_arrow(
         } else {
             (Vec3::ZERO, vec * *scale)
         };
-        gizmos.arrow(start, end, *color);
+        let color = bevy::prelude::Color::rgba(color.r, color.g, color.b, color.a);
+        gizmos.arrow(start, end, color);
     }
 
     for (arrow, state) in vector_arrows.iter() {
