@@ -26,8 +26,6 @@
         alsa-lib
         udev
       ];
-    # Pass through BUILDKITE environment variable
-    BUILDKITE = builtins.getEnv "BUILDKITE";
   };
 
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
