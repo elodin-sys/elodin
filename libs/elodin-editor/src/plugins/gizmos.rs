@@ -5,6 +5,7 @@ use bevy::{
         config::{DefaultGizmoConfigGroup, GizmoConfigStore, GizmoLineJoint},
         gizmos::Gizmos,
     },
+    log::warn,
     math::Vec3,
     transform::components::Transform,
 };
@@ -171,7 +172,7 @@ fn render_body_axis(
         let BodyAxes { entity_id, scale } = gizmo;
 
         let Some(entity_id) = entity_map.get(&ComponentId(entity_id.0)) else {
-            println!("entity not found");
+            warn!("body axes entity {entity_id:?} not found in EntityMap");
             continue;
         };
 
