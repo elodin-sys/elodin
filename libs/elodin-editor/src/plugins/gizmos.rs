@@ -43,7 +43,7 @@ fn render_vector_arrow(
     query: Query<(Option<&Transform>, &ComponentValueMap)>,
     arrows: Query<&VectorArrow>,
     vector_arrows: Query<(&VectorArrow3d, &VectorArrowState)>,
-    values: Query<&WktComponentValue>,
+    component_values: Query<&'static WktComponentValue>,
     mut gizmos: Gizmos,
 ) {
     for gizmo in arrows.iter() {
@@ -61,11 +61,11 @@ fn render_vector_arrow(
             continue;
         };
 
-        let Ok((transform, values)) = query.get(*entity_id) else {
+        let Ok((transform, value_map)) = query.get(*entity_id) else {
             continue;
         };
 
-        let Some(value) = values.0.get(id) else {
+        let Some(value) = value_map.0.get(id) else {
             continue;
         };
         let vec = match value {
@@ -128,7 +128,7 @@ fn render_vector_arrow(
             continue;
         };
 
-        let Ok(vector_value) = vector_expr.execute(&entity_map, &values) else {
+        let Ok(vector_value) = vector_expr.execute(&entity_map, &component_values) else {
             continue;
         };
 
@@ -140,7 +140,7 @@ fn render_vector_arrow(
 
         let mut start = Vec3::ZERO;
         if let Some(origin_expr) = &state.origin_expr {
-            if let Ok(origin_value) = origin_expr.execute(&entity_map, &values) {
+            if let Ok(origin_value) = origin_expr.execute(&entity_map, &component_values) {
                 if let Some(origin) = component_value_tail_to_vec3(&origin_value) {
                     start = impeller_vec3_to_bevy(origin);
                 }
