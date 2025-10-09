@@ -1513,6 +1513,9 @@ graph "value" {
         let reporter = GraphicalReportHandler::new();
         let mut b = String::new();
         reporter.render_report(&mut b, &err);
-        assert_eq!("\u{1b}[31mkdl_schematic::unknown_node\u{1b}[0m\n\n  \u{1b}[31m×\u{1b}[0m Unknown node type 'blah'\n   ╭─[2:1]\n \u{1b}[2m1\u{1b}[0m │ \n \u{1b}[2m2\u{1b}[0m │ blah\n   · \u{1b}[35;1m──┬─\u{1b}[0m\n   ·   \u{1b}[35;1m╰── \u{1b}[35;1munknown node\u{1b}[0m\u{1b}[0m\n \u{1b}[2m3\u{1b}[0m │ graph \"value\" {\n   ╰────\n", &b);
+        assert_eq!(
+            "\u{1b}[31mkdl_schematic::unknown_node\u{1b}[0m\n\n  \u{1b}[31m×\u{1b}[0m Unknown node type 'blah'\n   ╭─[2:1]\n \u{1b}[2m1\u{1b}[0m │ \n \u{1b}[2m2\u{1b}[0m │ blah\n   · \u{1b}[35;1m──┬─\u{1b}[0m\n   ·   \u{1b}[35;1m╰── \u{1b}[35;1munknown node\u{1b}[0m\u{1b}[0m\n \u{1b}[2m3\u{1b}[0m │ graph \"value\" {\n   ╰────\n",
+            &b
+        );
     }
 }
