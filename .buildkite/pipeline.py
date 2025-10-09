@@ -112,7 +112,7 @@ test_steps = [
     step(
         label=":nix: elodin-cli",
         key="elodin-cli",
-        command="nix build .#elodin-cli",
+        command="BUILDKITE=true nix build .#elodin-cli",
     ),
     group(
         name=":nix: aleph-os",

@@ -1,4 +1,3 @@
-use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -22,10 +21,7 @@ fn main() {
 }
 
 fn check_lfs(path: &Path) {
-    if std::env::var_os("BUILDKITE")
-        .map(|value| value == OsStr::new("true"))
-        .unwrap_or(false)
-    {
+    if std::env::var("BUILDKITE").is_ok_and(|v| v == "true") {
         eprintln!("WARN: Skipping LFS check on buildkite. See issue #208.");
         eprintln!("https://github.com/elodin-sys/elodin/issues/208");
         return;
@@ -58,7 +54,7 @@ fn check_lfs(path: &Path) {
     // Check if we read enough bytes.
     if bytes_read < HEADER_LENGTH {
         panic!(
-            "LFS file {:?} is too small ({} bytes). This might be a Git LFS pointer file. Please run 'git lfs pull' to download the actual font file.",
+            "LFS file {:?} is too small ({} bytes). This might be a Git LFS pointer file. Please run 'git lfs pull' to download the actual file.",
             path.display(),
             bytes_read
         );
@@ -67,8 +63,8 @@ fn check_lfs(path: &Path) {
     // Check if the first bytes look like a Git LFS pointer.
     if buffer.starts_with(git_lfs_prefix) {
         panic!(
-            "LFS file {:?} appears to be a Git LFS pointer file. The actual file was not downloaded. Please run 'git lfs pull' to download the font file.",
-            path.display()
+            "LFS file {:?} appears to be a Git LFS pointer file. The actual file was not downloaded. Please run 'git lfs pull' to download the file.",
+            path.display(),
         );
     }
 

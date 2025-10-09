@@ -32,7 +32,7 @@ Preference for Arm-based Macs
 > [!NOTE]
 > These instructions were validated on M1 architecture, macOS 15.1.1 on 2025-08-26.
 
-### Before Clonning
+### Before Cloning
 
 Before cloning the source, ensure `git-lfs` is installed. 
 
