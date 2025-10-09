@@ -5,8 +5,7 @@ use crate::{
     ui::{
         actions,
         colors::EColor,
-        inspector,
-        plot, query_plot, query_table,
+        inspector, plot, query_plot, query_table,
         tiles::{self, Pane},
     },
 };

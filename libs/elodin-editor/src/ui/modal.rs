@@ -404,11 +404,7 @@ impl WidgetSystem for ModalDialog<'_, '_> {
 
         // Display the error message
         ui.add_space(16.0);
-        ui.add(
-            ELabel::new(&dialog.message)
-                .text_color(get_scheme().text_secondary)
-                .padding(egui::Margin::same(0).bottom(16.0)),
-        );
+        ui.monospace(&dialog.message);
 
         // Add buttons
         ui.add_space(16.0);

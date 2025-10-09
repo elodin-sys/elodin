@@ -5,9 +5,9 @@ use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
 use impeller2_kdl::FromKdl;
 use impeller2_kdl::KdlSchematicError;
 use impeller2_wkt::{DbConfig, Graph, Line3d, Object3D, Panel, Schematic, Viewport};
+use miette::{Diagnostic, miette};
 use std::time::Duration;
 use std::{collections::BTreeMap, path::Path};
-use miette::{miette, Report, Diagnostic};
 
 use crate::{
     EqlContext,
@@ -58,9 +58,12 @@ pub fn sync_schematic(
         let path = Path::new(path);
         if path.try_exists().unwrap_or(false) {
             if let Err(e) = load_schematic_file(path, &mut params, live_reload_rx) {
-                modal.dialog_error("Invalid Schematic", &report_to_string(&e));
-                bevy::log::error!(?e, "invalid schematic for {path:?}");
-                // }
+                modal.dialog_error(
+                    format!("Invalid Schematic in {:?}", path.display()),
+                    &render_diag(&e),
+                );
+                let report = miette!(e.clone());
+                bevy::log::error!(?report, "Invalid schematic for {path:?}");
             } else {
                 return;
             }
@@ -68,10 +71,9 @@ pub fn sync_schematic(
     }
     if let Some(content) = config.schematic_content() {
         let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(content).inspect_err(|e| {
-            let report = report_to_string(e);
-            bevy::log::info!("{}", report);
-            modal.dialog_error("Invalid Schematic 2", &report);
-            bevy::log::error!(?e, "invalid schematic content")
+            modal.dialog_error("Invalid Schematic", &render_diag(e));
+            let report = miette!(e.clone());
+            bevy::log::error!(?report, "Invalid schematic content")
         }) else {
             return;
         };
@@ -79,18 +81,13 @@ pub fn sync_schematic(
     }
 }
 
-pub fn report_to_string(diagnostic: &dyn Diagnostic) -> String {
-    use miette::{GraphicalReportHandler, Report};
-    use std::fmt::Write;
+pub fn render_diag(diagnostic: &dyn Diagnostic) -> String {
     let mut buf = String::new();
     miette::GraphicalReportHandler::new_themed(miette::GraphicalTheme::unicode_nocolor())
-    // miette::GraphicalReportHandler::new()
-    // miette::DebugReportHandler::new()
         .render_report(&mut buf, diagnostic)
         .expect("Failed to render diagnostic");
     buf
 }
-
 
 pub fn load_schematic_file(
     path: &Path,
