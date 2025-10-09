@@ -25,21 +25,38 @@ This monorepo contains the source code for all Elodin simulation and flight soft
 ## Dependencies
 
 Rust 1.85.0
-Preference for Arm based Macs
+Preference for Arm-based Macs
 
-### macOS
+## Building
 
-Validated on M1 architecture, macOS 15.1.1 on 2025-08-26.
+> [!NOTE]
+> These instructions were validated on M1 architecture, macOS 15.1.1 on 2025-08-26.
+
+### Before Clonning
+
+Before cloning the source, ensure `git-lfs` is installed. 
+
+``` sh
+brew install gstreamer python gfortran openblas uv git-lfs;
+git lfs install; # This is idempotent; you can run it again.
+```
+
+### Source
+
+``` sh
+git clone https://github.com/elodin-sys/elodin.git
+```
+
 
 ### Build & Run
 ```sh
+cd elodin
 just install
 ```
 
 #### Elodin App & SDK Development
 (See [apps/elodin/README.md](apps/elodin/README.md))
 ``` sh
-brew install gstreamer python gfortran openblas uv git-lfs
 
 cd libs/nox-py
 uv venv --python 3.12
