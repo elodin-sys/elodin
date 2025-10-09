@@ -7,14 +7,17 @@ use bevy::{
     },
     log::warn,
     math::Vec3,
+    prelude::Color,
     transform::components::Transform,
 };
 use impeller2::types::ComponentId;
 use impeller2_bevy::{ComponentValueMap, EntityMap};
 use impeller2_wkt::{
-    BodyAxes, ComponentValue as WktComponentValue, VectorArrow, VectorArrow3d, WorldPos,
+    BodyAxes, Color as WktColor, ComponentValue as WktComponentValue, VectorArrow, VectorArrow3d,
+    WorldPos,
 };
 use nox::{ArrayBuf, Quaternion, Vector3};
+use std::ops::Range;
 
 use crate::{
     WorldPosExt,
@@ -68,39 +71,9 @@ fn render_vector_arrow(
         let Some(value) = value_map.0.get(id) else {
             continue;
         };
-        let vec = match value {
-            WktComponentValue::F32(arr) => {
-                let data = arr.buf.as_buf();
-                if range.start + 2 >= data.len() {
-                    continue;
-                }
-                Vector3::new(
-                    data[range.start] as f64,
-                    data[range.start + 1] as f64,
-                    data[range.start + 2] as f64,
-                )
-            }
-            WktComponentValue::F64(arr) => {
-                let data = arr.buf.as_buf();
-                if range.start + 2 >= data.len() {
-                    continue;
-                }
-                Vector3::new(
-                    data[range.start],
-                    data[range.start + 1],
-                    data[range.start + 2],
-                )
-            }
-            _ => {
-                continue;
-            }
+        let Some(vec) = component_value_slice_to_bevy_vec(value, range) else {
+            continue;
         };
-        let vec = WorldPos {
-            att: Quaternion::identity(),
-            pos: vec,
-        }
-        .bevy_pos()
-        .as_vec3();
         let (start, end) = if *attached {
             let Some(attached_transform) = transform else {
                 continue;
@@ -119,8 +92,7 @@ fn render_vector_arrow(
         } else {
             (Vec3::ZERO, vec * *scale)
         };
-        let color = bevy::prelude::Color::srgba(color.r, color.g, color.b, color.a);
-        gizmos.arrow(start, end, color);
+        gizmos.arrow(start, end, wkt_color_to_bevy(color));
     }
 
     for (arrow, state) in vector_arrows.iter() {
@@ -132,34 +104,24 @@ fn render_vector_arrow(
             continue;
         };
 
-        let Some(direction_value) = component_value_tail_to_vec3(&vector_value) else {
+        let Some(direction) = component_value_tail_to_vec3(&vector_value) else {
             continue;
         };
 
-        let direction = impeller_vec3_to_bevy(direction_value) * arrow.scale;
+        let direction = direction * arrow.scale;
 
         let mut start = Vec3::ZERO;
         if let Some(origin_expr) = &state.origin_expr {
             if let Ok(origin_value) = origin_expr.execute(&entity_map, &component_values) {
                 if let Some(origin) = component_value_tail_to_vec3(&origin_value) {
-                    start = impeller_vec3_to_bevy(origin);
+                    start = origin;
                 }
             }
         }
 
         let end = start + direction;
-        let color = bevy::prelude::Color::srgb(arrow.color.r, arrow.color.g, arrow.color.b);
-        gizmos.arrow(start, end, color);
+        gizmos.arrow(start, end, wkt_color_to_bevy(&arrow.color));
     }
-}
-
-fn impeller_vec3_to_bevy(vec: Vec3) -> Vec3 {
-    WorldPos {
-        att: Quaternion::identity(),
-        pos: Vector3::new(vec.x as f64, vec.y as f64, vec.z as f64),
-    }
-    .bevy_pos()
-    .as_vec3()
 }
 
 fn render_body_axis(
@@ -181,4 +143,57 @@ fn render_body_axis(
         };
         gizmos.axes(transform, *scale)
     }
+}
+
+fn component_value_slice_to_bevy_vec(
+    value: &WktComponentValue,
+    range: &Range<usize>,
+) -> Option<Vec3> {
+    match value {
+        WktComponentValue::F32(arr) => {
+            let data = arr.buf.as_buf();
+            array_slice_to_bevy_vec(data, range, |value| f64::from(value))
+        }
+        WktComponentValue::F64(arr) => {
+            let data = arr.buf.as_buf();
+            array_slice_to_bevy_vec(data, range, |value| value)
+        }
+        _ => None,
+    }
+}
+
+fn array_slice_to_bevy_vec<T>(
+    data: &[T],
+    range: &Range<usize>,
+    mut to_f64: impl FnMut(T) -> f64,
+) -> Option<Vec3>
+where
+    T: Copy,
+{
+    let x_idx = range.start;
+    let y_idx = x_idx.checked_add(1)?;
+    let z_idx = x_idx.checked_add(2)?;
+
+    if x_idx >= data.len() || y_idx >= data.len() || z_idx >= data.len() {
+        return None;
+    }
+
+    if range.end <= z_idx {
+        return None;
+    }
+
+    let world = WorldPos {
+        att: Quaternion::identity(),
+        pos: Vector3::new(
+            to_f64(data[x_idx]),
+            to_f64(data[y_idx]),
+            to_f64(data[z_idx]),
+        ),
+    };
+
+    Some(world.bevy_pos().as_vec3())
+}
+
+fn wkt_color_to_bevy(color: &WktColor) -> Color {
+    Color::srgba(color.r, color.g, color.b, color.a)
 }
