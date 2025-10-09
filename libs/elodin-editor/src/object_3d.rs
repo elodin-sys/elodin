@@ -1,7 +1,6 @@
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::prelude::Mesh;
 use bevy::prelude::*;
-use bevy::render::camera::ClearColorConfig;
 use bevy_render::alpha::AlphaMode;
 use big_space::GridCell;
 use eql::Expr;
@@ -10,8 +9,7 @@ use impeller2_wkt::{ComponentValue, Object3D};
 use nox::Array;
 use smallvec::smallvec;
 
-use crate::{BevyExt, MainCamera};
-use std::cmp::Ordering;
+use crate::BevyExt;
 use std::fmt;
 
 /// ExprObject3D component that holds an EQL expression for dynamic positioning
@@ -339,28 +337,6 @@ fn component_value_to_vec3(value: &ComponentValue) -> Result<Vec3, ScaleEvalErro
     }
 }
 
-pub fn apply_ellipsoid_background(
-    ellipses: Query<&EllipsoidVisual>,
-    mut cameras: Query<&mut Camera, With<MainCamera>>,
-) {
-    let background_color = ellipses
-        .iter()
-        .filter(|ellipse| ellipse.oversized)
-        .max_by(|a, b| {
-            a.max_extent
-                .partial_cmp(&b.max_extent)
-                .unwrap_or(Ordering::Equal)
-        })
-        .map(|ellipse| Color::srgba(ellipse.color.r, ellipse.color.g, ellipse.color.b, 1.0));
-
-    for mut camera in cameras.iter_mut() {
-        camera.clear_color = match background_color {
-            Some(color) => ClearColorConfig::Custom(color),
-            None => ClearColorConfig::Default,
-        };
-    }
-}
-
 pub trait ComponentArrayExt {
     fn as_world_pos(&self) -> Option<impeller2_wkt::WorldPos>;
 }
@@ -469,6 +445,7 @@ pub fn spawn_mesh(
                 alpha_mode,
                 unlit: false,
                 double_sided: true,
+                cull_mode: None,
                 perceptual_roughness: 0.6,
                 ..Default::default()
             });
@@ -503,9 +480,6 @@ pub struct Object3DPlugin;
 
 impl Plugin for Object3DPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (update_object_3d_system, apply_ellipsoid_background).chain(),
-        );
+        app.add_systems(Update, update_object_3d_system);
     }
 }
