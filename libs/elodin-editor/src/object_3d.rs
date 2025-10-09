@@ -12,6 +12,7 @@ use smallvec::smallvec;
 
 use crate::{BevyExt, MainCamera};
 use std::cmp::Ordering;
+use std::fmt;
 
 /// ExprObject3D component that holds an EQL expression for dynamic positioning
 #[derive(Component)]
@@ -213,6 +214,37 @@ pub fn compile_scale_eql(scale: &str, ctx: &eql::Context) -> Result<CompiledExpr
         .map_err(|err| err.to_string())
 }
 
+#[derive(Debug)]
+pub enum ScaleEvalError {
+    Expr(String),
+    NotEnoughComponents { len: usize },
+    InvalidComponentType,
+}
+
+impl fmt::Display for ScaleEvalError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Expr(err) => write!(f, "{}", err),
+            Self::NotEnoughComponents { len } => write!(
+                f,
+                "scale expression must yield at least 3 values, got {}",
+                len
+            ),
+            Self::InvalidComponentType => {
+                f.write_str("scale expression must yield an F32 or F64 array")
+            }
+        }
+    }
+}
+
+impl From<String> for ScaleEvalError {
+    fn from(value: String) -> Self {
+        Self::Expr(value)
+    }
+}
+
+impl std::error::Error for ScaleEvalError {}
+
 const ELLIPSOID_OVERSIZED_THRESHOLD: f32 = 10_000.0;
 
 /// System that updates 3D object entities based on their EQL expressions
@@ -261,7 +293,7 @@ pub fn update_object_3d_system(
                 }
             }
             Err(err) => {
-                object_3d.scale_error = Some(err);
+                object_3d.scale_error = Some(err.to_string());
                 ellipse.oversized = false;
                 ellipse.max_extent = 0.0;
             }
@@ -273,18 +305,18 @@ fn evaluate_scale(
     state: &Object3DState,
     entity_map: &EntityMap,
     component_value_maps: &Query<&'static ComponentValue>,
-) -> Result<Vec3, String> {
+) -> Result<Vec3, ScaleEvalError> {
     if let Some(expr) = &state.scale_expr {
         let value = expr
             .execute(entity_map, component_value_maps)
-            .map_err(|err| err.to_string())?;
+            .map_err(ScaleEvalError::from)?;
         component_value_to_vec3(&value)
     } else {
         Ok(Vec3::ONE)
     }
 }
 
-fn component_value_to_vec3(value: &ComponentValue) -> Result<Vec3, String> {
+fn component_value_to_vec3(value: &ComponentValue) -> Result<Vec3, ScaleEvalError> {
     use nox::ArrayBuf;
     match value {
         ComponentValue::F64(array) => {
@@ -292,10 +324,7 @@ fn component_value_to_vec3(value: &ComponentValue) -> Result<Vec3, String> {
             if data.len() >= 3 {
                 Ok(Vec3::new(data[0] as f32, data[1] as f32, data[2] as f32).abs())
             } else {
-                Err(format!(
-                    "scale expression must yield at least 3 values, got {}",
-                    data.len()
-                ))
+                Err(ScaleEvalError::NotEnoughComponents { len: data.len() })
             }
         }
         ComponentValue::F32(array) => {
@@ -303,13 +332,10 @@ fn component_value_to_vec3(value: &ComponentValue) -> Result<Vec3, String> {
             if data.len() >= 3 {
                 Ok(Vec3::new(data[0], data[1], data[2]).abs())
             } else {
-                Err(format!(
-                    "scale expression must yield at least 3 values, got {}",
-                    data.len()
-                ))
+                Err(ScaleEvalError::NotEnoughComponents { len: data.len() })
             }
         }
-        _ => Err("scale expression must yield an F32 or F64 array".to_string()),
+        _ => Err(ScaleEvalError::InvalidComponentType),
     }
 }
 
