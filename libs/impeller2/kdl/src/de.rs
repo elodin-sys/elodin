@@ -1,4 +1,4 @@
-use impeller2_wkt::{Color, Schematic, SchematicElem};
+use impeller2_wkt::{Color, Schematic, SchematicElem, VectorArrow3d};
 use kdl::{KdlDocument, KdlNode};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -34,6 +34,7 @@ fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlS
         | "schematic_tree" | "dashboard" => Ok(SchematicElem::Panel(parse_panel(node, src)?)),
         "object_3d" => Ok(SchematicElem::Object3d(parse_object_3d(node, src)?)),
         "line_3d" => Ok(SchematicElem::Line3d(parse_line_3d(node, src)?)),
+        "vector_arrow" => Ok(SchematicElem::VectorArrow(parse_vector_arrow(node, src)?)),
         _ => Err(KdlSchematicError::UnknownNode {
             node_type: node.name().to_string(),
             src: src.to_string(),
@@ -502,6 +503,50 @@ fn parse_line_3d(node: &KdlNode, src: &str) -> Result<Line3d, KdlSchematicError>
         line_width,
         color,
         perspective,
+        aux: (),
+    })
+}
+
+fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSchematicError> {
+    let vector = node
+        .entries()
+        .iter()
+        .find(|e| e.name().is_none())
+        .and_then(|e| e.value().as_string())
+        .ok_or_else(|| KdlSchematicError::MissingProperty {
+            property: "vector".to_string(),
+            node: "vector_arrow".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        })?
+        .to_string();
+
+    let origin = node
+        .get("origin")
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string());
+
+    let scale = node.get("scale").and_then(|v| v.as_float()).unwrap_or(1.0) as f32;
+
+    let name = node
+        .get("name")
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string());
+
+    let in_body_frame = node
+        .get("in_body_frame")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let color = parse_color_from_node_or_children(node, None).unwrap_or(Color::WHITE);
+
+    Ok(VectorArrow3d {
+        vector,
+        origin,
+        scale,
+        name,
+        color,
+        in_body_frame,
         aux: (),
     })
 }
@@ -1137,6 +1182,31 @@ tabs {
             assert!(!line.perspective);
         } else {
             panic!("Expected line_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_vector_arrow() {
+        let kdl = r#"
+vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="ball.world_pos" scale=1.5 name="Velocity" in_body_frame=#true {
+    color 0 0 255
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::VectorArrow(arrow) = &schematic.elems[0] {
+            assert_eq!(
+                arrow.vector,
+                "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]"
+            );
+            assert_eq!(arrow.origin.as_deref(), Some("ball.world_pos"));
+            assert_eq!(arrow.scale, 1.5);
+            assert_eq!(arrow.name.as_deref(), Some("Velocity"));
+            assert!(arrow.in_body_frame);
+            assert_eq!(arrow.color.b, 1.0);
+        } else {
+            panic!("Expected vector_arrow");
         }
     }
 

@@ -8,11 +8,16 @@ use bevy::{
     math::Vec3,
     transform::components::Transform,
 };
-use impeller::{
-    bevy::{ComponentValueMap, EntityMap},
-    well_known::{BodyAxes, VectorArrow, WorldPos},
+use impeller2_bevy::{ComponentValueMap, EntityMap};
+use impeller2_wkt::{
+    BodyAxes, ComponentValue as WktComponentValue, VectorArrow, VectorArrow3d, WorldPos,
 };
 use nox::{Quaternion, Vector3};
+
+use crate::{
+    WorldPosExt,
+    vector_arrow::{VectorArrowState, component_value_tail_to_vec3},
+};
 
 pub struct GizmoPlugin;
 
@@ -26,8 +31,8 @@ impl Plugin for GizmoPlugin {
 
 fn gizmo_setup(mut config_store: ResMut<GizmoConfigStore>) {
     let (config, _) = config_store.config_mut::<DefaultGizmoConfigGroup>();
-    config.line_width = 5.0;
-    config.line_joints = GizmoLineJoint::Round(12);
+    config.line.width = 5.0;
+    config.line.joints = GizmoLineJoint::Round(12);
     config.enabled = true;
 }
 
@@ -35,6 +40,8 @@ fn render_vector_arrow(
     entity_map: Res<EntityMap>,
     query: Query<(Option<&Transform>, &ComponentValueMap)>,
     arrows: Query<&VectorArrow>,
+    vector_arrows: Query<(&VectorArrow3d, &VectorArrowState)>,
+    values: Query<&WktComponentValue>,
     mut gizmos: Gizmos,
 ) {
     for gizmo in arrows.iter() {
@@ -60,12 +67,12 @@ fn render_vector_arrow(
             continue;
         };
         let vec = match value {
-            impeller::ComponentValue::F32(arr) => Vector3::new(
+            WktComponentValue::F32(arr) => Vector3::new(
                 arr[range.start] as f64,
                 arr[range.start + 1] as f64,
                 arr[range.start + 2] as f64,
             ),
-            impeller::ComponentValue::F64(arr) => {
+            WktComponentValue::F64(arr) => {
                 Vector3::new(arr[range.start], arr[range.start + 1], arr[range.start + 2])
             }
             _ => {
@@ -97,6 +104,35 @@ fn render_vector_arrow(
             (Vec3::ZERO, vec * *scale)
         };
         gizmos.arrow(start, end, *color);
+    }
+
+    for (arrow, state) in vector_arrows.iter() {
+        let Some(vector_expr) = &state.vector_expr else {
+            continue;
+        };
+
+        let Ok(vector_value) = vector_expr.execute(&entity_map, &values) else {
+            continue;
+        };
+
+        let Some(mut direction) = component_value_tail_to_vec3(&vector_value) else {
+            continue;
+        };
+
+        direction *= arrow.scale;
+
+        let mut start = Vec3::ZERO;
+        if let Some(origin_expr) = &state.origin_expr {
+            if let Ok(origin_value) = origin_expr.execute(&entity_map, &values) {
+                if let Some(origin) = component_value_tail_to_vec3(&origin_value) {
+                    start = origin;
+                }
+            }
+        }
+
+        let end = start + direction;
+        let color = bevy::prelude::Color::srgb(arrow.color.r, arrow.color.g, arrow.color.b);
+        gizmos.arrow(start, end, color);
     }
 }
 

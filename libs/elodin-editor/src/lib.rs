@@ -30,6 +30,7 @@ use impeller2_wkt::{CurrentTimestamp, NewConnection, Object3D, SetStreamState, W
 use impeller2_wkt::{EarliestTimestamp, LastUpdated};
 use nox::Tensor;
 use object_3d::create_object_3d_entity;
+use plugins::gizmos::GizmoPlugin;
 use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc};
 use ui::{
     SelectedObject,
@@ -44,6 +45,7 @@ pub mod object_3d;
 mod offset_parse;
 mod plugins;
 pub mod ui;
+pub mod vector_arrow;
 
 #[cfg(not(target_family = "wasm"))]
 pub mod run;
@@ -177,7 +179,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
             .add_plugins(NavigationGizmoPlugin)
             .add_plugins(impeller2_bevy::Impeller2Plugin)
-            //.add_plugins(crate::plugins::gizmos::GizmoPlugin)
+            .add_plugins(GizmoPlugin)
             .add_plugins(ui::UiPlugin)
             .add_plugins(FrameTimeDiagnosticsPlugin::default())
             .add_plugins(WireframePlugin::default())

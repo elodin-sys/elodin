@@ -4,7 +4,7 @@ use egui_tiles::{Container, Tile, TileId};
 use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
 use impeller2_kdl::FromKdl;
 use impeller2_kdl::KdlSchematicError;
-use impeller2_wkt::{DbConfig, Graph, Line3d, Object3D, Panel, Schematic, Viewport};
+use impeller2_wkt::{DbConfig, Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport};
 use std::time::Duration;
 use std::{collections::BTreeMap, path::Path};
 
@@ -22,6 +22,7 @@ use crate::{
         schematic::EqlExt,
         tiles::{DashboardPane, GraphPane, Pane, TileState, TreePane, ViewportPane},
     },
+    vector_arrow::VectorArrowState,
 };
 
 #[derive(Component)]
@@ -41,6 +42,7 @@ pub struct LoadSchematicParams<'w, 's> {
     pub selected_object: ResMut<'w, SelectedObject>,
     pub node_updater_params: NodeUpdaterParams<'w, 's>,
     objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
+    vector_arrows: Query<'w, 's, Entity, With<VectorArrowState>>,
 }
 
 pub fn sync_schematic(
@@ -120,6 +122,9 @@ impl LoadSchematicParams<'_, '_> {
         for entity in self.objects_3d.iter() {
             self.commands.entity(entity).despawn();
         }
+        for entity in self.vector_arrows.iter() {
+            self.commands.entity(entity).despawn();
+        }
         for elem in &schematic.elems {
             match elem {
                 impeller2_wkt::SchematicElem::Panel(p) => {
@@ -130,6 +135,9 @@ impl LoadSchematicParams<'_, '_> {
                 }
                 impeller2_wkt::SchematicElem::Line3d(line_3d) => {
                     self.spawn_line_3d(line_3d.clone());
+                }
+                impeller2_wkt::SchematicElem::VectorArrow(vector_arrow) => {
+                    self.spawn_vector_arrow(vector_arrow.clone());
                 }
             }
         }
@@ -151,6 +159,31 @@ impl LoadSchematicParams<'_, '_> {
 
     pub fn spawn_line_3d(&mut self, line_3d: Line3d) {
         self.commands.spawn(line_3d);
+    }
+
+    pub fn spawn_vector_arrow(&mut self, vector_arrow: VectorArrow3d) {
+        use crate::object_3d::compile_eql_expr;
+
+        let vector_expr = self
+            .eql
+            .0
+            .parse_str(&vector_arrow.vector)
+            .map(compile_eql_expr)
+            .ok();
+
+        let origin_expr = vector_arrow
+            .origin
+            .as_ref()
+            .and_then(|origin| self.eql.0.parse_str(origin).ok())
+            .map(compile_eql_expr);
+
+        self.commands.spawn((
+            vector_arrow,
+            VectorArrowState {
+                vector_expr,
+                origin_expr,
+            },
+        ));
     }
 
     pub fn spawn_panel(&mut self, panel: &Panel, parent_id: Option<TileId>) -> Option<TileId> {

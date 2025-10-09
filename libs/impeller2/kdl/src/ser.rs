@@ -20,6 +20,7 @@ fn serialize_schematic_elem<T>(elem: &SchematicElem<T>) -> KdlNode {
         SchematicElem::Panel(panel) => serialize_panel(panel),
         SchematicElem::Object3d(obj) => serialize_object_3d(obj),
         SchematicElem::Line3d(line) => serialize_line_3d(line),
+        SchematicElem::VectorArrow(arrow) => serialize_vector_arrow(arrow),
     }
 }
 
@@ -307,6 +308,35 @@ fn serialize_line_3d<T>(line: &Line3d<T>) -> KdlNode {
         node.entries_mut()
             .push(KdlEntry::new_prop("perspective", false));
     }
+
+    node
+}
+
+fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
+    let mut node = KdlNode::new("vector_arrow");
+    node.entries_mut().push(KdlEntry::new(arrow.vector.clone()));
+
+    if let Some(origin) = &arrow.origin {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("origin", origin.clone()));
+    }
+
+    if (arrow.scale - 1.0).abs() > f32::EPSILON {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("scale", arrow.scale as f64));
+    }
+
+    if let Some(name) = &arrow.name {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("name", name.clone()));
+    }
+
+    if arrow.in_body_frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("in_body_frame", true));
+    }
+
+    serialize_color_to_node(&mut node, &arrow.color);
 
     node
 }
@@ -808,6 +838,40 @@ mod tests {
             assert!(!line.perspective);
         } else {
             panic!("Expected line_3d");
+        }
+    }
+
+    #[test]
+    fn test_serialize_vector_arrow() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::VectorArrow(VectorArrow3d {
+                vector: "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]".to_string(),
+                origin: Some("ball.world_pos".to_string()),
+                scale: 2.5,
+                name: Some("Velocity".to_string()),
+                color: Color::BLUE,
+                in_body_frame: true,
+                aux: (),
+            }));
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert_eq!(parsed.elems.len(), 1);
+        if let SchematicElem::VectorArrow(arrow) = &parsed.elems[0] {
+            assert_eq!(
+                arrow.vector,
+                "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]"
+            );
+            assert_eq!(arrow.origin.as_deref(), Some("ball.world_pos"));
+            assert_eq!(arrow.scale, 2.5);
+            assert_eq!(arrow.name.as_deref(), Some("Velocity"));
+            assert!(arrow.in_body_frame);
+            assert_color_close(arrow.color, Color::BLUE);
+        } else {
+            panic!("Expected vector_arrow");
         }
     }
 
