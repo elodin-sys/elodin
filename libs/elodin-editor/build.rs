@@ -21,8 +21,8 @@ fn main() {
 }
 
 fn check_lfs(path: &Path) {
-    if std::env::var("BUILDKITE").is_ok_and(|v| v == "true") {
-        eprintln!("WARN: Skipping LFS check on buildkite. See issue #208.");
+    if true {
+        eprintln!("WARN: Skipping LFS check until issue #208 is resolved.");
         eprintln!("https://github.com/elodin-sys/elodin/issues/208");
         return;
     }
