@@ -1499,4 +1499,20 @@ graph "value" {
         assert_eq!(color.b, Color::YALK.b);
         assert!((color.a - (120.0 / 255.0)).abs() < f32::EPSILON);
     }
+
+    fn test_parse_error_report() {
+        use miette::{GraphicalReportHandler, Report, miette};
+        let kdl = r#"
+blah
+graph "value" {
+    color yalk
+}
+"#;
+        let err = parse_schematic(kdl).unwrap_err();
+        assert_eq!("Unknown node type 'blah'", format!("{}", err));
+        let reporter = GraphicalReportHandler::new();
+        let mut b = String::new();
+        reporter.render_report(&mut b, &err);
+        assert_eq!("\u{1b}[31mkdl_schematic::unknown_node\u{1b}[0m\n\n  \u{1b}[31m×\u{1b}[0m Unknown node type 'blah'\n   ╭─[2:1]\n \u{1b}[2m1\u{1b}[0m │ \n \u{1b}[2m2\u{1b}[0m │ blah\n   · \u{1b}[35;1m──┬─\u{1b}[0m\n   ·   \u{1b}[35;1m╰── \u{1b}[35;1munknown node\u{1b}[0m\u{1b}[0m\n \u{1b}[2m3\u{1b}[0m │ graph \"value\" {\n   ╰────\n", &b);
+    }
 }

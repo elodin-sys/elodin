@@ -7,6 +7,7 @@ use impeller2_kdl::KdlSchematicError;
 use impeller2_wkt::{DbConfig, Graph, Line3d, Object3D, Panel, Schematic, Viewport};
 use std::time::Duration;
 use std::{collections::BTreeMap, path::Path};
+use miette::{miette, Report, Diagnostic};
 
 use crate::{
     EqlContext,
@@ -44,32 +45,6 @@ pub struct LoadSchematicParams<'w, 's> {
     objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
 }
 
-// pub fn sync_schematic(
-//     config: Res<DbConfig>,
-//     mut params: LoadSchematicParams,
-//     live_reload_rx: ResMut<SchematicLiveReloadRx>,
-// ) -> Result<(), KdlSchematicError> {
-//     if !config.is_changed() {
-//         return Ok(());
-//     }
-//     if let Some(path) = config.schematic_path() {
-//         let path = Path::new(path);
-//         if path.try_exists().unwrap_or(false) {
-//             if let Err(e) = load_schematic_file(path, &mut params, live_reload_rx) {
-//                 bevy::log::error!(?e, "invalid schematic for {path:?}");
-//             } else {
-//                 return Ok(());
-//             }
-//         }
-//     }
-//     if let Some(content) = config.schematic_content() {
-//         let schematic = impeller2_wkt::Schematic::from_kdl(content)
-//             .inspect_err(|e| bevy::log::error!(?e, "invalid schematic content"))?;
-//         params.load_schematic(&schematic);
-//     }
-//     Ok(())
-// }
-
 pub fn sync_schematic(
     config: Res<DbConfig>,
     mut params: LoadSchematicParams,
@@ -83,8 +58,9 @@ pub fn sync_schematic(
         let path = Path::new(path);
         if path.try_exists().unwrap_or(false) {
             if let Err(e) = load_schematic_file(path, &mut params, live_reload_rx) {
-                modal.dialog_error("Invalid Schematic", &e);
+                modal.dialog_error("Invalid Schematic", &report_to_string(&e));
                 bevy::log::error!(?e, "invalid schematic for {path:?}");
+                // }
             } else {
                 return;
             }
@@ -92,7 +68,9 @@ pub fn sync_schematic(
     }
     if let Some(content) = config.schematic_content() {
         let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(content).inspect_err(|e| {
-            modal.dialog_error("Invalid Schematic", &e);
+            let report = report_to_string(e);
+            bevy::log::info!("{}", report);
+            modal.dialog_error("Invalid Schematic 2", &report);
             bevy::log::error!(?e, "invalid schematic content")
         }) else {
             return;
@@ -100,6 +78,19 @@ pub fn sync_schematic(
         params.load_schematic(&schematic);
     }
 }
+
+pub fn report_to_string(diagnostic: &dyn Diagnostic) -> String {
+    use miette::{GraphicalReportHandler, Report};
+    use std::fmt::Write;
+    let mut buf = String::new();
+    miette::GraphicalReportHandler::new_themed(miette::GraphicalTheme::unicode_nocolor())
+    // miette::GraphicalReportHandler::new()
+    // miette::DebugReportHandler::new()
+        .render_report(&mut buf, diagnostic)
+        .expect("Failed to render diagnostic");
+    buf
+}
+
 
 pub fn load_schematic_file(
     path: &Path,

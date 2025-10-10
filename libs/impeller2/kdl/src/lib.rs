@@ -7,7 +7,7 @@ pub use ser::*;
 mod de;
 pub use de::*;
 
-#[derive(Error, Debug, Diagnostic)]
+#[derive(Error, Debug, Diagnostic, Clone)]
 pub enum KdlSchematicError {
     #[error("KDL parse error")]
     #[diagnostic(code(kdl_schematic::parse_error))]

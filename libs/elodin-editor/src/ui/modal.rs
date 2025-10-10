@@ -138,7 +138,7 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
         let inspector_anchor = state_mut.inspector_anchor;
         let setting_modal_state = state_mut.setting_modal_state;
 
-        let modal_size = egui::vec2(280.0, 480.0);
+        let modal_size = egui::vec2(400.0, 480.0);
 
         let modal_rect = if let Some(inspector_anchor) = inspector_anchor.0 {
             egui::Rect::from_min_size(
@@ -487,7 +487,7 @@ impl ModalDialog<'_, '_> {
 
     /// Any system producing a `Result` may pipe to this so that any errors produced
     /// will show a dialog.
-    pub fn dialog_error<E: std::error::Error>(&mut self, title: impl Into<String>, error: &E) {
+    pub fn dialog_error<E: std::fmt::Display>(&mut self, title: impl Into<String>, error: &E) {
         self.show_message(title, format!("{}", error));
     }
 }
