@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
+    GridHandle,
     object_3d::Object3DState,
     ui::{
         actions,
@@ -31,6 +32,8 @@ pub struct SchematicParam<'w, 's> {
     pub graph_states: Query<'w, 's, &'static plot::GraphState>,
     pub query_plots: Query<'w, 's, &'static query_plot::QueryPlotData>,
     pub viewports: Query<'w, 's, &'static inspector::viewport::Viewport>,
+    pub camera_grids: Query<'w, 's, &'static GridHandle>,
+    pub grid_visibility: Query<'w, 's, &'static Visibility>,
     pub objects_3d: Query<'w, 's, (Entity, &'static Object3DState)>,
     pub lines_3d: Query<'w, 's, (Entity, &'static Line3d)>,
     pub vector_arrows: Query<'w, 's, (Entity, &'static VectorArrow3d)>,
@@ -49,11 +52,17 @@ impl SchematicParam<'_, '_> {
                 Pane::Viewport(viewport) => {
                     let cam_entity = viewport.camera?;
                     let viewport_data = self.viewports.get(cam_entity).ok()?;
+                    let mut show_grid = false;
+                    if let Ok(grid_handle) = self.camera_grids.get(cam_entity) {
+                        if let Ok(visibility) = self.grid_visibility.get(grid_handle.grid) {
+                            show_grid = matches!(*visibility, Visibility::Visible);
+                        }
+                    }
 
                     Some(Panel::Viewport(Viewport {
                         fov: 45.0,
                         active: false,
-                        show_grid: false,
+                        show_grid,
                         hdr: false,
                         name: Some(viewport.label.clone()),
                         pos: Some(viewport_data.pos.eql.clone()),
