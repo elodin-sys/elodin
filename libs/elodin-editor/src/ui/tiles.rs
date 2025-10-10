@@ -42,6 +42,7 @@ use crate::{
     object_3d::{EditableEQL, compile_eql_expr},
     plugins::{
         LogicalKeyState,
+        gizmos::GIZMO_RENDER_LAYER,
         navigation_gizmo::{RenderLayerAlloc, spawn_gizmo},
     },
     ui::dashboard::NodeUpdaterParams,
@@ -485,7 +486,7 @@ impl ViewportPane {
         viewport: &Viewport,
         label: String,
     ) -> Self {
-        let mut main_camera_layers = RenderLayers::default();
+        let mut main_camera_layers = RenderLayers::default().with(GIZMO_RENDER_LAYER);
         let mut grid_layers = RenderLayers::none();
         if let Some(grid_layer) = render_layer_alloc.alloc() {
             main_camera_layers = main_camera_layers.with(grid_layer);

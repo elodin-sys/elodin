@@ -1,3 +1,4 @@
+use bevy::render::view::RenderLayers;
 use bevy::{
     app::{App, Plugin, Startup, Update},
     ecs::system::{Query, Res, ResMut},
@@ -6,10 +7,11 @@ use bevy::{
         gizmos::Gizmos,
     },
     log::warn,
-    math::Vec3,
+    math::{DVec3, Vec3},
     prelude::Color,
     transform::components::Transform,
 };
+use big_space::FloatingOriginSettings;
 use impeller2::types::ComponentId;
 use impeller2_bevy::{ComponentValueMap, EntityMap};
 use impeller2_wkt::{
@@ -23,6 +25,9 @@ use crate::{
     WorldPosExt,
     vector_arrow::{VectorArrowState, component_value_tail_to_vec3},
 };
+
+pub const GIZMO_RENDER_LAYER: usize = 30;
+const MIN_ARROW_LENGTH_SQUARED: f32 = 1.0e-6;
 
 pub struct GizmoPlugin;
 
@@ -39,6 +44,7 @@ fn gizmo_setup(mut config_store: ResMut<GizmoConfigStore>) {
     config.line.width = 5.0;
     config.line.joints = GizmoLineJoint::Round(12);
     config.enabled = true;
+    config.render_layers = RenderLayers::layer(GIZMO_RENDER_LAYER);
 }
 
 fn render_vector_arrow(
@@ -47,6 +53,7 @@ fn render_vector_arrow(
     arrows: Query<&VectorArrow>,
     vector_arrows: Query<(&VectorArrow3d, &VectorArrowState)>,
     component_values: Query<&'static WktComponentValue>,
+    floating_origin: Res<FloatingOriginSettings>,
     mut gizmos: Gizmos,
 ) {
     for gizmo in arrows.iter() {
@@ -92,6 +99,9 @@ fn render_vector_arrow(
         } else {
             (Vec3::ZERO, vec * *scale)
         };
+        if (end - start).length_squared() <= MIN_ARROW_LENGTH_SQUARED {
+            continue;
+        }
         gizmos.arrow(start, end, wkt_color_to_bevy(color));
     }
 
@@ -109,16 +119,27 @@ fn render_vector_arrow(
         };
 
         let direction = direction * arrow.scale;
-
-        let mut start = Vec3::ZERO;
-        if let Some(origin_expr) = &state.origin_expr {
-            if let Ok(origin_value) = origin_expr.execute(&entity_map, &component_values) {
-                if let Some(origin) = component_value_tail_to_vec3(&origin_value) {
-                    start = origin;
-                }
-            }
+        if direction.length_squared() <= MIN_ARROW_LENGTH_SQUARED {
+            continue;
         }
 
+        let mut start_world = Vec3::ZERO;
+        if let Some(origin_expr) = &state.origin_expr {
+            let Ok(origin_value) = origin_expr.execute(&entity_map, &component_values) else {
+                continue;
+            };
+            let Some(origin) = component_value_tail_to_vec3(&origin_value) else {
+                continue;
+            };
+            start_world = origin;
+        }
+
+        let start_world_d = DVec3::new(
+            start_world.x as f64,
+            start_world.y as f64,
+            start_world.z as f64,
+        );
+        let (_, start) = floating_origin.translation_to_grid::<i128>(start_world_d);
         let end = start + direction;
         gizmos.arrow(start, end, wkt_color_to_bevy(&arrow.color));
     }
