@@ -416,13 +416,11 @@ You should be able to run the simulation and see the same behavior as before, bu
 #### Checking your work
 Success! We've added a wind force to our simulation. The ball now bounces around the world with the wind
 affecting its trajectory, steadily blowing the ball in a single direction, losing energy as it bounces.
-If you'd like to check your work, you can use the following command to generate the matching template code:
-```bash
-elodin create --template ball
+If you'd like to check your work, you can compare to the example at `examples/ball/`.
 ```
 
 {% alert(kind="notice") %}
-You'll notice that the template code is broken into multiple files, this is meant to serve as an example of how you can organize your code as it grows.
+You'll notice that the example code is broken into multiple files. This is meant to serve as an example of how you can organize your code as it grows.
 {% end %}
 
 
