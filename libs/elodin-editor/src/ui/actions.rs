@@ -37,7 +37,10 @@ impl LuaActor {
                 warn!(?err, "error spawning lua client");
                 return;
             }
-            while let Ok((cmd, res_tx)) = cmd_rx.recv().inspect_err(|e| warn!("command receive error: {e}")) {
+            while let Ok((cmd, res_tx)) = cmd_rx
+                .recv()
+                .inspect_err(|e| warn!("command receive error: {e}"))
+            {
                 match lua.load(&cmd).eval_async::<MultiValue>().await {
                     Ok(values) => {
                         let val = values

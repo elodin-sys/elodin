@@ -287,6 +287,17 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> KdlNode {
                 node
             }
         },
+        Object3DMesh::Ellipsoid { scale, color } => {
+            let mut node = KdlNode::new("ellipsoid");
+            node.entries_mut()
+                .push(KdlEntry::new_prop("scale", scale.clone()));
+
+            if color != &default_ellipsoid_color() {
+                serialize_color_to_node(&mut node, color);
+            }
+
+            node
+        }
     }
 }
 
@@ -731,6 +742,39 @@ mod tests {
                 assert_eq!(material.base_color.b, 0.0);
             } else {
                 panic!("Expected mesh object");
+            }
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_serialize_object_3d_ellipsoid() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "rocket.world_pos".to_string(),
+            mesh: Object3DMesh::Ellipsoid {
+                scale: "rocket.scale".to_string(),
+                color: Color::rgba(64.0 / 255.0, 128.0 / 255.0, 1.0, 96.0 / 255.0),
+            },
+            aux: (),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert_eq!(parsed.elems.len(), 1);
+        if let SchematicElem::Object3d(obj) = &parsed.elems[0] {
+            assert_eq!(obj.eql, "rocket.world_pos");
+            match &obj.mesh {
+                Object3DMesh::Ellipsoid { scale, color } => {
+                    assert_eq!(scale, "rocket.scale");
+                    assert!((color.r - 64.0 / 255.0).abs() < f32::EPSILON);
+                    assert!((color.g - 128.0 / 255.0).abs() < f32::EPSILON);
+                    assert!((color.b - 1.0).abs() < f32::EPSILON);
+                    assert!((color.a - 96.0 / 255.0).abs() < f32::EPSILON);
+                }
+                _ => panic!("Expected ellipsoid mesh"),
             }
         } else {
             panic!("Expected object_3d");

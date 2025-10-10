@@ -118,6 +118,7 @@ impl LoadSchematicParams<'_, '_> {
         self.tile_state
             .clear(&mut self.commands, &mut self.selected_object);
         for entity in self.objects_3d.iter() {
+            // Bevy's despawn() is recursive in this version
             self.commands.entity(entity).despawn();
         }
         for elem in &schematic.elems {
@@ -143,6 +144,7 @@ impl LoadSchematicParams<'_, '_> {
             &mut self.commands,
             object_3d.clone(),
             expr,
+            &self.eql.0,
             &mut self.materials,
             &mut self.meshes,
             &self.asset_server,
