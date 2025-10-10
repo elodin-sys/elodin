@@ -526,7 +526,25 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         .and_then(|v| v.as_string())
         .map(|s| s.to_string());
 
-    let scale = node.get("scale").and_then(|v| v.as_float()).unwrap_or(1.0) as f32;
+    let scale = match node.entry("scale") {
+        None => 1.0,
+        Some(entry) => {
+            let value = entry.value();
+            if let Some(value) = value.as_float() {
+                value as f32
+            } else if let Some(value) = value.as_integer() {
+                value as f32
+            } else {
+                return Err(KdlSchematicError::InvalidValue {
+                    property: "scale".to_string(),
+                    node: "vector_arrow".to_string(),
+                    expected: "a numeric value".to_string(),
+                    src: src.to_string(),
+                    span: entry.span(),
+                });
+            }
+        }
+    };
 
     let name = node
         .get("name")
@@ -1207,6 +1225,38 @@ vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="bal
             assert_eq!(arrow.color.b, 1.0);
         } else {
             panic!("Expected vector_arrow");
+        }
+    }
+
+    #[test]
+    fn test_parse_vector_arrow_integer_scale() {
+        let kdl = r#"
+vector_arrow "a.vector" scale=2 {
+    color "mint"
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::VectorArrow(arrow) = &schematic.elems[0] {
+            assert_eq!(arrow.scale, 2.0);
+        } else {
+            panic!("Expected vector_arrow");
+        }
+    }
+
+    #[test]
+    fn test_parse_vector_arrow_invalid_scale() {
+        let kdl = r#"vector_arrow "a.vector" scale="big""#;
+
+        let err = parse_schematic(kdl).unwrap_err();
+
+        match err {
+            KdlSchematicError::InvalidValue { property, node, .. } => {
+                assert_eq!(property, "scale");
+                assert_eq!(node, "vector_arrow");
+            }
+            other => panic!("Expected invalid value error, got {other:?}"),
         }
     }
 
