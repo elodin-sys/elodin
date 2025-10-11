@@ -657,32 +657,31 @@ fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
     let entries = node.entries();
     let positional_entries: Vec<_> = entries.iter().filter(|e| e.name().is_none()).collect();
 
-    if positional_entries.len() >= 3 {
-        if let (Some(r), Some(g), Some(b)) = (
+    if positional_entries.len() >= 3
+        && let (Some(r), Some(g), Some(b)) = (
             parse_color_component_value(positional_entries[0].value()),
             parse_color_component_value(positional_entries[1].value()),
             parse_color_component_value(positional_entries[2].value()),
-        ) {
-            let a = positional_entries
-                .get(3)
-                .and_then(|entry| parse_color_component_value(entry.value()))
-                .unwrap_or(1.0);
+        )
+    {
+        let a = positional_entries
+            .get(3)
+            .and_then(|entry| parse_color_component_value(entry.value()))
+            .unwrap_or(1.0);
 
-            return Some(Color::rgba(r, g, b, a));
-        }
+        return Some(Color::rgba(r, g, b, a));
     }
 
-    if let Some(first) = positional_entries.first() {
-        if let Some(name) = first.value().as_string() {
-            if let Some(mut color) = parse_named_color(name) {
-                if let Some(alpha_entry) = positional_entries.get(1) {
-                    if let Some(alpha) = parse_color_component_value(alpha_entry.value()) {
-                        color.a = alpha;
-                    }
-                }
-                return Some(color);
-            }
+    if let Some(first) = positional_entries.first()
+        && let Some(name) = first.value().as_string()
+        && let Some(mut color) = parse_named_color(name)
+    {
+        if let Some(alpha_entry) = positional_entries.get(1)
+            && let Some(alpha) = parse_color_component_value(alpha_entry.value())
+        {
+            color.a = alpha;
         }
+        return Some(color);
     }
 
     if let Some(color_value) = node.get("color").and_then(|v| v.as_string()) {
@@ -692,19 +691,19 @@ fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
                 .map(|s| s.trim())
                 .collect();
 
-            if values.len() >= 3 {
-                if let (Some(r), Some(g), Some(b)) = (
+            if values.len() >= 3
+                && let (Some(r), Some(g), Some(b)) = (
                     parse_color_component_str(values[0]),
                     parse_color_component_str(values[1]),
                     parse_color_component_str(values[2]),
-                ) {
-                    let a = values
-                        .get(3)
-                        .and_then(|v| parse_color_component_str(v))
-                        .unwrap_or(1.0);
+                )
+            {
+                let a = values
+                    .get(3)
+                    .and_then(|v| parse_color_component_str(v))
+                    .unwrap_or(1.0);
 
-                    return Some(Color::rgba(r, g, b, a));
-                }
+                return Some(Color::rgba(r, g, b, a));
             }
         }
 
