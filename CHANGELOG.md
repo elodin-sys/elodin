@@ -5,15 +5,10 @@
 ## v0.15
 
 ### v0.15.1
-- Ticks
-- Vector Arrows
-- Fix KDL crash
-- ellipse
-- 
 - **(feat)** UI: Display tick count and add "Goto tick…" command. (#196)
+- **(feat)** Add 3D ellipsoid mesh and color transparency support. (#201)
 - **(fix)** Do not panic on invalid KDL instead show a helpful error message. (#202)
 - **(feat)** Ensure LFS file is not an LFS file pointer. (#206)
-- **(feat)** Add 3D ellipsoid mesh and color transparency support. (#201)
 - **(fix)** Fix DB connection thread leak. (#198)
 - **(feat)** UI: Add custom graph line colors in KDL. (#193)
 - **(fix)** UI: restore graph inspector on title click to fix regression. (#199)
