@@ -48,25 +48,17 @@ In a Windows terminal launch the Elodin app.
 
 In a WSL terminal download and install `elodin` binary into your path then run:
 
-1. Create a new simulation using the three-body orbit template.
-    ```sh
-    elodin create --template three-body
-    ```
-2. Run the simulation server.
-    ```sh
-    elodin run three-body.py
-    ```
+```sh
+elodin run libs/nox-py/examples/three-body.py
+```
+
 
 ### Linux / macOS
 
-1. Create a new simulation using the three-body orbit template.
-    ```sh
-    elodin create --template three-body
-    ```
-2. Launch the simulation using the `elodin` CLI.
-    ```sh
-    elodin editor three-body.py
-    ```
+```sh
+elodin run libs/nox-py/examples/three-body.py
+```
+
 
 ## Perform Analysis
 
@@ -81,10 +73,9 @@ The `ball/plot.py` example depends on `matplotlib`. Install it using `pip`:
 pip install -U matplotlib
 ```
 
-Then create & run the ball template:
+Then run the ball plot example:
 ```sh
-elodin create --template ball
-python3 ball/plot.py
+python3 examples/ball/plot.py
 ```
 
 For more information on data frames check out

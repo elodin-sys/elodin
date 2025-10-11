@@ -4,7 +4,8 @@ use egui_tiles::{Container, Tile, TileId};
 use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
 use impeller2_kdl::FromKdl;
 use impeller2_kdl::KdlSchematicError;
-use impeller2_wkt::{DbConfig, Graph, Line3d, Object3D, Panel, Schematic, Viewport};
+use impeller2_wkt::{DbConfig, Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport};
+use miette::{Diagnostic, miette};
 use std::time::Duration;
 use std::{collections::BTreeMap, path::Path};
 
@@ -14,14 +15,16 @@ use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
         HdrEnabled, SelectedObject,
-        colors::{self},
+        colors::{self, EColor},
         dashboard::{NodeUpdaterParams, spawn_dashboard},
+        modal::ModalDialog,
         monitor::MonitorPane,
         plot::GraphBundle,
         query_plot::QueryPlotData,
         schematic::EqlExt,
         tiles::{DashboardPane, GraphPane, Pane, TileState, TreePane, ViewportPane},
     },
+    vector_arrow::VectorArrowState,
 };
 
 #[derive(Component)]
@@ -41,12 +44,14 @@ pub struct LoadSchematicParams<'w, 's> {
     pub selected_object: ResMut<'w, SelectedObject>,
     pub node_updater_params: NodeUpdaterParams<'w, 's>,
     objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
+    vector_arrows: Query<'w, 's, Entity, With<VectorArrowState>>,
 }
 
 pub fn sync_schematic(
     config: Res<DbConfig>,
     mut params: LoadSchematicParams,
     live_reload_rx: ResMut<SchematicLiveReloadRx>,
+    mut modal: ModalDialog,
 ) {
     if !config.is_changed() {
         return;
@@ -55,16 +60,35 @@ pub fn sync_schematic(
         let path = Path::new(path);
         if path.try_exists().unwrap_or(false) {
             if let Err(e) = load_schematic_file(path, &mut params, live_reload_rx) {
-                bevy::log::error!(?e, "invalid schematic for {path:?}");
+                modal.dialog_error(
+                    format!("Invalid Schematic in {:?}", path.display()),
+                    &render_diag(&e),
+                );
+                let report = miette!(e.clone());
+                bevy::log::error!(?report, "Invalid schematic for {path:?}");
             } else {
                 return;
             }
         }
     }
     if let Some(content) = config.schematic_content() {
-        let schematic = impeller2_wkt::Schematic::from_kdl(content).expect("schematic error");
+        let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(content).inspect_err(|e| {
+            modal.dialog_error("Invalid Schematic", &render_diag(e));
+            let report = miette!(e.clone());
+            bevy::log::error!(?report, "Invalid schematic content")
+        }) else {
+            return;
+        };
         params.load_schematic(&schematic);
     }
+}
+
+pub fn render_diag(diagnostic: &dyn Diagnostic) -> String {
+    let mut buf = String::new();
+    miette::GraphicalReportHandler::new_themed(miette::GraphicalTheme::unicode_nocolor())
+        .render_report(&mut buf, diagnostic)
+        .expect("Failed to render diagnostic");
+    buf
 }
 
 pub fn load_schematic_file(
@@ -118,6 +142,10 @@ impl LoadSchematicParams<'_, '_> {
         self.tile_state
             .clear(&mut self.commands, &mut self.selected_object);
         for entity in self.objects_3d.iter() {
+            // Bevy's despawn() is recursive in this version
+            self.commands.entity(entity).despawn();
+        }
+        for entity in self.vector_arrows.iter() {
             self.commands.entity(entity).despawn();
         }
         for elem in &schematic.elems {
@@ -131,6 +159,9 @@ impl LoadSchematicParams<'_, '_> {
                 impeller2_wkt::SchematicElem::Line3d(line_3d) => {
                     self.spawn_line_3d(line_3d.clone());
                 }
+                impeller2_wkt::SchematicElem::VectorArrow(vector_arrow) => {
+                    self.spawn_vector_arrow(vector_arrow.clone());
+                }
             }
         }
     }
@@ -143,6 +174,7 @@ impl LoadSchematicParams<'_, '_> {
             &mut self.commands,
             object_3d.clone(),
             expr,
+            &self.eql.0,
             &mut self.materials,
             &mut self.meshes,
             &self.asset_server,
@@ -151,6 +183,31 @@ impl LoadSchematicParams<'_, '_> {
 
     pub fn spawn_line_3d(&mut self, line_3d: Line3d) {
         self.commands.spawn(line_3d);
+    }
+
+    pub fn spawn_vector_arrow(&mut self, vector_arrow: VectorArrow3d) {
+        use crate::object_3d::compile_eql_expr;
+
+        let vector_expr = self
+            .eql
+            .0
+            .parse_str(&vector_arrow.vector)
+            .map(compile_eql_expr)
+            .ok();
+
+        let origin_expr = vector_arrow
+            .origin
+            .as_ref()
+            .and_then(|origin| self.eql.0.parse_str(origin).ok())
+            .map(compile_eql_expr);
+
+        self.commands.spawn((
+            vector_arrow,
+            VectorArrowState {
+                vector_expr,
+                origin_expr,
+            },
+        ));
     }
 
     pub fn spawn_panel(&mut self, panel: &Panel, parent_id: Option<TileId>) -> Option<TileId> {
@@ -238,17 +295,22 @@ impl LoadSchematicParams<'_, '_> {
                 let mut components_tree: BTreeMap<ComponentPath, Vec<(bool, Color32)>> =
                     BTreeMap::new();
                 for (j, (component, i)) in component_vec.iter().enumerate() {
+                    let line_color = graph
+                        .colors
+                        .get(j)
+                        .copied()
+                        .map(EColor::into_color32)
+                        .unwrap_or_else(|| colors::get_color_by_index_all(j));
                     if let Some(elements) = components_tree.get_mut(component) {
-                        elements[*i] = (true, colors::get_color_by_index_all(j));
+                        elements[*i] = (true, line_color);
                     } else {
                         let Some(schema) = self.schema_reg.0.get(&component.id) else {
                             continue;
                         };
                         let len: usize = schema.shape().iter().copied().product();
-                        let mut elements: Vec<(bool, Color32)> = (0..len)
-                            .map(|_| (false, colors::get_color_by_index_all(j)))
-                            .collect();
-                        elements[*i] = (true, colors::get_color_by_index_all(j));
+                        let mut elements: Vec<(bool, Color32)> =
+                            (0..len).map(|_| (false, line_color)).collect();
+                        elements[*i] = (true, line_color);
                         components_tree.insert(component.clone(), elements);
                     }
                 }

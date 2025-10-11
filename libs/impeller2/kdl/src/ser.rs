@@ -20,6 +20,7 @@ fn serialize_schematic_elem<T>(elem: &SchematicElem<T>) -> KdlNode {
         SchematicElem::Panel(panel) => serialize_panel(panel),
         SchematicElem::Object3d(obj) => serialize_object_3d(obj),
         SchematicElem::Line3d(line) => serialize_line_3d(line),
+        SchematicElem::VectorArrow(arrow) => serialize_vector_arrow(arrow),
     }
 }
 
@@ -155,6 +156,10 @@ fn serialize_graph<T>(graph: &Graph<T>) -> KdlNode {
             .push(KdlEntry::new_prop("y_max", graph.y_range.end));
     }
 
+    for color in &graph.colors {
+        serialize_color_to_node(&mut node, color);
+    }
+
     node
 }
 
@@ -283,6 +288,17 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> KdlNode {
                 node
             }
         },
+        Object3DMesh::Ellipsoid { scale, color } => {
+            let mut node = KdlNode::new("ellipsoid");
+            node.entries_mut()
+                .push(KdlEntry::new_prop("scale", scale.clone()));
+
+            if color != &default_ellipsoid_color() {
+                serialize_color_to_node(&mut node, color);
+            }
+
+            node
+        }
     }
 }
 
@@ -307,6 +323,35 @@ fn serialize_line_3d<T>(line: &Line3d<T>) -> KdlNode {
     node
 }
 
+fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
+    let mut node = KdlNode::new("vector_arrow");
+    node.entries_mut().push(KdlEntry::new(arrow.vector.clone()));
+
+    if let Some(origin) = &arrow.origin {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("origin", origin.clone()));
+    }
+
+    if (arrow.scale - 1.0).abs() > f32::EPSILON {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("scale", arrow.scale as f64));
+    }
+
+    if let Some(name) = &arrow.name {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("name", name.clone()));
+    }
+
+    if arrow.in_body_frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("in_body_frame", true));
+    }
+
+    serialize_color_to_node(&mut node, &arrow.color);
+
+    node
+}
+
 fn serialize_color_to_node(node: &mut KdlNode, color: &Color) {
     serialize_color_to_node_named(node, color, None)
 }
@@ -315,13 +360,17 @@ fn serialize_color_to_node_named(node: &mut KdlNode, color: &Color, name: Option
     let mut color_node = KdlNode::new(name.unwrap_or("color"));
 
     // Add r, g, b as positional arguments
-    color_node.entries_mut().push(KdlEntry::new(color.r as f64));
-    color_node.entries_mut().push(KdlEntry::new(color.g as f64));
-    color_node.entries_mut().push(KdlEntry::new(color.b as f64));
+    let r = float_color_component_to_int(color.r);
+    let g = float_color_component_to_int(color.g);
+    let b = float_color_component_to_int(color.b);
+    color_node.entries_mut().push(KdlEntry::new(r));
+    color_node.entries_mut().push(KdlEntry::new(g));
+    color_node.entries_mut().push(KdlEntry::new(b));
 
     // Add alpha if it's not 1.0 (default)
-    if color.a != 1.0 {
-        color_node.entries_mut().push(KdlEntry::new(color.a as f64));
+    let a = float_color_component_to_int(color.a);
+    if a != 255 {
+        color_node.entries_mut().push(KdlEntry::new(a));
     }
 
     // Add the color node as a child
@@ -332,6 +381,11 @@ fn serialize_color_to_node_named(node: &mut KdlNode, color: &Color, name: Option
         doc.nodes_mut().push(color_node);
         node.set_children(doc);
     }
+}
+
+fn float_color_component_to_int(component: f32) -> i128 {
+    let clamped = component.clamp(0.0, 1.0);
+    (clamped * 255.0).round() as i128
 }
 
 fn serialize_material_to_node(node: &mut KdlNode, material: &Material) {
@@ -573,6 +627,35 @@ mod tests {
     use super::*;
     use crate::parse_schematic;
 
+    const COLOR_EPSILON: f32 = 1.0 / 255.0 + 1e-6;
+
+    fn assert_color_close(actual: Color, expected: Color) {
+        assert!(
+            (actual.r - expected.r).abs() <= COLOR_EPSILON,
+            "expected r ~= {} got {}",
+            expected.r,
+            actual.r
+        );
+        assert!(
+            (actual.g - expected.g).abs() <= COLOR_EPSILON,
+            "expected g ~= {} got {}",
+            expected.g,
+            actual.g
+        );
+        assert!(
+            (actual.b - expected.b).abs() <= COLOR_EPSILON,
+            "expected b ~= {} got {}",
+            expected.b,
+            actual.b
+        );
+        assert!(
+            (actual.a - expected.a).abs() <= COLOR_EPSILON,
+            "expected a ~= {} got {}",
+            expected.a,
+            actual.a
+        );
+    }
+
     #[test]
     fn test_serialize_simple_viewport() {
         let mut schematic = Schematic::default();
@@ -632,6 +715,33 @@ mod tests {
     }
 
     #[test]
+    fn test_serialize_graph_with_colors() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::Panel(Panel::Graph(Graph {
+                eql: "rocket.fins[2], rocket.fins[3]".to_string(),
+                name: None,
+                graph_type: GraphType::Line,
+                auto_y_range: true,
+                y_range: 0.0..1.0,
+                aux: (),
+                colors: vec![Color::rgb(1.0, 0.0, 0.0), Color::rgb(0.0, 1.0, 0.0)],
+            })));
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert_eq!(parsed.elems.len(), 1);
+        let SchematicElem::Panel(Panel::Graph(graph)) = &parsed.elems[0] else {
+            panic!("Expected graph panel");
+        };
+        assert_eq!(graph.colors.len(), 2);
+        assert_eq!(graph.colors[0], Color::rgb(1.0, 0.0, 0.0));
+        assert_eq!(graph.colors[1], Color::rgb(0.0, 1.0, 0.0));
+    }
+
+    #[test]
     fn test_serialize_object_3d_sphere() {
         let mut schematic = Schematic::default();
         schematic.elems.push(SchematicElem::Object3d(Object3D {
@@ -662,6 +772,39 @@ mod tests {
                 assert_eq!(material.base_color.b, 0.0);
             } else {
                 panic!("Expected mesh object");
+            }
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_serialize_object_3d_ellipsoid() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "rocket.world_pos".to_string(),
+            mesh: Object3DMesh::Ellipsoid {
+                scale: "rocket.scale".to_string(),
+                color: Color::rgba(64.0 / 255.0, 128.0 / 255.0, 1.0, 96.0 / 255.0),
+            },
+            aux: (),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert_eq!(parsed.elems.len(), 1);
+        if let SchematicElem::Object3d(obj) = &parsed.elems[0] {
+            assert_eq!(obj.eql, "rocket.world_pos");
+            match &obj.mesh {
+                Object3DMesh::Ellipsoid { scale, color } => {
+                    assert_eq!(scale, "rocket.scale");
+                    assert!((color.r - 64.0 / 255.0).abs() < f32::EPSILON);
+                    assert!((color.g - 128.0 / 255.0).abs() < f32::EPSILON);
+                    assert!((color.b - 1.0).abs() < f32::EPSILON);
+                    assert!((color.a - 96.0 / 255.0).abs() < f32::EPSILON);
+                }
+                _ => panic!("Expected ellipsoid mesh"),
             }
         } else {
             panic!("Expected object_3d");
@@ -735,12 +878,44 @@ mod tests {
         if let SchematicElem::Line3d(line) = &parsed.elems[0] {
             assert_eq!(line.eql, "trajectory");
             assert_eq!(line.line_width, 2.0);
-            assert_eq!(line.color.r, Color::MINT.r);
-            assert_eq!(line.color.g, Color::MINT.g);
-            assert_eq!(line.color.b, Color::MINT.b);
+            assert_color_close(line.color, Color::MINT);
             assert!(!line.perspective);
         } else {
             panic!("Expected line_3d");
+        }
+    }
+
+    #[test]
+    fn test_serialize_vector_arrow() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::VectorArrow(VectorArrow3d {
+                vector: "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]".to_string(),
+                origin: Some("ball.world_pos".to_string()),
+                scale: 2.5,
+                name: Some("Velocity".to_string()),
+                color: Color::BLUE,
+                in_body_frame: true,
+                aux: (),
+            }));
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert_eq!(parsed.elems.len(), 1);
+        if let SchematicElem::VectorArrow(arrow) = &parsed.elems[0] {
+            assert_eq!(
+                arrow.vector,
+                "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]"
+            );
+            assert_eq!(arrow.origin.as_deref(), Some("ball.world_pos"));
+            assert_eq!(arrow.scale, 2.5);
+            assert_eq!(arrow.name.as_deref(), Some("Velocity"));
+            assert!(arrow.in_body_frame);
+            assert_color_close(arrow.color, Color::BLUE);
+        } else {
+            panic!("Expected vector_arrow");
         }
     }
 
@@ -772,7 +947,7 @@ tabs {
 }
 object_3d a.world_pos {
     sphere radius=0.20000000298023224 {
-        color 0.5299999713897705 0.8700000047683716 0.6200000047683716
+        color 135 222 158
     }
 }"#
             .trim(),
@@ -794,7 +969,7 @@ tabs {
 
 object_3d "a.world_pos" {
     sphere radius=0.2 {
-        color 1 0 1
+        color 255 0 255
     }
 }
 "#;
@@ -811,7 +986,7 @@ tabs {
 }
 object_3d a.world_pos {
     sphere radius=0.20000000298023224 {
-        color 1.0 0.0 1.0
+        color 255 0 255
     }
 }"#
             .trim(),
@@ -868,13 +1043,13 @@ object_3d a.world_pos {
         if let SchematicElem::Panel(Panel::Dashboard(dashboard)) = &parsed.elems[0] {
             assert_eq!(dashboard.root.label, Some("Styled Dashboard".to_string()));
             assert_eq!(dashboard.root.font_size, 24.0);
-            assert_eq!(dashboard.root.text_color, Color::TURQUOISE);
+            assert_color_close(dashboard.root.text_color, Color::TURQUOISE);
             assert_eq!(dashboard.root.text, Some("Hello World".to_string()));
 
             assert_eq!(dashboard.root.children.len(), 1);
             let child_node = &dashboard.root.children[0];
             assert_eq!(child_node.font_size, 12.0);
-            assert_eq!(child_node.text_color, Color::MINT);
+            assert_color_close(child_node.text_color, Color::MINT);
             assert_eq!(child_node.text, Some("Child Text".to_string()));
         } else {
             panic!("Expected dashboard");

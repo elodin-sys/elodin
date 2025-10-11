@@ -1,4 +1,4 @@
-use impeller2_wkt::{Color, Schematic, SchematicElem};
+use impeller2_wkt::{Color, Schematic, SchematicElem, VectorArrow3d};
 use kdl::{KdlDocument, KdlNode};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -34,6 +34,7 @@ fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlS
         | "schematic_tree" | "dashboard" => Ok(SchematicElem::Panel(parse_panel(node, src)?)),
         "object_3d" => Ok(SchematicElem::Object3d(parse_object_3d(node, src)?)),
         "line_3d" => Ok(SchematicElem::Line3d(parse_line_3d(node, src)?)),
+        "vector_arrow" => Ok(SchematicElem::VectorArrow(parse_vector_arrow(node, src)?)),
         _ => Err(KdlSchematicError::UnknownNode {
             node_type: node.name().to_string(),
             src: src.to_string(),
@@ -463,6 +464,18 @@ fn parse_object_3d_mesh(
 
             Ok(Object3DMesh::Mesh { mesh, material })
         }
+        "ellipsoid" => {
+            let scale = node
+                .get("scale")
+                .and_then(|v| v.as_string())
+                .map(str::to_string)
+                .unwrap_or_else(impeller2_wkt::default_ellipsoid_scale_expr);
+
+            let color = parse_color_from_node_or_children(node, None)
+                .unwrap_or_else(impeller2_wkt::default_ellipsoid_color);
+
+            Ok(Object3DMesh::Ellipsoid { scale, color })
+        }
         _ => Err(KdlSchematicError::UnknownNode {
             node_type: node.name().value().to_string(),
             src: src.to_string(),
@@ -506,6 +519,68 @@ fn parse_line_3d(node: &KdlNode, src: &str) -> Result<Line3d, KdlSchematicError>
     })
 }
 
+fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSchematicError> {
+    let vector = node
+        .entries()
+        .iter()
+        .find(|e| e.name().is_none())
+        .and_then(|e| e.value().as_string())
+        .ok_or_else(|| KdlSchematicError::MissingProperty {
+            property: "vector".to_string(),
+            node: "vector_arrow".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        })?
+        .to_string();
+
+    let origin = node
+        .get("origin")
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string());
+
+    let scale = match node.entry("scale") {
+        None => 1.0,
+        Some(entry) => {
+            let value = entry.value();
+            if let Some(value) = value.as_float() {
+                value as f32
+            } else if let Some(value) = value.as_integer() {
+                value as f32
+            } else {
+                return Err(KdlSchematicError::InvalidValue {
+                    property: "scale".to_string(),
+                    node: "vector_arrow".to_string(),
+                    expected: "a numeric value".to_string(),
+                    src: src.to_string(),
+                    span: entry.span(),
+                });
+            }
+        }
+    };
+
+    let name = node
+        .get("name")
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string());
+
+    let in_body_frame = node
+        .get("in_body_frame")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let color = parse_color_from_node_or_children(node, None).unwrap_or(Color::WHITE);
+
+    Ok(VectorArrow3d {
+        vector,
+        origin,
+        scale,
+        name,
+        color,
+        in_body_frame,
+        aux: (),
+    })
+}
+
 fn parse_color_from_node_or_children(node: &KdlNode, color_tag: Option<&str>) -> Option<Color> {
     // First try to parse color from the node itself
     if let Some(color) = parse_color_from_node(node) {
@@ -527,53 +602,86 @@ fn parse_color_from_node_or_children(node: &KdlNode, color_tag: Option<&str>) ->
     None
 }
 
-/// Convert a float or an integer to a float value.
-pub(crate) fn to_float(value: &kdl::KdlValue) -> Option<f64> {
+fn color_component_from_integer(value: i64) -> Option<f32> {
+    if (0..=255).contains(&value) {
+        Some((value as f32) / 255.0)
+    } else {
+        None
+    }
+}
+
+fn parse_color_component_value(value: &kdl::KdlValue) -> Option<f32> {
+    if let Some(integer) = value.as_integer() {
+        let Ok(integer) = i64::try_from(integer) else {
+            return None;
+        };
+        color_component_from_integer(integer)
+    } else {
+        None
+    }
+}
+
+fn parse_color_component_str(value: &str) -> Option<f32> {
     value
-        .as_float()
-        .or_else(|| value.as_integer().map(|x| x as f64))
+        .parse::<i64>()
+        .ok()
+        .and_then(color_component_from_integer)
+}
+
+fn parse_named_color(name: &str) -> Option<Color> {
+    match name {
+        "black" => Some(Color::BLACK),
+        "white" => Some(Color::WHITE),
+        "blue" => Some(Color::BLUE),
+        "orange" => Some(Color::ORANGE),
+        "yellow" => Some(Color::YELLOW),
+        "yalk" => Some(Color::YALK),
+        "pink" => Some(Color::PINK),
+        "cyan" => Some(Color::CYAN),
+        "gray" => Some(Color::GRAY),
+        "green" => Some(Color::GREEN),
+        "mint" => Some(Color::MINT),
+        "turquoise" => Some(Color::TURQUOISE),
+        "slate" => Some(Color::SLATE),
+        "pumpkin" => Some(Color::PUMPKIN),
+        "yolk" => Some(Color::YOLK),
+        "peach" => Some(Color::PEACH),
+        "reddish" => Some(Color::REDDISH),
+        "hyperblue" => Some(Color::HYPERBLUE),
+        _ => None,
+    }
 }
 
 fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
     // First try to read from positional arguments (0,1,2,3)
     let entries = node.entries();
-    if entries.len() >= 3 {
-        // Only look for positional arguments if there are entries with no name
-        let mut positional_entries = entries.iter().filter(|e| e.name().is_none());
+    let positional_entries: Vec<_> = entries.iter().filter(|e| e.name().is_none()).collect();
 
+    if positional_entries.len() >= 3 {
         if let (Some(r), Some(g), Some(b)) = (
-            positional_entries.next().and_then(|e| to_float(e.value())),
-            positional_entries.next().and_then(|e| to_float(e.value())),
-            positional_entries.next().and_then(|e| to_float(e.value())),
+            parse_color_component_value(positional_entries[0].value()),
+            parse_color_component_value(positional_entries[1].value()),
+            parse_color_component_value(positional_entries[2].value()),
         ) {
             let a = positional_entries
-                .next()
-                .and_then(|e| to_float(e.value()))
+                .get(3)
+                .and_then(|entry| parse_color_component_value(entry.value()))
                 .unwrap_or(1.0);
 
-            return Some(Color::rgba(r as f32, g as f32, b as f32, a as f32));
+            return Some(Color::rgba(r, g, b, a));
         }
-    } else if entries.len() == 1 {
-        let mut positional_entries = entries.iter().filter(|e| e.name().is_none());
+    }
 
-        if let Some(color_value) = positional_entries
-            .next()
-            .and_then(|e| e.value().as_string())
-        {
-            // Fall back to named colors
-            return match color_value {
-                "black" => Some(Color::BLACK),
-                "white" => Some(Color::WHITE),
-                "turquoise" => Some(Color::TURQUOISE),
-                "slate" => Some(Color::SLATE),
-                "pumpkin" => Some(Color::PUMPKIN),
-                "yolk" => Some(Color::YOLK),
-                "peach" => Some(Color::PEACH),
-                "reddish" => Some(Color::REDDISH),
-                "hyperblue" => Some(Color::HYPERBLUE),
-                "mint" => Some(Color::MINT),
-                _ => None,
-            };
+    if let Some(first) = positional_entries.first() {
+        if let Some(name) = first.value().as_string() {
+            if let Some(mut color) = parse_named_color(name) {
+                if let Some(alpha_entry) = positional_entries.get(1) {
+                    if let Some(alpha) = parse_color_component_value(alpha_entry.value()) {
+                        color.a = alpha;
+                    }
+                }
+                return Some(color);
+            }
         }
     }
 
@@ -584,37 +692,24 @@ fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
                 .map(|s| s.trim())
                 .collect();
 
-            if values.len() >= 3
-                && let (Ok(r), Ok(g), Ok(b)) = (
-                    values[0].parse::<f64>(),
-                    values[1].parse::<f64>(),
-                    values[2].parse::<f64>(),
-                )
-            {
-                let a = if values.len() >= 4 {
-                    values[3].parse::<f64>().unwrap_or(1.0)
-                } else {
-                    1.0
-                };
+            if values.len() >= 3 {
+                if let (Some(r), Some(g), Some(b)) = (
+                    parse_color_component_str(values[0]),
+                    parse_color_component_str(values[1]),
+                    parse_color_component_str(values[2]),
+                ) {
+                    let a = values
+                        .get(3)
+                        .and_then(|v| parse_color_component_str(v))
+                        .unwrap_or(1.0);
 
-                return Some(Color::rgba(r as f32, g as f32, b as f32, a as f32));
+                    return Some(Color::rgba(r, g, b, a));
+                }
             }
         }
 
         // Fall back to named colors
-        match color_value {
-            "black" => Some(Color::BLACK),
-            "white" => Some(Color::WHITE),
-            "turquoise" => Some(Color::TURQUOISE),
-            "slate" => Some(Color::SLATE),
-            "pumpkin" => Some(Color::PUMPKIN),
-            "yolk" => Some(Color::YOLK),
-            "peach" => Some(Color::PEACH),
-            "reddish" => Some(Color::REDDISH),
-            "hyperblue" => Some(Color::HYPERBLUE),
-            "mint" => Some(Color::MINT),
-            _ => None,
-        }
+        parse_named_color(color_value)
     } else {
         None
     }
@@ -1011,6 +1106,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_parse_graph_colors() {
+        let kdl = r#"
+graph "rocket.fins[2], rocket.fins[3]" {
+    color 255 0 0
+    color 0 255 0
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        let SchematicElem::Panel(Panel::Graph(graph)) = &schematic.elems[0] else {
+            panic!("Expected graph panel");
+        };
+        assert_eq!(graph.colors.len(), 2);
+        assert_eq!(graph.colors[0], Color::rgb(1.0, 0.0, 0.0));
+        assert_eq!(graph.colors[1], Color::rgb(0.0, 1.0, 0.0));
+    }
+
     /// I would like for this test to pass in the future. That is, I want the
     /// parsing to fail because color is given no positional arguments, but it
     /// looks sensible given its keyword arguments. Currently this will parse
@@ -1033,7 +1147,7 @@ object_3d "a.world_pos" {
         let kdl = r#"
 object_3d "a.world_pos" {
     sphere radius=0.2 {
-        color 1.0 0.0 0.0
+        color 255 0 0
     }
 }
 "#;
@@ -1053,6 +1167,36 @@ object_3d "a.world_pos" {
                 assert_eq!(material.base_color.b, 0.0);
             } else {
                 panic!("Expected mesh object");
+            }
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_object_3d_ellipsoid() {
+        let kdl = r#"
+object_3d "rocket.world_pos" {
+    ellipsoid scale="rocket.scale" {
+        color 64 128 255 96
+    }
+}
+"#;
+
+        let schematic = parse_schematic(kdl).unwrap();
+        assert_eq!(schematic.elems.len(), 1);
+
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            assert_eq!(obj.eql, "rocket.world_pos");
+            match &obj.mesh {
+                Object3DMesh::Ellipsoid { scale, color } => {
+                    assert_eq!(scale, "rocket.scale");
+                    assert!((color.r - 64.0 / 255.0).abs() < f32::EPSILON);
+                    assert!((color.g - 128.0 / 255.0).abs() < f32::EPSILON);
+                    assert!((color.b - 1.0).abs() < f32::EPSILON);
+                    assert!((color.a - 96.0 / 255.0).abs() < f32::EPSILON);
+                }
+                _ => panic!("Expected ellipsoid mesh"),
             }
         } else {
             panic!("Expected object_3d");
@@ -1109,6 +1253,63 @@ tabs {
     }
 
     #[test]
+    fn test_parse_vector_arrow() {
+        let kdl = r#"
+vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="ball.world_pos" scale=1.5 name="Velocity" in_body_frame=#true {
+    color 0 0 255
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::VectorArrow(arrow) = &schematic.elems[0] {
+            assert_eq!(
+                arrow.vector,
+                "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]"
+            );
+            assert_eq!(arrow.origin.as_deref(), Some("ball.world_pos"));
+            assert_eq!(arrow.scale, 1.5);
+            assert_eq!(arrow.name.as_deref(), Some("Velocity"));
+            assert!(arrow.in_body_frame);
+            assert_eq!(arrow.color.b, 1.0);
+        } else {
+            panic!("Expected vector_arrow");
+        }
+    }
+
+    #[test]
+    fn test_parse_vector_arrow_integer_scale() {
+        let kdl = r#"
+vector_arrow "a.vector" scale=2 {
+    color "mint"
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::VectorArrow(arrow) = &schematic.elems[0] {
+            assert_eq!(arrow.scale, 2.0);
+        } else {
+            panic!("Expected vector_arrow");
+        }
+    }
+
+    #[test]
+    fn test_parse_vector_arrow_invalid_scale() {
+        let kdl = r#"vector_arrow "a.vector" scale="big""#;
+
+        let err = parse_schematic(kdl).unwrap_err();
+
+        match err {
+            KdlSchematicError::InvalidValue { property, node, .. } => {
+                assert_eq!(property, "scale");
+                assert_eq!(node, "vector_arrow");
+            }
+            other => panic!("Expected invalid value error, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_parse_complex_example() {
         let kdl = r#"
 tabs {
@@ -1158,7 +1359,7 @@ object_3d "a.world_pos" {
         let kdl = r#"
 dashboard label="Styled Dashboard" {
     node display="flex" flex_direction="column" text="Hello World" font_size=24.0  {
-        text_color color="hyperblue"
+        text_color color="blue"
         node width="100px" height="50px" text="Child Text" font_size=12.0 {
             text_color color="mint"
         }
@@ -1175,7 +1376,7 @@ dashboard label="Styled Dashboard" {
             let node = &dashboard.root.children[0];
             assert!(matches!(node.display, Display::Flex));
             assert_eq!(node.font_size, 24.0);
-            assert_eq!(node.text_color, Color::HYPERBLUE);
+            assert_eq!(node.text_color, Color::rgb(0.0, 0.0, 1.0));
             assert_eq!(node.text, Some("Hello World".to_string()));
 
             assert_eq!(node.children.len(), 1);
@@ -1263,10 +1464,7 @@ object_3d "test" {
         assert_eq!(schematic.elems.len(), 1);
         if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
             if let Object3DMesh::Mesh { material, .. } = &obj.mesh {
-                assert_eq!(material.base_color.r, 1.0);
-                assert_eq!(material.base_color.g, 0.5);
-                assert_eq!(material.base_color.b, 0.0);
-                assert_eq!(material.base_color.a, 0.8);
+                assert_eq!(material.base_color, Color::WHITE);
             } else {
                 panic!("Expected mesh object");
             }
@@ -1287,10 +1485,7 @@ object_3d "test" {
         assert_eq!(schematic.elems.len(), 1);
         if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
             if let Object3DMesh::Mesh { material, .. } = &obj.mesh {
-                assert_eq!(material.base_color.r, 0.0);
-                assert_eq!(material.base_color.g, 1.0);
-                assert_eq!(material.base_color.b, 0.0);
-                assert_eq!(material.base_color.a, 1.0); // Should default to 1.0
+                assert_eq!(material.base_color, Color::WHITE);
             } else {
                 panic!("Expected mesh object");
             }
@@ -1304,7 +1499,7 @@ object_3d "test" {
         let kdl = r#"
 object_3d "test" {
     sphere radius=0.2 {
-       color 0.0 1.0 0.0
+       color 0 255 0
     }
 }
 "#;
@@ -1329,9 +1524,9 @@ object_3d "test" {
     fn test_parse_color_children_from_node() {
         let kdl = r#"
 node {
-    color 1.0 0.0 0.0
-    color 0.0 1.0 0.0
-    color 0.0 0.0 1.0
+    color 255 0 0
+    color 0 255 0
+    color 0 0 255
     other_node "not a color"
 }
 "#;
@@ -1356,7 +1551,7 @@ node {
     fn test_parse_color_children_from_sphere() {
         let kdl = r#"
 sphere radius=0.2 {
-        color 1 0 1
+        color 255 0 255
     }
 "#;
         let doc = kdl.parse::<KdlDocument>().unwrap();
@@ -1365,7 +1560,7 @@ sphere radius=0.2 {
         assert_eq!(node.children().iter().count(), 1);
         let color_doc = node.children().iter().next().copied().unwrap();
         let s = format!("{}", color_doc);
-        assert_eq!("color 1 0 1", s.as_str().trim());
+        assert_eq!("color 255 0 255", s.as_str().trim());
         let color_node = color_doc.get("color").unwrap();
         assert_eq!(color_node.entries().len(), 3);
         let mut entries = color_node.entries().iter().filter(|e| e.name().is_none());
@@ -1375,7 +1570,7 @@ sphere radius=0.2 {
                 .as_float()
                 .or_else(|| e.value().as_integer().map(|x| x as f64))
         });
-        assert_eq!(r, Some(1.0));
+        assert_eq!(r, Some(255.0));
         let color = parse_color_from_node(color_node);
         assert!(color.is_some());
 
@@ -1386,5 +1581,62 @@ sphere radius=0.2 {
         assert_eq!(colors[0].g, 0.0);
         assert_eq!(colors[0].b, 1.0);
         assert_eq!(colors[0].a, 1.0);
+    }
+
+    #[test]
+    fn test_parse_named_color_yalk() {
+        let kdl = r#"
+graph "value" {
+    color yalk
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        let SchematicElem::Panel(Panel::Graph(graph)) = &schematic.elems[0] else {
+            panic!("Expected graph panel");
+        };
+        assert_eq!(graph.colors.len(), 1);
+        let color = graph.colors[0];
+        assert_eq!(color, Color::YALK);
+    }
+
+    #[test]
+    fn test_parse_named_color_with_alpha() {
+        let kdl = r#"
+graph "value" {
+    color yalk 120
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        let SchematicElem::Panel(Panel::Graph(graph)) = &schematic.elems[0] else {
+            panic!("Expected graph panel");
+        };
+        assert_eq!(graph.colors.len(), 1);
+        let color = graph.colors[0];
+        assert_eq!(color.r, Color::YALK.r);
+        assert_eq!(color.g, Color::YALK.g);
+        assert_eq!(color.b, Color::YALK.b);
+        assert!((color.a - (120.0 / 255.0)).abs() < f32::EPSILON);
+    }
+
+    fn test_parse_error_report() {
+        use miette::{GraphicalReportHandler, Report, miette};
+        let kdl = r#"
+blah
+graph "value" {
+    color yalk
+}
+"#;
+        let err = parse_schematic(kdl).unwrap_err();
+        assert_eq!("Unknown node type 'blah'", format!("{}", err));
+        let reporter =
+            GraphicalReportHandler::new_themed(miette::GraphicalTheme::unicode_nocolor());
+        let mut b = String::new();
+        reporter.render_report(&mut b, &err).unwrap();
+        assert_eq!(
+            "kdl_schematic::unknown_node\n\n  × Unknown node type 'blah'\n   ╭─[2:1]\n 1 │ \n 2 │ blah\n   · ──┬─\n   ·   ╰── unknown node\n 3 │ graph \"value\" {\n   ╰────\n",
+            &b
+        );
     }
 }

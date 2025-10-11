@@ -69,7 +69,7 @@ typedef unsigned long long U64;
 #define SYSTICK_CSR_CLKSOURCE    (1 << 2)
 
 // Constants
-#define RED_LED_PIN        5
+#define RED_LED_PIN        3
 
 // Timeout helper macro
 #define WAIT_FOR(condition, error_msg) do { \

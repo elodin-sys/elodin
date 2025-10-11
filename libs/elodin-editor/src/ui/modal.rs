@@ -3,21 +3,96 @@ use bevy::{
         system::{Local, Query, Res, ResMut, SystemParam, SystemState},
         world::World,
     },
+    prelude::{Children, In},
     window::Window,
 };
 use bevy_egui::{EguiContexts, egui};
-use impeller2_bevy::{ComponentMetadataRegistry, ComponentPath, ComponentPathRegistry};
+use impeller2::types::ComponentId;
+use impeller2_bevy::{ComponentMetadataRegistry, ComponentPathRegistry};
+
+// Modal system for displaying dialogs and messages.
+//
+// # Examples
+//
+// ## Simple Message Dialog
+// ```rust
+// // In any system with access to ModalDialog
+// fn my_system(mut modal_dialog: ModalDialog) {
+//     modal_dialog.show_message("Info", "Operation completed successfully!");
+// }
+// ```
+//
+// ## Custom Dialog with Multiple Buttons
+// ```rust
+// use crate::ui::{Dialog, DialogButton, DialogAction};
+//
+// fn my_system(mut modal_dialog: ModalDialog) {
+//     let dialog = Dialog {
+//         id: "confirm_delete".to_string(),
+//         title: "Confirm Action".to_string(),
+//         message: "Are you sure you want to delete this item?".to_string(),
+//         buttons: vec![
+//             DialogButton {
+//                 text: "Cancel".to_string(),
+//                 action: DialogAction::Close,
+//             },
+//             DialogButton {
+//                 text: "Delete".to_string(),
+//                 action: DialogAction::Custom("delete".to_string()),
+//             },
+//         ],
+//     };
+//     modal_dialog.show_dialog(dialog);
+// }
+// ```
+//
+// ## Listening for Dialog Events
+// ```rust
+// use bevy::prelude::*;
+// use crate::ui::{DialogEvent, DialogAction};
+//
+// fn handle_dialog_events(mut dialog_events: EventReader<DialogEvent>) {
+//     for event in dialog_events.read() {
+//         match &event.action {
+//             DialogAction::Close => {
+//                 println!("Dialog '{}' was closed", event.id);
+//             }
+//             DialogAction::Custom(action_id) => {
+//                 println!("Custom action '{}' triggered for dialog '{}'", action_id, event.id);
+//                 match (event.id.as_str(), action_id.as_str()) {
+//                     ("confirm_delete", "delete") => {
+//                         // Handle delete confirmation
+//                     }
+//                     ("save_changes", "save") => {
+//                         // Handle save confirmation
+//                     }
+//                     _ => {
+//                         // Handle other combinations
+//                     }
+//                 }
+//             }
+//         }
+//     }
+// }
+// ```
+//
+// ## Closing a Modal
+// ```rust
+// setting_modal_state.close();
+// ```
 
 use crate::ui::{
-    EntityData, InspectorAnchor, SettingModal, SettingModalState, colors::get_scheme, images,
-    theme, utils::MarginSides,
+    Dialog, DialogAction, DialogButton, DialogEvent, EntityData, InspectorAnchor, SettingModal,
+    SettingModalState, colors::get_scheme, images, theme, utils::MarginSides,
 };
+use bevy::prelude::*;
 
 use super::{
-    RootWidgetSystem, WidgetSystem, WidgetSystemExt,
+    RootWidgetSystem, WidgetSystemExt,
     button::EButton,
     label::{self, ELabel},
-    plot::{GraphState, default_component_values},
+    plot::GraphState,
+    widgets::WidgetSystem,
 };
 
 #[derive(SystemParam)]
@@ -27,6 +102,22 @@ pub struct ModalWithSettings<'w, 's> {
     window: Query<'w, 's, &'static Window>,
     inspector_anchor: Res<'w, InspectorAnchor>,
     setting_modal_state: Res<'w, SettingModalState>,
+}
+
+pub mod action {
+    use super::*;
+
+    /// Any system producing a `Result` may pipe to this so that any errors produced
+    /// will show a dialog.
+    pub fn dialog_err<E: std::error::Error>(
+        In(result): In<Result<(), E>>,
+        mut modal_dialog: ModalDialog,
+    ) {
+        if let Err(e) = result {
+            bevy::log::warn!("Show error dialog: {}", e);
+            modal_dialog.show_message("Error", format!("{}", e));
+        }
+    }
 }
 
 impl RootWidgetSystem for ModalWithSettings<'_, '_> {
@@ -47,7 +138,7 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
         let inspector_anchor = state_mut.inspector_anchor;
         let setting_modal_state = state_mut.setting_modal_state;
 
-        let modal_size = egui::vec2(280.0, 480.0);
+        let modal_size = egui::vec2(400.0, 480.0);
 
         let modal_rect = if let Some(inspector_anchor) = inspector_anchor.0 {
             egui::Rect::from_min_size(
@@ -73,7 +164,10 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
                 .resizable(false)
                 .frame(egui::Frame {
                     fill: get_scheme().bg_secondary,
-                    stroke: egui::Stroke::NONE,
+                    stroke: egui::Stroke {
+                        width: 1.0,
+                        color: get_scheme().text_secondary,
+                    },
                     inner_margin: egui::Margin::same(16),
                     outer_margin: egui::Margin::symmetric(4, 0),
                     ..Default::default()
@@ -91,6 +185,13 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
                         SettingModal::GraphRename(_, _) => {
                             // TODO: Rename graph
                         }
+                        SettingModal::Dialog(dialog) => {
+                            ui.add_widget_with::<ModalDialog>(
+                                world,
+                                "modal_dialog",
+                                (close_icon, dialog.clone()),
+                            );
+                        }
                     }
                 });
         }
@@ -104,6 +205,8 @@ pub struct ModalUpdateGraph<'w, 's> {
     metadata_store: Res<'w, ComponentMetadataRegistry>,
     path_reg: Res<'w, ComponentPathRegistry>,
     graph_states: Query<'w, 's, &'static mut GraphState>,
+    component_ids: Query<'w, 's, &'static ComponentId>,
+    children: Query<'w, 's, &'static Children>,
 }
 
 impl WidgetSystem for ModalUpdateGraph<'_, '_> {
@@ -114,7 +217,7 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
         world: &mut World,
         state: &mut SystemState<Self>,
         ui: &mut egui::Ui,
-        args: Self::Args,
+        args: <Self as WidgetSystem>::Args,
     ) {
         let state_mut = state.get_mut(world);
         let close_icon = args;
@@ -123,8 +226,10 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
             entities_meta,
             mut setting_modal_state,
             metadata_store,
-            path_reg,
+            path_reg: _path_reg,
             mut graph_states,
+            component_ids,
+            children,
         } = state_mut;
 
         let Some(setting_modal) = setting_modal_state.0.as_mut() else {
@@ -135,7 +240,7 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
         };
 
         // Reset modal if Graph was removed
-        let Ok(mut graph_state) = graph_states.get_mut(*m_graph_id) else {
+        let Ok(_graph_state) = graph_states.get_mut(*m_graph_id) else {
             setting_modal_state.0 = None;
             return;
         };
@@ -163,7 +268,7 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
 
         let selected_entity = entities_meta
             .iter()
-            .find(|(entity_id, _, _, _)| m_entity_id.is_some_and(|eid| eid == **entity_id));
+            .find(|(entity_id, _, _, _)| m_component_id.is_some_and(|eid| eid == **entity_id));
 
         let selected_entity_label =
             selected_entity.map_or("NONE", |(_, _, _, metadata)| &metadata.name);
@@ -178,11 +283,11 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
                 .show_ui(ui, |ui| {
                     theme::configure_combo_item(ui.style_mut());
 
-                    ui.selectable_value(m_entity_id, None, "NONE");
+                    ui.selectable_value(m_component_id, None, "NONE");
 
                     for (entity_id, _, _, metadata) in entities_meta.iter() {
                         ui.selectable_value(
-                            m_entity_id,
+                            m_component_id,
                             Some(*entity_id),
                             metadata.name.to_string(),
                         );
@@ -190,21 +295,30 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
                 });
         });
 
-        if let Some((entity_id, _, components, _)) = selected_entity {
+        if let Some((_entity_id, bevy_entity, _, _)) = selected_entity {
             ui.add(
                 ELabel::new("COMPONENT")
                     .text_color(get_scheme().text_secondary)
                     .padding(egui::Margin::same(0).top(16.0).bottom(8.0)),
             );
 
-            let selected_component = components
-                .0
-                .iter()
-                .find(|(component_id, _)| m_component_id.is_some_and(|cid| cid == **component_id));
+            // Get available components for the selected entity
+            let available_components: Vec<_> = children
+                .iter_descendants(bevy_entity)
+                .chain(std::iter::once(bevy_entity))
+                .filter_map(|child| {
+                    let component_id = component_ids.get(child).ok()?;
+                    let metadata = metadata_store.get_metadata(component_id)?;
+                    Some((component_id, child, metadata))
+                })
+                .collect();
+
+            let selected_component = available_components.iter().find(|(component_id, _, _)| {
+                m_component_id.is_some_and(|cid| cid == **component_id)
+            });
 
             let selected_component_label = selected_component
-                .and_then(|(component_id, _)| metadata_store.get_metadata(component_id))
-                .map(|m| m.name.as_ref())
+                .map(|(_, _, metadata)| metadata.name.as_ref())
                 .unwrap_or_else(|| "NONE");
 
             ui.scope(|ui| {
@@ -217,25 +331,23 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
 
                         ui.selectable_value(m_component_id, None, "NONE");
 
-                        for (component_id, _) in components.0.iter() {
-                            let Some(metadata) = metadata_store.get_metadata(component_id) else {
-                                continue;
-                            };
+                        for (component_id, _, metadata) in &available_components {
                             ui.selectable_value(
                                 m_component_id,
-                                Some(*component_id),
+                                Some(**component_id),
                                 metadata.name.clone(),
                             );
                         }
                     });
             });
 
-            if let Some((component_id, component)) = selected_component {
+            if let Some((_component_id, _, _metadata)) = selected_component {
                 ui.add_space(16.0);
 
                 let add_component_btn = ui.add(EButton::green("ADD COMPONENT"));
 
                 if add_component_btn.clicked() {
+                    // TODO: Implement adding component to graph
                     // let values = default_component_values(entity_id, component_id, component);
                     // let component_path = path_reg
                     //     .get(component_id)
@@ -247,5 +359,131 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
                 }
             }
         }
+    }
+}
+
+#[derive(SystemParam)]
+pub struct ModalDialog<'w, 's> {
+    setting_modal_state: ResMut<'w, SettingModalState>,
+    dialog_events: EventWriter<'w, DialogEvent>,
+    _phantom: std::marker::PhantomData<&'s ()>,
+}
+
+impl WidgetSystem for ModalDialog<'_, '_> {
+    type Args = (egui::TextureId, Dialog);
+    type Output = ();
+
+    fn ui_system(
+        world: &mut World,
+        state: &mut SystemState<Self>,
+        ui: &mut egui::Ui,
+        args: <Self as WidgetSystem>::Args,
+    ) {
+        let mut state_mut = state.get_mut(world);
+        let (close_icon, dialog) = args;
+
+        let title_margin = egui::Margin::same(8).bottom(16.0);
+        let [close_clicked] = label::label_with_buttons(
+            ui,
+            [close_icon],
+            &dialog.title,
+            get_scheme().text_primary,
+            title_margin,
+        );
+
+        if close_clicked {
+            state_mut.dialog_events.write(DialogEvent {
+                action: DialogAction::Close,
+                id: dialog.id.clone(),
+            });
+            state_mut.setting_modal_state.close();
+            return;
+        }
+
+        ui.add(egui::Separator::default().spacing(0.0));
+
+        // Display the error message
+        ui.add_space(16.0);
+        ui.monospace(&dialog.message);
+
+        // Add buttons
+        ui.add_space(16.0);
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                for (i, button) in dialog.buttons.iter().enumerate() {
+                    let button_ui = ui.add(EButton::new(&button.text));
+
+                    if button_ui.clicked() {
+                        match &button.action {
+                            DialogAction::Close => {
+                                state_mut.dialog_events.write(DialogEvent {
+                                    action: DialogAction::Close,
+                                    id: dialog.id.clone(),
+                                });
+                                state_mut.setting_modal_state.close();
+                            }
+                            DialogAction::Custom(action_id) => {
+                                state_mut.dialog_events.write(DialogEvent {
+                                    action: DialogAction::Custom(action_id.clone()),
+                                    id: dialog.id.clone(),
+                                });
+                                state_mut.setting_modal_state.close();
+                            }
+                        }
+                    }
+
+                    // Add space between buttons (except after the last button)
+                    if i < dialog.buttons.len() - 1 {
+                        ui.add_space(8.0);
+                    }
+                }
+            });
+        });
+    }
+}
+
+impl ModalDialog<'_, '_> {
+    /// Show a simple message dialog with just a close button
+    pub fn show_message(&mut self, title: impl Into<String>, message: impl Into<String>) {
+        let id = format!(
+            "message_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        );
+        self.setting_modal_state.0 = Some(SettingModal::Dialog(Dialog {
+            id,
+            title: title.into(),
+            message: message.into(),
+            buttons: vec![DialogButton {
+                text: "OK".to_string(),
+                action: DialogAction::Close,
+            }],
+        }));
+    }
+
+    /// Show a custom dialog with multiple buttons
+    pub fn show(&mut self, dialog: Dialog) {
+        self.setting_modal_state.0 = Some(SettingModal::Dialog(dialog));
+    }
+
+    /// Any system producing a `Result` may pipe to this so that any errors produced
+    /// will show a dialog.
+    pub fn dialog_err<T, E: std::error::Error>(
+        &mut self,
+        title: impl Into<String>,
+        result: Result<T, E>,
+    ) -> Result<T, E> {
+        if let Err(e) = &result {
+            self.show_message(title, format!("{}", e));
+        }
+        result
+    }
+
+    /// Any system producing a `Result` may pipe to this so that any errors produced
+    /// will show a dialog.
+    pub fn dialog_error<E: std::fmt::Display>(&mut self, title: impl Into<String>, error: &E) {
+        self.show_message(title, format!("{}", error));
     }
 }

@@ -8,10 +8,12 @@ use bevy::{
     scene::SceneRoot,
 };
 use bevy_egui::egui::{self, Align, RichText};
-use impeller2_wkt::{ComponentMetadata, Material, Mesh, Object3DMesh};
+use impeller2_wkt::{
+    ComponentMetadata, Material, Mesh, Object3DMesh, default_ellipsoid_scale_expr,
+};
 use smallvec::SmallVec;
 
-use crate::object_3d::spawn_mesh;
+use crate::object_3d::{EllipsoidVisual, compile_scale_eql, spawn_mesh};
 use crate::ui::inspector::{eql_textfield, node_color_picker};
 use crate::{
     object_3d::Object3DState,
@@ -36,6 +38,7 @@ pub struct InspectorObject3D<'w, 's> {
     material_assets: ResMut<'w, Assets<StandardMaterial>>,
     mesh_assets: ResMut<'w, Assets<bevy::prelude::Mesh>>,
     assets: Res<'w, AssetServer>,
+    ellipse_visuals: Query<'w, 's, &'static EllipsoidVisual>,
 }
 
 impl WidgetSystem for InspectorObject3D<'_, '_> {
@@ -57,6 +60,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
             assets,
             mut material_assets,
             mut mesh_assets,
+            ellipse_visuals,
         } = state.get_mut(world);
 
         let (_icons, entity) = args;
@@ -130,6 +134,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     Mesh::Box { .. } => "Box",
                     Mesh::Cylinder { .. } => "Cylinder",
                 },
+                Object3DMesh::Ellipsoid { .. } => "Ellipse",
             };
 
             let mut selected_mesh_type = current_mesh_type;
@@ -144,6 +149,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                         ui.selectable_value(&mut selected_mesh_type, "Sphere", "Sphere");
                         ui.selectable_value(&mut selected_mesh_type, "Box", "Box");
                         ui.selectable_value(&mut selected_mesh_type, "Cylinder", "Cylinder");
+                        ui.selectable_value(&mut selected_mesh_type, "Ellipse", "Ellipse");
                     });
             });
 
@@ -153,6 +159,8 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                 match selected_mesh_type {
                     "GLB" => {
                         object_3d_state.data.mesh = Object3DMesh::Glb(String::new());
+                        object_3d_state.scale_expr = None;
+                        object_3d_state.scale_error = None;
                     }
                     "Sphere" => {
                         object_3d_state.data.mesh = Object3DMesh::Mesh {
@@ -161,6 +169,8 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                                 base_color: impeller2_wkt::Color::HYPERBLUE,
                             },
                         };
+                        object_3d_state.scale_expr = None;
+                        object_3d_state.scale_error = None;
                     }
                     "Box" => {
                         object_3d_state.data.mesh = Object3DMesh::Mesh {
@@ -173,6 +183,8 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                                 base_color: impeller2_wkt::Color::HYPERBLUE,
                             },
                         };
+                        object_3d_state.scale_expr = None;
+                        object_3d_state.scale_error = None;
                     }
                     "Cylinder" => {
                         object_3d_state.data.mesh = Object3DMesh::Mesh {
@@ -184,6 +196,25 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                                 base_color: impeller2_wkt::Color::HYPERBLUE,
                             },
                         };
+                        object_3d_state.scale_expr = None;
+                        object_3d_state.scale_error = None;
+                    }
+                    "Ellipse" => {
+                        let default_scale = default_ellipsoid_scale_expr();
+                        object_3d_state.data.mesh = Object3DMesh::Ellipsoid {
+                            scale: default_scale.clone(),
+                            color: impeller2_wkt::Color::WHITE,
+                        };
+                        match compile_scale_eql(&default_scale, &eql_context.0) {
+                            Ok(expr) => {
+                                object_3d_state.scale_expr = Some(expr);
+                                object_3d_state.scale_error = None;
+                            }
+                            Err(err) => {
+                                object_3d_state.scale_expr = None;
+                                object_3d_state.scale_error = Some(err);
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -276,21 +307,57 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
 
                     node_color_picker(ui, "Material Color", &mut material.base_color);
                 }
+                Object3DMesh::Ellipsoid { scale, color } => {
+                    changed |= node_color_picker(ui, "Ellipse Color", color);
+                    ui.separator();
+                    ui.label(egui::RichText::new("Scale (EQL)").color(get_scheme().text_secondary));
+                    let response = eql_textfield(ui, true, &eql_context.0, scale);
+                    if response.changed() {
+                        if scale.trim().is_empty() {
+                            object_3d_state.scale_expr = None;
+                            object_3d_state.scale_error = None;
+                        } else {
+                            match compile_scale_eql(scale, &eql_context.0) {
+                                Ok(expr) => {
+                                    object_3d_state.scale_expr = Some(expr);
+                                    object_3d_state.scale_error = None;
+                                }
+                                Err(err) => {
+                                    object_3d_state.scale_expr = None;
+                                    object_3d_state.scale_error = Some(err);
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(err) = &object_3d_state.scale_error {
+                        ui.colored_label(get_scheme().error, err);
+                    }
+                }
             }
 
             if changed {
-                let mut entity = commands.entity(entity);
-                entity
+                if let Ok(ellipse_visual) = ellipse_visuals.get(entity) {
+                    commands.entity(ellipse_visual.child).despawn();
+                    commands.entity(entity).remove::<EllipsoidVisual>();
+                }
+
+                commands
+                    .entity(entity)
                     .remove::<SceneRoot>()
                     .remove::<Mesh3d>()
                     .remove::<MeshMaterial3d<StandardMaterial>>();
-                spawn_mesh(
-                    &mut entity,
+
+                if let Some(ellipse) = spawn_mesh(
+                    &mut commands,
+                    entity,
                     &object_3d_state.data.mesh,
                     &mut material_assets,
                     &mut mesh_assets,
                     &assets,
-                );
+                ) {
+                    commands.entity(entity).insert(ellipse);
+                }
             }
         });
 

@@ -26,7 +26,7 @@ egui.version = "0.31"
 egui.features = ["rayon"]
 egui_tiles = "0.12"
 egui_table = "0.3"
-winit.version = "0.30"
+winit.version = "0.30.12"
 winit.features = ["rwh_05"]
 raw-window-handle = "0.5"
 bevy_infinite_grid.git = "https://github.com/Cyannide/bevy_infinite_grid.git"
@@ -43,15 +43,15 @@ fastrand.version = "2"
 
 # lock
 spin = { version = "0.9.8", default-features = false, features = [
-    "use_ticket_mutex",
-    "rwlock",
+  "use_ticket_mutex",
+  "rwlock",
 ] }
 
 # protocols
 postcard.version = "1.0.8"
 reqwest = { version = "0.12", features = [
-    "rustls-tls",
-    "gzip",
+  "rustls-tls",
+  "gzip",
 ], default-features = false }
 impeller2.path = "../../libs/impeller2"
 impeller2.features = ["hifitime"]
@@ -137,7 +137,7 @@ impeller2-bevy.default-features = false
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.5"
 objc2-app-kit = { version = "0.2", features = ["NSWindow", "NSToolbar", "NSColor", "NSApplication", "NSImage", "all"] }
-objc2-foundation = { version = "0.2", features = ["NSData", "all"] }
+objc2-foundation = "0.3.2"
 video-toolbox.path = "../video-toolbox"
 
 # windows

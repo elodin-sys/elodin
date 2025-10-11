@@ -90,6 +90,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         }
 
         ui.separator();
+
         egui::Frame::NONE
             .inner_margin(egui::Margin::symmetric(0, 8))
             .show(ui, |ui| {

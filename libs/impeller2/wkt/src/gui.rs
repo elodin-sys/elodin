@@ -37,6 +37,7 @@ pub enum SchematicElem<T = ()> {
     Panel(Panel<T>),
     Object3d(Object3D<T>),
     Line3d(Line3d<T>),
+    VectorArrow(VectorArrow3d<T>),
 }
 
 impl<T> SchematicElem<T> {
@@ -45,6 +46,7 @@ impl<T> SchematicElem<T> {
             SchematicElem::Panel(panel) => SchematicElem::Panel(panel.map_aux(|_| ())),
             SchematicElem::Object3d(obj) => SchematicElem::Object3d(obj.map_aux(|_| ())),
             SchematicElem::Line3d(line) => SchematicElem::Line3d(line.map_aux(|_| ())),
+            SchematicElem::VectorArrow(arrow) => SchematicElem::VectorArrow(arrow.map_aux(|_| ())),
         }
     }
 }
@@ -275,6 +277,48 @@ impl<T: Serialize + DeserializeOwned> Asset for Line3d<T> {
     const NAME: &'static str = "line_3d";
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "T: Serialize + DeserializeOwned")]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct VectorArrow3d<T = ()> {
+    pub vector: String,
+    pub origin: Option<String>,
+    #[serde(default = "VectorArrow3d::<T>::default_scale")]
+    pub scale: f32,
+    pub name: Option<String>,
+    #[serde(default = "VectorArrow3d::<T>::default_color")]
+    pub color: Color,
+    #[serde(default)]
+    pub in_body_frame: bool,
+    pub aux: T,
+}
+
+impl<T> VectorArrow3d<T> {
+    fn default_scale() -> f32 {
+        1.0
+    }
+
+    fn default_color() -> Color {
+        Color::WHITE
+    }
+
+    pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> VectorArrow3d<U> {
+        VectorArrow3d {
+            vector: self.vector.clone(),
+            origin: self.origin.clone(),
+            scale: self.scale,
+            name: self.name.clone(),
+            color: self.color,
+            in_body_frame: self.in_body_frame,
+            aux: f(&self.aux),
+        }
+    }
+}
+
+impl<T: Serialize + DeserializeOwned> Asset for VectorArrow3d<T> {
+    const NAME: &'static str = "vector_arrow";
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Camera;
@@ -347,17 +391,40 @@ impl Material {
             base_color: Color::rgb(r, g, b),
         }
     }
+
+    pub fn color_with_alpha(r: f32, g: f32, b: f32, a: f32) -> Self {
+        Material {
+            base_color: Color::rgba(r, g, b, a),
+        }
+    }
 }
 
 impl Asset for Material {
     const NAME: &'static str = "material";
 }
 
+pub fn default_ellipsoid_scale_expr() -> String {
+    "(1, 1, 1)".to_string()
+}
+
+pub fn default_ellipsoid_color() -> Color {
+    Color::WHITE
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub enum Object3DMesh {
     Glb(String),
-    Mesh { mesh: Mesh, material: Material },
+    Mesh {
+        mesh: Mesh,
+        material: Material,
+    },
+    Ellipsoid {
+        #[serde(default = "default_ellipsoid_scale_expr")]
+        scale: String,
+        #[serde(default = "default_ellipsoid_color")]
+        color: Color,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

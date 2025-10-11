@@ -24,7 +24,50 @@ This monorepo contains the source code for all Elodin simulation and flight soft
 
 ## Dependencies
 
-Install [Determinate Systems Nix](https://determinate.systems/nix-installer/) which will give you exactly the same development environment that we are using. Once installed, then you can do 
+Rust 1.90.0
+Preference for Arm-based Macs
+
+## Building
+
+> [!NOTE]
+> These instructions were validated on M1 architecture, macOS 15.1.1 on 2025-08-26.
+
+### Before Cloning
+
+Before cloning the source, ensure `git-lfs` is installed. 
+
+``` sh
+brew install gstreamer python gfortran openblas uv git-lfs;
+git lfs install; # This is idempotent; you can run it again.
+```
+
+### Source
+
+``` sh
+git clone https://github.com/elodin-sys/elodin.git
+```
+
+
+### Build & Run
+```sh
+cd elodin
+just install
+```
+
+#### Elodin App & SDK Development
+(See [apps/elodin/README.md](apps/elodin/README.md))
+``` sh
+
+cd libs/nox-py
+uv venv --python 3.12
+source .venv/bin/activate
+uvx maturin develop --uv
+uv sync
+
+cargo run --manifest-path=../../apps/elodin/Cargo.toml editor examples/three-body.py
+```
+
+Alternatively, install [Determinate Systems Nix](https://determinate.systems/nix-installer/) which will give you exactly the same development environment that we are using. Once you have Nix installed, switch to the top of the Elodin repo. Then you can do 
 
 ```
 nix develop .#rust
