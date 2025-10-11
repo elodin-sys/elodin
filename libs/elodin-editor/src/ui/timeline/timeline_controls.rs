@@ -9,6 +9,7 @@ use impeller2_bevy::{CurrentStreamId, PacketTx};
 use impeller2_wkt::{
     CurrentTimestamp, EarliestTimestamp, LastUpdated, SetStreamState, SimulationTimeStep,
 };
+use std::convert::TryFrom;
 
 use crate::{
     TimeRangeBehavior,
@@ -22,7 +23,7 @@ use crate::{
     },
 };
 
-use super::TimelineIcons;
+use super::{StreamTickOrigin, TimelineIcons};
 
 #[derive(SystemParam)]
 pub struct TimelineControls<'w> {
@@ -34,6 +35,7 @@ pub struct TimelineControls<'w> {
     stream_id: Res<'w, CurrentStreamId>,
     earliest_timestamp: Res<'w, EarliestTimestamp>,
     behavior: ResMut<'w, TimeRangeBehavior>,
+    tick_origin: ResMut<'w, StreamTickOrigin>,
 }
 
 impl WidgetSystem for TimelineControls<'_> {
@@ -56,9 +58,16 @@ impl WidgetSystem for TimelineControls<'_> {
             stream_id,
             earliest_timestamp,
             mut behavior,
+            mut tick_origin,
         } = state.get_mut(world);
 
+        tick_origin.observe_stream(**stream_id);
+        tick_origin.observe_tick(tick.0, earliest_timestamp.0);
+
         let mut tick_changed = false;
+        let tick_step_duration = hifitime::Duration::from_seconds(tick_time.0);
+        let tick_step_micros_i128 = tick_step_duration.total_nanoseconds() / 1000;
+        let tick_step_micros = i64::try_from(tick_step_micros_i128).unwrap_or(0);
         ui.set_height(50.0);
 
         egui::Frame::NONE
@@ -79,17 +88,22 @@ impl WidgetSystem for TimelineControls<'_> {
                             if jump_to_start_btn.clicked() {
                                 tick.0 = earliest_timestamp.0;
                                 tick_changed = true;
+                                tick_origin.request_rebase();
                             }
 
                             let frame_back_btn = ui.add(
                                 EImageButton::new(icons.frame_back).scale(btn_scale, btn_scale),
                             );
 
-                            if frame_back_btn.clicked() && tick.0 > earliest_timestamp.0 {
-                                tick.0.0 -= (hifitime::Duration::from_seconds(tick_time.0)
-                                    .total_nanoseconds()
-                                    / 1000) as i64;
+                            if frame_back_btn.clicked()
+                                && tick.0 > earliest_timestamp.0
+                                && tick_step_micros > 0
+                            {
+                                tick.0.0 -= tick_step_micros;
                                 tick_changed = true;
+                                if tick.0 <= earliest_timestamp.0 {
+                                    tick_origin.request_rebase();
+                                }
                             }
 
                             if paused.0 {
@@ -113,10 +127,11 @@ impl WidgetSystem for TimelineControls<'_> {
                                 EImageButton::new(icons.frame_forward).scale(btn_scale, btn_scale),
                             );
 
-                            if frame_forward_btn.clicked() && tick.0 < max_tick.0 {
-                                tick.0.0 += (hifitime::Duration::from_seconds(tick_time.0)
-                                    .total_nanoseconds()
-                                    / 1000) as i64;
+                            if frame_forward_btn.clicked()
+                                && tick.0 < max_tick.0
+                                && tick_step_micros > 0
+                            {
+                                tick.0.0 += tick_step_micros;
 
                                 tick_changed = true;
                             }
@@ -175,6 +190,30 @@ impl WidgetSystem for TimelineControls<'_> {
                                     ui.add(egui::Label::new(time_label).selectable(false));
 
                                     ui.add_space(24.0);
+
+                                    let origin_timestamp = tick_origin.origin(earliest_timestamp.0);
+                                    let tick_text = if tick_step_micros_i128 <= 0 {
+                                        "-".to_owned()
+                                    } else {
+                                        let delta =
+                                            i128::from(tick.0.0) - i128::from(origin_timestamp.0);
+                                        let clamped_delta = delta.max(0);
+                                        (clamped_delta / tick_step_micros_i128).to_string()
+                                    };
+
+                                    let tick_value = egui::RichText::new(tick_text)
+                                        .color(get_scheme().text_primary);
+                                    ui.add(
+                                        egui::Label::new(tick_value)
+                                            .selectable(false)
+                                            .halign(egui::Align::BOTTOM),
+                                    );
+
+                                    let tick_label = egui::RichText::new("TICK")
+                                        .color(get_scheme().text_secondary);
+                                    ui.add_space(8.0);
+
+                                    ui.add(egui::Label::new(tick_label).selectable(false));
                                 });
                         },
                     );

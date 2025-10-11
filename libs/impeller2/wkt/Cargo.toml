@@ -38,6 +38,6 @@ strum.version = "0.27"
 strum.features = ["derive"]
 
 # lua
-mlua.version = "0.10"
+mlua.version = "0.10.5"
 mlua.features = ["serialize"]
 mlua.optional = true
