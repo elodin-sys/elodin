@@ -13,7 +13,7 @@ use bevy::{ecs::system::SystemParam, prelude::*};
 use egui_tiles::{Tile, TileId};
 use impeller2_wkt::{
     ActionPane, ComponentMonitor, ComponentPath, Dashboard, Line3d, Panel, Schematic,
-    SchematicElem, Split, Viewport,
+    SchematicElem, Split, VectorArrow3d, Viewport,
 };
 
 pub mod tree;
@@ -33,6 +33,7 @@ pub struct SchematicParam<'w, 's> {
     pub viewports: Query<'w, 's, &'static inspector::viewport::Viewport>,
     pub objects_3d: Query<'w, 's, (Entity, &'static Object3DState)>,
     pub lines_3d: Query<'w, 's, (Entity, &'static Line3d)>,
+    pub vector_arrows: Query<'w, 's, (Entity, &'static VectorArrow3d)>,
     pub ui_state: Res<'w, tiles::TileState>,
     pub dashboards: Query<'w, 's, &'static Dashboard<Entity>>,
 }
@@ -206,6 +207,12 @@ pub fn tiles_to_schematic(param: SchematicParam, mut schematic: ResMut<CurrentSc
             .lines_3d
             .iter()
             .map(|(entity, line)| SchematicElem::Line3d(line.map_aux(|_| entity))),
+    );
+    schematic.elems.extend(
+        param
+            .vector_arrows
+            .iter()
+            .map(|(entity, arrow)| SchematicElem::VectorArrow(arrow.map_aux(|_| entity))),
     );
 }
 

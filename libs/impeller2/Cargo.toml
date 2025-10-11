@@ -51,7 +51,7 @@ bevy.default-features = false
 bevy.optional = true
 
 # lua
-mlua.version = "0.10"
+mlua.version = "0.10.5"
 mlua.features = ["serialize"]
 mlua.optional = true
 

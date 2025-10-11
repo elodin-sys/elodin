@@ -378,7 +378,7 @@ impl EButton {
             ui.painter()
                 .layout_no_wrap(self.label.to_string(), font_id.clone(), self.color);
 
-        let desired_width = self.width.unwrap_or(ui.available_width());
+        let desired_width = self.width.unwrap_or(galley.size().x + self.margin.sum().x);
         let desired_size = egui::vec2(desired_width, galley.size().y + self.margin.sum().y);
         let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
 

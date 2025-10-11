@@ -6,7 +6,7 @@ description = "Streams video files to elodin-db after re-encoding to AV1"
 publish = false
 
 [dependencies]
-ffmpeg-next.version = "7.1.0"
+ffmpeg-next.version = "8.0.0"
 impeller2 = { path = "../../libs/impeller2" }
 impeller2-stellar = { path = "../../libs/impeller2/stellar" }
 impeller2-wkt = { path = "../../libs/impeller2/wkt" }
