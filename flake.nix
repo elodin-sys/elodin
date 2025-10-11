@@ -1,4 +1,15 @@
 {
+  nixConfig = {
+    extra-substituters = [
+      "https://cache.nixos.org"
+      "http://ci-arm1.elodin.dev:5000"
+    ];
+    extra-trusted-public-keys = [
+      "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
+      "builder-cache-1:q7rDGIQgkg1nsxNEg7mHN1kEDuxPmJhQpuIXCCwLj8E="
+    ];
+    fallback = true;
+  };
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
     # Pin crane to May 2025 version to avoid Cargo.lock path resolution bug on Linux
