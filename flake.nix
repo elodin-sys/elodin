@@ -79,16 +79,7 @@
         };
 
         devShells = with shells; {
-          inherit
-            c
-            ops
-            python
-            nix-tools
-            writing
-            docs
-            rust
-            elodin
-            ;
+          inherit elodin;
           default = shells.elodin;
         };
 
