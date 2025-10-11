@@ -20,12 +20,12 @@ use bevy::{
 use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::TileId;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
-use impeller2::types::msg_id;
+use impeller2::types::{Timestamp, msg_id};
 use impeller2_bevy::{ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
 use impeller2_kdl::ToKdl;
 use impeller2_wkt::{
-    ComponentPath, ComponentValue, DbConfig, IsRecording, Material, Mesh, Object3D, SetDbConfig,
-    SetStreamState,
+    ComponentPath, ComponentValue, CurrentTimestamp, DbConfig, EarliestTimestamp, IsRecording,
+    Material, Mesh, Object3D, SetDbConfig, SetStreamState, SimulationTimeStep,
 };
 use miette::IntoDiagnostic;
 use nox::ArrayBuf;
@@ -34,12 +34,13 @@ use crate::{
     EqlContext, Offset, SelectedTimeRange, TimeRangeBehavior,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        HdrEnabled, colors,
+        HdrEnabled, Paused, colors,
         plot::{GraphBundle, default_component_values},
         schematic::{
             CurrentSchematic, LoadSchematicParams, SchematicLiveReloadRx, load_schematic_file,
         },
         tiles::{self, TileState},
+        timeline::{StreamTickOrigin, timeline_slider::UITick},
     },
 };
 
@@ -605,6 +606,83 @@ fn set_time_range_behavior() -> PaletteItem {
     })
 }
 
+fn goto_tick() -> PaletteItem {
+    PaletteItem::new("Goto Tick...", TIME_LABEL, |_: In<String>| {
+        PalettePage::new(vec![
+            PaletteItem::new(
+                LabelSource::placeholder("Enter tick number"),
+                "",
+                move |In(tick_str): In<String>,
+                      mut current_tick: ResMut<CurrentTimestamp>,
+                      mut ui_tick: ResMut<UITick>,
+                      mut paused: ResMut<Paused>,
+                      stream_id: Res<CurrentStreamId>,
+                      packet_tx: Res<PacketTx>,
+                      earliest_timestamp: Res<EarliestTimestamp>,
+                      mut tick_origin: ResMut<StreamTickOrigin>,
+                      tick_time: Res<SimulationTimeStep>| {
+                    let trimmed = tick_str.trim();
+                    if trimmed.is_empty() {
+                        return PaletteEvent::Error(
+                            "Tick value cannot be empty. Please enter a non-negative integer."
+                                .into(),
+                        );
+                    }
+
+                    let Ok(parsed_tick) = trimmed.parse::<u64>() else {
+                        return PaletteEvent::Error(format!(
+                            "Invalid tick value: {trimmed}. Please enter a non-negative integer."
+                        ));
+                    };
+
+                    if parsed_tick >= i64::MAX as u64 {
+                        return PaletteEvent::Error("Tick value is too large".to_string());
+                    }
+
+                    let tick_duration_us = (hifitime::Duration::from_seconds(tick_time.0)
+                        .total_nanoseconds()
+                        / 1000) as i64;
+
+                    if tick_duration_us <= 0 {
+                        return PaletteEvent::Error(
+                            "Simulation tick duration must be positive to compute timestamp"
+                                .to_string(),
+                        );
+                    }
+
+                    let parsed_tick = parsed_tick as i64;
+                    let Some(offset_us) = tick_duration_us.checked_mul(parsed_tick) else {
+                        return PaletteEvent::Error(
+                            "Tick value is too large to convert to a timestamp".to_string(),
+                        );
+                    };
+
+                    let base_timestamp = tick_origin.origin(earliest_timestamp.0).0;
+                    let Some(target_us) = base_timestamp.checked_add(offset_us) else {
+                        return PaletteEvent::Error(
+                            "Computed timestamp is out of range".to_string(),
+                        );
+                    };
+
+                    let timestamp = Timestamp(target_us);
+                    paused.0 = true;
+                    current_tick.0 = timestamp;
+                    ui_tick.0 = timestamp.0;
+                    if parsed_tick == 0 {
+                        tick_origin.request_rebase();
+                    }
+                    packet_tx.send_msg(SetStreamState::rewind(**stream_id, timestamp));
+
+                    PaletteEvent::Exit
+                },
+            )
+            .default(),
+        ])
+        .prompt("Enter the tick to jump to")
+        .into()
+    })
+}
+
 pub fn save_schematic_as() -> PaletteItem {
     PaletteItem::new(
         "Save Schematic As...",
@@ -794,6 +872,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                         aux: (),
                     },
                     expr.clone(),
+                    &eql_ctx.0,
                     &mut material_assets,
                     &mut mesh_assets,
                     &assets,
@@ -857,19 +936,20 @@ pub fn create_3d_object() -> PaletteItem {
                                             "Enter path to GLTF file for the 3D object visualization",
                                             move |In(gltf_path): In<String>,
                                                   mut commands: Commands,
+                                                  eql_ctx: Res<EqlContext>,
                                                   mut material_assets: ResMut<Assets<StandardMaterial>>,
                                                   mut mesh_assets: ResMut<Assets<bevy::prelude::Mesh>>,
-                                                  assets: Res<AssetServer>,
-                                                  | {
+                                                  assets: Res<AssetServer>| {
                                                 let obj = impeller2_wkt::Object3DMesh::Glb(gltf_path.trim().to_string());
 
                                                 crate::object_3d::create_object_3d_entity(
                                                     &mut commands,
                                                     Object3D { eql: eql.clone(), mesh: obj, aux: () },
                                                     expr.clone(),
+                                                    &eql_ctx.0,
                                                     &mut material_assets,
                                                     &mut mesh_assets,
-                                                    &assets
+                                                    &assets,
                                                 );
 
                                                 PaletteEvent::Exit
@@ -1065,6 +1145,7 @@ impl Default for PalettePage {
                 },
             ),
             set_playback_speed(),
+            goto_tick(),
             fix_current_time_range(),
             set_time_range_behavior(),
             create_graph(None),

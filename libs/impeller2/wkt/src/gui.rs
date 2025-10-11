@@ -391,17 +391,40 @@ impl Material {
             base_color: Color::rgb(r, g, b),
         }
     }
+
+    pub fn color_with_alpha(r: f32, g: f32, b: f32, a: f32) -> Self {
+        Material {
+            base_color: Color::rgba(r, g, b, a),
+        }
+    }
 }
 
 impl Asset for Material {
     const NAME: &'static str = "material";
 }
 
+pub fn default_ellipsoid_scale_expr() -> String {
+    "(1, 1, 1)".to_string()
+}
+
+pub fn default_ellipsoid_color() -> Color {
+    Color::WHITE
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub enum Object3DMesh {
     Glb(String),
-    Mesh { mesh: Mesh, material: Material },
+    Mesh {
+        mesh: Mesh,
+        material: Material,
+    },
+    Ellipsoid {
+        #[serde(default = "default_ellipsoid_scale_expr")]
+        scale: String,
+        #[serde(default = "default_ellipsoid_color")]
+        color: Color,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

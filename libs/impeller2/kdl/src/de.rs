@@ -464,6 +464,18 @@ fn parse_object_3d_mesh(
 
             Ok(Object3DMesh::Mesh { mesh, material })
         }
+        "ellipsoid" => {
+            let scale = node
+                .get("scale")
+                .and_then(|v| v.as_string())
+                .map(str::to_string)
+                .unwrap_or_else(impeller2_wkt::default_ellipsoid_scale_expr);
+
+            let color = parse_color_from_node_or_children(node, None)
+                .unwrap_or_else(impeller2_wkt::default_ellipsoid_color);
+
+            Ok(Object3DMesh::Ellipsoid { scale, color })
+        }
         _ => Err(KdlSchematicError::UnknownNode {
             node_type: node.name().value().to_string(),
             src: src.to_string(),
@@ -658,9 +670,16 @@ fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
 
             return Some(Color::rgba(r, g, b, a));
         }
-    } else if positional_entries.len() == 1 {
-        if let Some(color_value) = positional_entries[0].value().as_string() {
-            if let Some(color) = parse_named_color(color_value) {
+    }
+
+    if let Some(first) = positional_entries.first() {
+        if let Some(name) = first.value().as_string() {
+            if let Some(mut color) = parse_named_color(name) {
+                if let Some(alpha_entry) = positional_entries.get(1) {
+                    if let Some(alpha) = parse_color_component_value(alpha_entry.value()) {
+                        color.a = alpha;
+                    }
+                }
                 return Some(color);
             }
         }
@@ -1155,6 +1174,36 @@ object_3d "a.world_pos" {
     }
 
     #[test]
+    fn test_parse_object_3d_ellipsoid() {
+        let kdl = r#"
+object_3d "rocket.world_pos" {
+    ellipsoid scale="rocket.scale" {
+        color 64 128 255 96
+    }
+}
+"#;
+
+        let schematic = parse_schematic(kdl).unwrap();
+        assert_eq!(schematic.elems.len(), 1);
+
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            assert_eq!(obj.eql, "rocket.world_pos");
+            match &obj.mesh {
+                Object3DMesh::Ellipsoid { scale, color } => {
+                    assert_eq!(scale, "rocket.scale");
+                    assert!((color.r - 64.0 / 255.0).abs() < f32::EPSILON);
+                    assert!((color.g - 128.0 / 255.0).abs() < f32::EPSILON);
+                    assert!((color.b - 1.0).abs() < f32::EPSILON);
+                    assert!((color.a - 96.0 / 255.0).abs() < f32::EPSILON);
+                }
+                _ => panic!("Expected ellipsoid mesh"),
+            }
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
     fn test_parse_tabs_with_children() {
         let kdl = r#"
 tabs {
@@ -1549,5 +1598,45 @@ graph "value" {
         assert_eq!(graph.colors.len(), 1);
         let color = graph.colors[0];
         assert_eq!(color, Color::YALK);
+    }
+
+    #[test]
+    fn test_parse_named_color_with_alpha() {
+        let kdl = r#"
+graph "value" {
+    color yalk 120
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        let SchematicElem::Panel(Panel::Graph(graph)) = &schematic.elems[0] else {
+            panic!("Expected graph panel");
+        };
+        assert_eq!(graph.colors.len(), 1);
+        let color = graph.colors[0];
+        assert_eq!(color.r, Color::YALK.r);
+        assert_eq!(color.g, Color::YALK.g);
+        assert_eq!(color.b, Color::YALK.b);
+        assert!((color.a - (120.0 / 255.0)).abs() < f32::EPSILON);
+    }
+
+    fn test_parse_error_report() {
+        use miette::{GraphicalReportHandler, Report, miette};
+        let kdl = r#"
+blah
+graph "value" {
+    color yalk
+}
+"#;
+        let err = parse_schematic(kdl).unwrap_err();
+        assert_eq!("Unknown node type 'blah'", format!("{}", err));
+        let reporter =
+            GraphicalReportHandler::new_themed(miette::GraphicalTheme::unicode_nocolor());
+        let mut b = String::new();
+        reporter.render_report(&mut b, &err).unwrap();
+        assert_eq!(
+            "kdl_schematic::unknown_node\n\n  × Unknown node type 'blah'\n   ╭─[2:1]\n 1 │ \n 2 │ blah\n   · ──┬─\n   ·   ╰── unknown node\n 3 │ graph \"value\" {\n   ╰────\n",
+            &b
+        );
     }
 }
