@@ -39,18 +39,67 @@ impl HardwareStatus {
         defmt::info!("========================================");
         defmt::info!("Hardware Initialization Report");
         defmt::info!("========================================");
-        defmt::info!("SD Card:        {}", if self.sdcard { "✓ Ready" } else { "✗ Not detected" });
-        defmt::info!("USB Hub:        {}", if self.usb_hub { "✓ Ready" } else { "✗ Not detected" });
-        defmt::info!("BMM350 (Mag):   {}", if self.bmm350 { "✓ Ready" } else { "✗ Failed" });
-        defmt::info!("BMP581 (Baro):  {}", if self.bmp581 { "✓ Ready" } else { "✗ Failed" });
-        defmt::info!("BMI270 (IMU):   {}", if self.bmi270 { "✓ Ready" } else { "✗ Failed" });
-        defmt::info!("FRAM:           {}", if self.fram { "✓ Ready" } else { "✗ Not detected" });
+        defmt::info!(
+            "SD Card:        {}",
+            if self.sdcard {
+                "✓ Ready"
+            } else {
+                "✗ Not detected"
+            }
+        );
+        defmt::info!(
+            "USB Hub:        {}",
+            if self.usb_hub {
+                "✓ Ready"
+            } else {
+                "✗ Not detected"
+            }
+        );
+        defmt::info!(
+            "BMM350 (Mag):   {}",
+            if self.bmm350 {
+                "✓ Ready"
+            } else {
+                "✗ Failed"
+            }
+        );
+        defmt::info!(
+            "BMP581 (Baro):  {}",
+            if self.bmp581 {
+                "✓ Ready"
+            } else {
+                "✗ Failed"
+            }
+        );
+        defmt::info!(
+            "BMI270 (IMU):   {}",
+            if self.bmi270 {
+                "✓ Ready"
+            } else {
+                "✗ Failed"
+            }
+        );
+        defmt::info!(
+            "FRAM:           {}",
+            if self.fram {
+                "✓ Ready"
+            } else {
+                "✗ Not detected"
+            }
+        );
         defmt::info!("========================================");
-        
-        let ready_count = [self.sdcard, self.usb_hub, self.bmm350, self.bmp581, self.bmi270, self.fram]
-            .iter()
-            .filter(|&&x| x)
-            .count();
+
+        let ready_count = [
+            self.sdcard,
+            self.usb_hub,
+            self.bmm350,
+            self.bmp581,
+            self.bmi270,
+            self.fram,
+        ]
+        .iter()
+        .filter(|&&x| x)
+        .count();
         defmt::info!("Ready: {}/6 devices", ready_count);
     }
 }
@@ -189,7 +238,10 @@ fn main() -> ! {
             true
         }
         Err(e) => {
-            defmt::warn!("USB2513B hub configuration failed (may not be present): {:?}", e);
+            defmt::warn!(
+                "USB2513B hub configuration failed (may not be present): {:?}",
+                e
+            );
             false
         }
     };
@@ -358,7 +410,9 @@ fn main() -> ! {
         }
 
         blue_led.update(now);
-        let mag_updated = bmm350.as_mut().is_some_and(|s| s.update(&mut i2c3_dma, now));
+        let mag_updated = bmm350
+            .as_mut()
+            .is_some_and(|s| s.update(&mut i2c3_dma, now));
         if let Some(ref mut s) = bmi270 {
             let _ = s.update(&mut i2c2_dma, now);
         }

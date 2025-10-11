@@ -214,26 +214,27 @@ impl Fm24cl16b {
             let addr = i * 8; // Space them out
 
             // Write pattern
-            self.write(i2c, addr, pattern)
-                .map_err(|e| {
-                    defmt::error!("FRAM write failed at addr {}: {:?}", addr, e);
-                    e
-                })?;
+            self.write(i2c, addr, pattern).map_err(|e| {
+                defmt::error!("FRAM write failed at addr {}: {:?}", addr, e);
+                e
+            })?;
 
             // Read back and verify
             let mut read_data = [0u8; 4];
-            self.read(i2c, addr, &mut read_data)
-                .map_err(|e| {
-                    defmt::error!("FRAM read failed at addr {}: {:?}", addr, e);
-                    e
-                })?;
+            self.read(i2c, addr, &mut read_data).map_err(|e| {
+                defmt::error!("FRAM read failed at addr {}: {:?}", addr, e);
+                e
+            })?;
 
             // Verify match
             for (j, &byte) in pattern.iter().enumerate() {
                 if byte != read_data[j] {
                     defmt::error!(
                         "Pattern {} failed at byte {}: expected 0x{:02x}, got 0x{:02x}",
-                        i, j, byte, read_data[j]
+                        i,
+                        j,
+                        byte,
+                        read_data[j]
                     );
                     return Err(Error::CommunicationFailed);
                 }
@@ -262,7 +263,9 @@ impl Fm24cl16b {
             if byte != read_cross_page[i] {
                 defmt::error!(
                     "Page boundary test failed at byte {}: expected 0x{:02x}, got 0x{:02x}",
-                    i, byte, read_cross_page[i]
+                    i,
+                    byte,
+                    read_cross_page[i]
                 );
                 return Err(Error::CommunicationFailed);
             }
@@ -272,24 +275,24 @@ impl Fm24cl16b {
         let end_addr = self.size() - 4;
         let end_data = [0xDE, 0xAD, 0xBE, 0xEF];
 
-        self.write(i2c, end_addr, &end_data)
-            .map_err(|e| {
-                defmt::error!("FRAM write failed at end address {}: {:?}", end_addr, e);
-                e
-            })?;
+        self.write(i2c, end_addr, &end_data).map_err(|e| {
+            defmt::error!("FRAM write failed at end address {}: {:?}", end_addr, e);
+            e
+        })?;
 
         let mut read_end_data = [0u8; 4];
-        self.read(i2c, end_addr, &mut read_end_data)
-            .map_err(|e| {
-                defmt::error!("FRAM read failed at end address {}: {:?}", end_addr, e);
-                e
-            })?;
+        self.read(i2c, end_addr, &mut read_end_data).map_err(|e| {
+            defmt::error!("FRAM read failed at end address {}: {:?}", end_addr, e);
+            e
+        })?;
 
         for (i, &byte) in end_data.iter().enumerate() {
             if byte != read_end_data[i] {
                 defmt::error!(
                     "End memory test failed at byte {}: expected 0x{:02x}, got 0x{:02x}",
-                    i, byte, read_end_data[i]
+                    i,
+                    byte,
+                    read_end_data[i]
                 );
                 return Err(Error::CommunicationFailed);
             }
