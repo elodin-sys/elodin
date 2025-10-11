@@ -5,6 +5,7 @@ use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
 use impeller2_kdl::FromKdl;
 use impeller2_kdl::KdlSchematicError;
 use impeller2_wkt::{DbConfig, Graph, Line3d, Object3D, Panel, Schematic, Viewport};
+use miette::{Diagnostic, miette};
 use std::time::Duration;
 use std::{collections::BTreeMap, path::Path};
 
@@ -16,6 +17,7 @@ use crate::{
         HdrEnabled, SelectedObject,
         colors::{self, EColor},
         dashboard::{NodeUpdaterParams, spawn_dashboard},
+        modal::ModalDialog,
         monitor::MonitorPane,
         plot::GraphBundle,
         query_plot::QueryPlotData,
@@ -47,6 +49,7 @@ pub fn sync_schematic(
     config: Res<DbConfig>,
     mut params: LoadSchematicParams,
     live_reload_rx: ResMut<SchematicLiveReloadRx>,
+    mut modal: ModalDialog,
 ) {
     if !config.is_changed() {
         return;
@@ -55,16 +58,35 @@ pub fn sync_schematic(
         let path = Path::new(path);
         if path.try_exists().unwrap_or(false) {
             if let Err(e) = load_schematic_file(path, &mut params, live_reload_rx) {
-                bevy::log::error!(?e, "invalid schematic for {path:?}");
+                modal.dialog_error(
+                    format!("Invalid Schematic in {:?}", path.display()),
+                    &render_diag(&e),
+                );
+                let report = miette!(e.clone());
+                bevy::log::error!(?report, "Invalid schematic for {path:?}");
             } else {
                 return;
             }
         }
     }
     if let Some(content) = config.schematic_content() {
-        let schematic = impeller2_wkt::Schematic::from_kdl(content).expect("schematic error");
+        let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(content).inspect_err(|e| {
+            modal.dialog_error("Invalid Schematic", &render_diag(e));
+            let report = miette!(e.clone());
+            bevy::log::error!(?report, "Invalid schematic content")
+        }) else {
+            return;
+        };
         params.load_schematic(&schematic);
     }
+}
+
+pub fn render_diag(diagnostic: &dyn Diagnostic) -> String {
+    let mut buf = String::new();
+    miette::GraphicalReportHandler::new_themed(miette::GraphicalTheme::unicode_nocolor())
+        .render_report(&mut buf, diagnostic)
+        .expect("Failed to render diagnostic");
+    buf
 }
 
 pub fn load_schematic_file(
