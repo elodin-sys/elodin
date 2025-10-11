@@ -142,13 +142,19 @@ in {
         if [ ! -d "$VENV_DIR" ]; then
           echo "🔨 First-time setup: Creating venv and building elodin..."
           (cd libs/nox-py && uv venv) 2>&1 | grep -v "arm64-apple-macosx" || true
-          source "$VENV_DIR/bin/activate"
-          (cd libs/nox-py && maturin develop) 2>&1 | grep -v "arm64-apple-macosx" || true
+          (cd libs/nox-py && source .venv/bin/activate && maturin develop) 2>&1 | grep -v "arm64-apple-macosx" || true
           echo "✅ Python setup complete!"
         else
           echo "📦 Using existing Python venv"
-          source "$VENV_DIR/bin/activate"
         fi
+
+        # Activate the venv in the current shell
+        source "$VENV_DIR/bin/activate"
+        echo "✅ Python venv activated: $VENV_DIR"
+
+        # Export these so they persist if we launch zsh
+        export VIRTUAL_ENV
+        export PATH
       fi
 
       echo ""
@@ -160,13 +166,11 @@ in {
       echo "  • Cloud: kubectl, gcloud, azure"
       echo "  • Version control: git with delta, git-lfs"
       echo ""
-      echo "💡 All tools are available in your regular shell environment."
-      echo "   Your existing zsh, Oh My Zsh, and p10k configs are preserved."
-      echo ""
 
-      # Start zsh if not already in it (uses user's default zsh config)
+      # If we're not in zsh yet, start it
+      # Using 'exec -a' to preserve environment and not use login shell
       if [ -z "''${ZSH_VERSION:-}" ]; then
-        exec ${pkgs.zsh}/bin/zsh -l
+        exec ${pkgs.zsh}/bin/zsh
       fi
     '';
   };
