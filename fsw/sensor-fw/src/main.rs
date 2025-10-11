@@ -23,10 +23,44 @@ const CAN_PERIOD: fugit::MicrosDuration<u64> = CAN_RATE.into_duration();
 const USB_LOG_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(50);
 const USB_LOG_PERIOD: fugit::MicrosDuration<u64> = USB_LOG_RATE.into_duration();
 
+/// Tracks which hardware components initialized successfully
+#[derive(Default)]
+struct HardwareStatus {
+    sdcard: bool,
+    usb_hub: bool,
+    bmm350: bool,
+    bmp581: bool,
+    bmi270: bool,
+    fram: bool,
+}
+
+impl HardwareStatus {
+    fn print_report(&self) {
+        defmt::info!("========================================");
+        defmt::info!("Hardware Initialization Report");
+        defmt::info!("========================================");
+        defmt::info!("SD Card:        {}", if self.sdcard { "✓ Ready" } else { "✗ Not detected" });
+        defmt::info!("USB Hub:        {}", if self.usb_hub { "✓ Ready" } else { "✗ Not detected" });
+        defmt::info!("BMM350 (Mag):   {}", if self.bmm350 { "✓ Ready" } else { "✗ Failed" });
+        defmt::info!("BMP581 (Baro):  {}", if self.bmp581 { "✓ Ready" } else { "✗ Failed" });
+        defmt::info!("BMI270 (IMU):   {}", if self.bmi270 { "✓ Ready" } else { "✗ Failed" });
+        defmt::info!("FRAM:           {}", if self.fram { "✓ Ready" } else { "✗ Not detected" });
+        defmt::info!("========================================");
+        
+        let ready_count = [self.sdcard, self.usb_hub, self.bmm350, self.bmp581, self.bmi270, self.fram]
+            .iter()
+            .filter(|&&x| x)
+            .count();
+        defmt::info!("Ready: {}/6 devices", ready_count);
+    }
+}
+
 #[cortex_m_rt::entry]
 fn main() -> ! {
     defmt::info!("Starting");
     sensor_fw::init_heap();
+
+    let mut hw_status = HardwareStatus::default();
 
     let pins = bsp::Pins::take().unwrap();
     let bsp::Pins {
@@ -90,11 +124,22 @@ fn main() -> ! {
 
     let [_i2c1_rx, i2c2_rx, i2c3_rx, dshot_tx, ..] = dp.DMA1.split();
 
-    let sd = sdmmc::Sdmmc::new(&dp.RCC, dp.SDMMC1, &clock_cfg).unwrap();
-    defmt::info!("Configured SDMMC");
-    let mut sdmmc_fs = sd.fatfs(green_led);
-    let mut blackbox = sdmmc_fs.blackbox(monotonic.now());
-    defmt::info!("Configured blackbox");
+    let sd = match sdmmc::Sdmmc::new(&dp.RCC, dp.SDMMC1, &clock_cfg) {
+        Ok(sd) => {
+            defmt::info!("Configured SDMMC");
+            Some(sd)
+        }
+        Err(e) => {
+            defmt::warn!("Failed to configure SDMMC: {:?}", e);
+            None
+        }
+    };
+    let mut sdmmc_fs = sd.map(|s| s.fatfs(green_led));
+    let mut blackbox = sdmmc_fs.as_mut().map(|fs| fs.blackbox(monotonic.now()));
+    hw_status.sdcard = blackbox.is_some();
+    if hw_status.sdcard {
+        defmt::info!("Configured blackbox");
+    }
 
     defmt::debug!("Initializing I2C + DMA");
     let mut i2c3_dma = I2cDma::new(
@@ -138,10 +183,16 @@ fn main() -> ! {
     };
 
     let usb_hub = usb2513b::Usb2513b::default();
-    usb_hub
-        .configure_if_needed(&mut i2c1_low_speed_erased)
-        .unwrap();
-    defmt::info!("USB2513B hub configuration complete");
+    hw_status.usb_hub = match usb_hub.configure_if_needed(&mut i2c1_low_speed_erased) {
+        Ok(_) => {
+            defmt::info!("USB2513B hub configuration complete");
+            true
+        }
+        Err(e) => {
+            defmt::warn!("USB2513B hub configuration failed (may not be present): {:?}", e);
+            false
+        }
+    };
 
     // Extract and reconfigure I2C1 with higher speed for FRAM
     let i2c::I2c { regs, .. } = i2c1_low_speed_erased;
@@ -155,15 +206,52 @@ fn main() -> ! {
     };
     defmt::info!("Reconfigured I2C1 to 1MHz for FRAM");
 
-    let mut bmm350 = bmm350::Bmm350::new(&mut i2c3_dma, bmm350::Address::Low, &mut delay).unwrap();
-    defmt::info!("Configured BMM350");
-    let mut bmp581 = bmp581::Bmp581::new(&mut i2c3_dma, bmp581::Address::Low, &mut delay).unwrap();
-    defmt::info!("Configured BMP581");
-    let mut bmi270 = bmi270::Bmi270::new(&mut i2c2_dma, bmi270::Address::Low, &mut delay).unwrap();
-    defmt::info!("Configured BMI270");
+    let mut bmm350 = match bmm350::Bmm350::new(&mut i2c3_dma, bmm350::Address::Low, &mut delay) {
+        Ok(sensor) => {
+            defmt::info!("Configured BMM350");
+            hw_status.bmm350 = true;
+            Some(sensor)
+        }
+        Err(e) => {
+            defmt::warn!("Failed to initialize BMM350: {:?}", e);
+            None
+        }
+    };
 
-    let mut fram = fm24cl16b::Fm24cl16b::new(&mut i2c1_high_speed).unwrap();
-    defmt::info!("Configured FRAM");
+    let mut bmp581 = match bmp581::Bmp581::new(&mut i2c3_dma, bmp581::Address::Low, &mut delay) {
+        Ok(sensor) => {
+            defmt::info!("Configured BMP581");
+            hw_status.bmp581 = true;
+            Some(sensor)
+        }
+        Err(e) => {
+            defmt::warn!("Failed to initialize BMP581: {:?}", e);
+            None
+        }
+    };
+
+    let mut bmi270 = match bmi270::Bmi270::new(&mut i2c2_dma, bmi270::Address::Low, &mut delay) {
+        Ok(sensor) => {
+            defmt::info!("Configured BMI270");
+            hw_status.bmi270 = true;
+            Some(sensor)
+        }
+        Err(e) => {
+            defmt::warn!("Failed to initialize BMI270: {:?}", e);
+            None
+        }
+    };
+
+    let mut fram = match fm24cl16b::Fm24cl16b::new(&mut i2c1_high_speed) {
+        Ok(f) => {
+            defmt::info!("Configured FRAM");
+            Some(f)
+        }
+        Err(e) => {
+            defmt::warn!("Failed to initialize FRAM: {:?}", e);
+            None
+        }
+    };
 
     let can = can::setup_can(dp.FDCAN1, &dp.RCC);
     let mut can = dronecan::DroneCan::new(can);
@@ -186,8 +274,22 @@ fn main() -> ! {
     );
     defmt::info!("Configured voltage/current monitor");
 
-    // Run FRAM self-test - will panic if there's an issue
-    fram.self_test(&mut i2c1_high_speed);
+    // Run FRAM self-test if present
+    if let Some(ref mut f) = fram {
+        hw_status.fram = match f.self_test(&mut i2c1_high_speed) {
+            Ok(_) => {
+                defmt::info!("FRAM self-test passed");
+                true
+            }
+            Err(e) => {
+                defmt::warn!("FRAM self-test failed: {:?}", e);
+                false
+            }
+        };
+    }
+
+    // Print hardware initialization report
+    hw_status.print_report();
 
     let mut cmd_bridge = command::CommandBridge::new(uart_bridge);
 
@@ -234,13 +336,13 @@ fn main() -> ! {
             last_usb_log = now;
             let record = blackbox::Record {
                 ts: ts.to_millis() as u32,
-                mag: bmm350.data.mag,
-                gyro: bmi270.gyro_dps,
-                accel: bmi270.accel_g,
-                mag_temp: bmm350.data.temp,
-                mag_sample: bmm350.data.sample,
-                baro: bmp581.data.pressure_pascal,
-                baro_temp: bmp581.data.temp_c,
+                mag: bmm350.as_ref().map_or([0.0; 3], |s| s.data.mag),
+                gyro: bmi270.as_ref().map_or([0.0; 3], |s| s.gyro_dps),
+                accel: bmi270.as_ref().map_or([0.0; 3], |s| s.accel_g),
+                mag_temp: bmm350.as_ref().map_or(0.0, |s| s.data.temp),
+                mag_sample: bmm350.as_ref().map_or(0, |s| s.data.sample),
+                baro: bmp581.as_ref().map_or(0.0, |s| s.data.pressure_pascal),
+                baro_temp: bmp581.as_ref().map_or(0.0, |s| s.data.temp_c),
                 vin: monitor.data.vin,
                 vbat: monitor.data.vbat,
                 aux_current: monitor.data.aux_current,
@@ -256,40 +358,46 @@ fn main() -> ! {
         }
 
         blue_led.update(now);
-        let mag_updated = bmm350.update(&mut i2c3_dma, now);
-        let _ = bmi270.update(&mut i2c2_dma, now);
-        let _ = bmp581.update(&mut i2c3_dma, now);
+        let mag_updated = bmm350.as_mut().map_or(false, |s| s.update(&mut i2c3_dma, now));
+        if let Some(ref mut s) = bmi270 {
+            let _ = s.update(&mut i2c2_dma, now);
+        }
+        if let Some(ref mut s) = bmp581 {
+            let _ = s.update(&mut i2c3_dma, now);
+        }
         let _ = monitor.update(now);
 
         if mag_updated {
             let record = blackbox::Record {
                 ts: ts.to_millis() as u32,
-                mag: bmm350.data.mag,
-                gyro: bmi270.gyro_dps,
-                accel: bmi270.accel_g,
-                mag_temp: bmm350.data.temp,
-                mag_sample: bmm350.data.sample,
-                baro: bmp581.data.pressure_pascal,
-                baro_temp: bmp581.data.temp_c,
+                mag: bmm350.as_ref().map_or([0.0; 3], |s| s.data.mag),
+                gyro: bmi270.as_ref().map_or([0.0; 3], |s| s.gyro_dps),
+                accel: bmi270.as_ref().map_or([0.0; 3], |s| s.accel_g),
+                mag_temp: bmm350.as_ref().map_or(0.0, |s| s.data.temp),
+                mag_sample: bmm350.as_ref().map_or(0, |s| s.data.sample),
+                baro: bmp581.as_ref().map_or(0.0, |s| s.data.pressure_pascal),
+                baro_temp: bmp581.as_ref().map_or(0.0, |s| s.data.temp_c),
                 vin: monitor.data.vin,
                 vbat: monitor.data.vbat,
                 aux_current: monitor.data.aux_current,
                 rtc_vbat: monitor.data.rtc_vbat,
                 cpu_temp: monitor.data.cpu_temp,
             };
-            blackbox.write_record(record);
+            if let Some(ref mut bb) = blackbox {
+                bb.write_record(record);
+            }
         }
 
-        if mag_updated && bmm350.data.sample % 400 == 0 {
+        if mag_updated && bmm350.as_ref().map_or(false, |s| s.data.sample % 400 == 0) {
             defmt::info!(
                 "{}: mag: {}, mag_temp: {}, gyro: {}, accel: {}, baro: {}, baro_temp: {}°C",
                 ts,
-                bmm350.data.mag,
-                bmm350.data.temp,
-                bmi270.gyro_dps,
-                bmi270.accel_g,
-                bmp581.data.pressure_pascal,
-                bmp581.data.temp_c,
+                bmm350.as_ref().map_or([0.0; 3], |s| s.data.mag),
+                bmm350.as_ref().map_or(0.0, |s| s.data.temp),
+                bmi270.as_ref().map_or([0.0; 3], |s| s.gyro_dps),
+                bmi270.as_ref().map_or([0.0; 3], |s| s.accel_g),
+                bmp581.as_ref().map_or(0.0, |s| s.data.pressure_pascal),
+                bmp581.as_ref().map_or(0.0, |s| s.data.temp_c),
             );
             defmt::info!(
                 "{}: vin: {}V, vbat: {}V, current: {}A, rtc_vbat: {}V, cpu_temp: {}°C",
