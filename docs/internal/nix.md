@@ -7,7 +7,7 @@ If you want to use the official Nix installer, you will need to follow the instr
 ## Unified Development Shell
 
 Elodin provides a unified development shell that includes all necessary tools for development:
-- Run `nix develop .#elodin` (or simply `nix develop` as it's the default)
+- Run `nix develop` to enter the unified shell
 - This single shell includes tools for Rust, Python, C/C++, cloud operations, and documentation
 - No need to switch between different shells for different tasks
 

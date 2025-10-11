@@ -70,8 +70,7 @@ cargo run --manifest-path=../../apps/elodin/Cargo.toml editor examples/three-bod
 Alternatively, install [Determinate Systems Nix](https://determinate.systems/nix-installer/) which will give you exactly the same development environment that we are using. Once you have Nix installed, switch to the top of the Elodin repo. Then you can do 
 
 ```
-nix develop .#elodin
-# or simply: nix develop
+nix develop
 ```
 
 This unified shell includes all tools needed for:
@@ -89,7 +88,7 @@ just install
 #### Elodin App & SDK Development
 (See [apps/elodin/README.md](apps/elodin/README.md))
 ``` sh
-nix develop .#elodin 
+nix develop
 
 cd libs/nox-py
 uv venv --python 3.12

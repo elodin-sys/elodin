@@ -20,7 +20,6 @@ def build_image_step(image_name, target, image_tag="latest", repository="elodin.
 
     return nix_step(
         label=f":docker: {image_name}",
-        flake=".#elodin",
         pre_command=pre_command,
         command=command,
         env={"REGISTRY_AUTH_FILE": "./auth.json"},
@@ -29,8 +28,8 @@ def build_image_step(image_name, target, image_tag="latest", repository="elodin.
 
 def nix_step(
     label,
-    flake,
-    command,
+    flake=None,
+    command="",
     emoji=":nix:",
     pre_command=None,
     key=None,
@@ -39,7 +38,8 @@ def nix_step(
     plugins=[],
     agents={},
 ):
-    heredoc_command = f"""nix develop {flake} --command bash <<'EOF'
+    flake_arg = f" {flake}" if flake else ""
+    heredoc_command = f"""nix develop{flake_arg} --command bash <<'EOF'
 set -o pipefail
 {command}
 EOF"""
@@ -60,7 +60,6 @@ EOF"""
 def rust_step(label, command, env={}, emoji=":crab:"):
     return nix_step(
         label=label,
-        flake=".#elodin",
         emoji=emoji,
         command=command,
         env=env,
@@ -70,7 +69,6 @@ def rust_step(label, command, env={}, emoji=":crab:"):
 def c_step(label, command, env={}, emoji=":c:"):
     return nix_step(
         label=label,
-        flake=".#elodin",
         emoji=emoji,
         command=command,
         env=env,
