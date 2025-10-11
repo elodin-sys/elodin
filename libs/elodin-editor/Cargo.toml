@@ -137,7 +137,7 @@ impeller2-bevy.default-features = false
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.5"
 objc2-app-kit = { version = "0.2", features = ["NSWindow", "NSToolbar", "NSColor", "NSApplication", "NSImage", "all"] }
-objc2-foundation = "0.3.2"
+objc2-foundation = { version = "0.2", features = ["NSData", "all"] }
 video-toolbox.path = "../video-toolbox"
 
 # windows
