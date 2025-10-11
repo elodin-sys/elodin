@@ -1,3 +1,4 @@
+use bevy::render::view::RenderLayers;
 use bevy::{
     app::{App, Plugin, Startup, Update},
     ecs::system::{Query, Res, ResMut},
@@ -5,14 +6,28 @@ use bevy::{
         config::{DefaultGizmoConfigGroup, GizmoConfigStore, GizmoLineJoint},
         gizmos::Gizmos,
     },
-    math::Vec3,
+    log::warn,
+    math::{DVec3, Vec3},
+    prelude::Color,
     transform::components::Transform,
 };
-use impeller::{
-    bevy::{ComponentValueMap, EntityMap},
-    well_known::{BodyAxes, VectorArrow, WorldPos},
+use big_space::FloatingOriginSettings;
+use impeller2::types::ComponentId;
+use impeller2_bevy::{ComponentValueMap, EntityMap};
+use impeller2_wkt::{
+    BodyAxes, Color as WktColor, ComponentValue as WktComponentValue, VectorArrow, VectorArrow3d,
+    WorldPos,
 };
-use nox::{Quaternion, Vector3};
+use nox::{ArrayBuf, Quaternion, Vector3};
+use std::ops::Range;
+
+use crate::{
+    WorldPosExt,
+    vector_arrow::{VectorArrowState, component_value_tail_to_vec3},
+};
+
+pub const GIZMO_RENDER_LAYER: usize = 30;
+const MIN_ARROW_LENGTH_SQUARED: f32 = 1.0e-6;
 
 pub struct GizmoPlugin;
 
@@ -26,15 +41,19 @@ impl Plugin for GizmoPlugin {
 
 fn gizmo_setup(mut config_store: ResMut<GizmoConfigStore>) {
     let (config, _) = config_store.config_mut::<DefaultGizmoConfigGroup>();
-    config.line_width = 5.0;
-    config.line_joints = GizmoLineJoint::Round(12);
+    config.line.width = 5.0;
+    config.line.joints = GizmoLineJoint::Round(12);
     config.enabled = true;
+    config.render_layers = RenderLayers::layer(GIZMO_RENDER_LAYER);
 }
 
 fn render_vector_arrow(
     entity_map: Res<EntityMap>,
     query: Query<(Option<&Transform>, &ComponentValueMap)>,
     arrows: Query<&VectorArrow>,
+    vector_arrows: Query<(&VectorArrow3d, &VectorArrowState)>,
+    component_values: Query<&'static WktComponentValue>,
+    floating_origin: Res<FloatingOriginSettings>,
     mut gizmos: Gizmos,
 ) {
     for gizmo in arrows.iter() {
@@ -43,41 +62,25 @@ fn render_vector_arrow(
             color,
             range,
             attached,
-            entity_id,
             body_frame,
             scale,
+            ..
         } = gizmo;
 
-        let Some(entity_id) = entity_map.get(entity_id) else {
+        let Some(entity_id) = entity_map.get(id) else {
             continue;
         };
 
-        let Ok((transform, values)) = query.get(*entity_id) else {
+        let Ok((transform, value_map)) = query.get(*entity_id) else {
             continue;
         };
 
-        let Some(value) = values.0.get(id) else {
+        let Some(value) = value_map.0.get(id) else {
             continue;
         };
-        let vec = match value {
-            impeller::ComponentValue::F32(arr) => Vector3::new(
-                arr[range.start] as f64,
-                arr[range.start + 1] as f64,
-                arr[range.start + 2] as f64,
-            ),
-            impeller::ComponentValue::F64(arr) => {
-                Vector3::new(arr[range.start], arr[range.start + 1], arr[range.start + 2])
-            }
-            _ => {
-                continue;
-            }
+        let Some(vec) = component_value_slice_to_bevy_vec(value, range) else {
+            continue;
         };
-        let vec = WorldPos {
-            att: Quaternion::identity(),
-            pos: vec,
-        }
-        .bevy_pos()
-        .as_vec3();
         let (start, end) = if *attached {
             let Some(attached_transform) = transform else {
                 continue;
@@ -96,7 +99,49 @@ fn render_vector_arrow(
         } else {
             (Vec3::ZERO, vec * *scale)
         };
-        gizmos.arrow(start, end, *color);
+        if (end - start).length_squared() <= MIN_ARROW_LENGTH_SQUARED {
+            continue;
+        }
+        gizmos.arrow(start, end, wkt_color_to_bevy(color));
+    }
+
+    for (arrow, state) in vector_arrows.iter() {
+        let Some(vector_expr) = &state.vector_expr else {
+            continue;
+        };
+
+        let Ok(vector_value) = vector_expr.execute(&entity_map, &component_values) else {
+            continue;
+        };
+
+        let Some(direction) = component_value_tail_to_vec3(&vector_value) else {
+            continue;
+        };
+
+        let direction = direction * arrow.scale;
+        if direction.length_squared() <= MIN_ARROW_LENGTH_SQUARED {
+            continue;
+        }
+
+        let mut start_world = Vec3::ZERO;
+        if let Some(origin_expr) = &state.origin_expr {
+            let Ok(origin_value) = origin_expr.execute(&entity_map, &component_values) else {
+                continue;
+            };
+            let Some(origin) = component_value_tail_to_vec3(&origin_value) else {
+                continue;
+            };
+            start_world = origin;
+        }
+
+        let start_world_d = DVec3::new(
+            start_world.x as f64,
+            start_world.y as f64,
+            start_world.z as f64,
+        );
+        let (_, start) = floating_origin.translation_to_grid::<i128>(start_world_d);
+        let end = start + direction;
+        gizmos.arrow(start, end, wkt_color_to_bevy(&arrow.color));
     }
 }
 
@@ -109,8 +154,8 @@ fn render_body_axis(
     for gizmo in arrows.iter() {
         let BodyAxes { entity_id, scale } = gizmo;
 
-        let Some(entity_id) = entity_map.get(entity_id) else {
-            println!("entity not found");
+        let Some(entity_id) = entity_map.get(&ComponentId(entity_id.0)) else {
+            warn!("body axes entity {entity_id:?} not found in EntityMap");
             continue;
         };
 
@@ -119,4 +164,57 @@ fn render_body_axis(
         };
         gizmos.axes(transform, *scale)
     }
+}
+
+fn component_value_slice_to_bevy_vec(
+    value: &WktComponentValue,
+    range: &Range<usize>,
+) -> Option<Vec3> {
+    match value {
+        WktComponentValue::F32(arr) => {
+            let data = arr.buf.as_buf();
+            array_slice_to_bevy_vec(data, range, f64::from)
+        }
+        WktComponentValue::F64(arr) => {
+            let data = arr.buf.as_buf();
+            array_slice_to_bevy_vec(data, range, |value| value)
+        }
+        _ => None,
+    }
+}
+
+fn array_slice_to_bevy_vec<T>(
+    data: &[T],
+    range: &Range<usize>,
+    mut to_f64: impl FnMut(T) -> f64,
+) -> Option<Vec3>
+where
+    T: Copy,
+{
+    let x_idx = range.start;
+    let y_idx = x_idx.checked_add(1)?;
+    let z_idx = x_idx.checked_add(2)?;
+
+    if x_idx >= data.len() || y_idx >= data.len() || z_idx >= data.len() {
+        return None;
+    }
+
+    if range.end <= z_idx {
+        return None;
+    }
+
+    let world = WorldPos {
+        att: Quaternion::identity(),
+        pos: Vector3::new(
+            to_f64(data[x_idx]),
+            to_f64(data[y_idx]),
+            to_f64(data[z_idx]),
+        ),
+    };
+
+    Some(world.bevy_pos().as_vec3())
+}
+
+fn wkt_color_to_bevy(color: &WktColor) -> Color {
+    Color::srgba(color.r, color.g, color.b, color.a)
 }

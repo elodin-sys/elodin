@@ -34,6 +34,9 @@ def world(seed: int = 0) -> el.World:
         line_3d ball.world_pos line_width=2.0 {
             color white
         }
+        vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="ball.world_pos" scale=1.0 name="Ball Velocity" {
+            color 0 0 255
+        }
     """)
     return world
 
