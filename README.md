@@ -50,6 +50,8 @@ nix develop
 ```
 
 This unified shell automatically provides:
+- ✅ **Enhanced Terminal** (Works with your existing zsh/bash configuration)
+- ✅ **Modern CLI Tools** (eza, bat, delta, fzf, ripgrep, zoxide)
 - ✅ **Rust toolchain** (cargo, clippy, nextest) - pinned to 1.90.0
 - ✅ **Python environment** (uv, maturin, ruff, pytest)
 - ✅ **C/C++ compilers** (clang, gcc, cmake)
@@ -59,15 +61,15 @@ This unified shell automatically provides:
 - ✅ **All system dependencies** (gstreamer, ffmpeg, openssl, etc.)
 
 > [!TIP]
-> The Nix shell handles all dependencies automatically, including git-lfs for large files. No manual installation needed!
+> The Nix shell runs Oh My Zsh + Powerlevel 10k
 
-### 4. Build and Install
+### 4. Build and Install Elodin Editor and Elodin DB into your path
 ```sh
 # In the Nix shell
 just install
 ```
 
-### 5. Develop with Elodin
+### 5. Develop the Elodin simulation server
 
 #### Python SDK Development
 ```sh
@@ -76,11 +78,10 @@ cd libs/nox-py
 uv venv --python 3.12
 source .venv/bin/activate
 uvx maturin develop --uv
-uv sync
-
-# Run the editor with an example
-cargo run --manifest-path=../../apps/elodin/Cargo.toml editor examples/three-body.py
+python3 examples/rocket.py
 ```
+
+Open the Elodin editor ("elodin" in your terminal) and connect to the local server
 
 ## Alternative Local Setup (macOS Only)
 

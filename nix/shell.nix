@@ -13,6 +13,28 @@ in {
     name = "elo-unified-shell";
     buildInputs =
       [
+        # Shell stack
+        zsh
+        oh-my-zsh
+        zsh-powerlevel10k
+        zsh-completions
+
+        # Enhanced CLI tools
+        eza # Better ls
+        bat # Better cat
+        delta # Better git diff
+        fzf # Fuzzy finder
+        fd # Better find
+        ripgrep # Better grep
+        zoxide # Smart cd
+        direnv # Directory environments
+        nix-direnv # Nix integration for direnv
+        vim # Editor
+        less # Pager
+
+        # Fonts for terminal (MesloLGS for p10k)
+        (nerd-fonts.meslo-lg)
+
         # Rust toolchain and tools
         buildkite-test-collector-rust
         (rustToolchain pkgs)
@@ -105,18 +127,12 @@ in {
 
     doCheck = false;
 
-    shellHook = lib.optionalString stdenv.isDarwin ''
+    shellHook = ''
+      set -euo pipefail
+
       echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
       echo "🚀 Elodin Unified Development Shell"
       echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-      echo ""
-      echo "This shell includes tools for:"
-      echo "  • Rust development (cargo, clippy, nextest)"
-      echo "  • Python development (uv, maturin, ruff)"
-      echo "  • C/C++ compilation"
-      echo "  • Cloud operations (kubectl, gcloud, azure)"
-      echo "  • Documentation (zola, typos)"
-      echo "  • Version control (git-lfs, git-filter-repo)"
       echo ""
 
       # Auto-setup venv and build elodin package for Python development
@@ -128,18 +144,30 @@ in {
           (cd libs/nox-py && uv venv) 2>&1 | grep -v "arm64-apple-macosx" || true
           source "$VENV_DIR/bin/activate"
           (cd libs/nox-py && maturin develop) 2>&1 | grep -v "arm64-apple-macosx" || true
-          echo ""
           echo "✅ Python setup complete!"
         else
-          echo "📦 Using existing venv (run 'rm -rf libs/nox-py/.venv' to rebuild)"
+          echo "📦 Using existing Python venv"
           source "$VENV_DIR/bin/activate"
         fi
-
-        echo ""
-        echo "ℹ️  Python ready! Test with: python -c 'import elodin; print(elodin.__version__)'"
       fi
 
       echo ""
+      echo "🚀 Environment ready with:"
+      echo "  • Shell: Your existing zsh configuration"
+      echo "  • Enhanced tools: eza, bat, delta, fzf, ripgrep, zoxide"
+      echo "  • Rust: cargo, clippy, nextest"
+      echo "  • Python: uv, maturin, ruff (venv activated)"
+      echo "  • Cloud: kubectl, gcloud, azure"
+      echo "  • Version control: git with delta, git-lfs"
+      echo ""
+      echo "💡 All tools are available in your regular shell environment."
+      echo "   Your existing zsh, Oh My Zsh, and p10k configs are preserved."
+      echo ""
+
+      # Start zsh if not already in it (uses user's default zsh config)
+      if [ -z "''${ZSH_VERSION:-}" ]; then
+        exec ${pkgs.zsh}/bin/zsh -l
+      fi
     '';
   };
 }
