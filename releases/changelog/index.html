@@ -199,8 +199,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.15.0" selected>
-                        v0.15.0
+                    <option value="v0.15.1" selected>
+                        v0.15.1
                     </option>
                 </select>
             </span>
@@ -324,6 +324,10 @@
                 <li><a href="/releases/changelog/#v0-15">v0.15</a></li>
                 
                 <ul>
+                    
+                    <li>
+                        <a href="/releases/changelog/#v0-15-1">v0.15.1</a>
+                    </li>
                     
                     <li>
                         <a href="/releases/changelog/#v0-15-0">v0.15.0</a>
@@ -575,6 +579,23 @@
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Changelog</h1>
                    <h2 id="v0-15">v0.15</h2>
+<h3 id="v0-15-1">v0.15.1</h3>
+<ul>
+<li><strong>(feat)</strong> UI: Display tick count and add "Goto tick…" command. (#196)</li>
+<li><strong>(feat)</strong> Restore vector arrow schematic support. (#210)</li>
+<li><strong>(feat)</strong> Add 3D ellipsoid mesh and color transparency support. (#201)</li>
+<li><strong>(feat)</strong> UI: Add custom graph line colors in KDL. (#193)</li>
+<li><strong>(feat)</strong> Add new EQL formula <code>norm()</code>.</li>
+<li><strong>(doc)</strong> Extend <code>nox-ecs</code> <a href="https://github.com/elodin-sys/elodin/tree/main/libs/nox-ecs">README example</a> with symbolic graph evaluation.</li>
+<li><strong>(doc)</strong> Add READMEs for EQL plus HOWTO and  <a href="https://github.com/elodin-sys/elodin/tree/main/libs/nox"><code>nox</code></a>, <a href="https://github.com/elodin-sys/elodin/tree/main/libs/nox-ecs"><code>nox-ecs</code></a>, and <a href="https://github.com/elodin-sys/elodin/tree/main/libs/nox-ecs-macros"><code>nox-ecs-macros</code></a>.</li>
+<li><strong>(fix)</strong> Do not panic on invalid KDL instead show a helpful error message. (#202)</li>
+<li><strong>(fix)</strong> Ensure LFS file is not an LFS file pointer. (#206)</li>
+<li><strong>(fix)</strong> Fix DB connection thread leak. (#198)</li>
+<li><strong>(fix)</strong> UI: restore graph inspector on title click to fix regression. (#199)</li>
+<li><strong>(fix)</strong> Fix the component monitor serialization. (#189)</li>
+<li><strong>(fix)</strong> Fix stackoverflow when evaluating larger <code>noxpr</code> expression graphs. (#129)</li>
+<li><strong>(chore)</strong> Update Nix development environment. (#182)</li>
+</ul>
 <h3 id="v0-15-0">v0.15.0</h3>
 <ul>
 <li><strong>(feat)</strong> UI: Lock graphs to same x-axis zoom</li>
@@ -588,6 +609,7 @@
 <li><strong>(fix)</strong> Add auto-tick advancement to JaxSim.</li>
 <li><strong>(breaking)</strong> Handle UI and object visualization using new schematics format. See <a href="/reference/migration/to-0-15">migration guide</a>.</li>
 <li><strong>(fix)</strong> Stop endlessly creating entities for packet handling.</li>
+<li><strong>(breaking)</strong> The entity concept was removed from the DB, breaking previous saves.</li>
 <li><strong>(breaking)</strong> Replace <code>set_component_name</code> with <code>set_component_metadata</code> in C++ API to support setting element names.</li>
 <li><strong>(breaking)</strong> <code>exec.history()</code> now expects a component name, or a list of component names. If multiple component names are provided, they will be joined on the "time" column.</li>
 <li><strong>(fix)</strong> Fix bug where component values for tick 0 (initial component values before simulating) and tick 1 would have the same timestamps.</li>
