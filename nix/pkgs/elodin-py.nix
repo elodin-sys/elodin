@@ -92,7 +92,7 @@
 
   # Import shared JAX overrides
   jaxOverrides = pkgs.callPackage ./jax-overrides.nix {inherit pkgs;};
-  
+
   elodin = ps: let
     # Create a modified Python package set with our JAX/jaxlib overrides
     # This ensures all packages use the same jaxlib version

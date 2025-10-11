@@ -10,7 +10,7 @@ with pkgs; let
 
   # Import shared JAX overrides
   jaxOverrides = pkgs.callPackage ./pkgs/jax-overrides.nix {inherit pkgs;};
-  
+
   # Create a Python environment with the same JAX version as our pyproject.toml
   pythonWithJax = let
     python3' = python3.override {

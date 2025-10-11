@@ -1,7 +1,6 @@
 # Shared JAX/jaxlib version overrides for consistency across the project
 # These overrides ensure we use JAX 0.4.31 everywhere to match our pyproject.toml
-{pkgs}:
-self: super: {
+{pkgs}: self: super: {
   # Override jaxlib to use version 0.4.31
   jaxlib = super.jaxlib-bin.overridePythonAttrs (old: rec {
     version = "0.4.31";
@@ -32,7 +31,7 @@ self: super: {
           else "sha256-yficGFKH5A7oFzpxQtZJUxHncs0TmpPcqT8NmcGHKDI="; # macosx_11_0_arm64
       };
   });
-  
+
   # Make jaxlib-bin point to our overridden jaxlib
   jaxlib-bin = self.jaxlib;
 
