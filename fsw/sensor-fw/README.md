@@ -41,7 +41,7 @@ cargo rrb fw
 
 # Option 2: Using OpenOCD with RTT logging (includes live logs)
 cargo build --release --bin fw
-./openocd/flash.sh target/thumbv7em-none-eabihf/release/fw
+../openocd/flash.sh target/thumbv7em-none-eabihf/release/fw --defmt
 ```
 
 
@@ -78,8 +78,8 @@ probe-rs run --chip STM32H747IITx target/thumbv7em-none-eabihf/release/fw
 ```sh
 # build the firmware:
 cargo build --release --bin fw
-# flash the firmware + attach to RTT
-../openocd/flash.sh target/thumbv7em-none-eabihf/release/fw --defmt
+# flash the firmware + attach to RTT with defmt logging
+../openocd/flash.sh target/thumbv7em-none-eabihf/release/fw --defmt 
 ```
 
 ### Erase all internal flash memory
