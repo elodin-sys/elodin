@@ -8,8 +8,9 @@ If you want to use the official Nix installer, you will need to follow the instr
 
 Elodin provides a unified development shell that includes all necessary tools for development:
 - Run `nix develop` to enter the unified shell
-- This single shell includes tools for Rust, Python, C/C++, cloud operations, and documentation
+- This single shell includes tools for Rust, Python, C/C++, cloud operations, documentation, and git-lfs
 - No need to switch between different shells for different tasks
+- git-lfs is included to handle large files in the repository
 
 # macOS VM
 Often you want to build Linux binaries with Nix on your mac. This guide shows how to setup a VM using OrbStack, that supports remote builds.
@@ -23,9 +24,9 @@ Host orb
   Hostname 127.0.0.1
   Port 32222
 ```
-5. Still in macOS - Add this to `/etc/nix/machines` - replacing `sphw` with your username. You will also need to edit the file as root
+5. Still in macOS - Add this to `/etc/nix/machines` - replacing `user` with your username. You will also need to edit the file as root
 ```
-ssh://sphw@orb x86_64-linux,aarch64-linux /Users/sphw/.orbstack/ssh/id_ed25519 20 20 nixos-test,benchmark,big-parallel,kvm - -
+ssh://user@orb x86_64-linux,aarch64-linux /Users/user/.orbstack/ssh/id_ed25519 20 20 nixos-test,benchmark,big-parallel,kvm - -
 ```
 6. Run `orb` to enter the nixos machine
 7. Add this line below the `users` declaration in `/etc/nixos/configuration.nix`. You will likely need to add some sort of text-editor. This can be done temporarily with `nix-shell -p vim`
@@ -33,6 +34,6 @@ ssh://sphw@orb x86_64-linux,aarch64-linux /Users/sphw/.orbstack/ssh/id_ed25519 2
 nix.settings.trusted-users = ["root" "@wheel"];
 ```
 8. Run `sudo nixos-rebuild switch` to rebuild the nixos config
-9. Next `sudo ssh -i ~/.orbstack/ssh/id_ed25519 sphw@orb` on macOS replacing sphw with your username. If everything work this should drop you into your vm.
+9. Next `sudo ssh -i ~/.orbstack/ssh/id_ed25519 user@orb` on macOS replacing user with your username. If everything work this should drop you into your vm.
 14. Test your build by running `nix build --impure --expr '(with import <nixpkgs> { system = "x86_64-linux"; }; runCommand "foo" {} "uname > $out")'` in macOS
 11. Profit!

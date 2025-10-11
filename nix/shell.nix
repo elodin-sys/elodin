@@ -56,6 +56,7 @@ in {
         jq
         yq
         git-filter-repo
+        git-lfs
         (google-cloud-sdk.withExtraComponents (
           with google-cloud-sdk.components; [gke-gcloud-auth-plugin]
         ))
@@ -115,6 +116,7 @@ in {
       echo "  • C/C++ compilation"
       echo "  • Cloud operations (kubectl, gcloud, azure)"
       echo "  • Documentation (zola, typos)"
+      echo "  • Version control (git-lfs, git-filter-repo)"
       echo ""
 
       # Auto-setup venv and build elodin package for Python development

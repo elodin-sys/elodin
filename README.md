@@ -79,6 +79,7 @@ This unified shell includes all tools needed for:
 - C/C++ compilation
 - Cloud operations (kubectl, gcloud, azure)
 - Documentation (zola, typos)
+- Version control (git-lfs for large files)
 
 ### Build & Install Elodin & Elodin DB
 ```sh
