@@ -28,7 +28,7 @@ order = 1
 - **(fix)** Fix stackoverflow when evaluating larger `noxpr` expression graphs. (#129)
 - **(doc)** Add READMEs for EQL plus HOWTO and  [`nox`][nox], [`nox-ecs`][nox-ecs], and [`nox-ecs-macros`][nox-ecs-macros]. 
 - **(feat)** Add new EQL formula `norm()`.
-- **(feat)** nox-ecs: Extend [README example]() with symbolic graph evaluation.
+- **(feat)** nox-ecs: Extend [README example][nox-ecs] with symbolic graph evaluation.
 
 [nox]: https://github.com/elodin-sys/elodin/tree/main/libs/nox
 [nox-ecs]: https://github.com/elodin-sys/elodin/tree/main/libs/nox-ecs
