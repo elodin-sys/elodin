@@ -19,10 +19,8 @@ This document contains the help content for the `elodin` command-line program.
 **Command Overview:**
 
 * [`elodin`↴](#elodin)
-* [`elodin login`↴](#elodin-login)
 * [`elodin editor`↴](#elodin-editor)
 * [`elodin run`↴](#elodin-run)
-* [`elodin create`↴](#elodin-create)
 
 ## `elodin`
 
@@ -30,24 +28,14 @@ This document contains the help content for the `elodin` command-line program.
 
 ###### **Subcommands:**
 
-* `login` — Obtain access credentials for your user account
 * `editor` — Launch the Elodin editor (default)
 * `run` — Run an Elodin simulaton in headless mode
-* `create` — Create template
 
 ###### **Options:**
 
 * `-u`, `--url <URL>`
 
   Default value: `https://app.elodin.systems`
-
-
-
-## `elodin login`
-
-Obtain access credentials for your user account
-
-**Usage:** `elodin login`
 
 
 
@@ -61,7 +49,7 @@ Launch the Elodin editor (default)
 
 * `<addr/path>`
 
-  Default value: `127.0.0.1:2240`
+  Default value: ``
 
 
 
@@ -75,25 +63,7 @@ Run an Elodin simulaton in headless mode
 
 * `<addr/path>`
 
-  Default value: `127.0.0.1:2240`
-
-
-
-## `elodin create`
-
-Create template
-
-**Usage:** `elodin create [OPTIONS] --template <TEMPLATE>`
-
-###### **Options:**
-
-* `-t`, `--template <TEMPLATE>` — Name of the template
-
-  Possible values: `rocket`, `drone`, `cube-sat`, `three-body`, `ball`
-
-* `-p`, `--path <PATH>` — Path where the result will be located
-
-  Default value: `.`
+  Default value: ``
 
 
 
@@ -103,3 +73,4 @@ Create template
     This document was generated automatically by
     <a href="https://crates.io/crates/clap-markdown"><code>clap-markdown</code></a>.
 </i></small>
+

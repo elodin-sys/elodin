@@ -5,7 +5,6 @@ use miette::miette;
 use stellarator::util::CancelToken;
 use tracing_subscriber::EnvFilter;
 
-mod create;
 mod editor;
 
 #[derive(Parser, Clone)]
@@ -26,8 +25,6 @@ enum Commands {
     /// Run an Elodin simulaton in headless mode
     #[cfg(not(target_os = "windows"))]
     Run(editor::Args),
-    /// Create template
-    Create(create::Args),
 }
 
 impl Cli {
@@ -73,7 +70,6 @@ impl Cli {
                 .run_sim(args, rt, CancelToken::new())?
                 .join()
                 .map_err(|_| miette!("join error"))?,
-            Some(Commands::Create(args)) => self.create_template(args).into_diagnostic(),
             None => self.clone().editor(editor::Args::default(), rt),
         }
     }
