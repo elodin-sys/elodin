@@ -504,23 +504,11 @@
 <pre data-lang="wsl" class="language-wsl z-code"><code class="language-wsl" data-lang="wsl"><span class="z-text z-plain">.\elodin.exe
 </span></code></pre>
 <p>In a WSL terminal download and install <code>elodin</code> binary into your path then run:</p>
-<ol>
-<li>Create a new simulation using the three-body orbit template.<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin</span></span><span class="z-meta z-function-call z-arguments z-shell"> create<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>template</span> three-body</span>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin</span></span><span class="z-meta z-function-call z-arguments z-shell"> run libs/nox-py/examples/three-body.py</span>
 </span></code></pre>
-</li>
-<li>Run the simulation server.<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin</span></span><span class="z-meta z-function-call z-arguments z-shell"> run three-body.py</span>
-</span></code></pre>
-</li>
-</ol>
 <h3 id="linux-macos">Linux / macOS</h3>
-<ol>
-<li>Create a new simulation using the three-body orbit template.<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin</span></span><span class="z-meta z-function-call z-arguments z-shell"> create<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>template</span> three-body</span>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin</span></span><span class="z-meta z-function-call z-arguments z-shell"> run libs/nox-py/examples/three-body.py</span>
 </span></code></pre>
-</li>
-<li>Launch the simulation using the <code>elodin</code> CLI.<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin</span></span><span class="z-meta z-function-call z-arguments z-shell"> editor three-body.py</span>
-</span></code></pre>
-</li>
-</ol>
 <h2 id="perform-analysis">Perform Analysis</h2>
 <p>To analyze simulation data, use the <code>Exec</code> API to run the simulation for some number of ticks and collect the historical component data as a [Polars DataFrame].
 The DataFrame can then be used to generate plots or perform other methods of data analysis.</p>
@@ -528,9 +516,8 @@ The DataFrame can then be used to generate plots or perform other methods of dat
 <p>The <code>ball/plot.py</code> example depends on <code>matplotlib</code>. Install it using <code>pip</code>:</p>
 <pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">pip</span></span><span class="z-meta z-function-call z-arguments z-shell"> install<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>U</span> matplotlib</span>
 </span></code></pre>
-<p>Then create &amp; run the ball template:</p>
-<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin</span></span><span class="z-meta z-function-call z-arguments z-shell"> create<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>template</span> ball</span>
-</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">python3</span></span><span class="z-meta z-function-call z-arguments z-shell"> ball/plot.py</span>
+<p>Then run the ball plot example:</p>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">python3</span></span><span class="z-meta z-function-call z-arguments z-shell"> examples/ball/plot.py</span>
 </span></code></pre>
 <p>For more information on data frames check out
 <a href="https://docs.pola.rs/user-guide/concepts/data-structures/#dataframe">Polars DataFrame</a></p>

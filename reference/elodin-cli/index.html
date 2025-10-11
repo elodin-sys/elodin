@@ -379,19 +379,11 @@
                     </li>
                     
                     <li>
-                        <a href="/reference/elodin-cli/#elodin-login">elodin login</a>
-                    </li>
-                    
-                    <li>
                         <a href="/reference/elodin-cli/#elodin-editor">elodin editor</a>
                     </li>
                     
                     <li>
                         <a href="/reference/elodin-cli/#elodin-run">elodin run</a>
-                    </li>
-                    
-                    <li>
-                        <a href="/reference/elodin-cli/#elodin-create">elodin create</a>
                     </li>
                     
                 </ul>
@@ -408,19 +400,15 @@
 <p><strong>Command Overview:</strong></p>
 <ul>
 <li><a href="/reference/elodin-cli/#elodin"><code>elodin</code>↴</a></li>
-<li><a href="/reference/elodin-cli/#elodin-login"><code>elodin login</code>↴</a></li>
 <li><a href="/reference/elodin-cli/#elodin-editor"><code>elodin editor</code>↴</a></li>
 <li><a href="/reference/elodin-cli/#elodin-run"><code>elodin run</code>↴</a></li>
-<li><a href="/reference/elodin-cli/#elodin-create"><code>elodin create</code>↴</a></li>
 </ul>
 <h2 id="elodin"><code>elodin</code></h2>
 <p><strong>Usage:</strong> <code>elodin [OPTIONS] [COMMAND]</code></p>
 <h6 id="subcommands"><strong>Subcommands:</strong></h6>
 <ul>
-<li><code>login</code> — Obtain access credentials for your user account</li>
 <li><code>editor</code> — Launch the Elodin editor (default)</li>
 <li><code>run</code> — Run an Elodin simulaton in headless mode</li>
-<li><code>create</code> — Create template</li>
 </ul>
 <h6 id="options"><strong>Options:</strong></h6>
 <ul>
@@ -429,9 +417,6 @@
 <p>Default value: <code>https://app.elodin.systems</code></p>
 </li>
 </ul>
-<h2 id="elodin-login"><code>elodin login</code></h2>
-<p>Obtain access credentials for your user account</p>
-<p><strong>Usage:</strong> <code>elodin login</code></p>
 <h2 id="elodin-editor"><code>elodin editor</code></h2>
 <p>Launch the Elodin editor (default)</p>
 <p><strong>Usage:</strong> <code>elodin editor [addr/path]</code></p>
@@ -439,7 +424,7 @@
 <ul>
 <li>
 <p><code>&lt;addr/path&gt;</code></p>
-<p>Default value: <code>127.0.0.1:2240</code></p>
+<p>Default value: ``</p>
 </li>
 </ul>
 <h2 id="elodin-run"><code>elodin run</code></h2>
@@ -449,21 +434,7 @@
 <ul>
 <li>
 <p><code>&lt;addr/path&gt;</code></p>
-<p>Default value: <code>127.0.0.1:2240</code></p>
-</li>
-</ul>
-<h2 id="elodin-create"><code>elodin create</code></h2>
-<p>Create template</p>
-<p><strong>Usage:</strong> <code>elodin create [OPTIONS] --template &lt;TEMPLATE&gt;</code></p>
-<h6 id="options-1"><strong>Options:</strong></h6>
-<ul>
-<li>
-<p><code>-t</code>, <code>--template &lt;TEMPLATE&gt;</code> — Name of the template</p>
-<p>Possible values: <code>rocket</code>, <code>drone</code>, <code>cube-sat</code>, <code>three-body</code>, <code>ball</code></p>
-</li>
-<li>
-<p><code>-p</code>, <code>--path &lt;PATH&gt;</code> — Path where the result will be located</p>
-<p>Default value: <code>.</code></p>
+<p>Default value: ``</p>
 </li>
 </ul>
 <hr/>
