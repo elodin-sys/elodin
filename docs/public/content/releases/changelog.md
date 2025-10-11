@@ -15,6 +15,26 @@ order = 1
 
 ## v0.15
 
+### v0.15.1
+- **(feat)** UI: Display tick count and add "Goto tick…" command. (#196)
+- **(feat)** Restore vector arrow schematic support. (#210)
+- **(feat)** Add 3D ellipsoid mesh and color transparency support. (#201)
+- **(feat)** UI: Add custom graph line colors in KDL. (#193)
+- **(feat)** Add new EQL formula `norm()`.
+- **(doc)** Extend `nox-ecs` [README example][nox-ecs] with symbolic graph evaluation.
+- **(doc)** Add READMEs for EQL plus HOWTO and  [`nox`][nox], [`nox-ecs`][nox-ecs], and [`nox-ecs-macros`][nox-ecs-macros]. 
+- **(fix)** Do not panic on invalid KDL instead show a helpful error message. (#202)
+- **(fix)** Ensure LFS file is not an LFS file pointer. (#206)
+- **(fix)** Fix DB connection thread leak. (#198)
+- **(fix)** UI: restore graph inspector on title click to fix regression. (#199)
+- **(fix)** Fix the component monitor serialization. (#189)
+- **(fix)** Fix stackoverflow when evaluating larger `noxpr` expression graphs. (#129)
+- **(chore)** Update Nix development environment. (#182)
+
+[nox]: https://github.com/elodin-sys/elodin/tree/main/libs/nox
+[nox-ecs]: https://github.com/elodin-sys/elodin/tree/main/libs/nox-ecs
+[nox-ecs-macros]: https://github.com/elodin-sys/elodin/tree/main/libs/nox-ecs-macros
+
 ### v0.15.0
 - **(feat)** UI: Lock graphs to same x-axis zoom
 - **(feat)** UI: Editable panel titles
@@ -27,6 +47,7 @@ order = 1
 - **(fix)** Add auto-tick advancement to JaxSim.
 - **(breaking)** Handle UI and object visualization using new schematics format. See [migration guide](/reference/migration/to-0-15).
 - **(fix)** Stop endlessly creating entities for packet handling.
+- **(breaking)** The entity concept was removed from the DB, breaking previous saves.
 - **(breaking)** Replace `set_component_name` with `set_component_metadata` in C++ API to support setting element names.
 - **(breaking)** `exec.history()` now expects a component name, or a list of component names. If multiple component names are provided, they will be joined on the "time" column.
 - **(fix)** Fix bug where component values for tick 0 (initial component values before simulating) and tick 1 would have the same timestamps.
