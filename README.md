@@ -69,7 +69,18 @@ This unified shell automatically provides:
 just install
 ```
 
-### 5. Develop the Elodin simulation server
+### 5. Run and view an example simulation
+```sh
+# Still in the Nix shell
+python3 examples/ball/main.py
+```
+
+Open Elodin and connect to it:
+```sh
+elodin
+```
+
+### 6. Develop the Elodin simulation server
 
 #### Python SDK Development
 ```sh

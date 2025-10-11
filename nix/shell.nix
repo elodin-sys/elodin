@@ -7,6 +7,67 @@
 with pkgs; let
   xla_ext = pkgs.callPackage ./pkgs/xla-ext.nix {system = pkgs.stdenv.hostPlatform.system;};
   llvm = llvmPackages_latest;
+
+  # Create a Python environment with the same JAX version as our pyproject.toml
+  pythonWithJax = let
+    python3' = python3.override {
+      packageOverrides = self: super: {
+        # Override jaxlib to use version 0.4.31
+        jaxlib = super.jaxlib-bin.overridePythonAttrs (old: rec {
+          version = "0.4.31";
+          src = let
+            system = pkgs.stdenv.system;
+            platform =
+              if system == "x86_64-linux"
+              then "manylinux2014_x86_64"
+              else if system == "aarch64-linux"
+              then "manylinux2014_aarch64"
+              else "macosx_11_0_arm64";
+            wheelName = "jaxlib-${version}-cp312-cp312-${platform}.whl";
+            baseUrl = "https://files.pythonhosted.org/packages";
+            wheelUrls = {
+              "manylinux2014_x86_64" = "${baseUrl}/b1/09/58d35465d48c8bee1d9a4e7a3c5db2edaabfc7ac94f4576c9f8c51b83e70/${wheelName}";
+              "manylinux2014_aarch64" = "${baseUrl}/e0/af/10b49f8de2acc7abc871478823579d7241be52ca0d6bb0d2b2c476cc1b68/${wheelName}";
+              "macosx_11_0_arm64" = "${baseUrl}/68/cf/28895a4a89d88d18592507d7a35218b6bb2d8bced13615065c9f925f2ae1/${wheelName}";
+            };
+          in
+            pkgs.fetchurl {
+              url = wheelUrls.${platform} or (throw "Unsupported platform: ${platform}");
+              hash =
+                if system == "x86_64-linux"
+                then "sha256-Hxr6X9WKYPZ/DKWG4mcUrs5i6qLIM0wk0OgoWvxKfM0="
+                else if system == "aarch64-linux"
+                then "sha256-TYZ6GgVlsxz9qrvsgeAwLGRhuyrEuSwEZwMo15WBmAM="
+                else "sha256-yficGFKH5A7oFzpxQtZJUxHncs0TmpPcqT8NmcGHKDI="; # macosx_11_0_arm64
+            };
+        });
+        jaxlib-bin = self.jaxlib;
+
+        # Override JAX to use version 0.4.31
+        jax = super.jax.overridePythonAttrs (old: rec {
+          version = "0.4.31";
+          src = super.fetchPypi {
+            inherit (old) pname;
+            inherit version;
+            hash = "sha256-/S1HBkOgBz2CJzfweI9xORZWr35izFsueZXuOQzqwoc=";
+          };
+          pythonImportsCheck = [];
+          doCheck = false;
+        });
+      };
+    };
+  in
+    python3'.withPackages (ps:
+      with ps; [
+        jax
+        jaxlib
+        typing-extensions
+        pytest
+        pytest-json-report
+        matplotlib
+        polars
+        numpy
+      ]);
 in {
   # Unified shell that combines all development environments
   elodin = mkShell {
@@ -40,14 +101,8 @@ in {
         (rustToolchain pkgs)
         cargo-nextest
         pkg-config
-        python3
-        python3Packages.jax
-        python3Packages.jaxlib
-        python3Packages.typing-extensions
-        python3Packages.pytest
-        python3Packages.pytest-json-report
-        python3Packages.matplotlib
-        python3Packages.polars
+        # Use our custom Python with JAX 0.4.31
+        pythonWithJax
         openssl
         clang
         maturin
