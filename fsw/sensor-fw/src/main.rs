@@ -358,7 +358,7 @@ fn main() -> ! {
         }
 
         blue_led.update(now);
-        let mag_updated = bmm350.as_mut().map_or(false, |s| s.update(&mut i2c3_dma, now));
+        let mag_updated = bmm350.as_mut().is_some_and(|s| s.update(&mut i2c3_dma, now));
         if let Some(ref mut s) = bmi270 {
             let _ = s.update(&mut i2c2_dma, now);
         }
@@ -388,7 +388,7 @@ fn main() -> ! {
             }
         }
 
-        if mag_updated && bmm350.as_ref().map_or(false, |s| s.data.sample % 400 == 0) {
+        if mag_updated && bmm350.as_ref().is_some_and(|s| s.data.sample % 400 == 0) {
             defmt::info!(
                 "{}: mag: {}, mag_temp: {}, gyro: {}, accel: {}, baro: {}, baro_temp: {}°C",
                 ts,
