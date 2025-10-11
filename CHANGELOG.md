@@ -4,6 +4,30 @@
 
 ## v0.15
 
+### v0.15.1
+- Ticks
+- Vector Arrows
+- Fix KDL crash
+- ellipse
+- 
+- **(feat)** UI: Display tick count and add "Goto tick…" command. (#196)
+- **(fix)** Do not panic on invalid KDL instead show a helpful error message. (#202)
+- **(feat)** Ensure LFS file is not an LFS file pointer. (#206)
+- **(feat)** Add 3D ellipsoid mesh and color transparency support. (#201)
+- **(fix)** Fix DB connection thread leak. (#198)
+- **(feat)** UI: Add custom graph line colors in KDL. (#193)
+- **(fix)** UI: restore graph inspector on title click to fix regression. (#199)
+- **(fix)** Fix the component monitor serialization. (#189)
+- **(chore)** Update Nix development environment. (#182)
+- **(fix)** Fix stackoverflow when evaluating larger `noxpr` expression graphs. (#129)
+- **(doc)** Add READMEs for EQL plus HOWTO and  [`nox`][nox], [`nox-ecs`][nox-ecs], and [`nox-ecs-macros`][nox-ecs-macros]. 
+- **(feat)** Add new EQL formula `norm()`.
+- **(feat)** nox-ecs: Extend [README example]() with symbolic graph evaluation.
+
+[nox]: https://github.com/elodin-sys/elodin/tree/main/libs/nox
+[nox-ecs]: https://github.com/elodin-sys/elodin/tree/main/libs/nox-ecs
+[nox-ecs-macros]: https://github.com/elodin-sys/elodin/tree/main/libs/nox-ecs-macros
+
 ### v0.15.0
 - **(feat)** UI: Lock graphs to same x-axis zoom
 - **(feat)** UI: Editable panel titles
