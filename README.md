@@ -70,16 +70,16 @@ cargo run --manifest-path=../../apps/elodin/Cargo.toml editor examples/three-bod
 Alternatively, install [Determinate Systems Nix](https://determinate.systems/nix-installer/) which will give you exactly the same development environment that we are using. Once you have Nix installed, switch to the top of the Elodin repo. Then you can do 
 
 ```
-nix develop .#rust
-cargo ...
+nix develop .#elodin
+# or simply: nix develop
 ```
 
-or, for Python, 
-
-```
-nix develop .#python 
-python ...
-```
+This unified shell includes all tools needed for:
+- Rust development (cargo, clippy, nextest)
+- Python development (uv, maturin, ruff)
+- C/C++ compilation
+- Cloud operations (kubectl, gcloud, azure)
+- Documentation (zola, typos)
 
 ### Build & Install Elodin & Elodin DB
 ```sh
@@ -89,7 +89,7 @@ just install
 #### Elodin App & SDK Development
 (See [apps/elodin/README.md](apps/elodin/README.md))
 ``` sh
-nix develop .#python 
+nix develop .#elodin 
 
 cd libs/nox-py
 uv venv --python 3.12

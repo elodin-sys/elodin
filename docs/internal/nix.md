@@ -4,6 +4,13 @@ Elodin uses Nix for building docker images and for CI dependencies. We heavily u
 
 If you want to use the official Nix installer, you will need to follow the instructions located here: https://nixos.wiki/wiki/Flakes
 
+## Unified Development Shell
+
+Elodin provides a unified development shell that includes all necessary tools for development:
+- Run `nix develop .#elodin` (or simply `nix develop` as it's the default)
+- This single shell includes tools for Rust, Python, C/C++, cloud operations, and documentation
+- No need to switch between different shells for different tasks
+
 # macOS VM
 Often you want to build Linux binaries with Nix on your mac. This guide shows how to setup a VM using OrbStack, that supports remote builds.
 

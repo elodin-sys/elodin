@@ -1,5 +1,5 @@
 #! /usr/bin/env nix
-#! nix develop .#docs --command just --justfile
+#! nix develop .#elodin --command just --justfile
 
 default:
     zola serve

@@ -47,7 +47,7 @@ test_steps = [
         steps=[
             nix_step(
                 label="typos",
-                flake=".#writing",
+                flake=".#elodin",
                 command="typos -c typos.toml",
             ),
         ],
@@ -59,7 +59,7 @@ test_steps = [
         # this step is just to verify that the package can be imported
         # nix does all the actual work of building nox-py and installing it in the environment
         command="python -c 'import elodin; print(elodin.__version__)'",
-        flake=".#python",
+        flake=".#elodin",
     ),
     group(
         name=":python: python",
@@ -68,12 +68,12 @@ test_steps = [
             nix_step(
                 label=":python: pytest",
                 command="pytest libs/nox-py",
-                flake=".#python",
+                flake=".#elodin",
             ),
             nix_step(
                 label=":python: lint",
                 command="ruff format --check && ruff check",
-                flake=".#python",
+                flake=".#elodin",
             ),
         ],
     ),
@@ -84,31 +84,31 @@ test_steps = [
             nix_step(
                 label=":python: ball",
                 command="python3 examples/ball/main.py bench --ticks 100",
-                flake=".#python",
+                flake=".#elodin",
             ),
             nix_step(
                 label=":python: drone",
                 command="python3 examples/drone/main.py bench --ticks 100",
-                flake=".#python",
+                flake=".#elodin",
             ),
             nix_step(
                 label=":python: rocket",
                 command="python3 libs/nox-py/examples/rocket.py bench --ticks 100",
-                flake=".#python",
+                flake=".#elodin",
             ),
             nix_step(
                 label=":python: three-body",
                 command="python3 libs/nox-py/examples/three-body.py bench --ticks 100",
-                flake=".#python",
+                flake=".#elodin",
             ),
             nix_step(
                 label=":python: cube-sat",
                 command="python3 libs/nox-py/examples/cube-sat.py bench --ticks 10",
-                flake=".#python",
+                flake=".#elodin",
             ),
         ],
     ),
-    nix_step(label="alejandra", flake=".#nix-tools", command="alejandra -c ."),
+    nix_step(label="alejandra", flake=".#elodin", command="alejandra -c ."),
     step(
         label=":nix: elodin-cli",
         key="elodin-cli",

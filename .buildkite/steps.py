@@ -20,7 +20,7 @@ def build_image_step(image_name, target, image_tag="latest", repository="elodin.
 
     return nix_step(
         label=f":docker: {image_name}",
-        flake=".#ops",
+        flake=".#elodin",
         pre_command=pre_command,
         command=command,
         env={"REGISTRY_AUTH_FILE": "./auth.json"},
@@ -60,7 +60,7 @@ EOF"""
 def rust_step(label, command, env={}, emoji=":crab:"):
     return nix_step(
         label=label,
-        flake=".#rust",
+        flake=".#elodin",
         emoji=emoji,
         command=command,
         env=env,
@@ -70,7 +70,7 @@ def rust_step(label, command, env={}, emoji=":crab:"):
 def c_step(label, command, env={}, emoji=":c:"):
     return nix_step(
         label=label,
-        flake=".#c",
+        flake=".#elodin",
         emoji=emoji,
         command=command,
         env=env,

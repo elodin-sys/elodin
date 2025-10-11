@@ -1,5 +1,5 @@
 #! /usr/bin/env nix
-#! nix develop .#ops --command just --justfile
+#! nix develop .#elodin --command just --justfile
 
 [private]
 default:
@@ -35,5 +35,5 @@ public-changelog:
 
 install:
   @echo "🚧 Installing elodin and elodin-db to ~/.local/bin"
-  nix develop .#rust --command cargo build --release --package elodin --package elodin-db
+  nix develop .#elodin --command cargo build --release --package elodin --package elodin-db
   cp target/release/elodin target/release/elodin-db ~/.local/bin

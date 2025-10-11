@@ -87,8 +87,9 @@
             writing
             docs
             rust
+            elodin
             ;
-          default = shells.rust;
+          default = shells.elodin;
         };
 
         formatter = pkgs.alejandra;
