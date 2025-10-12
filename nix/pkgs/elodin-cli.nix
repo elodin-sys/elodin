@@ -3,6 +3,9 @@
   crane,
   rustToolchain,
   lib,
+  elodinPy,
+  python,
+  pythonPackages,
   ...
 }: let
   # Direct Rust build using rustPlatform.buildRustPackage
@@ -16,9 +19,19 @@
   cargoToml = builtins.fromTOML (builtins.readFile ../../Cargo.toml);
   version = cargoToml.workspace.package.version;
   src = pkgs.nix-gitignore.gitignoreSource [] ../..;
+  pythonPath = pythonPackages.makePythonPath [elodinPy];
+  pythonMajorMinor = lib.versions.majorMinor python.version;
+
+  propagatedBuildInputs = with pkgs; [
+    libGL
+    libglvnd
+    libxkbcommon
+    wayland
+    mesa
+  ];
 
   bin = pkgs.rustPlatform.buildRustPackage rec {
-    inherit pname version src;
+    inherit pname version src propagatedBuildInputs;
 
     cargoLock = {
       lockFile = ../../Cargo.lock;
@@ -35,7 +48,7 @@
 
     buildInputs = with pkgs;
       [
-        python3
+        python
         gfortran
       ]
       ++ lib.optionals stdenv.isDarwin [
@@ -46,14 +59,29 @@
       ]
       ++ lib.optionals stdenv.isLinux [
         alsa-lib
+        alsa-lib.dev
         udev
+        libGL
       ];
 
     doCheck = false;
 
+    postInstall =
+      ''
+        wrapProgram $out/bin/elodin \
+          --prefix PATH : "${python}/bin" \
+          --prefix PYTHONPATH : "${pythonPath}" \
+          --prefix PYTHONPATH : "${python}/lib/python${pythonMajorMinor}" \
+      ''
+      + lib.optionalString pkgs.stdenv.isLinux ''
+        --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath propagatedBuildInputs}
+      '';
+
     # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
     # GCC 14 treats -Wincompatible-pointer-types as error by default
     NIX_CFLAGS_COMPILE = lib.optionalString pkgs.stdenv.isLinux "-Wno-error=incompatible-pointer-types";
+    CARGO_PROFILE = "dev";
+    CARGO_PROFILE_RELEASE_DEBUG = true;
   };
 in {
   # Only export the binary - clippy and tests are run directly
