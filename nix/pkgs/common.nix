@@ -13,6 +13,8 @@
       matchesSuffix = lib.any (suffix: lib.hasSuffix suffix base) [
         "Cargo.toml"
         "Cargo.lock"
+        "rust-toolchain.toml"
+        "rustfmt.toml"
         "logo.txt"
         "logo.png"
         ".rs"

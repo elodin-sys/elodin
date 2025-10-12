@@ -1,8 +1,9 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
-    # Pin crane to May 2025 version to avoid Cargo.lock path resolution bug on Linux
-    # macOS python shell uses maturin directly instead (see nix/shell.nix)
+    # Pin crane to May 2025 version to avoid Cargo.lock path resolution bug
+    # Note: elodin-cli uses rustPlatform directly due to macOS issues (see nix/pkgs/elodin-cli.nix)
+    # Python shell on macOS also bypasses crane (see nix/shell.nix)
     crane.url = "github:ipetkov/crane/dfd9a8dfd09db9aad544c4d3b6c47b12562544a5";
     systems.url = "github:nix-systems/default";
     rust-overlay = {
@@ -70,11 +71,9 @@
 
         checks = with pkgs.elodin; {
           elodin-db-clippy = elodin-db.clippy;
-          elodin-cli-clippy = elodin-cli.clippy;
           elodin-py-clippy = elodin-py.clippy;
           # sensor-fw-clippy = sensor-fw.clippy;
           elodin-db-test = elodin-db.test;
-          elodin-cli-test = elodin-cli.test;
           # sensor-fw-test = sensor-fw.test;
         };
 
