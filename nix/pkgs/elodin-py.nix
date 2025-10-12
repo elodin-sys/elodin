@@ -8,15 +8,8 @@
   ...
 }: let
   # Direct Rust build using rustPlatform.buildRustPackage
-  #
-  # We bypass crane entirely due to path resolution issues with the pinned
-  # crane version (dfd9a8dfd...) on macOS that cause "crane-utils" build failures.
-  # This matches the approach used in elodin-cli.nix for consistency.
-  #
-  # Note: clippy checks should be run directly via cargo in the development shell
-  
   xla_ext = pkgs.callPackage ./xla-ext.nix {inherit system;};
-  
+
   # Extract pname and version directly from Cargo.toml files
   noxPyCargoToml = builtins.fromTOML (builtins.readFile ../../libs/nox-py/Cargo.toml);
   workspaceCargoToml = builtins.fromTOML (builtins.readFile ../../Cargo.toml);
@@ -46,68 +39,73 @@
   # Build the wheel using rustPlatform
   wheel = pkgs.rustPlatform.buildRustPackage rec {
     inherit pname version src;
-    
+
     cargoLock = {
       lockFile = ../../Cargo.lock;
       allowBuiltinFetchGit = true;
     };
-    
+
     buildAndTestSubdir = "libs/nox-py";
-    
-    nativeBuildInputs = with pkgs; [
-      (rustToolchain pkgs)
-      maturin
-      pkg-config
-      cmake
-      python3  # Add python3 to nativeBuildInputs so it's available during build
-      which    # Required for build scripts that use which to find python3
-    ] ++ lib.optionals stdenv.isLinux [
-      autoPatchelfHook
-      patchelf
-    ] ++ lib.optionals stdenv.isDarwin [
-      fixDarwinDylibNames
-      darwin.cctools
-    ];
-    
-    buildInputs = with pkgs; [
-      python
-      openssl
-      gfortran
-      gfortran.cc.lib
-      xla_ext
-    ] ++ lib.optionals stdenv.isDarwin [
-      libiconv
-    ];
-    
+
+    nativeBuildInputs = with pkgs;
+      [
+        (rustToolchain pkgs)
+        maturin
+        pkg-config
+        cmake
+        python3 # Add python3 to nativeBuildInputs so it's available during build
+        which # Required for build scripts that use which to find python3
+        gfortran # Fortran compiler needed at build time for netlib-src
+      ]
+      ++ lib.optionals stdenv.isLinux [
+        autoPatchelfHook
+        patchelf
+      ]
+      ++ lib.optionals stdenv.isDarwin [
+        fixDarwinDylibNames
+        darwin.cctools
+      ];
+
+    buildInputs = with pkgs;
+      [
+        python
+        openssl
+        gfortran.cc.lib # Fortran runtime library for linking
+        xla_ext
+      ]
+      ++ lib.optionals stdenv.isDarwin [
+        libiconv
+      ];
+
     # Environment variables for the build
     XLA_EXTENSION_DIR = "${xla_ext}";
     OPENSSL_DIR = "${pkgs.openssl.dev}";
     OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
     OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include/";
-    
+
     # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
     # GCC 14 treats -Wincompatible-pointer-types as error by default
     NIX_CFLAGS_COMPILE = lib.optionalString pkgs.stdenv.isLinux "-Wno-error=incompatible-pointer-types";
-    
+
     doCheck = false;
-    
+
     # Override the build phase to use maturin
     buildPhase = ''
       runHook preBuild
-      
+
       # Build the wheel with maturin
       maturin build --offline --target-dir ./target -m libs/nox-py/Cargo.toml --release
-      
+
       runHook postBuild
     '';
-    
+
     # Install the wheel
     installPhase = ''
       runHook preInstall
-      
+
       mkdir -p $out
       cp target/wheels/${wheelName}-${wheelVersion}-${wheelSuffix}.whl $out/
-      
+
       runHook postInstall
     '';
   };

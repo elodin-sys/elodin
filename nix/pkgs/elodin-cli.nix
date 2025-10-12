@@ -44,13 +44,13 @@
       (rustToolchain pkgs)
       pkg-config
       cmake
-      makeWrapper  # Required for wrapProgram in postInstall
+      makeWrapper # Required for wrapProgram in postInstall
+      gfortran # Fortran compiler needed at build time for netlib-src
     ];
 
     buildInputs = with pkgs;
       [
         python
-        gfortran
       ]
       ++ lib.optionals stdenv.isDarwin [
         libiconv
