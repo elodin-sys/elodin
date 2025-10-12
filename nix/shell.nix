@@ -36,7 +36,7 @@ in {
       [
         # Interactive bash (required for nix develop to work properly)
         bashInteractive
-        
+
         # Shell stack
         zsh
         oh-my-zsh
@@ -151,7 +151,7 @@ in {
       echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
       echo ""
       echo "Environment ready:"
-      echo "  • Rust: cargo, clippy, nextest" 
+      echo "  • Rust: cargo, clippy, nextest"
       echo "  • Tools: uv, maturin, ruff, just, kubectl, gcloud"
       echo "  • Shell tools: eza, bat, delta, fzf, ripgrep, zoxide"
       echo ""
@@ -159,7 +159,7 @@ in {
       echo "   cd libs/nox-py && uv venv --python 3.12"
       echo "   source .venv/bin/activate && maturin develop"
       echo ""
-      
+
       # If we're in an interactive shell and not already in zsh, exec into zsh
       if [[ $- == *i* ]] && [ -z "''${ZSH_VERSION:-}" ]; then
         exec ${pkgs.zsh}/bin/zsh
