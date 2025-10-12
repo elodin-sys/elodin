@@ -22,75 +22,94 @@ This monorepo contains the source code for all Elodin simulation and flight soft
   </a>
 </h2>
 
-## Dependencies
+## Getting Started
 
-Rust 1.90.0
-Preference for Arm-based Macs
+### Prerequisites
+- **Recommended**: [Determinate Systems Nix](https://determinate.systems/nix-installer/) for a consistent development environment
+- **Alternative**: Manual setup on macOS (see [Local Setup](#local-setup-macos-only) below)
 
-## Building
+## Development Setup (Recommended: Nix)
 
-> [!NOTE]
-> These instructions were validated on M1 architecture, macOS 15.1.1 on 2025-08-26.
+The Elodin repository uses Nix to provide a consistent, reproducible development environment across all platforms. This is the same environment our team uses daily.
 
-### Before Cloning
-
-Before cloning the source, ensure `git-lfs` is installed. 
-
-``` sh
-brew install gstreamer python gfortran openblas uv git-lfs;
-git lfs install; # This is idempotent; you can run it again.
-```
-
-### Source
-
-``` sh
-git clone https://github.com/elodin-sys/elodin.git
-```
-
-
-### Build & Run
+### 1. Install Nix
 ```sh
+# Install Determinate Systems Nix (recommended)
+curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install
+```
+
+### 2. Clone the Repository
+```sh
+git clone https://github.com/elodin-sys/elodin.git
+cd elodin
+```
+
+### 3. Enter the Development Shell
+```sh
+nix develop --command bash
+```
+
+This unified shell automatically provides:
+- ✅ **Enhanced Terminal** (Works with your existing zsh/bash configuration)
+- ✅ **Modern CLI Tools** (eza, bat, delta, fzf, ripgrep, zoxide)
+- ✅ **Rust toolchain** (cargo, clippy, nextest) - pinned to 1.90.0
+- ✅ **Python environment** (uv, maturin, ruff, pytest)
+- ✅ **C/C++ compilers** (clang, gcc, cmake)
+- ✅ **Cloud tools** (kubectl, gcloud, azure-cli)
+- ✅ **Documentation tools** (zola, typos)
+- ✅ **Version control** (git-lfs, git-filter-repo)
+- ✅ **All system dependencies** (gstreamer, ffmpeg, openssl, etc.)
+
+> [!TIP]
+> The Nix shell runs Oh My Zsh + Powerlevel 10k, and will run configuration setup on first run if not installed
+
+### 4. Build and Install Elodin Editor and Elodin DB into your path
+```sh
+# In the Nix shell
+just install
+```
+
+### 5. Develop the Elodin simulation server & example
+
+#### Python SDK Development
+```sh
+# Still in the Nix shell
+cd libs/nox-py
+uv venv --python 3.12
+source .venv/bin/activate
+uvx maturin develop --uv
+python3 examples/rocket.py
+```
+
+Open the Elodin editor ("elodin" in your terminal) and connect to the local server
+
+---
+
+## Alternative Local Setup (macOS Only)
+
+> [!WARNING]
+> This setup is more complex and may lead to inconsistent environments across developers. We strongly recommend using Nix instead.
+
+If you cannot use Nix, you can manually install dependencies on macOS:
+
+### Prerequisites
+```sh
+# Install required tools via Homebrew
+brew install gstreamer python gfortran openblas uv git-lfs rust
+
+# Initialize git-lfs
+git lfs install
+```
+
+### Build and Run
+```sh
+git clone https://github.com/elodin-sys/elodin.git
 cd elodin
 just install
 ```
 
-#### Elodin App & SDK Development
-(See [apps/elodin/README.md](apps/elodin/README.md))
-``` sh
-
-cd libs/nox-py
-uv venv --python 3.12
-source .venv/bin/activate
-uvx maturin develop --uv
-uv sync
-
-cargo run --manifest-path=../../apps/elodin/Cargo.toml editor examples/three-body.py
-```
-
-Alternatively, install [Determinate Systems Nix](https://determinate.systems/nix-installer/) which will give you exactly the same development environment that we are using. Once you have Nix installed, switch to the top of the Elodin repo. Then you can do 
-
-```
-nix develop .#rust
-cargo ...
-```
-
-or, for Python, 
-
-```
-nix develop .#python 
-python ...
-```
-
-### Build & Install Elodin & Elodin DB
+### Python Development (Local Setup)
 ```sh
-just install
-```
-
-#### Elodin App & SDK Development
-(See [apps/elodin/README.md](apps/elodin/README.md))
-``` sh
-nix develop .#python 
-
 cd libs/nox-py
 uv venv --python 3.12
 source .venv/bin/activate
@@ -99,3 +118,12 @@ uv sync
 
 cargo run --manifest-path=../../apps/elodin/Cargo.toml editor examples/three-body.py
 ```
+
+> [!NOTE]
+> Local setup instructions were validated on M1 architecture, macOS 15.1.1 on 2025-08-26.
+
+## Additional Resources
+
+- [Elodin App Documentation](apps/elodin/README.md)
+- [Python SDK Documentation](libs/nox-py/README.md)
+- [Internal Nix Documentation](docs/internal/nix.md)

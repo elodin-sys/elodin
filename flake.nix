@@ -79,16 +79,8 @@
         };
 
         devShells = with shells; {
-          inherit
-            c
-            ops
-            python
-            nix-tools
-            writing
-            docs
-            rust
-            ;
-          default = shells.rust;
+          inherit elodin;
+          default = shells.elodin;
         };
 
         formatter = pkgs.alejandra;
