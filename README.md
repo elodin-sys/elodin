@@ -46,7 +46,7 @@ cd elodin
 
 ### 3. Enter the Development Shell
 ```sh
-nix develop
+nix develop --command bash
 ```
 
 This unified shell automatically provides:
@@ -61,7 +61,7 @@ This unified shell automatically provides:
 - ✅ **All system dependencies** (gstreamer, ffmpeg, openssl, etc.)
 
 > [!TIP]
-> The Nix shell runs Oh My Zsh + Powerlevel 10k
+> The Nix shell runs Oh My Zsh + Powerlevel 10k, and will run configuration setup on first run if not installed
 
 ### 4. Build and Install Elodin Editor and Elodin DB into your path
 ```sh
@@ -69,18 +69,7 @@ This unified shell automatically provides:
 just install
 ```
 
-### 5. Run and view an example simulation
-```sh
-# Still in the Nix shell
-python3 examples/ball/main.py
-```
-
-Open Elodin and connect to it:
-```sh
-elodin
-```
-
-### 6. Develop the Elodin simulation server
+### 5. Develop the Elodin simulation server & example
 
 #### Python SDK Development
 ```sh
@@ -93,6 +82,8 @@ python3 examples/rocket.py
 ```
 
 Open the Elodin editor ("elodin" in your terminal) and connect to the local server
+
+---
 
 ## Alternative Local Setup (macOS Only)
 

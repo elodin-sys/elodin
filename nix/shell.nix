@@ -34,6 +34,9 @@ in {
     name = "elo-unified-shell";
     buildInputs =
       [
+        # Interactive bash (required for nix develop to work properly)
+        bashInteractive
+        
         # Shell stack
         zsh
         oh-my-zsh
@@ -143,74 +146,23 @@ in {
     doCheck = false;
 
     shellHook = ''
-      set -euo pipefail
-
-      # Detect if we're in CI or non-interactive mode
-      IS_CI="''${CI:-''${BUILDKITE:-''${GITHUB_ACTIONS:-}}}"
-      IS_INTERACTIVE="''${PS1:-}"
-
-      # Only show the banner in interactive mode
-      if [ -n "$IS_INTERACTIVE" ] && [ -z "$IS_CI" ]; then
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "🚀 Elodin Unified Development Shell"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo ""
-      fi
-
-      # Auto-setup venv and build elodin package for Python development
-      VENV_DIR="$PWD/libs/nox-py/.venv"
-
-      if [ -d "$PWD/libs/nox-py" ]; then
-        if [ ! -d "$VENV_DIR" ]; then
-          if [ -n "$IS_INTERACTIVE" ] && [ -z "$IS_CI" ]; then
-            echo "🔨 First-time setup: Creating venv and building elodin..."
-          fi
-
-          # Create venv
-          if (cd libs/nox-py && uv venv) 2>&1 | grep -v "arm64-apple-macosx" || true; then
-            # Try to build the package, but don't fail if it doesn't work
-            if ! (cd libs/nox-py && source .venv/bin/activate && maturin develop) 2>&1 | grep -v "arm64-apple-macosx"; then
-              if [ -n "$IS_CI" ]; then
-                echo "⚠️  Warning: Failed to build elodin package (may be due to disk space or other issues)"
-              else
-                echo "⚠️  Warning: Failed to build elodin package - you may need to run 'maturin develop' manually"
-              fi
-            else
-              [ -n "$IS_INTERACTIVE" ] && [ -z "$IS_CI" ] && echo "✅ Python setup complete!"
-            fi
-          fi
-        else
-          [ -n "$IS_INTERACTIVE" ] && [ -z "$IS_CI" ] && echo "📦 Using existing Python venv"
-        fi
-
-        # Activate the venv in the current shell if it exists
-        if [ -f "$VENV_DIR/bin/activate" ]; then
-          source "$VENV_DIR/bin/activate"
-          [ -n "$IS_INTERACTIVE" ] && [ -z "$IS_CI" ] && echo "✅ Python venv activated: $VENV_DIR"
-
-          # Export these so they persist if we launch zsh
-          export VIRTUAL_ENV
-          export PATH
-        fi
-      fi
-
-      # Only show environment info and switch to zsh in interactive mode
-      if [ -n "$IS_INTERACTIVE" ] && [ -z "$IS_CI" ]; then
-        echo ""
-        echo "🚀 Environment ready with:"
-        echo "  • Shell: Your existing zsh configuration"
-        echo "  • Enhanced tools: eza, bat, delta, fzf, ripgrep, zoxide"
-        echo "  • Rust: cargo, clippy, nextest"
-        echo "  • Python: uv, maturin, ruff (venv activated)"
-        echo "  • Cloud: kubectl, gcloud, azure"
-        echo "  • Version control: git with delta, git-lfs"
-        echo ""
-
-        # Only exec zsh if we're in an interactive shell and not already in zsh
-        # and not in CI, and not in a nix develop --command context
-        if [ -z "''${ZSH_VERSION:-}" ] && [ -z "''${IN_NIX_SHELL_COMMAND:-}" ]; then
-          exec ${pkgs.zsh}/bin/zsh
-        fi
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "🚀 Elodin Development Shell (Nix)"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      echo "Environment ready:"
+      echo "  • Rust: cargo, clippy, nextest" 
+      echo "  • Tools: uv, maturin, ruff, just, kubectl, gcloud"
+      echo "  • Shell tools: eza, bat, delta, fzf, ripgrep, zoxide"
+      echo ""
+      echo "💡 Python setup (if needed):"
+      echo "   cd libs/nox-py && uv venv --python 3.12"
+      echo "   source .venv/bin/activate && maturin develop"
+      echo ""
+      
+      # If we're in an interactive shell and not already in zsh, exec into zsh
+      if [[ $- == *i* ]] && [ -z "''${ZSH_VERSION:-}" ]; then
+        exec ${pkgs.zsh}/bin/zsh
       fi
     '';
   };
