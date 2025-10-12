@@ -29,12 +29,12 @@
       elodin = rec {
         memserve = final.callPackage ./nix/pkgs/memserve.nix {inherit crane rustToolchain;};
         elodin-py = final.callPackage ./nix/pkgs/elodin-py.nix {
-          inherit crane rustToolchain;
+          inherit rustToolchain;
           python = final.python312Full;
           pythonPackages = final.python312Packages;
         };
         elodin-cli = final.callPackage ./nix/pkgs/elodin-cli.nix {
-          inherit crane rustToolchain;
+          inherit rustToolchain;
           elodinPy = elodin-py.py;
           python = elodin-py.python;
           pythonPackages = elodin-py.pythonPackages;
@@ -80,7 +80,6 @@
 
         checks = with pkgs.elodin; {
           elodin-db-clippy = elodin-db.clippy;
-          elodin-py-clippy = elodin-py.clippy;
           # sensor-fw-clippy = sensor-fw.clippy;
           elodin-db-test = elodin-db.test;
           # sensor-fw-test = sensor-fw.test;

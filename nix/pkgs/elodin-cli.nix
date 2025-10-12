@@ -44,6 +44,7 @@
       (rustToolchain pkgs)
       pkg-config
       cmake
+      makeWrapper  # Required for wrapProgram in postInstall
     ];
 
     buildInputs = with pkgs;
