@@ -96,19 +96,6 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
             .push(KdlEntry::new_prop("fov", viewport.fov as f64));
     }
 
-    if viewport.active {
-        node.entries_mut().push(KdlEntry::new_prop("active", true));
-    }
-
-    if viewport.show_grid {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("show_grid", true));
-    }
-
-    if viewport.hdr {
-        node.entries_mut().push(KdlEntry::new_prop("hdr", true));
-    }
-
     if let Some(ref pos) = viewport.pos {
         node.entries_mut()
             .push(KdlEntry::new_prop("pos", pos.clone()));
@@ -117,6 +104,19 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
     if let Some(ref look_at) = viewport.look_at {
         node.entries_mut()
             .push(KdlEntry::new_prop("look_at", look_at.clone()));
+    }
+
+    if viewport.hdr {
+        node.entries_mut().push(KdlEntry::new_prop("hdr", true));
+    }
+
+    if viewport.show_grid {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("show_grid", true));
+    }
+
+    if viewport.active {
+        node.entries_mut().push(KdlEntry::new_prop("active", true));
     }
 
     node
@@ -938,11 +938,11 @@ object_3d "a.world_pos" {
         let serialized = serialize_schematic(&parsed);
         // NOTE: fov and grid are dropped because they are the default value.
         //
-        //viewport active=#true hdr=#true fov=45.0 show_grid=#false
+        //viewport hdr=#true show_grid=#false active=#true
         assert_eq!(
             r#"
 tabs {
-    viewport active=#true hdr=#true
+    viewport hdr=#true active=#true
     graph a.world_pos name="a world_pos"
 }
 object_3d a.world_pos {
@@ -977,11 +977,11 @@ object_3d "a.world_pos" {
         let serialized = serialize_schematic(&parsed);
         // NOTE: fov and grid are dropped because they are the default value.
         //
-        //viewport active=#true hdr=#true fov=45.0 show_grid=#false
+        //viewport hdr=#true show_grid=#false active=#true
         assert_eq!(
             r#"
 tabs {
-    viewport active=#true hdr=#true
+    viewport hdr=#true active=#true
     graph a.world_pos name="a world_pos"
 }
 object_3d a.world_pos {
