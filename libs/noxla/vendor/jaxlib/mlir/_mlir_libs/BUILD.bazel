@@ -1,0 +1,316 @@
+# Copyright 2021 The JAX Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+load("@rules_python//python:py_library.bzl", "py_library")
+load(
+    "//jaxlib:jax.bzl",
+    "if_windows",
+)
+load("//jaxlib:pywrap.bzl", "nanobind_pywrap_extension")
+load("//jaxlib:symlink_files.bzl", "symlink_inputs")
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+    licenses = ["notice"],
+)
+
+COPTS = [
+    "-fexceptions",
+    "-frtti",
+]
+
+nanobind_pywrap_extension(
+    name = "_mlir",
+    srcs = [
+        "@llvm-project//mlir:lib/Bindings/Python/MainModule.cpp",
+    ],
+    copts = COPTS,
+    deps = [
+        "@llvm-project//mlir:MLIRBindingsPythonCore",
+        "@llvm-project//mlir:MLIRBindingsPythonNanobindHeaders",
+        "@nanobind",
+    ],
+)
+
+nanobind_pywrap_extension(
+    name = "_mlirDialectsGPU",
+    srcs = [
+        "@llvm-project//mlir:lib/Bindings/Python/DialectGPU.cpp",
+    ],
+    copts = COPTS,
+    deps = [
+        "@llvm-project//mlir:CAPIGPU",
+        "@llvm-project//mlir:CAPIIR",
+        "@llvm-project//mlir:MLIRBindingsPythonNanobindHeaders",
+        "@nanobind",
+    ],
+)
+
+nanobind_pywrap_extension(
+    name = "_mlirGPUPasses",
+    srcs = [
+        "@llvm-project//mlir:lib/Bindings/Python/GPUPasses.cpp",
+    ],
+    copts = COPTS,
+    deps = [
+        "@llvm-project//mlir:CAPIGPU",
+        "@llvm-project//mlir:MLIRBindingsPythonNanobindHeaders",
+        "@nanobind",
+    ],
+)
+
+nanobind_pywrap_extension(
+    name = "_mlirDialectsNVGPU",
+    srcs = [
+        "@llvm-project//mlir:lib/Bindings/Python/DialectNVGPU.cpp",
+    ],
+    copts = COPTS,
+    deps = [
+        "@llvm-project//mlir:CAPIIR",
+        "@llvm-project//mlir:CAPINVGPU",
+        "@llvm-project//mlir:MLIRBindingsPythonNanobindHeaders",
+        "@nanobind",
+    ],
+)
+
+nanobind_pywrap_extension(
+    name = "_mlirDialectsLLVM",
+    srcs = [
+        "@llvm-project//mlir:lib/Bindings/Python/DialectLLVM.cpp",
+    ],
+    copts = COPTS,
+    deps = [
+        "@llvm-project//mlir:CAPIIR",
+        "@llvm-project//mlir:CAPILLVM",
+        "@llvm-project//mlir:MLIRBindingsPythonNanobindHeaders",
+        "@nanobind",
+    ],
+)
+
+nanobind_pywrap_extension(
+    name = "_mlirDialectsSparseTensor",
+    srcs = [
+        "@llvm-project//mlir:lib/Bindings/Python/DialectSparseTensor.cpp",
+    ],
+    copts = COPTS,
+    deps = [
+        "@llvm-project//mlir:CAPISparseTensor",
+        "@llvm-project//mlir:MLIRBindingsPythonNanobindHeaders",
+        "@nanobind",
+    ],
+)
+
+nanobind_pywrap_extension(
+    name = "_mlirSparseTensorPasses",
+    srcs = [
+        "@llvm-project//mlir:lib/Bindings/Python/SparseTensorPasses.cpp",
+    ],
+    copts = COPTS,
+    deps = [
+        "@llvm-project//mlir:CAPISparseTensor",
+        "@llvm-project//mlir:MLIRBindingsPythonNanobindHeaders",
+        "@nanobind",
+    ],
+)
+
+nanobind_pywrap_extension(
+    name = "_mosaic_gpu_ext",
+    srcs = ["mosaic_gpu_ext.cc"],
+    copts = COPTS,
+    deps = [
+        "//jaxlib/mosaic/dialect/gpu:gpu_dialect_capi",
+        "@llvm-project//mlir:CAPIIR",
+        "@llvm-project//mlir:MLIRBindingsPythonNanobindHeadersAndDeps",
+        "@nanobind",
+    ],
+)
+
+# This is here, instead of in jaxlib/mosaic/python, so it's in the same
+# directory as libjaxlib_mlir_capi.so (produced by
+# :jaxlib_mlir_capi_shared_library). This ensures that the RPATH works correctly
+# across platforms. It's not clear if Windows supports RPATH-like functionality
+# across different directories at all.
+nanobind_pywrap_extension(
+    name = "_tpu_ext",
+    srcs = ["tpu_ext.cc"],
+    copts = COPTS,
+    deps = [
+        "//jaxlib/mosaic:tpu_dialect_capi",
+        "@com_google_absl//absl/log:check",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:CAPIIR",
+        "@llvm-project//mlir:MLIRBindingsPythonNanobindHeadersAndDeps",
+        "@nanobind",
+        "@xla//xla/python:nb_numpy",
+        "@xla//xla/tsl/python/lib/core:numpy",
+    ],
+)
+
+# This target contains the extension and it's Python dependencies, which are not
+# supported by the `nanobind_pywrap_extension`/`nanobind_extension` macros.
+py_library(
+    name = "_tpu_ext_lib",
+    deps = [
+        ":_tpu_ext",
+        "//jaxlib/mlir:ir",
+        "//jaxlib/mosaic/python:layout_defs",
+    ],
+)
+
+nanobind_pywrap_extension(
+    name = "_triton_ext",
+    srcs = ["triton_ext.cc"],
+    copts = COPTS,
+    pytype_srcs = ["_triton_ext.pyi"],
+    deps = [
+        "@nanobind",
+    ] + if_windows(
+        [],
+        [
+            "//jaxlib/triton:triton_dialect_capi",
+            "@llvm-project//mlir:CAPIIR",
+            "@llvm-project//mlir:MLIRBindingsPythonNanobindHeadersAndDeps",
+        ],
+    ),
+)
+
+symlink_inputs(
+    name = "_mlir_libs",
+    rule = py_library,
+    symlinked_inputs = {"srcs": {
+        ".": [
+            "@llvm-project//mlir/python:MlirLibsPyFiles",
+        ],
+    }},
+    deps = [
+        ":_jax_mlir_ext",
+        ":_mlir",
+    ],
+)
+
+# JAX-specific registrations.
+
+nanobind_pywrap_extension(
+    name = "_jax_mlir_ext",
+    srcs = ["jax_mlir_ext.cc"],
+    copts = COPTS,
+    deps = [
+        "//jaxlib/mosaic/gpu:mlir_capi",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/types:span",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:CAPIArith",
+        "@llvm-project//mlir:CAPICF",
+        "@llvm-project//mlir:CAPIGPU",
+        "@llvm-project//mlir:CAPIIR",
+        "@llvm-project//mlir:CAPILLVM",
+        "@llvm-project//mlir:CAPIMath",
+        "@llvm-project//mlir:CAPIMemRef",
+        "@llvm-project//mlir:CAPINVGPU",
+        "@llvm-project//mlir:CAPINVVM",
+        "@llvm-project//mlir:CAPISCF",
+        "@llvm-project//mlir:CAPITransforms",
+        "@llvm-project//mlir:CAPIVector",
+        "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:MLIRBindingsPythonNanobindHeaders",
+        "@llvm-project//mlir:Support",
+        "@local_config_python//:headers",
+        "@nanobind",
+        "@shardy//shardy/integrations/c:sdy_capi",
+        "@xla//xla/pjrt:status_casters",
+        "@xla//xla/python:nb_absl_span",
+        "@xla//xla/service/spmd/shardy/integrations/c:xla_sdy_capi",
+    ],
+)
+
+##---------------------------------------------------------------------------##
+# MHLO Extensions
+##---------------------------------------------------------------------------##
+
+nanobind_pywrap_extension(
+    name = "_mlirHlo",
+    srcs = [
+        "@xla//xla/mlir_hlo:bindings/python/MlirHloModule.cc",
+    ],
+    copts = COPTS,
+    deps = [
+        "@llvm-project//mlir:CAPIIR",
+        "@llvm-project//mlir:MLIRBindingsPythonNanobindHeaders",
+        "@local_config_python//:headers",
+        "@nanobind",
+        "@xla//xla/mlir_hlo:CAPI",
+    ],
+)
+
+##---------------------------------------------------------------------------##
+# Shardy Extensions
+##---------------------------------------------------------------------------##
+
+nanobind_pywrap_extension(
+    name = "_sdy",
+    srcs = [
+        "@shardy//shardy/integrations/python/ir:sdy_module.cc",
+    ],
+    copts = COPTS,
+    deps = [
+        "@llvm-project//mlir:CAPIIR",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:MLIRBindingsPythonNanobindHeaders",
+        "@local_config_python//:headers",
+        "@nanobind",
+        "@shardy//shardy/integrations/c:sdy_capi",
+    ],
+)
+
+##---------------------------------------------------------------------------##
+# Stablehlo Extensions
+##---------------------------------------------------------------------------##
+
+nanobind_pywrap_extension(
+    name = "_chlo",
+    srcs = [
+        "@stablehlo//:chlo_py_api_files",
+    ],
+    copts = COPTS,
+    deps = [
+        "@llvm-project//mlir:CAPIIR",
+        "@llvm-project//mlir:MLIRBindingsPythonNanobindHeaders",
+        "@local_config_python//:headers",
+        "@nanobind",
+        "@stablehlo//:chlo_capi",
+    ],
+)
+
+nanobind_pywrap_extension(
+    name = "_stablehlo",
+    srcs = [
+        "@stablehlo//:stablehlo_py_api_files",
+    ],
+    copts = COPTS,
+    deps = [
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:CAPIIR",
+        "@llvm-project//mlir:MLIRBindingsPythonNanobindHeaders",
+        "@local_config_python//:headers",
+        "@nanobind",
+        "@stablehlo//:stablehlo_capi",
+    ],
+)

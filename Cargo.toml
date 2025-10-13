@@ -88,3 +88,6 @@ wmm.path = "libs/wmm"
 [profile.release-with-debug]
 inherits = "release"
 debug = true
+
+[patch.crates-io]
+lapack-src = { git = "https://github.com/elodin-sys/lapack-src.git" }

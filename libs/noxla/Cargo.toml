@@ -6,10 +6,14 @@ edition = "2024"
 description = "Rust bindings to XLA's C++ API"
 repository = "https://github.com/elodin-sys/elodin"
 
+# Let Cargo know we link a native lib
+links = "noxla"
+
 [features]
 shared = []
 cuda = ["shared"]
 cargo-clippy = []
+link-kernels = []
 
 [dependencies]
 thiserror = { version = "2.0", default-features = false }
@@ -20,21 +24,14 @@ cpp = "0.5.9"
 cxx = "1.0"
 zerocopy.version = "0.8"
 zerocopy.features = ["derive"]
-lapack-sys = "0.14.0"
-
-[target.'cfg(not(target_os = "macos"))'.dependencies]
-lapack-src = { version = "0.10", features = ["netlib"] }
-netlib-src = { version = "0.8", features = ["static"] }
-[target.'cfg(target_os = "macos")'.dependencies]
-lapack-src = { version = "0.10", features = ["accelerate"] }
-
 
 [build-dependencies]
-cc = "1.0"
+cc = "1.1"
 flate2 = "1.0.28"
 tar = "0.4.40"
 cpp_build = "0.5.9"
 find_cuda_helper = "0.2.0"
 ureq = "2.9.7"
-zip = "2.1.3"
+zip = "2.3"
 anyhow = "1.0.86"
+fs_extra = "1.3.0"
