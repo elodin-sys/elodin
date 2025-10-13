@@ -15,12 +15,15 @@ limitations under the License.
 
 #include "jaxlib/gpu/gpu_kernel_helpers.h"
 
+#include <cstdint>
+#include <string>
+
 #include "absl/base/optimization.h"
 #include "absl/log/check.h"
-#include "absl/memory/memory.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "jaxlib/gpu/vendor.h"
 
 namespace jax {
 namespace JAX_GPU_NAMESPACE {
@@ -141,18 +144,12 @@ std::string ErrorString(cufftResult status) {
       return "cuFFT invalid size";
     case CUFFT_UNALIGNED_DATA:
       return "cuFFT unaligned data";
-    case CUFFT_INCOMPLETE_PARAMETER_LIST:
-      return "cuFFT incomplete parameter list";
     case CUFFT_INVALID_DEVICE:
       return "cuFFT invalid device";
-    case CUFFT_PARSE_ERROR:
-      return "cuFFT parse error";
     case CUFFT_NO_WORKSPACE:
       return "cuFFT no workspace";
     case CUFFT_NOT_IMPLEMENTED:
       return "cuFFT not implemented";
-    case CUFFT_LICENSE_ERROR:
-      return "cuFFT license error";
     case CUFFT_NOT_SUPPORTED:
       return "cuFFT not supported";
     default:
@@ -312,21 +309,6 @@ absl::Status AsStatus(cufftResult error, const char* file, std::int64_t line,
   return absl::OkStatus();
 }
 #endif
-
-absl::StatusOr<std::unique_ptr<void*[]>> MakeBatchPointers(
-    gpuStream_t stream, void* buffer, void* dev_ptrs, int batch,
-    int batch_elem_size) {
-  char* ptr = static_cast<char*>(buffer);
-  auto host_ptrs = absl::make_unique<void*[]>(batch);
-  for (int i = 0; i < batch; ++i) {
-    host_ptrs[i] = ptr;
-    ptr += batch_elem_size;
-  }
-  JAX_RETURN_IF_ERROR(JAX_AS_STATUS(
-      gpuMemcpyAsync(dev_ptrs, host_ptrs.get(), sizeof(void*) * batch,
-                     gpuMemcpyHostToDevice, stream)));
-  return std::move(host_ptrs);
-}
 
 }  // namespace JAX_GPU_NAMESPACE
 }  // namespace jax
