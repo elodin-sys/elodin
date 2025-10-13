@@ -8,6 +8,7 @@ use std::{
 
 use crate::Error;
 use itertools::Itertools;
+use pyo3::PyAny;
 use smallvec::{SmallVec, smallvec};
 use xla::{ArrayElement, ElementType, NativeType, XlaBuilder, XlaComputation, XlaOp, XlaOpRef};
 
@@ -76,7 +77,7 @@ pub enum NoxprNode {
     Convert(Convert),
 
     #[cfg(feature = "jax")]
-    Jax(pyo3::PyObject),
+    Jax(pyo3::Py<PyAny>),
 
     Call(Call),
 
@@ -1549,7 +1550,7 @@ impl Noxpr {
             }
             NoxprNode::Scan(s) => s.initial_state.ty(),
             #[cfg(feature = "jax")]
-            NoxprNode::Jax(o) => pyo3::Python::with_gil(|py| {
+            NoxprNode::Jax(o) => pyo3::Python::attach(|py| {
                 let shape = o.getattr(py, "shape").ok()?.extract::<Vec<i64>>(py).ok()?;
                 let shape = SmallVec::from_vec(shape);
                 let element_type = o
@@ -1634,7 +1635,7 @@ impl Noxpr {
             },
             NoxprNode::Scan(s) => s.initial_state.element_type(),
             #[cfg(feature = "jax")]
-            NoxprNode::Jax(o) => pyo3::Python::with_gil(|py| {
+            NoxprNode::Jax(o) => pyo3::Python::attach(|py| {
                 let element_type = o
                     .getattr(py, "dtype.name")
                     .ok()?
@@ -1779,7 +1780,7 @@ impl Noxpr {
             NoxprNode::GetTupleElement(g) => get_tuple_shape(g.index, &g.expr.node),
             NoxprNode::Scan(s) => s.initial_state.shape(),
             #[cfg(feature = "jax")]
-            NoxprNode::Jax(o) => pyo3::Python::with_gil(|py| {
+            NoxprNode::Jax(o) => pyo3::Python::attach(|py| {
                 use pyo3::prelude::PyAnyMethods;
                 let jnp = py.import("jax.numpy").unwrap();
                 let o = jnp.call_method1("array", (o,)).ok()?;
@@ -1829,7 +1830,7 @@ impl Noxpr {
 
     /// Constructs a new `Noxpr` from a JAX Python object.
     #[cfg(feature = "jax")]
-    pub fn jax(py: pyo3::PyObject) -> Noxpr {
+    pub fn jax(py: pyo3::Py<PyAny>) -> Noxpr {
         Noxpr::new(NoxprNode::Jax(py))
     }
 
@@ -2598,7 +2599,7 @@ impl ReplacementTracer {
             })),
             #[cfg(feature = "jax")]
             NoxprNode::Jax(j) => {
-                pyo3::Python::with_gil(|py| Noxpr::new(NoxprNode::Jax(j.clone_ref(py))))
+                pyo3::Python::attach(|py| Noxpr::new(NoxprNode::Jax(j.clone_ref(py))))
             }
             NoxprNode::Convert(c) => {
                 let arg = self.visit(&c.arg);
