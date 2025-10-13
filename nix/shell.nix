@@ -206,6 +206,14 @@ in {
         systemd
       ]
     );
+    
+    # Graphics environment variables for Linux
+    LIBGL_DRIVERS_PATH = lib.optionalString pkgs.stdenv.isLinux "${mesa}/lib/dri";
+    __GLX_VENDOR_LIBRARY_NAME = lib.optionalString pkgs.stdenv.isLinux "mesa";
+    LIBVA_DRIVERS_PATH = lib.optionalString pkgs.stdenv.isLinux "${mesa}/lib/dri";
+    VK_ICD_FILENAMES = lib.optionalString pkgs.stdenv.isLinux "${mesa}/share/vulkan/icd.d/radeon_icd.x86_64.json:${mesa}/share/vulkan/icd.d/intel_icd.x86_64.json:${mesa}/share/vulkan/icd.d/lvp_icd.x86_64.json";
+    VK_LAYER_PATH = lib.optionalString pkgs.stdenv.isLinux "${vulkan-validation-layers}/share/vulkan/explicit_layer.d";
+    ALSA_PLUGIN_DIR = lib.optionalString pkgs.stdenv.isLinux "${pipewire}/lib/alsa-lib";
 
 
     doCheck = false;
