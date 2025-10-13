@@ -519,6 +519,20 @@ impl Request for SaveArchive {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
+pub struct SaveNative {
+    pub path: PathBuf,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
+pub struct NativeSaved {
+    pub path: PathBuf,
+}
+
+impl Request for SaveNative {
+    type Reply<B: IoBuf + Clone> = NativeSaved;
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
 #[serde(rename_all = "snake_case")]
 pub enum ArchiveFormat {
     ArrowIpc,

@@ -12,7 +12,7 @@ use bevy::{
         system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
         world::World,
     },
-    log::{error, info},
+    log::{error, info, warn},
     pbr::{StandardMaterial, wireframe::WireframeConfig},
     prelude::In,
     render::view::Visibility,
@@ -21,7 +21,7 @@ use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::TileId;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::{Timestamp, msg_id};
-use impeller2_bevy::{ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
+use impeller2_bevy::{CommandsExt, ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
 use impeller2_kdl::ToKdl;
 use impeller2_wkt::{
     ComponentPath, ComponentValue, CurrentTimestamp, DbConfig, EarliestTimestamp, IsRecording,
@@ -730,6 +730,93 @@ pub fn save_schematic_db() -> PaletteItem {
     )
 }
 
+pub fn save_db_native_as() -> PaletteItem {
+    PaletteItem::new("Save DB…", PRESETS_LABEL, |_name: In<String>| {
+        PalettePage::new(vec![
+            PaletteItem::new(
+                LabelSource::placeholder("Enter a name for the Save DB directory"),
+                "",
+                |In(name): In<String>, mut commands: Commands| {
+                    let trimmed = name.trim();
+                    if trimmed.is_empty() {
+                        return PaletteEvent::Error("Name cannot be empty".into());
+                    }
+                    if trimmed.eq_ignore_ascii_case("db") {
+                        return PaletteEvent::Error("Name \"db\" is not allowed".into());
+                    }
+
+                    let cwd = match std::env::current_dir() {
+                        Ok(dir) => dir,
+                        Err(err) => return PaletteEvent::Error(format!("{err}")),
+                    };
+
+                    let relative_path = Path::new(trimmed);
+                    if relative_path.is_absolute() {
+                        return PaletteEvent::Error(
+                            "Path must be relative to the workspace".into(),
+                        );
+                    }
+                    if relative_path
+                        .components()
+                        .any(|component| matches!(component, std::path::Component::ParentDir))
+                    {
+                        return PaletteEvent::Error("Path must not contain \"..\"".into());
+                    }
+
+                    if relative_path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .map(|name| name.eq_ignore_ascii_case("db"))
+                        .unwrap_or(false)
+                    {
+                        return PaletteEvent::Error("Directory name \"db\" is not allowed".into());
+                    }
+
+                    let target_dir = cwd.join(relative_path);
+                    if !target_dir.starts_with(&cwd) {
+                        return PaletteEvent::Error("Path must stay inside the workspace".into());
+                    }
+                    if target_dir.exists() {
+                        return PaletteEvent::Error(format!(
+                            "Directory \"{trimmed}\" already exists"
+                        ));
+                    }
+
+                    let path = target_dir.join("db");
+                    commands.send_req_reply(
+                        impeller2_wkt::SaveNative { path },
+                        |res: In<
+                            Result<impeller2_wkt::NativeSaved, impeller2_wkt::ErrorResponse>,
+                        >| {
+                            match res.0 {
+                                Ok(saved) => {
+                                    let display_path = std::env::current_dir()
+                                        .ok()
+                                        .and_then(|cwd| {
+                                            saved
+                                                .path
+                                                .strip_prefix(cwd)
+                                                .ok()
+                                                .map(|p| format!("/{}", p.display()))
+                                        })
+                                        .unwrap_or_else(|| format!("{}", saved.path.display()));
+                                    info!(path = %display_path, "Saved DB");
+                                }
+                                Err(err) => warn!(?err, "Failed to save DB"),
+                            }
+                            true
+                        },
+                    );
+                    PaletteEvent::Exit
+                },
+            )
+            .default(),
+        ])
+        .prompt("Enter a name for the Save DB directory")
+        .into()
+    })
+}
+
 pub fn save_schematic_inner() -> PaletteItem {
     PaletteItem::new(
         LabelSource::placeholder("Enter a name for the schematic"),
@@ -1163,6 +1250,7 @@ impl Default for PalettePage {
             save_schematic(),
             save_schematic_as(),
             save_schematic_db(),
+            save_db_native_as(),
             load_schematic(),
             set_color_scheme(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {

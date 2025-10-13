@@ -134,6 +134,61 @@ impl DB {
         db_state.write(self.path.join("db_state"))
     }
 
+    pub fn save_native_to(&self, target_db_path: PathBuf) -> Result<PathBuf, Error> {
+        let (parent_dir, final_db_dir) = if target_db_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.eq_ignore_ascii_case("db"))
+            .unwrap_or(false)
+        {
+            (
+                target_db_path
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| PathBuf::from(".")),
+                target_db_path.clone(),
+            )
+        } else {
+            (target_db_path.clone(), target_db_path.join("db"))
+        };
+
+        let run_dir = parent_dir.clone();
+
+        if self.path.starts_with(&final_db_dir) || final_db_dir.starts_with(&self.path) {
+            return Err(Error::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "target directory overlaps database path",
+            )));
+        }
+
+        if run_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.eq_ignore_ascii_case("db"))
+            .unwrap_or(false)
+        {
+            return Err(Error::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "directory name \"db\" is not allowed",
+            )));
+        }
+
+        if run_dir.exists() || final_db_dir.exists() {
+            return Err(Error::Io(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "target directory already exists",
+            )));
+        }
+
+        std::fs::create_dir_all(&run_dir)?;
+        let tmp_db_dir = run_dir.join("db.tmp");
+        let _ = std::fs::remove_dir_all(&tmp_db_dir);
+        std::fs::create_dir_all(&tmp_db_dir)?;
+        copy_dir_recursively(&self.path, &tmp_db_dir)?;
+        std::fs::rename(&tmp_db_dir, &final_db_dir)?;
+        Ok(final_db_dir)
+    }
+
     pub fn open(path: PathBuf) -> Result<Self, Error> {
         let mut component_metadata = HashMap::new();
         let mut components = HashMap::new();
@@ -370,6 +425,31 @@ impl State {
         msg_log.set_metadata(metadata)?;
         Ok(())
     }
+}
+
+fn copy_dir_recursively(src: &Path, dst: &Path) -> Result<(), Error> {
+    for entry in std::fs::read_dir(src)? {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let path = entry.path();
+        let file_name = match path.file_name() {
+            Some(n) => n,
+            None => continue,
+        };
+        let dst_path = dst.join(file_name);
+        let md = std::fs::symlink_metadata(&path)?;
+        if md.is_dir() {
+            std::fs::create_dir_all(&dst_path)?;
+            copy_dir_recursively(&path, &dst_path)?;
+        } else if md.is_file() {
+            std::fs::copy(&path, &dst_path)?;
+        } else {
+            // ignore special files
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1072,6 +1152,18 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             let SaveArchive { path, format } = m.parse()?;
             db.save_archive(&path, format)?;
             tx.send_msg(&ArchiveSaved { path }).await?;
+        }
+        Packet::Msg(m) if m.id == SaveNative::ID => {
+            let SaveNative { path } = m.parse()?;
+            match db.save_native_to(path) {
+                Ok(path) => {
+                    tx.send_msg(&NativeSaved { path }).await?;
+                }
+                Err(err) => {
+                    warn!(?err, "failed to save native db");
+                    return Err(err);
+                }
+            }
         }
         Packet::Msg(m) if m.id == VTableStream::ID => {
             let VTableStream { id } = m.parse::<VTableStream>()?;
