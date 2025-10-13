@@ -4,11 +4,10 @@ use crate::{
     GridHandle,
     object_3d::Object3DState,
     ui::{
-        actions,
+        HdrEnabled, actions,
         colors::EColor,
         inspector, plot, query_plot, query_table,
         tiles::{self, Pane},
-        HdrEnabled,
     },
 };
 use bevy::{ecs::system::SystemParam, prelude::*};
@@ -55,10 +54,10 @@ impl SchematicParam<'_, '_> {
                     let cam_entity = viewport.camera?;
                     let viewport_data = self.viewports.get(cam_entity).ok()?;
                     let mut show_grid = false;
-                    if let Ok(grid_handle) = self.camera_grids.get(cam_entity) {
-                        if let Ok(visibility) = self.grid_visibility.get(grid_handle.grid) {
-                            show_grid = matches!(*visibility, Visibility::Visible);
-                        }
+                    if let Ok(grid_handle) = self.camera_grids.get(cam_entity)
+                        && let Ok(visibility) = self.grid_visibility.get(grid_handle.grid)
+                    {
+                        show_grid = matches!(*visibility, Visibility::Visible);
                     }
 
                     Some(Panel::Viewport(Viewport {
