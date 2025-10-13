@@ -114,20 +114,20 @@ in {
         alsa-lib
         alsa-oss
         alsa-utils
-        pipewire  # For PipeWire support
-        
+        pipewire
+
         # Graphics - Core
         libGL
         libglvnd
         mesa
         libdrm
-        
+
         # Vulkan
         vulkan-loader
         vulkan-headers
         vulkan-validation-layers
         vulkan-tools
-        
+
         # X11
         xorg.libX11
         xorg.libXcursor
@@ -135,20 +135,20 @@ in {
         xorg.libXi
         xorg.libXext
         xorg.libxshmfence
-        
+
         # Wayland
         wayland
         libxkbcommon
-        
+
         # Other
         gtk3
         udev
-        systemd  # For libudev
+        systemd # For libudev
         fontconfig
         lldb
         autoPatchelfHook
         config.packages.elodin-py.py
-        
+
         # Additional build dependencies from CI
         openblas
       ]
@@ -171,24 +171,24 @@ in {
     NIX_CFLAGS_COMPILE = lib.optionalString pkgs.stdenv.isLinux "-Wno-error=incompatible-pointer-types";
 
     LLDB_DEBUGSERVER_PATH = lib.optionalString pkgs.stdenv.isDarwin "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/Resources/debugserver";
-    
+
     # Set up library paths for Linux graphics/audio
     LD_LIBRARY_PATH = lib.optionalString pkgs.stdenv.isLinux (
       lib.makeLibraryPath [
         # Audio
         alsa-lib
         pipewire
-        
+
         # Graphics - Core
         libGL
         libglvnd
         mesa
         libdrm
-        
+
         # Vulkan
         vulkan-loader
         vulkan-validation-layers
-        
+
         # X11
         xorg.libX11
         xorg.libXcursor
@@ -196,17 +196,17 @@ in {
         xorg.libXi
         xorg.libXext
         xorg.libxshmfence
-        
+
         # Wayland
         wayland
         libxkbcommon
-        
+
         # Other
         udev
         systemd
       ]
     );
-    
+
     # Graphics environment variables for Linux
     LIBGL_DRIVERS_PATH = lib.optionalString pkgs.stdenv.isLinux "${mesa}/lib/dri";
     __GLX_VENDOR_LIBRARY_NAME = lib.optionalString pkgs.stdenv.isLinux "mesa";
@@ -214,7 +214,6 @@ in {
     VK_ICD_FILENAMES = lib.optionalString pkgs.stdenv.isLinux "${mesa}/share/vulkan/icd.d/radeon_icd.x86_64.json:${mesa}/share/vulkan/icd.d/intel_icd.x86_64.json:${mesa}/share/vulkan/icd.d/lvp_icd.x86_64.json";
     VK_LAYER_PATH = lib.optionalString pkgs.stdenv.isLinux "${vulkan-validation-layers}/share/vulkan/explicit_layer.d";
     ALSA_PLUGIN_DIR = lib.optionalString pkgs.stdenv.isLinux "${pipewire}/lib/alsa-lib";
-
 
     doCheck = false;
 

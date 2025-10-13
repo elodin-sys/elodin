@@ -22,7 +22,6 @@
   pythonPath = pythonPackages.makePythonPath [elodinPy];
   pythonMajorMinor = lib.versions.majorMinor python.version;
 
-
   bin = pkgs.rustPlatform.buildRustPackage rec {
     inherit pname version src;
 
@@ -45,9 +44,9 @@
     buildInputs = with pkgs;
       [
         python
-        openssl  # libssl-dev in ubuntu
-        openblas  # libopenblas-dev in ubuntu
-        xz  # liblzma-dev in ubuntu
+        openssl # libssl-dev in ubuntu
+        openblas # libopenblas-dev in ubuntu
+        xz # liblzma-dev in ubuntu
       ]
       ++ lib.optionals pkgs.stdenv.isDarwin [
         libiconv
@@ -59,34 +58,34 @@
         # Audio
         alsa-lib
         alsa-lib.dev
-        pipewire  # For PipeWire support
-        
+        pipewire
+
         # Graphics - Core
         libGL
         libglvnd
         mesa
-        
+
         # Vulkan
         vulkan-loader
         vulkan-headers
         vulkan-validation-layers
         vulkan-tools
-        
+
         # X11
         xorg.libX11
         xorg.libXcursor
         xorg.libXrandr
         xorg.libXi
         xorg.libXext
-        
+
         # Wayland
         wayland
         libxkbcommon
         libxkbcommon.dev
-        
+
         # Other
         udev
-        systemd  # For libudev
+        systemd # For libudev
       ];
 
     doCheck = false;
@@ -97,17 +96,17 @@
           # Audio
           pkgs.alsa-lib
           pkgs.pipewire
-          
+
           # Graphics - Core
           pkgs.libGL
-          pkgs.libglvnd  # Provides libEGL
-          pkgs.mesa  # Provides DRI drivers
+          pkgs.libglvnd # Provides libEGL
+          pkgs.mesa # Provides DRI drivers
           pkgs.libdrm
-          
+
           # Vulkan
           pkgs.vulkan-loader
           pkgs.vulkan-validation-layers
-          
+
           # X11
           pkgs.xorg.libX11
           pkgs.xorg.libXcursor
@@ -115,14 +114,14 @@
           pkgs.xorg.libXi
           pkgs.xorg.libXext
           pkgs.xorg.libxshmfence
-          
+
           # Wayland
           pkgs.wayland
           pkgs.libxkbcommon
-          
+
           # Other
           pkgs.udev
-          pkgs.systemd  # For libudev
+          pkgs.systemd # For libudev
         ]
       );
     in ''
@@ -131,14 +130,14 @@
         --prefix PYTHONPATH : "${pythonPath}" \
         --prefix PYTHONPATH : "${python}/lib/python${pythonMajorMinor}" \
         ${lib.optionalString pkgs.stdenv.isLinux ''
-          --prefix LD_LIBRARY_PATH : "${linuxLibPath}" \
-          --set LIBGL_DRIVERS_PATH "${pkgs.mesa}/lib/dri" \
-          --set __GLX_VENDOR_LIBRARY_NAME "mesa" \
-          --set LIBVA_DRIVERS_PATH "${pkgs.mesa}/lib/dri" \
-          --prefix VK_ICD_FILENAMES : "${pkgs.mesa}/share/vulkan/icd.d/radeon_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/intel_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.x86_64.json" \
-          --prefix VK_LAYER_PATH : "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d" \
-          --set ALSA_PLUGIN_DIR "${pkgs.pipewire}/lib/alsa-lib"
-        ''}
+        --prefix LD_LIBRARY_PATH : "${linuxLibPath}" \
+        --set LIBGL_DRIVERS_PATH "${pkgs.mesa}/lib/dri" \
+        --set __GLX_VENDOR_LIBRARY_NAME "mesa" \
+        --set LIBVA_DRIVERS_PATH "${pkgs.mesa}/lib/dri" \
+        --prefix VK_ICD_FILENAMES : "${pkgs.mesa}/share/vulkan/icd.d/radeon_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/intel_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.x86_64.json" \
+        --prefix VK_LAYER_PATH : "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d" \
+        --set ALSA_PLUGIN_DIR "${pkgs.pipewire}/lib/alsa-lib"
+      ''}
     '';
 
     # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
