@@ -28,6 +28,12 @@
     libxkbcommon
     wayland
     mesa
+    # X11 libraries needed for bevy_winit
+    xorg.libX11
+    xorg.libXcursor
+    xorg.libXrandr
+    xorg.libXi
+    xorg.libXext
   ];
 
   bin = pkgs.rustPlatform.buildRustPackage rec {

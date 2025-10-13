@@ -57,6 +57,8 @@ elodin
 ```sh
 nix develop
 ```
+> [!TIP]
+> The Nix shell runs Oh My Zsh + Powerlevel 10k, and will run configuration setup on first run if not installed
 
 #### Python SDK Development
 ```sh
@@ -68,11 +70,10 @@ uvx maturin develop --uv
 python3 examples/rocket.py
 ```
 
-> [!TIP]
-> The Nix shell runs Oh My Zsh + Powerlevel 10k, and will run configuration setup on first run if not installed
-
 Open the Elodin editor ("elodin" in any terminal) and connect to the local server
 
+> [!NOTE]
+> Local setup instructions were validated on Intel x86, Ubuntu 24.04 on 2025-10-12.
 ---
 
 ## Alternative Local Setup (macOS Only)

@@ -122,6 +122,12 @@ in {
         lldb
         autoPatchelfHook
         config.packages.elodin-py.py
+        # X11 libraries for bevy_winit
+        xorg.libX11
+        xorg.libXcursor
+        xorg.libXrandr
+        xorg.libXi
+        xorg.libXext
       ]
       # macOS-specific dependencies
       ++ lib.optionals stdenv.isDarwin [
