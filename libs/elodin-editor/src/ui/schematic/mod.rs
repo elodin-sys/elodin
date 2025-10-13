@@ -8,6 +8,7 @@ use crate::{
         colors::EColor,
         inspector, plot, query_plot, query_table,
         tiles::{self, Pane},
+        HdrEnabled,
     },
 };
 use bevy::{ecs::system::SystemParam, prelude::*};
@@ -39,6 +40,7 @@ pub struct SchematicParam<'w, 's> {
     pub vector_arrows: Query<'w, 's, (Entity, &'static VectorArrow3d)>,
     pub ui_state: Res<'w, tiles::TileState>,
     pub dashboards: Query<'w, 's, &'static Dashboard<Entity>>,
+    pub hdr_enabled: Res<'w, HdrEnabled>,
 }
 
 impl SchematicParam<'_, '_> {
@@ -63,7 +65,7 @@ impl SchematicParam<'_, '_> {
                         fov: 45.0,
                         active: false,
                         show_grid,
-                        hdr: false,
+                        hdr: self.hdr_enabled.0,
                         name: Some(viewport.label.clone()),
                         pos: Some(viewport_data.pos.eql.clone()),
                         look_at: Some(viewport_data.look_at.eql.clone()),
