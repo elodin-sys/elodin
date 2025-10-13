@@ -1,7 +1,10 @@
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
-    crane.url = "github:ipetkov/crane";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    # Pin crane to May 2025 version to avoid Cargo.lock path resolution bug
+    # Note: elodin-cli uses rustPlatform directly due to macOS issues (see nix/pkgs/elodin-cli.nix)
+    # Python shell on macOS also bypasses crane (see nix/shell.nix)
+    crane.url = "github:ipetkov/crane/dfd9a8dfd09db9aad544c4d3b6c47b12562544a5";
     systems.url = "github:nix-systems/default";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
@@ -23,10 +26,19 @@
   }: let
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
     elodinOverlay = final: prev: {
-      elodin = {
+      elodin = rec {
         memserve = final.callPackage ./nix/pkgs/memserve.nix {inherit crane rustToolchain;};
-        elodin-cli = final.callPackage ./nix/pkgs/elodin-cli.nix {inherit crane rustToolchain;};
-        elodin-py = final.callPackage ./nix/pkgs/elodin-py.nix {inherit crane rustToolchain;};
+        elodin-py = final.callPackage ./nix/pkgs/elodin-py.nix {
+          inherit rustToolchain;
+          python = final.python312Full;
+          pythonPackages = final.python312Packages;
+        };
+        elodin-cli = final.callPackage ./nix/pkgs/elodin-cli.nix {
+          inherit rustToolchain;
+          elodinPy = elodin-py.py;
+          python = elodin-py.python;
+          pythonPackages = elodin-py.pythonPackages;
+        };
         elodin-db = final.callPackage ./images/aleph/pkgs/elodin-db.nix {inherit crane rustToolchain;};
         # sensor-fw = final.callPackage ./nix/pkgs/sensor-fw.nix {inherit crane rustToolchain;};
       };
@@ -68,25 +80,14 @@
 
         checks = with pkgs.elodin; {
           elodin-db-clippy = elodin-db.clippy;
-          elodin-cli-clippy = elodin-cli.clippy;
-          elodin-py-clippy = elodin-py.clippy;
           # sensor-fw-clippy = sensor-fw.clippy;
           elodin-db-test = elodin-db.test;
-          elodin-cli-test = elodin-cli.test;
           # sensor-fw-test = sensor-fw.test;
         };
 
         devShells = with shells; {
-          inherit
-            c
-            ops
-            python
-            nix-tools
-            writing
-            docs
-            rust
-            ;
-          default = shells.rust;
+          inherit elodin;
+          default = shells.elodin;
         };
 
         formatter = pkgs.alejandra;

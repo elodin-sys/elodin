@@ -9,7 +9,7 @@ use crate::time::{Clock, timer::Ticks};
 use std::time::Duration;
 
 crate::loom::thread_local! {
-    static CLOCK: RefCell<Option<Arc<TestClockState>>> = RefCell::new(None);
+    static CLOCK: RefCell<Option<Arc<TestClockState>>> = const { RefCell::new(None) };
 }
 
 #[derive(Debug, Clone)]

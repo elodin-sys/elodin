@@ -1,34 +1,22 @@
 {
   pkgs,
   lib,
-  crane,
   rustToolchain,
   system,
+  python,
+  pythonPackages,
   ...
 }: let
+  # Direct Rust build using rustPlatform.buildRustPackage
   xla_ext = pkgs.callPackage ./xla-ext.nix {inherit system;};
-  craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
-  pname = (craneLib.crateNameFromCargoToml {cargoToml = ../../libs/nox-py/Cargo.toml;}).pname;
-  version = (craneLib.crateNameFromCargoToml {cargoToml = ../../Cargo.toml;}).version;
 
-  pyFilter = path: _type: builtins.match ".*py$" path != null;
-  mdFilter = path: _type: builtins.match ".*md$" path != null;
-  protoFilter = path: _type: builtins.match ".*proto$" path != null;
-  assetFilter = path: _type: builtins.match ".*assets.*$" path != null;
-  cppFilter = path: _type: builtins.match ".*[h|(cpp)|(cpp.jinja)]$" path != null;
+  # Extract pname and version directly from Cargo.toml files
+  noxPyCargoToml = builtins.fromTOML (builtins.readFile ../../libs/nox-py/Cargo.toml);
+  workspaceCargoToml = builtins.fromTOML (builtins.readFile ../../Cargo.toml);
+  pname = noxPyCargoToml.package.name;
+  version = workspaceCargoToml.workspace.package.version;
 
-  srcFilter = path: type:
-    (pyFilter path type)
-    || (mdFilter path type)
-    || (protoFilter path type)
-    || (assetFilter path type)
-    || (cppFilter path type)
-    || (craneLib.filterCargoSources path type);
-
-  src = lib.cleanSourceWith {
-    src = craneLib.path ./../..;
-    filter = srcFilter;
-  };
+  src = pkgs.nix-gitignore.gitignoreSource [] ../..;
 
   arch = with pkgs;
     if stdenv.isDarwin
@@ -39,51 +27,6 @@
       else stdenv.hostPlatform.ubootArch
     else builtins.elemAt (lib.strings.splitString "-" system) 0;
 
-  commonArgs = {
-    inherit pname version;
-    inherit src;
-    doCheck = false;
-
-    nativeBuildInputs = with pkgs;
-      [maturin]
-      ++ lib.optionals stdenv.isLinux [
-        autoPatchelfHook
-        patchelf
-      ]
-      ++ lib.optionals stdenv.isDarwin [
-        fixDarwinDylibNames
-        darwin.cctools
-      ];
-    buildInputs = with pkgs;
-      [
-        pkg-config
-        python3
-        openssl
-        cmake
-        gfortran
-        gfortran.cc.lib
-        xla_ext
-      ]
-      ++ lib.optionals stdenv.isDarwin [pkgs.libiconv];
-
-    cargoExtraArgs = "--package=nox-py";
-
-    XLA_EXTENSION_DIR = "${xla_ext}";
-    OPENSSL_DIR = "${pkgs.openssl.dev}";
-    OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
-    OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include/";
-  };
-
-  cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-
-  clippy = craneLib.cargoClippy (
-    commonArgs
-    // {
-      inherit cargoArtifacts;
-      cargoClippyExtraArgs = "--all-targets -- --deny warnings";
-    }
-  );
-
   wheelName = "elodin";
   wheelPlatform =
     if pkgs.stdenv.isDarwin
@@ -92,31 +35,105 @@
   wheelSuffix = "cp310-abi3-${wheelPlatform}_${arch}";
   # Convert version format from 0.15.0-alpha.1 to 0.15.0a1 for wheel filename
   wheelVersion = lib.strings.replaceStrings ["-alpha."] ["a"] version;
-  wheel = craneLib.buildPackage (
-    commonArgs
-    // {
-      inherit cargoArtifacts;
-      doCheck = false;
-      pname = "elodin";
-      buildPhase = "maturin build --offline --target-dir ./target -m libs/nox-py/Cargo.toml --release";
-      installPhase = "install -D target/wheels/${wheelName}-${wheelVersion}-${wheelSuffix}.whl -t $out/";
-    }
-  );
 
-  elodin = ps:
-    ps.buildPythonPackage {
+  # Build the wheel using rustPlatform
+  wheel = pkgs.rustPlatform.buildRustPackage rec {
+    inherit pname version src;
+
+    cargoLock = {
+      lockFile = ../../Cargo.lock;
+      allowBuiltinFetchGit = true;
+    };
+
+    buildAndTestSubdir = "libs/nox-py";
+
+    nativeBuildInputs = with pkgs;
+      [
+        (rustToolchain pkgs)
+        maturin
+        pkg-config
+        cmake
+        python3 # Add python3 to nativeBuildInputs so it's available during build
+        which # Required for build scripts that use which to find python3
+        gfortran # Fortran compiler needed at build time for netlib-src
+      ]
+      ++ lib.optionals stdenv.isLinux [
+        autoPatchelfHook
+        patchelf
+      ]
+      ++ lib.optionals stdenv.isDarwin [
+        fixDarwinDylibNames
+        darwin.cctools
+      ];
+
+    buildInputs = with pkgs;
+      [
+        python
+        openssl
+        gfortran.cc.lib # Fortran runtime library for linking
+        xla_ext
+      ]
+      ++ lib.optionals stdenv.isDarwin [
+        libiconv
+      ];
+
+    # Environment variables for the build
+    XLA_EXTENSION_DIR = "${xla_ext}";
+    OPENSSL_DIR = "${pkgs.openssl.dev}";
+    OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
+    OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include/";
+
+    # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
+    # GCC 14 treats -Wincompatible-pointer-types as error by default
+    NIX_CFLAGS_COMPILE = lib.optionalString pkgs.stdenv.isLinux "-Wno-error=incompatible-pointer-types";
+
+    doCheck = false;
+
+    # Override the build phase to use maturin
+    buildPhase = ''
+      runHook preBuild
+
+      # Build the wheel with maturin
+      maturin build --offline --target-dir ./target -m libs/nox-py/Cargo.toml --release
+
+      runHook postBuild
+    '';
+
+    # Install the wheel
+    installPhase = ''
+      runHook preInstall
+
+      mkdir -p $out
+      cp target/wheels/${wheelName}-${wheelVersion}-${wheelSuffix}.whl $out/
+
+      runHook postInstall
+    '';
+  };
+
+  # Import shared JAX overrides
+  jaxOverrides = pkgs.callPackage ./jax-overrides.nix {inherit pkgs;};
+
+  elodin = ps: let
+    # Create a modified Python package set with our JAX/jaxlib overrides
+    # This ensures all packages use the same jaxlib version
+    ps' = ps.override {
+      overrides = jaxOverrides;
+    };
+  in
+    ps'.buildPythonPackage {
       pname = wheelName;
       format = "wheel";
       version = version;
       src = "${wheel}/${wheelName}-${wheelVersion}-${wheelSuffix}.whl";
       doCheck = false;
-      propagatedBuildInputs = with ps; [
+      propagatedBuildInputs = with ps'; [
         jax
         jaxlib
         typing-extensions
         numpy
         polars
         pytest
+        matplotlib
       ];
       buildInputs = [
         xla_ext
@@ -134,7 +151,9 @@
       );
       pythonImportsCheck = [wheelName];
     };
-  py = elodin pkgs.python3Packages;
+  py = elodin pythonPackages;
 in {
-  inherit py clippy;
+  # Note: clippy is not included here since we're bypassing crane
+  # Run clippy directly via cargo in the development shell (nix develop)
+  inherit py python pythonPackages;
 }

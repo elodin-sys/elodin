@@ -29,14 +29,14 @@ impl PartialEq for Literal {
 impl Literal {
     pub fn raw_buf(&self) -> &[u8] {
         let len: Pin<&mut usize> = std::pin::pin!(0);
-        let data = unsafe {
+
+        (unsafe {
             let data = cpp!([self as "std::shared_ptr<Literal>*", len as "size_t*"] -> *const u8 as "const uint8_t*" {
                 *len = (*self)->size_bytes();
                 return (const uint8_t*) (*self)->untyped_data();
             });
             std::slice::from_raw_parts(data, *len)
-        };
-        data
+        }) as _
     }
 
     pub fn primitive_type(&self) -> Result<PrimitiveType> {

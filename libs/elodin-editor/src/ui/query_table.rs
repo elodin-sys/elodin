@@ -113,7 +113,7 @@ impl egui_table::TableDelegate for QueryTableResults<'_> {
         let offset = cell.row_nr as usize - count;
         let formatters = &self.formatters[cell.col_nr];
         let formatter = &formatters[batch_i];
-        if cell.row_nr % 2 == 0 {
+        if cell.row_nr.is_multiple_of(2) {
             ui.painter().rect_filled(
                 ui.max_rect(),
                 egui::CornerRadius::ZERO,
@@ -226,10 +226,9 @@ impl WidgetSystem for QueryTableWidget<'_, '_> {
                             });
                         if let (QueryType::EQL, QueryType::SQL) =
                             (prev_query_type, table.data.query_type)
+                            && let Ok(sql) = eql_context.0.sql(&table.data.query)
                         {
-                            if let Ok(sql) = eql_context.0.sql(&table.data.query) {
-                                table.data.query = sql;
-                            }
+                            table.data.query = sql;
                         }
                     });
                     ui.add_space(8.0);

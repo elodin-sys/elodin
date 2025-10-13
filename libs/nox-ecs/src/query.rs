@@ -221,16 +221,16 @@ impl<G: ComponentGroup> crate::system::SystemParam for Query<G> {
                 component_id: id,
             };
 
-            if let Some(var) = builder.vars.get_mut(&id) {
-                if var.entity_map != self.entity_map {
-                    outputs.push(crate::update_var(
-                        &var.entity_map,
-                        &self.entity_map,
-                        &var.buffer,
-                        expr,
-                    ));
-                    continue;
-                }
+            if let Some(var) = builder.vars.get_mut(&id)
+                && var.entity_map != self.entity_map
+            {
+                outputs.push(crate::update_var(
+                    &var.entity_map,
+                    &self.entity_map,
+                    &var.buffer,
+                    expr,
+                ));
+                continue;
             }
             outputs.push(array.buffer);
         }

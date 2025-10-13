@@ -77,6 +77,21 @@ in {
   ];
   boot.extraModulePackages = lib.mkForce [];
 
+  # Explicitly set available kernel modules to avoid missing modules like ata_piix
+  boot.initrd.availableKernelModules = lib.mkForce [
+    # Storage
+    "ahci"
+    "xhci_pci"
+    "usb_storage"
+    "sd_mod"
+    "nvme"
+    # Filesystems
+    "ext4"
+    # USB
+    "xhci_hcd"
+    # Note: ata_piix is explicitly NOT included as it's not available in tegra kernel
+  ];
+
   # Avoids a bunch ofeextra modules we don't have in the tegra_defconfig, like "ata_piix",
   disabledModules = ["profiles/all-hardware.nix"];
   #hardware.deviceTree.name = "tegra234-p3767-0003-p3509-a02.dtb";

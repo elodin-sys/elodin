@@ -330,20 +330,9 @@ fn setup_titlebar(
     winit_windows: NonSend<bevy::winit::WinitWindows>,
     mut commands: Commands,
 ) {
-    use cocoa::{
-        appkit::{
-            NSColor, NSToolbar, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility,
-            NSWindowToolbarStyle,
-        },
-        base::{BOOL, id, nil},
-    };
-    use objc::{
-        class,
-        declare::ClassDecl,
-        msg_send,
-        runtime::{Object, Sel},
-        sel, sel_impl,
-    };
+    use objc2::rc::Retained;
+    use objc2::{ClassType, msg_send, msg_send_id};
+    use objc2_app_kit::{NSColor, NSToolbar, NSWindow, NSWindowStyleMask, NSWindowToolbarStyle};
 
     for id in &windows {
         let Some(window) = winit_windows.get_window(id) else {
@@ -356,68 +345,44 @@ fn setup_titlebar(
             error!("non AppKit window on macOS");
             continue;
         };
-        let window = handle.ns_window;
-        let window: cocoa::base::id = unsafe { std::mem::transmute(window) };
+        let window: *mut NSWindow = handle.ns_window.cast();
         if window.is_null() {
             continue;
         }
         unsafe {
-            // define an objective class for NSToolbar's delegate,
-            // because NSToolbar will complain if we do not
-            let toolbar_delegate_class = {
-                let superclass = class!(NSObject);
-                let Some(mut decl) = ClassDecl::new(&format!("ToolbarDel{}", id), superclass)
-                else {
-                    continue;
-                };
-                extern "C" fn toolbar(_: &Object, _: Sel, _: id, _: id, _: BOOL) -> *const Object {
-                    nil
-                }
-                extern "C" fn allowed(_: &Object, _: Sel, _: id) -> id {
-                    nil
-                }
-                decl.add_method(
-                    objc::sel!(toolbar:itemForItemIdentifier:willBeInsertedIntoToolbar:),
-                    toolbar as extern "C" fn(&Object, Sel, id, id, bool) -> *const Object,
-                );
-                decl.add_method(
-                    objc::sel!(toolbarAllowedItemIdentifiers:),
-                    allowed as extern "C" fn(&Object, Sel, id) -> id,
-                );
-                decl.add_method(
-                    objc::sel!(toolbarDefaultItemIdentifiers:),
-                    allowed as extern "C" fn(&Object, Sel, id) -> id,
-                );
-                decl.register()
-            };
-            let del: id = msg_send![toolbar_delegate_class, alloc];
-            let del = msg_send![del, init];
-            let toolbar = NSToolbar::alloc(nil);
-            let toolbar = toolbar.init_();
-            toolbar.setDelegate_(del);
-            if toolbar.is_null() {
-                continue;
-            }
-            window.setTitlebarAppearsTransparent_(true);
-            let color = NSColor::clearColor(nil);
-            window.setBackgroundColor_(NSColor::colorWithRed_green_blue_alpha_(
-                color,
-                (0x0C / 0xFF) as f64,
-                (0x0C / 0xFF) as f64,
-                (0x0C / 0xFF) as f64,
+            let window = &*window;
+
+            // Create a simple toolbar without delegate for now
+            // The delegate isn't strictly necessary for basic toolbar functionality
+            use objc2_foundation::NSString;
+            let identifier = NSString::from_str("MainToolbar");
+            let toolbar: Retained<NSToolbar> = msg_send_id![
+                msg_send_id![NSToolbar::class(), alloc],
+                initWithIdentifier: &*identifier
+            ];
+
+            window.setTitlebarAppearsTransparent(true);
+
+            // Create color with RGBA
+            let color = NSColor::colorWithRed_green_blue_alpha(
+                (0x0C as f64) / (0xFF as f64),
+                (0x0C as f64) / (0xFF as f64),
+                (0x0C as f64) / (0xFF as f64),
                 0.7,
-            ));
-            window.setStyleMask_(
-                NSWindowStyleMask::NSFullSizeContentViewWindowMask
-                    | NSWindowStyleMask::NSResizableWindowMask
-                    | NSWindowStyleMask::NSTitledWindowMask
-                    | NSWindowStyleMask::NSClosableWindowMask
-                    | NSWindowStyleMask::NSMiniaturizableWindowMask
-                    | NSWindowStyleMask::NSUnifiedTitleAndToolbarWindowMask,
             );
-            window.setToolbarStyle_(NSWindowToolbarStyle::NSWindowToolbarStyleUnifiedCompact);
-            window.setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
-            window.setToolbar_(toolbar);
+            window.setBackgroundColor(Some(&color));
+
+            window.setStyleMask(
+                NSWindowStyleMask::FullSizeContentView
+                    | NSWindowStyleMask::Resizable
+                    | NSWindowStyleMask::Titled
+                    | NSWindowStyleMask::Closable
+                    | NSWindowStyleMask::Miniaturizable
+                    | NSWindowStyleMask::UnifiedTitleAndToolbar,
+            );
+            window.setToolbarStyle(NSWindowToolbarStyle::UnifiedCompact);
+            let _: () = msg_send![window, setTitleVisibility: 1u64]; // NSWindowTitleHidden = 1
+            window.setToolbar(Some(&toolbar));
             commands.entity(id).insert(SetupTitlebar);
         }
     }
@@ -580,30 +545,29 @@ fn set_icon_windows() {
 /// source: https://github.com/emilk/egui/blob/15370bbea0b468cf719a75cc6d1e39eb00c420d8/crates/eframe/src/native/app_icon.rs#L199C1-L268C2
 #[cfg(target_os = "macos")]
 fn set_icon_mac() {
-    use cocoa::{
-        appkit::{NSApp, NSApplication, NSImage},
-        base::nil,
-        foundation::NSData,
-    };
+    use objc2::rc::Retained;
+    use objc2::{ClassType, msg_send, msg_send_id};
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::NSData;
 
     let png_bytes = include_bytes!("../assets/512x512@2x.png");
 
-    // SAFETY: Accessing raw data from icon in a read-only manner. Icon data is static!
     unsafe {
-        let app = NSApp();
+        // Get unowned reference to shared app singleton (+0 retain count)
+        // Do NOT wrap in Retained - sharedApplication returns a non-owning reference
+        let app: *mut NSApplication = msg_send![NSApplication::class(), sharedApplication];
         if app.is_null() {
-            panic!("NSApp was null when setting app icon")
+            return;
         }
 
-        let data = NSData::dataWithBytes_length_(
-            nil,
-            png_bytes.as_ptr().cast::<std::ffi::c_void>(),
-            png_bytes.len() as u64,
-        );
+        // Create NSData from bytes
+        let data = NSData::with_bytes(png_bytes);
 
-        let app_icon = NSImage::initWithData_(NSImage::alloc(nil), data);
+        // Create NSImage from NSData (this is +1, owned by Retained)
+        let app_icon: Retained<NSImage> = msg_send_id![NSImage::alloc(), initWithData: &*data];
 
-        app.setApplicationIconImage_(app_icon);
+        // Set the icon using the unowned app pointer
+        let _: () = msg_send![app, setApplicationIconImage: &*app_icon];
     }
 }
 

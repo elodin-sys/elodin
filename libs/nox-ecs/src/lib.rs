@@ -131,15 +131,15 @@ impl<T: Component + 'static> crate::system::SystemParam for ComponentArray<T> {
     }
 
     fn output(&self, builder: &mut SystemBuilder) -> Result<Noxpr, Error> {
-        if let Some(var) = builder.vars.get_mut(&T::COMPONENT_ID) {
-            if var.entity_map != self.entity_map {
-                return Ok(update_var(
-                    &var.entity_map,
-                    &self.entity_map,
-                    &var.buffer,
-                    &self.buffer,
-                ));
-            }
+        if let Some(var) = builder.vars.get_mut(&T::COMPONENT_ID)
+            && var.entity_map != self.entity_map
+        {
+            return Ok(update_var(
+                &var.entity_map,
+                &self.entity_map,
+                &var.buffer,
+                &self.buffer,
+            ));
         }
         Ok(self.buffer.clone())
     }
@@ -165,10 +165,10 @@ pub fn update_var(
             let mut stop = shape.clone();
             stop[0] = *update_index as i64 + 1;
             let start = std::iter::once(*update_index as i64)
-                .chain(std::iter::repeat(0).take(shape.len() - 1))
+                .chain(std::iter::repeat_n(0, shape.len() - 1))
                 .collect();
             let existing_index = std::iter::once((*existing_index as i64).constant())
-                .chain(std::iter::repeat(0i64.constant()).take(shape.len() - 1))
+                .chain(std::iter::repeat_n(0i64.constant(), shape.len() - 1))
                 .collect();
             buffer.dynamic_update_slice(
                 existing_index,
