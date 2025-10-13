@@ -109,34 +109,57 @@ in {
         rav1e
       ]
       # Linux-specific dependencies
-      ++ lib.optionals stdenv.isLinux [
+      ++ lib.optionals pkgs.stdenv.isLinux [
+        # Audio
         alsa-lib
         alsa-oss
         alsa-utils
+        pipewire  # For PipeWire support
+        
+        # Graphics - Core
+        libGL
+        libglvnd
+        mesa
+        libdrm
+        
+        # Vulkan
         vulkan-loader
-        wayland
-        gtk3
-        udev
-        libxkbcommon
-        fontconfig
-        lldb
-        autoPatchelfHook
-        config.packages.elodin-py.py
-        # X11 libraries for bevy_winit
+        vulkan-headers
+        vulkan-validation-layers
+        vulkan-tools
+        
+        # X11
         xorg.libX11
         xorg.libXcursor
         xorg.libXrandr
         xorg.libXi
         xorg.libXext
+        xorg.libxshmfence
+        
+        # Wayland
+        wayland
+        libxkbcommon
+        
+        # Other
+        gtk3
+        udev
+        systemd  # For libudev
+        fontconfig
+        lldb
+        autoPatchelfHook
+        config.packages.elodin-py.py
+        
+        # Additional build dependencies from CI
+        openblas
       ]
       # macOS-specific dependencies
-      ++ lib.optionals stdenv.isDarwin [
+      ++ lib.optionals pkgs.stdenv.isDarwin [
         fixDarwinDylibNames
       ];
 
     nativeBuildInputs = with pkgs; (
-      lib.optionals stdenv.isLinux [autoPatchelfHook]
-      ++ lib.optionals stdenv.isDarwin [fixDarwinDylibNames]
+      lib.optionals pkgs.stdenv.isLinux [autoPatchelfHook]
+      ++ lib.optionals pkgs.stdenv.isDarwin [fixDarwinDylibNames]
     );
 
     # Environment variables
@@ -145,9 +168,45 @@ in {
 
     # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
     # GCC 14 treats -Wincompatible-pointer-types as error by default
-    NIX_CFLAGS_COMPILE = lib.optionalString stdenv.isLinux "-Wno-error=incompatible-pointer-types";
+    NIX_CFLAGS_COMPILE = lib.optionalString pkgs.stdenv.isLinux "-Wno-error=incompatible-pointer-types";
 
-    LLDB_DEBUGSERVER_PATH = lib.optionalString stdenv.isDarwin "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/Resources/debugserver";
+    LLDB_DEBUGSERVER_PATH = lib.optionalString pkgs.stdenv.isDarwin "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/Resources/debugserver";
+    
+    # Set up library paths for Linux graphics/audio
+    LD_LIBRARY_PATH = lib.optionalString pkgs.stdenv.isLinux (
+      lib.makeLibraryPath [
+        # Audio
+        alsa-lib
+        pipewire
+        
+        # Graphics - Core
+        libGL
+        libglvnd
+        mesa
+        libdrm
+        
+        # Vulkan
+        vulkan-loader
+        vulkan-validation-layers
+        
+        # X11
+        xorg.libX11
+        xorg.libXcursor
+        xorg.libXrandr
+        xorg.libXi
+        xorg.libXext
+        xorg.libxshmfence
+        
+        # Wayland
+        wayland
+        libxkbcommon
+        
+        # Other
+        udev
+        systemd
+      ]
+    );
+
 
     doCheck = false;
 

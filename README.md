@@ -50,20 +50,23 @@ cd elodin
 ```sh
 # this will also build and use the shell below
 just install
-# open elodin, we'll connect to the server we start below
-elodin
 ```
 
-### 4. Enter the Development Shell, run the server & example simulation
+### 4. Enter the Development Shell, run elodin
 ```sh
 nix develop
+# open elodin, we'll connect to the server we start below
+elodin
 ```
 > [!TIP]
 > The Nix shell runs Oh My Zsh + Powerlevel 10k, and will run configuration setup on first run if not installed
 
+### 5. Enter the Development Shell, run the server & example simulation
+
 #### Python SDK Development
 ```sh
-# In the Nix shell
+# In a new terminal
+nix develop # enter a new nix develop shell
 cd libs/nox-py
 uv venv --python 3.12
 source .venv/bin/activate
@@ -71,7 +74,7 @@ uvx maturin develop --uv
 python3 examples/rocket.py
 ```
 
-Open the Elodin editor ("elodin" in any terminal) and connect to the local server
+Open the Elodin editor and connect to the local server
 
 > [!NOTE]
 > Local setup instructions were validated on Arm M2 MacOS & Intel x86 Ubuntu 24.04 on 2025-10-12.
