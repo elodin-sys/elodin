@@ -28,6 +28,7 @@ This monorepo contains the source code for all Elodin simulation and flight soft
 - [Determinate Systems Nix](https://determinate.systems/nix-installer/) for a consistent development environment
 - [Just](https://just.systems/man/en/): ( `brew install just` / `apt install just` )
 - [git-lfs](https://docs.github.com/en/repositories/working-with-files/managing-large-files/installing-git-large-file-storage): ( `brew install git-lfs` / `apt install git-lfs` ), and make sure to activate it globally with `git lfs install` from the terminal.
+- **STRONGLY** prefer an Arm-based MacOS, nix works on x86 & Ubuntu but at much slower build speeds and worse DX.
 
 ## Development Setup (Recommended: Nix)
 
@@ -73,7 +74,7 @@ python3 examples/rocket.py
 Open the Elodin editor ("elodin" in any terminal) and connect to the local server
 
 > [!NOTE]
-> Local setup instructions were validated on Intel x86, Ubuntu 24.04 on 2025-10-12.
+> Local setup instructions were validated on Arm M2 MacOS & Intel x86 Ubuntu 24.04 on 2025-10-12.
 ---
 
 ## Alternative Local Setup (macOS Only)
