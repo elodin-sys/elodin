@@ -5,13 +5,13 @@ Subject: Double the device tree buffer size
 
 Signed-off-by: Mika Tammi <mika.tammi@unikie.com>
 ---
- src/boot/efi/devicetree.c | 9 ++++++++-
+ src/boot/devicetree.c | 9 ++++++++-
  1 file changed, 8 insertions(+), 1 deletion(-)
 
-diff --git a/src/boot/efi/devicetree.c b/src/boot/efi/devicetree.c
+diff --git a/src/boot/devicetree.c b/src/boot/devicetree.c
 index caafef24d3..8395fd2c79 100644
---- a/src/boot/efi/devicetree.c
-+++ b/src/boot/efi/devicetree.c
+--- a/src/boot/devicetree.c
++++ b/src/boot/devicetree.c
 @@ -4,6 +4,8 @@
  #include "proto/dt-fixup.h"
  #include "util.h"

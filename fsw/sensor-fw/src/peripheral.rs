@@ -47,21 +47,21 @@ pub trait HalTimerExt: Sized + Borrow<timer::Timer<Self::HalTimerReg>> {
         dma_periph: dma::DmaPeriph,
     );
 
-    fn ch<const CHANNEL: u8>(&self) -> TimCh<CHANNEL, Self::HalTimerReg> {
+    fn ch<const CHANNEL: u8>(&self) -> TimCh<'_, CHANNEL, Self::HalTimerReg> {
         TimCh {
             _timer: self.borrow(),
         }
     }
-    fn ch1(&self) -> TimCh<1, Self::HalTimerReg> {
+    fn ch1(&self) -> TimCh<'_, 1, Self::HalTimerReg> {
         self.ch()
     }
-    fn ch2(&self) -> TimCh<2, Self::HalTimerReg> {
+    fn ch2(&self) -> TimCh<'_, 2, Self::HalTimerReg> {
         self.ch()
     }
-    fn ch3(&self) -> TimCh<3, Self::HalTimerReg> {
+    fn ch3(&self) -> TimCh<'_, 3, Self::HalTimerReg> {
         self.ch()
     }
-    fn ch4(&self) -> TimCh<4, Self::HalTimerReg> {
+    fn ch4(&self) -> TimCh<'_, 4, Self::HalTimerReg> {
         self.ch()
     }
 }

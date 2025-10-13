@@ -54,10 +54,10 @@ impl StreamTickOrigin {
                 None => tick,
             });
             self.pending_rebase = false;
-        } else if let Some(origin) = self.timestamp {
-            if tick < origin {
-                self.timestamp = Some(tick);
-            }
+        } else if let Some(origin) = self.timestamp
+            && tick < origin
+        {
+            self.timestamp = Some(tick);
         }
     }
 

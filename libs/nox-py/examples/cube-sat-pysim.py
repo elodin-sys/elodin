@@ -258,7 +258,8 @@ def estimate_attitude(
         e = measured_body - body_r
         H = np.block([el.skew(body_r), np.zeros((3, 3))])
         H_trans = H.T
-        K = p @ H_trans @ la.inv(H @ p @ H_trans + var_r)
+        # Use pseudoinverse for better numerical stability and vmap compatibility
+        K = p @ H_trans @ np.linalg.pinv(H @ p @ H_trans + var_r)
         p = (np.eye(6) - K @ H) @ p
         delta_x_hat = delta_x_hat + K @ (e - H @ delta_x_hat)
     delta_alpha = delta_x_hat[0:3]

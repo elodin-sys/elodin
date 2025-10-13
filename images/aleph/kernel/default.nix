@@ -18,6 +18,9 @@ buildLinux (args
 
     defconfig = "tegra_defconfig";
 
+    # Ignore unused kernel config options from nixpkgs that don't exist in this kernel
+    ignoreConfigErrors = true;
+
     # Using applyPatches here since it's not obvious how to append an extra
     # postPatch. This is not very efficient.
     src = applyPatches {

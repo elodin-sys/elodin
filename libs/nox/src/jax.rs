@@ -331,10 +331,10 @@ impl JaxTracer {
 
     fn visit_comp(&mut self, comp: &NoxprComp) -> PyObject {
         Python::with_gil(|py| {
-            if let NoxprNode::Jax(obj) = &*comp.func.inner.node {
-                if obj.getattr(py, "__call__").is_ok() {
-                    return obj.clone_ref(py);
-                }
+            if let NoxprNode::Jax(obj) = &*comp.func.inner.node
+                && obj.getattr(py, "__call__").is_ok()
+            {
+                return obj.clone_ref(py);
             }
             JaxNoxprFn {
                 tracer: JaxTracer::default(),
@@ -535,7 +535,7 @@ mod tests {
                     }
 
                     // Initialize Python with the config
-                    let init_status = ffi::Py_InitializeFromConfig(&mut config);
+                    let init_status = ffi::Py_InitializeFromConfig(&config);
                     if init_status._type == ffi::_PyStatus_TYPE::_PyStatus_TYPE_ERROR {
                         panic!(
                             "Failed to initialize Python: {}",

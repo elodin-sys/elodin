@@ -51,16 +51,18 @@ mod tests {
         }
 
         let q: Quaternion<f64, ArrayRepr> =
-            Quaternion::from_axis_angle(Vector::z_axis(), 3.14 / 4.0);
+            Quaternion::from_axis_angle(Vector::z_axis(), core::f64::consts::PI / 4.0);
         let dcm = test_triad_inner(q);
+        // cos(45°) = sin(45°) = √2/2 ≈ 0.7071067811865476
+        let sqrt2_over_2 = core::f64::consts::SQRT_2 / 2.0;
         approx::assert_relative_eq!(
             tensor![
-                [0.70738827, 0.70682518, 0.],
-                [-0.70682518, 0.70738827, 0.],
+                [sqrt2_over_2, sqrt2_over_2, 0.],
+                [-sqrt2_over_2, sqrt2_over_2, 0.],
                 [0., 0., 1.]
             ],
             dcm,
-            epsilon = 1.0e-4
+            epsilon = 1.0e-10
         );
 
         for i in -124..124 {

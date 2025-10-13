@@ -16,6 +16,8 @@ fn main() {
         .derive_debug(true)
         .no_copy("(.*)Msg_C")
         .blocklist_item(".*MaybeUninit.*")
+        // Blocklist PartialEq for pthread types that contain function pointers
+        .no_partialeq(".*pthread.*")
         .wrap_unsafe_ops(true)
         .default_macro_constant_type(bindgen::MacroTypeVariation::Signed)
         // Tell cargo to invalidate the built crate whenever any of the

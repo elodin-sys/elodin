@@ -52,7 +52,7 @@
         aleph.overlays.jetpack
       ];
 
-      system.stateVersion = "24.11";
+      system.stateVersion = "25.05";
 
       i18n.supportedLocales = [(config.i18n.defaultLocale + "/UTF-8")];
 

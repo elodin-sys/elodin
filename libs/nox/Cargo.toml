@@ -65,9 +65,7 @@ tracing = "0.1"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 lapack-src = { version = "0.10", features = ["netlib"], optional = true }
-netlib-src.version = "0.8"
-netlib-src.features = ["static"]
-netlib-src.optional = true
+netlib-src = { version = "0.8", features = ["static"], optional = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 lapack-src = { version = "0.10", features = ["accelerate"], optional = true }
 

@@ -647,6 +647,7 @@ pub struct Args {
     pub path: Option<PathBuf>,
 }
 
+#[allow(dead_code)]
 struct LuaMsg<M: Msg>(M);
 
 impl<M: Msg> UserData for LuaMsg<M> {

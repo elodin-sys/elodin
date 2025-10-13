@@ -22,42 +22,89 @@ This monorepo contains the source code for all Elodin simulation and flight soft
   </a>
 </h2>
 
-## Dependencies
+## Getting Started
 
-Rust 1.85.0
-Preference for Arm-based Macs
+### Prerequisites
+- [Determinate Systems Nix](https://determinate.systems/nix-installer/) for a consistent development environment
+- [Just](https://just.systems/man/en/): ( `brew install just` / `apt install just` )
+- [git-lfs](https://docs.github.com/en/repositories/working-with-files/managing-large-files/installing-git-large-file-storage): ( `brew install git-lfs` / `apt install git-lfs` ), and make sure to activate it globally with `git lfs install` from the terminal.
+- **STRONGLY** prefer an Arm-based MacOS, nix works on x86 & Ubuntu but at much slower build speeds and worse DX.
 
-## Building
+## Development Setup (Recommended: Nix)
+
+The Elodin repository uses Nix to provide a consistent, reproducible development environment across all platforms. This is the same environment our team uses daily.
+
+### 1. Install Nix
+```sh
+# Install Determinate Systems Nix (recommended)
+curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install
+```
+
+### 2. Clone the Repository
+```sh
+git clone https://github.com/elodin-sys/elodin.git
+cd elodin
+```
+
+### 3. Build and Install Elodin Editor and Elodin DB into your path
+```sh
+# this will also build and use the shell below
+just install
+```
+
+### 4. Enter the Development Shell, run elodin
+```sh
+nix develop
+# open elodin, we'll connect to the server we start below
+elodin
+```
+> [!TIP]
+> The Nix shell runs Oh My Zsh + Powerlevel 10k, and will run configuration setup on first run if not installed
+
+### 5. Enter the Development Shell, run the server & example simulation
+
+#### Python SDK Development
+```sh
+# In a new terminal
+nix develop # enter a new nix develop shell
+cd libs/nox-py
+uv venv --python 3.12
+source .venv/bin/activate
+uvx maturin develop --uv
+python3 examples/rocket.py
+```
+
+Open the Elodin editor and connect to the local server
 
 > [!NOTE]
-> These instructions were validated on M1 architecture, macOS 15.1.1 on 2025-08-26.
+> Local setup instructions were validated on Arm M2 MacOS & Intel x86 Ubuntu 24.04 on 2025-10-12.
+---
 
-### Before Cloning
+## Alternative Local Setup (macOS Only)
 
-Before cloning the source, ensure `git-lfs` is installed. 
+> [!WARNING]
+> This setup is more complex and may lead to inconsistent environments across developers. We strongly recommend using Nix instead.
 
-``` sh
-brew install gstreamer python gfortran openblas uv git-lfs;
-git lfs install; # This is idempotent; you can run it again.
-```
+If you cannot use Nix, you can manually install dependencies on macOS:
 
-### Source
-
-``` sh
-git clone https://github.com/elodin-sys/elodin.git
-```
-
-
-### Build & Run
+### Prerequisites
 ```sh
+# Install required tools via Homebrew
+brew install gstreamer python gfortran openblas uv git-lfs rust
+
+# Initialize git-lfs
+git lfs install
+```
+
+### Build and Run
+```sh
+git clone https://github.com/elodin-sys/elodin.git
 cd elodin
 just install
 ```
 
-#### Elodin App & SDK Development
-(See [apps/elodin/README.md](apps/elodin/README.md))
-``` sh
-
+### Python Development (Local Setup)
+```sh
 cd libs/nox-py
 uv venv --python 3.12
 source .venv/bin/activate
@@ -67,18 +114,11 @@ uv sync
 cargo run --manifest-path=../../apps/elodin/Cargo.toml editor examples/three-body.py
 ```
 
-Alternatively, install [Determinate Systems Nix](https://determinate.systems/nix-installer/) which will give you exactly the same development environment that we are using. Once you have Nix installed, switch to the top of the Elodin repo. Then you can do 
+> [!NOTE]
+> Local setup instructions were validated on M1 architecture, macOS 15.1.1 on 2025-08-26.
 
-```
-nix develop .#rust
-cargo ...
-```
+## Additional Resources
 
-or, for Python, 
-
-```
-nix develop .#python 
-python ...
-```
-
-Note that BuildKite uses exactly this infrastructure to run tests! It sets up the environment using Nix commands above and then runs the steps in `pipeline.py` under the `.buildkite` directory. You should be able to run the same steps locally just by copying the code from BuildKite steps. 
+- [Elodin App Documentation](apps/elodin/README.md)
+- [Python SDK Documentation](libs/nox-py/README.md)
+- [Internal Nix Documentation](docs/internal/nix.md)

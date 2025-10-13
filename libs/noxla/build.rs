@@ -115,11 +115,9 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // The --copy-dt-needed-entries -lstdc++ are helpful to get around some
-    // "DSO missing from command line" error
-    // undefined reference to symbol '_ZStlsIcSt11char_traitsIcESaIcEERSt13basic_ostreamIT_T0_ES7_RKNSt7__cxx1112basic_stringIS4_S5_T1_EE@@GLIBCXX_3.4.21'
+    // Explicitly link libstdc++ on Linux to avoid "DSO missing from command line" errors.
+    // Note: --copy-dt-needed-entries is not supported by rust-lld (default in Rust 1.90+)
     if os == OS::Linux {
-        println!("cargo:rustc-link-arg=-Wl,--copy-dt-needed-entries");
         println!("cargo:rustc-link-arg=-Wl,-lstdc++");
     }
 

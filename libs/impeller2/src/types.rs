@@ -526,7 +526,7 @@ pub struct PacketHeader {
     pub req_id: RequestId,
 }
 
-#[derive(TryFromBytes, Unaligned, Immutable, KnownLayout, Debug)]
+#[derive(TryFromBytes, Unaligned, Immutable, KnownLayout, Debug, IntoBytes)]
 #[repr(C)]
 pub struct Packet {
     pub header: PacketHeader,
