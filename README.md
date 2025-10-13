@@ -25,8 +25,9 @@ This monorepo contains the source code for all Elodin simulation and flight soft
 ## Getting Started
 
 ### Prerequisites
-- **Recommended**: [Determinate Systems Nix](https://determinate.systems/nix-installer/) for a consistent development environment
-- **Alternative**: Manual setup on macOS (see [Local Setup](#local-setup-macos-only) below)
+- [Determinate Systems Nix](https://determinate.systems/nix-installer/) for a consistent development environment
+- [Just](https://just.systems/man/en/): ( `brew install just` / `apt install just` )
+- [git-lfs](https://docs.github.com/en/repositories/working-with-files/managing-large-files/installing-git-large-file-storage): ( `brew install git-lfs` / `apt install git-lfs` ), and make sure to activate it globally with `git lfs install` from the terminal.
 
 ## Development Setup (Recommended: Nix)
 
@@ -44,36 +45,22 @@ git clone https://github.com/elodin-sys/elodin.git
 cd elodin
 ```
 
-### 3. Enter the Development Shell
+### 3. Build and Install Elodin Editor and Elodin DB into your path
 ```sh
-nix develop --command bash
-```
-
-This unified shell automatically provides:
-- ✅ **Enhanced Terminal** (Works with your existing zsh/bash configuration)
-- ✅ **Modern CLI Tools** (eza, bat, delta, fzf, ripgrep, zoxide)
-- ✅ **Rust toolchain** (cargo, clippy, nextest) - pinned to 1.90.0
-- ✅ **Python environment** (uv, maturin, ruff, pytest)
-- ✅ **C/C++ compilers** (clang, gcc, cmake)
-- ✅ **Cloud tools** (kubectl, gcloud, azure-cli)
-- ✅ **Documentation tools** (zola, typos)
-- ✅ **Version control** (git-lfs, git-filter-repo)
-- ✅ **All system dependencies** (gstreamer, ffmpeg, openssl, etc.)
-
-> [!TIP]
-> The Nix shell runs Oh My Zsh + Powerlevel 10k, and will run configuration setup on first run if not installed
-
-### 4. Build and Install Elodin Editor and Elodin DB into your path
-```sh
-# In the Nix shell
+# this will also build and use the shell below
 just install
+# open elodin, we'll connect to the server we start below
+elodin
 ```
 
-### 5. Develop the Elodin simulation server & example
+### 4. Enter the Development Shell, run the server & example simulation
+```sh
+nix develop
+```
 
 #### Python SDK Development
 ```sh
-# Still in the Nix shell
+# In the Nix shell
 cd libs/nox-py
 uv venv --python 3.12
 source .venv/bin/activate
@@ -81,7 +68,10 @@ uvx maturin develop --uv
 python3 examples/rocket.py
 ```
 
-Open the Elodin editor ("elodin" in your terminal) and connect to the local server
+> [!TIP]
+> The Nix shell runs Oh My Zsh + Powerlevel 10k, and will run configuration setup on first run if not installed
+
+Open the Elodin editor ("elodin" in any terminal) and connect to the local server
 
 ---
 

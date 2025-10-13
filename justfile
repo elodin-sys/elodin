@@ -34,6 +34,7 @@ public-changelog:
   sed -i "" "s/$old_version/$new_version/g" docs/public/config.toml
 
 install:
-  @echo "🚧 Installing elodin and elodin-db to ~/.local/bin"
+  @echo "🚧 Installing elodin and elodin-db to ~/.nix-profile/bin"
   nix develop --command cargo build --release --package elodin --package elodin-db
-  cp target/release/elodin target/release/elodin-db ~/.local/bin
+  mkdir -p ~/.nix-profile/bin
+  cp target/release/elodin target/release/elodin-db ~/.nix-profile/bin

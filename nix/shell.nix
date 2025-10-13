@@ -157,7 +157,7 @@ in {
       echo ""
       echo "💡 Python setup (if needed):"
       echo "   cd libs/nox-py && uv venv --python 3.12"
-      echo "   source .venv/bin/activate && maturin develop"
+      echo "   source .venv/bin/activate && uvx maturin develop --uv"
       echo ""
 
       # If we're in an interactive shell and not already in zsh, exec into zsh
