@@ -67,7 +67,7 @@ traversal = "0.1.2"
 tracing = "0.1"
 
 lapack-sys = "0.14.0"
-lapack-src = { version = "0.12", features = ["netlib"], optional = true }
+lapack-src = { version = "0.13", features = ["netlib"], optional = true }
 netlib-src = { version = "0.9", features = ["static"] }
 
 [build-dependencies]
