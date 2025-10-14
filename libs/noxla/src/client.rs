@@ -285,28 +285,10 @@ impl PjRtClient {
     }
 
     pub fn copy_into_host_vec(&self, buffer: &PjRtBuffer, dst: &mut Vec<u8>) -> Result<()> {
-        if !buffer.is_on_cpu() {
-            // fallback to regular copy if buffer is not on CPU
-            return buffer.copy_into(dst);
-        }
-
-        let len = buffer.shape().size();
-        let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
-        let src: &[u8] = unsafe {
-            let src_ptr = cpp!([self as "std::shared_ptr<PjRtClient>*", buffer as "const std::unique_ptr<PjRtBuffer>*", out_status as "absl::Status*"] -> *const u8 as "std::uintptr_t" {
-                auto status = (*self)->UnsafeBufferPointer(buffer->get());
-                if (status.ok()) {
-                    return status.value();
-                } else {
-                    *out_status = absl::Status(status.status());
-                    return 0;
-                }
-            });
-            std::slice::from_raw_parts(src_ptr, len)
-        };
-        out_status.to_result()?;
-        dst.clear();
-        dst.extend_from_slice(src);
-        Ok(())
+        // NOTE: The previous optimisation that used `UnsafeBufferPointer` for CPU buffers
+        // started returning partially updated data with newer PJRT/XLA builds (see
+        // https://github.com/openxla/xla/pull/11438). Always materialise the literal on the
+        // host instead, which keeps the simulation deterministically in sync.
+        buffer.copy_into(dst)
     }
 }
