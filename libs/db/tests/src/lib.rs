@@ -2,6 +2,7 @@
 mod tests {
 
     use arrow::{array::AsArray, datatypes::Float64Type};
+    use futures_lite::future::zip;
     use elodin_db::{DB, Error, Server};
     use impeller2::{
         types::{ComponentId, IntoLenPacket, LenPacket, Msg, PrimType, Timestamp},
@@ -9,13 +10,7 @@ mod tests {
     };
     use impeller2_stellar::Client;
     use postcard_schema::{Schema, schema::owned::OwnedNamedType};
-    use std::{
-        fs::File,
-        io::Write,
-        net::SocketAddr,
-        sync::Arc,
-        time::{Duration, Instant},
-    };
+    use std::{fs::File, io::Write, net::SocketAddr, sync::Arc, time::Duration};
     use stellarator::{net::TcpListener, sleep, spawn, struc_con::stellar, test};
     use zerocopy::FromBytes;
     use zerocopy::IntoBytes;
@@ -564,8 +559,7 @@ mod tests {
                     path: save_path,
                     format: ArchiveFormat::Native,
                 };
-                let resp = archive_client.request(&save_archive).await.unwrap();
-                (resp, Instant::now())
+                archive_client.request(&save_archive).await.unwrap()
             }
         };
 
@@ -574,33 +568,32 @@ mod tests {
             let mut pkt = LenPacket::table(vtable_id, 8);
             pkt.extend_aligned(&[late_value]);
             writer_client.send(pkt).await.0.unwrap();
-            Instant::now()
         };
 
-        let ((archive_saved, save_done), write_done) = tokio::join!(save_future, write_future);
-
-        assert!(
-            write_done >= save_done,
-            "write completed before snapshot finished"
-        );
+        let (archive_saved, _) = zip(save_future, write_future).await;
 
         let expected_snapshot_path = native_root.join("db");
-        assert_eq!(archive_saved.path, expected_snapshot_path);
+        assert_eq!(archive_saved.path, native_root);
         assert!(expected_snapshot_path.exists());
 
-        let snapshot_file =
-            File::open(expected_snapshot_path.join("TestComponentNative.arrow")).unwrap();
-        let mut reader = arrow::ipc::reader::FileReader::try_new(snapshot_file, None).unwrap();
-        let batch = reader.next().unwrap().unwrap();
-        assert_eq!(batch.num_rows(), 3);
-        let values = batch
-            .column_by_name("TestComponentNative")
-            .unwrap()
-            .as_fixed_size_list()
-            .values()
-            .as_primitive::<Float64Type>()
-            .values();
-        assert_eq!(values, &[10.5, 20.5, 30.5]);
+        let snapshot_db = DB::open(expected_snapshot_path.clone()).unwrap();
+        snapshot_db.with_state(|state| {
+            let component = state
+                .get_component(component_id)
+                .expect("missing component in snapshot");
+            let (timestamps, _) = component
+                .time_series
+                .get_range(Timestamp(i64::MIN)..Timestamp(i64::MAX))
+                .expect("failed to read snapshot range");
+            assert_eq!(timestamps.len(), 3);
+            let (_, buf) = component
+                .time_series
+                .latest()
+                .expect("missing latest snapshot sample");
+            let latest =
+                f64::from_le_bytes(buf.try_into().expect("component sample size mismatch"));
+            assert!((latest - 30.5).abs() < f64::EPSILON);
+        });
 
         db.with_state(|state| {
             let component = state

@@ -4748,6 +4748,7 @@ dependencies = [
  "impeller2-cli",
  "impeller2-stellar",
  "impeller2-wkt",
+ "libc",
  "memmap2",
  "miette 7.6.0",
  "nox",
