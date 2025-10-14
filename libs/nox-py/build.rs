@@ -53,13 +53,31 @@ fn link_linux_libraries(kernels_path: &str) {
 
     if use_pkg_config {
         let mut pkg_errors = Vec::new();
-        for lib in ["lapack", "blas"] {
-            if let Err(err) = pkg_config::Config::new().probe(lib) {
-                pkg_errors.push(format!("{lib}: {err}"));
+        let mut have_lapack = false;
+        let mut have_blas = false;
+
+        match pkg_config::Config::new().probe("lapack") {
+            Ok(_) => have_lapack = true,
+            Err(err) => pkg_errors.push(format!("lapack: {err}")),
+        }
+
+        match pkg_config::Config::new().probe("blas") {
+            Ok(_) => have_blas = true,
+            Err(err) => pkg_errors.push(format!("blas: {err}")),
+        }
+
+        if !(have_lapack && have_blas) {
+            match pkg_config::Config::new().probe("openblas") {
+                Ok(_) => {
+                    have_lapack = true;
+                    have_blas = true;
+                    pkg_errors.clear();
+                }
+                Err(err) => pkg_errors.push(format!("openblas: {err}")),
             }
         }
 
-        if !pkg_errors.is_empty() {
+        if !(have_lapack && have_blas) {
             panic!(
                 "Failed to locate BLAS/LAPACK via pkg-config. Set DEP_BLAS_ROOT via netlib-src or install lapack/blas with pkg-config support. Errors: {}",
                 pkg_errors.join(", ")
