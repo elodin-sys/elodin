@@ -1709,8 +1709,9 @@ graph "value" {
         assert!((color.a - (120.0 / 255.0)).abs() < f32::EPSILON);
     }
 
+    #[test]
     fn test_parse_error_report() {
-        use miette::{GraphicalReportHandler, Report, miette};
+        use miette::{GraphicalReportHandler, GraphicalTheme};
         let kdl = r#"
 blah
 graph "value" {
@@ -1719,8 +1720,7 @@ graph "value" {
 "#;
         let err = parse_schematic(kdl).unwrap_err();
         assert_eq!("Unknown node type 'blah'", format!("{}", err));
-        let reporter =
-            GraphicalReportHandler::new_themed(miette::GraphicalTheme::unicode_nocolor());
+        let reporter = GraphicalReportHandler::new_themed(GraphicalTheme::unicode_nocolor());
         let mut b = String::new();
         reporter.render_report(&mut b, &err).unwrap();
         assert_eq!(
