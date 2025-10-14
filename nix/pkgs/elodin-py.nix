@@ -70,6 +70,8 @@
       [
         python
         openssl
+        lapack
+        openblas
         gfortran.cc.lib # Fortran runtime library for linking
         xla_ext
       ]
