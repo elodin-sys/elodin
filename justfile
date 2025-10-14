@@ -36,5 +36,5 @@ public-changelog:
 install:
   @echo "🚧 Installing elodin and elodin-db to ~/.nix-profile/bin"
   nix develop --command cargo build --release --package elodin --package elodin-db
-  mkdir -p ~/.nix-profile/bin
+  cd ~/.nix-profile && mkdir -p bin
   cp target/release/elodin target/release/elodin-db ~/.nix-profile/bin

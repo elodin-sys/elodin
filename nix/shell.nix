@@ -5,6 +5,8 @@
   ...
 }:
 with pkgs; let
+  # Import shared configuration
+  common = pkgs.callPackage ./pkgs/common.nix {};
   xla_ext = pkgs.callPackage ./pkgs/xla-ext.nix {system = pkgs.stdenv.hostPlatform.system;};
   llvm = llvmPackages_latest;
 
@@ -30,7 +32,7 @@ with pkgs; let
       ]);
 in {
   # Unified shell that combines all development environments
-  elodin = mkShell {
+  elodin = mkShell ({
     name = "elo-unified-shell";
     buildInputs =
       [
@@ -63,19 +65,12 @@ in {
         buildkite-test-collector-rust
         (rustToolchain pkgs)
         cargo-nextest
-        pkg-config
         # Use our custom Python with JAX 0.4.31
         pythonWithJax
-        openssl
         clang
         maturin
-        cmake
-        openssl
-        xz
         bzip2
         libclang
-        gfortran
-        gfortran.cc.lib
         ffmpeg-full
         ffmpeg-full.dev
         gst_all_1.gstreamer
@@ -108,54 +103,27 @@ in {
         zola
         rav1e
       ]
+      ++ common.commonNativeBuildInputs
+      ++ common.commonBuildInputs
       # Linux-specific dependencies
-      ++ lib.optionals pkgs.stdenv.isLinux [
-        # Audio
-        alsa-lib
-        alsa-oss
-        alsa-utils
-        pipewire
-
-        # Graphics - Core
-        libGL
-        libglvnd
-        mesa
-        libdrm
-
-        # Vulkan
-        vulkan-loader
-        vulkan-headers
-        vulkan-validation-layers
-        vulkan-tools
-
-        # X11
-        xorg.libX11
-        xorg.libXcursor
-        xorg.libXrandr
-        xorg.libXi
-        xorg.libXext
-        xorg.libxshmfence
-
-        # Wayland
-        wayland
-        libxkbcommon
-
-        # Other
-        gtk3
-        udev
-        systemd # For libudev
-        fontconfig
-        lldb
-        autoPatchelfHook
-        config.packages.elodin-py.py
-
-        # Additional build dependencies from CI
-        openblas
-      ]
+      ++ lib.optionals pkgs.stdenv.isLinux (
+        common.linuxGraphicsAudioDeps ++ [
+          # Additional Linux-specific tools not in common
+          alsa-oss
+          alsa-utils
+          gtk3
+          fontconfig
+          lldb
+          autoPatchelfHook
+          config.packages.elodin-py.py
+        ]
+      )
       # macOS-specific dependencies
-      ++ lib.optionals pkgs.stdenv.isDarwin [
-        fixDarwinDylibNames
-      ];
+      ++ lib.optionals pkgs.stdenv.isDarwin (
+        common.darwinDeps ++ [
+          fixDarwinDylibNames
+        ]
+      );
 
     nativeBuildInputs = with pkgs; (
       lib.optionals pkgs.stdenv.isLinux [autoPatchelfHook]
@@ -168,52 +136,14 @@ in {
 
     # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
     # GCC 14 treats -Wincompatible-pointer-types as error by default
-    NIX_CFLAGS_COMPILE = lib.optionalString pkgs.stdenv.isLinux "-Wno-error=incompatible-pointer-types";
+    NIX_CFLAGS_COMPILE = common.netlibWorkaround;
 
     LLDB_DEBUGSERVER_PATH = lib.optionalString pkgs.stdenv.isDarwin "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/Resources/debugserver";
 
     # Set up library paths for Linux graphics/audio
     LD_LIBRARY_PATH = lib.optionalString pkgs.stdenv.isLinux (
-      lib.makeLibraryPath [
-        # Audio
-        alsa-lib
-        pipewire
-
-        # Graphics - Core
-        libGL
-        libglvnd
-        mesa
-        libdrm
-
-        # Vulkan
-        vulkan-loader
-        vulkan-validation-layers
-
-        # X11
-        xorg.libX11
-        xorg.libXcursor
-        xorg.libXrandr
-        xorg.libXi
-        xorg.libXext
-        xorg.libxshmfence
-
-        # Wayland
-        wayland
-        libxkbcommon
-
-        # Other
-        udev
-        systemd
-      ]
+      common.makeLinuxLibraryPath {inherit pkgs;}
     );
-
-    # Graphics environment variables for Linux
-    LIBGL_DRIVERS_PATH = lib.optionalString pkgs.stdenv.isLinux "${mesa}/lib/dri";
-    __GLX_VENDOR_LIBRARY_NAME = lib.optionalString pkgs.stdenv.isLinux "mesa";
-    LIBVA_DRIVERS_PATH = lib.optionalString pkgs.stdenv.isLinux "${mesa}/lib/dri";
-    VK_ICD_FILENAMES = lib.optionalString pkgs.stdenv.isLinux "${mesa}/share/vulkan/icd.d/radeon_icd.x86_64.json:${mesa}/share/vulkan/icd.d/intel_icd.x86_64.json:${mesa}/share/vulkan/icd.d/lvp_icd.x86_64.json";
-    VK_LAYER_PATH = lib.optionalString pkgs.stdenv.isLinux "${vulkan-validation-layers}/share/vulkan/explicit_layer.d";
-    ALSA_PLUGIN_DIR = lib.optionalString pkgs.stdenv.isLinux "${pipewire}/lib/alsa-lib";
 
     doCheck = false;
 
@@ -237,5 +167,7 @@ in {
         exec ${pkgs.zsh}/bin/zsh
       fi
     '';
-  };
+  } // lib.optionalAttrs pkgs.stdenv.isLinux (
+    common.linuxGraphicsEnv {inherit pkgs;}
+  ));
 }
