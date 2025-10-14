@@ -524,6 +524,7 @@ pub enum ArchiveFormat {
     ArrowIpc,
     Parquet,
     Csv,
+    Native,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, postcard_schema::Schema)]
