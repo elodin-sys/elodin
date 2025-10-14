@@ -29,7 +29,7 @@ This document contains the help content for the `elodin` command-line program.
 ###### **Subcommands:**
 
 * `editor` — Launch the Elodin editor (default)
-* `run` — Run an Elodin simulaton in headless mode
+* `run` — Run an Elodin simulation in headless mode
 
 ###### **Options:**
 
@@ -55,7 +55,7 @@ Launch the Elodin editor (default)
 
 ## `elodin run`
 
-Run an Elodin simulaton in headless mode
+Run an Elodin simulation in headless mode
 
 **Usage:** `elodin run [addr/path]`
 
