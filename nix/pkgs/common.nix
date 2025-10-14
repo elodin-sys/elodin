@@ -79,8 +79,6 @@
   # Common macOS dependencies
   darwinDeps = with pkgs; [
     libiconv
-    # Framework dependencies are now handled automatically by rustPlatform
-    # The old framework stubs are deprecated and will be removed in nixpkgs 25.11
   ];
 
   # Common build dependencies
@@ -89,7 +87,7 @@
     openblas
     xz
     python312Full
-    gfortran.cc.lib # Fortran runtime library needed for linking
+    gfortran.cc.lib
   ];
 
   # Common native build inputs
@@ -132,6 +130,7 @@
       # Other
       udev
       systemd
+      gfortran.cc.lib
     ]);
 
   # Linux graphics environment variables
