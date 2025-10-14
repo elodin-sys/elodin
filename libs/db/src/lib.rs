@@ -29,7 +29,7 @@ use std::{
     ops::Range,
     path::{Path, PathBuf},
     sync::{
-        Arc, RwLock,
+        Arc, Condvar, Mutex as StdMutex, RwLock,
         atomic::{self, AtomicBool, AtomicI64, AtomicU64},
     },
     time::{Duration, Instant},
@@ -58,9 +58,126 @@ mod msg_log;
 pub(crate) mod time_series;
 mod vtable_stream;
 
+pub struct SnapshotBarrier {
+    state: StdMutex<SnapshotState>,
+    cv: Condvar,
+}
+
+#[derive(Default)]
+struct SnapshotState {
+    active_writers: usize,
+    snapshot_active: bool,
+}
+
+pub struct SnapshotWriterGuard<'a> {
+    barrier: &'a SnapshotBarrier,
+    released: bool,
+}
+
+pub struct SnapshotGuard<'a> {
+    barrier: &'a SnapshotBarrier,
+    released: bool,
+}
+
+impl SnapshotBarrier {
+    pub fn new() -> Self {
+        Self {
+            state: StdMutex::new(SnapshotState::default()),
+            cv: Condvar::new(),
+        }
+    }
+
+    pub fn enter_writer(&self) -> SnapshotWriterGuard<'_> {
+        let mut state = self.state.lock().unwrap();
+        while state.snapshot_active {
+            state = self.cv.wait(state).unwrap();
+        }
+        state.active_writers += 1;
+        SnapshotWriterGuard {
+            barrier: self,
+            released: false,
+        }
+    }
+
+    pub fn begin_snapshot(&self) -> SnapshotGuard<'_> {
+        let mut state = self.state.lock().unwrap();
+        while state.snapshot_active {
+            state = self.cv.wait(state).unwrap();
+        }
+        state.snapshot_active = true;
+        while state.active_writers > 0 {
+            state = self.cv.wait(state).unwrap();
+        }
+        SnapshotGuard {
+            barrier: self,
+            released: false,
+        }
+    }
+
+    fn release_writer(&self) {
+        let mut state = self.state.lock().unwrap();
+        debug_assert!(state.active_writers > 0);
+        if state.active_writers == 0 {
+            return;
+        }
+        state.active_writers -= 1;
+        let should_notify = state.active_writers == 0;
+        drop(state);
+        if should_notify {
+            self.cv.notify_all();
+        }
+    }
+
+    fn finish_snapshot(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.snapshot_active = false;
+        drop(state);
+        self.cv.notify_all();
+    }
+}
+
+impl<'a> SnapshotWriterGuard<'a> {
+    pub fn release(mut self) {
+        if self.released {
+            return;
+        }
+        self.barrier.release_writer();
+        self.released = true;
+    }
+}
+
+impl<'a> Drop for SnapshotWriterGuard<'a> {
+    fn drop(&mut self) {
+        if !self.released {
+            self.barrier.release_writer();
+            self.released = true;
+        }
+    }
+}
+
+impl<'a> SnapshotGuard<'a> {
+    pub fn release(mut self) {
+        if self.released {
+            return;
+        }
+        self.barrier.finish_snapshot();
+        self.released = true;
+    }
+}
+
+impl<'a> Drop for SnapshotGuard<'a> {
+    fn drop(&mut self) {
+        if !self.released {
+            self.barrier.finish_snapshot();
+            self.released = true;
+        }
+    }
+}
+
 pub struct DB {
     pub vtable_gen: AtomicCell<u64>,
     state: RwLock<State>,
+    snapshot_barrier: SnapshotBarrier,
     pub recording_cell: PlayingCell,
 
     // metadata
@@ -104,6 +221,7 @@ impl DB {
         };
         let db = DB {
             state: RwLock::new(state),
+            snapshot_barrier: SnapshotBarrier::new(),
             recording_cell: PlayingCell::new(true),
             path,
             vtable_gen: AtomicCell::new(0),
@@ -132,6 +250,10 @@ impl DB {
     pub fn save_db_state(&self) -> Result<(), Error> {
         let db_state = self.db_config();
         db_state.write(self.path.join("db_state"))
+    }
+
+    pub fn begin_snapshot(&self) -> SnapshotGuard<'_> {
+        self.snapshot_barrier.begin_snapshot()
     }
 
     pub fn open(path: PathBuf) -> Result<Self, Error> {
@@ -208,6 +330,7 @@ impl DB {
         };
         Ok(DB {
             state: RwLock::new(state),
+            snapshot_barrier: SnapshotBarrier::new(),
             path,
             vtable_gen: AtomicCell::new(0),
             recording_cell: PlayingCell::new(db_state.recording),
@@ -221,6 +344,7 @@ impl DB {
 
     pub fn insert_vtable(&self, vtable: VTableMsg) -> Result<(), Error> {
         info!(id = ?vtable.id, "inserting vtable");
+        let _snapshot_guard = self.snapshot_barrier.enter_writer();
         self.with_state_mut(|state| {
             for res in vtable.vtable.realize_fields(None) {
                 let RealizedField {
@@ -240,6 +364,7 @@ impl DB {
     }
 
     pub fn push_msg(&self, timestamp: Timestamp, id: PacketId, msg: &[u8]) -> Result<(), Error> {
+        let _snapshot_guard = self.snapshot_barrier.enter_writer();
         let exists = self.with_state(|s| {
             if let Some(msg_log) = s.msg_logs.get(&id) {
                 msg_log.push(timestamp, msg)?;
@@ -573,6 +698,7 @@ impl Component {
 
 struct DBSink<'a> {
     components: &'a HashMap<ComponentId, Component>,
+    snapshot_barrier: &'a SnapshotBarrier,
     last_updated: &'a AtomicCell<Timestamp>,
     sunk_new_time_series: bool,
     table_received: Timestamp,
@@ -586,6 +712,7 @@ impl Decomponentize for DBSink<'_> {
         value: impeller2::types::ComponentView<'_>,
         timestamp: Option<Timestamp>,
     ) -> Result<(), Error> {
+        let _snapshot_guard = self.snapshot_barrier.enter_writer();
         let timestamp = timestamp.unwrap_or(self.table_received);
         let value_buf = value.as_bytes();
         let Some(component) = self.components.get(&component_id) else {
@@ -967,6 +1094,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             db.with_state(|state| {
                 let mut sink = DBSink {
                     components: &state.components,
+                    snapshot_barrier: &db.snapshot_barrier,
                     last_updated: &db.last_updated,
                     sunk_new_time_series: false,
                     table_received: Timestamp::now(),
