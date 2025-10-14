@@ -9,7 +9,13 @@ mod tests {
     };
     use impeller2_stellar::Client;
     use postcard_schema::{Schema, schema::owned::OwnedNamedType};
-    use std::{net::SocketAddr, sync::Arc, time::Duration};
+    use std::{
+        fs::File,
+        io::Write,
+        net::SocketAddr,
+        sync::Arc,
+        time::{Duration, Instant},
+    };
     use stellarator::{net::TcpListener, sleep, spawn, struc_con::stellar, test};
     use zerocopy::FromBytes;
     use zerocopy::IntoBytes;
@@ -495,6 +501,124 @@ mod tests {
             .as_primitive::<Float64Type>()
             .values();
         assert_eq!(values, &[10.5, 20.5, 30.5]);
+    }
+
+    #[test]
+    async fn test_save_archive_native_blocks_writes() {
+        let (addr, db) = setup_test_db().await.unwrap();
+        let mut setup_client = Client::connect(addr).await.unwrap();
+
+        let component_id = ComponentId::new("archive_native_test");
+        setup_client
+            .send(&SetComponentMetadata::new(component_id, "TestComponentNative"))
+            .await
+            .0
+            .unwrap();
+
+        let vtable = vtable([raw_field(
+            0,
+            8,
+            schema(PrimType::F64, &[1], component(component_id)),
+        )]);
+        let vtable_id = 3u16.to_le_bytes();
+        setup_client
+            .send(&VTableMsg {
+                id: vtable_id,
+                vtable,
+            })
+            .await
+            .0
+            .unwrap();
+
+        let initial_values = [10.5f64, 20.5, 30.5];
+        for value in initial_values {
+            let mut pkt = LenPacket::table(vtable_id, 8);
+            pkt.extend_aligned(&[value]);
+            setup_client.send(pkt).await.0.unwrap();
+            sleep(Duration::from_millis(5)).await;
+        }
+
+        // Add a filler file to make the native copy take perceptible time.
+        let filler_path = db.path.join("filler.bin");
+        {
+            let mut filler = File::create(&filler_path).unwrap();
+            filler
+                .write_all(&vec![0xAAu8; 4 * 1024 * 1024])
+                .unwrap();
+            filler.sync_all().unwrap();
+        }
+
+        let native_root = std::env::temp_dir().join(format!(
+            "test_native_archive_{}",
+            fastrand::u64(..)
+        ));
+
+        let mut archive_client = Client::connect(addr).await.unwrap();
+        let mut writer_client = Client::connect(addr).await.unwrap();
+        let late_value = 99.5f64;
+
+        let save_future = {
+            let save_path = native_root.clone();
+            async move {
+                let save_archive = SaveArchive {
+                    path: save_path,
+                    format: ArchiveFormat::Native,
+                };
+                let resp = archive_client.request(&save_archive).await.unwrap();
+                (resp, Instant::now())
+            }
+        };
+
+        let write_future = async move {
+            sleep(Duration::from_millis(10)).await;
+            let mut pkt = LenPacket::table(vtable_id, 8);
+            pkt.extend_aligned(&[late_value]);
+            writer_client.send(pkt).await.0.unwrap();
+            Instant::now()
+        };
+
+        let ((archive_saved, save_done), write_done) = tokio::join!(save_future, write_future);
+
+        assert!(
+            write_done >= save_done,
+            "write completed before snapshot finished"
+        );
+
+        let expected_snapshot_path = native_root.join("db");
+        assert_eq!(archive_saved.path, expected_snapshot_path);
+        assert!(expected_snapshot_path.exists());
+
+        let snapshot_file =
+            File::open(expected_snapshot_path.join("TestComponentNative.arrow")).unwrap();
+        let mut reader = arrow::ipc::reader::FileReader::try_new(snapshot_file, None).unwrap();
+        let batch = reader.next().unwrap().unwrap();
+        assert_eq!(batch.num_rows(), 3);
+        let values = batch
+            .column_by_name("TestComponentNative")
+            .unwrap()
+            .as_fixed_size_list()
+            .values()
+            .as_primitive::<Float64Type>()
+            .values();
+        assert_eq!(values, &[10.5, 20.5, 30.5]);
+
+        db.with_state(|state| {
+            let component = state
+                .get_component(component_id)
+                .expect("missing component");
+            let (_, buf) = component
+                .time_series
+                .latest()
+                .expect("missing latest sample");
+            let latest =
+                f64::from_le_bytes(buf.try_into().expect("component sample size mismatch"));
+            assert!(
+                (latest - late_value).abs() < f64::EPSILON,
+                "latest sample should include post-snapshot write"
+            );
+        });
+
+        let _ = std::fs::remove_dir_all(native_root);
     }
 
     #[test]
