@@ -243,6 +243,12 @@ object_3d ball.world_pos {
         color 25 50 255 // red green blue [alpha]
     }
 }
+
+object_3d ground.world_pos {
+    plane width=20 depth=20 {
+        color 32 128 32
+    }
+}
 ```
 
 ### `world.glb()` to `glb`

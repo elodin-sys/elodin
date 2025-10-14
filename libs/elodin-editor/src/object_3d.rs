@@ -423,7 +423,11 @@ pub fn spawn_mesh(
             None
         }
         impeller2_wkt::Object3DMesh::Mesh { mesh, material } => {
-            let material = material.clone().into_bevy();
+            let mut material = material.clone().into_bevy();
+            if matches!(mesh, impeller2_wkt::Mesh::Plane { .. }) {
+                material.double_sided = true;
+                material.cull_mode = None;
+            }
             let material = material_assets.add(material);
             commands.entity(entity).insert(MeshMaterial3d(material));
             let mesh = mesh.clone().into_bevy();

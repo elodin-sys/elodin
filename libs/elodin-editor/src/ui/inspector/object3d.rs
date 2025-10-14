@@ -133,6 +133,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     Mesh::Sphere { .. } => "Sphere",
                     Mesh::Box { .. } => "Box",
                     Mesh::Cylinder { .. } => "Cylinder",
+                    Mesh::Plane { .. } => "Plane",
                 },
                 Object3DMesh::Ellipsoid { .. } => "Ellipse",
             };
@@ -149,6 +150,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                         ui.selectable_value(&mut selected_mesh_type, "Sphere", "Sphere");
                         ui.selectable_value(&mut selected_mesh_type, "Box", "Box");
                         ui.selectable_value(&mut selected_mesh_type, "Cylinder", "Cylinder");
+                        ui.selectable_value(&mut selected_mesh_type, "Plane", "Plane");
                         ui.selectable_value(&mut selected_mesh_type, "Ellipse", "Ellipse");
                     });
             });
@@ -191,6 +193,19 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                             mesh: Mesh::Cylinder {
                                 radius: 0.5,
                                 height: 2.0,
+                            },
+                            material: Material {
+                                base_color: impeller2_wkt::Color::HYPERBLUE,
+                            },
+                        };
+                        object_3d_state.scale_expr = None;
+                        object_3d_state.scale_error = None;
+                    }
+                    "Plane" => {
+                        object_3d_state.data.mesh = Object3DMesh::Mesh {
+                            mesh: Mesh::Plane {
+                                width: 10.0,
+                                depth: 10.0,
                             },
                             material: Material {
                                 base_color: impeller2_wkt::Color::HYPERBLUE,
@@ -299,6 +314,29 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                                             .range(0.01..=100.0),
                                     )
                                     .changed();
+                            }
+                            Mesh::Plane { width, depth } => {
+                                ui.label(
+                                    egui::RichText::new("Size").color(get_scheme().text_secondary),
+                                );
+                                ui.horizontal(|ui| {
+                                    ui.label("Width:");
+                                    changed |= ui
+                                        .add(
+                                            egui::DragValue::new(width)
+                                                .speed(0.1)
+                                                .range(0.1..=1000.0),
+                                        )
+                                        .changed();
+                                    ui.label("Depth:");
+                                    changed |= ui
+                                        .add(
+                                            egui::DragValue::new(depth)
+                                                .speed(0.1)
+                                                .range(0.1..=1000.0),
+                                        )
+                                        .changed();
+                                });
                             }
                         }
                     });
