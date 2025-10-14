@@ -54,8 +54,8 @@
     postInstall = ''
       wrapProgram $out/bin/elodin \
         ${common.makeWrapperArgs {
-          inherit pkgs python pythonPath pythonMajorMinor;
-        }}
+        inherit pkgs python pythonPath pythonMajorMinor;
+      }}
     '';
 
     # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+

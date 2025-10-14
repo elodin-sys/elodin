@@ -87,7 +87,7 @@
     # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
     # GCC 14 treats -Wincompatible-pointer-types as error by default
     NIX_CFLAGS_COMPILE = common.netlibWorkaround;
-    
+
     # Ensure C++ standard library is linked on macOS
     NIX_LDFLAGS = lib.optionalString pkgs.stdenv.isDarwin "-lc++";
 
@@ -131,23 +131,27 @@
       src = "${wheel}/${wheelName}-${wheelVersion}-${wheelSuffix}.whl";
       doCheck = false;
       pythonImportsCheck = []; # Skip import check due to C++ library loading issues on macOS
-      propagatedBuildInputs = with ps'; [
-        jax
-        jaxlib
-        typing-extensions
-        numpy
-        polars
-        pytest
-        matplotlib
-      ] ++ lib.optionals pkgs.stdenv.isDarwin [
-        pkgs.libcxx # C++ standard library runtime
-      ];
-      buildInputs = [
-        xla_ext
-        pkgs.gfortran.cc.lib
-      ] ++ lib.optionals pkgs.stdenv.isDarwin [
-        pkgs.stdenv.cc.cc.lib # C++ standard library for macOS
-      ];
+      propagatedBuildInputs = with ps';
+        [
+          jax
+          jaxlib
+          typing-extensions
+          numpy
+          polars
+          pytest
+          matplotlib
+        ]
+        ++ lib.optionals pkgs.stdenv.isDarwin [
+          pkgs.libcxx # C++ standard library runtime
+        ];
+      buildInputs =
+        [
+          xla_ext
+          pkgs.gfortran.cc.lib
+        ]
+        ++ lib.optionals pkgs.stdenv.isDarwin [
+          pkgs.stdenv.cc.cc.lib # C++ standard library for macOS
+        ];
       nativeBuildInputs = with pkgs; (
         lib.optionals stdenv.isLinux [
           autoPatchelfHook

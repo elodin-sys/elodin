@@ -89,6 +89,7 @@
     openblas
     xz
     python312Full
+    gfortran.cc.lib # Fortran runtime library needed for linking
   ];
 
   # Common native build inputs
@@ -100,7 +101,7 @@
   ];
 
   # Function to create Linux library path
-  makeLinuxLibraryPath = {pkgs}: 
+  makeLinuxLibraryPath = {pkgs}:
     lib.makeLibraryPath (with pkgs; [
       # Audio
       alsa-lib
