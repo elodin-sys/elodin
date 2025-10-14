@@ -2,8 +2,8 @@
 mod tests {
 
     use arrow::{array::AsArray, datatypes::Float64Type};
-    use futures_lite::future::zip;
     use elodin_db::{DB, Error, Server};
+    use futures_lite::future::zip;
     use impeller2::{
         types::{ComponentId, IntoLenPacket, LenPacket, Msg, PrimType, Timestamp},
         vtable::builder::{component, raw_field, raw_table, schema, timestamp, vtable},
@@ -505,7 +505,10 @@ mod tests {
 
         let component_id = ComponentId::new("archive_native_test");
         setup_client
-            .send(&SetComponentMetadata::new(component_id, "TestComponentNative"))
+            .send(&SetComponentMetadata::new(
+                component_id,
+                "TestComponentNative",
+            ))
             .await
             .0
             .unwrap();
@@ -537,16 +540,12 @@ mod tests {
         let filler_path = db.path.join("filler.bin");
         {
             let mut filler = File::create(&filler_path).unwrap();
-            filler
-                .write_all(&vec![0xAAu8; 4 * 1024 * 1024])
-                .unwrap();
+            filler.write_all(&vec![0xAAu8; 4 * 1024 * 1024]).unwrap();
             filler.sync_all().unwrap();
         }
 
-        let native_root = std::env::temp_dir().join(format!(
-            "test_native_archive_{}",
-            fastrand::u64(..)
-        ));
+        let native_root =
+            std::env::temp_dir().join(format!("test_native_archive_{}", fastrand::u64(..)));
 
         let mut archive_client = Client::connect(addr).await.unwrap();
         let mut writer_client = Client::connect(addr).await.unwrap();
