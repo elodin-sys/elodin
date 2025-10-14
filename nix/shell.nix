@@ -32,7 +32,8 @@ with pkgs; let
       ]);
 in {
   # Unified shell that combines all development environments
-  elodin = mkShell ({
+  elodin = mkShell (
+    {
       name = "elo-unified-shell";
       buildInputs =
         [
@@ -172,5 +173,6 @@ in {
     }
     // lib.optionalAttrs pkgs.stdenv.isLinux (
       common.linuxGraphicsEnv {inherit pkgs;}
-    ));
+    )
+  );
 }
