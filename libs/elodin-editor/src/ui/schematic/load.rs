@@ -1,5 +1,6 @@
 use bevy::{ecs::system::SystemParam, prelude::*};
 use bevy_egui::egui::Color32;
+use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::{Container, Tile, TileId};
 use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
 use impeller2_kdl::FromKdl;
@@ -45,6 +46,7 @@ pub struct LoadSchematicParams<'w, 's> {
     pub node_updater_params: NodeUpdaterParams<'w, 's>,
     objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
     vector_arrows: Query<'w, 's, Entity, With<VectorArrowState>>,
+    grid_lines: Query<'w, 's, Entity, With<InfiniteGrid>>,
 }
 
 pub fn sync_schematic(
@@ -141,11 +143,16 @@ impl LoadSchematicParams<'_, '_> {
         self.render_layer_alloc.free_all();
         self.tile_state
             .clear(&mut self.commands, &mut self.selected_object);
+        self.hdr_enabled.0 = false;
         for entity in self.objects_3d.iter() {
             // Bevy's despawn() is recursive in this version
             self.commands.entity(entity).despawn();
         }
         for entity in self.vector_arrows.iter() {
+            self.commands.entity(entity).despawn();
+        }
+        // Remove all GridLines before loading new schematic.
+        for entity in self.grid_lines.iter() {
             self.commands.entity(entity).despawn();
         }
         for elem in &schematic.elems {

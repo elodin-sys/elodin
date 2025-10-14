@@ -96,19 +96,6 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
             .push(KdlEntry::new_prop("fov", viewport.fov as f64));
     }
 
-    if viewport.active {
-        node.entries_mut().push(KdlEntry::new_prop("active", true));
-    }
-
-    if viewport.show_grid {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("show_grid", true));
-    }
-
-    if viewport.hdr {
-        node.entries_mut().push(KdlEntry::new_prop("hdr", true));
-    }
-
     if let Some(ref pos) = viewport.pos {
         node.entries_mut()
             .push(KdlEntry::new_prop("pos", pos.clone()));
@@ -117,6 +104,19 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
     if let Some(ref look_at) = viewport.look_at {
         node.entries_mut()
             .push(KdlEntry::new_prop("look_at", look_at.clone()));
+    }
+
+    if viewport.hdr {
+        node.entries_mut().push(KdlEntry::new_prop("hdr", true));
+    }
+
+    if viewport.show_grid {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("show_grid", true));
+    }
+
+    if viewport.active {
+        node.entries_mut().push(KdlEntry::new_prop("active", true));
     }
 
     node
@@ -687,6 +687,53 @@ mod tests {
     }
 
     #[test]
+    fn test_viewport_property_order() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::Panel(Panel::Viewport(Viewport {
+                name: Some("main".to_string()),
+                fov: 60.0,
+                active: true,
+                show_grid: true,
+                hdr: true,
+                pos: Some("(0,0,0,0, 1,2,3)".to_string()),
+                look_at: Some("(0,0,0,0, 0,0,0)".to_string()),
+                aux: (),
+            })));
+
+        let serialized = serialize_schematic(&schematic);
+        let viewport_line = serialized
+            .lines()
+            .find(|line| line.trim_start().starts_with("viewport"))
+            .expect("viewport line missing");
+
+        let properties = [
+            "name=",
+            "fov=",
+            "pos=",
+            "look_at=",
+            "hdr=",
+            "show_grid=",
+            "active=",
+        ];
+        let mut indices = Vec::with_capacity(properties.len());
+        for property in properties {
+            let idx = viewport_line
+                .find(property)
+                .unwrap_or_else(|| panic!("{property} missing in `{viewport_line}`"));
+            indices.push(idx);
+        }
+
+        for window in indices.windows(2) {
+            assert!(
+                window[0] < window[1],
+                "expected viewport properties in order name → fov → pos → look_at → hdr → show_grid → active: `{viewport_line}`"
+            );
+        }
+    }
+
+    #[test]
     fn test_serialize_graph() {
         let mut schematic = Schematic::default();
         schematic
@@ -938,11 +985,11 @@ object_3d "a.world_pos" {
         let serialized = serialize_schematic(&parsed);
         // NOTE: fov and grid are dropped because they are the default value.
         //
-        //viewport active=#true hdr=#true fov=45.0 show_grid=#false
+        //viewport hdr=#true show_grid=#false active=#true
         assert_eq!(
             r#"
 tabs {
-    viewport active=#true hdr=#true
+    viewport hdr=#true active=#true
     graph a.world_pos name="a world_pos"
 }
 object_3d a.world_pos {
@@ -977,11 +1024,11 @@ object_3d "a.world_pos" {
         let serialized = serialize_schematic(&parsed);
         // NOTE: fov and grid are dropped because they are the default value.
         //
-        //viewport active=#true hdr=#true fov=45.0 show_grid=#false
+        //viewport hdr=#true show_grid=#false active=#true
         assert_eq!(
             r#"
 tabs {
-    viewport active=#true hdr=#true
+    viewport hdr=#true active=#true
     graph a.world_pos name="a world_pos"
 }
 object_3d a.world_pos {
