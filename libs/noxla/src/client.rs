@@ -68,7 +68,6 @@ impl PjRtClient {
     #[allow(unused_variables)]
     pub fn gpu(memory_fraction: f64, preallocate: bool) -> Result<Self> {
         let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
-        init_cpu_lapack();
         let client = unsafe {
             cpp!([out_status as "__attribute__((unused)) absl::Status*", memory_fraction as "__attribute__((unused)) double", preallocate as "__attribute__((unused)) bool"] -> PjRtClient as "std::shared_ptr<PjRtClient>" {
                 #ifdef EL_CUDA
