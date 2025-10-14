@@ -1,6 +1,6 @@
 use crate::Color;
 use impeller2::component::Asset;
-use impeller2::types::{ComponentId, EntityId};
+use impeller2::types::EntityId;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::HashMap;
 use std::ops::Range;
@@ -322,21 +322,6 @@ impl<T: Serialize + DeserializeOwned> Asset for VectorArrow3d<T> {
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Camera;
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct VectorArrow {
-    pub id: ComponentId,
-    pub range: Range<usize>,
-    pub color: Color,
-    pub attached: bool,
-    pub body_frame: bool,
-    pub scale: f32,
-}
-
-impl Asset for VectorArrow {
-    const NAME: &'static str = "arrow";
-}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
