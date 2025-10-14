@@ -133,6 +133,12 @@ impl TimeSeries {
         &self.index
     }
 
+    pub fn sync_all(&self) -> Result<(), Error> {
+        self.index.sync_all()?;
+        self.data.sync_all()?;
+        Ok(())
+    }
+
     pub fn push_buf(&self, timestamp: Timestamp, buf: &[u8]) -> Result<(), Error> {
         let len = self.index.len() as usize;
 

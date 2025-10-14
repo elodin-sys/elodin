@@ -1,4 +1,5 @@
 use std::{
+    fs::File,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -124,6 +125,17 @@ impl MsgLog {
         self.waker.clone()
     }
 
+    pub fn sync_all(&self) -> Result<(), Error> {
+        self.timestamps.sync_all()?;
+        self.bufs.sync_all()?;
+        let metadata_path = self.path.join("metadata");
+        if metadata_path.exists() {
+            File::open(&metadata_path)?.sync_all()?;
+        }
+        File::open(&self.path)?.sync_all()?;
+        Ok(())
+    }
+
     pub fn set_metadata(&mut self, metadata: MsgMetadata) -> Result<(), Error> {
         let metadata = self.metadata.insert(metadata);
         let metadata_path = self.path.join("metadata");
@@ -145,6 +157,12 @@ struct BufLog {
 impl BufLog {
     pub fn bufs(&self) -> &[UmbraBuf] {
         <[UmbraBuf]>::ref_from_bytes(self.offsets.data()).expect("offsets buf invalid")
+    }
+
+    fn sync_all(&self) -> Result<(), Error> {
+        self.offsets.sync_all()?;
+        self.data_log.sync_all()?;
+        Ok(())
     }
 
     pub fn get_msg(&self, index: usize) -> Option<&[u8]> {

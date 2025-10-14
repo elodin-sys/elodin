@@ -25,6 +25,7 @@ use std::{
     borrow::Cow,
     collections::HashMap,
     ffi::OsStr,
+    fs::File,
     net::{SocketAddr, ToSocketAddrs},
     ops::Range,
     path::{Path, PathBuf},
@@ -254,6 +255,25 @@ impl DB {
 
     pub fn begin_snapshot(&self) -> SnapshotGuard<'_> {
         self.snapshot_barrier.begin_snapshot()
+    }
+
+    pub fn flush_all(&self) -> Result<(), Error> {
+        self.with_state(|state| -> Result<(), Error> {
+            for component in state.components.values() {
+                component.sync_all()?;
+            }
+            for msg_log in state.msg_logs.values() {
+                msg_log.sync_all()?;
+            }
+            Ok(())
+        })?;
+
+        let db_state_path = self.path.join("db_state");
+        if db_state_path.exists() {
+            File::open(&db_state_path)?.sync_all()?;
+        }
+        File::open(&self.path)?.sync_all()?;
+        Ok(())
     }
 
     pub fn open(path: PathBuf) -> Result<Self, Error> {
@@ -693,6 +713,10 @@ impl Component {
 
     fn get_range(&self, range: Range<Timestamp>) -> Option<(&[Timestamp], &[u8])> {
         self.time_series.get_range(range)
+    }
+
+    fn sync_all(&self) -> Result<(), Error> {
+        self.time_series.sync_all()
     }
 }
 
