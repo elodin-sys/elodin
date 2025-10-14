@@ -662,6 +662,7 @@ impl BevyExt for impeller2_wkt::Mesh {
                 bevy::math::primitives::Plane3d::default()
                     .mesh()
                     .size(width, depth)
+                    .into()
             }
         }
     }
