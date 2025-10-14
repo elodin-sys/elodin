@@ -12,7 +12,7 @@
   };
   sha256_map = {
     "aarch64-darwin" = "sha256:0m82waljhscajsdkpyd16c2spn1avfpp9a9am9nahlafa6lvrvrz";
-    "aarch64-linux" = lib.fakeSha256;
+    "aarch64-linux" = "sha256:0x88bffhqprnjagf8j6jgdydhp4z7c383z9m8m93ns7z93y5iw67";
     "x86_64-linux" = "sha256:11j0fy1p8wc79pgdpym5dn9k6w65n8jja8mqnfyqpmhkppl0idg6";
   };
   suffix = builtins.getAttr system suffix_map;
