@@ -138,6 +138,12 @@ impl SnapshotBarrier {
     }
 }
 
+impl Default for SnapshotBarrier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'a> SnapshotWriterGuard<'a> {
     pub fn release(mut self) {
         if self.released {
