@@ -51,6 +51,7 @@ smallvec.features = ["const_generics", "union", "serde"]
 zerocopy.version = "0.8.2"
 pin-project = "1"
 rustfft = "6.2"
+libc = "0.2"
 
 # errors
 thiserror = "2"

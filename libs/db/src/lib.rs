@@ -25,7 +25,8 @@ use std::{
     borrow::Cow,
     collections::HashMap,
     ffi::OsStr,
-    fs::File,
+    fs::{self, File},
+    io::{self, Read, Seek, SeekFrom, Write},
     net::{SocketAddr, ToSocketAddrs},
     ops::Range,
     path::{Path, PathBuf},
@@ -175,6 +176,130 @@ impl<'a> Drop for SnapshotGuard<'a> {
     }
 }
 
+fn sync_dir(path: &Path) -> io::Result<()> {
+    #[cfg(target_family = "unix")]
+    {
+        let dir = File::open(path)?;
+        dir.sync_all()
+    }
+    #[cfg(not(target_family = "unix"))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+fn copy_sparse(src: &Path, dst: &Path) -> io::Result<()> {
+    const BUF_SIZE: usize = 128 * 1024;
+    let mut src_file = File::open(src)?;
+    let mut dst_file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(dst)?;
+    let metadata = src_file.metadata()?;
+    let mut buf = vec![0u8; BUF_SIZE];
+    loop {
+        let read = src_file.read(&mut buf)?;
+        if read == 0 {
+            break;
+        }
+        if buf[..read].iter().all(|&b| b == 0) {
+            dst_file.seek(SeekFrom::Current(read as i64))?;
+        } else {
+            dst_file.write_all(&buf[..read])?;
+        }
+    }
+    dst_file.set_len(metadata.len())?;
+    dst_file.sync_all()
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn try_reflink(src: &Path, dst: &Path) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    let src_file = File::open(src)?;
+    let dst_file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(dst)?;
+    const FICLONE: libc::c_ulong = 0x4004_9409;
+    let res = unsafe { libc::ioctl(dst_file.as_raw_fd(), FICLONE, src_file.as_raw_fd()) };
+    if res == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn try_reflink(src: &Path, dst: &Path) -> io::Result<()> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let src_c = CString::new(src.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains null byte"))?;
+    let dst_c = CString::new(dst.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains null byte"))?;
+    let res = unsafe { libc::clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) };
+    if res == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+)))]
+fn try_reflink(_src: &Path, _dst: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "reflink not supported on this platform",
+    ))
+}
+
+fn copy_file_native(src: &Path, dst: &Path) -> Result<(), Error> {
+    let metadata = fs::metadata(src)?;
+    match try_reflink(src, dst) {
+        Ok(()) => {}
+        Err(_) => {
+            let _ = fs::remove_file(dst);
+            copy_sparse(src, dst)?;
+        }
+    }
+    fs::set_permissions(dst, metadata.permissions())?;
+    let file = File::open(dst)?;
+    file.sync_all()?;
+    if let Some(parent) = dst.parent() {
+        sync_dir(parent)?;
+    }
+    Ok(())
+}
+
+fn copy_dir_native(src: &Path, dst: &Path) -> Result<(), Error> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_native(&src_path, &dst_path)?;
+        } else if file_type.is_file() {
+            copy_file_native(&src_path, &dst_path)?;
+        } else {
+            // skip non-regular entries
+        }
+    }
+    let metadata = fs::metadata(src)?;
+    fs::set_permissions(dst, metadata.permissions())?;
+    let _ = sync_dir(dst);
+    Ok(())
+}
+
 pub struct DB {
     pub vtable_gen: AtomicCell<u64>,
     state: RwLock<State>,
@@ -274,6 +399,66 @@ impl DB {
         }
         File::open(&self.path)?.sync_all()?;
         Ok(())
+    }
+
+    pub fn copy_native(&self, target_db_path: impl AsRef<Path>) -> Result<PathBuf, Error> {
+        let target_db_path = target_db_path.as_ref();
+        let (parent_dir, final_db_dir) = if target_db_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.eq_ignore_ascii_case("db"))
+            .unwrap_or(false)
+        {
+            (
+                target_db_path
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| PathBuf::from(".")),
+                target_db_path.to_path_buf(),
+            )
+        } else {
+            (target_db_path.to_path_buf(), target_db_path.join("db"))
+        };
+
+        let run_dir = parent_dir.clone();
+
+        if self.path.starts_with(&final_db_dir) || final_db_dir.starts_with(&self.path) {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "target directory overlaps database path",
+            )));
+        }
+
+        if run_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.eq_ignore_ascii_case("db"))
+            .unwrap_or(false)
+        {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "directory name \"db\" is not allowed",
+            )));
+        }
+
+        if run_dir.exists() || final_db_dir.exists() {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "target directory already exists",
+            )));
+        }
+
+        fs::create_dir_all(&run_dir)?;
+        let tmp_db_dir = run_dir.join("db.tmp");
+        if tmp_db_dir.exists() {
+            fs::remove_dir_all(&tmp_db_dir)?;
+        }
+        fs::create_dir_all(&tmp_db_dir)?;
+        copy_dir_native(&self.path, &tmp_db_dir)?;
+        sync_dir(&tmp_db_dir)?;
+        fs::rename(&tmp_db_dir, &final_db_dir)?;
+        sync_dir(&run_dir)?;
+        Ok(final_db_dir)
     }
 
     pub fn open(path: PathBuf) -> Result<Self, Error> {

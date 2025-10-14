@@ -294,6 +294,13 @@ impl DB {
 
     pub fn save_archive(&self, path: impl AsRef<Path>, format: ArchiveFormat) -> Result<(), Error> {
         let path = path.as_ref();
+        if matches!(format, ArchiveFormat::Native) {
+            let snapshot = self.begin_snapshot();
+            self.flush_all()?;
+            self.copy_native(path)?;
+            drop(snapshot);
+            return Ok(());
+        }
         std::fs::create_dir_all(path)?;
         self.with_state(|state| {
             for component in state.components.values() {
