@@ -7,7 +7,7 @@ use bevy::{
         gizmos::Gizmos,
     },
     log::warn,
-    math::{DVec3, Vec3},
+    math::{DVec3, Quat, Vec3},
     prelude::Color,
     transform::components::Transform,
 };
@@ -18,7 +18,11 @@ use impeller2_wkt::{
     BodyAxes, Color as WktColor, ComponentValue as WktComponentValue, VectorArrow3d,
 };
 
-use crate::vector_arrow::{VectorArrowState, component_value_tail_to_vec3};
+use crate::{
+    WorldPosExt,
+    object_3d::ComponentArrayExt,
+    vector_arrow::{VectorArrowState, component_value_tail_to_vec3},
+};
 
 pub const GIZMO_RENDER_LAYER: usize = 30;
 const MIN_ARROW_LENGTH_SQUARED: f32 = 1.0e-6;
@@ -61,20 +65,30 @@ fn render_vector_arrow(
             continue;
         };
 
-        let direction = direction * arrow.scale;
+        let mut direction = direction * arrow.scale;
         if direction.length_squared() <= MIN_ARROW_LENGTH_SQUARED {
             continue;
         }
 
         let mut start_world = Vec3::ZERO;
+        let mut rotation = Quat::IDENTITY;
         if let Some(origin_expr) = &state.origin_expr {
             let Ok(origin_value) = origin_expr.execute(&entity_map, &component_values) else {
                 continue;
             };
-            let Some(origin) = component_value_tail_to_vec3(&origin_value) else {
-                continue;
-            };
-            start_world = origin;
+            if let Some(world_pos) = origin_value.as_world_pos() {
+                start_world = world_pos.bevy_pos().as_vec3();
+                rotation = world_pos.bevy_att().as_quat();
+            } else {
+                let Some(origin) = component_value_tail_to_vec3(&origin_value) else {
+                    continue;
+                };
+                start_world = origin;
+            }
+        }
+
+        if arrow.in_body_frame {
+            direction = rotation * direction;
         }
 
         let start_world_d = DVec3::new(
