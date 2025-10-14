@@ -1,4 +1,4 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use arrow::{
     array::RecordBatch,
     error::ArrowError,
@@ -794,7 +794,8 @@ impl UserData for LuaFieldBuilder {}
 pub async fn run(args: Args) -> anyhow::Result<()> {
     let lua = lua()?;
     if let Some(path) = args.path {
-        let script = std::fs::read_to_string(path)?;
+        let script = std::fs::read_to_string(&path)
+            .with_context(|| format!("Failed to read file at path: {}", path.display()))?;
         lua.load(&script).eval_async::<MultiValue>().await?;
         Ok(())
     } else {
