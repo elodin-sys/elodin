@@ -8676,6 +8676,8 @@ dependencies = [
  "impeller2",
  "impeller2-wkt",
  "indicatif",
+ "lapack-src",
+ "lapack-sys",
  "miette 7.6.0",
  "nox-ecs",
  "nox-ecs-macros",

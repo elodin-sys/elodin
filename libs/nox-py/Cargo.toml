@@ -82,5 +82,6 @@ convert_case = "0.8.0"
 [build-dependencies]
 pkg-config = "0.3"
 
-[target.'cfg(target_os = "linux")'.build-dependencies]
-netlib-src = { version = "0.9", features = ["static"] }
+[target.'cfg(target_os = "linux")'.dependencies]
+lapack-src = { version = "0.13", features = ["netlib"] }
+lapack-sys = "0.14"
