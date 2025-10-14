@@ -287,6 +287,15 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> KdlNode {
                 serialize_material_to_node(&mut node, material);
                 node
             }
+            Mesh::Plane { width, depth } => {
+                let mut node = KdlNode::new("plane");
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("width", *width as f64));
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("depth", *depth as f64));
+                serialize_material_to_node(&mut node, material);
+                node
+            }
         },
         Object3DMesh::Ellipsoid { scale, color } => {
             let mut node = KdlNode::new("ellipsoid");
@@ -776,6 +785,46 @@ mod tests {
         } else {
             panic!("Expected object_3d");
         }
+    }
+
+    #[test]
+    fn test_serialize_object_3d_plane() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "a.world_pos".to_string(),
+            mesh: Object3DMesh::Mesh {
+                mesh: Mesh::Plane {
+                    width: 15.0,
+                    depth: 20.0,
+                },
+                material: Material {
+                    base_color: Color::rgb(0.0, 0.5, 1.0),
+                },
+            },
+            aux: (),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert_eq!(parsed.elems.len(), 1);
+        let SchematicElem::Object3d(obj) = &parsed.elems[0] else {
+            panic!("Expected object_3d");
+        };
+
+        let Object3DMesh::Mesh { mesh, material } = &obj.mesh else {
+            panic!("Expected mesh object");
+        };
+
+        let Mesh::Plane { width, depth } = mesh else {
+            panic!("Expected plane mesh");
+        };
+
+        assert!((*width - 15.0).abs() < f32::EPSILON);
+        assert!((*depth - 20.0).abs() < f32::EPSILON);
+        assert_eq!(material.base_color.r, 0.0);
+        assert!((material.base_color.g - 128.0 / 255.0).abs() < f32::EPSILON);
+        assert_eq!(material.base_color.b, 1.0);
     }
 
     #[test]

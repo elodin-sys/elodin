@@ -464,6 +464,30 @@ fn parse_object_3d_mesh(
 
             Ok(Object3DMesh::Mesh { mesh, material })
         }
+        "plane" => {
+            let size = node
+                .get("size")
+                .and_then(|v| v.as_float())
+                .map(|v| v as f32)
+                .unwrap_or(10.0);
+
+            let width = node
+                .get("width")
+                .and_then(|v| v.as_float())
+                .map(|v| v as f32)
+                .unwrap_or(size);
+
+            let depth = node
+                .get("depth")
+                .and_then(|v| v.as_float())
+                .map(|v| v as f32)
+                .unwrap_or(size);
+
+            let mesh = Mesh::Plane { width, depth };
+            let material = parse_material_from_node(node).unwrap_or(Material::color(1.0, 1.0, 1.0));
+
+            Ok(Object3DMesh::Mesh { mesh, material })
+        }
         "ellipsoid" => {
             let scale = node
                 .get("scale")
@@ -1170,6 +1194,72 @@ object_3d "a.world_pos" {
         } else {
             panic!("Expected object_3d");
         }
+    }
+
+    #[test]
+    fn test_parse_object_3d_plane() {
+        let kdl = r#"
+object_3d "a.world_pos" {
+    plane width=12.5 depth=8.0 {
+        color 0 255 0
+    }
+}
+"#;
+
+        let schematic = parse_schematic(kdl).unwrap();
+        assert_eq!(schematic.elems.len(), 1);
+
+        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+            panic!("Expected object_3d");
+        };
+
+        assert_eq!(obj.eql, "a.world_pos");
+
+        let Object3DMesh::Mesh { mesh, material } = &obj.mesh else {
+            panic!("Expected mesh object");
+        };
+
+        let Mesh::Plane { width, depth } = mesh else {
+            panic!("Expected plane mesh");
+        };
+
+        assert!((*width - 12.5).abs() < f32::EPSILON);
+        assert!((*depth - 8.0).abs() < f32::EPSILON);
+        assert_eq!(material.base_color.r, 0.0);
+        assert_eq!(material.base_color.g, 1.0);
+        assert_eq!(material.base_color.b, 0.0);
+    }
+
+    #[test]
+    fn test_parse_object_3d_plane_size_default() {
+        let kdl = r#"
+object_3d "a.world_pos" {
+    plane size=4.0 {
+        color 0 0 255
+    }
+}
+"#;
+
+        let schematic = parse_schematic(kdl).unwrap();
+        assert_eq!(schematic.elems.len(), 1);
+
+        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+            panic!("Expected object_3d");
+        };
+
+        let Object3DMesh::Mesh { mesh, material } = &obj.mesh else {
+            panic!("Expected mesh object");
+        };
+
+        let Mesh::Plane { width, depth } = mesh else {
+            panic!("Expected plane mesh");
+        };
+
+        assert!((*width - 4.0).abs() < f32::EPSILON);
+        assert!((*depth - 4.0).abs() < f32::EPSILON);
+        assert_eq!(material.base_color.r, 0.0);
+        assert_eq!(material.base_color.g, 0.0);
+        assert_eq!(material.base_color.b, 1.0);
     }
 
     #[test]

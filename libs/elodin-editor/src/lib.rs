@@ -658,6 +658,11 @@ impl BevyExt for impeller2_wkt::Mesh {
             impeller2_wkt::Mesh::Cylinder { radius, height } => {
                 bevy::math::primitives::Cylinder::new(radius, height).into()
             }
+            impeller2_wkt::Mesh::Plane { width, depth } => {
+                bevy::math::primitives::Plane3d::default()
+                    .mesh()
+                    .size(width, depth)
+            }
         }
     }
 }
