@@ -1,4 +1,5 @@
 use std::env;
+use std::path::Path;
 
 fn main() {
     let kernels_path = env::var("DEP_NOXLA_NOXLA_KERNELS")
@@ -22,42 +23,47 @@ fn link_linux_libraries(kernels_path: &str) {
     println!("cargo:rustc-link-arg={}", kernels_path);
     println!("cargo:rustc-link-arg=-Wl,--no-whole-archive");
 
+    let mut use_pkg_config = false;
+
     match env::var("DEP_BLAS_ROOT") {
         Ok(blas_root) => {
             let lapack_path = format!("{}/lib/liblapack-netlib.a", blas_root);
             let blas_path = format!("{}/lib/libblas-netlib.a", blas_root);
 
-            println!("cargo:rustc-link-arg=-Wl,--start-group");
-            println!("cargo:rustc-link-arg={}", lapack_path);
-            println!("cargo:rustc-link-arg={}", blas_path);
-            println!("cargo:rustc-link-arg=-Wl,--end-group");
+            if Path::new(&lapack_path).exists() && Path::new(&blas_path).exists() {
+                println!("cargo:rustc-link-arg=-Wl,--start-group");
+                println!("cargo:rustc-link-arg={}", lapack_path);
+                println!("cargo:rustc-link-arg={}", blas_path);
+                println!("cargo:rustc-link-arg=-Wl,--end-group");
+            } else {
+                println!(
+                    "cargo:warning=Expected static Netlib archives at {lapack_path} and {blas_path}, falling back to pkg-config lookup."
+                );
+                use_pkg_config = true;
+            }
         }
         Err(err) => {
             println!(
                 "cargo:warning=DEP_BLAS_ROOT not provided ({}); falling back to pkg-config lookup for BLAS/LAPACK.",
                 err
             );
+            use_pkg_config = true;
+        }
+    }
 
-            let mut pkg_errors = Vec::new();
-            let mut found = false;
-            for lib in ["lapack", "openblas"] {
-                match pkg_config::Config::new().probe(lib) {
-                    Ok(_) => {
-                        found = true;
-                        break;
-                    }
-                    Err(probe_err) => {
-                        pkg_errors.push(format!("{lib}: {probe_err}"));
-                    }
-                }
+    if use_pkg_config {
+        let mut pkg_errors = Vec::new();
+        for lib in ["lapack", "blas"] {
+            if let Err(err) = pkg_config::Config::new().probe(lib) {
+                pkg_errors.push(format!("{lib}: {err}"));
             }
+        }
 
-            if !found {
-                panic!(
-                    "Failed to locate a BLAS/LAPACK implementation. Set DEP_BLAS_ROOT via netlib-src or install lapack/openblas with pkg-config support. Errors: {}",
-                    pkg_errors.join(", ")
-                );
-            }
+        if !pkg_errors.is_empty() {
+            panic!(
+                "Failed to locate BLAS/LAPACK via pkg-config. Set DEP_BLAS_ROOT via netlib-src or install lapack/blas with pkg-config support. Errors: {}",
+                pkg_errors.join(", ")
+            );
         }
     }
 
