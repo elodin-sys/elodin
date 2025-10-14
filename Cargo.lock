@@ -8681,6 +8681,7 @@ dependencies = [
  "nox-ecs-macros",
  "noxla",
  "numpy",
+ "pkg-config",
  "postcard",
  "pyo3",
  "roci-adcs",
