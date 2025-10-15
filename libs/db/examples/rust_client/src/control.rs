@@ -19,8 +19,8 @@ impl ControlSender {
         Self {
             // IMPORTANT: We need to use the same VTable ID that the simulation expects
             // The simulation likely uses VTable [0, 0] or [1, 0] for its main components
-            // TODO: This should be discovered dynamically from the database
-            trim_vtable_id: [1, 0], // Try to match simulation's VTable
+            // TODO: This should be discovered dynamically from the database.
+            trim_vtable_id: [1, 0], // Try to match simulation's VTable.
             trim_component_id: ComponentId::new("rocket.fin_control_trim"),
             start_time: Instant::now(),
             last_send_time: Instant::now(),
@@ -64,7 +64,7 @@ impl ControlSender {
         // Calculate time since start in seconds
         let elapsed = self.start_time.elapsed().as_secs_f64();
 
-        // Generate sinusoidal value: amplitude 10.0, period 4 seconds
+        // Generate sinusoidal value: amplitude 1.0, period 4 seconds
         // This gives us a nice visible oscillation
         let frequency = 0.25; // 0.25 Hz = 4 second period
         let amplitude = 1.0; // ±1 degree

@@ -47,14 +47,15 @@ cargo build -p elodin-db-rust-client --release
 
 1. **Start the Database Server**
 ```bash
-elodin-db run [::]:2240 ~/.elodin/db --config examples/db-config.lua
+mkdir ~/.elodin
+elodin-db run "[::]:2240" "~/.elodin/db" 
 ```
 
 2. **Run a Simulation** (optional but recommended)
 ```bash
 # In another terminal
 cd libs/nox-py/examples
-python rocket.py
+python rocket.py run
 ```
 
 3. **Launch the Rust Client**
