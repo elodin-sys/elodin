@@ -289,7 +289,10 @@ pub struct VectorArrow3d<T = ()> {
     #[serde(default = "VectorArrow3d::<T>::default_color")]
     pub color: Color,
     #[serde(default)]
-    pub in_body_frame: bool,
+    #[serde(alias = "in_body_frame")]
+    pub body_frame: bool,
+    #[serde(default)]
+    pub normalize: bool,
     pub aux: T,
 }
 
@@ -309,7 +312,8 @@ impl<T> VectorArrow3d<T> {
             scale: self.scale,
             name: self.name.clone(),
             color: self.color,
-            in_body_frame: self.in_body_frame,
+            body_frame: self.body_frame,
+            normalize: self.normalize,
             aux: f(&self.aux),
         }
     }

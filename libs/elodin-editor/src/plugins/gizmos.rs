@@ -61,11 +61,19 @@ fn render_vector_arrow(
             continue;
         };
 
-        let Some(direction) = component_value_tail_to_vec3(&vector_value) else {
+        let Some(mut direction) = component_value_tail_to_vec3(&vector_value) else {
             continue;
         };
 
-        let mut direction = direction * arrow.scale;
+        if direction.length_squared() <= MIN_ARROW_LENGTH_SQUARED {
+            continue;
+        }
+
+        if arrow.normalize {
+            direction = direction.normalize();
+        }
+
+        direction *= arrow.scale;
         if direction.length_squared() <= MIN_ARROW_LENGTH_SQUARED {
             continue;
         }
@@ -87,7 +95,7 @@ fn render_vector_arrow(
             }
         }
 
-        if arrow.in_body_frame {
+        if arrow.body_frame {
             direction = rotation * direction;
         }
 

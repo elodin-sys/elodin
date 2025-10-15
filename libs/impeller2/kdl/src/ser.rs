@@ -342,9 +342,14 @@ fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
             .push(KdlEntry::new_prop("name", name.clone()));
     }
 
-    if arrow.in_body_frame {
+    if arrow.body_frame {
         node.entries_mut()
-            .push(KdlEntry::new_prop("in_body_frame", true));
+            .push(KdlEntry::new_prop("body_frame", true));
+    }
+
+    if arrow.normalize {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("normalize", true));
     }
 
     serialize_color_to_node(&mut node, &arrow.color);
@@ -896,7 +901,8 @@ mod tests {
                 scale: 2.5,
                 name: Some("Velocity".to_string()),
                 color: Color::BLUE,
-                in_body_frame: true,
+                body_frame: true,
+                normalize: true,
                 aux: (),
             }));
 
@@ -912,7 +918,8 @@ mod tests {
             assert_eq!(arrow.origin.as_deref(), Some("ball.world_pos"));
             assert_eq!(arrow.scale, 2.5);
             assert_eq!(arrow.name.as_deref(), Some("Velocity"));
-            assert!(arrow.in_body_frame);
+            assert!(arrow.body_frame);
+            assert!(arrow.normalize);
             assert_color_close(arrow.color, Color::BLUE);
         } else {
             panic!("Expected vector_arrow");
