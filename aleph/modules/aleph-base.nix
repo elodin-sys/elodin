@@ -26,7 +26,7 @@
   # Always create podman group, even if podman isn't enabled.
   users.groups.podman = {};
   environment.etc."elodin-version" = let
-    cargoToml = builtins.fromTOML (builtins.readFile ../../../Cargo.toml);
+    cargoToml = builtins.fromTOML (builtins.readFile ../../Cargo.toml);
     version = cargoToml.workspace.package.version;
   in {
     text = version;

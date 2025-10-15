@@ -6,8 +6,8 @@
   ...
 }: let
   craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
-  pname = (craneLib.crateNameFromCargoToml {cargoToml = ../../../fsw/serial-bridge/Cargo.toml;}).pname;
-  version = (craneLib.crateNameFromCargoToml {cargoToml = ../../../Cargo.toml;}).version;
+  pname = (craneLib.crateNameFromCargoToml {cargoToml = ../../fsw/serial-bridge/Cargo.toml;}).pname;
+  version = (craneLib.crateNameFromCargoToml {cargoToml = ../../Cargo.toml;}).version;
 
   common = import ./common.nix {inherit lib;};
   src = common.src;

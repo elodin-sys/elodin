@@ -39,7 +39,7 @@
           python = elodin-py.python;
           pythonPackages = elodin-py.pythonPackages;
         };
-        elodin-db = final.callPackage ./images/aleph/pkgs/elodin-db.nix {inherit crane rustToolchain;};
+        elodin-db = final.callPackage ./aleph/pkgs/elodin-db.nix {inherit crane rustToolchain;};
         # sensor-fw = final.callPackage ./nix/pkgs/sensor-fw.nix {inherit crane rustToolchain;};
       };
     };

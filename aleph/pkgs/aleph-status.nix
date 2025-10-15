@@ -6,8 +6,8 @@
   ...
 }: let
   craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
-  crateName = craneLib.crateNameFromCargoToml {cargoToml = ../../../fsw/aleph-setup/Cargo.toml;};
-  version = (craneLib.crateNameFromCargoToml {cargoToml = ../../../Cargo.toml;}).version;
+  crateName = craneLib.crateNameFromCargoToml {cargoToml = ../../fsw/aleph-status/Cargo.toml;};
+  version = (craneLib.crateNameFromCargoToml {cargoToml = ../../Cargo.toml;}).version;
 
   common = import ./common.nix {inherit lib;};
   src = common.src;

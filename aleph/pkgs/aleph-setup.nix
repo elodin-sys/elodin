@@ -6,23 +6,19 @@
   ...
 }: let
   craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
-  pname = (craneLib.crateNameFromCargoToml {cargoToml = ../../../fsw/mekf/Cargo.toml;}).pname;
-  version = (craneLib.crateNameFromCargoToml {cargoToml = ../../../Cargo.toml;}).version;
+  crateName = craneLib.crateNameFromCargoToml {cargoToml = ../../fsw/aleph-setup/Cargo.toml;};
+  version = (craneLib.crateNameFromCargoToml {cargoToml = ../../Cargo.toml;}).version;
 
   common = import ./common.nix {inherit lib;};
   src = common.src;
 
   commonArgs = {
-    inherit pname version;
-    inherit src;
+    inherit (crateName) pname;
+    inherit src version;
     doCheck = false;
-    cargoExtraArgs = "--package=${pname}";
+    cargoExtraArgs = "--package=${crateName.pname}";
     HOST_CC = "${pkgs.stdenv.cc.nativePrefix}cc";
     TARGET_CC = "${pkgs.stdenv.cc.targetPrefix}cc";
-    buildInputs = [
-      pkgs.buildPackages.clang
-    ];
-    LIBCLANG_PATH = "${pkgs.buildPackages.libclang.lib}/lib";
   };
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
   bin = craneLib.buildPackage (commonArgs

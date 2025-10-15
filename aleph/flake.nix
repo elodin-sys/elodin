@@ -33,14 +33,14 @@
     agenix,
   }: let
     system = "aarch64-linux";
-    rustToolchain = p: p.rust-bin.fromRustupToolchainFile ../../rust-toolchain.toml;
+    rustToolchain = p: p.rust-bin.fromRustupToolchainFile ../rust-toolchain.toml;
     overlay = final: prev:
       (prev.lib.packagesFromDirectoryRecursive {
         directory = ./pkgs;
         callPackage = path: args: final.callPackage path (args // {inherit crane rustToolchain;});
       })
       // {
-        memserve = final.callPackage ../../nix/pkgs/memserve.nix {inherit crane rustToolchain;};
+        memserve = final.callPackage ../nix/pkgs/memserve.nix {inherit crane rustToolchain;};
       }
       // (rust-overlay.overlays.default final prev);
     # Temporarily disabled for nixpkgs 25.05 compatibility (CUDA issues)
@@ -144,8 +144,8 @@
             builtins.attrValues baseModules
             ++ [
               agenix.nixosModules.default
-              ../../nix/modules/docs.nix
-              ../../nix/modules/tunnel.nix
+              ../nix/modules/docs.nix
+              ../nix/modules/tunnel.nix
               ({pkgs, ...}: {
                 services.nvpmodel.profileNumber = 1;
                 services.nvpmodel.configFile = "${pkgs.nvidia-jetpack.l4t-nvpmodel}/etc/nvpmodel/nvpmodel_p3767_0003.conf";

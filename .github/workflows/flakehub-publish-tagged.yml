@@ -17,5 +17,5 @@ jobs:
           name: "elodin-sys/elodin"
           rolling: true
           visibility: "private"
-          directory: ./images/aleph
+          directory: ./aleph
           include-output-paths: true
