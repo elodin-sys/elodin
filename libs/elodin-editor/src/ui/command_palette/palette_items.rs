@@ -12,9 +12,9 @@ use bevy::{
         system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
         world::World,
     },
-    log::{error, info},
+    log::{error, info, warn},
     pbr::{StandardMaterial, wireframe::WireframeConfig},
-    prelude::In,
+    prelude::{Deref, DerefMut, In, Resource},
     render::view::Visibility,
 };
 use bevy_infinite_grid::InfiniteGrid;
@@ -43,6 +43,17 @@ use crate::{
         timeline::{StreamTickOrigin, timeline_slider::UITick},
     },
 };
+
+/// Stores a path to the last directory used in the schematic load dialog.
+///
+/// I would have preferred for this to be a `Local<Option<PathBuf>>`, but the
+/// `BoxedSystem` that PaletteItem stores is regenerated every time.
+#[derive(Debug, Default, Resource, Deref, DerefMut)]
+struct DialogLastPath(Option<PathBuf>);
+
+pub(crate) fn plugin(app: &mut bevy::app::App) {
+    app.init_resource::<DialogLastPath>();
+}
 
 pub struct PalettePage {
     items: Vec<PaletteItem>,
@@ -748,24 +759,46 @@ pub fn save_schematic_inner() -> PaletteItem {
     .default()
 }
 
+pub fn schematics_dir() -> Option<PathBuf> {
+    let cwd = match std::env::current_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            error!(?e, "getting current dir");
+            return None;
+        }
+    };
+    let dir = std::env::var_os("ELODIN_KDL_DIR")
+        .and_then(|d| {
+            let p = PathBuf::from(d);
+            if !p.exists() {
+                warn!("No such directory ELODIN_KDL_DIR {:?}", p.display());
+                None
+            } else if !p.is_dir() {
+                warn!("Not a directory ELODIN_KDL_DIR {:?}", p.display());
+                None
+            } else {
+                Some(p)
+            }
+        })
+        .unwrap_or(cwd);
+    Some(dir)
+}
+
 pub fn load_schematic() -> PaletteItem {
     PaletteItem::new("Load Schematic", PRESETS_LABEL, |_: In<String>| {
-        let dir = match std::env::current_dir() {
-            Ok(dir) => dir,
-            Err(e) => {
-                error!(?e, "getting schematic dir");
-                return PaletteEvent::Exit;
-            }
+        let Some(dir) = schematics_dir() else {
+            return PaletteEvent::Exit;
         };
-        let elems = match std::fs::read_dir(dir) {
+        let elems = match std::fs::read_dir(&dir) {
             Ok(x) => x,
             Err(e) => {
-                error!(?e, "reading schematic dir");
+                error!(?e, "reading schematic dir {:?}", dir.display());
                 return PaletteEvent::Exit;
             }
         };
 
         let mut items = vec![load_schematic_picker()];
+        let mut file = dir;
         for elem in elems {
             let Ok(elem) = elem else { continue };
             let path = elem.path();
@@ -775,7 +808,11 @@ pub fn load_schematic() -> PaletteItem {
             if path.extension().and_then(|e| e.to_str()) != Some("kdl") {
                 continue;
             }
-            items.push(load_schematic_inner(file_name.to_string()))
+            file.push(file_name);
+            if let Some(item) = load_schematic_inner(&file) {
+                items.push(item);
+            }
+            file.pop();
         }
         PalettePage::new(items).into()
     })
@@ -785,39 +822,49 @@ pub fn load_schematic_picker() -> PaletteItem {
     PaletteItem::new(
         "Use File Dialog",
         "",
-        move |_: In<String>, mut params: LoadSchematicParams, rx: ResMut<SchematicLiveReloadRx>| {
+        |_: In<String>,
+         mut params: LoadSchematicParams,
+         rx: ResMut<SchematicLiveReloadRx>,
+         mut last_dir: ResMut<DialogLastPath>| {
             let mut dialog = rfd::FileDialog::new().add_filter("kdl", &["kdl"]);
 
-            if let Ok(cwd) = std::env::current_dir() {
-                dialog = dialog.set_directory(cwd);
+            if let Some(dir) = last_dir.take().or_else(|| schematics_dir()) {
+                dialog = dialog.set_directory(dir);
             }
-            if let Some(path) = dialog.pick_file()
-                && let Err(err) = load_schematic_file(&path, &mut params, rx)
-                    .inspect_err(|err| {
-                        dbg!(err);
-                    })
-                    .into_diagnostic()
-            {
-                return PaletteEvent::Error(err.to_string());
+            if let Some(path) = dialog.pick_file() {
+                **last_dir = path.parent().map(PathBuf::from);
+                info!("PATH {:?}", path.display());
+                if let Err(err) =
+                    load_schematic_file(dbg!(&path), &mut params, rx).into_diagnostic()
+                {
+                    return PaletteEvent::Error(err.to_string());
+                }
             }
             PaletteEvent::Exit
         },
     )
 }
 
-pub fn load_schematic_inner(name: String) -> PaletteItem {
-    let path = PathBuf::from(name.clone());
-    PaletteItem::new(
-        name,
-        "",
-        move |_: In<String>, mut params: LoadSchematicParams, rx: ResMut<SchematicLiveReloadRx>| {
-            if let Err(err) = load_schematic_file(&path, &mut params, rx) {
-                PaletteEvent::Error(err.to_string())
-            } else {
-                PaletteEvent::Exit
-            }
-        },
-    )
+fn load_schematic_inner(path: &Path) -> Option<PaletteItem> {
+    let name = path
+        .file_name()
+        .map(|name_os| name_os.to_string_lossy().into_owned());
+    let path = PathBuf::from(path);
+    name.map(|name| {
+        PaletteItem::new(
+            name,
+            "",
+            move |_: In<String>,
+                  mut params: LoadSchematicParams,
+                  rx: ResMut<SchematicLiveReloadRx>| {
+                if let Err(err) = load_schematic_file(&path, &mut params, rx) {
+                    PaletteEvent::Error(err.to_string())
+                } else {
+                    PaletteEvent::Exit
+                }
+            },
+        )
+    })
 }
 
 pub fn set_color_scheme() -> PaletteItem {
