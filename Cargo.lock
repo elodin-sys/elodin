@@ -4831,7 +4831,6 @@ dependencies = [
  "bevy_render",
  "big_space",
  "const-fnv1a-hash",
- "convert_case 0.6.0",
  "directories",
  "egui",
  "egui_material_icons",

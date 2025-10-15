@@ -20,7 +20,6 @@ use bevy::{
 use bevy_egui::{EguiContextSettings, EguiPlugin};
 use bevy_render::alpha::AlphaMode;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
-use convert_case::{Case, Casing};
 use impeller2::types::{ComponentId, OwnedPacket};
 use impeller2::types::{Msg, Timestamp};
 use impeller2_bevy::{
@@ -741,7 +740,7 @@ fn sync_object_3d(
             _ => continue,
         };
 
-        let eql = format!("{}.world_pos", parent.name.to_case(Case::Snake));
+        let eql = format!("{}.world_pos", &parent.name);
         let Ok(expr) = ctx.0.parse_str(&eql) else {
             continue;
         };
