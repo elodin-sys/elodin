@@ -140,7 +140,6 @@ in {
 
       # Enable sccache for faster Rust builds
       RUSTC_WRAPPER = "${pkgs.sccache}/bin/sccache";
-      SCCACHE_DIR = "\${HOME}/.cache/sccache";
 
       # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
       # GCC 14 treats -Wincompatible-pointer-types as error by default
@@ -156,6 +155,10 @@ in {
       doCheck = false;
 
       shellHook = ''
+        # # Set sccache cache directory with proper shell expansion
+        export SCCACHE_DIR="''${HOME}/.cache/sccache"
+        mkdir -p "''${SCCACHE_DIR}"
+        
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "🚀 Elodin Development Shell (Nix)"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
