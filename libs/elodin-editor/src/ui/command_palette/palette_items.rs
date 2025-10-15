@@ -828,7 +828,7 @@ pub fn load_schematic_picker() -> PaletteItem {
          mut last_dir: ResMut<DialogLastPath>| {
             let mut dialog = rfd::FileDialog::new().add_filter("kdl", &["kdl"]);
 
-            if let Some(dir) = last_dir.take().or_else(|| schematics_dir()) {
+            if let Some(dir) = last_dir.take().or_else(schematics_dir) {
                 dialog = dialog.set_directory(dir);
             }
             if let Some(path) = dialog.pick_file() {

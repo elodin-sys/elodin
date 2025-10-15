@@ -22,7 +22,8 @@ def world(seed: int = 0) -> el.World:
         name="ball",
     )
 
-    world.schematic("""
+    world.schematic(
+        """
         hsplit {
             viewport name=Viewport pos="(0,0,0,0, 8,2,4)" look_at="(0,0,0,0, 0,0,3)" hdr=#true show_grid=#true active=#true
         }
@@ -42,7 +43,9 @@ def world(seed: int = 0) -> el.World:
                 color 32 128 32 125
             }
         }
-    """, "ball.kdl")
+    """,
+        "ball.kdl",
+    )
     return world
 
 
