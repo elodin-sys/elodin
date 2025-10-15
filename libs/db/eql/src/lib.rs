@@ -462,22 +462,20 @@ impl Context {
                 .zip(nodes)
                 .take(path.path.len().saturating_sub(1))
             {
-                let part = component_parts
-                    .entry(node.to_string())
-                    .or_insert_with(|| ComponentPart {
-                        id: part.id,
-                        name: part.name.to_string(),
-                        children: BTreeMap::new(),
-                        component: None,
-                    });
+                let part =
+                    component_parts
+                        .entry(node.to_string())
+                        .or_insert_with(|| ComponentPart {
+                            id: part.id,
+                            name: part.name.to_string(),
+                            children: BTreeMap::new(),
+                            component: None,
+                        });
                 component_parts = &mut part.children;
             }
             let mut nodes = component.name.split('.');
             component_parts.insert(
-                nodes
-                    .next_back()
-                    .unwrap()
-                    .to_string(),
+                nodes.next_back().unwrap().to_string(),
                 ComponentPart {
                     id: component.id,
                     name: component.name.clone(),
