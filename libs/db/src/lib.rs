@@ -1280,6 +1280,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             });
         }
         Packet::Msg(m) if m.id == SetDbConfig::ID => {
+            let _snapshot_guard = db.snapshot_barrier.enter_writer();
             let SetDbConfig {
                 recording,
                 metadata,
@@ -1294,6 +1295,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 s.db_config.metadata.extend(metadata);
             });
             db.save_db_state()?;
+            drop(_snapshot_guard);
             tx.send_msg(&db.db_config()).await?;
         }
         Packet::Msg(m) if m.id == GetEarliestTimestamp::ID => {
@@ -1358,22 +1360,28 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             tx.send_msg(&ArrowIPC { batch: None }).await?;
         }
         Packet::Msg(m) if m.id == SetMsgMetadata::ID => {
+            let _snapshot_guard = db.snapshot_barrier.enter_writer();
             let SetMsgMetadata { id, metadata } = m.parse::<SetMsgMetadata>()?;
             db.with_state_mut(|s| s.set_msg_metadata(id, metadata, &db.path))?;
+            drop(_snapshot_guard);
         }
         Packet::Msg(m) if m.id == MsgStream::ID => {
+            let _snapshot_guard = db.snapshot_barrier.enter_writer();
             let MsgStream { msg_id } = m.parse::<MsgStream>()?;
             let msg_log =
                 db.with_state_mut(|s| s.get_or_insert_msg_log(msg_id, &db.path).cloned())?;
+            drop(_snapshot_guard);
             let req_id = m.req_id;
             stellarator::spawn(handle_msg_stream(msg_id, req_id, msg_log, tx.tx.clone()));
         }
         Packet::Msg(m) if m.id == FixedRateMsgStream::ID => {
+            let _snapshot_guard = db.snapshot_barrier.enter_writer();
             let FixedRateMsgStream { msg_id, fixed_rate } = m.parse::<FixedRateMsgStream>()?;
             let msg_log =
                 db.with_state_mut(|s| s.get_or_insert_msg_log(msg_id, &db.path).cloned())?;
             let stream_state =
                 db.get_or_insert_fixed_rate_state(fixed_rate.stream_id, fixed_rate.behavior);
+            drop(_snapshot_guard);
             stellarator::spawn(handle_fixed_rate_msg_stream(
                 msg_id,
                 m.req_id,
