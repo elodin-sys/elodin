@@ -158,7 +158,7 @@ in {
         # # Set sccache cache directory with proper shell expansion
         export SCCACHE_DIR="''${HOME}/.cache/sccache"
         mkdir -p "''${SCCACHE_DIR}"
-        
+
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "🚀 Elodin Development Shell (Nix)"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

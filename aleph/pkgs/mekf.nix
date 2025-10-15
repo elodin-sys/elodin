@@ -13,25 +13,25 @@
 in
   pkgs.rustPlatform.buildRustPackage {
     inherit pname version src;
-    
+
     cargoLock = {
       lockFile = ../../Cargo.lock;
       allowBuiltinFetchGit = true;
     };
-    
+
     buildAndTestSubdir = "fsw/mekf";
-    
+
     nativeBuildInputs = [
       (rustToolchain pkgs)
     ];
-    
+
     buildInputs = [
       pkgs.buildPackages.clang
     ];
-    
+
     HOST_CC = "${pkgs.stdenv.cc.nativePrefix}cc";
     TARGET_CC = "${pkgs.stdenv.cc.targetPrefix}cc";
     LIBCLANG_PATH = "${pkgs.buildPackages.libclang.lib}/lib";
-    
+
     doCheck = false;
   }

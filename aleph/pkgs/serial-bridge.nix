@@ -13,20 +13,20 @@
 in
   pkgs.rustPlatform.buildRustPackage {
     inherit pname version src;
-    
+
     cargoLock = {
       lockFile = ../../Cargo.lock;
       allowBuiltinFetchGit = true;
     };
-    
+
     buildAndTestSubdir = "fsw/serial-bridge";
-    
+
     nativeBuildInputs = [
       (rustToolchain pkgs)
     ];
-    
+
     HOST_CC = "${pkgs.stdenv.cc.nativePrefix}cc";
     TARGET_CC = "${pkgs.stdenv.cc.targetPrefix}cc";
-    
+
     doCheck = false;
   }

@@ -1619,8 +1619,9 @@ graph "value" {
         assert!((color.a - (120.0 / 255.0)).abs() < f32::EPSILON);
     }
 
+    #[test]
     fn test_parse_error_report() {
-        use miette::{GraphicalReportHandler, Report, miette};
+        use miette::GraphicalReportHandler;
         let kdl = r#"
 blah
 graph "value" {
