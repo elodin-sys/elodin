@@ -72,6 +72,7 @@ in {
           maturin
           bzip2
           libclang
+          sccache
           ffmpeg-full
           ffmpeg-full.dev
           gst_all_1.gstreamer
@@ -136,6 +137,10 @@ in {
       # Environment variables
       LIBCLANG_PATH = "${libclang.lib}/lib";
       XLA_EXTENSION_DIR = "${xla_ext}";
+
+      # Enable sccache for faster Rust builds
+      RUSTC_WRAPPER = "${pkgs.sccache}/bin/sccache";
+      SCCACHE_DIR = "\${HOME}/.cache/sccache";
 
       # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
       # GCC 14 treats -Wincompatible-pointer-types as error by default

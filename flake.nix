@@ -1,10 +1,6 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
-    # Pin crane to May 2025 version to avoid Cargo.lock path resolution bug
-    # Note: elodin-cli uses rustPlatform directly due to macOS issues (see nix/pkgs/elodin-cli.nix)
-    # Python shell on macOS also bypasses crane (see nix/shell.nix)
-    crane.url = "github:ipetkov/crane/dfd9a8dfd09db9aad544c4d3b6c47b12562544a5";
     systems.url = "github:nix-systems/default";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
@@ -19,7 +15,6 @@
   outputs = {
     self,
     nixpkgs,
-    crane,
     rust-overlay,
     flake-utils,
     ...
@@ -27,7 +22,7 @@
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
     elodinOverlay = final: prev: {
       elodin = rec {
-        memserve = final.callPackage ./nix/pkgs/memserve.nix {inherit crane rustToolchain;};
+        memserve = final.callPackage ./nix/pkgs/memserve.nix {inherit rustToolchain;};
         elodin-py = final.callPackage ./nix/pkgs/elodin-py.nix {
           inherit rustToolchain;
           python = final.python312Full;
@@ -39,8 +34,8 @@
           python = elodin-py.python;
           pythonPackages = elodin-py.pythonPackages;
         };
-        elodin-db = final.callPackage ./aleph/pkgs/elodin-db.nix {inherit crane rustToolchain;};
-        # sensor-fw = final.callPackage ./nix/pkgs/sensor-fw.nix {inherit crane rustToolchain;};
+        elodin-db = final.callPackage ./aleph/pkgs/elodin-db.nix {inherit rustToolchain;};
+        # sensor-fw = final.callPackage ./nix/pkgs/sensor-fw.nix {inherit rustToolchain;};
       };
     };
   in
