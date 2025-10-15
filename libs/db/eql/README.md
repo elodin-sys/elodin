@@ -86,6 +86,3 @@ Anything not listed is not part of the current language (as of **September 29, 2
 | `(a.world_pos.x, a.world_pos[1])` | `select a_world_pos.a_world_pos[1] as "a.world_pos.x", a_world_pos.a_world_pos[2] as "a.world_pos.y" from a_world_pos;` | Mix dot-field and array index to select X and Y. |
 | `(a.world_pos, b.velocity, c.acceleration)` | `select a_world_pos.a_world_pos as "a.world_pos", b_velocity.b_velocity as "b.velocity", c_acceleration.c_acceleration as "c.acceleration" from a_world_pos join b_velocity on a_world_pos.time = b_velocity.time join c_acceleration on a_world_pos.time = c_acceleration.time;` | Select three full components with implicit time joins. |
 | **Invalid shapes** | `a.world_pos.x.fft(1024) · a.world_pos.time.fftfreq(1) · a.world_pos.last(10)` | `fft`/`fftfreq` take no args; `last`/`first` require a string duration like `"10s"`. |
-
-## Adding a new "EQL formula"
-- [Developer Guide](src/how-to-new-formula.md)
