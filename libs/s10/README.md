@@ -26,7 +26,7 @@ S10 uses TOML files to define recipes. It searches for configuration in this ord
 # Default recipe when none specified
 [default]
 type = "sim"
-path = "../nox-py/examples/cube-sat.py"
+path = "../../examples/cube-sat/main.py"
 
 # Cargo project with auto-rebuild
 [flight-software]
@@ -69,7 +69,7 @@ Runs Python-based Elodin simulations with automatic `uv` or `python3` detection:
 ```toml
 [my-sim]
 type = "sim"
-path = "examples/drone.py"
+path = "examples/drone/main.py"
 addr = "0.0.0.0:2240"  # Optional, default shown
 optimize = false       # Optional optimization flag
 ```
@@ -200,7 +200,7 @@ S10 is designed to work seamlessly with the Elodin ecosystem:
 ```toml
 [drone-sim]
 type = "sim"
-path = "examples/drone.py"
+path = "examples/drone/main.py"
 ```
 
 This automatically:
