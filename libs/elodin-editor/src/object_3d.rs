@@ -258,12 +258,11 @@ pub fn update_object_3d_system(
     component_value_maps: Query<&'static ComponentValue>,
 ) {
     for (_entity, mut object_3d, mut pos, ellipse) in objects_query.iter_mut() {
-        if let Some(compiled_expr) = &object_3d.compiled_expr {
-            if let Ok(component_value) = compiled_expr.execute(&entity_map, &component_value_maps) {
-                if let Some(world_pos) = component_value.as_world_pos() {
-                    *pos = world_pos;
-                }
-            }
+        if let Some(compiled_expr) = &object_3d.compiled_expr
+            && let Ok(component_value) = compiled_expr.execute(&entity_map, &component_value_maps)
+            && let Some(world_pos) = component_value.as_world_pos()
+        {
+            *pos = world_pos;
         }
 
         let Some(mut ellipse) = ellipse else {
@@ -424,7 +423,11 @@ pub fn spawn_mesh(
             None
         }
         impeller2_wkt::Object3DMesh::Mesh { mesh, material } => {
-            let material = material.clone().into_bevy();
+            let mut material = material.clone().into_bevy();
+            if matches!(mesh, impeller2_wkt::Mesh::Plane { .. }) {
+                material.double_sided = true;
+                material.cull_mode = None;
+            }
             let material = material_assets.add(material);
             commands.entity(entity).insert(MeshMaterial3d(material));
             let mesh = mesh.clone().into_bevy();

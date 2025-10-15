@@ -68,43 +68,24 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
 
         let (icons, pair) = args;
 
-        let entity_id = pair.impeller;
         let Ok(metadata) = metadata_query.get(pair.bevy) else {
             ui.add(empty_inspector());
             return tree_actions;
         };
 
         let icon_chart = icons.chart;
-
-        let mono_font = egui::TextStyle::Monospace.resolve(ui.style_mut());
         egui::Frame::NONE
             .inner_margin(egui::Margin::ZERO.top(8.0))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.add(
-                        label::ELabel::new(&metadata.name)
-                            .padding(egui::Margin::same(0).bottom(24.))
-                            .bottom_stroke(egui::Stroke {
-                                width: 1.0,
-                                color: get_scheme().border_primary,
-                            })
-                            .margin(egui::Margin::same(0).bottom(8.)),
-                    );
-
-                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
-                        ui.label(
-                            RichText::new(entity_id.0.to_string())
-                                .color(get_scheme().text_primary)
-                                .font(mono_font.clone()),
-                        );
-                        ui.add_space(6.0);
-                        ui.label(
-                            egui::RichText::new("ID")
-                                .color(get_scheme().text_secondary)
-                                .font(mono_font.clone()),
-                        );
-                    });
-                });
+                ui.add(
+                    label::ELabel::new(&metadata.name)
+                        .padding(egui::Margin::same(0).bottom(24.))
+                        .bottom_stroke(egui::Stroke {
+                            width: 1.0,
+                            color: get_scheme().border_primary,
+                        })
+                        .margin(egui::Margin::same(0).bottom(8.)),
+                );
             });
 
         search(ui, &mut filter.0, icons.search);
@@ -166,7 +147,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                     BTreeMap::from_iter(std::iter::once((component_path, values.clone())));
                 let bundle =
                     GraphBundle::new(&mut render_layer_alloc, components, metadata.name.clone());
-                tree_actions.push(TreeAction::AddGraph(None, Some(bundle)));
+                tree_actions.push(TreeAction::AddGraph(None, Box::new(Some(bundle))));
             }
         }
         tree_actions

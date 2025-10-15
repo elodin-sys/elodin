@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
 use crate::{
+    GridHandle,
     object_3d::Object3DState,
     ui::{
-        actions,
+        HdrEnabled, actions,
         colors::EColor,
         inspector, plot, query_plot, query_table,
         tiles::{self, Pane},
@@ -13,7 +14,7 @@ use bevy::{ecs::system::SystemParam, prelude::*};
 use egui_tiles::{Tile, TileId};
 use impeller2_wkt::{
     ActionPane, ComponentMonitor, ComponentPath, Dashboard, Line3d, Panel, Schematic,
-    SchematicElem, Split, Viewport,
+    SchematicElem, Split, VectorArrow3d, Viewport,
 };
 
 pub mod tree;
@@ -31,10 +32,14 @@ pub struct SchematicParam<'w, 's> {
     pub graph_states: Query<'w, 's, &'static plot::GraphState>,
     pub query_plots: Query<'w, 's, &'static query_plot::QueryPlotData>,
     pub viewports: Query<'w, 's, &'static inspector::viewport::Viewport>,
+    pub camera_grids: Query<'w, 's, &'static GridHandle>,
+    pub grid_visibility: Query<'w, 's, &'static Visibility>,
     pub objects_3d: Query<'w, 's, (Entity, &'static Object3DState)>,
     pub lines_3d: Query<'w, 's, (Entity, &'static Line3d)>,
+    pub vector_arrows: Query<'w, 's, (Entity, &'static VectorArrow3d)>,
     pub ui_state: Res<'w, tiles::TileState>,
     pub dashboards: Query<'w, 's, &'static Dashboard<Entity>>,
+    pub hdr_enabled: Res<'w, HdrEnabled>,
 }
 
 impl SchematicParam<'_, '_> {
@@ -48,12 +53,18 @@ impl SchematicParam<'_, '_> {
                 Pane::Viewport(viewport) => {
                     let cam_entity = viewport.camera?;
                     let viewport_data = self.viewports.get(cam_entity).ok()?;
+                    let mut show_grid = false;
+                    if let Ok(grid_handle) = self.camera_grids.get(cam_entity)
+                        && let Ok(visibility) = self.grid_visibility.get(grid_handle.grid)
+                    {
+                        show_grid = matches!(*visibility, Visibility::Visible);
+                    }
 
                     Some(Panel::Viewport(Viewport {
                         fov: 45.0,
                         active: false,
-                        show_grid: false,
-                        hdr: false,
+                        show_grid,
+                        hdr: self.hdr_enabled.0,
                         name: Some(viewport.label.clone()),
                         pos: Some(viewport_data.pos.eql.clone()),
                         look_at: Some(viewport_data.look_at.eql.clone()),
@@ -206,6 +217,12 @@ pub fn tiles_to_schematic(param: SchematicParam, mut schematic: ResMut<CurrentSc
             .lines_3d
             .iter()
             .map(|(entity, line)| SchematicElem::Line3d(line.map_aux(|_| entity))),
+    );
+    schematic.elems.extend(
+        param
+            .vector_arrows
+            .iter()
+            .map(|(entity, arrow)| SchematicElem::VectorArrow(arrow.map_aux(|_| entity))),
     );
 }
 

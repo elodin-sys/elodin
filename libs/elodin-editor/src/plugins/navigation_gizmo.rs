@@ -1,4 +1,4 @@
-use crate::MainCamera;
+use crate::{MainCamera, plugins::gizmos::GIZMO_RENDER_LAYER};
 use bevy::animation::{AnimationTarget, AnimationTargetId, animated_field};
 use bevy::math::{DVec3, Dir3};
 use bevy::prelude::*;
@@ -98,7 +98,9 @@ pub struct RenderLayerAlloc(usize);
 
 impl Default for RenderLayerAlloc {
     fn default() -> Self {
-        Self(!1usize)
+        let mut bits = !1usize;
+        bits &= !(1usize << GIZMO_RENDER_LAYER);
+        Self(bits)
     }
 }
 

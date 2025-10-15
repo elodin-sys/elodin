@@ -232,7 +232,7 @@ fn list_external_disks() -> anyhow::Result<Vec<ExternalDisk>> {
         if line.starts_with("/dev/disk") && line.contains("external") {
             let parts: Vec<&str> = line.split_whitespace().collect();
             let path = parts[0].to_string();
-            let identifier = path.split('/').last().unwrap_or("").to_string();
+            let identifier = path.split('/').next_back().unwrap_or("").to_string();
 
             disks.push(ExternalDisk {
                 path,
@@ -286,7 +286,7 @@ fn list_external_disks() -> anyhow::Result<Vec<ExternalDisk>> {
             let is_external = is_external_disk_linux(&path)?;
 
             if is_external {
-                let identifier = path.split('/').last().unwrap_or("").to_string();
+                let identifier = path.split('/').next_back().unwrap_or("").to_string();
                 let size = if parts.len() >= 2 {
                     parts[1].to_string()
                 } else {
@@ -314,16 +314,16 @@ fn list_external_disks() -> anyhow::Result<Vec<ExternalDisk>> {
 
 #[cfg(target_os = "linux")]
 fn is_external_disk_linux(path: &str) -> anyhow::Result<bool> {
-    let device_name = path.split('/').last().unwrap_or("");
+    let device_name = path.split('/').next_back().unwrap_or("");
     if device_name.is_empty() {
         return Ok(false);
     }
 
     let removable_path = format!("/sys/block/{}/removable", device_name);
-    if let Ok(removable) = std::fs::read_to_string(removable_path) {
-        if removable.trim() == "1" {
-            return Ok(true);
-        }
+    if let Ok(removable) = std::fs::read_to_string(removable_path)
+        && removable.trim() == "1"
+    {
+        return Ok(true);
     }
 
     let device_path = format!("/sys/block/{}/device", device_name);

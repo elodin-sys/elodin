@@ -10,7 +10,7 @@ use bevy_egui::egui;
 use egui::{CornerRadius, Margin};
 use impeller2::types::Timestamp;
 use impeller2_bevy::{CurrentStreamId, PacketTx};
-use impeller2_wkt::{CurrentTimestamp, SetStreamState};
+use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, SetStreamState};
 use std::ops::RangeInclusive;
 
 use crate::ui::{
@@ -21,8 +21,8 @@ use crate::ui::{
 };
 
 use super::{
-    DurationExt, TimelineArgs, TimelineIcons, get_position_range, position_from_value,
-    value_from_position,
+    DurationExt, StreamTickOrigin, TimelineArgs, TimelineIcons, get_position_range,
+    position_from_value, value_from_position,
 };
 
 // ----------------------------------------------------------------------------
@@ -79,14 +79,12 @@ impl<'a> Timeline<'a> {
         active_range: RangeInclusive<i64>,
     ) -> Self {
         let range_f64 = (*active_range.start() as f64)..=(*active_range.end() as f64);
-        let timeline = Self::from_get_set(range_f64, move |v: Option<f64>| {
+        Self::from_get_set(range_f64, move |v: Option<f64>| {
             if let Some(v) = v {
                 *value = Num::from_f64(v);
             }
             value.to_f64()
-        });
-
-        timeline
+        })
     }
 
     pub fn from_get_set(
@@ -360,6 +358,8 @@ pub struct TimelineSlider<'w> {
     event: Res<'w, PacketTx>,
     tick: ResMut<'w, UITick>,
     current_stream_id: Res<'w, CurrentStreamId>,
+    tick_origin: ResMut<'w, StreamTickOrigin>,
+    earliest_timestamp: Res<'w, EarliestTimestamp>,
 }
 
 impl WidgetSystem for TimelineSlider<'_> {
@@ -376,7 +376,11 @@ impl WidgetSystem for TimelineSlider<'_> {
             event,
             mut tick,
             current_stream_id,
+            mut tick_origin,
+            earliest_timestamp,
         } = state.get_mut(world);
+
+        tick_origin.observe_stream(**current_stream_id);
 
         let (icons, timeline_args) = args;
         let handle_icon = icons.handle;
@@ -398,9 +402,13 @@ impl WidgetSystem for TimelineSlider<'_> {
                 .on_hover_cursor(egui::CursorIcon::PointingHand);
 
             if response.changed() {
+                let target_timestamp = Timestamp(tick.0);
+                if target_timestamp <= earliest_timestamp.0 {
+                    tick_origin.request_rebase();
+                }
                 event.send_msg(SetStreamState::rewind(
                     **current_stream_id,
-                    Timestamp(tick.0),
+                    target_timestamp,
                 ))
             }
         });

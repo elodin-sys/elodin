@@ -42,6 +42,7 @@ pub mod hierarchy;
 pub mod images;
 pub mod inspector;
 pub mod label;
+pub mod modal;
 pub mod monitor;
 pub mod plot;
 pub mod plot_3d;
@@ -185,7 +186,9 @@ impl Plugin for UiPlugin {
             .init_resource::<SettingModalState>()
             .init_resource::<HdrEnabled>()
             .init_resource::<timeline_slider::UITick>()
+            .init_resource::<timeline::StreamTickOrigin>()
             .init_resource::<command_palette::CommandPaletteState>()
+            .add_event::<DialogEvent>()
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, shortcuts)
@@ -205,10 +208,44 @@ impl Plugin for UiPlugin {
 pub enum SettingModal {
     Graph(Entity, Option<ComponentId>),
     GraphRename(Entity, String),
+    Dialog(Dialog),
+}
+
+#[derive(Clone, Debug)]
+pub struct Dialog {
+    pub id: String,
+    pub title: String,
+    pub message: String,
+    pub buttons: Vec<DialogButton>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DialogButton {
+    pub text: String,
+    pub action: DialogAction,
+}
+
+#[derive(Clone, Debug)]
+pub enum DialogAction {
+    Close,
+    Custom(String), // Custom action identifier
+}
+
+#[derive(Clone, Debug, Event)]
+pub struct DialogEvent {
+    pub action: DialogAction,
+    pub id: String,
 }
 
 #[derive(Resource, Default, Clone, Debug)]
 pub struct SettingModalState(pub Option<SettingModal>);
+
+impl SettingModalState {
+    /// Close any open modal
+    pub fn close(&mut self) {
+        self.0 = None;
+    }
+}
 
 #[derive(Resource, Default)]
 pub struct FullscreenState(pub bool);
@@ -552,7 +589,7 @@ pub fn render_layout(world: &mut World) {
 
     world.add_root_widget::<ViewportOverlay>("viewport_overlay");
 
-    //world.add_root_widget::<ModalWithSettings>("modal_graph");
+    world.add_root_widget::<modal::ModalWithSettings>("modal_graph");
 
     world.add_root_widget::<CommandPalette>("command_palette");
 }
@@ -617,10 +654,10 @@ fn sync_camera_grid_cell(
     entity_transform_query: Query<&GridCell<i128>, Without<MainCamera>>,
 ) {
     for (parent, mut grid_cell) in query.iter_mut() {
-        if let Some(parent) = parent {
-            if let Ok(entity_cell) = entity_transform_query.get(parent.parent()) {
-                *grid_cell = *entity_cell;
-            }
+        if let Some(parent) = parent
+            && let Ok(entity_cell) = entity_transform_query.get(parent.parent())
+        {
+            *grid_cell = *entity_cell;
         }
     }
 }

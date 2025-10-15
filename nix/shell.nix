@@ -5,113 +5,174 @@
   ...
 }:
 with pkgs; let
+  # Import shared configuration
+  common = pkgs.callPackage ./pkgs/common.nix {};
   xla_ext = pkgs.callPackage ./pkgs/xla-ext.nix {system = pkgs.stdenv.hostPlatform.system;};
   llvm = llvmPackages_latest;
+
+  # Import shared JAX overrides
+  jaxOverrides = pkgs.callPackage ./pkgs/jax-overrides.nix {inherit pkgs;};
+
+  # Create a Python environment with the same JAX version as our pyproject.toml
+  pythonWithJax = let
+    python3' = python3.override {
+      packageOverrides = jaxOverrides;
+    };
+  in
+    python3'.withPackages (ps:
+      with ps; [
+        jax
+        jaxlib
+        typing-extensions
+        pytest
+        pytest-json-report
+        matplotlib
+        polars
+        numpy
+      ]);
 in {
-  c = (mkShell.override {stdenv = llvm.libcxxStdenv;}) {
-    name = "elo-c-shell";
-    buildInputs = [];
-    doCheck = false;
-  };
-  rust = mkShell {
-    name = "elo-rust-shell";
-    buildInputs =
-      [
-        buildkite-test-collector-rust
-        (rustToolchain pkgs)
-        cargo-nextest
-        pkg-config
-        python3
-        python3Packages.jax
-        python3Packages.jaxlib
-        python3Packages.typing-extensions
-        python3Packages.pytest
-        python3Packages.matplotlib
-        python3Packages.polars
-        openssl
-        clang
-        maturin
-        cmake
-        openssl
-        xz
-        libclang
-        gfortran
-        gfortran.cc.lib
-        ffmpeg-full
-        gst_all_1.gstreamer
-        gst_all_1.gst-plugins-base
-        gst_all_1.gst-plugins-good
-        flip-link
-      ]
-      ++ lib.optionals stdenv.isLinux [
-        alsa-lib
-        alsa-oss
-        alsa-utils
-        vulkan-loader
-        wayland
-        gtk3
-        udev
-        libxkbcommon
-        fontconfig
-        lldb
-      ];
-    LIBCLANG_PATH = "${libclang.lib}/lib";
-    doCheck = false;
+  # Unified shell that combines all development environments
+  elodin = mkShell (
+    {
+      name = "elo-unified-shell";
+      buildInputs =
+        [
+          # Interactive bash (required for nix develop to work properly)
+          bashInteractive
 
-    LLDB_DEBUGSERVER_PATH = lib.optionalString stdenv.isDarwin "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/Resources/debugserver";
-    XLA_EXTENSION_DIR = "${xla_ext}";
-  };
-  ops = mkShell {
-    name = "elo-ops-shell";
-    buildInputs = [
-      skopeo
-      gettext
-      just
-      docker
-      kubectl
-      jq
-      yq
-      git-filter-repo
-      (google-cloud-sdk.withExtraComponents (
-        with google-cloud-sdk.components; [gke-gcloud-auth-plugin]
-      ))
-      azure-cli
-    ];
-    doCheck = false;
-  };
-  python = mkShell {
-    name = "elo-py-shell";
-    buildInputs = [
-      ruff
-      cmake
-      python3Packages.pytest
-      python3Packages.pytest-json-report
-      config.packages.elodin-py.py
-    ];
-    nativeBuildInputs = with pkgs; (
-      lib.optionals stdenv.isLinux [autoPatchelfHook]
-      ++ lib.optionals stdenv.isDarwin [fixDarwinDylibNames]
-    );
-    XLA_EXTENSION_DIR = "${xla_ext}";
-  };
+          # Shell stack
+          zsh
+          oh-my-zsh
+          zsh-powerlevel10k
+          zsh-completions
 
-  nix-tools = mkShell {
-    name = "elo-nix-shell";
-    buildInputs = [
-      alejandra
-    ];
-  };
-  writing = mkShell {
-    name = "elo-writing-shell";
-    buildInputs = [typos];
-  };
-  docs = mkShell {
-    name = "elo-docs-shell";
-    buildInputs = [
-      typos
-      zola
-      ffmpeg
-      rav1e
-    ];
-  };
+          # Enhanced CLI tools
+          eza # Better ls
+          bat # Better cat
+          delta # Better git diff
+          fzf # Fuzzy finder
+          fd # Better find
+          ripgrep # Better grep
+          zoxide # Smart cd
+          direnv # Directory environments
+          nix-direnv # Nix integration for direnv
+          vim # Editor
+          less # Pager
+
+          # Fonts for terminal (MesloLGS for p10k)
+          (nerd-fonts.meslo-lg)
+
+          # Rust toolchain and tools
+          buildkite-test-collector-rust
+          (rustToolchain pkgs)
+          cargo-nextest
+          # Use our custom Python with JAX 0.4.31
+          pythonWithJax
+          clang
+          maturin
+          bzip2
+          libclang
+          ffmpeg-full
+          ffmpeg-full.dev
+          gst_all_1.gstreamer
+          gst_all_1.gst-plugins-base
+          gst_all_1.gst-plugins-good
+          flip-link
+
+          # Python tools
+          ruff
+          uv
+
+          # Operations tools
+          skopeo
+          gettext
+          just
+          docker
+          kubectl
+          jq
+          yq
+          git-filter-repo
+          git-lfs
+          (google-cloud-sdk.withExtraComponents (
+            with google-cloud-sdk.components; [gke-gcloud-auth-plugin]
+          ))
+          azure-cli
+
+          # Documentation and quality tools
+          alejandra
+          typos
+          zola
+          rav1e
+        ]
+        ++ common.commonNativeBuildInputs
+        ++ common.commonBuildInputs
+        # Linux-specific dependencies
+        ++ lib.optionals pkgs.stdenv.isLinux (
+          common.linuxGraphicsAudioDeps
+          ++ [
+            # Additional Linux-specific tools not in common
+            alsa-oss
+            alsa-utils
+            gtk3
+            fontconfig
+            lldb
+            autoPatchelfHook
+            config.packages.elodin-py.py
+          ]
+        )
+        # macOS-specific dependencies
+        ++ lib.optionals pkgs.stdenv.isDarwin (
+          common.darwinDeps
+          ++ [
+            fixDarwinDylibNames
+          ]
+        );
+
+      nativeBuildInputs = with pkgs; (
+        lib.optionals pkgs.stdenv.isLinux [autoPatchelfHook]
+        ++ lib.optionals pkgs.stdenv.isDarwin [fixDarwinDylibNames]
+      );
+
+      # Environment variables
+      LIBCLANG_PATH = "${libclang.lib}/lib";
+      XLA_EXTENSION_DIR = "${xla_ext}";
+
+      # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
+      # GCC 14 treats -Wincompatible-pointer-types as error by default
+      NIX_CFLAGS_COMPILE = common.netlibWorkaround;
+
+      LLDB_DEBUGSERVER_PATH = lib.optionalString pkgs.stdenv.isDarwin "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/Resources/debugserver";
+
+      # Set up library paths for Linux graphics/audio
+      LD_LIBRARY_PATH = lib.optionalString pkgs.stdenv.isLinux (
+        common.makeLinuxLibraryPath {inherit pkgs;}
+      );
+
+      doCheck = false;
+
+      shellHook = ''
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🚀 Elodin Development Shell (Nix)"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "Environment ready:"
+        echo "  • Rust: cargo, clippy, nextest"
+        echo "  • Tools: uv, maturin, ruff, just, kubectl, gcloud"
+        echo "  • Shell tools: eza, bat, delta, fzf, ripgrep, zoxide"
+        echo ""
+        echo "💡 Python setup (if needed):"
+        echo "   cd libs/nox-py && uv venv --python 3.12"
+        echo "   source .venv/bin/activate && uvx maturin develop --uv"
+        echo ""
+
+        # If we're in an interactive shell and not already in zsh, exec into zsh
+        if [[ $- == *i* ]] && [ -z "''${ZSH_VERSION:-}" ]; then
+          exec ${pkgs.zsh}/bin/zsh
+        fi
+      '';
+    }
+    // lib.optionalAttrs pkgs.stdenv.isLinux (
+      common.linuxGraphicsEnv {inherit pkgs;}
+    )
+  );
 }

@@ -93,7 +93,7 @@ pub fn sync_line_plot_3d(
                     _padding: Default::default(),
                 },
                 config: LineConfig {
-                    render_layers: RenderLayers::default(),
+                    render_layers: RenderLayers::layer(crate::plugins::gizmos::GIZMO_RENDER_LAYER),
                 },
                 global_transform: Default::default(),
                 transform: Default::default(),
