@@ -145,7 +145,6 @@ impl LoadSchematicParams<'_, '_> {
             .clear(&mut self.commands, &mut self.selected_object);
         self.hdr_enabled.0 = false;
         for entity in self.objects_3d.iter() {
-            // Bevy's despawn() is recursive in this version
             self.commands.entity(entity).despawn();
         }
         for entity in self.vector_arrows.iter() {

@@ -200,7 +200,8 @@ impl Plugin for UiPlugin {
             .add_systems(Update, query_plot::auto_bounds)
             .add_systems(Update, dashboard::update_nodes)
             .add_plugins(SchematicPlugin)
-            .add_plugins(LinePlot3dPlugin);
+            .add_plugins(LinePlot3dPlugin)
+            .add_plugins(command_palette::palette_items::plugin);
     }
 }
 
