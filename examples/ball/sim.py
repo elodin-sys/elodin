@@ -39,7 +39,7 @@ def world(seed: int = 0) -> el.World:
         }
         object_3d "(0,0,0,1, 0,0,0)" {
             plane width=2000 depth=2000 {
-                color 32 128 32
+                color 32 128 32 125
             }
         }
     """, "ball.kdl")
