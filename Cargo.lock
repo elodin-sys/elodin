@@ -5073,7 +5073,6 @@ checksum = "fc7e7a64c02cf7a5b51e745a9e45f60660a286f151c238b9d397b3e923f5082f"
 name = "eql"
 version = "0.15.1"
 dependencies = [
- "convert_case 0.8.0",
  "hifitime",
  "impeller2",
  "impeller2-wkt",

@@ -1,5 +1,4 @@
 #![doc = include_str!("../README.md")]
-use convert_case::Casing;
 use std::{
     borrow::Cow,
     collections::{BTreeMap, BTreeSet},
@@ -464,7 +463,7 @@ impl Context {
                 .take(path.path.len().saturating_sub(1))
             {
                 let part = component_parts
-                    .entry(node.to_case(convert_case::Case::Snake))
+                    .entry(node.to_string())
                     .or_insert_with(|| ComponentPart {
                         id: part.id,
                         name: part.name.to_string(),
@@ -478,7 +477,7 @@ impl Context {
                 nodes
                     .next_back()
                     .unwrap()
-                    .to_case(convert_case::Case::Snake),
+                    .to_string(),
                 ComponentPart {
                     id: component.id,
                     name: component.name.clone(),
@@ -487,10 +486,6 @@ impl Context {
                 },
             );
         }
-        // let mut component_parts = BTreeMap::new();
-        // for component in components {
-        //     component_parts.insert(component.name.clone(), component);
-        // }
         Self {
             component_parts,
             earliest_timestamp,
