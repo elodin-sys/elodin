@@ -7,7 +7,7 @@
 This monorepo contains the source code for all Elodin simulation and flight software:
 
 - Flight software
-  - [`aleph-os`](./images/aleph): Aleph NixOS modules for composing a Linux flight software stack that runs on the Orin.
+  - [`aleph-os`](./aleph): Aleph NixOS modules for composing a Linux flight software stack that runs on the Orin.
   - [`elodin-db`](./libs/db) (FSW application): A time-series database which functions as a central telemetry store and message bus.
   - [`serial-bridge`](./fsw/serial-bridge) (FSW application): Reads sensor data being streamed over the serial port and writes it to [`elodin-db`](./libs/db).
   - [`mekf`](./fsw/mekf) (FSW application): A Multiplicative Extended Kalman Filter implementation that fuses sensor data to estimate vehicle attitude.

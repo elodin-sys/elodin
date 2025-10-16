@@ -1,6 +1,5 @@
 {
   pkgs,
-  crane,
   rustToolchain,
   lib,
   elodinPy,
@@ -10,12 +9,6 @@
 }: let
   # Import shared configuration
   common = pkgs.callPackage ./common.nix {};
-  # Direct Rust build using rustPlatform.buildRustPackage
-  #
-  # We bypass crane entirely due to path resolution issues with the pinned
-  # crane version (dfd9a8dfd...) on macOS that cause "crane-utils" build failures.
-  # For consistency and simplicity, we use the same direct build approach for
-  # both macOS and Linux platforms.
   pname = "elodin";
   # Derive version from Cargo.toml workspace configuration
   cargoToml = builtins.fromTOML (builtins.readFile ../../Cargo.toml);
@@ -64,8 +57,5 @@
     CARGO_PROFILE = "dev";
     CARGO_PROFILE_RELEASE_DEBUG = true;
   };
-in {
-  # Only export the binary - clippy and tests are run directly
-  # via cargo in the development shell (nix develop)
-  inherit bin;
-}
+in
+  bin

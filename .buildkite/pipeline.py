@@ -111,14 +111,14 @@ test_steps = [
             step(
                 label=":nix: toplevel",
                 key="toplevel",
-                command=["cd images/aleph", "nix build --accept-flake-config .#toplevel"],
+                command=["cd aleph", "nix build --accept-flake-config .#toplevel"],
                 agents={"queue": "nixos-arm"},
             ),
             step(
                 label=":nix: sdimage",
                 key="sdimage",
                 command=[
-                    "cd images/aleph",
+                    "cd aleph",
                     "nix build --accept-flake-config .#sdimage",
                 ],
                 agents={"queue": "nixos-arm"},
@@ -127,7 +127,7 @@ test_steps = [
                 label=":nix: flash-uefi",
                 key="flash-uefi",
                 command=[
-                    "cd images/aleph",
+                    "cd aleph",
                     "nix build --accept-flake-config .#flash-uefi",
                 ],
             ),

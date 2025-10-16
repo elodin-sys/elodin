@@ -7,7 +7,7 @@
   };
 
   inputs = {
-    aleph.url = "github:elodin-sys/elodin/main?dir=images/aleph";
+    aleph.url = "github:elodin-sys/elodin/main?dir=aleph";
     nixpkgs.follows = "aleph/nixpkgs";
   };
   outputs = {
