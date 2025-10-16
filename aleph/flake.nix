@@ -9,8 +9,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
-    # Pin to version before kernelPackages.devicetree was removed
-    jetpack.url = "github:anduril/jetpack-nixos/eb413a5739515086f33c611376075bd869574f4f";
+    jetpack.url = "github:anduril/jetpack-nixos/de01bba154f27a96b40c7f406f1f84517ee11780";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
     agenix.url = "github:ryantm/agenix";
@@ -64,7 +63,7 @@
     };
     devModules = {
       # Temporarily disabled for nixpkgs 25.05 compatibility (CUDA issues)
-      # aleph-dev = ./modules/aleph-dev.nix;
+      aleph-dev = ./modules/aleph-dev.nix;
     };
     defaultModule = {config, ...}: {
       imports = [
