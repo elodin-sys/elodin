@@ -31,3 +31,33 @@ pub(crate) fn component_suggestion() -> String {
 pub(crate) fn keyword_suggestion() -> String {
     "last".to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{Component, ComponentPart, Context, Expr, parse_duration};
+    use impeller2::schema::Schema;
+    use impeller2::types::{ComponentId, PrimType, Timestamp};
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    #[test]
+    fn last_generates_expected_sql() {
+        let component = Arc::new(Component::new(
+            "a.world_pos".to_string(),
+            ComponentId::new("a.world_pos"),
+            Schema::new(PrimType::F64, vec![3u64]).unwrap(),
+        ));
+        let part = Arc::new(ComponentPart {
+            name: "a.world_pos".to_string(),
+            id: component.id,
+            component: Some(component.clone()),
+            children: BTreeMap::new(),
+        });
+        let context = Context::new(BTreeMap::new(), Timestamp(0), Timestamp(1_000_000));
+        let duration = parse_duration("PT0.5S").unwrap();
+        let expr = Expr::Last(Box::new(Expr::ComponentPart(part)), duration);
+
+        let sql = expr.to_sql(&context).unwrap();
+        assert!(sql.contains(">= to_timestamp(0.5)"));
+    }
+}
