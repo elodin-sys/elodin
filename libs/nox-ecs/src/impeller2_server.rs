@@ -3,6 +3,7 @@ use impeller2::types::{ComponentId, Timestamp};
 use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 use nox_ecs::Error;
 use std::{
+    fmt::Write,
     sync::{Arc, atomic},
     time::{Duration, Instant},
 };
@@ -130,6 +131,7 @@ pub fn init_db(
 
 pub fn copy_db_to_world(state: &State, world: &mut WorldExec<Compiled>) {
     let world = &mut world.world;
+    let mut pair_name = String::new();
     for (component_id, (schema, _)) in world.metadata.component_map.iter() {
         let Some(column) = world.host.get_mut(component_id) else {
             continue;
@@ -151,7 +153,15 @@ pub fn copy_db_to_world(state: &State, world: &mut WorldExec<Compiled>) {
                 continue;
             };
 
-            let pair_name = format!("{}.{}", entity_metadata.name, component_metadata.name);
+            pair_name.clear();
+            if let Err(err) = write!(
+                pair_name,
+                "{}.{}",
+                entity_metadata.name, component_metadata.name
+            ) {
+                warn!(?err, "error constructing name");
+                continue;
+            }
             let pair_id = ComponentId::new(&pair_name);
 
             let Some(component) = state.get_component(pair_id) else {
