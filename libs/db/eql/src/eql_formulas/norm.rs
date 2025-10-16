@@ -24,7 +24,7 @@ pub(crate) fn to_qualified_field(expr: &Expr) -> Result<String, Error> {
     for i in 0..n_elems {
         let qi = Expr::ArrayAccess(Box::new(Expr::ComponentPart(part.clone())), i)
             .to_qualified_field()?;
-        terms.push(format!("{qi} * {qi}")); // <- sans parenthèses, pour matcher les tests
+        terms.push(format!("{qi} * {qi}"));
     }
     Ok(format!("sqrt({})", terms.join(" + ")))
 }
