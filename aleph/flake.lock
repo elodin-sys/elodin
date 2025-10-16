@@ -26,22 +26,6 @@
         "type": "github"
       }
     },
-    "crane": {
-      "locked": {
-        "lastModified": 1746291859,
-        "narHash": "sha256-DdWJLA+D5tcmrRSg5Y7tp/qWaD05ATI4Z7h22gd1h7Q=",
-        "owner": "ipetkov",
-        "repo": "crane",
-        "rev": "dfd9a8dfd09db9aad544c4d3b6c47b12562544a5",
-        "type": "github"
-      },
-      "original": {
-        "owner": "ipetkov",
-        "repo": "crane",
-        "rev": "dfd9a8dfd09db9aad544c4d3b6c47b12562544a5",
-        "type": "github"
-      }
-    },
     "darwin": {
       "inputs": {
         "nixpkgs": [
@@ -110,17 +94,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1746820677,
-        "narHash": "sha256-qmeJxkpSecAc3evuTvqh9uP9bVZbe0DXXEnIXGYGW7w=",
+        "lastModified": 1750793833,
+        "narHash": "sha256-DXi3/LpWYyBdrI5dLRJ26g+nnVficdcRGJNuSuY/eEA=",
         "owner": "anduril",
         "repo": "jetpack-nixos",
-        "rev": "eb413a5739515086f33c611376075bd869574f4f",
+        "rev": "de01bba154f27a96b40c7f406f1f84517ee11780",
         "type": "github"
       },
       "original": {
         "owner": "anduril",
         "repo": "jetpack-nixos",
-        "rev": "eb413a5739515086f33c611376075bd869574f4f",
+        "rev": "de01bba154f27a96b40c7f406f1f84517ee11780",
         "type": "github"
       }
     },
@@ -159,7 +143,6 @@
     "root": {
       "inputs": {
         "agenix": "agenix",
-        "crane": "crane",
         "flake-utils": "flake-utils",
         "jetpack": "jetpack",
         "nixpkgs": "nixpkgs",

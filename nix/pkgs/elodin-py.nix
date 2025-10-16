@@ -153,7 +153,5 @@
     };
   py = elodin pythonPackages;
 in {
-  # Note: clippy is not included here since we're bypassing crane
-  # Run clippy directly via cargo in the development shell (nix develop)
   inherit py python pythonPackages;
 }
