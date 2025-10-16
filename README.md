@@ -90,7 +90,8 @@ If you cannot use Nix, you can manually install dependencies on macOS:
 ### Prerequisites
 ```sh
 # Install required tools via Homebrew
-brew install gstreamer python gfortran openblas uv git-lfs rust
+brew install gstreamer python gfortran openblas uv git-lfs rust libiconv bzip2
+brew link --force libconv bzip2
 
 # Initialize git-lfs
 git lfs install
@@ -102,6 +103,8 @@ git clone https://github.com/elodin-sys/elodin.git
 cd elodin
 just install
 ```
+
+If you get an error that `-lc++` is not found then make sure you are not running `gcc`! Check by running `cc -v` and put `/usr/bin` first in your path so that `clang` is used instead.
 
 ### Python Development (Local Setup)
 ```sh
