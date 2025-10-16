@@ -777,6 +777,20 @@ mod tests {
     }
 
     #[test]
+    fn test_fftfreq_sql() {
+        let entity_component = create_test_entity_component();
+        let context = create_test_context();
+
+        let time_expr = Expr::Time(entity_component);
+        let expr = Expr::FftFreq(Box::new(time_expr));
+        let result = expr.to_sql(&context);
+        assert_eq!(
+            result.unwrap(),
+            "select fftfreq(a_world_pos.time) from a_world_pos"
+        );
+    }
+
+    #[test]
     fn test_array_access_sql() {
         let part = create_test_component_part();
         let context = create_test_context();
@@ -932,6 +946,19 @@ mod tests {
         assert_eq!(
             result_str,
             "select a_world_pos.a_world_pos as 'a.world_pos', b_velocity.b_velocity as 'b.velocity', c_acceleration.c_acceleration as 'c.acceleration' from a_world_pos JOIN b_velocity ON a_world_pos.time = b_velocity.time JOIN c_acceleration ON a_world_pos.time = c_acceleration.time"
+        );
+    }
+
+    #[test]
+    fn test_norm_sql() {
+        // norm()
+        let part = create_test_component_part();
+        let context = create_test_context();
+        let expr = Expr::Norm(Box::new(Expr::ComponentPart(part)));
+        let sql = expr.to_sql(&context).unwrap();
+        assert_eq!(
+            sql,
+            "select sqrt(a_world_pos.a_world_pos[1] * a_world_pos.a_world_pos[1] + a_world_pos.a_world_pos[2] * a_world_pos.a_world_pos[2] + a_world_pos.a_world_pos[3] * a_world_pos.a_world_pos[3]) as 'norm(a.world_pos)' from a_world_pos"
         );
     }
 
