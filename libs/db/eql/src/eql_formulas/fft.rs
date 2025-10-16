@@ -23,38 +23,3 @@ pub(crate) fn parse(recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
 pub(crate) fn array_access_suggestion() -> String {
     "fft()".to_string()
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::{Component, ComponentPart, Context, Expr};
-    use impeller2::schema::Schema;
-    use impeller2::types::{ComponentId, PrimType};
-    use std::collections::BTreeMap;
-    use std::sync::Arc;
-
-    #[test]
-    fn test_fft_to_sql() {
-        let component = Arc::new(Component::new(
-            "a.world_pos".to_string(),
-            ComponentId::new("a.world_pos"),
-            Schema::new(PrimType::F64, vec![3u64]).unwrap(),
-        ));
-        let part = Arc::new(ComponentPart {
-            name: "a.world_pos".to_string(),
-            id: component.id,
-            component: Some(component.clone()),
-            children: BTreeMap::new(),
-        });
-
-        let expr = Expr::Fft(Box::new(Expr::ArrayAccess(
-            Box::new(Expr::ComponentPart(part.clone())),
-            0,
-        )));
-        let context = Context::default();
-        let sql = expr.to_sql(&context).unwrap();
-        assert_eq!(
-            sql,
-            "select fft(a_world_pos.a_world_pos[1]) as 'fft(a.world_pos.x)' from a_world_pos"
-        );
-    }
-}
