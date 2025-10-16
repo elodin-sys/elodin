@@ -1,6 +1,5 @@
 {
   pkgs,
-  crane,
   rustToolchain,
   lib,
   elodinPy,
