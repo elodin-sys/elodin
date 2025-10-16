@@ -1,53 +1,85 @@
 {
   pkgs,
-  crane,
   rustToolchain,
   lib,
   ...
 }: let
-  craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
-  pname = (craneLib.crateNameFromCargoToml {cargoToml = ../../libs/db/Cargo.toml;}).pname;
-  version = (craneLib.crateNameFromCargoToml {cargoToml = ../../Cargo.toml;}).version;
+  pname = "elodin-db";
+  workspaceToml = builtins.fromTOML (builtins.readFile ../../Cargo.toml);
+  version = workspaceToml.workspace.package.version;
 
   common = import ./common.nix {inherit lib;};
   src = common.src;
 
-  commonArgs = with pkgs; {
-    inherit pname version;
-    inherit src;
+  # Main binary build
+  bin = pkgs.rustPlatform.buildRustPackage {
+    inherit pname version src;
+
+    cargoLock = {
+      lockFile = ../../Cargo.lock;
+      allowBuiltinFetchGit = true;
+    };
+
+    buildAndTestSubdir = "libs/db";
+
+    nativeBuildInputs = [
+      (rustToolchain pkgs)
+    ];
+
+    HOST_CC = "${pkgs.stdenv.cc.nativePrefix}cc";
+    TARGET_CC = "${pkgs.stdenv.cc.targetPrefix}cc";
+
     doCheck = false;
-    cargoExtraArgs = "--package=${pname}";
-    HOST_CC = "${stdenv.cc.nativePrefix}cc";
-    TARGET_CC = "${stdenv.cc.targetPrefix}cc";
   };
 
-  cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+  # Clippy check derivation
+  clippy = pkgs.rustPlatform.buildRustPackage {
+    inherit version src;
+    pname = "${pname}-clippy";
 
-  clippy = craneLib.cargoClippy (
-    commonArgs
-    // {
-      inherit cargoArtifacts;
-      cargoClippyExtraArgs = "--all-targets -- --deny warnings";
-    }
-  );
+    cargoLock = {
+      lockFile = ../../Cargo.lock;
+      allowBuiltinFetchGit = true;
+    };
 
-  bin = craneLib.buildPackage (
-    commonArgs
-    // {
-      inherit cargoArtifacts;
-      doCheck = false;
-    }
-  );
+    buildAndTestSubdir = "libs/db";
 
-  test = craneLib.cargoNextest (
-    commonArgs
-    // {
-      inherit cargoArtifacts;
-      partitions = 1;
-      partitionType = "count";
-      cargoNextestPartitionsExtraArgs = "--no-tests=pass";
-    }
-  );
+    nativeBuildInputs = [
+      (rustToolchain pkgs)
+    ];
+
+    buildPhase = ''
+      cargo clippy --package elodin-db --all-targets -- --deny warnings
+    '';
+
+    installPhase = "touch $out";
+    doCheck = false;
+  };
+
+  # Test derivation using cargo-nextest
+  test = pkgs.rustPlatform.buildRustPackage {
+    inherit version src;
+    pname = "${pname}-test";
+
+    cargoLock = {
+      lockFile = ../../Cargo.lock;
+      allowBuiltinFetchGit = true;
+    };
+
+    buildAndTestSubdir = "libs/db";
+
+    nativeBuildInputs = [
+      (rustToolchain pkgs)
+      pkgs.cargo-nextest
+    ];
+
+    buildPhase = ''
+      cargo nextest run --package elodin-db --no-tests=pass
+    '';
+
+    installPhase = "touch $out";
+    doCheck = false;
+  };
 in {
   inherit bin clippy test;
 }

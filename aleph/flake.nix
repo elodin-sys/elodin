@@ -13,8 +13,6 @@
     jetpack.url = "github:anduril/jetpack-nixos/eb413a5739515086f33c611376075bd869574f4f";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
-    # Pin crane to May 2025 version to avoid Cargo.lock path resolution bug
-    crane.url = "github:ipetkov/crane/dfd9a8dfd09db9aad544c4d3b6c47b12562544a5";
     agenix.url = "github:ryantm/agenix";
 
     jetpack.inputs.nixpkgs.follows = "nixpkgs";
@@ -28,7 +26,6 @@
     nixpkgs-unstable,
     flake-utils,
     jetpack,
-    crane,
     rust-overlay,
     agenix,
   }: let
@@ -37,10 +34,10 @@
     overlay = final: prev:
       (prev.lib.packagesFromDirectoryRecursive {
         directory = ./pkgs;
-        callPackage = path: args: final.callPackage path (args // {inherit crane rustToolchain;});
+        callPackage = path: args: final.callPackage path (args // {inherit rustToolchain;});
       })
       // {
-        memserve = final.callPackage ../nix/pkgs/memserve.nix {inherit crane rustToolchain;};
+        memserve = final.callPackage ../nix/pkgs/memserve.nix {inherit rustToolchain;};
       }
       // (rust-overlay.overlays.default final prev);
     # Temporarily disabled for nixpkgs 25.05 compatibility (CUDA issues)

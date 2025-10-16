@@ -1,29 +1,32 @@
 {
   pkgs,
-  crane,
   rustToolchain,
   lib,
   ...
 }: let
-  craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
-  crateName = craneLib.crateNameFromCargoToml {cargoToml = ../../fsw/aleph-status/Cargo.toml;};
-  version = (craneLib.crateNameFromCargoToml {cargoToml = ../../Cargo.toml;}).version;
+  pname = "aleph-status";
+  workspaceToml = builtins.fromTOML (builtins.readFile ../../Cargo.toml);
+  version = workspaceToml.workspace.package.version;
 
   common = import ./common.nix {inherit lib;};
   src = common.src;
+in
+  pkgs.rustPlatform.buildRustPackage {
+    inherit pname version src;
 
-  commonArgs = {
-    inherit (crateName) pname;
-    inherit src version;
-    doCheck = false;
-    cargoExtraArgs = "--package=${crateName.pname}";
+    cargoLock = {
+      lockFile = ../../Cargo.lock;
+      allowBuiltinFetchGit = true;
+    };
+
+    buildAndTestSubdir = "fsw/aleph-status";
+
+    nativeBuildInputs = [
+      (rustToolchain pkgs)
+    ];
+
     HOST_CC = "${pkgs.stdenv.cc.nativePrefix}cc";
     TARGET_CC = "${pkgs.stdenv.cc.targetPrefix}cc";
-  };
-  cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-  bin = craneLib.buildPackage (commonArgs
-    // {
-      inherit cargoArtifacts;
-    });
-in
-  bin
+
+    doCheck = false;
+  }

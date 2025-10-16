@@ -1,29 +1,32 @@
 {
   pkgs,
-  crane,
   rustToolchain,
   lib,
   ...
 }: let
-  craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
-  pname = (craneLib.crateNameFromCargoToml {cargoToml = ../../fsw/serial-bridge/Cargo.toml;}).pname;
-  version = (craneLib.crateNameFromCargoToml {cargoToml = ../../Cargo.toml;}).version;
+  pname = "aleph-serial-bridge";
+  workspaceToml = builtins.fromTOML (builtins.readFile ../../Cargo.toml);
+  version = workspaceToml.workspace.package.version;
 
   common = import ./common.nix {inherit lib;};
   src = common.src;
+in
+  pkgs.rustPlatform.buildRustPackage {
+    inherit pname version src;
 
-  commonArgs = {
-    inherit pname version;
-    inherit src;
-    doCheck = false;
-    cargoExtraArgs = "--package=${pname}";
+    cargoLock = {
+      lockFile = ../../Cargo.lock;
+      allowBuiltinFetchGit = true;
+    };
+
+    buildAndTestSubdir = "fsw/serial-bridge";
+
+    nativeBuildInputs = [
+      (rustToolchain pkgs)
+    ];
+
     HOST_CC = "${pkgs.stdenv.cc.nativePrefix}cc";
     TARGET_CC = "${pkgs.stdenv.cc.targetPrefix}cc";
-  };
-  cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-  bin = craneLib.buildPackage (commonArgs
-    // {
-      inherit cargoArtifacts;
-    });
-in
-  bin
+
+    doCheck = false;
+  }
