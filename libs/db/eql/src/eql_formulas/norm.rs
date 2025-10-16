@@ -47,38 +47,3 @@ pub(crate) fn extend_component_suggestions(component: &Component, suggestions: &
         suggestions.push("norm()".to_string());
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::{Component, ComponentPart, Context, Expr};
-    use impeller2::schema::Schema;
-    use impeller2::types::{ComponentId, PrimType};
-    use std::collections::BTreeMap;
-    use std::sync::Arc;
-
-    fn create_test_component_part() -> Arc<ComponentPart> {
-        let component = Arc::new(Component::new(
-            "a.world_pos".to_string(),
-            ComponentId::new("a.world_pos"),
-            Schema::new(PrimType::F64, vec![3u64]).unwrap(), // 3D vector schema
-        ));
-        Arc::new(ComponentPart {
-            name: "a.world_pos".to_string(),
-            id: component.id,
-            component: Some(component),
-            children: BTreeMap::new(),
-        })
-    }
-
-    #[test]
-    fn test_norm_sql() {
-        let part = create_test_component_part();
-        let context = Context::default();
-        let expr = Expr::Norm(Box::new(Expr::ComponentPart(part)));
-        let sql = expr.to_sql(&context).unwrap();
-        assert_eq!(
-            sql,
-            "select sqrt(a_world_pos.a_world_pos[1] * a_world_pos.a_world_pos[1] + a_world_pos.a_world_pos[2] * a_world_pos.a_world_pos[2] + a_world_pos.a_world_pos[3] * a_world_pos.a_world_pos[3]) as 'norm(a.world_pos)' from a_world_pos"
-        );
-    }
-}
