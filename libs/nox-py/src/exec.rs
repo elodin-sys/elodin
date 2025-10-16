@@ -37,6 +37,7 @@ impl Exec {
             );
         let mut timestamp = Timestamp::now();
         for _ in 0..ticks {
+            // XXX: Is this where we would wait for a write?
             self.exec.run()?;
             self.db.with_state(|state| {
                 nox_ecs::impeller2_server::commit_world_head(state, &mut self.exec, timestamp)
