@@ -48,8 +48,8 @@ Anything not listed is not part of the current language (as of **September 29, 2
 | **Formula call (generic)**| `expr.method(args)`             | Call a method on a receiver              | Parser accepts a (single) tuple of args due to comma precedence; semantics only support the 4 methods below. |
 | **Formula: fft()**        | `a.world_pos.x.fft()`           | Signal FFT                               | Receiver must be an array access (scalar from vector). No args. Emits `fft(...)` in SQL (requires DB UDF). |
 | **Formula: fftfreq()**    | `a.world_pos.time.fftfreq()`    | Frequency bins                           | Receiver must be `Time(...)` (component.time). No args. Emits `fftfreq(...)` in SQL (requires DB UDF). |
-| **Formula: last("Δt")**   | `(expr).last("5m")`             | Time window (latest Δt)                  | Exactly one string argument (duration). Appends `WHERE time >= to_timestamp(last - Δt)`. Duration parsed by `jiff::Span`. |
-| **Formula: first("Δt")**  | `(expr).first("10s")`           | Time window (earliest Δt)                | Exactly one string argument (duration). Appends `WHERE time <= to_timestamp(earliest + Δt)`. |
+| **Formula: last("Δt")**   | `(expr).last("PT2S")`           | Time window (latest Δt)                  | Exactly one ISO-8601 string argument like `"PT2S"` (parsed via `jiff::Span`). Appends `WHERE time >= to_timestamp(last - Δt)`. |
+| **Formula: first("Δt")**  | `(expr).first("PT5S")`          | Time window (earliest Δt)                | Exactly one ISO-8601 string argument like `"PT5S"`. Appends `WHERE time <= to_timestamp(earliest + Δt)`. |
 | **Formula: norm()** | `a.world_pos.norm()` | Euclidean norm of a vector component | No args. Expands to sqrt(∑ elem*elem) over all vector elements; works on numeric vector components. |
 | **Whitespace**           | spaces / tabs / newlines        | Ignored separators                       | Grammar skips whitespace where sensible. |
 | **Format string**        | `text ${expr} text`             | Parse into segments + embedded ASTs      | Separate entrypoint `fmt_string` returns `Vec<FmtNode>`. Raw `$` not allowed in plain segments. |
