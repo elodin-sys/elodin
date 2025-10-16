@@ -57,8 +57,5 @@
     CARGO_PROFILE = "dev";
     CARGO_PROFILE_RELEASE_DEBUG = true;
   };
-in {
-  # Only export the binary - clippy and tests are run directly
-  # via cargo in the development shell (nix develop)
-  inherit bin;
-}
+in
+  bin

@@ -22,7 +22,6 @@
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
     elodinOverlay = final: prev: {
       elodin = rec {
-        memserve = final.callPackage ./nix/pkgs/memserve.nix {inherit rustToolchain;};
         elodin-py = final.callPackage ./nix/pkgs/elodin-py.nix {
           inherit rustToolchain;
           python = final.python312Full;
@@ -35,7 +34,6 @@
           pythonPackages = elodin-py.pythonPackages;
         };
         elodin-db = final.callPackage ./aleph/pkgs/elodin-db.nix {inherit rustToolchain;};
-        # sensor-fw = final.callPackage ./nix/pkgs/sensor-fw.nix {inherit rustToolchain;};
       };
     };
   in
@@ -55,29 +53,11 @@
 
         config.packages = pkgs.elodin;
 
-        docs-image = pkgs.callPackage ./nix/docs.nix {inherit config;};
         shells = pkgs.callPackage ./nix/shell.nix {inherit config rustToolchain;};
       in {
-        packages = with pkgs.elodin;
-          {
-            inherit
-              memserve
-              ;
-            elodin-db = elodin-db.bin;
-            elodin-cli = elodin-cli.bin;
-            elodin-py = elodin-py.py;
-            # sensor-fw = sensor-fw.bin;
-            default = pkgs.elodin.elodin-cli.bin;
-          }
-          // pkgs.lib.attrsets.optionalAttrs pkgs.stdenv.isLinux {
-            inherit docs-image;
-          };
-
-        checks = with pkgs.elodin; {
-          elodin-db-clippy = elodin-db.clippy;
-          # sensor-fw-clippy = sensor-fw.clippy;
-          elodin-db-test = elodin-db.test;
-          # sensor-fw-test = sensor-fw.test;
+        packages = with pkgs.elodin; {
+          inherit elodin-cli elodin-db;
+          elodin-py = elodin-py.py;
         };
 
         devShells = with shells; {
