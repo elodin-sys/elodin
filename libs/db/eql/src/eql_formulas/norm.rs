@@ -34,10 +34,8 @@ pub(crate) fn to_column_name(expr: &Expr) -> Option<String> {
 }
 
 pub(crate) fn parse(recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
-    if args.is_empty() {
-        if matches!(recv, Expr::ComponentPart(_)) {
-            return Ok(Expr::Norm(Box::new(recv)));
-        }
+    if args.is_empty() && matches!(recv, Expr::ComponentPart(_)) {
+        return Ok(Expr::Norm(Box::new(recv)));
     }
     Err(Error::InvalidMethodCall("norm".to_string()))
 }
