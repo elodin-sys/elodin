@@ -90,7 +90,10 @@ impl SnapshotBarrier {
     }
 
     pub fn enter_writer(&self) -> SnapshotWriterGuard<'_> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self
+            .state
+            .lock()
+            .expect("snapshot barrier mutex poisoned");
         while state.snapshot_active {
             state = self.cv.wait(state).unwrap();
         }
