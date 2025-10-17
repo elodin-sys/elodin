@@ -1204,6 +1204,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             tx.send_time_series(id, timestamps, data).await?;
         }
         Packet::Msg(m) if m.id == SetComponentMetadata::ID => {
+            let _snapshot_guard = db.snapshot_barrier.enter_writer();
             let SetComponentMetadata(metadata) = m.parse::<SetComponentMetadata>()?;
             db.with_state_mut(|state| state.set_component_metadata(metadata, &db.path))?;
         }
