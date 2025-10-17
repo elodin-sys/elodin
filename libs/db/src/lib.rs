@@ -25,11 +25,13 @@ use std::{
     borrow::Cow,
     collections::HashMap,
     ffi::OsStr,
+    fs::{self, File},
+    io::{self, Read, Seek, SeekFrom, Write},
     net::{SocketAddr, ToSocketAddrs},
     ops::Range,
     path::{Path, PathBuf},
     sync::{
-        Arc, RwLock,
+        Arc, Condvar, Mutex as StdMutex, RwLock,
         atomic::{self, AtomicBool, AtomicI64, AtomicU64},
     },
     time::{Duration, Instant},
@@ -58,9 +60,256 @@ mod msg_log;
 pub(crate) mod time_series;
 mod vtable_stream;
 
+pub struct SnapshotBarrier {
+    state: StdMutex<SnapshotState>,
+    cv: Condvar,
+}
+
+#[derive(Default)]
+struct SnapshotState {
+    active_writers: usize,
+    snapshot_active: bool,
+}
+
+pub struct SnapshotWriterGuard<'a> {
+    barrier: &'a SnapshotBarrier,
+    released: bool,
+}
+
+pub struct SnapshotGuard<'a> {
+    barrier: &'a SnapshotBarrier,
+    released: bool,
+}
+
+impl SnapshotBarrier {
+    pub fn new() -> Self {
+        Self {
+            state: StdMutex::new(SnapshotState::default()),
+            cv: Condvar::new(),
+        }
+    }
+
+    pub fn enter_writer(&self) -> SnapshotWriterGuard<'_> {
+        let mut state = self.state.lock().expect("snapshot barrier mutex poisoned");
+        while state.snapshot_active {
+            state = self.cv.wait(state).unwrap();
+        }
+        state.active_writers += 1;
+        SnapshotWriterGuard {
+            barrier: self,
+            released: false,
+        }
+    }
+
+    pub fn begin_snapshot(&self) -> SnapshotGuard<'_> {
+        let mut state = self.state.lock().unwrap();
+        while state.snapshot_active {
+            state = self.cv.wait(state).unwrap();
+        }
+        state.snapshot_active = true;
+        while state.active_writers > 0 {
+            state = self.cv.wait(state).unwrap();
+        }
+        SnapshotGuard {
+            barrier: self,
+            released: false,
+        }
+    }
+
+    fn release_writer(&self) {
+        let mut state = self.state.lock().unwrap();
+        debug_assert!(state.active_writers > 0);
+        if state.active_writers == 0 {
+            return;
+        }
+        state.active_writers -= 1;
+        let should_notify = state.active_writers == 0;
+        drop(state);
+        if should_notify {
+            self.cv.notify_all();
+        }
+    }
+
+    fn finish_snapshot(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.snapshot_active = false;
+        drop(state);
+        self.cv.notify_all();
+    }
+}
+
+impl Default for SnapshotBarrier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<'a> SnapshotWriterGuard<'a> {
+    pub fn release(mut self) {
+        if self.released {
+            return;
+        }
+        self.barrier.release_writer();
+        self.released = true;
+    }
+}
+
+impl<'a> Drop for SnapshotWriterGuard<'a> {
+    fn drop(&mut self) {
+        if !self.released {
+            self.barrier.release_writer();
+            self.released = true;
+        }
+    }
+}
+
+impl<'a> SnapshotGuard<'a> {
+    pub fn release(mut self) {
+        if self.released {
+            return;
+        }
+        self.barrier.finish_snapshot();
+        self.released = true;
+    }
+}
+
+impl<'a> Drop for SnapshotGuard<'a> {
+    fn drop(&mut self) {
+        if !self.released {
+            self.barrier.finish_snapshot();
+            self.released = true;
+        }
+    }
+}
+
+fn sync_dir(path: &Path) -> io::Result<()> {
+    #[cfg(target_family = "unix")]
+    {
+        let dir = File::open(path)?;
+        dir.sync_all()
+    }
+    #[cfg(not(target_family = "unix"))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+fn copy_sparse(src: &Path, dst: &Path) -> io::Result<()> {
+    const BUF_SIZE: usize = 128 * 1024;
+    let mut src_file = File::open(src)?;
+    let mut dst_file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(dst)?;
+    let metadata = src_file.metadata()?;
+    let mut buf = vec![0u8; BUF_SIZE];
+    loop {
+        let read = src_file.read(&mut buf)?;
+        if read == 0 {
+            break;
+        }
+        if buf[..read].iter().all(|&b| b == 0) {
+            dst_file.seek(SeekFrom::Current(read as i64))?;
+        } else {
+            dst_file.write_all(&buf[..read])?;
+        }
+    }
+    dst_file.set_len(metadata.len())?;
+    dst_file.sync_all()
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn try_reflink(src: &Path, dst: &Path) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    let src_file = File::open(src)?;
+    let dst_file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(dst)?;
+    const FICLONE: libc::c_ulong = 0x4004_9409;
+    let res = unsafe { libc::ioctl(dst_file.as_raw_fd(), FICLONE, src_file.as_raw_fd()) };
+    if res == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn try_reflink(src: &Path, dst: &Path) -> io::Result<()> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let src_c = CString::new(src.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains null byte"))?;
+    let dst_c = CString::new(dst.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains null byte"))?;
+    let res = unsafe { libc::clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) };
+    if res == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+)))]
+fn try_reflink(_src: &Path, _dst: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "reflink not supported on this platform",
+    ))
+}
+
+fn copy_file_native(src: &Path, dst: &Path) -> Result<(), Error> {
+    let metadata = fs::metadata(src)?;
+    match try_reflink(src, dst) {
+        Ok(()) => {}
+        Err(_) => {
+            let _ = fs::remove_file(dst);
+            copy_sparse(src, dst)?;
+        }
+    }
+    fs::set_permissions(dst, metadata.permissions())?;
+    let file = File::open(dst)?;
+    file.sync_all()?;
+    if let Some(parent) = dst.parent() {
+        sync_dir(parent)?;
+    }
+    Ok(())
+}
+
+fn copy_dir_native(src: &Path, dst: &Path) -> Result<(), Error> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_native(&src_path, &dst_path)?;
+        } else if file_type.is_file() {
+            copy_file_native(&src_path, &dst_path)?;
+        } else {
+            // skip non-regular entries
+        }
+    }
+    let metadata = fs::metadata(src)?;
+    fs::set_permissions(dst, metadata.permissions())?;
+    let _ = sync_dir(dst);
+    Ok(())
+}
+
 pub struct DB {
     pub vtable_gen: AtomicCell<u64>,
     state: RwLock<State>,
+    snapshot_barrier: SnapshotBarrier,
     pub recording_cell: PlayingCell,
 
     // metadata
@@ -104,6 +353,7 @@ impl DB {
         };
         let db = DB {
             state: RwLock::new(state),
+            snapshot_barrier: SnapshotBarrier::new(),
             recording_cell: PlayingCell::new(true),
             path,
             vtable_gen: AtomicCell::new(0),
@@ -132,6 +382,89 @@ impl DB {
     pub fn save_db_state(&self) -> Result<(), Error> {
         let db_state = self.db_config();
         db_state.write(self.path.join("db_state"))
+    }
+
+    pub fn begin_snapshot(&self) -> SnapshotGuard<'_> {
+        self.snapshot_barrier.begin_snapshot()
+    }
+
+    pub fn flush_all(&self) -> Result<(), Error> {
+        self.with_state(|state| -> Result<(), Error> {
+            for component in state.components.values() {
+                component.sync_all()?;
+            }
+            for msg_log in state.msg_logs.values() {
+                msg_log.sync_all()?;
+            }
+            Ok(())
+        })?;
+
+        let db_state_path = self.path.join("db_state");
+        if db_state_path.exists() {
+            File::open(&db_state_path)?.sync_all()?;
+        }
+        File::open(&self.path)?.sync_all()?;
+        Ok(())
+    }
+
+    pub fn copy_native(&self, target_db_path: impl AsRef<Path>) -> Result<PathBuf, Error> {
+        let target_db_path = target_db_path.as_ref();
+        let (parent_dir, final_db_dir) = if target_db_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.eq_ignore_ascii_case("db"))
+            .unwrap_or(false)
+        {
+            (
+                target_db_path
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| PathBuf::from(".")),
+                target_db_path.to_path_buf(),
+            )
+        } else {
+            (target_db_path.to_path_buf(), target_db_path.join("db"))
+        };
+
+        let run_dir = parent_dir.clone();
+
+        if self.path.starts_with(&final_db_dir) || final_db_dir.starts_with(&self.path) {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "target directory overlaps database path",
+            )));
+        }
+
+        if run_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.eq_ignore_ascii_case("db"))
+            .unwrap_or(false)
+        {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "directory name \"db\" is not allowed",
+            )));
+        }
+
+        if run_dir.exists() || final_db_dir.exists() {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "target directory already exists",
+            )));
+        }
+
+        fs::create_dir_all(&run_dir)?;
+        let tmp_db_dir = run_dir.join("db.tmp");
+        if tmp_db_dir.exists() {
+            fs::remove_dir_all(&tmp_db_dir)?;
+        }
+        fs::create_dir_all(&tmp_db_dir)?;
+        copy_dir_native(&self.path, &tmp_db_dir)?;
+        sync_dir(&tmp_db_dir)?;
+        fs::rename(&tmp_db_dir, &final_db_dir)?;
+        sync_dir(&run_dir)?;
+        Ok(final_db_dir)
     }
 
     pub fn open(path: PathBuf) -> Result<Self, Error> {
@@ -208,6 +541,7 @@ impl DB {
         };
         Ok(DB {
             state: RwLock::new(state),
+            snapshot_barrier: SnapshotBarrier::new(),
             path,
             vtable_gen: AtomicCell::new(0),
             recording_cell: PlayingCell::new(db_state.recording),
@@ -221,6 +555,7 @@ impl DB {
 
     pub fn insert_vtable(&self, vtable: VTableMsg) -> Result<(), Error> {
         info!(id = ?vtable.id, "inserting vtable");
+        let _snapshot_guard = self.snapshot_barrier.enter_writer();
         self.with_state_mut(|state| {
             for res in vtable.vtable.realize_fields(None) {
                 let RealizedField {
@@ -240,6 +575,7 @@ impl DB {
     }
 
     pub fn push_msg(&self, timestamp: Timestamp, id: PacketId, msg: &[u8]) -> Result<(), Error> {
+        let _snapshot_guard = self.snapshot_barrier.enter_writer();
         let exists = self.with_state(|s| {
             if let Some(msg_log) = s.msg_logs.get(&id) {
                 msg_log.push(timestamp, msg)?;
@@ -569,10 +905,15 @@ impl Component {
     fn get_range(&self, range: Range<Timestamp>) -> Option<(&[Timestamp], &[u8])> {
         self.time_series.get_range(range)
     }
+
+    fn sync_all(&self) -> Result<(), Error> {
+        self.time_series.sync_all()
+    }
 }
 
 struct DBSink<'a> {
     components: &'a HashMap<ComponentId, Component>,
+    snapshot_barrier: &'a SnapshotBarrier,
     last_updated: &'a AtomicCell<Timestamp>,
     sunk_new_time_series: bool,
     table_received: Timestamp,
@@ -586,6 +927,7 @@ impl Decomponentize for DBSink<'_> {
         value: impeller2::types::ComponentView<'_>,
         timestamp: Option<Timestamp>,
     ) -> Result<(), Error> {
+        let _snapshot_guard = self.snapshot_barrier.enter_writer();
         let timestamp = timestamp.unwrap_or(self.table_received);
         let value_buf = value.as_bytes();
         let Some(component) = self.components.get(&component_id) else {
@@ -862,6 +1204,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             tx.send_time_series(id, timestamps, data).await?;
         }
         Packet::Msg(m) if m.id == SetComponentMetadata::ID => {
+            let _snapshot_guard = db.snapshot_barrier.enter_writer();
             let SetComponentMetadata(metadata) = m.parse::<SetComponentMetadata>()?;
             db.with_state_mut(|state| state.set_component_metadata(metadata, &db.path))?;
         }
@@ -938,6 +1281,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             });
         }
         Packet::Msg(m) if m.id == SetDbConfig::ID => {
+            let _snapshot_guard = db.snapshot_barrier.enter_writer();
             let SetDbConfig {
                 recording,
                 metadata,
@@ -952,6 +1296,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 s.db_config.metadata.extend(metadata);
             });
             db.save_db_state()?;
+            drop(_snapshot_guard);
             tx.send_msg(&db.db_config()).await?;
         }
         Packet::Msg(m) if m.id == GetEarliestTimestamp::ID => {
@@ -967,6 +1312,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             db.with_state(|state| {
                 let mut sink = DBSink {
                     components: &state.components,
+                    snapshot_barrier: &db.snapshot_barrier,
                     last_updated: &db.last_updated,
                     sunk_new_time_series: false,
                     table_received: Timestamp::now(),
@@ -1015,22 +1361,28 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             tx.send_msg(&ArrowIPC { batch: None }).await?;
         }
         Packet::Msg(m) if m.id == SetMsgMetadata::ID => {
+            let _snapshot_guard = db.snapshot_barrier.enter_writer();
             let SetMsgMetadata { id, metadata } = m.parse::<SetMsgMetadata>()?;
             db.with_state_mut(|s| s.set_msg_metadata(id, metadata, &db.path))?;
+            drop(_snapshot_guard);
         }
         Packet::Msg(m) if m.id == MsgStream::ID => {
+            let _snapshot_guard = db.snapshot_barrier.enter_writer();
             let MsgStream { msg_id } = m.parse::<MsgStream>()?;
             let msg_log =
                 db.with_state_mut(|s| s.get_or_insert_msg_log(msg_id, &db.path).cloned())?;
+            drop(_snapshot_guard);
             let req_id = m.req_id;
             stellarator::spawn(handle_msg_stream(msg_id, req_id, msg_log, tx.tx.clone()));
         }
         Packet::Msg(m) if m.id == FixedRateMsgStream::ID => {
+            let _snapshot_guard = db.snapshot_barrier.enter_writer();
             let FixedRateMsgStream { msg_id, fixed_rate } = m.parse::<FixedRateMsgStream>()?;
             let msg_log =
                 db.with_state_mut(|s| s.get_or_insert_msg_log(msg_id, &db.path).cloned())?;
             let stream_state =
                 db.get_or_insert_fixed_rate_state(fixed_rate.stream_id, fixed_rate.behavior);
+            drop(_snapshot_guard);
             stellarator::spawn(handle_fixed_rate_msg_stream(
                 msg_id,
                 m.req_id,

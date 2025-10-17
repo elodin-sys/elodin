@@ -3,11 +3,12 @@ use zerocopy::{Immutable, IntoBytes};
 
 use crate::Error;
 use std::{
-    fs::OpenOptions,
+    fs::{File, OpenOptions},
     io::{Seek, SeekFrom, Write as _},
     marker::PhantomData,
+    mem::size_of,
     os::fd::AsRawFd,
-    path::Path,
+    path::{Path, PathBuf},
     slice::{self, SliceIndex},
     sync::{
         Arc, Mutex,
@@ -29,6 +30,7 @@ pub struct AppendLog<E> {
     map: Arc<memmap2::MmapRaw>,
     header_extra: PhantomData<E>,
     write_lock: Arc<Mutex<()>>,
+    path: Arc<PathBuf>,
 }
 
 impl<E> Clone for AppendLog<E> {
@@ -37,6 +39,7 @@ impl<E> Clone for AppendLog<E> {
             map: self.map.clone(),
             header_extra: PhantomData,
             write_lock: self.write_lock.clone(),
+            path: self.path.clone(),
         }
     }
 }
@@ -51,6 +54,7 @@ struct Header<E> {
 impl<E: IntoBytes + Immutable> AppendLog<E> {
     pub fn create(path: impl AsRef<Path>, extra: E) -> Result<Self, Error> {
         const FILE_SIZE: u64 = 1024 * 1024 * 1024 * 8; // 8gb
+        let path = path.as_ref();
         let mut file = OpenOptions::new()
             .create_new(true)
             .write(true)
@@ -63,6 +67,7 @@ impl<E: IntoBytes + Immutable> AppendLog<E> {
             map,
             header_extra: PhantomData,
             write_lock: Arc::new(Mutex::new(())),
+            path: Arc::new(path.to_path_buf()),
         };
         unsafe {
             let map = map.map.as_mut_ptr().add(size_of::<AtomicU64>() * 2);
@@ -76,12 +81,14 @@ impl<E: IntoBytes + Immutable> AppendLog<E> {
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
+        let path = path.as_ref();
         let file = OpenOptions::new().write(true).read(true).open(path)?;
         let map = Arc::new(memmap2::MmapRaw::map_raw(file.as_raw_fd())?);
         let map = Self {
             map,
             header_extra: PhantomData,
             write_lock: Arc::new(Mutex::new(())),
+            path: Arc::new(path.to_path_buf()),
         };
         Ok(map)
     }
@@ -133,6 +140,21 @@ impl<E: IntoBytes + Immutable> AppendLog<E> {
 
     pub(crate) fn raw_mmap(&self) -> &Arc<MmapRaw> {
         &self.map
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn sync_all(&self) -> Result<(), Error> {
+        self.map.flush()?;
+        let file = File::open(&*self.path)?;
+        file.sync_all()?;
+        if let Some(parent) = self.path.parent() {
+            let dir = File::open(parent)?;
+            dir.sync_all()?;
+        }
+        Ok(())
     }
 
     pub fn write(&self, buf: &[u8]) -> Result<usize, Error> {
