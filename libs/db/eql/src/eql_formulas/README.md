@@ -21,7 +21,7 @@ When PostgreSQL already provides the underlying function (e.g. `sqrt`, `pow`, ag
 Steps:
 1. Implement the transformation logic inside the new module (see `norm.rs` for a complete template).
 2. Delegate from `lib.rs` by updating the relevant match arms (parsing, SQL rendering, suggestions).
-3. Cover the behaviour with unit tests and optionally extend `tests/formulas.rs`.
+3. Cover the behaviour with unit tests.
 
 ## Scenario B — Formula requiring a DataFusion UDF
 If the feature does not exist in PostgreSQL/DataFusion, you must implement and register a User Defined Function first.
