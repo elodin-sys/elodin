@@ -111,7 +111,7 @@ source .venv/bin/activate
 uvx maturin develop --uv
 uv sync
 
-cargo run --manifest-path=../../apps/elodin/Cargo.toml editor examples/three-body.py
+cargo run --manifest-path=../../apps/elodin/Cargo.toml editor ../../examples/three-body/main.py
 ```
 
 > [!NOTE]

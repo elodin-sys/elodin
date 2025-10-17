@@ -258,7 +258,7 @@ Start the simulation again to see the gizmos in action.
 
 #### Checking your work
 And that's it! You can now run the simulation and see the three bodies orbiting around each other in a stable configuration.
-If you'd like to check your work, you can compare to the example at `libs/nox-py/examples/three-body.py`.
+If you'd like to check your work, you can compare to the example at `examples/three-body/`.
 
 #### Make it fancy
 Thanks to the amazing work done [here](https://observablehq.com/@rreusser/periodic-planar-three-body-orbits), you can easily

@@ -53,8 +53,8 @@ elodin-db run [::]:2240 ~/.elodin/db --config examples/db-config.lua
 2. **Run a Simulation** (optional but recommended)
 ```bash
 # In another terminal
-cd libs/nox-py/examples
-python rocket.py
+cd ./examples/rocket/
+python main.py
 ```
 
 3. **Launch the Rust Client**

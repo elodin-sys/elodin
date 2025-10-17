@@ -87,15 +87,15 @@ test_steps = [
             ),
             nix_step(
                 label=":python: rocket",
-                command="python3 libs/nox-py/examples/rocket.py bench --ticks 100",
+                command="python3 examples/rocket/main.py bench --ticks 100",
             ),
             nix_step(
                 label=":python: three-body",
-                command="python3 libs/nox-py/examples/three-body.py bench --ticks 100",
+                command="python3 examples/three-body/main.py bench --ticks 100",
             ),
             nix_step(
                 label=":python: cube-sat",
-                command="python3 libs/nox-py/examples/cube-sat.py bench --ticks 10",
+                command="python3 examples/cube-sat/main.py bench --ticks 10",
             ),
         ],
     ),

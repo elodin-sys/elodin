@@ -59,11 +59,11 @@ uvx maturin develop --uv
 Once installed, try these examples:
 ```bash
 # From repository root
-elodin editor libs/nox-py/examples/three-body.py  # N-body orbital mechanics
-elodin editor libs/nox-py/examples/cube-sat.py    # Satellite attitude control
-elodin editor libs/nox-py/examples/rocket.py      # 6DOF rocket simulation
-elodin editor examples/ball/main.py               # Physics with collisions
-elodin editor examples/drone/main.py              # Quadcopter dynamics
+elodin editor examples/three-body/main.py  # N-body orbital mechanics
+elodin editor examples/cube-sat/main.py    # Satellite attitude control
+elodin editor examples/rocket/main.py      # 6DOF rocket simulation
+elodin editor examples/ball/main.py        # Physics with collisions
+elodin editor examples/drone/main.py       # Quadcopter dynamics
 ```
 
 ## Execution Modes
@@ -120,7 +120,7 @@ sim.set_state("attitude", "satellite", new_quaternion)
 # Compatible with JAX transformations
 jax.vmap(sim.step)(batch_inputs)
 ```
-*See full JAX-only example: [examples/cube-sat-pysim.py](examples/cube-sat-pysim.py)*
+*See full JAX-only example: [../../examples/cube-sat-pysim/main.py](../../examples/cube-sat-pysim/main.py)*
 
 ### 5. Compiled Mode
 Pre-compile for maximum performance:
@@ -179,7 +179,7 @@ Discover all components and entities in a simulation without running it:
 
 ```bash
 # Output JSON with all components and entities
-python examples/rocket.py components
+python examples/rocket/main.py components
 ```
 
 **Output Example:**
@@ -381,7 +381,7 @@ def aero_coefs(fin_deflect: FinDeflect, fin_trim: FinControlTrim) -> AeroCoefs:
 Run the complete example:
 ```bash
 # Terminal 1: Simulation
-python examples/rocket.py run 0.0.0.0:2240
+python examples/rocket/main.py run 0.0.0.0:2240
 
 # Terminal 2: External controller
 cargo run --release -p elodin-db-rust-client
@@ -493,13 +493,13 @@ sys = gravity_effector | el.six_dof()
 ```
 
 *See real usage in spacecraft simulations:*
-- [Cube-sat with EGM08 gravity](examples/cube-sat.py#L25) - Degree 64 for accurate ADCS
-- [Cube-sat JAX simulation](examples/cube-sat-pysim.py#L26) - Degree 10 for faster training
+- [Cube-sat with EGM08 gravity](../../examples/cube-sat/main.py#L25) - Degree 64 for accurate ADCS
+- [Cube-sat JAX simulation](../../examples/cube-sat-pysim/main.py#L26) - Degree 10 for faster training
 
 ## Examples
 
 ### Three-Body Problem
-*Full implementation: [examples/three-body.py](examples/three-body.py)*
+*Full implementation: [../../examples/three-body/main.py](../../examples/three-body/main.py)*
 ```python
 import elodin as el
 import jax.numpy as jnp
@@ -522,7 +522,7 @@ w.run(el.six_dof(sys=gravity))
 ```
 
 ### Spacecraft ADCS
-*Full implementation: [examples/cube-sat.py](examples/cube-sat.py) | JAX-only version: [examples/cube-sat-pysim.py](examples/cube-sat-pysim.py)*
+*Full implementation: [../../examples/cube-sat/main.py](../../examples/cube-sat/main.py) | JAX-only version: [../../examples/cube-sat-pysim/main.py](../../examples/cube-sat-pysim/main.py)*
 ```python
 # Complete MEKF, LQR control, reaction wheels, and sensor simulation
 sys = sensors | kalman_filter | control | actuators | el.six_dof()
@@ -530,7 +530,7 @@ w.run(sys, sim_time_step=1/120.0)
 ```
 
 ### Rocket with Aerodynamics
-*Full implementation: [examples/rocket.py](examples/rocket.py)*
+*Full implementation: [../../examples/rocket/main.py](../../examples/rocket/main.py)*
 ```python
 # 6DOF rocket simulation with drag, thrust curves, and fin control
 sys = non_effectors | el.six_dof(sys=effectors, integrator=el.Integrator.Rk4)
