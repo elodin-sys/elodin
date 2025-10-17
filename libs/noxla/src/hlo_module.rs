@@ -2,7 +2,7 @@ use crate::{Result, Status, XlaComputation};
 use cpp::{cpp, cpp_class};
 
 cpp! {{
-    #include "xla/service/hlo_parser.h"
+    #include "xla/hlo/parser/hlo_parser.h"
     #include <strstream>
     using namespace xla;
 }}
@@ -24,13 +24,13 @@ impl HloModuleProto {
         let binary_ptr = binary.as_ptr();
         let binary_len = binary.len();
         let status = unsafe {
-            cpp!([binary_ptr as "char*", binary_len as "size_t", out_ptr as "HloModuleProto*"] -> Status as "Status" {
+            cpp!([binary_ptr as "char*", binary_len as "size_t", out_ptr as "HloModuleProto*"] -> Status as "absl::Status" {
                 std::string data(binary_ptr, binary_len);
                 HloSnapshot proto;
                 if (!proto.ParseFromString(data) &&
                         !proto.mutable_hlo()->ParseFromString(data) &&
                         !proto.mutable_hlo()->mutable_hlo_module()->ParseFromString(data)) {
-                    return Status(
+                    return absl::Status(
                         InvalidArgument("Failed to parse input as HLO protobuf binary"));
                 }
                 auto config_status = HloModule::CreateModuleConfigFromProto(proto.hlo().hlo_module(), {});
@@ -44,7 +44,7 @@ impl HloModuleProto {
                 }
                 auto hlo_module = std::move(status.value());
                 *out_ptr = hlo_module->ToProto();
-                return Status();
+                return absl::Status();
             })
         };
         status.to_result()?;
