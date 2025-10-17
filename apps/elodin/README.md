@@ -29,7 +29,7 @@ Run `three-body` example while watching for editor code changes (requires [cargo
 ```bash
 # Execute this command from inside the libs/nox-py directory
 cargo watch --watch ../../libs/elodin-editor \
-    -x 'run --manifest-path=../../apps/elodin/Cargo.toml editor examples/three-body/main.py'
+    -x 'run --manifest-path=../../apps/elodin/Cargo.toml editor ../../examples/three-body/main.py'
 ```
 
 ### `ELODIN_ASSETS_DIR`
