@@ -25,13 +25,13 @@ use impeller2_bevy::{ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx
 use impeller2_kdl::ToKdl;
 use impeller2_wkt::{
     ComponentPath, ComponentValue, CurrentTimestamp, DbConfig, EarliestTimestamp, IsRecording,
-    Material, Mesh, Object3D, SetDbConfig, SetStreamState, SimulationTimeStep,
+    LastUpdated, Material, Mesh, Object3D, SetDbConfig, SetStreamState, SimulationTimeStep,
 };
 use miette::IntoDiagnostic;
 use nox::ArrayBuf;
 
 use crate::{
-    EqlContext, Offset, SelectedTimeRange, TimeRangeBehavior,
+    EqlContext, Offset, SelectedTimeRange, TimeRangeBehavior, TimeRangeError,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
         HdrEnabled, Paused, colors,
@@ -580,7 +580,10 @@ fn set_time_range_behavior() -> PaletteItem {
                                 "Enter end offset (e.g., '+5m', '-10s', '=2023-01-01T00:00:00Z')",
                             ),
                             "End Offset",
-                            move |end_str: In<String>, mut behavior: ResMut<TimeRangeBehavior>| {
+                            move |end_str: In<String>,
+                                  mut behavior: ResMut<TimeRangeBehavior>,
+                                  earliest: Res<EarliestTimestamp>,
+                                  latest: Res<LastUpdated>| {
                                 let Ok(end_offset) = Offset::from_str(&end_str.0) else {
                                     return PaletteEvent::Error(format!(
                                         "Invalid end offset format: {}",
@@ -588,9 +591,23 @@ fn set_time_range_behavior() -> PaletteItem {
                                     ));
                                 };
 
-                                behavior.start = start_offset;
-                                behavior.end = end_offset;
-                                PaletteEvent::Exit
+                                let preview = TimeRangeBehavior {
+                                    start: start_offset,
+                                    end: end_offset,
+                                };
+
+                                match preview.calculate_selected_range(earliest.0, latest.0) {
+                                    Ok(_) | Err(TimeRangeError::NoData) => {
+                                        *behavior = preview;
+                                        PaletteEvent::Exit
+                                    }
+                                    Err(TimeRangeError::InvalidRange { .. }) => PaletteEvent::Error(
+                                        format!(
+                                            "Invalid time range: `{}` must resolve before `{}` for the current data",
+                                            start_offset, end_offset
+                                        ),
+                                    ),
+                                }
                             },
                         )
                         .default(),
