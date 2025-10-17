@@ -9,19 +9,12 @@ Each formula is implemented in its own `*.rs` file, while `mod.rs` wires them to
 - `../tests/formulas.rs` – integration-level checks that exercise the full EQL parsing pipeline.
 
 ## Adding a Formula (cheatsheet)
-1. **Create a file**: `touch <formula>.rs`.
+1. **Create a file**: `<formula>.rs`.
 2. **Register the module** in `mod.rs` with `pub mod <formula>;`.
 3. **Expose the helpers** expected by `lib.rs`. Each formula generally provides:
    - `parse(recv: Expr, args: &[Expr]) -> Result<Expr, Error>`
    - rendering helpers (`to_field`, `to_qualified_field`, `to_column_name`, or custom equivalents)
    - suggestion helpers (for auto-completion)
-4. **Write tests**:
-   - Unit tests placed at the bottom of `<formula>.rs` for focused behaviour.
-   - Optional integration test in `tests/formulas.rs` to assert the end-to-end SQL emitted by `Context::sql`.
-5. **Run the toolchain**:
-   - `cargo fmt`
-   - `cargo test -p eql`
-   - `cargo doc -p eql --open` (this README is embedded automatically)
 
 ## Scenario A — Formula backed by existing SQL primitives
 When PostgreSQL already provides the underlying function (e.g. `sqrt`, `pow`, aggregation functions), only the EQL layer needs to change.
@@ -38,6 +31,4 @@ If the feature does not exist in PostgreSQL/DataFusion, you must implement and r
 2. Register it inside `libs/db/src/arrow/mod.rs`.
 3. Wire the formula in this directory just like Scenario A, reusing the UDF when generating SQL.
 4. Add tests as above to guarantee the plumbing works.
-
-> Tip: keep reusable utilities (duration parsing, component metadata access, etc.) inside `lib.rs` so every formula can share them without duplicating logic.
 
