@@ -5,7 +5,7 @@
 To simplify access to hierarchical, time-oriented data, we introduce **Elodin Query Language** (EQL).
 
 EQL is a **lightweight query language dedicated to time-series signals**.  
-It allows you to easily select components (e.g. `a.world_pos.x`, `rocket.fin_deflect[0]`), automatically handle time-based joins, and work with time windows (`.last("5m")`, `.first("10s")`).  
+It allows you to easily select components (e.g. `a.world_pos.x`, `rocket.fin_deflect[0]`), automatically handle time-based joins, and work with time windows (`.last("PT1m")`, `.first("PT1s")`).  
 EQL also provides specialized signal-oriented functions such as `fft` or `fftfreq`.
 
 ## From EQL to SQL
