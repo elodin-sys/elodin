@@ -1,3 +1,4 @@
+use bytemuck;
 use elodin_db::{DB, State, handle_conn};
 use impeller2::types::{ComponentId, Timestamp};
 use impeller2_wkt::{ComponentMetadata, EntityMetadata};
@@ -45,7 +46,7 @@ impl Server {
                     handles.push(stellarator::spawn(handle_conn(stream, db.clone())).drop_guard());
                 }
             });
-        let tick = stellarator::spawn(tick(tick_db, world, is_cancelled, start_time));
+        let tick = stellarator::spawn(tick(tick_db, world, is_cancelled, || true, start_time));
         futures_lite::future::race(async { stream.join().await.unwrap().unwrap() }, async {
             tick.await
                 .map_err(|_| stellarator::Error::JoinFailed)
@@ -235,8 +236,10 @@ async fn tick(
     db: Arc<DB>,
     mut world: WorldExec<Compiled>,
     is_cancelled: impl Fn() -> bool + 'static,
+    must_wait: impl Fn() -> bool + 'static,
     mut timestamp: Timestamp,
 ) {
+    // XXX This is what world.run ultimately calls.
     let mut start = Instant::now();
     let mut tick = 0;
     while db.recording_cell.wait().await {
@@ -244,6 +247,7 @@ async fn tick(
             db.recording_cell.set_playing(false);
             world.world.metadata.max_tick = u64::MAX;
         }
+        // loop {}
         db.with_state(|state| copy_db_to_world(state, &mut world));
         if let Err(err) = world.run() {
             warn!(?err, "error ticking world");
@@ -259,6 +263,9 @@ async fn tick(
         if is_cancelled() {
             return;
         }
+        while must_wait() {
+            stellarator::sleep(Duration::from_millis(1)).await;
+        }
         stellarator::sleep(sleep_time).await;
         let now = Instant::now();
         while start < now {
@@ -267,4 +274,61 @@ async fn tick(
         tick += 1;
         timestamp += world.world.sim_time_step().0;
     }
+}
+
+/// Collect all entity and component IDs that are marked with "external_control" metadata
+pub fn external_controls(world: &WorldExec<Compiled>) -> Vec<ComponentId> {
+    let mut external_controls = Vec::new();
+    for (component_id, (_, component_metadata)) in world.world.metadata.component_map.iter() {
+        // Check if this component has external_control metadata
+        if component_metadata
+            .metadata
+            .get("external_control")
+            .map(|s| s == "true")
+            .unwrap_or(false)
+        {
+            external_controls.push(*component_id);
+        }
+    }
+    external_controls
+}
+
+/// Check if any external control components have been updated since the last check
+/// Returns (has_updates, updated_timestamps) where updated_timestamps contains the latest
+/// timestamp for each external control component that was updated
+pub fn collect_timestamps(db: &DB, components: &[ComponentId]) -> Vec<(ComponentId, Timestamp)> {
+    // Use the external_controls function to get all external control components
+
+    db.with_state(|state| {
+        let mut timestamps = vec![];
+        for component_id in components.iter() {
+            if let Some(component) = state.get_component(*component_id) {
+                if let Some((timestamp, _)) = component.time_series.latest() {
+                    timestamps.push((*component_id, *timestamp));
+                } else {
+                    timestamps.push((*component_id, Timestamp(i64::MIN)));
+                }
+            } else {
+                timestamps.push((*component_id, Timestamp(i64::MIN)));
+            }
+        }
+        timestamps
+    })
+}
+
+pub fn update_timestamps(db: &DB, components: &mut [(ComponentId, Timestamp)]) -> bool {
+    db.with_state(|state| {
+        let mut changed = false;
+        for (component_id, timestamp) in components.iter_mut() {
+            if let Some(component) = state.get_component(*component_id) {
+                if let Some((curr_timestamp, _)) = component.time_series.latest() {
+                    if *timestamp != *curr_timestamp {
+                        changed = true;
+                        *timestamp = *curr_timestamp;
+                    }
+                }
+            }
+        }
+        changed
+    })
 }
