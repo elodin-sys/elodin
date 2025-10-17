@@ -6,7 +6,6 @@ Each formula is implemented in its own `*.rs` file, while `mod.rs` wires them to
 ## Layout
 - `mod.rs` – registers the formula modules and exposes this guide in Rustdoc.
 - `fft.rs`, `fftfreq.rs`, `first.rs`, `last.rs`, `norm.rs` – reference implementations you can mimic.
-- `../tests/formulas.rs` – integration-level checks that exercise the full EQL parsing pipeline.
 
 ## Adding a Formula (cheatsheet)
 1. **Create a file**: `<formula>.rs`.
