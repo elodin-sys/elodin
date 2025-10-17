@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::*;
 
-use impeller2::types::Timestamp;
+use impeller2::types::{ComponentId, Timestamp};
 use impeller2_wkt::ArchiveFormat;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use nox_ecs::Compiled;
@@ -13,6 +13,44 @@ use pyo3::types::IntoPyDict;
 pub struct Exec {
     pub exec: nox_ecs::WorldExec<Compiled>,
     pub db: elodin_db::DB,
+}
+
+impl Exec {
+    /// Wait for external control components to be updated
+    fn wait_for_external_controls(&mut self,
+                                 py: Python<'_>,
+                                 external_controls: &mut [(ComponentId, Timestamp)],
+    ) -> Result<bool, Error> {
+        loop { }
+        if external_controls.is_empty() {
+            return Ok(true);
+        }
+        // Check for updates with a timeout to avoid infinite waiting
+        let timeout_ms = 100; // 100ms timeout
+        let start_time = std::time::Instant::now();
+        
+        loop {
+            // Check if we have updates using the impeller2_server function
+            if nox_ecs::impeller2_server::update_timestamps(
+                &self.db,
+                external_controls,
+            ) {
+                return Ok(true);
+            }
+            
+            // Check if timeout exceeded
+            if start_time.elapsed().as_millis() > timeout_ms {
+                return Ok(false);
+            }
+            
+            // Allow Python signals to be processed
+            py.check_signals()?;
+            
+            // Small sleep to avoid busy waiting
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        unreachable!()
+    }
 }
 
 #[pymethods]
@@ -36,8 +74,12 @@ impl Exec {
                 ProgressStyle::with_template("{bar:50} {pos:>6}/{len:6} remaining: {eta}").unwrap(),
             );
         let mut timestamp = Timestamp::now();
+        let external_controls = nox_ecs::impeller2_server::external_controls(&self.exec);
+        let mut external_controls_timestamped = nox_ecs::impeller2_server::collect_timestamps(&self.db, &external_controls);
         for _ in 0..ticks {
-            // XXX: Is this where we would wait for a write?
+            // Wait for external control components to be updated before running the next tick
+            self.wait_for_external_controls(py, &mut external_controls_timestamped)?;
+            
             self.exec.run()?;
             self.db.with_state(|state| {
                 nox_ecs::impeller2_server::commit_world_head(state, &mut self.exec, timestamp)
