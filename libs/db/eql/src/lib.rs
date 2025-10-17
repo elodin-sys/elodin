@@ -15,6 +15,10 @@ use impeller2::{
 use impeller2_wkt::ComponentPath;
 use peg::error::ParseError;
 
+pub mod eql_formulas;
+
+use eql_formulas::{fft, fftfreq, first, last, norm};
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum AstNode<'input> {
     Ident(Cow<'input, str>),
@@ -127,8 +131,8 @@ impl Expr {
             Expr::ComponentPart(component) => Ok(component.name.replace(".", "_")),
 
             Expr::Time(_) => Ok("time".to_string()),
-            Expr::Fft(e) => Ok(format!("fft({})", e.to_field()?)),
-            Expr::FftFreq(e) => Ok(format!("fftfreq({})", e.to_field()?)),
+            Expr::Fft(e) => fft::to_field(e),
+            Expr::FftFreq(e) => fftfreq::to_field(e),
             Expr::BinaryOp(left, right, op) => Ok(format!(
                 "({} {} {})",
                 left.to_field()?,
@@ -178,35 +182,9 @@ impl Expr {
     /// Converts an Expr to a qualified SQL field name (table.field) for use in JOINs.
     fn to_qualified_field(&self) -> Result<String, Error> {
         match self {
-            Expr::Norm(e) => {
-                let part = match e.as_ref() {
-                    Expr::ComponentPart(p) => p.clone(),
-                    _ => {
-                        return Err(Error::InvalidMethodCall(
-                            "norm() expects a vector component".to_string(),
-                        ));
-                    }
-                };
-                let comp = part.component.as_ref().ok_or_else(|| {
-                    Error::InvalidFieldAccess("norm() on non-leaf component".to_string())
-                })?;
-                let dims = comp.schema.dim();
-                if dims.is_empty() {
-                    return Err(Error::InvalidMethodCall(
-                        "norm() on scalar component".to_string(),
-                    ));
-                }
-                let n_elems: usize = dims.iter().copied().map(|d| d as usize).product();
-                let mut terms = Vec::with_capacity(n_elems);
-                for i in 0..n_elems {
-                    let qi = Expr::ArrayAccess(Box::new(Expr::ComponentPart(part.clone())), i)
-                        .to_qualified_field()?;
-                    terms.push(format!("{qi} * {qi}")); // <- sans parenthèses, pour matcher les tests
-                }
-                Ok(format!("sqrt({})", terms.join(" + ")))
-            }
-            Expr::Fft(e) => Ok(format!("fft({})", e.to_qualified_field()?)),
-            Expr::FftFreq(e) => Ok(format!("fftfreq({})", e.to_qualified_field()?)),
+            Expr::Norm(e) => norm::to_qualified_field(e),
+            Expr::Fft(e) => fft::to_qualified_field(e),
+            Expr::FftFreq(e) => fftfreq::to_qualified_field(e),
             Expr::BinaryOp(left, right, op) => Ok(format!(
                 "({} {} {})",
                 left.to_qualified_field()?,
@@ -224,9 +202,9 @@ impl Expr {
 
     fn to_column_name(&self) -> Option<String> {
         match self {
-            Expr::Norm(e) => Some(format!("norm({})", e.to_column_name()?)), // norm()
-            Expr::Fft(e) => Some(format!("fft({})", e.to_column_name()?)),
-            Expr::FftFreq(e) => Some(format!("fftfreq({})", e.to_column_name()?)),
+            Expr::Norm(e) => norm::to_column_name(e),
+            Expr::Fft(e) => fft::to_column_name(e),
+            Expr::FftFreq(e) => fftfreq::to_column_name(e),
             Expr::ComponentPart(e) => Some(e.name.clone()),
             Expr::ArrayAccess(expr, index) => match expr.as_ref() {
                 Expr::ComponentPart(c) => {
@@ -256,7 +234,7 @@ impl Expr {
         }
     }
 
-    fn to_sql_time_field(&self) -> Result<String, Error> {
+    pub(crate) fn to_sql_time_field(&self) -> Result<String, Error> {
         match self {
             Expr::Tuple(elements) => {
                 let Some(first) = elements.first() else {
@@ -340,26 +318,8 @@ impl Expr {
                 }
             }
 
-            Expr::Last(expr, duration) => {
-                let sql = expr.to_sql(context)?;
-                let duration_micros = (duration.total_nanoseconds() / 1000) as i64;
-                let lower_bound = context.last_timestamp.0 - duration_micros;
-                let lower_bound = lower_bound as f64 * 1e-6;
-                let time_field = expr.to_sql_time_field()?;
-                Ok(format!(
-                    "{sql} where {time_field} >= to_timestamp({lower_bound})",
-                ))
-            }
-            Expr::First(expr, duration) => {
-                let sql = expr.to_sql(context)?;
-                let duration_micros = (duration.total_nanoseconds() / 1000) as i64;
-                let upper_bound = context.earliest_timestamp.0 + duration_micros;
-                let upper_bound = upper_bound as f64 * 1e-6;
-                let time_field = expr.to_sql_time_field()?;
-                Ok(format!(
-                    "{sql} where {time_field} <= to_timestamp({upper_bound})",
-                ))
-            }
+            Expr::Last(expr, duration) => last::to_sql(expr, duration, context),
+            Expr::First(expr, duration) => first::to_sql(expr, duration, context),
 
             Expr::StringLiteral(_) => Err(Error::InvalidFieldAccess(
                 "cannot convert string literal to SQL".to_string(),
@@ -562,16 +522,12 @@ impl Context {
                     .iter()
                     .map(|ast_node| self.parse(ast_node))
                     .collect::<Result<Vec<_>, _>>()?;
-                match (cow.as_ref(), &recv, &args[..]) {
-                    ("norm", Expr::ComponentPart(_), &[]) => Ok(Expr::Norm(Box::new(recv))), // norm()
-                    ("fft", Expr::ArrayAccess(_, _), &[]) => Ok(Expr::Fft(Box::new(recv))),
-                    ("fftfreq", Expr::Time(_), &[]) => Ok(Expr::FftFreq(Box::new(recv))),
-                    ("last", _, &[Expr::StringLiteral(ref d)]) => {
-                        Ok(Expr::Last(Box::new(recv), parse_duration(d)?))
-                    }
-                    ("first", _, &[Expr::StringLiteral(ref d)]) => {
-                        Ok(Expr::First(Box::new(recv), parse_duration(d)?))
-                    }
+                match cow.as_ref() {
+                    "norm" => norm::parse(recv, &args),
+                    "fft" => fft::parse(recv, &args),
+                    "fftfreq" => fftfreq::parse(recv, &args),
+                    "last" => last::parse(recv, &args),
+                    "first" => first::parse(recv, &args),
                     _ => Err(Error::InvalidMethodCall(cow.to_string())),
                 }
             }
@@ -619,39 +575,24 @@ impl Context {
                 let mut suggestions: Vec<String> = part.children.keys().cloned().collect();
                 if let Some(component) = &part.component {
                     suggestions.extend(component.element_names.iter().map(|name| name.to_string()));
-                    if !component.schema.dim().is_empty() {
-                        // norm()
-                        suggestions.push("norm()".to_string());
-                    }
-                    suggestions.push("last(".to_string());
-                    suggestions.push("first(".to_string());
+                    norm::extend_component_suggestions(component, &mut suggestions);
+                    suggestions.push(last::component_suggestion());
+                    suggestions.push(first::component_suggestion());
                 }
                 suggestions.push("time".to_string());
                 suggestions.sort();
                 suggestions
             }
-            Expr::Time(_) => {
-                vec!["fftfreq()".to_string()]
+            Expr::Time(_) => fftfreq::suggestions_for_time(),
+            Expr::ArrayAccess(_, _) => vec![
+                fft::array_access_suggestion(),
+                last::component_suggestion(),
+                first::component_suggestion(),
+            ],
+            Expr::Tuple(_) | Expr::Fft(_) | Expr::FftFreq(_) => {
+                vec![last::keyword_suggestion(), first::keyword_suggestion()]
             }
-            Expr::ArrayAccess(_, _) => {
-                vec![
-                    "fft()".to_string(),
-                    "last(".to_string(),
-                    "first(".to_string(),
-                ]
-            }
-            Expr::Tuple(_) => {
-                vec!["last".to_string(), "first".to_string()]
-            }
-            Expr::StringLiteral(_) => {
-                vec![]
-            }
-            Expr::Fft(_) => {
-                vec!["last".to_string(), "first".to_string()]
-            }
-            Expr::FftFreq(_) => {
-                vec!["last".to_string(), "first".to_string()]
-            }
+            Expr::StringLiteral(_) => vec![],
             _ => vec![],
         }
     }
@@ -727,7 +668,7 @@ impl Context {
     }
 }
 
-fn parse_duration(duration_str: &str) -> Result<hifitime::Duration, Error> {
+pub(crate) fn parse_duration(duration_str: &str) -> Result<hifitime::Duration, Error> {
     let span = jiff::Span::from_str(duration_str)
         .map_err(|err| Error::InvalidMethodCall(err.to_string()))?;
     Ok(hifitime::Duration::from_nanoseconds(
