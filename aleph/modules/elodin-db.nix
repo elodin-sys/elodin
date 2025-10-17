@@ -4,7 +4,7 @@
   config,
   ...
 }: let
-  elodin-db = pkgs.elodin-db.bin;
+  elodin-db = pkgs.elodin-db;
   cfg = config.services.elodin-db;
 in {
   options.services.elodin-db = {

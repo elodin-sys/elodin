@@ -79,9 +79,6 @@
   # Common macOS dependencies
   darwinDeps = with pkgs; [
     libiconv
-    darwin.apple_sdk.frameworks.Security
-    darwin.apple_sdk.frameworks.CoreServices
-    darwin.apple_sdk.frameworks.SystemConfiguration
   ];
 
   # Common build dependencies

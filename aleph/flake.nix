@@ -9,12 +9,9 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
-    # Pin to version before kernelPackages.devicetree was removed
-    jetpack.url = "github:anduril/jetpack-nixos/eb413a5739515086f33c611376075bd869574f4f";
+    jetpack.url = "github:anduril/jetpack-nixos/de01bba154f27a96b40c7f406f1f84517ee11780";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
-    # Pin crane to May 2025 version to avoid Cargo.lock path resolution bug
-    crane.url = "github:ipetkov/crane/dfd9a8dfd09db9aad544c4d3b6c47b12562544a5";
     agenix.url = "github:ryantm/agenix";
 
     jetpack.inputs.nixpkgs.follows = "nixpkgs";
@@ -28,19 +25,18 @@
     nixpkgs-unstable,
     flake-utils,
     jetpack,
-    crane,
     rust-overlay,
     agenix,
   }: let
     system = "aarch64-linux";
-    rustToolchain = p: p.rust-bin.fromRustupToolchainFile ../../rust-toolchain.toml;
+    rustToolchain = p: p.rust-bin.fromRustupToolchainFile ../rust-toolchain.toml;
     overlay = final: prev:
       (prev.lib.packagesFromDirectoryRecursive {
         directory = ./pkgs;
-        callPackage = path: args: final.callPackage path (args // {inherit crane rustToolchain;});
+        callPackage = path: args: final.callPackage path (args // {inherit rustToolchain;});
       })
       // {
-        memserve = final.callPackage ../../nix/pkgs/memserve.nix {inherit crane rustToolchain;};
+        memserve = final.callPackage ../nix/pkgs/memserve.nix {inherit rustToolchain;};
       }
       // (rust-overlay.overlays.default final prev);
     # Temporarily disabled for nixpkgs 25.05 compatibility (CUDA issues)
@@ -67,7 +63,7 @@
     };
     devModules = {
       # Temporarily disabled for nixpkgs 25.05 compatibility (CUDA issues)
-      # aleph-dev = ./modules/aleph-dev.nix;
+      aleph-dev = ./modules/aleph-dev.nix;
     };
     defaultModule = {config, ...}: {
       imports = [
@@ -144,8 +140,8 @@
             builtins.attrValues baseModules
             ++ [
               agenix.nixosModules.default
-              ../../nix/modules/docs.nix
-              ../../nix/modules/tunnel.nix
+              ../nix/modules/docs.nix
+              ../nix/modules/tunnel.nix
               ({pkgs, ...}: {
                 services.nvpmodel.profileNumber = 1;
                 services.nvpmodel.configFile = "${pkgs.nvidia-jetpack.l4t-nvpmodel}/etc/nvpmodel/nvpmodel_p3767_0003.conf";

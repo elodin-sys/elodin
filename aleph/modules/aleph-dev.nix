@@ -49,8 +49,9 @@ in {
       stdenv.cc.cc.lib
       cudaPackages.cudatoolkit
       cudaPackages.cudnn
-      cudaPackages.tensorrt
-      cudaPackages.vpi2
+      # For 25.05, tensorRT requires manual intervention
+      # see: https://github.com/NixOS/nixpkgs/blob/ee9ca432c02483222ce2fd7993582e1e61b77a4d/pkgs/development/cuda-modules/_cuda/fixups/tensorrt.nix#L54
+      # cudaPackages.tensorrt
       gst_all_1.gstreamer
       nvidia-jetpack.l4t-cuda
       nvidia-jetpack.l4t-gstreamer
@@ -58,7 +59,6 @@ in {
       nvidia-jetpack.l4t-camera
     ];
     NVCC_PREPEND_FLAGS = "--compiler-bindir ${pkgs.gcc11}/bin/gcc";
-    NVCC_APPEND_FLAGS = "-I${pkgs.cudaPackages.cuda_cudart.include}/include";
     CONTAINER_HOST = "unix:///run/podman/podman.sock";
     GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" [
       gst_all_1.gstreamer

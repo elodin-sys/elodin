@@ -72,6 +72,7 @@ in {
           maturin
           bzip2
           libclang
+          sccache
           ffmpeg-full
           ffmpeg-full.dev
           gst_all_1.gstreamer
@@ -137,6 +138,9 @@ in {
       LIBCLANG_PATH = "${libclang.lib}/lib";
       XLA_EXTENSION_DIR = "${xla_ext}";
 
+      # Enable sccache for local nix develop shell only for faster Rust builds
+      SCCACHE_BIN = "${pkgs.sccache}/bin/sccache";
+
       # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
       # GCC 14 treats -Wincompatible-pointer-types as error by default
       NIX_CFLAGS_COMPILE = common.netlibWorkaround;
@@ -151,22 +155,25 @@ in {
       doCheck = false;
 
       shellHook = ''
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "🚀 Elodin Development Shell (Nix)"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo ""
-        echo "Environment ready:"
-        echo "  • Rust: cargo, clippy, nextest"
-        echo "  • Tools: uv, maturin, ruff, just, kubectl, gcloud"
-        echo "  • Shell tools: eza, bat, delta, fzf, ripgrep, zoxide"
-        echo ""
-        echo "💡 Python setup (if needed):"
-        echo "   cd libs/nox-py && uv venv --python 3.12"
-        echo "   source .venv/bin/activate && uvx maturin develop --uv"
-        echo ""
+        # start the shell if we're in an interactive shell
+        if [[ $- == *i* ]]; then
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🚀 Elodin Development Shell (Nix)"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "Environment ready:"
+          echo "  • Rust: cargo, clippy, nextest"
+          echo "  • Tools: uv, maturin, ruff, just, kubectl, gcloud"
+          echo "  • Shell tools: eza, bat, delta, fzf, ripgrep, zoxide"
+          echo ""
+          echo "💡 Python setup (if needed):"
+          echo "   cd libs/nox-py && uv venv --python 3.12"
+          echo "   source .venv/bin/activate && uvx maturin develop --uv"
+          echo ""
 
-        # If we're in an interactive shell and not already in zsh, exec into zsh
-        if [[ $- == *i* ]] && [ -z "''${ZSH_VERSION:-}" ]; then
+          export RUSTC_WRAPPER="''${SCCACHE_BIN}"
+          export SCCACHE_DIR="''${HOME}/.cache/sccache"
+          mkdir -p "''${SCCACHE_DIR}"
           exec ${pkgs.zsh}/bin/zsh
         fi
       '';
