@@ -44,7 +44,7 @@ members = [
     "libs/db/eql",
     "libs/impeller2/kdl",
     "libs/db/examples/rust_client"
- ]
+ , "docs/literate-tests"]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 
 [workspace.package]
