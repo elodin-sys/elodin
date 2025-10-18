@@ -7,7 +7,6 @@ edition = "2024"
 # parse
 peg = "0.8.5"
 unicode-ident = "1.0.18"
-convert_case = "0.8"
 
 # data-structures
 smallvec = "1.15"

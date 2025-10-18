@@ -101,7 +101,6 @@ peg = "0.8.5"
 
 # eql
 eql.path = "../db/eql"
-convert_case = "0.6.0"
 bevy-inspector-egui.version = "0.31"
 bevy-inspector-egui.optional = true
 

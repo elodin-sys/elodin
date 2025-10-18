@@ -25,7 +25,8 @@ pub fn component(input: TokenStream) -> TokenStream {
     } = Component::from_derive_input(&input).unwrap();
     let fields = data.take_struct().unwrap();
     let ty = &fields.fields[0];
-    let name = name.unwrap_or(ident.to_string().to_case(Case::Snake));
+    // I don't quite understand how and where this name will be used.
+    let name = name.unwrap_or_else(|| ident.to_string().to_case(Case::Snake));
 
     let comp_where = if let Some(where_clause) = generics.where_clause.clone() {
         quote! { #where_clause, Self: #crate_name::nox::ReprMonad<#crate_name::nox::Op>
