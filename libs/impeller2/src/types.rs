@@ -1048,4 +1048,15 @@ mod tests {
         assert_eq!(PrimType::U16.padding(12), 0);
         assert_eq!(PrimType::U16.padding(11), 1);
     }
+
+    #[test]
+    fn test_bridge() {
+        let id = msg_id("bridge");
+        assert_eq!(168, id[0]);
+        assert_eq!(236, id[1]);
+
+        let id = msg_id("Bridge");
+        assert_eq!(35, id[0]);
+        assert_eq!(155, id[1]);
+    }
 }
