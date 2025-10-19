@@ -349,6 +349,7 @@ mod inner {
                     // `#[track_caller]` attribute on it.
                     #[allow(clippy::manual_map)]
                     match Self::current() {
+                        // Insert type?
                         Some(registry) => Some(registry.insert::<T>()),
                         _ => None,
                     }

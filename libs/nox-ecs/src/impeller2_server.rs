@@ -46,7 +46,7 @@ impl Server {
                     handles.push(stellarator::spawn(handle_conn(stream, db.clone())).drop_guard());
                 }
             });
-        let tick = stellarator::spawn(tick(tick_db, world, is_cancelled, || true, start_time));
+        let tick = stellarator::spawn(tick(tick_db, world, is_cancelled, || false, start_time));
         futures_lite::future::race(async { stream.join().await.unwrap().unwrap() }, async {
             tick.await
                 .map_err(|_| stellarator::Error::JoinFailed)
