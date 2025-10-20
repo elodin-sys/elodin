@@ -166,7 +166,8 @@ def world() -> tuple[el.World, el.EntityId]:
             }
         }
     """
-        + object_mesh
+        + object_mesh,
+        "drone.kdl",
     )
     return world, drone
 

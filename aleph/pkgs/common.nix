@@ -3,7 +3,7 @@
     includeSrc = orig_path: type: let
       path = toString orig_path;
       base = baseNameOf path;
-      relPath = lib.removePrefix (toString ../../..) orig_path;
+      relPath = lib.removePrefix (toString ../..) orig_path;
       matchesPrefix = lib.any (prefix: lib.hasPrefix prefix relPath) [
         "/apps"
         "/libs"
@@ -29,7 +29,7 @@
       (type == "directory" && matchesPrefix && !matchesExclude) || matchesSuffix;
   in
     lib.cleanSourceWith {
-      src = ../../..;
+      src = ../..;
       filter = path: type: includeSrc path type;
     };
 }

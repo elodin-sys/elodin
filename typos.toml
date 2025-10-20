@@ -30,7 +30,7 @@ extend-exclude = [
     "**/simulink/**/*.xml",
     "libs/basilisk-rs/basilisk/**/*",
     "libs/stellarator/maitake",
-    "images/aleph/modules/*.nix",
+    "aleph/modules/*.nix",
     "*.age",
 ]
 ignore-vcs = true

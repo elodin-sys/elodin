@@ -96,19 +96,6 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
             .push(KdlEntry::new_prop("fov", viewport.fov as f64));
     }
 
-    if viewport.active {
-        node.entries_mut().push(KdlEntry::new_prop("active", true));
-    }
-
-    if viewport.show_grid {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("show_grid", true));
-    }
-
-    if viewport.hdr {
-        node.entries_mut().push(KdlEntry::new_prop("hdr", true));
-    }
-
     if let Some(ref pos) = viewport.pos {
         node.entries_mut()
             .push(KdlEntry::new_prop("pos", pos.clone()));
@@ -117,6 +104,19 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
     if let Some(ref look_at) = viewport.look_at {
         node.entries_mut()
             .push(KdlEntry::new_prop("look_at", look_at.clone()));
+    }
+
+    if viewport.hdr {
+        node.entries_mut().push(KdlEntry::new_prop("hdr", true));
+    }
+
+    if viewport.show_grid {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("show_grid", true));
+    }
+
+    if viewport.active {
+        node.entries_mut().push(KdlEntry::new_prop("active", true));
     }
 
     node
@@ -284,6 +284,15 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> KdlNode {
                     .push(KdlEntry::new_prop("radius", *radius as f64));
                 node.entries_mut()
                     .push(KdlEntry::new_prop("height", *height as f64));
+                serialize_material_to_node(&mut node, material);
+                node
+            }
+            Mesh::Plane { width, depth } => {
+                let mut node = KdlNode::new("plane");
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("width", *width as f64));
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("depth", *depth as f64));
                 serialize_material_to_node(&mut node, material);
                 node
             }
@@ -692,6 +701,53 @@ mod tests {
     }
 
     #[test]
+    fn test_viewport_property_order() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::Panel(Panel::Viewport(Viewport {
+                name: Some("main".to_string()),
+                fov: 60.0,
+                active: true,
+                show_grid: true,
+                hdr: true,
+                pos: Some("(0,0,0,0, 1,2,3)".to_string()),
+                look_at: Some("(0,0,0,0, 0,0,0)".to_string()),
+                aux: (),
+            })));
+
+        let serialized = serialize_schematic(&schematic);
+        let viewport_line = serialized
+            .lines()
+            .find(|line| line.trim_start().starts_with("viewport"))
+            .expect("viewport line missing");
+
+        let properties = [
+            "name=",
+            "fov=",
+            "pos=",
+            "look_at=",
+            "hdr=",
+            "show_grid=",
+            "active=",
+        ];
+        let mut indices = Vec::with_capacity(properties.len());
+        for property in properties {
+            let idx = viewport_line
+                .find(property)
+                .unwrap_or_else(|| panic!("{property} missing in `{viewport_line}`"));
+            indices.push(idx);
+        }
+
+        for window in indices.windows(2) {
+            assert!(
+                window[0] < window[1],
+                "expected viewport properties in order name → fov → pos → look_at → hdr → show_grid → active: `{viewport_line}`"
+            );
+        }
+    }
+
+    #[test]
     fn test_serialize_graph() {
         let mut schematic = Schematic::default();
         schematic
@@ -781,6 +837,46 @@ mod tests {
         } else {
             panic!("Expected object_3d");
         }
+    }
+
+    #[test]
+    fn test_serialize_object_3d_plane() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "a.world_pos".to_string(),
+            mesh: Object3DMesh::Mesh {
+                mesh: Mesh::Plane {
+                    width: 15.0,
+                    depth: 20.0,
+                },
+                material: Material {
+                    base_color: Color::rgb(0.0, 0.5, 1.0),
+                },
+            },
+            aux: (),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert_eq!(parsed.elems.len(), 1);
+        let SchematicElem::Object3d(obj) = &parsed.elems[0] else {
+            panic!("Expected object_3d");
+        };
+
+        let Object3DMesh::Mesh { mesh, material } = &obj.mesh else {
+            panic!("Expected mesh object");
+        };
+
+        let Mesh::Plane { width, depth } = mesh else {
+            panic!("Expected plane mesh");
+        };
+
+        assert!((*width - 15.0).abs() < f32::EPSILON);
+        assert!((*depth - 20.0).abs() < f32::EPSILON);
+        assert_eq!(material.base_color.r, 0.0);
+        assert!((material.base_color.g - 128.0 / 255.0).abs() < f32::EPSILON);
+        assert_eq!(material.base_color.b, 1.0);
     }
 
     #[test]
@@ -945,11 +1041,11 @@ object_3d "a.world_pos" {
         let serialized = serialize_schematic(&parsed);
         // NOTE: fov and grid are dropped because they are the default value.
         //
-        //viewport active=#true hdr=#true fov=45.0 show_grid=#false
+        //viewport hdr=#true show_grid=#false active=#true
         assert_eq!(
             r#"
 tabs {
-    viewport active=#true hdr=#true
+    viewport hdr=#true active=#true
     graph a.world_pos name="a world_pos"
 }
 object_3d a.world_pos {
@@ -984,11 +1080,11 @@ object_3d "a.world_pos" {
         let serialized = serialize_schematic(&parsed);
         // NOTE: fov and grid are dropped because they are the default value.
         //
-        //viewport active=#true hdr=#true fov=45.0 show_grid=#false
+        //viewport hdr=#true show_grid=#false active=#true
         assert_eq!(
             r#"
 tabs {
-    viewport active=#true hdr=#true
+    viewport hdr=#true active=#true
     graph a.world_pos name="a world_pos"
 }
 object_3d a.world_pos {

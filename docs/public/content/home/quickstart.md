@@ -49,14 +49,14 @@ In a Windows terminal launch the Elodin app.
 In a WSL terminal download and install `elodin` binary into your path then run:
 
 ```sh
-elodin run libs/nox-py/examples/three-body.py
+elodin run examples/three-body/main.py
 ```
 
 
 ### Linux / macOS
 
 ```sh
-elodin run libs/nox-py/examples/three-body.py
+elodin run examples/three-body/main.py
 ```
 
 

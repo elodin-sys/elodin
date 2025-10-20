@@ -28,7 +28,7 @@ Compile the SD Image from source using Nix:
 
 ```bash
 git clone git@github.com:elodin-sys/elodin.git
-cd elodin/images/aleph
+cd elodin/aleph
 nix build --accept-flake-config .#packages.aarch64-linux.sdimage
 ```
 

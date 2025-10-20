@@ -551,7 +551,7 @@ impl ViewportPane {
             Transform::default(),
             Camera3d::default(),
             Camera {
-                hdr: false,
+                hdr: viewport.hdr,
                 clear_color: ClearColorConfig::Default,
                 order: 1,
                 ..Default::default()

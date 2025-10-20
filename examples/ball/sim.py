@@ -22,7 +22,8 @@ def world(seed: int = 0) -> el.World:
         name="ball",
     )
 
-    world.schematic("""
+    world.schematic(
+        """
         hsplit {
             viewport name=Viewport pos="(0,0,0,0, 8,2,4)" look_at="(0,0,0,0, 0,0,3)" hdr=#true show_grid=#true active=#true
         }
@@ -37,10 +38,14 @@ def world(seed: int = 0) -> el.World:
         vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="ball.world_pos" scale=1.0 name="Ball Velocity" {
             color 0 0 255
         }
-        vector_arrow "(1, 0, 0)" origin="ball.world_pos" scale=2 name="Ball Velocity"
-        vector_arrow "(0, 1, 0)" origin="ball.world_pos" scale=1.0 name="Ball Velocity" body_frame=#true
-        vector_arrow "(0, 0, 1)" origin="ball.world_pos" scale=1.0 name="Ball Velocity" body_frame=#true normalize=#true
-""")
+        object_3d "(0,0,0,1, 0,0,0)" {
+            plane width=2000 depth=2000 {
+                color 32 128 32 125
+            }
+        }
+    """,
+        "ball.kdl",
+    )
     return world
 
 

@@ -1064,6 +1064,47 @@ pub fn create_3d_object() -> PaletteItem {
                                 }
                             },
                         ),
+                        PaletteItem::new(
+                            "Plane",
+                            "",
+                            {
+                                let eql = eql.clone();
+                                let expr = expr.clone();
+                                move |_: In<String>| {
+                                    let eql = eql.clone();
+                                    let expr = expr.clone();
+                                    PalettePage::new(vec![
+                                        PaletteItem::new(
+                                            LabelSource::placeholder(
+                                                "Enter width and depth (default: 10 10)",
+                                            ),
+                                            "Enter the width and depth for the plane",
+                                            move |In(dimensions): In<String>| {
+                                                let parts: Vec<f32> = dimensions
+                                                    .split_whitespace()
+                                                    .filter_map(|s| s.parse().ok())
+                                                    .collect();
+
+                                                let (width, depth) = match parts.as_slice() {
+                                                    [w, d] => (*w, *d),
+                                                    [w] => (*w, *w),
+                                                    _ => (10.0, 10.0),
+                                                };
+
+                                                create_object_3d_with_color(
+                                                    eql.clone(),
+                                                    expr.clone(),
+                                                    Mesh::plane(width, depth)
+                                                )
+                                            },
+                                        )
+                                        .default()
+                                    ])
+                                    .prompt("Enter plane size")
+                                    .into()
+                                }
+                            },
+                        ),
                     ])
                     .prompt("Choose 3D object visualization type")
                     .into()

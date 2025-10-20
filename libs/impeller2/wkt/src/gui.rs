@@ -344,6 +344,7 @@ pub enum Mesh {
     Sphere { radius: f32 },
     Box { x: f32, y: f32, z: f32 },
     Cylinder { radius: f32, height: f32 },
+    Plane { width: f32, depth: f32 },
 }
 
 impl Mesh {
@@ -353,6 +354,10 @@ impl Mesh {
 
     pub fn sphere(radius: f32) -> Self {
         Self::Sphere { radius }
+    }
+
+    pub fn plane(width: f32, depth: f32) -> Self {
+        Self::Plane { width, depth }
     }
 }
 

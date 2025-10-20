@@ -27,8 +27,9 @@ stdenv.mkDerivation {
   buildInputs = [
     cudaPackages.cudatoolkit
     cudaPackages.cudnn
-    cudaPackages.tensorrt
-    cudaPackages.vpi2
+    # For 25.05, TensorRT requires manual intervention
+    # see: https://github.com/NixOS/nixpkgs/blob/ee9ca432c02483222ce2fd7993582e1e61b77a4d/pkgs/development/cuda-modules/_cuda/fixups/tensorrt.nix#L54
+    # cudaPackages.tensorrt
     stdenv.cc.cc.lib
     gst_all_1.gstreamer
     gst_all_1.gst-plugins-base
@@ -45,6 +46,9 @@ stdenv.mkDerivation {
   unpackCmd = "dpkg-deb -x $src source";
 
   autoPatchelfIgnoreMissingDeps = true;
+  # FIXME: 25.05 change (https://nixos.org/manual/nixpkgs/unstable/#no-broken-symlinks.sh)
+  # see: https://github.com/NixOS/nixpkgs/pull/370750
+  dontCheckForBrokenSymlinks = true;
 
   preBuild = ''
     addAutoPatchelfSearchPath ${yaml-cpp}/lib/
