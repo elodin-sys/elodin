@@ -9,7 +9,7 @@ use impeller2_wkt::{ComponentValue, Object3D};
 use nox::Array;
 use smallvec::smallvec;
 
-use crate::BevyExt;
+use crate::{BevyExt, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
 use std::fmt;
 
 /// ExprObject3D component that holds an EQL expression for dynamic positioning
@@ -298,6 +298,40 @@ pub fn update_object_3d_system(
     }
 }
 
+/// Disables cameras that ship inside imported scenes so they do not interfere with editor views.
+pub fn disable_imported_cameras(
+    object_roots: Query<Entity, With<Object3DState>>,
+    parents: Query<&ChildOf>,
+    mut imported_cameras: Query<
+        (&ChildOf, &mut Camera),
+        (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>),
+    >,
+) {
+    for (parent, mut camera) in imported_cameras.iter_mut() {
+        let mut current = parent.0;
+        let mut belongs_to_object = false;
+
+        while let Ok(ancestor) = parents.get(current) {
+            if object_roots.get(current).is_ok() {
+                belongs_to_object = true;
+                break;
+            }
+            current = ancestor.0;
+        }
+
+        if !belongs_to_object {
+            // Check the last ancestor (root) if the loop exited because there was no parent.
+            if object_roots.get(current).is_ok() {
+                belongs_to_object = true;
+            }
+        }
+
+        if belongs_to_object {
+            camera.is_active = false;
+        }
+    }
+}
+
 fn evaluate_scale(
     state: &Object3DState,
     entity_map: &EntityMap,
@@ -483,6 +517,6 @@ pub struct Object3DPlugin;
 
 impl Plugin for Object3DPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, update_object_3d_system);
+        app.add_systems(Update, (update_object_3d_system, disable_imported_cameras));
     }
 }
