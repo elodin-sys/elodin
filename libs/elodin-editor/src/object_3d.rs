@@ -1,4 +1,5 @@
 use bevy::ecs::hierarchy::ChildOf;
+use bevy::log::warn;
 use bevy::prelude::Mesh;
 use bevy::prelude::*;
 use bevy_render::alpha::AlphaMode;
@@ -14,8 +15,7 @@ use std::fmt;
 
 type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>);
 
-type ImportedCameraQuery<'w, 's> =
-    Query<'w, 's, (&'static ChildOf, &'static mut Camera), ImportedCameraFilter>;
+type ImportedCameraQuery<'w, 's> = Query<'w, 's, (Entity, &'static ChildOf), ImportedCameraFilter>;
 
 /// ExprObject3D component that holds an EQL expression for dynamic positioning
 #[derive(Component)]
@@ -303,33 +303,47 @@ pub fn update_object_3d_system(
     }
 }
 
-/// Disables cameras that ship inside imported scenes so they do not interfere with editor views.
-pub fn disable_imported_cameras(
-    object_roots: Query<Entity, With<Object3DState>>,
+/// Emits a warning when a GLB spawns a camera so the user can decide how to handle it.
+pub fn warn_imported_cameras(
+    object_states: Query<&Object3DState>,
     parents: Query<&ChildOf>,
-    mut imported_cameras: ImportedCameraQuery,
+    imported_cameras: ImportedCameraQuery,
 ) {
-    for (parent, mut camera) in imported_cameras.iter_mut() {
+    for (camera_entity, parent) in imported_cameras.iter() {
         let mut current = parent.0;
-        let mut belongs_to_object = false;
+        let mut owning_object = None;
 
-        while let Ok(ancestor) = parents.get(current) {
-            if object_roots.get(current).is_ok() {
-                belongs_to_object = true;
+        // Walk up the hierarchy to see if this camera belongs to an object_3d root.
+        loop {
+            if object_states.get(current).is_ok() {
+                owning_object = Some(current);
                 break;
             }
-            current = ancestor.0;
+
+            let Ok(next_parent) = parents.get(current) else {
+                break;
+            };
+            current = next_parent.0;
         }
 
-        if !belongs_to_object {
-            // Check the last ancestor (root) if the loop exited because there was no parent.
-            if object_roots.get(current).is_ok() {
-                belongs_to_object = true;
-            }
-        }
+        let Some(object_root) = owning_object else {
+            continue;
+        };
 
-        if belongs_to_object {
-            camera.is_active = false;
+        if let Ok(state) = object_states.get(object_root) {
+            let source = match &state.data.mesh {
+                impeller2_wkt::Object3DMesh::Glb(path) => format!("GLB '{path}'"),
+                _ => "object_3d".to_string(),
+            };
+            warn!(
+                "Imported {source} contains camera entity {camera_entity:?}; \
+                 embedded cameras stay active. Remove the camera from the asset if this is unintended."
+            );
+        } else {
+            warn!(
+                "Imported object_3d contains camera entity {camera_entity:?}; \
+                 embedded cameras stay active. Remove the camera from the asset if this is unintended."
+            );
         }
     }
 }
@@ -519,6 +533,6 @@ pub struct Object3DPlugin;
 
 impl Plugin for Object3DPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (update_object_3d_system, disable_imported_cameras));
+        app.add_systems(Update, (update_object_3d_system, warn_imported_cameras));
     }
 }
