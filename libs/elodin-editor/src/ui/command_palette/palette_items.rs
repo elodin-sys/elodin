@@ -853,7 +853,12 @@ fn save_db_native_prompt_item() -> PaletteItem {
                         }
                         Err(err) => {
                             warn!(?err, "Failed to save DB snapshot");
-                            let message = err.description.clone();
+                            let message = if err.description.contains("Serde Deserialization Error")
+                            {
+                                "Connected database does not support native DB snapshots. Please update elodin-db and try again.".to_string()
+                            } else {
+                                err.description.clone()
+                            };
                             palette_state.open_page(save_db_native_prompt_page);
                             palette_state.handle_event(PaletteEvent::Error(message));
                         }
