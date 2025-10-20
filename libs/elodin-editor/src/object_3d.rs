@@ -1,5 +1,5 @@
 use bevy::ecs::hierarchy::ChildOf;
-use bevy::log::warn;
+use bevy::log::warn_once;
 use bevy::prelude::Mesh;
 use bevy::prelude::*;
 use bevy_render::alpha::AlphaMode;
@@ -335,12 +335,12 @@ pub fn warn_imported_cameras(
                 impeller2_wkt::Object3DMesh::Glb(path) => format!("GLB '{path}'"),
                 _ => "object_3d".to_string(),
             };
-            warn!(
+            warn_once!(
                 "Imported {source} contains camera entity {camera_entity:?}; \
                  embedded cameras stay active. Remove the camera from the asset if this is unintended."
             );
         } else {
-            warn!(
+            warn_once!(
                 "Imported object_3d contains camera entity {camera_entity:?}; \
                  embedded cameras stay active. Remove the camera from the asset if this is unintended."
             );
