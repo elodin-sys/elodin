@@ -12,18 +12,10 @@ use smallvec::smallvec;
 use crate::{BevyExt, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
 use std::fmt;
 
-type ImportedCameraFilter = (
-    Added<Camera>,
-    Without<NavGizmoCamera>,
-    Without<MainCamera>,
-);
+type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>);
 
-type ImportedCameraQuery<'w, 's> = Query<
-    'w,
-    's,
-    (&'static ChildOf, &'static mut Camera),
-    ImportedCameraFilter,
->;
+type ImportedCameraQuery<'w, 's> =
+    Query<'w, 's, (&'static ChildOf, &'static mut Camera), ImportedCameraFilter>;
 
 /// ExprObject3D component that holds an EQL expression for dynamic positioning
 #[derive(Component)]
