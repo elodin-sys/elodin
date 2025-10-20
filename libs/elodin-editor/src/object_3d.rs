@@ -12,6 +12,19 @@ use smallvec::smallvec;
 use crate::{BevyExt, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
 use std::fmt;
 
+type ImportedCameraFilter = (
+    Added<Camera>,
+    Without<NavGizmoCamera>,
+    Without<MainCamera>,
+);
+
+type ImportedCameraQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static ChildOf, &'static mut Camera),
+    ImportedCameraFilter,
+>;
+
 /// ExprObject3D component that holds an EQL expression for dynamic positioning
 #[derive(Component)]
 pub struct Object3DState {
@@ -302,10 +315,7 @@ pub fn update_object_3d_system(
 pub fn disable_imported_cameras(
     object_roots: Query<Entity, With<Object3DState>>,
     parents: Query<&ChildOf>,
-    mut imported_cameras: Query<
-        (&ChildOf, &mut Camera),
-        (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>),
-    >,
+    mut imported_cameras: ImportedCameraQuery,
 ) {
     for (parent, mut camera) in imported_cameras.iter_mut() {
         let mut current = parent.0;
