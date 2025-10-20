@@ -1,7 +1,7 @@
 import os
 
 from buildkite import group, pipeline, step
-from steps import c_step, nix_step, rust_step
+from steps import nix_step
 
 AZ_CONFIG = {"cluster_name": "dev", "rg_name": "dev"}
 
@@ -14,8 +14,13 @@ test_steps = [
     group(
         name=":c: C",
         steps=[
-            c_step(label="db-c-example", command="cd libs/db; cc examples/client.c -lm"),
-            c_step(
+            nix_step(
+                emoji=":c:",
+                label="db-c-example",
+                command="cd libs/db; cc examples/client.c -lm",
+            ),
+            nix_step(
+                emoji=":c:",
                 label="db-cpp-example",
                 command="cd libs/db; c++ -std=c++23 examples/client.cpp",
             ),
@@ -24,11 +29,13 @@ test_steps = [
     group(
         name=":crab: rust",
         steps=[
-            rust_step(
+            nix_step(
+                emoji=":crab:",
                 label="clippy",
                 command="cargo clippy -- -Dwarnings && cd fsw/sensor-fw && cargo clippy -- -Dwarnings",
             ),
-            rust_step(
+            nix_step(
+                emoji=":crab:",
                 label="cargo test",
                 command="cargo test --release -- -Z unstable-options --format json --report-time | buildkite-test-collector",
                 env={
@@ -36,7 +43,8 @@ test_steps = [
                     "BUILDKITE_ANALYTICS_TOKEN": "R6hH2MNhtMdbfQWhDd9cvZfo",
                 },
             ),
-            rust_step(
+            nix_step(
+                emoji=":crab:",
                 label="cargo fmt",
                 command="cargo fmt --check && cargo fmt --check --manifest-path fsw/sensor-fw/Cargo.toml",
             ),
@@ -112,7 +120,7 @@ test_steps = [
                 label=":nix: toplevel",
                 key="toplevel",
                 command=["cd aleph", "nix build --accept-flake-config .#toplevel"],
-                agents={"queue": "nixos-arm"},
+                agents={"queue": "nixos-arm-aws"},
             ),
             step(
                 label=":nix: sdimage",
@@ -121,7 +129,7 @@ test_steps = [
                     "cd aleph",
                     "nix build --accept-flake-config .#sdimage",
                 ],
-                agents={"queue": "nixos-arm"},
+                agents={"queue": "nixos-arm-aws"},
             ),
             step(
                 label=":nix: flash-uefi",
@@ -144,5 +152,8 @@ pipeline(
     steps=pipeline_steps,
     env={
         "BUILDKITE_PLUGIN_FS_CACHE_FOLDER": "/run/buildkite/cache",
+    },
+    agents={
+        "queue": "nixos-x86-aws",
     },
 )

@@ -23,5 +23,8 @@ def group(name, is_gha=False, key=None, depends_on=None, steps=[]):
     }
 
 
-def pipeline(steps=[], env={}):
-    return print(json.dumps({"steps": steps, "env": env}))
+def pipeline(steps=[], env={}, agents={}):
+    result = {"steps": steps, "env": env}
+    if agents:
+        result["agents"] = agents
+    return print(json.dumps(result))
