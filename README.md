@@ -71,7 +71,7 @@ cd libs/nox-py
 uv venv --python 3.12
 source .venv/bin/activate
 uvx maturin develop --uv
-python3 examples/rocket.py
+python3 ../../examples/rocket/main.py run
 ```
 
 Open the Elodin editor and connect to the local server
