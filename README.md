@@ -46,22 +46,26 @@ git clone https://github.com/elodin-sys/elodin.git
 cd elodin
 ```
 
-### 3. Build and Install Elodin Editor and Elodin DB into your path
-```sh
-# this will also build and use the shell below
-just install
-```
-
-### 4. Enter the Development Shell, run elodin
+### 3. Enter the Nix Development Shell (this can take awhile to build the first time)
 ```sh
 nix develop
-# open elodin, we'll connect to the server we start below
-elodin
 ```
 > [!TIP]
-> The Nix shell runs Oh My Zsh + Powerlevel 10k, and will run configuration setup on first run if not installed
+> The Nix shell supports Oh My Zsh + Powerlevel 10k; for first time configuration run: `p10k configure`
+>
 
-### 5. Enter the Development Shell, run the server & example simulation
+### 4. Build and Install Elodin Editor and Elodin DB into your path
+```sh
+just install
+
+elodin --version
+
+python3 examples/rocket/main.py run
+```
+
+## Python SDK Development Setup (Nix Continued)
+
+### 5. Enter *another* the Development Shell, run the server & example simulation
 
 #### Python SDK Development
 ```sh
