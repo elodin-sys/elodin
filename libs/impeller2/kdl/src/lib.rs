@@ -7,6 +7,8 @@ pub use ser::*;
 mod de;
 pub use de::*;
 
+pub mod env;
+
 #[derive(Error, Debug, Diagnostic, Clone)]
 pub enum KdlSchematicError {
     #[error("KDL parse error")]
@@ -54,9 +56,12 @@ pub enum KdlSchematicError {
     },
 }
 
+// TODO: Consider using the `Display` or `ToString` trait.
 pub trait ToKdl {
     fn to_kdl(&self) -> String;
 }
+
+// TODO: Consider using the `std::str::FromStr` trait.
 pub trait FromKdl {
     fn from_kdl(src: &str) -> Result<Self, KdlSchematicError>
     where

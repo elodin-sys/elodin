@@ -12,7 +12,7 @@ use bevy::{
         system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
         world::World,
     },
-    log::{error, info, warn},
+    log::{error, info},
     pbr::{StandardMaterial, wireframe::WireframeConfig},
     prelude::{Deref, DerefMut, In, Resource},
     render::view::Visibility,
@@ -22,7 +22,7 @@ use egui_tiles::TileId;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::{Timestamp, msg_id};
 use impeller2_bevy::{ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
-use impeller2_kdl::ToKdl;
+use impeller2_kdl::{env::{schematic_file, schematic_dir_or_cwd}, ToKdl};
 use impeller2_wkt::{
     ComponentPath, ComponentValue, CurrentTimestamp, DbConfig, EarliestTimestamp, IsRecording,
     Material, Mesh, Object3D, SetDbConfig, SetStreamState, SimulationTimeStep,
@@ -711,10 +711,11 @@ pub fn save_schematic() -> PaletteItem {
                 Some(path) => {
                     let kdl = schematic.0.to_kdl();
                     let path = Path::new(path).with_extension("kdl");
-                    if let Err(e) = std::fs::write(&path, kdl) {
-                        error!(?e, "saving schematic");
+                    let dest = schematic_file(&path);
+                    if let Err(e) = std::fs::write(&dest, kdl) {
+                        error!(?e, "saving schematic to {:?}", dest.display());
                     } else {
-                        info!(?path, "saved schematic");
+                        info!("saved schematic to {:?}", dest.display());
                     }
                     PaletteEvent::Exit
                 }
@@ -748,10 +749,11 @@ pub fn save_schematic_inner() -> PaletteItem {
         move |In(name): In<String>, schematic: Res<CurrentSchematic>| {
             let kdl = schematic.0.to_kdl();
             let path = PathBuf::from(name).with_extension("kdl");
-            if let Err(e) = std::fs::write(&path, kdl) {
+            let dest = schematic_file(&path);
+            if let Err(e) = std::fs::write(&dest, kdl) {
                 error!(?e, "saving schematic");
             } else {
-                info!(?path, "saved schematic");
+                info!("saved schematic to {:?}", dest.display());
             }
             PaletteEvent::Exit
         },
@@ -759,34 +761,10 @@ pub fn save_schematic_inner() -> PaletteItem {
     .default()
 }
 
-pub fn schematics_dir() -> Option<PathBuf> {
-    let cwd = match std::env::current_dir() {
-        Ok(dir) => dir,
-        Err(e) => {
-            error!(?e, "getting current dir");
-            return None;
-        }
-    };
-    let dir = std::env::var_os("ELODIN_KDL_DIR")
-        .and_then(|d| {
-            let p = PathBuf::from(d);
-            if !p.exists() {
-                warn!("No such directory ELODIN_KDL_DIR {:?}", p.display());
-                None
-            } else if !p.is_dir() {
-                warn!("Not a directory ELODIN_KDL_DIR {:?}", p.display());
-                None
-            } else {
-                Some(p)
-            }
-        })
-        .unwrap_or(cwd);
-    Some(dir)
-}
-
 pub fn load_schematic() -> PaletteItem {
     PaletteItem::new("Load Schematic", PRESETS_LABEL, |_: In<String>| {
-        let Some(dir) = schematics_dir() else {
+        let Ok(dir) = schematic_dir_or_cwd()
+            .inspect_err(|e| error!(?e, "getting schematic dir")) else {
             return PaletteEvent::Exit;
         };
         let elems = match std::fs::read_dir(&dir) {
@@ -827,8 +805,7 @@ pub fn load_schematic_picker() -> PaletteItem {
          rx: ResMut<SchematicLiveReloadRx>,
          mut last_dir: ResMut<DialogLastPath>| {
             let mut dialog = rfd::FileDialog::new().add_filter("kdl", &["kdl"]);
-
-            if let Some(dir) = last_dir.take().or_else(schematics_dir) {
+            if let Some(dir) = last_dir.take().or_else(|| schematic_dir_or_cwd().ok()) {
                 dialog = dialog.set_directory(dir);
             }
             if let Some(path) = dialog.pick_file() {

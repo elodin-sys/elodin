@@ -6983,6 +6983,7 @@ dependencies = [
  "kdl",
  "miette 7.6.0",
  "thiserror 2.0.17",
+ "tracing",
 ]
 
 [[package]]
@@ -8672,6 +8673,7 @@ dependencies = [
  "elodin-db",
  "env_logger 0.11.8",
  "impeller2",
+ "impeller2-kdl",
  "impeller2-wkt",
  "indicatif",
  "miette 7.6.0",

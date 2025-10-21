@@ -41,6 +41,7 @@ impeller2-wkt.path = "../impeller2/wkt"
 impeller2-wkt.features = ["gui", "std"]
 elodin-db.path = "../db"
 
+impeller2-kdl.path = "../impeller2/kdl"
 # async
 stellarator.path = "../stellarator"
 tokio.version = "1.34"
