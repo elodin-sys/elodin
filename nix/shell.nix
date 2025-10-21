@@ -167,7 +167,7 @@ in {
           echo "  • Shell tools: eza, bat, delta, fzf, ripgrep, zoxide"
           echo ""
           echo "💡 SDK Development (if needed):"
-          echo "   cd libs/nox-py && uv venv --python 3.12" && \
+          echo "   cd libs/nox-py && uv venv --python 3.12 && \ "
           echo "   source .venv/bin/activate && uvx maturin develop --uv"
           echo ""
 
