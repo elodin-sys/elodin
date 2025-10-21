@@ -30,6 +30,8 @@ This monorepo contains the source code for all Elodin simulation and flight soft
 - [git-lfs](https://docs.github.com/en/repositories/working-with-files/managing-large-files/installing-git-large-file-storage): ( `brew install git-lfs` / `apt install git-lfs` ), and make sure to activate it globally with `git lfs install` from the terminal.
 - **STRONGLY** prefer an Arm-based MacOS, nix works on x86 & Ubuntu but at much slower build speeds and worse DX.
 
+---
+
 ## Development Setup (Recommended: Nix)
 
 The Elodin repository uses Nix to provide a consistent, reproducible development environment across all platforms. This is the same environment our team uses daily.
@@ -63,18 +65,24 @@ elodin --version
 python3 examples/rocket/main.py run
 ```
 
-## Python SDK Development Setup (Nix Continued)
+Open the Elodin editor in a new nix develop shell and connect to the local server
 
-### 5. Enter *another* the Development Shell, run the server & example simulation
+---
+
+## Python SDK Development Setup (Nix-based continued)
+
+### 5. Enter *another* Nix Development Shell, run the server & example simulation
 
 #### Python SDK Development
 ```sh
 # In a new terminal
-nix develop # enter a new nix develop shell
-cd libs/nox-py
-uv venv --python 3.12
-source .venv/bin/activate
+nix develop
+# build the SDK python wheel
+cd libs/nox-py && \
+uv venv --python 3.12 && \
+source .venv/bin/activate && \
 uvx maturin develop --uv
+# use the newly built wheel
 python3 ../../examples/rocket/main.py run
 ```
 
@@ -82,6 +90,7 @@ Open the Elodin editor and connect to the local server
 
 > [!NOTE]
 > Local setup instructions were validated on Arm M2 MacOS & Intel x86 Ubuntu 24.04 on 2025-10-12.
+
 ---
 
 ## Alternative Local Setup (macOS Only)
