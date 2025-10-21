@@ -16,7 +16,7 @@ use peg::error::ParseError;
 
 pub mod eql_formulas;
 
-use eql_formulas::{Formula, EqlFormula, fft::Fft, fftfreq, first, last, norm};
+use eql_formulas::{Formula, EqlFormula, FormulaRegistry, create_default_registry, fft::Fft, fftfreq, first, last, norm};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AstNode<'input> {
@@ -395,6 +395,7 @@ pub struct Context {
     pub component_parts: BTreeMap<String, ComponentPart>,
     pub earliest_timestamp: Timestamp,
     pub last_timestamp: Timestamp,
+    pub formula_registry: FormulaRegistry,
 }
 
 impl Default for Context {
@@ -403,6 +404,7 @@ impl Default for Context {
             component_parts: BTreeMap::new(),
             earliest_timestamp: Timestamp(i64::MIN),
             last_timestamp: Timestamp(i64::MAX),
+            formula_registry: create_default_registry(),
         }
     }
 }
@@ -450,6 +452,7 @@ impl Context {
             component_parts,
             earliest_timestamp,
             last_timestamp,
+            formula_registry: create_default_registry(),
         }
     }
 
@@ -462,6 +465,7 @@ impl Context {
             component_parts,
             earliest_timestamp,
             last_timestamp,
+            formula_registry: create_default_registry(),
         }
     }
 
@@ -517,13 +521,11 @@ impl Context {
                     .iter()
                     .map(|ast_node| self.parse(ast_node))
                     .collect::<Result<Vec<_>, _>>()?;
-                match cow.as_ref() {
-                    "norm" => norm::parse(recv, &args),
-                    "fft" => Fft.parse(recv, &args),
-                    "fftfreq" => fftfreq::parse(recv, &args),
-                    "last" => last::parse(recv, &args),
-                    "first" => first::parse(recv, &args),
-                    _ => Err(Error::InvalidMethodCall(cow.to_string())),
+                // Try to find the formula in the registry
+                if let Some(formula) = self.formula_registry.get(cow.as_ref()) {
+                    formula.parse(recv, &args)
+                } else {
+                    Err(Error::InvalidMethodCall(cow.to_string()))
                 }
             }
             AstNode::Tuple(ast_nodes) => ast_nodes

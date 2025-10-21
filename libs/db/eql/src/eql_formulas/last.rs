@@ -32,6 +32,19 @@ pub(crate) fn keyword_suggestion() -> String {
     "last".to_string()
 }
 
+#[derive(Debug, Clone)]
+pub struct Last;
+
+impl super::EqlFormula for Last {
+    fn name(&self) -> &'static str {
+        "last"
+    }
+
+    fn parse(&self, recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
+        parse(recv, args)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{Component, ComponentPart, Context, Expr, parse_duration};

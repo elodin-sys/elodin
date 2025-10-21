@@ -45,3 +45,24 @@ pub(crate) fn extend_component_suggestions(component: &Component, suggestions: &
         suggestions.push("norm()".to_string());
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct Norm;
+
+impl super::EqlFormula for Norm {
+    fn name(&self) -> &'static str {
+        "norm"
+    }
+
+    fn parse(&self, recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
+        parse(recv, args)
+    }
+
+    fn to_qualified_field(&self, expr: &Expr) -> Result<String, Error> {
+        to_qualified_field(expr)
+    }
+
+    fn to_column_name(&self, expr: &Expr) -> Option<String> {
+        to_column_name(expr)
+    }
+}
