@@ -1,3 +1,3 @@
 CPPFLAGS = --std=c++2b
 
-all: sim-client
+all: sim-client bridge-client

@@ -32,11 +32,13 @@ struct SensorData {
     float humidity;
 };
 
-struct GlobalData {
+struct BridgeData {
     int64_t time;
-    int64_t tick;
-    double simulation_time_step;
-
+    double sim_time;
+    double pos_world[7];
+    double vel_world[3];
+    double accel_world[3];
+    double gyro[3];
     // double world_pos[3];
 };
 
@@ -150,13 +152,17 @@ try {
     const char* ip = "127.0.0.1";
     const uint16_t port = 2240;
 
-    std::println("Global data size {}", sizeof(GlobalData));
+    std::println("Global data size {}", sizeof(BridgeData));
     // Connect the main socket for writing
     std::println("Main thread: connecting writer socket");
     auto sock = Socket(ip, port);
     auto time = builder::raw_table(0, 8);
     auto table = builder::vtable({
-        field<GlobalData, &GlobalData::tick>(schema(PrimType::U64(), {}, timestamp(time, component("Globals.tick")))),
+        field<BridgeData, &BridgeData::sim_time>(schema(PrimType::F64(), {}, timestamp(time, component("bridge.time")))),
+        field<BridgeData, &BridgeData::pos_world>(schema(PrimType::F64(), { 7 }, timestamp(time, component("bridge.pos_world")))),
+        field<BridgeData, &BridgeData::vel_world>(schema(PrimType::F64(), { 3 }, timestamp(time, component("bridge.vel_world")))),
+        field<BridgeData, &BridgeData::accel_world>(schema(PrimType::F64(), { 3 }, timestamp(time, component("bridge.accel_world")))),
+        field<BridgeData, &BridgeData::gyro>(schema(PrimType::F64(), { 3 }, timestamp(time, component("bridge.gyro")))),
         // In the rocket.py sim the time_step will be 0.0083333 which is 0x0x3F811111059D0921.
         //
         // When this program runs, it will report the following:
@@ -167,9 +173,9 @@ try {
         // | header                | elodin time           | tick                  | simulation_time_step  |
         // ```
         // The time_step is there at the end of the buffer in little-endian byte order.
-        field<GlobalData, &GlobalData::simulation_time_step>(schema(PrimType::F64(), {}, timestamp(time, component("Globals.simulation_time_step")))),
+        // field<BridgeData, &BridgeData::simulation_time_step>(schema(PrimType::F64(), {}, timestamp(time, component("Globals.simulation_time_step")))),
         // NOTE: We can't mix components from other entities it seems.
-        // field<GlobalData, &GlobalData::world_pos>(schema(PrimType::F64(), { 7 }, timestamp(time, component("rocket.world_pos")))),
+        // field<BridgeData, &BridgeData::world_pos>(schema(PrimType::F64(), { 7 }, timestamp(time, component("rocket.world_pos")))),
         // field<SensorData, &SensorData::gyro>(schema(PrimType::F32(), { 3 }, timestamp(time, component("vehicle.imu.gyro")))),
         // field<SensorData, &SensorData::accel>(schema(PrimType::F32(), { 3 }, timestamp(time, component("vehicle.imu.accel")))),
         // field<SensorData, &SensorData::temp>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.temp")))),
@@ -200,11 +206,11 @@ try {
     //     .pressure = 2.0,
     //     .humidity = 3.0
     // };
-    auto global_data = GlobalData {
-    .tick = 0,
-    .simulation_time_step = 0.0,
+    auto global_data = BridgeData {
+    // .tick = 0,
+    // .simulation_time_step = 0.0,
     };
-    std::println("Size of packet header {}", sizeof(PacketHeader));
+    // std::println("Size of packet header {}", sizeof(PacketHeader));
     // while (true) {
     //     // send sin wave data continuously
     //     auto table_header = PacketHeader {
