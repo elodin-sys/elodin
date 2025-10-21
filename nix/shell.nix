@@ -166,8 +166,8 @@ in {
           echo "  • Tools: uv, maturin, ruff, just, kubectl, gcloud"
           echo "  • Shell tools: eza, bat, delta, fzf, ripgrep, zoxide"
           echo ""
-          echo "💡 Python setup (if needed):"
-          echo "   cd libs/nox-py && uv venv --python 3.12"
+          echo "💡 SDK Development (if needed):"
+          echo "   cd libs/nox-py && uv venv --python 3.12 && \ "
           echo "   source .venv/bin/activate && uvx maturin develop --uv"
           echo ""
 

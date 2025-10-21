@@ -30,6 +30,8 @@ This monorepo contains the source code for all Elodin simulation and flight soft
 - [git-lfs](https://docs.github.com/en/repositories/working-with-files/managing-large-files/installing-git-large-file-storage): ( `brew install git-lfs` / `apt install git-lfs` ), and make sure to activate it globally with `git lfs install` from the terminal.
 - **STRONGLY** prefer an Arm-based MacOS, nix works on x86 & Ubuntu but at much slower build speeds and worse DX.
 
+---
+
 ## Development Setup (Recommended: Nix)
 
 The Elodin repository uses Nix to provide a consistent, reproducible development environment across all platforms. This is the same environment our team uses daily.
@@ -46,31 +48,41 @@ git clone https://github.com/elodin-sys/elodin.git
 cd elodin
 ```
 
-### 3. Build and Install Elodin Editor and Elodin DB into your path
-```sh
-# this will also build and use the shell below
-just install
-```
-
-### 4. Enter the Development Shell, run elodin
+### 3. Enter the Nix Development Shell (this can take awhile to build the first time)
 ```sh
 nix develop
-# open elodin, we'll connect to the server we start below
-elodin
 ```
 > [!TIP]
-> The Nix shell runs Oh My Zsh + Powerlevel 10k, and will run configuration setup on first run if not installed
+> The Nix shell supports Oh My Zsh + Powerlevel 10k; for first time configuration run: `p10k configure`
+>
 
-### 5. Enter the Development Shell, run the server & example simulation
+### 4. Build and Install Elodin Editor and Elodin DB into your path
+```sh
+just install
+
+elodin --version
+
+python3 examples/rocket/main.py run
+```
+
+Open the Elodin editor in a new nix develop shell and connect to the local server
+
+---
+
+## Python SDK Development Setup (Nix-based continued)
+
+### 5. Enter *another* Nix Development Shell, run the server & example simulation
 
 #### Python SDK Development
 ```sh
 # In a new terminal
-nix develop # enter a new nix develop shell
-cd libs/nox-py
-uv venv --python 3.12
-source .venv/bin/activate
+nix develop
+# build the SDK python wheel
+cd libs/nox-py && \
+uv venv --python 3.12 && \
+source .venv/bin/activate && \
 uvx maturin develop --uv
+# use the newly built wheel
 python3 ../../examples/rocket/main.py run
 ```
 
@@ -78,6 +90,7 @@ Open the Elodin editor and connect to the local server
 
 > [!NOTE]
 > Local setup instructions were validated on Arm M2 MacOS & Intel x86 Ubuntu 24.04 on 2025-10-12.
+
 ---
 
 ## Alternative Local Setup (macOS Only)
