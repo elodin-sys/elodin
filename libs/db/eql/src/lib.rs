@@ -16,7 +16,7 @@ use peg::error::ParseError;
 
 pub mod eql_formulas;
 
-use eql_formulas::{fft, fftfreq, first, last, norm};
+use eql_formulas::{Formula, EqlFormula, fft::Fft, fftfreq, first, last, norm};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AstNode<'input> {
@@ -109,6 +109,8 @@ pub enum Expr {
     FloatLiteral(f64),
     StringLiteral(String),
 
+    Formula(Formula, Box<Expr>),
+
     // norm()
     Norm(Box<Expr>),
 
@@ -130,7 +132,7 @@ impl Expr {
             Expr::ComponentPart(component) => Ok(component.name.replace(".", "_")),
 
             Expr::Time(_) => Ok("time".to_string()),
-            Expr::Fft(e) => fft::to_field(e),
+            Expr::Fft(e) => Fft.to_field(e),
             Expr::FftFreq(e) => fftfreq::to_field(e),
             Expr::BinaryOp(left, right, op) => Ok(format!(
                 "({} {} {})",
@@ -182,7 +184,7 @@ impl Expr {
     fn to_qualified_field(&self) -> Result<String, Error> {
         match self {
             Expr::Norm(e) => norm::to_qualified_field(e),
-            Expr::Fft(e) => fft::to_qualified_field(e),
+            Expr::Fft(e) => Fft.to_qualified_field(e),
             Expr::FftFreq(e) => fftfreq::to_qualified_field(e),
             Expr::BinaryOp(left, right, op) => Ok(format!(
                 "({} {} {})",
@@ -202,7 +204,7 @@ impl Expr {
     fn to_column_name(&self) -> Option<String> {
         match self {
             Expr::Norm(e) => norm::to_column_name(e),
-            Expr::Fft(e) => fft::to_column_name(e),
+            Expr::Fft(e) => Fft.to_column_name(e),
             Expr::FftFreq(e) => fftfreq::to_column_name(e),
             Expr::ComponentPart(e) => Some(e.name.clone()),
             Expr::ArrayAccess(expr, index) => match expr.as_ref() {
@@ -517,7 +519,7 @@ impl Context {
                     .collect::<Result<Vec<_>, _>>()?;
                 match cow.as_ref() {
                     "norm" => norm::parse(recv, &args),
-                    "fft" => fft::parse(recv, &args),
+                    "fft" => Fft.parse(recv, &args),
                     "fftfreq" => fftfreq::parse(recv, &args),
                     "last" => last::parse(recv, &args),
                     "first" => first::parse(recv, &args),
@@ -578,7 +580,7 @@ impl Context {
             }
             Expr::Time(_) => fftfreq::suggestions_for_time(),
             Expr::ArrayAccess(_, _) => vec![
-                fft::array_access_suggestion(),
+                Fft.array_access_suggestion(),
                 last::component_suggestion(),
                 first::component_suggestion(),
             ],
