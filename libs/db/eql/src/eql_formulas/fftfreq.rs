@@ -23,3 +23,28 @@ pub(crate) fn parse(recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
 pub(crate) fn suggestions_for_time() -> Vec<String> {
     vec!["fftfreq()".to_string()]
 }
+
+#[derive(Debug, Clone)]
+pub struct FftFreq;
+
+impl super::EqlFormula for FftFreq {
+    fn name(&self) -> &'static str {
+        "fftfreq"
+    }
+
+    fn parse(&self, recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
+        parse(recv, args)
+    }
+
+    fn to_field(&self, expr: &Expr) -> Result<String, Error> {
+        to_field(expr)
+    }
+
+    fn to_qualified_field(&self, expr: &Expr) -> Result<String, Error> {
+        to_qualified_field(expr)
+    }
+
+    fn to_column_name(&self, expr: &Expr) -> Option<String> {
+        to_column_name(expr)
+    }
+}
