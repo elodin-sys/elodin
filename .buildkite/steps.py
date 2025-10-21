@@ -55,21 +55,3 @@ EOF"""
         plugins=plugins,
         agents=agents,
     )
-
-
-def rust_step(label, command, env={}, emoji=":crab:"):
-    return nix_step(
-        label=label,
-        emoji=emoji,
-        command=command,
-        env=env,
-    )
-
-
-def c_step(label, command, env={}, emoji=":c:"):
-    return nix_step(
-        label=label,
-        emoji=emoji,
-        command=command,
-        env=env,
-    )
