@@ -572,31 +572,26 @@ impl Context {
 
     /// Get suggestions for the given expression
     pub fn get_suggestions(&self, expr: &Expr) -> Vec<String> {
-        match expr {
+        let mut suggestions: Vec<String> = match expr {
             Expr::ComponentPart(part) => {
                 let mut suggestions: Vec<String> = part.children.keys().cloned().collect();
                 if let Some(component) = &part.component {
                     suggestions.extend(component.element_names.iter().map(|name| name.to_string()));
-                    norm::extend_component_suggestions(component, &mut suggestions);
-                    suggestions.push(last::component_suggestion());
-                    suggestions.push(first::component_suggestion());
                 }
                 suggestions.push("time".to_string());
-                suggestions.sort();
                 suggestions
             }
-            Expr::Time(_) => fftfreq::suggestions_for_time(),
-            Expr::ArrayAccess(_, _) => vec![
-                Fft.array_access_suggestion(),
-                last::component_suggestion(),
-                first::component_suggestion(),
-            ],
-            Expr::Tuple(_) | Expr::Fft(_) | Expr::FftFreq(_) => {
-                vec![last::keyword_suggestion(), first::keyword_suggestion()]
-            }
-            Expr::StringLiteral(_) => vec![],
-            _ => vec![],
+            Expr::StringLiteral(_) => Vec::new(),
+            _ => Vec::new(),
+        };
+
+        for formula in self.formula_registry.iter() {
+            suggestions.extend(formula.suggestions(expr, self));
         }
+
+        suggestions.sort();
+        suggestions.dedup();
+        suggestions
     }
 
     pub fn get_string_suggestions(&self, input: &str) -> Vec<(String, String)> {
