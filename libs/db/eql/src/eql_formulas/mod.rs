@@ -6,7 +6,7 @@ pub mod first;
 pub mod last;
 pub mod norm;
 
-use crate::{Expr, Error};
+use crate::{Error, Expr};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -16,7 +16,8 @@ pub trait EqlFormula: Send + Sync + std::fmt::Debug {
     fn parse(&self, recv: Expr, args: &[Expr]) -> Result<Expr, Error>;
 
     fn to_column_name(&self, expr: &Expr) -> Option<String> {
-        expr.to_column_name().map(|name| format!("{}({name})", self.name()))
+        expr.to_column_name()
+            .map(|name| format!("{}({name})", self.name()))
     }
 
     fn to_qualified_field(&self, expr: &Expr) -> Result<String, Error> {
@@ -74,62 +75,16 @@ impl Default for FormulaRegistry {
     }
 }
 
-/// A wrapper around a formula that implements Clone by storing an Arc
-#[derive(Debug, Clone)]
-pub struct Formula {
-    inner: Arc<dyn EqlFormula>,
-}
-
-impl Formula {
-    /// Create a new Formula wrapper
-    pub fn new<F: EqlFormula + 'static>(formula: F) -> Self {
-        Self {
-            inner: Arc::new(formula),
-        }
-    }
-
-    /// Get the formula name
-    pub fn name(&self) -> &'static str {
-        self.inner.name()
-    }
-}
-
-impl EqlFormula for Formula {
-    fn name(&self) -> &'static str {
-        self.inner.name()
-    }
-
-    fn parse(&self, recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
-        self.inner.parse(recv, args)
-    }
-
-    fn to_column_name(&self, expr: &Expr) -> Option<String> {
-        self.inner.to_column_name(expr)
-    }
-
-    fn to_qualified_field(&self, expr: &Expr) -> Result<String, Error> {
-        self.inner.to_qualified_field(expr)
-    }
-
-    fn to_field(&self, expr: &Expr) -> Result<String, Error> {
-        self.inner.to_field(expr)
-    }
-
-    fn array_access_suggestion(&self) -> String {
-        self.inner.array_access_suggestion()
-    }
-}
-
 /// Create a default formula registry with all built-in formulas
 pub fn create_default_registry() -> FormulaRegistry {
     let mut registry = FormulaRegistry::new();
-    
+
     // Register all built-in formulas
     registry.register(fft::Fft);
     registry.register(fftfreq::FftFreq);
     registry.register(norm::Norm);
     registry.register(first::First);
     registry.register(last::Last);
-    
+
     registry
 }

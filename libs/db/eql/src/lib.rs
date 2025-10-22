@@ -16,7 +16,9 @@ use peg::error::ParseError;
 
 pub mod eql_formulas;
 
-use eql_formulas::{Formula, EqlFormula, FormulaRegistry, create_default_registry, fft::Fft, fftfreq, first, last, norm};
+use eql_formulas::{
+    EqlFormula, FormulaRegistry, create_default_registry, fft::Fft, fftfreq, first, last, norm,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AstNode<'input> {
@@ -109,7 +111,10 @@ pub enum Expr {
     FloatLiteral(f64),
     StringLiteral(String),
 
-    Formula(Formula, Box<Expr>),
+    // We're using `Arc` to satisfy the `Clone` requirement above with a `dyn`.
+    // `Box<dyn EqlFormula>` would be a more natural fit, but it doesn't
+    // implement clone.
+    Formula(Arc<dyn EqlFormula>, Box<Expr>),
 
     // norm()
     Norm(Box<Expr>),
