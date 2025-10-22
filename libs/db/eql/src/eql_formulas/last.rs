@@ -43,6 +43,16 @@ impl super::EqlFormula for Last {
     fn parse(&self, recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
         parse(recv, args)
     }
+
+    fn suggestions(&self, expr: &Expr, _context: &Context) -> Vec<String> {
+        match expr {
+            Expr::ComponentPart(_) | Expr::ArrayAccess(_, _) => {
+                vec!["last(".to_string()]
+            }
+            Expr::Tuple(_) | Expr::Fft(_) | Expr::FftFreq(_) => vec!["last".to_string()],
+            _ => Vec::new(),
+        }
+    }
 }
 
 #[cfg(test)]

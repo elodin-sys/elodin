@@ -1,4 +1,4 @@
-use crate::{Error, Expr};
+use crate::{Context, Error, Expr};
 
 // pub(crate) fn to_field(expr: &Expr) -> Result<String, Error> {
 //     Ok(format!("fft({})", expr.to_field()?))
@@ -37,6 +37,14 @@ impl super::EqlFormula for Fft {
             Ok(Expr::Fft(Box::new(recv)))
         } else {
             Err(Error::InvalidMethodCall("fft".to_string()))
+        }
+    }
+
+    fn suggestions(&self, expr: &Expr, _context: &Context) -> Vec<String> {
+        if matches!(expr, Expr::ArrayAccess(_, _)) {
+            vec!["fft()".to_string()]
+        } else {
+            Vec::new()
         }
     }
 }

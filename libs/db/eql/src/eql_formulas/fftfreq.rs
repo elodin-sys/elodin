@@ -1,4 +1,4 @@
-use crate::{Error, Expr};
+use crate::{Context, Error, Expr};
 
 pub(crate) fn to_field(expr: &Expr) -> Result<String, Error> {
     Ok(format!("fftfreq({})", expr.to_field()?))
@@ -46,5 +46,13 @@ impl super::EqlFormula for FftFreq {
 
     fn to_column_name(&self, expr: &Expr) -> Option<String> {
         to_column_name(expr)
+    }
+
+    fn suggestions(&self, expr: &Expr, _context: &Context) -> Vec<String> {
+        if matches!(expr, Expr::Time(_)) {
+            suggestions_for_time()
+        } else {
+            Vec::new()
+        }
     }
 }

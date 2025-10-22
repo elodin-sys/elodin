@@ -1,4 +1,4 @@
-use crate::{Component, Error, Expr};
+use crate::{Component, Context, Error, Expr};
 
 pub(crate) fn to_qualified_field(expr: &Expr) -> Result<String, Error> {
     let part = match expr {
@@ -64,5 +64,16 @@ impl super::EqlFormula for Norm {
 
     fn to_column_name(&self, expr: &Expr) -> Option<String> {
         to_column_name(expr)
+    }
+
+    fn suggestions(&self, expr: &Expr, _context: &Context) -> Vec<String> {
+        if let Expr::ComponentPart(part) = expr {
+            if let Some(component) = &part.component {
+                if !component.schema.dim().is_empty() {
+                    return vec!["norm()".to_string()];
+                }
+            }
+        }
+        Vec::new()
     }
 }

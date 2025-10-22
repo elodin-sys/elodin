@@ -6,7 +6,7 @@ pub mod first;
 pub mod last;
 pub mod norm;
 
-use crate::{Error, Expr};
+use crate::{Context, Error, Expr};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -29,8 +29,8 @@ pub trait EqlFormula: Send + Sync + std::fmt::Debug {
         Ok(format!("{}({})", self.name(), expr.to_field()?))
     }
 
-    fn array_access_suggestion(&self) -> String {
-        format!("{}()", self.name())
+    fn suggestions(&self, _expr: &Expr, _context: &Context) -> Vec<String> {
+        Vec::new()
     }
 }
 
@@ -67,6 +67,10 @@ impl FormulaRegistry {
     /// Check if a formula is registered
     pub fn contains(&self, name: &str) -> bool {
         self.formulas.contains_key(name)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Arc<dyn EqlFormula>> {
+        self.formulas.values()
     }
 }
 
