@@ -109,9 +109,6 @@ pub enum Expr {
     FloatLiteral(f64),
     StringLiteral(String),
 
-    // We're using `Arc` to satisfy the `Clone` requirement above with a `dyn`.
-    // `Box<dyn EqlFormula>` would be a more natural fit, but it doesn't
-    // implement clone.
     Formula(Arc<dyn EqlFormula>, Box<Expr>),
 
     // norm()
