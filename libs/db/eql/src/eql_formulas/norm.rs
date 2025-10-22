@@ -67,12 +67,11 @@ impl super::EqlFormula for Norm {
     }
 
     fn suggestions(&self, expr: &Expr, _context: &Context) -> Vec<String> {
-        if let Expr::ComponentPart(part) = expr {
-            if let Some(component) = &part.component {
-                if !component.schema.dim().is_empty() {
-                    return vec!["norm()".to_string()];
-                }
-            }
+        if let Expr::ComponentPart(part) = expr
+            && let Some(component) = &part.component
+            && !component.schema.dim().is_empty()
+        {
+            return vec!["norm()".to_string()];
         }
         Vec::new()
     }
