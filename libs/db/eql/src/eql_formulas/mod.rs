@@ -10,11 +10,11 @@ use crate::{Context, Error, Expr};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-// These default impls came from fft.
 pub trait EqlFormula: Send + Sync + std::fmt::Debug {
     fn name(&self) -> &'static str;
 
-    fn parse(&self, recv: Expr, args: &[Expr]) -> Result<Expr, Error>;
+    fn parse(&self, formula: Arc<dyn EqlFormula>, recv: Expr, args: &[Expr])
+    -> Result<Expr, Error>;
 
     fn to_column_name(&self, expr: &Expr) -> Option<String> {
         expr.to_column_name()

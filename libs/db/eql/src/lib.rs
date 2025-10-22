@@ -16,9 +16,7 @@ use peg::error::ParseError;
 
 pub mod eql_formulas;
 
-use eql_formulas::{
-    EqlFormula, FormulaRegistry, create_default_registry, fft::Fft, fftfreq, first, last, norm,
-};
+use eql_formulas::{EqlFormula, FormulaRegistry, create_default_registry, first, last, norm};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AstNode<'input> {
@@ -119,10 +117,6 @@ pub enum Expr {
     // norm()
     Norm(Box<Expr>),
 
-    // ffts
-    Fft(Box<Expr>),
-    FftFreq(Box<Expr>),
-
     // time limits
     Last(Box<Expr>, hifitime::Duration),
     First(Box<Expr>, hifitime::Duration),
@@ -137,8 +131,7 @@ impl Expr {
             Expr::ComponentPart(component) => Ok(component.name.replace(".", "_")),
 
             Expr::Time(_) => Ok("time".to_string()),
-            Expr::Fft(e) => Fft.to_field(e),
-            Expr::FftFreq(e) => fftfreq::to_field(e),
+            Expr::Formula(formula, expr) => formula.to_field(expr),
             Expr::BinaryOp(left, right, op) => Ok(format!(
                 "({} {} {})",
                 left.to_field()?,
@@ -168,8 +161,7 @@ impl Expr {
 
             Expr::Time(component) => Ok(component.name.replace(".", "_")),
             Expr::Norm(e) => e.to_table(), // norm()
-            Expr::FftFreq(e) => e.to_table(),
-            Expr::Fft(e) => e.to_table(),
+            Expr::Formula(_, expr) => expr.to_table(),
             Expr::BinaryOp(left, _, _) => left.to_table(),
 
             Expr::ArrayAccess(inner_expr, _) => match inner_expr.as_ref() {
@@ -189,8 +181,7 @@ impl Expr {
     fn to_qualified_field(&self) -> Result<String, Error> {
         match self {
             Expr::Norm(e) => norm::to_qualified_field(e),
-            Expr::Fft(e) => Fft.to_qualified_field(e),
-            Expr::FftFreq(e) => fftfreq::to_qualified_field(e),
+            Expr::Formula(formula, expr) => formula.to_qualified_field(expr),
             Expr::BinaryOp(left, right, op) => Ok(format!(
                 "({} {} {})",
                 left.to_qualified_field()?,
@@ -209,8 +200,7 @@ impl Expr {
     fn to_column_name(&self) -> Option<String> {
         match self {
             Expr::Norm(e) => norm::to_column_name(e),
-            Expr::Fft(e) => Fft.to_column_name(e),
-            Expr::FftFreq(e) => fftfreq::to_column_name(e),
+            Expr::Formula(formula, expr) => formula.to_column_name(expr),
             Expr::ComponentPart(e) => Some(e.name.clone()),
             Expr::ArrayAccess(expr, index) => match expr.as_ref() {
                 Expr::ComponentPart(c) => {
@@ -526,9 +516,9 @@ impl Context {
                     .iter()
                     .map(|ast_node| self.parse(ast_node))
                     .collect::<Result<Vec<_>, _>>()?;
-                // Try to find the formula in the registry
                 if let Some(formula) = self.formula_registry.get(cow.as_ref()) {
-                    formula.parse(recv, &args)
+                    let arc = Arc::clone(formula);
+                    formula.parse(arc, recv, &args)
                 } else {
                     Err(Error::InvalidMethodCall(cow.to_string()))
                 }
@@ -690,6 +680,7 @@ pub enum Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::eql_formulas::fftfreq;
 
     #[test]
     fn test_ast_parse() {
@@ -786,7 +777,7 @@ mod tests {
         let context = create_test_context();
 
         let time_expr = Expr::Time(entity_component);
-        let expr = Expr::FftFreq(Box::new(time_expr));
+        let expr = Expr::Formula(Arc::new(fftfreq::FftFreq), Box::new(time_expr));
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
