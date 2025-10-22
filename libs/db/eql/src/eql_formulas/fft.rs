@@ -39,5 +39,4 @@ impl super::EqlFormula for Fft {
             Err(Error::InvalidMethodCall("fft".to_string()))
         }
     }
-
 }
