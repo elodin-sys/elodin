@@ -10,6 +10,7 @@ use crate::{Error, Expr};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+// These default impls came from fft.
 pub trait EqlFormula: Send + Sync + std::fmt::Debug {
     fn name(&self) -> &'static str;
 
@@ -59,8 +60,8 @@ impl FormulaRegistry {
     }
 
     /// Get all registered formula names
-    pub fn formula_names(&self) -> Vec<String> {
-        self.formulas.keys().cloned().collect()
+    pub fn formula_names(&self) -> impl Iterator<Item = &str> {
+        self.formulas.keys().map(|s| s.as_str())
     }
 
     /// Check if a formula is registered
