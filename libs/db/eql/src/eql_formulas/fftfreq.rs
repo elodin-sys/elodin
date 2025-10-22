@@ -1,4 +1,5 @@
 use crate::{Context, Error, Expr};
+use std::sync::Arc;
 
 pub(crate) fn to_field(expr: &Expr) -> Result<String, Error> {
     Ok(format!("fftfreq({})", expr.to_field()?))
@@ -10,14 +11,6 @@ pub(crate) fn to_qualified_field(expr: &Expr) -> Result<String, Error> {
 
 pub(crate) fn to_column_name(expr: &Expr) -> Option<String> {
     expr.to_column_name().map(|name| format!("fftfreq({name})"))
-}
-
-pub(crate) fn parse(recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
-    if args.is_empty() && matches!(recv, Expr::Time(_)) {
-        Ok(Expr::FftFreq(Box::new(recv)))
-    } else {
-        Err(Error::InvalidMethodCall("fftfreq".to_string()))
-    }
 }
 
 pub(crate) fn suggestions_for_time() -> Vec<String> {
@@ -32,8 +25,17 @@ impl super::EqlFormula for FftFreq {
         "fftfreq"
     }
 
-    fn parse(&self, recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
-        parse(recv, args)
+    fn parse(
+        &self,
+        formula: Arc<dyn super::EqlFormula>,
+        recv: Expr,
+        args: &[Expr],
+    ) -> Result<Expr, Error> {
+        if args.is_empty() && matches!(recv, Expr::Time(_)) {
+            Ok(Expr::Formula(formula, Box::new(recv)))
+        } else {
+            Err(Error::InvalidMethodCall("fftfreq".to_string()))
+        }
     }
 
     fn to_field(&self, expr: &Expr) -> Result<String, Error> {

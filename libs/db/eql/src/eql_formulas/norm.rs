@@ -1,4 +1,5 @@
-use crate::{Component, Context, Error, Expr};
+use crate::{Context, Error, Expr};
+use std::sync::Arc;
 
 pub(crate) fn to_qualified_field(expr: &Expr) -> Result<String, Error> {
     let part = match expr {
@@ -40,12 +41,6 @@ pub(crate) fn parse(recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
     Err(Error::InvalidMethodCall("norm".to_string()))
 }
 
-pub(crate) fn extend_component_suggestions(component: &Component, suggestions: &mut Vec<String>) {
-    if !component.schema.dim().is_empty() {
-        suggestions.push("norm()".to_string());
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Norm;
 
@@ -54,7 +49,12 @@ impl super::EqlFormula for Norm {
         "norm"
     }
 
-    fn parse(&self, recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
+    fn parse(
+        &self,
+        _formula: Arc<dyn super::EqlFormula>,
+        recv: Expr,
+        args: &[Expr],
+    ) -> Result<Expr, Error> {
         parse(recv, args)
     }
 
