@@ -786,6 +786,25 @@ mod tests {
     }
 
     #[test]
+    fn test_fft_sql_via_parse() {
+        let context = create_test_context();
+        let expr = context.parse_str("a.world_pos[0].fft()").unwrap();
+        let sql = expr.to_sql(&context).unwrap();
+        assert_eq!(
+            sql,
+            "select fft(a_world_pos.a_world_pos[1]) as 'fft(a.world_pos.x)' from a_world_pos"
+        );
+    }
+
+    #[test]
+    fn test_fftfreq_sql_via_parse() {
+        let context = create_test_context();
+        let expr = context.parse_str("a.world_pos.time.fftfreq()").unwrap();
+        let sql = expr.to_sql(&context).unwrap();
+        assert_eq!(sql, "select fftfreq(a_world_pos.time) from a_world_pos");
+    }
+
+    #[test]
     fn test_array_access_sql() {
         let part = create_test_component_part();
         let context = create_test_context();
@@ -972,7 +991,9 @@ mod tests {
         let suggestions = context.get_suggestions(&expr);
         assert!(suggestions.contains(&"world_pos".to_string()));
         assert!(suggestions.contains(&"time".to_string()));
-        assert_eq!(suggestions.len(), 2);
+        assert!(suggestions.contains(&"first(".to_string()));
+        assert!(suggestions.contains(&"last(".to_string()));
+        assert_eq!(suggestions.len(), 4);
     }
 
     #[test]
@@ -985,6 +1006,7 @@ mod tests {
         let suggestions = context.get_suggestions(&expr);
         assert!(suggestions.contains(&"first(".to_string()));
         assert!(suggestions.contains(&"last(".to_string()));
+        assert!(suggestions.contains(&"norm()".to_string()));
         assert!(suggestions.contains(&"time".to_string()));
         assert!(suggestions.contains(&"x".to_string()));
         assert!(suggestions.contains(&"y".to_string()));
@@ -1015,6 +1037,14 @@ mod tests {
     }
 
     #[test]
+    fn test_formula_suggestions() {
+        let context = create_test_context();
+        let expr = context.parse_str("a.world_pos[0].fft()").unwrap();
+        let suggestions = context.get_suggestions(&expr);
+        assert_eq!(suggestions, vec!["first", "last"]);
+    }
+
+    #[test]
     fn test_string_suggestions_empty() {
         let context = create_test_context();
         let suggestions = context
@@ -1038,6 +1068,8 @@ mod tests {
 
         assert!(suggestions.contains(&"world_pos".to_string()));
         assert!(suggestions.contains(&"time".to_string()));
+        assert!(suggestions.contains(&"first(".to_string()));
+        assert!(suggestions.contains(&"last(".to_string()));
     }
 
     #[test]
@@ -1051,6 +1083,7 @@ mod tests {
 
         assert!(suggestions.contains(&"first(".to_string()));
         assert!(suggestions.contains(&"last(".to_string()));
+        assert!(suggestions.contains(&"norm()".to_string()));
         assert!(suggestions.contains(&"time".to_string()));
         assert!(suggestions.contains(&"x".to_string()));
     }
