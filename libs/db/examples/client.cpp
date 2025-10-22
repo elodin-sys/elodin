@@ -134,11 +134,12 @@ try {
     auto time = builder::raw_table(0, 8);
     auto table = builder::vtable({
         field<SensorData, &SensorData::mag>(schema(PrimType::F32(), { 3 }, timestamp(time, component("vehicle.imu.mag")))),
-        field<SensorData, &SensorData::gyro>(schema(PrimType::F32(), { 3 }, timestamp(time, component("vehicle.imu.gyro")))),
-        field<SensorData, &SensorData::accel>(schema(PrimType::F32(), { 3 }, timestamp(time, component("vehicle.imu.accel")))),
-        field<SensorData, &SensorData::temp>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.temp")))),
-        field<SensorData, &SensorData::pressure>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.pressure")))),
-        field<SensorData, &SensorData::humidity>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.humidity")))),
+        field<SensorData, &SensorData::mag>(schema(PrimType::F32(), { 3 }, timestamp(time, component("vehicle.imu.mag")))),
+        // field<SensorData, &SensorData::gyro>(schema(PrimType::F32(), { 3 }, timestamp(time, component("vehicle.imu.gyro")))),
+        // field<SensorData, &SensorData::accel>(schema(PrimType::F32(), { 3 }, timestamp(time, component("vehicle.imu.accel")))),
+        // field<SensorData, &SensorData::temp>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.temp")))),
+        // field<SensorData, &SensorData::pressure>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.pressure")))),
+        // field<SensorData, &SensorData::humidity>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.humidity")))),
     });
 
     sock.send(VTableMsg {

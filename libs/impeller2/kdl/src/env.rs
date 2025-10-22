@@ -1,4 +1,7 @@
-use std::{io, path::{Path, PathBuf}};
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 use thiserror::Error;
 use tracing::error;
 
@@ -36,10 +39,9 @@ pub fn schematic_dir_or_cwd() -> Result<PathBuf, Error> {
     } else {
         Ok(std::env::current_dir()?)
     }
-
 }
 
-/// Given an aboluste file path, return it unchanged. Otherwise append to
+/// Given an absolute file path, return it unchanged. Otherwise append to
 /// `ELODIN_KDL_DIR` if set.
 pub fn schematic_file(path: &Path) -> PathBuf {
     if path.is_absolute() {

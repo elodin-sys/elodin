@@ -436,7 +436,7 @@ impl WorldBuilder {
             .metadata
             .schematic_path
             .as_ref()
-            .map(|p| impeller2_kdl::env::schematic_file(&Path::new(p)))
+            .map(|p| impeller2_kdl::env::schematic_file(Path::new(p)))
             .and_then(|path| {
                 if path.exists() {
                     std::fs::read_to_string(&path)
