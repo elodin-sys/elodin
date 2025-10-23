@@ -29,4 +29,5 @@ impl super::EqlFormula for Fft {
             Vec::new()
         }
     }
+
 }

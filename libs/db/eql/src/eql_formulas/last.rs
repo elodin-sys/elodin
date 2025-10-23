@@ -53,11 +53,23 @@ impl super::EqlFormula for Last {
             _ => Vec::new(),
         }
     }
+
+    fn to_sql(
+        &self,
+        expr: &Expr,
+        context: &Context,
+    ) -> Result<String, Error> {
+        if let Some(duration) = self.0.as_ref() {
+            to_sql(expr, duration, context)
+        } else {
+            Err(Error::MissingDuration(self.name().to_string()))
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{Component, ComponentPart, Context, Expr, parse_duration};
+    use crate::{Component, ComponentPart, Context, Expr, parse_duration, eql_formulas::Last};
     use impeller2::schema::Schema;
     use impeller2::types::{ComponentId, PrimType, Timestamp};
     use std::collections::BTreeMap;
@@ -78,9 +90,9 @@ mod tests {
         });
         let context = Context::new(BTreeMap::new(), Timestamp(0), Timestamp(1_000_000));
         let duration = parse_duration("PT0.5S").unwrap();
-        let expr = Expr::Last(Box::new(Expr::ComponentPart(part)), duration);
+        let expr = Expr::Formula(Arc::new(Last(Some(duration))), Box::new(Expr::ComponentPart(part)));
 
         let sql = expr.to_sql(&context).unwrap();
-        assert!(sql.contains(">= to_timestamp(0.5)"));
+        assert!(sql.contains(">= to_timestamp(0.5)"), "WAS {}", sql);
     }
 }

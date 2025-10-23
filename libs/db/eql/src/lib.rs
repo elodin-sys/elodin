@@ -310,7 +310,9 @@ impl Expr {
             Expr::StringLiteral(_) => Err(Error::InvalidFieldAccess(
                 "cannot convert string literal to SQL".to_string(),
             )),
-
+            Expr::Formula(formula, expr) => {
+                formula.to_sql(expr, context)
+            },
             expr => Ok(format!(
                 "select {} from {}",
                 expr.to_select_part()?,
@@ -769,7 +771,7 @@ mod tests {
         let context = create_test_context();
 
         let time_expr = Expr::Time(entity_component);
-        let expr = Expr::Formula(Arc::new(fftfreq::FftFreq), Box::new(time_expr));
+        let expr = Expr::Formula(Arc::new(FftFreq), Box::new(time_expr));
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),

@@ -75,4 +75,14 @@ impl super::EqlFormula for Norm {
         }
         Vec::new()
     }
+
+    // fn to_sql(&self, expr: &Expr, context: &Context) -> Result<String, Error> {
+    //     Ok(format!(
+    //         "select {} as '{}' from {}",
+    //         // self.name(),
+    //         self.to_qualified_field(expr)?,
+    //         self.to_column_name(expr)?,
+    //         expr.to_table()?
+    //     ))
+    // }
 }

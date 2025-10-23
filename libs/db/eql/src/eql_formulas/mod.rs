@@ -1,10 +1,15 @@
 #![doc = include_str!("README.md")]
 
-pub mod fft;
-pub mod fftfreq;
-pub mod first;
-pub mod last;
-pub mod norm;
+mod fft;
+mod fftfreq;
+mod first;
+mod last;
+mod norm;
+pub use fft::*;
+pub use fftfreq::*;
+pub use first::*;
+pub use last::*;
+pub use norm::*;
 
 use crate::{Context, Error, Expr};
 use std::collections::HashMap;
@@ -31,6 +36,27 @@ pub trait EqlFormula: Send + Sync + std::fmt::Debug {
 
     fn suggestions(&self, _expr: &Expr, _context: &Context) -> Vec<String> {
         Vec::new()
+    }
+
+    fn to_select_part(&self, expr: &Expr) -> Result<String, Error> {
+        if let Some(column_name) = self.to_column_name(expr) {
+            Ok(format!(
+                "{} as '{}'",
+                self.to_qualified_field(expr)?,
+                column_name
+            ))
+        } else {
+            self.to_qualified_field(expr)
+        }
+    }
+
+    fn to_sql(&self, expr: &Expr, context: &Context) -> Result<String, Error> {
+        Ok(format!(
+            "select {} from {}",
+            // self.name(),
+            self.to_select_part(expr)?,
+            expr.to_table()?
+        ))
     }
 }
 
