@@ -515,21 +515,21 @@ mod tests {
         };
 
         let err = client.request(&save_archive).await.unwrap_err();
+        let description = err.to_string();
         assert!(
-            err.description.contains("Cannot save db to"),
+            description.contains("Cannot save db to"),
             "error description missing prefix: {}",
-            err.description
+            description
         );
         assert!(
-            err.description
-                .contains("C:\\\\Users\\\\tester\\\\snapshot"),
+            description.contains("C:\\\\Users\\\\tester\\\\snapshot"),
             "error description missing path: {}",
-            err.description
+            description
         );
         assert!(
-            err.description.contains("Windows-style location"),
+            description.contains("Windows-style location"),
             "error description missing guidance: {}",
-            err.description
+            description
         );
         assert!(
             !invalid_path.exists(),
