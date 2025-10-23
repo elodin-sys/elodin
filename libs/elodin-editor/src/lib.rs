@@ -195,17 +195,21 @@ impl Plugin for EditorPlugin {
             .add_systems(PreUpdate, setup_cell)
             .add_systems(PreUpdate, sync_res::<CurrentTimestamp>)
             .add_systems(PreUpdate, sync_res::<impeller2_wkt::SimulationTimeStep>)
-            .add_systems(PreUpdate, sync_pos)
-            .add_systems(PreUpdate, sync_object_3d)
+            .add_systems(
+                PreUpdate,
+                (
+                    set_floating_origin,
+                    (sync_pos, sync_object_3d, set_viewport_pos),
+                )
+                    .chain(),
+            )
             .add_systems(Update, sync_paused)
             .add_systems(PreUpdate, set_selected_range)
-            .add_systems(PreUpdate, set_floating_origin.after(sync_pos))
             .add_systems(Update, update_eql_context)
             .add_systems(Update, set_eql_context_range.after(update_eql_context))
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
             .add_systems(PostUpdate, set_clear_color)
-            .add_systems(Update, set_viewport_pos)
             //.add_systems(Update, clamp_current_time)
             .insert_resource(WireframeConfig {
                 global: false,
@@ -623,6 +627,7 @@ pub fn sync_pos(
     mut query: Query<(&mut Transform, &mut GridCell<i128>, &WorldPos)>,
     floating_origin: Res<FloatingOriginSettings>,
 ) {
+    // return;
     query
         .iter_mut()
         .for_each(|(mut transform, mut grid_cell, world_pos)| {

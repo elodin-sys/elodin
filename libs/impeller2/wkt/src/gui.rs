@@ -1,6 +1,6 @@
 use crate::Color;
 use impeller2::component::Asset;
-use impeller2::types::{ComponentId, EntityId};
+use impeller2::types::EntityId;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::HashMap;
 use std::ops::Range;
@@ -284,17 +284,20 @@ pub struct VectorArrow3d<T = ()> {
     pub vector: String,
     pub origin: Option<String>,
     #[serde(default = "VectorArrow3d::<T>::default_scale")]
-    pub scale: f32,
+    pub scale: f64,
     pub name: Option<String>,
     #[serde(default = "VectorArrow3d::<T>::default_color")]
     pub color: Color,
     #[serde(default)]
-    pub in_body_frame: bool,
+    #[serde(alias = "in_body_frame")]
+    pub body_frame: bool,
+    #[serde(default)]
+    pub normalize: bool,
     pub aux: T,
 }
 
 impl<T> VectorArrow3d<T> {
-    fn default_scale() -> f32 {
+    fn default_scale() -> f64 {
         1.0
     }
 
@@ -309,7 +312,8 @@ impl<T> VectorArrow3d<T> {
             scale: self.scale,
             name: self.name.clone(),
             color: self.color,
-            in_body_frame: self.in_body_frame,
+            body_frame: self.body_frame,
+            normalize: self.normalize,
             aux: f(&self.aux),
         }
     }
@@ -322,21 +326,6 @@ impl<T: Serialize + DeserializeOwned> Asset for VectorArrow3d<T> {
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Camera;
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct VectorArrow {
-    pub id: ComponentId,
-    pub range: Range<usize>,
-    pub color: Color,
-    pub attached: bool,
-    pub body_frame: bool,
-    pub scale: f32,
-}
-
-impl Asset for VectorArrow {
-    const NAME: &'static str = "arrow";
-}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]

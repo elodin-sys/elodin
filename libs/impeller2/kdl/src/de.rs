@@ -567,9 +567,9 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         Some(entry) => {
             let value = entry.value();
             if let Some(value) = value.as_float() {
-                value as f32
+                value
             } else if let Some(value) = value.as_integer() {
-                value as f32
+                value as f64
             } else {
                 return Err(KdlSchematicError::InvalidValue {
                     property: "scale".to_string(),
@@ -587,8 +587,14 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         .and_then(|v| v.as_string())
         .map(|s| s.to_string());
 
-    let in_body_frame = node
-        .get("in_body_frame")
+    let body_frame = node
+        .get("body_frame")
+        .or_else(|| node.get("in_body_frame"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let normalize = node
+        .get("normalize")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
@@ -600,7 +606,8 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         scale,
         name,
         color,
-        in_body_frame,
+        body_frame,
+        normalize,
         aux: (),
     })
 }
@@ -1344,7 +1351,7 @@ tabs {
     #[test]
     fn test_parse_vector_arrow() {
         let kdl = r#"
-vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="ball.world_pos" scale=1.5 name="Velocity" in_body_frame=#true {
+vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="ball.world_pos" scale=1.5 name="Velocity" body_frame=#true normalize=#true {
     color 0 0 255
 }
 "#;
@@ -1359,8 +1366,25 @@ vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="bal
             assert_eq!(arrow.origin.as_deref(), Some("ball.world_pos"));
             assert_eq!(arrow.scale, 1.5);
             assert_eq!(arrow.name.as_deref(), Some("Velocity"));
-            assert!(arrow.in_body_frame);
+            assert!(arrow.body_frame);
+            assert!(arrow.normalize);
             assert_eq!(arrow.color.b, 1.0);
+        } else {
+            panic!("Expected vector_arrow");
+        }
+    }
+
+    #[test]
+    fn test_parse_vector_arrow_in_body_frame_alias() {
+        let kdl = r#"
+vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" in_body_frame=#true
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::VectorArrow(arrow) = &schematic.elems[0] {
+            assert!(arrow.body_frame);
+            assert!(!arrow.normalize);
         } else {
             panic!("Expected vector_arrow");
         }

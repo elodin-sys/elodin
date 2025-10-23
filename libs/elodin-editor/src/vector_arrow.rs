@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::{math::DVec3, prelude::*};
 use impeller2_wkt::{ComponentValue, WorldPos};
 use nox::{ArrayBuf, Quaternion, Vector3};
 
@@ -11,7 +11,7 @@ pub struct VectorArrowState {
     pub origin_expr: Option<CompiledExpr>,
 }
 
-pub fn component_value_tail_to_vec3(value: &ComponentValue) -> Option<Vec3> {
+pub fn component_value_tail_to_vec3(value: &ComponentValue) -> Option<DVec3> {
     match value {
         ComponentValue::F32(array) => {
             let data = array.buf.as_buf();
@@ -25,7 +25,7 @@ pub fn component_value_tail_to_vec3(value: &ComponentValue) -> Option<Vec3> {
     }
 }
 
-fn tail_to_vec3(mut iter: impl DoubleEndedIterator<Item = f64>) -> Option<Vec3> {
+fn tail_to_vec3(mut iter: impl DoubleEndedIterator<Item = f64>) -> Option<DVec3> {
     let z = iter.next_back()?;
     let y = iter.next_back()?;
     let x = iter.next_back()?;
@@ -33,5 +33,5 @@ fn tail_to_vec3(mut iter: impl DoubleEndedIterator<Item = f64>) -> Option<Vec3> 
         att: Quaternion::identity(),
         pos: Vector3::new(x, y, z),
     };
-    Some(world.bevy_pos().as_vec3())
+    Some(world.bevy_pos())
 }
