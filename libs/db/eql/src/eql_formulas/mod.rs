@@ -2,13 +2,11 @@
 
 mod fft;
 mod fftfreq;
-mod first;
-mod last;
+mod time_slice;
 mod norm;
 pub use fft::*;
 pub use fftfreq::*;
-pub use first::*;
-pub use last::*;
+pub use time_slice::*;
 pub use norm::*;
 
 use crate::{Context, Error, Expr};
@@ -111,12 +109,11 @@ pub fn create_default_registry() -> FormulaRegistry {
     let mut registry = FormulaRegistry::new();
 
     // Register all built-in formulas
-    registry.register(fft::Fft);
-    registry.register(fftfreq::FftFreq);
-    registry.register(norm::Norm);
-    registry.register(first::First);
-    registry.register(last::TimeSlice::Last(None));
-    registry.register(last::TimeSlice::First(None));
+    registry.register(Fft);
+    registry.register(FftFreq);
+    registry.register(Norm);
+    registry.register(TimeSlice::Last(None));
+    registry.register(TimeSlice::First(None));
 
     registry
 }

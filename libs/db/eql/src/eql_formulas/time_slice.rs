@@ -113,4 +113,27 @@ mod tests {
         let sql = expr.to_sql(&context).unwrap();
         assert!(sql.contains(">= to_timestamp(0.5)"), "WAS {}", sql);
     }
+
+
+    #[test]
+    fn first_generates_expected_sql() {
+        let component = Arc::new(Component::new(
+            "a.world_pos".to_string(),
+            ComponentId::new("a.world_pos"),
+            Schema::new(PrimType::F64, vec![3u64]).unwrap(),
+        ));
+        let part = Arc::new(ComponentPart {
+            name: "a.world_pos".to_string(),
+            id: component.id,
+            component: Some(component.clone()),
+            children: BTreeMap::new(),
+        });
+
+        let context = Context::new(BTreeMap::new(), Timestamp(0), Timestamp(1_000_000));
+        let duration = parse_duration("PT0.5S").unwrap();
+        let expr = Expr::Formula(Arc::new(TimeSlice::First(Some(duration))), Box::new(Expr::ComponentPart(part)));
+
+        let sql = expr.to_sql(&context).unwrap();
+        assert!(sql.contains("<= to_timestamp(0.5)"));
+    }
 }
