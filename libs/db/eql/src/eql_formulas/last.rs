@@ -1,16 +1,18 @@
 use crate::{Context, Error, Expr, parse_duration};
+use hifitime::Duration;
 use std::sync::Arc;
 
-pub(crate) fn parse(recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
+fn parse(recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
     if let [Expr::StringLiteral(duration)] = args {
         let duration = parse_duration(duration)?;
-        Ok(Expr::Last(Box::new(recv), duration))
+        // Ok(Expr::Last(Box::new(recv), duration))
+        Ok(Expr::Formula(Arc::new(Last(Some(duration))), Box::new(recv)))
     } else {
         Err(Error::InvalidMethodCall("last".to_string()))
     }
 }
 
-pub(crate) fn to_sql(
+fn to_sql(
     expr: &Expr,
     duration: &hifitime::Duration,
     context: &Context,
@@ -25,8 +27,8 @@ pub(crate) fn to_sql(
     ))
 }
 
-#[derive(Debug, Clone)]
-pub struct Last;
+#[derive(Debug, Clone, Default)]
+pub struct Last(pub Option<Duration>);
 
 impl super::EqlFormula for Last {
     fn name(&self) -> &'static str {

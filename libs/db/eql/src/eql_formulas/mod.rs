@@ -18,7 +18,7 @@ pub trait EqlFormula: Send + Sync + std::fmt::Debug {
 
     fn to_column_name(&self, expr: &Expr) -> Option<String> {
         expr.to_column_name()
-            .map(|name| format!("{}({name})", self.name()))
+            .map(|name| format!("{}({})", self.name(), name))
     }
 
     fn to_qualified_field(&self, expr: &Expr) -> Result<String, Error> {
@@ -89,7 +89,7 @@ pub fn create_default_registry() -> FormulaRegistry {
     registry.register(fftfreq::FftFreq);
     registry.register(norm::Norm);
     registry.register(first::First);
-    registry.register(last::Last);
+    registry.register(last::Last::default());
 
     registry
 }

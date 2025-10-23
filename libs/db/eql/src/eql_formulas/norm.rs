@@ -1,7 +1,7 @@
 use crate::{Context, Error, Expr};
 use std::sync::Arc;
 
-pub(crate) fn to_qualified_field(expr: &Expr) -> Result<String, Error> {
+fn to_qualified_field(expr: &Expr) -> Result<String, Error> {
     let part = match expr {
         Expr::ComponentPart(p) => p.clone(),
         _ => {
@@ -30,13 +30,13 @@ pub(crate) fn to_qualified_field(expr: &Expr) -> Result<String, Error> {
     Ok(format!("sqrt({})", terms.join(" + ")))
 }
 
-pub(crate) fn to_column_name(expr: &Expr) -> Option<String> {
+fn to_column_name(expr: &Expr) -> Option<String> {
     expr.to_column_name().map(|name| format!("norm({name})"))
 }
 
-pub(crate) fn parse(recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
+fn parse(recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
     if args.is_empty() && matches!(recv, Expr::ComponentPart(_)) {
-        return Ok(Expr::Norm(Box::new(recv)));
+        return Ok(Expr::Formula(Arc::new(Norm), Box::new(recv)));
     }
     Err(Error::InvalidMethodCall("norm".to_string()))
 }
