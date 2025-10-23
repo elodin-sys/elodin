@@ -175,6 +175,10 @@ pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
+        // Probe ELODIN_KDL_DIR once so any warning about an invalid directory
+        // surfaces immediately on startup.
+        let _ = impeller2_kdl::env::schematic_dir();
+
         app.init_resource::<Paused>()
             .init_resource::<SelectedObject>()
             .init_resource::<HoveredEntity>()

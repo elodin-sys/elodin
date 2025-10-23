@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use thiserror::Error;
-use tracing::error;
+use tracing::{error, warn};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -21,9 +21,13 @@ pub fn schematic_dir() -> Result<Option<PathBuf>, Error> {
     if let Some(d) = std::env::var_os("ELODIN_KDL_DIR") {
         let p = PathBuf::from(d);
         if !p.exists() {
-            Err(Error::NoSuchDir(p))
+            let err = Error::NoSuchDir(p.clone());
+            warn!("{err}, falling back to current working directory.");
+            Ok(None)
         } else if !p.is_dir() {
-            Err(Error::NotDir(p))
+            let err = Error::NotDir(p.clone());
+            warn!("{err}, falling back to current working directory.");
+            Ok(None)
         } else {
             Ok(Some(p))
         }

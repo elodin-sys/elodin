@@ -22,7 +22,10 @@ use egui_tiles::TileId;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::{Timestamp, msg_id};
 use impeller2_bevy::{ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
-use impeller2_kdl::{env::{schematic_file, schematic_dir_or_cwd}, ToKdl};
+use impeller2_kdl::{
+    ToKdl,
+    env::{schematic_dir_or_cwd, schematic_file},
+};
 use impeller2_wkt::{
     ComponentPath, ComponentValue, CurrentTimestamp, DbConfig, EarliestTimestamp, IsRecording,
     Material, Mesh, Object3D, SetDbConfig, SetStreamState, SimulationTimeStep,
@@ -763,8 +766,8 @@ pub fn save_schematic_inner() -> PaletteItem {
 
 pub fn load_schematic() -> PaletteItem {
     PaletteItem::new("Load Schematic", PRESETS_LABEL, |_: In<String>| {
-        let Ok(dir) = schematic_dir_or_cwd()
-            .inspect_err(|e| error!(?e, "getting schematic dir")) else {
+        let Ok(dir) = schematic_dir_or_cwd().inspect_err(|e| error!(?e, "getting schematic dir"))
+        else {
             return PaletteEvent::Exit;
         };
         let elems = match std::fs::read_dir(&dir) {

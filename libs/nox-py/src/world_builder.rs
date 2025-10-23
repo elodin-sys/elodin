@@ -442,7 +442,11 @@ impl WorldBuilder {
                     std::fs::read_to_string(&path)
                         .inspect(|_| info!("read schematic at {:?}", path.display()))
                         .inspect_err(|err| {
-                            error!(?err, "could not read schematic file at {:?}", path.display())
+                            error!(
+                                ?err,
+                                "could not read schematic file at {:?}",
+                                path.display()
+                            )
                         })
                         .ok()
                 } else {
