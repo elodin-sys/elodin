@@ -1,4 +1,5 @@
-use crate::{Component, Error, Expr};
+use crate::{Context, Error, Expr};
+use std::sync::Arc;
 
 pub(crate) fn to_qualified_field(expr: &Expr) -> Result<String, Error> {
     let part = match expr {
@@ -40,8 +41,38 @@ pub(crate) fn parse(recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
     Err(Error::InvalidMethodCall("norm".to_string()))
 }
 
-pub(crate) fn extend_component_suggestions(component: &Component, suggestions: &mut Vec<String>) {
-    if !component.schema.dim().is_empty() {
-        suggestions.push("norm()".to_string());
+#[derive(Debug, Clone)]
+pub struct Norm;
+
+impl super::EqlFormula for Norm {
+    fn name(&self) -> &'static str {
+        "norm"
+    }
+
+    fn parse(
+        &self,
+        _formula: Arc<dyn super::EqlFormula>,
+        recv: Expr,
+        args: &[Expr],
+    ) -> Result<Expr, Error> {
+        parse(recv, args)
+    }
+
+    fn to_qualified_field(&self, expr: &Expr) -> Result<String, Error> {
+        to_qualified_field(expr)
+    }
+
+    fn to_column_name(&self, expr: &Expr) -> Option<String> {
+        to_column_name(expr)
+    }
+
+    fn suggestions(&self, expr: &Expr, _context: &Context) -> Vec<String> {
+        if let Expr::ComponentPart(part) = expr
+            && let Some(component) = &part.component
+            && !component.schema.dim().is_empty()
+        {
+            return vec!["norm()".to_string()];
+        }
+        Vec::new()
     }
 }

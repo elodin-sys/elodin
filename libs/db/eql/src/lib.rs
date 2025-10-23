@@ -16,7 +16,7 @@ use peg::error::ParseError;
 
 pub mod eql_formulas;
 
-use eql_formulas::{fft, fftfreq, first, last, norm};
+use eql_formulas::{EqlFormula, FormulaRegistry, create_default_registry, first, last, norm};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AstNode<'input> {
@@ -109,12 +109,10 @@ pub enum Expr {
     FloatLiteral(f64),
     StringLiteral(String),
 
+    Formula(Arc<dyn EqlFormula>, Box<Expr>),
+
     // norm()
     Norm(Box<Expr>),
-
-    // ffts
-    Fft(Box<Expr>),
-    FftFreq(Box<Expr>),
 
     // time limits
     Last(Box<Expr>, hifitime::Duration),
@@ -130,8 +128,7 @@ impl Expr {
             Expr::ComponentPart(component) => Ok(component.name.replace(".", "_")),
 
             Expr::Time(_) => Ok("time".to_string()),
-            Expr::Fft(e) => fft::to_field(e),
-            Expr::FftFreq(e) => fftfreq::to_field(e),
+            Expr::Formula(formula, expr) => formula.to_field(expr),
             Expr::BinaryOp(left, right, op) => Ok(format!(
                 "({} {} {})",
                 left.to_field()?,
@@ -161,8 +158,7 @@ impl Expr {
 
             Expr::Time(component) => Ok(component.name.replace(".", "_")),
             Expr::Norm(e) => e.to_table(), // norm()
-            Expr::FftFreq(e) => e.to_table(),
-            Expr::Fft(e) => e.to_table(),
+            Expr::Formula(_, expr) => expr.to_table(),
             Expr::BinaryOp(left, _, _) => left.to_table(),
 
             Expr::ArrayAccess(inner_expr, _) => match inner_expr.as_ref() {
@@ -182,8 +178,7 @@ impl Expr {
     fn to_qualified_field(&self) -> Result<String, Error> {
         match self {
             Expr::Norm(e) => norm::to_qualified_field(e),
-            Expr::Fft(e) => fft::to_qualified_field(e),
-            Expr::FftFreq(e) => fftfreq::to_qualified_field(e),
+            Expr::Formula(formula, expr) => formula.to_qualified_field(expr),
             Expr::BinaryOp(left, right, op) => Ok(format!(
                 "({} {} {})",
                 left.to_qualified_field()?,
@@ -202,8 +197,7 @@ impl Expr {
     fn to_column_name(&self) -> Option<String> {
         match self {
             Expr::Norm(e) => norm::to_column_name(e),
-            Expr::Fft(e) => fft::to_column_name(e),
-            Expr::FftFreq(e) => fftfreq::to_column_name(e),
+            Expr::Formula(formula, expr) => formula.to_column_name(expr),
             Expr::ComponentPart(e) => Some(e.name.clone()),
             Expr::ArrayAccess(expr, index) => match expr.as_ref() {
                 Expr::ComponentPart(c) => {
@@ -393,6 +387,7 @@ pub struct Context {
     pub component_parts: BTreeMap<String, ComponentPart>,
     pub earliest_timestamp: Timestamp,
     pub last_timestamp: Timestamp,
+    pub formula_registry: FormulaRegistry,
 }
 
 impl Default for Context {
@@ -401,6 +396,7 @@ impl Default for Context {
             component_parts: BTreeMap::new(),
             earliest_timestamp: Timestamp(i64::MIN),
             last_timestamp: Timestamp(i64::MAX),
+            formula_registry: create_default_registry(),
         }
     }
 }
@@ -448,6 +444,7 @@ impl Context {
             component_parts,
             earliest_timestamp,
             last_timestamp,
+            formula_registry: create_default_registry(),
         }
     }
 
@@ -460,6 +457,7 @@ impl Context {
             component_parts,
             earliest_timestamp,
             last_timestamp,
+            formula_registry: create_default_registry(),
         }
     }
 
@@ -515,13 +513,11 @@ impl Context {
                     .iter()
                     .map(|ast_node| self.parse(ast_node))
                     .collect::<Result<Vec<_>, _>>()?;
-                match cow.as_ref() {
-                    "norm" => norm::parse(recv, &args),
-                    "fft" => fft::parse(recv, &args),
-                    "fftfreq" => fftfreq::parse(recv, &args),
-                    "last" => last::parse(recv, &args),
-                    "first" => first::parse(recv, &args),
-                    _ => Err(Error::InvalidMethodCall(cow.to_string())),
+                if let Some(formula) = self.formula_registry.get(cow.as_ref()) {
+                    let arc = Arc::clone(formula);
+                    formula.parse(arc, recv, &args)
+                } else {
+                    Err(Error::InvalidMethodCall(cow.to_string()))
                 }
             }
             AstNode::Tuple(ast_nodes) => ast_nodes
@@ -563,31 +559,26 @@ impl Context {
 
     /// Get suggestions for the given expression
     pub fn get_suggestions(&self, expr: &Expr) -> Vec<String> {
-        match expr {
+        let mut suggestions: Vec<String> = match expr {
             Expr::ComponentPart(part) => {
                 let mut suggestions: Vec<String> = part.children.keys().cloned().collect();
                 if let Some(component) = &part.component {
                     suggestions.extend(component.element_names.iter().map(|name| name.to_string()));
-                    norm::extend_component_suggestions(component, &mut suggestions);
-                    suggestions.push(last::component_suggestion());
-                    suggestions.push(first::component_suggestion());
                 }
                 suggestions.push("time".to_string());
-                suggestions.sort();
                 suggestions
             }
-            Expr::Time(_) => fftfreq::suggestions_for_time(),
-            Expr::ArrayAccess(_, _) => vec![
-                fft::array_access_suggestion(),
-                last::component_suggestion(),
-                first::component_suggestion(),
-            ],
-            Expr::Tuple(_) | Expr::Fft(_) | Expr::FftFreq(_) => {
-                vec![last::keyword_suggestion(), first::keyword_suggestion()]
-            }
-            Expr::StringLiteral(_) => vec![],
-            _ => vec![],
+            Expr::StringLiteral(_) => Vec::new(),
+            _ => Vec::new(),
+        };
+
+        for formula in self.formula_registry.iter() {
+            suggestions.extend(formula.suggestions(expr, self));
         }
+
+        suggestions.sort();
+        suggestions.dedup();
+        suggestions
     }
 
     pub fn get_string_suggestions(&self, input: &str) -> Vec<(String, String)> {
@@ -686,6 +677,7 @@ pub enum Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::eql_formulas::fftfreq;
 
     #[test]
     fn test_ast_parse() {
@@ -782,12 +774,31 @@ mod tests {
         let context = create_test_context();
 
         let time_expr = Expr::Time(entity_component);
-        let expr = Expr::FftFreq(Box::new(time_expr));
+        let expr = Expr::Formula(Arc::new(fftfreq::FftFreq), Box::new(time_expr));
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
             "select fftfreq(a_world_pos.time) from a_world_pos"
         );
+    }
+
+    #[test]
+    fn test_fft_sql_via_parse() {
+        let context = create_test_context();
+        let expr = context.parse_str("a.world_pos[0].fft()").unwrap();
+        let sql = expr.to_sql(&context).unwrap();
+        assert_eq!(
+            sql,
+            "select fft(a_world_pos.a_world_pos[1]) as 'fft(a.world_pos.x)' from a_world_pos"
+        );
+    }
+
+    #[test]
+    fn test_fftfreq_sql_via_parse() {
+        let context = create_test_context();
+        let expr = context.parse_str("a.world_pos.time.fftfreq()").unwrap();
+        let sql = expr.to_sql(&context).unwrap();
+        assert_eq!(sql, "select fftfreq(a_world_pos.time) from a_world_pos");
     }
 
     #[test]
@@ -977,7 +988,9 @@ mod tests {
         let suggestions = context.get_suggestions(&expr);
         assert!(suggestions.contains(&"world_pos".to_string()));
         assert!(suggestions.contains(&"time".to_string()));
-        assert_eq!(suggestions.len(), 2);
+        assert!(suggestions.contains(&"first(".to_string()));
+        assert!(suggestions.contains(&"last(".to_string()));
+        assert_eq!(suggestions.len(), 4);
     }
 
     #[test]
@@ -990,6 +1003,7 @@ mod tests {
         let suggestions = context.get_suggestions(&expr);
         assert!(suggestions.contains(&"first(".to_string()));
         assert!(suggestions.contains(&"last(".to_string()));
+        assert!(suggestions.contains(&"norm()".to_string()));
         assert!(suggestions.contains(&"time".to_string()));
         assert!(suggestions.contains(&"x".to_string()));
         assert!(suggestions.contains(&"y".to_string()));
@@ -1020,6 +1034,14 @@ mod tests {
     }
 
     #[test]
+    fn test_formula_suggestions() {
+        let context = create_test_context();
+        let expr = context.parse_str("a.world_pos[0].fft()").unwrap();
+        let suggestions = context.get_suggestions(&expr);
+        assert_eq!(suggestions, vec!["first", "last"]);
+    }
+
+    #[test]
     fn test_string_suggestions_empty() {
         let context = create_test_context();
         let suggestions = context
@@ -1043,6 +1065,8 @@ mod tests {
 
         assert!(suggestions.contains(&"world_pos".to_string()));
         assert!(suggestions.contains(&"time".to_string()));
+        assert!(suggestions.contains(&"first(".to_string()));
+        assert!(suggestions.contains(&"last(".to_string()));
     }
 
     #[test]
@@ -1056,6 +1080,7 @@ mod tests {
 
         assert!(suggestions.contains(&"first(".to_string()));
         assert!(suggestions.contains(&"last(".to_string()));
+        assert!(suggestions.contains(&"norm()".to_string()));
         assert!(suggestions.contains(&"time".to_string()));
         assert!(suggestions.contains(&"x".to_string()));
     }

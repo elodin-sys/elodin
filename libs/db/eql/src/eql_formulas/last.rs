@@ -1,4 +1,5 @@
 use crate::{Context, Error, Expr, parse_duration};
+use std::sync::Arc;
 
 pub(crate) fn parse(recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
     if let [Expr::StringLiteral(duration)] = args {
@@ -24,12 +25,32 @@ pub(crate) fn to_sql(
     ))
 }
 
-pub(crate) fn component_suggestion() -> String {
-    "last(".to_string()
-}
+#[derive(Debug, Clone)]
+pub struct Last;
 
-pub(crate) fn keyword_suggestion() -> String {
-    "last".to_string()
+impl super::EqlFormula for Last {
+    fn name(&self) -> &'static str {
+        "last"
+    }
+
+    fn parse(
+        &self,
+        _formula: Arc<dyn super::EqlFormula>,
+        recv: Expr,
+        args: &[Expr],
+    ) -> Result<Expr, Error> {
+        parse(recv, args)
+    }
+
+    fn suggestions(&self, expr: &Expr, _context: &Context) -> Vec<String> {
+        match expr {
+            Expr::ComponentPart(_) | Expr::ArrayAccess(_, _) => {
+                vec!["last(".to_string()]
+            }
+            Expr::Tuple(_) | Expr::Formula(_, _) => vec!["last".to_string()],
+            _ => Vec::new(),
+        }
+    }
 }
 
 #[cfg(test)]
