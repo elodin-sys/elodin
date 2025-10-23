@@ -773,14 +773,11 @@ fn save_db_native_prompt_item() -> PaletteItem {
             if trimmed.is_empty() {
                 return PaletteEvent::Error("Directory name cannot be empty".to_string());
             }
-            let rel_path = Path::new(trimmed);
-            if rel_path.is_absolute() {
-                return PaletteEvent::Error(
-                    "Please provide a path relative to the workspace".to_string(),
-                );
-            }
+            let raw_path = PathBuf::from(trimmed);
+            let mut path_is_absolute =
+                raw_path.is_absolute() || trimmed.starts_with('/') || trimmed.starts_with('\\');
             let mut last_component: Option<&std::ffi::OsStr> = None;
-            for component in rel_path.components() {
+            for component in raw_path.components() {
                 match component {
                     Component::Normal(part) => {
                         if part.is_empty() {
@@ -795,10 +792,13 @@ fn save_db_native_prompt_item() -> PaletteItem {
                             "`.` segments are not allowed in the path".to_string(),
                         );
                     }
-                    Component::ParentDir | Component::Prefix(_) | Component::RootDir => {
+                    Component::ParentDir => {
                         return PaletteEvent::Error(
                             "Path may not traverse outside the workspace".to_string(),
                         );
+                    }
+                    Component::Prefix(_) | Component::RootDir => {
+                        path_is_absolute = true;
                     }
                 }
             }
@@ -810,26 +810,30 @@ fn save_db_native_prompt_item() -> PaletteItem {
                     "The final directory name cannot be \"db\"".to_string(),
                 );
             }
-            let cwd = match std::env::current_dir() {
-                Ok(cwd) => cwd,
-                Err(err) => {
-                    error!(?err, "Failed to resolve workspace directory");
+            let request_path = if path_is_absolute {
+                raw_path.clone()
+            } else {
+                let cwd = match std::env::current_dir() {
+                    Ok(cwd) => cwd,
+                    Err(err) => {
+                        error!(?err, "Failed to resolve workspace directory");
+                        return PaletteEvent::Error(
+                            "Failed to resolve workspace directory".to_string(),
+                        );
+                    }
+                };
+                let target = cwd.join(&raw_path);
+                if target.exists() {
+                    return PaletteEvent::Error("Directory already exists".to_string());
+                }
+                if let Err(err) = target.strip_prefix(&cwd) {
+                    error!(?err, "Save path escaped workspace");
                     return PaletteEvent::Error(
-                        "Failed to resolve workspace directory".to_string(),
+                        "Path must stay within the workspace directory".to_string(),
                     );
                 }
+                raw_path.clone()
             };
-            let target = cwd.join(rel_path);
-            if target.exists() {
-                return PaletteEvent::Error("Directory already exists".to_string());
-            }
-            if let Err(err) = target.strip_prefix(&cwd) {
-                error!(?err, "Save path escaped workspace");
-                return PaletteEvent::Error(
-                    "Path must stay within the workspace directory".to_string(),
-                );
-            }
-            let request_path = target.clone();
             commands.send_req_reply(
                 SaveArchive {
                     path: request_path,
@@ -873,8 +877,9 @@ fn save_db_native_prompt_item() -> PaletteItem {
 }
 
 fn save_db_native_prompt_page() -> PalettePage {
-    PalettePage::new(vec![save_db_native_prompt_item()])
-        .prompt("Enter a name for the Save DB directory")
+    PalettePage::new(vec![save_db_native_prompt_item()]).prompt(
+        "Enter a directory name within the workspace or an absolute path on the database host",
+    )
 }
 
 pub fn save_db_native() -> PaletteItem {

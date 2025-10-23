@@ -17,13 +17,15 @@ use impeller2::types::{PrimType, Timestamp};
 use impeller2_wkt::ArchiveFormat;
 use std::{
     fs::File,
+    io,
     ops::{Bound, RangeBounds},
-    path::Path,
+    path::{Path, PathBuf},
     pin::Pin,
     ptr::NonNull,
     sync::Arc,
     task::{Context, Poll},
 };
+use tracing::{error, info, warn};
 use zerocopy::{Immutable, IntoBytes};
 
 use crate::{Component, DB, Error, append_log::AppendLog};
@@ -293,71 +295,191 @@ impl DB {
     }
 
     pub fn save_archive(&self, path: impl AsRef<Path>, format: ArchiveFormat) -> Result<(), Error> {
-        let path = path.as_ref();
-        if matches!(format, ArchiveFormat::Native) {
-            let snapshot = self.begin_snapshot();
-            self.flush_all()?;
-            self.copy_native(path)?;
-            drop(snapshot);
-            return Ok(());
+        let raw_path = path.as_ref();
+        let hostname = current_hostname();
+
+        #[cfg(not(windows))]
+        if looks_like_windows_absolute(raw_path) {
+            let target = format_host_target(&hostname, raw_path);
+            let message = format!(
+                "Cannot save db to {target}, the path looks like a Windows-style location. \
+Use a path that exists on the database host."
+            );
+            error!("{}", message);
+            return Err(Error::Io(io::Error::new(io::ErrorKind::NotFound, message)));
         }
-        std::fs::create_dir_all(path)?;
-        self.with_state(|state| {
-            for component in state.components.values() {
-                let Some(component_metadata) =
-                    state.component_metadata.get(&component.component_id)
-                else {
-                    continue;
-                };
 
-                let column_name = component_metadata.name.clone();
-                let element_names = component_metadata.element_names();
+        let resolved = if raw_path.is_absolute() {
+            raw_path.to_path_buf()
+        } else {
+            self.archive_base_dir().join(raw_path)
+        };
+        let target = format_host_target(&hostname, &resolved);
 
-                let record_batch = match format {
-                    ArchiveFormat::Csv => {
-                        // CSV doesn't support nested structures, use flattened columns
-                        component.as_flat_record_batch(column_name.clone(), element_names)
+        match format.clone() {
+            ArchiveFormat::Native => {
+                let snapshot = self.begin_snapshot();
+                self.flush_all()?;
+                let result = self.copy_native(&resolved);
+                drop(snapshot);
+                match result {
+                    Ok(final_path) => {
+                        info!("Saved db to {}", format_host_target(&hostname, &final_path));
+                        Ok(())
                     }
-                    _ => {
-                        // Parquet and Arrow IPC both support ListArray natively
-                        component.as_record_batch(column_name.clone())
+                    Err(Error::Io(source)) => {
+                        let kind = source.kind();
+                        let message = format!("Cannot save db to {}, {}", target, source);
+                        error!("{}", message);
+                        Err(Error::Io(io::Error::new(kind, message)))
                     }
-                };
-                let schema = record_batch.schema_ref();
-                match format {
-                    ArchiveFormat::ArrowIpc => {
-                        let file_name = format!("{column_name}.arrow");
-                        let file_path = path.join(file_name);
-                        let mut file = File::create(file_path)?;
-                        let mut writer =
-                            arrow::ipc::writer::FileWriter::try_new(&mut file, schema)?;
-                        writer.write(&record_batch)?;
-                        writer.finish()?;
+                    Err(err) => {
+                        error!("Cannot save db to {}, {}", target, err);
+                        Err(err)
                     }
-                    #[cfg(feature = "parquet")]
-                    ArchiveFormat::Parquet => {
-                        let file_name = format!("{column_name}.parquet");
-                        let file_path = path.join(file_name);
-                        let mut file = File::create(file_path)?;
-                        let mut writer =
-                            parquet::arrow::ArrowWriter::try_new(&mut file, schema.clone(), None)?;
-                        writer.write(&record_batch)?;
-                        writer.close()?;
-                    }
-                    ArchiveFormat::Csv => {
-                        let file_name = format!("{column_name}.csv");
-                        let file_path = path.join(file_name);
-                        let mut file = File::create(file_path)?;
-                        let mut writer = arrow::csv::Writer::new(&mut file);
-                        writer.write(&record_batch)?;
-                    }
-                    #[allow(unreachable_patterns)]
-                    _ => return Err(Error::UnsupportedArchiveFormat),
                 }
             }
-            Ok(())
-        })
+            other_format => {
+                if let Err(err) = std::fs::create_dir_all(&resolved) {
+                    let message = format!("Cannot save db to {}, {}", target, err);
+                    error!("{}", message);
+                    return Err(Error::Io(io::Error::new(err.kind(), message)));
+                }
+
+                let resolved_dir = resolved.clone();
+                let export_format = other_format.clone();
+                let flatten_for_csv = matches!(other_format, ArchiveFormat::Csv);
+                let export: Result<(), Error> = self.with_state(move |state| {
+                    for component in state.components.values() {
+                        let Some(component_metadata) =
+                            state.component_metadata.get(&component.component_id)
+                        else {
+                            continue;
+                        };
+
+                        let column_name = component_metadata.name.clone();
+                        let element_names = component_metadata.element_names();
+
+                        let record_batch = if flatten_for_csv {
+                            component.as_flat_record_batch(column_name.clone(), element_names)
+                        } else {
+                            component.as_record_batch(column_name.clone())
+                        };
+                        let schema = record_batch.schema_ref();
+
+                        match export_format.clone() {
+                            ArchiveFormat::ArrowIpc => {
+                                let file_name = format!("{column_name}.arrow");
+                                let file_path = resolved_dir.join(file_name);
+                                let mut file = File::create(file_path)?;
+                                let mut writer =
+                                    arrow::ipc::writer::FileWriter::try_new(&mut file, schema)?;
+                                writer.write(&record_batch)?;
+                                writer.finish()?;
+                            }
+                            #[cfg(feature = "parquet")]
+                            ArchiveFormat::Parquet => {
+                                let file_name = format!("{column_name}.parquet");
+                                let file_path = resolved_dir.join(file_name);
+                                let mut file = File::create(file_path)?;
+                                let mut writer = parquet::arrow::ArrowWriter::try_new(
+                                    &mut file,
+                                    schema.clone(),
+                                    None,
+                                )?;
+                                writer.write(&record_batch)?;
+                                writer.close()?;
+                            }
+                            ArchiveFormat::Csv => {
+                                let file_name = format!("{column_name}.csv");
+                                let file_path = resolved_dir.join(file_name);
+                                let mut file = File::create(file_path)?;
+                                let mut writer = arrow::csv::Writer::new(&mut file);
+                                writer.write(&record_batch)?;
+                            }
+                            #[allow(unreachable_patterns)]
+                            _ => return Err(Error::UnsupportedArchiveFormat),
+                        }
+                    }
+                    Ok(())
+                });
+
+                match export {
+                    Ok(()) => {
+                        info!("Saved db to {}", target);
+                        Ok(())
+                    }
+                    Err(Error::Io(source)) => {
+                        let kind = source.kind();
+                        let message = format!("Cannot save db to {}, {}", target, source);
+                        error!("{}", message);
+                        Err(Error::Io(io::Error::new(kind, message)))
+                    }
+                    Err(err) => {
+                        error!("Cannot save db to {}, {}", target, err);
+                        Err(err)
+                    }
+                }
+            }
+        }
     }
+
+    fn archive_base_dir(&self) -> PathBuf {
+        match std::env::current_dir() {
+            Ok(dir) => std::fs::canonicalize(&dir).unwrap_or(dir),
+            Err(err) => {
+                warn!(
+                    ?err,
+                    "Failed to read current working directory; falling back to DB path."
+                );
+                let base = self
+                    .path
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                std::fs::canonicalize(&base).unwrap_or(base)
+            }
+        }
+    }
+}
+
+fn current_hostname() -> String {
+    const HOSTNAME_LEN: usize = 256;
+    let mut buf = [0u8; HOSTNAME_LEN];
+    let name = unsafe {
+        if libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) == 0 {
+            let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+            String::from_utf8_lossy(&buf[..len]).into_owned()
+        } else {
+            String::new()
+        }
+    };
+    if name.is_empty() {
+        "unknown-host".to_string()
+    } else {
+        name
+    }
+}
+
+fn format_host_target(host: &str, path: &Path) -> String {
+    let mut display = path.display().to_string();
+    let sep = std::path::MAIN_SEPARATOR;
+    if !display.ends_with(sep) {
+        display.push(sep);
+    }
+    format!("{host}:{display}")
+}
+
+#[cfg(not(windows))]
+fn looks_like_windows_absolute(path: &Path) -> bool {
+    path.to_str().is_some_and(|s| {
+        let bytes = s.as_bytes();
+        (bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && (bytes[2] == b'\\' || bytes[2] == b'/'))
+            || s.starts_with("\\\\")
+    })
 }
 
 fn bool_ref<T: IntoBytes + Immutable, R: RangeBounds<usize>>(

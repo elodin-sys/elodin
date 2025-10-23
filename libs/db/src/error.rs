@@ -9,7 +9,7 @@ pub enum Error {
     MapOverflow,
     #[error("stellarator {0}")]
     Stellar(stellarator::Error),
-    #[error("io {0}")]
+    #[error("{0}")]
     Io(#[from] std::io::Error),
     #[error("impeller_stella {0}")]
     ImpellerStella(impeller2_stellar::Error),

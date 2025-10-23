@@ -498,6 +498,45 @@ mod tests {
         assert_eq!(values, &[10.5, 20.5, 30.5]);
     }
 
+    #[cfg(not(windows))]
+    #[test]
+    async fn test_save_archive_rejects_windows_path_on_unix() {
+        let (addr, _db) = setup_test_db().await.unwrap();
+        let mut client = Client::connect(addr).await.unwrap();
+
+        let invalid_path = std::path::PathBuf::from("C:\\Users\\tester\\snapshot");
+        if invalid_path.exists() {
+            let _ = std::fs::remove_dir_all(&invalid_path);
+        }
+
+        let save_archive = SaveArchive {
+            path: invalid_path.clone(),
+            format: ArchiveFormat::ArrowIpc,
+        };
+
+        let err = client.request(&save_archive).await.unwrap_err();
+        assert!(
+            err.description.contains("Cannot save db to"),
+            "error description missing prefix: {}",
+            err.description
+        );
+        assert!(
+            err.description
+                .contains("C:\\\\Users\\\\tester\\\\snapshot"),
+            "error description missing path: {}",
+            err.description
+        );
+        assert!(
+            err.description.contains("Windows-style location"),
+            "error description missing guidance: {}",
+            err.description
+        );
+        assert!(
+            !invalid_path.exists(),
+            "invalid export path should not be created on unix hosts"
+        );
+    }
+
     #[test]
     async fn test_save_archive_native_blocks_writes() {
         let (addr, db) = setup_test_db().await.unwrap();
