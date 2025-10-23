@@ -506,8 +506,7 @@ impl Context {
                     .map(|ast_node| self.parse(ast_node))
                     .collect::<Result<Vec<_>, _>>()?;
                 if let Some(formula) = self.formula_registry.get(cow.as_ref()) {
-                    let arc = Arc::clone(formula);
-                    formula.parse(arc, recv, &args)
+                    formula.parse(recv, &args)
                 } else {
                     Err(Error::InvalidMethodCall(cow.to_string()))
                 }

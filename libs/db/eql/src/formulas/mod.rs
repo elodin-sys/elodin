@@ -16,7 +16,7 @@ use std::sync::Arc;
 pub trait Formula: Send + Sync + std::fmt::Debug {
     fn name(&self) -> &'static str;
 
-    fn parse(&self, formula: Arc<dyn Formula>, recv: Expr, args: &[Expr])
+    fn parse(&self, recv: Expr, args: &[Expr])
     -> Result<Expr, Error>;
 
     fn to_column_name(&self, expr: &Expr) -> Option<String> {

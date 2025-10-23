@@ -11,12 +11,11 @@ impl super::Formula for Fft {
 
     fn parse(
         &self,
-        formula: Arc<dyn super::Formula>,
         recv: Expr,
         args: &[Expr],
     ) -> Result<Expr, Error> {
         if args.is_empty() && matches!(recv, Expr::ArrayAccess(_, _)) {
-            Ok(Expr::Formula(formula, Box::new(recv)))
+            Ok(Expr::Formula(Arc::new(Fft), Box::new(recv)))
         } else {
             Err(Error::InvalidMethodCall("fft".to_string()))
         }

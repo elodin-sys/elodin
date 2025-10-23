@@ -27,12 +27,11 @@ impl super::Formula for FftFreq {
 
     fn parse(
         &self,
-        formula: Arc<dyn super::Formula>,
         recv: Expr,
         args: &[Expr],
     ) -> Result<Expr, Error> {
         if args.is_empty() && matches!(recv, Expr::Time(_)) {
-            Ok(Expr::Formula(formula, Box::new(recv)))
+            Ok(Expr::Formula(Arc::new(FftFreq), Box::new(recv)))
         } else {
             Err(Error::InvalidMethodCall("fftfreq".to_string()))
         }

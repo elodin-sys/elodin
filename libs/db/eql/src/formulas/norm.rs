@@ -51,7 +51,6 @@ impl super::Formula for Norm {
 
     fn parse(
         &self,
-        _formula: Arc<dyn super::Formula>,
         recv: Expr,
         args: &[Expr],
     ) -> Result<Expr, Error> {

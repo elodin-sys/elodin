@@ -34,7 +34,6 @@ impl super::Formula for TimeSlice {
 
     fn parse(
         &self,
-        _formula: Arc<dyn super::Formula>,
         recv: Expr,
         args: &[Expr],
     ) -> Result<Expr, Error> {
