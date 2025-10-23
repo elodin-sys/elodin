@@ -9,11 +9,7 @@ impl super::Formula for Fft {
         "fft"
     }
 
-    fn parse(
-        &self,
-        recv: Expr,
-        args: &[Expr],
-    ) -> Result<Expr, Error> {
+    fn parse(&self, recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
         if args.is_empty() && matches!(recv, Expr::ArrayAccess(_, _)) {
             Ok(Expr::Formula(Arc::new(Fft), Box::new(recv)))
         } else {

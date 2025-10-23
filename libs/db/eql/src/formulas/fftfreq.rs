@@ -25,11 +25,7 @@ impl super::Formula for FftFreq {
         "fftfreq"
     }
 
-    fn parse(
-        &self,
-        recv: Expr,
-        args: &[Expr],
-    ) -> Result<Expr, Error> {
+    fn parse(&self, recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
         if args.is_empty() && matches!(recv, Expr::Time(_)) {
             Ok(Expr::Formula(Arc::new(FftFreq), Box::new(recv)))
         } else {

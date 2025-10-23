@@ -32,11 +32,7 @@ impl super::Formula for TimeSlice {
         }
     }
 
-    fn parse(
-        &self,
-        recv: Expr,
-        args: &[Expr],
-    ) -> Result<Expr, Error> {
+    fn parse(&self, recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
         if let [Expr::StringLiteral(duration)] = args {
             let duration = parse_duration(duration)?;
             // Ok(Expr::Last(Box::new(recv), duration))

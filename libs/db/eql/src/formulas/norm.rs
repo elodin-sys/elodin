@@ -49,11 +49,7 @@ impl super::Formula for Norm {
         "norm"
     }
 
-    fn parse(
-        &self,
-        recv: Expr,
-        args: &[Expr],
-    ) -> Result<Expr, Error> {
+    fn parse(&self, recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
         parse(recv, args)
     }
 
