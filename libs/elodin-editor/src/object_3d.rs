@@ -1,4 +1,5 @@
 use bevy::ecs::hierarchy::ChildOf;
+use bevy::log::warn_once;
 use bevy::prelude::Mesh;
 use bevy::prelude::*;
 use bevy_render::alpha::AlphaMode;
@@ -9,8 +10,12 @@ use impeller2_wkt::{ComponentValue, Object3D};
 use nox::Array;
 use smallvec::smallvec;
 
-use crate::BevyExt;
+use crate::{BevyExt, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
 use std::fmt;
+
+type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>);
+
+type ImportedCameraQuery<'w, 's> = Query<'w, 's, (Entity, &'static ChildOf), ImportedCameraFilter>;
 
 /// ExprObject3D component that holds an EQL expression for dynamic positioning
 #[derive(Component)]
@@ -298,6 +303,51 @@ pub fn update_object_3d_system(
     }
 }
 
+/// Emits a warning when a GLB spawns a camera so the user can decide how to handle it.
+pub fn warn_imported_cameras(
+    object_states: Query<&Object3DState>,
+    parents: Query<&ChildOf>,
+    imported_cameras: ImportedCameraQuery,
+) {
+    for (camera_entity, parent) in imported_cameras.iter() {
+        let mut current = parent.0;
+        let mut owning_object = None;
+
+        // Walk up the hierarchy to see if this camera belongs to an object_3d root.
+        loop {
+            if object_states.get(current).is_ok() {
+                owning_object = Some(current);
+                break;
+            }
+
+            let Ok(next_parent) = parents.get(current) else {
+                break;
+            };
+            current = next_parent.0;
+        }
+
+        let Some(object_root) = owning_object else {
+            continue;
+        };
+
+        if let Ok(state) = object_states.get(object_root) {
+            let source = match &state.data.mesh {
+                impeller2_wkt::Object3DMesh::Glb(path) => format!("GLB '{path}'"),
+                _ => "object_3d".to_string(),
+            };
+            warn_once!(
+                "Imported {source} contains camera entity {camera_entity:?}; \
+                 embedded cameras stay active. Remove the camera from the asset if this is unintended."
+            );
+        } else {
+            warn_once!(
+                "Imported object_3d contains camera entity {camera_entity:?}; \
+                 embedded cameras stay active. Remove the camera from the asset if this is unintended."
+            );
+        }
+    }
+}
+
 fn evaluate_scale(
     state: &Object3DState,
     entity_map: &EntityMap,
@@ -483,6 +533,6 @@ pub struct Object3DPlugin;
 
 impl Plugin for Object3DPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, update_object_3d_system);
+        app.add_systems(Update, (update_object_3d_system, warn_imported_cameras));
     }
 }
