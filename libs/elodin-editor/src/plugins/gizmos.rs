@@ -1,6 +1,6 @@
 use bevy::render::view::RenderLayers;
 use bevy::{
-    app::{App, Plugin, Startup, Update},
+    app::{App, Plugin, Startup, Update, PostUpdate},
     ecs::system::{Query, Res, ResMut},
     gizmos::{
         config::{DefaultGizmoConfigGroup, GizmoConfigStore, GizmoLineJoint},
@@ -8,7 +8,7 @@ use bevy::{
     },
     log::warn,
     math::{DVec3, Quat, Vec3, DQuat},
-    prelude::Color,
+    prelude::{IntoScheduleConfigs, Color, TransformSystem},
     transform::components::Transform,
 };
 use big_space::FloatingOriginSettings;
@@ -32,7 +32,9 @@ pub struct GizmoPlugin;
 impl Plugin for GizmoPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, gizmo_setup);
-        app.add_systems(Update, render_vector_arrow);
+        // This is how the `big_space` crate did it.
+        // app.add_systems(PostUpdate, render_vector_arrow.after(TransformSystem::TransformPropagate));
+        app.add_systems(bevy::app::PreUpdate, render_vector_arrow);
         app.add_systems(Update, render_body_axis);
     }
 }
@@ -87,10 +89,7 @@ fn render_vector_arrow(
             if let Some(world_pos) = origin_value.as_world_pos() {
                 start_world = world_pos.bevy_pos();
                 rotation = world_pos.bevy_att();
-            } else {
-                let Some(origin) = component_value_tail_to_vec3(&origin_value) else {
-                    continue;
-                };
+            } else if let Some(origin) = component_value_tail_to_vec3(&origin_value) {
                 start_world = origin;
             }
         }

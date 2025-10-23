@@ -257,6 +257,7 @@ pub fn update_object_3d_system(
     entity_map: Res<EntityMap>,
     component_value_maps: Query<&'static ComponentValue>,
 ) {
+    // return;
     for (_entity, mut object_3d, mut pos, ellipse) in objects_query.iter_mut() {
         if let Some(compiled_expr) = &object_3d.compiled_expr
             && let Ok(component_value) = compiled_expr.execute(&entity_map, &component_value_maps)
