@@ -14,9 +14,9 @@ use impeller2::{
 use impeller2_wkt::ComponentPath;
 use peg::error::ParseError;
 
-pub mod eql_formulas;
+pub mod formulas;
 
-use eql_formulas::{EqlFormula, FormulaRegistry, create_default_registry, first, last, norm};
+use formulas::{Formula, FormulaRegistry, create_default_registry};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AstNode<'input> {
@@ -109,10 +109,7 @@ pub enum Expr {
     FloatLiteral(f64),
     StringLiteral(String),
 
-    Formula(Arc<dyn EqlFormula>, Box<Expr>),
-
-    // norm()
-    Norm(Box<Expr>),
+    Formula(Arc<dyn Formula>, Box<Expr>),
 
     // time limits
     Last(Box<Expr>, hifitime::Duration),
@@ -126,7 +123,6 @@ impl Expr {
     fn to_field(&self) -> Result<String, Error> {
         match self {
             Expr::ComponentPart(component) => Ok(component.name.replace(".", "_")),
-
             Expr::Time(_) => Ok("time".to_string()),
             Expr::Formula(formula, expr) => formula.to_field(expr),
             Expr::BinaryOp(left, right, op) => Ok(format!(
@@ -157,7 +153,6 @@ impl Expr {
             Expr::ComponentPart(component) => Ok(component.name.replace(".", "_")),
 
             Expr::Time(component) => Ok(component.name.replace(".", "_")),
-            Expr::Norm(e) => e.to_table(), // norm()
             Expr::Formula(_, expr) => expr.to_table(),
             Expr::BinaryOp(left, _, _) => left.to_table(),
 
@@ -177,7 +172,6 @@ impl Expr {
     /// Converts an Expr to a qualified SQL field name (table.field) for use in JOINs.
     fn to_qualified_field(&self) -> Result<String, Error> {
         match self {
-            Expr::Norm(e) => norm::to_qualified_field(e),
             Expr::Formula(formula, expr) => formula.to_qualified_field(expr),
             Expr::BinaryOp(left, right, op) => Ok(format!(
                 "({} {} {})",
@@ -196,7 +190,6 @@ impl Expr {
 
     fn to_column_name(&self) -> Option<String> {
         match self {
-            Expr::Norm(e) => norm::to_column_name(e),
             Expr::Formula(formula, expr) => formula.to_column_name(expr),
             Expr::ComponentPart(e) => Some(e.name.clone()),
             Expr::ArrayAccess(expr, index) => match expr.as_ref() {
@@ -311,13 +304,10 @@ impl Expr {
                 }
             }
 
-            Expr::Last(expr, duration) => last::to_sql(expr, duration, context),
-            Expr::First(expr, duration) => first::to_sql(expr, duration, context),
-
             Expr::StringLiteral(_) => Err(Error::InvalidFieldAccess(
                 "cannot convert string literal to SQL".to_string(),
             )),
-
+            Expr::Formula(formula, expr) => formula.to_sql(expr, context),
             expr => Ok(format!(
                 "select {} from {}",
                 expr.to_select_part()?,
@@ -514,8 +504,7 @@ impl Context {
                     .map(|ast_node| self.parse(ast_node))
                     .collect::<Result<Vec<_>, _>>()?;
                 if let Some(formula) = self.formula_registry.get(cow.as_ref()) {
-                    let arc = Arc::clone(formula);
-                    formula.parse(arc, recv, &args)
+                    formula.parse(recv, &args)
                 } else {
                     Err(Error::InvalidMethodCall(cow.to_string()))
                 }
@@ -672,12 +661,14 @@ pub enum Error {
     InvalidMethodCall(String),
     #[error("parse {0}")]
     Parse(#[from] ParseError<peg::str::LineCol>),
+    #[error("missing duration: {0}")]
+    MissingDuration(String),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::eql_formulas::fftfreq;
+    use crate::formulas::*;
 
     #[test]
     fn test_ast_parse() {
@@ -774,7 +765,7 @@ mod tests {
         let context = create_test_context();
 
         let time_expr = Expr::Time(entity_component);
-        let expr = Expr::Formula(Arc::new(fftfreq::FftFreq), Box::new(time_expr));
+        let expr = Expr::Formula(Arc::new(FftFreq), Box::new(time_expr));
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
@@ -965,7 +956,7 @@ mod tests {
         // norm()
         let part = create_test_component_part();
         let context = create_test_context();
-        let expr = Expr::Norm(Box::new(Expr::ComponentPart(part)));
+        let expr = Expr::Formula(Arc::new(Norm), Box::new(Expr::ComponentPart(part)));
         let sql = expr.to_sql(&context).unwrap();
         assert_eq!(
             sql,
