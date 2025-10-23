@@ -13,10 +13,10 @@ use crate::{Context, Error, Expr};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub trait EqlFormula: Send + Sync + std::fmt::Debug {
+pub trait Formula: Send + Sync + std::fmt::Debug {
     fn name(&self) -> &'static str;
 
-    fn parse(&self, formula: Arc<dyn EqlFormula>, recv: Expr, args: &[Expr])
+    fn parse(&self, formula: Arc<dyn Formula>, recv: Expr, args: &[Expr])
     -> Result<Expr, Error>;
 
     fn to_column_name(&self, expr: &Expr) -> Option<String> {
@@ -48,10 +48,9 @@ pub trait EqlFormula: Send + Sync + std::fmt::Debug {
         }
     }
 
-    fn to_sql(&self, expr: &Expr, context: &Context) -> Result<String, Error> {
+    fn to_sql(&self, expr: &Expr, _context: &Context) -> Result<String, Error> {
         Ok(format!(
             "select {} from {}",
-            // self.name(),
             self.to_select_part(expr)?,
             expr.to_table()?
         ))
@@ -61,7 +60,7 @@ pub trait EqlFormula: Send + Sync + std::fmt::Debug {
 /// A formula registry that allows dynamic registration and lookup of formulas
 #[derive(Debug, Clone)]
 pub struct FormulaRegistry {
-    formulas: HashMap<String, Arc<dyn EqlFormula>>,
+    formulas: HashMap<String, Arc<dyn Formula>>,
 }
 
 impl FormulaRegistry {
@@ -73,13 +72,13 @@ impl FormulaRegistry {
     }
 
     /// Register a formula in the registry
-    pub fn register<F: EqlFormula + 'static>(&mut self, formula: F) {
+    pub fn register<F: Formula + 'static>(&mut self, formula: F) {
         let name = formula.name().to_string();
         self.formulas.insert(name, Arc::new(formula));
     }
 
     /// Get a formula by name
-    pub fn get(&self, name: &str) -> Option<&Arc<dyn EqlFormula>> {
+    pub fn get(&self, name: &str) -> Option<&Arc<dyn Formula>> {
         self.formulas.get(name)
     }
 
@@ -93,7 +92,7 @@ impl FormulaRegistry {
         self.formulas.contains_key(name)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &Arc<dyn EqlFormula>> {
+    pub fn iter(&self) -> impl Iterator<Item = &Arc<dyn Formula>> {
         self.formulas.values()
     }
 }

@@ -14,9 +14,9 @@ use impeller2::{
 use impeller2_wkt::ComponentPath;
 use peg::error::ParseError;
 
-pub mod eql_formulas;
+pub mod formulas;
 
-use eql_formulas::{EqlFormula, FormulaRegistry, create_default_registry};
+use formulas::{Formula, FormulaRegistry, create_default_registry};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AstNode<'input> {
@@ -109,7 +109,7 @@ pub enum Expr {
     FloatLiteral(f64),
     StringLiteral(String),
 
-    Formula(Arc<dyn EqlFormula>, Box<Expr>),
+    Formula(Arc<dyn Formula>, Box<Expr>),
 
     // time limits
     Last(Box<Expr>, hifitime::Duration),
@@ -306,13 +306,10 @@ impl Expr {
 
             // Expr::Last(expr, duration) => last::to_sql(expr, duration, context),
             // Expr::First(expr, duration) => first::to_sql(expr, duration, context),
-
             Expr::StringLiteral(_) => Err(Error::InvalidFieldAccess(
                 "cannot convert string literal to SQL".to_string(),
             )),
-            Expr::Formula(formula, expr) => {
-                formula.to_sql(expr, context)
-            },
+            Expr::Formula(formula, expr) => formula.to_sql(expr, context),
             expr => Ok(format!(
                 "select {} from {}",
                 expr.to_select_part()?,
@@ -674,7 +671,7 @@ pub enum Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::eql_formulas::*;
+    use crate::formulas::*;
 
     #[test]
     fn test_ast_parse() {

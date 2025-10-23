@@ -44,14 +44,14 @@ fn parse(recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
 #[derive(Debug, Clone)]
 pub struct Norm;
 
-impl super::EqlFormula for Norm {
+impl super::Formula for Norm {
     fn name(&self) -> &'static str {
         "norm"
     }
 
     fn parse(
         &self,
-        _formula: Arc<dyn super::EqlFormula>,
+        _formula: Arc<dyn super::Formula>,
         recv: Expr,
         args: &[Expr],
     ) -> Result<Expr, Error> {

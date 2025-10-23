@@ -20,14 +20,14 @@ fn suggestions_for_time() -> Vec<String> {
 #[derive(Debug, Clone)]
 pub struct FftFreq;
 
-impl super::EqlFormula for FftFreq {
+impl super::Formula for FftFreq {
     fn name(&self) -> &'static str {
         "fftfreq"
     }
 
     fn parse(
         &self,
-        formula: Arc<dyn super::EqlFormula>,
+        formula: Arc<dyn super::Formula>,
         recv: Expr,
         args: &[Expr],
     ) -> Result<Expr, Error> {

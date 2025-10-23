@@ -4,14 +4,14 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub struct Fft;
 
-impl super::EqlFormula for Fft {
+impl super::Formula for Fft {
     fn name(&self) -> &'static str {
         "fft"
     }
 
     fn parse(
         &self,
-        formula: Arc<dyn super::EqlFormula>,
+        formula: Arc<dyn super::Formula>,
         recv: Expr,
         args: &[Expr],
     ) -> Result<Expr, Error> {
@@ -29,5 +29,4 @@ impl super::EqlFormula for Fft {
             Vec::new()
         }
     }
-
 }

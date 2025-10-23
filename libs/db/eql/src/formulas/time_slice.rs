@@ -2,8 +2,6 @@ use crate::{Context, Error, Expr, parse_duration};
 use hifitime::Duration;
 use std::sync::Arc;
 
-
-
 #[derive(Debug, Clone)]
 pub enum TimeSlice {
     First(Option<Duration>),
@@ -26,7 +24,7 @@ impl TimeSlice {
     }
 }
 
-impl super::EqlFormula for TimeSlice {
+impl super::Formula for TimeSlice {
     fn name(&self) -> &'static str {
         match self {
             TimeSlice::First(_) => "first",
@@ -34,13 +32,19 @@ impl super::EqlFormula for TimeSlice {
         }
     }
 
-    fn parse(&self,
-             _formula: Arc<dyn super::EqlFormula>,
-             recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
+    fn parse(
+        &self,
+        _formula: Arc<dyn super::Formula>,
+        recv: Expr,
+        args: &[Expr],
+    ) -> Result<Expr, Error> {
         if let [Expr::StringLiteral(duration)] = args {
             let duration = parse_duration(duration)?;
             // Ok(Expr::Last(Box::new(recv), duration))
-            Ok(Expr::Formula(Arc::new(self.with_duration(duration)), Box::new(recv)))
+            Ok(Expr::Formula(
+                Arc::new(self.with_duration(duration)),
+                Box::new(recv),
+            ))
         } else {
             Err(Error::InvalidMethodCall("last".to_string()))
         }
@@ -55,11 +59,7 @@ impl super::EqlFormula for TimeSlice {
         }
     }
 
-    fn to_sql(
-        &self,
-        expr: &Expr,
-        context: &Context,
-    ) -> Result<String, Error> {
+    fn to_sql(&self, expr: &Expr, context: &Context) -> Result<String, Error> {
         if let Some(duration) = self.duration() {
             let sql = expr.to_sql(context)?;
             let duration_micros = (duration.total_nanoseconds() / 1000) as i64;
@@ -87,7 +87,7 @@ impl super::EqlFormula for TimeSlice {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Component, ComponentPart, Context, Expr, parse_duration, eql_formulas::TimeSlice};
+    use crate::{Component, ComponentPart, Context, Expr, formulas::TimeSlice, parse_duration};
     use impeller2::schema::Schema;
     use impeller2::types::{ComponentId, PrimType, Timestamp};
     use std::collections::BTreeMap;
@@ -108,12 +108,14 @@ mod tests {
         });
         let context = Context::new(BTreeMap::new(), Timestamp(0), Timestamp(1_000_000));
         let duration = parse_duration("PT0.5S").unwrap();
-        let expr = Expr::Formula(Arc::new(TimeSlice::Last(Some(duration))), Box::new(Expr::ComponentPart(part)));
+        let expr = Expr::Formula(
+            Arc::new(TimeSlice::Last(Some(duration))),
+            Box::new(Expr::ComponentPart(part)),
+        );
 
         let sql = expr.to_sql(&context).unwrap();
         assert!(sql.contains(">= to_timestamp(0.5)"), "WAS {}", sql);
     }
-
 
     #[test]
     fn first_generates_expected_sql() {
@@ -131,7 +133,10 @@ mod tests {
 
         let context = Context::new(BTreeMap::new(), Timestamp(0), Timestamp(1_000_000));
         let duration = parse_duration("PT0.5S").unwrap();
-        let expr = Expr::Formula(Arc::new(TimeSlice::First(Some(duration))), Box::new(Expr::ComponentPart(part)));
+        let expr = Expr::Formula(
+            Arc::new(TimeSlice::First(Some(duration))),
+            Box::new(Expr::ComponentPart(part)),
+        );
 
         let sql = expr.to_sql(&context).unwrap();
         assert!(sql.contains("<= to_timestamp(0.5)"));
