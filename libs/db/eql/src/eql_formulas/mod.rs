@@ -115,7 +115,8 @@ pub fn create_default_registry() -> FormulaRegistry {
     registry.register(fftfreq::FftFreq);
     registry.register(norm::Norm);
     registry.register(first::First);
-    registry.register(last::Last::default());
+    registry.register(last::TimeSlice::Last(None));
+    registry.register(last::TimeSlice::First(None));
 
     registry
 }

@@ -55,7 +55,7 @@ impl super::EqlFormula for First {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Component, ComponentPart, Context, Expr, parse_duration};
+    use crate::{Component, ComponentPart, Context, Expr, parse_duration, eql_formulas::TimeSlice};
     use impeller2::schema::Schema;
     use impeller2::types::{ComponentId, PrimType, Timestamp};
     use std::collections::BTreeMap;
@@ -77,7 +77,7 @@ mod tests {
 
         let context = Context::new(BTreeMap::new(), Timestamp(0), Timestamp(1_000_000));
         let duration = parse_duration("PT0.5S").unwrap();
-        let expr = Expr::First(Box::new(Expr::ComponentPart(part)), duration);
+        let expr = Expr::Formula(Arc::new(TimeSlice::First(Some(duration))), Box::new(Expr::ComponentPart(part)));
 
         let sql = expr.to_sql(&context).unwrap();
         assert!(sql.contains("<= to_timestamp(0.5)"));
