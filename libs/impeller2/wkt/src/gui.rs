@@ -284,7 +284,7 @@ pub struct VectorArrow3d<T = ()> {
     pub vector: String,
     pub origin: Option<String>,
     #[serde(default = "VectorArrow3d::<T>::default_scale")]
-    pub scale: f32,
+    pub scale: f64,
     pub name: Option<String>,
     #[serde(default = "VectorArrow3d::<T>::default_color")]
     pub color: Color,
@@ -297,7 +297,7 @@ pub struct VectorArrow3d<T = ()> {
 }
 
 impl<T> VectorArrow3d<T> {
-    fn default_scale() -> f32 {
+    fn default_scale() -> f64 {
         1.0
     }
 

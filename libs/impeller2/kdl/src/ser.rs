@@ -341,9 +341,9 @@ fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
             .push(KdlEntry::new_prop("origin", origin.clone()));
     }
 
-    if (arrow.scale - 1.0).abs() > f32::EPSILON {
+    if (arrow.scale - 1.0).abs() > f64::EPSILON {
         node.entries_mut()
-            .push(KdlEntry::new_prop("scale", arrow.scale as f64));
+            .push(KdlEntry::new_prop("scale", arrow.scale));
     }
 
     if let Some(name) = &arrow.name {

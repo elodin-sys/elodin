@@ -7,7 +7,7 @@ use bevy::{
         gizmos::Gizmos,
     },
     log::warn,
-    math::{DVec3, Quat, Vec3},
+    math::{DVec3, Quat, Vec3, DQuat},
     prelude::Color,
     transform::components::Transform,
 };
@@ -25,7 +25,7 @@ use crate::{
 };
 
 pub const GIZMO_RENDER_LAYER: usize = 30;
-const MIN_ARROW_LENGTH_SQUARED: f32 = 1.0e-6;
+const MIN_ARROW_LENGTH_SQUARED: f64 = 1.0e-6;
 
 pub struct GizmoPlugin;
 
@@ -78,15 +78,15 @@ fn render_vector_arrow(
             continue;
         }
 
-        let mut start_world = Vec3::ZERO;
-        let mut rotation = Quat::IDENTITY;
+        let mut start_world = DVec3::ZERO;
+        let mut rotation = DQuat::IDENTITY;
         if let Some(origin_expr) = &state.origin_expr {
             let Ok(origin_value) = origin_expr.execute(&entity_map, &component_values) else {
                 continue;
             };
             if let Some(world_pos) = origin_value.as_world_pos() {
-                start_world = world_pos.bevy_pos().as_vec3();
-                rotation = world_pos.bevy_att().as_quat();
+                start_world = world_pos.bevy_pos();
+                rotation = world_pos.bevy_att();
             } else {
                 let Some(origin) = component_value_tail_to_vec3(&origin_value) else {
                     continue;
@@ -99,13 +99,9 @@ fn render_vector_arrow(
             direction = rotation * direction;
         }
 
-        let start_world_d = DVec3::new(
-            start_world.x as f64,
-            start_world.y as f64,
-            start_world.z as f64,
-        );
-        let (_, start) = floating_origin.translation_to_grid::<i128>(start_world_d);
-        let end = start + direction;
+        let (_, start) = floating_origin.translation_to_grid::<i128>(start_world);
+
+        let (_, end) = floating_origin.translation_to_grid::<i128>(start_world + direction);
         gizmos.arrow(start, end, wkt_color_to_bevy(&arrow.color));
     }
 }

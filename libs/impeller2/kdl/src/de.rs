@@ -567,9 +567,9 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         Some(entry) => {
             let value = entry.value();
             if let Some(value) = value.as_float() {
-                value as f32
+                value
             } else if let Some(value) = value.as_integer() {
-                value as f32
+                value as f64
             } else {
                 return Err(KdlSchematicError::InvalidValue {
                     property: "scale".to_string(),
