@@ -196,7 +196,14 @@ impl Plugin for EditorPlugin {
             .add_systems(PreUpdate, setup_cell)
             .add_systems(PreUpdate, sync_res::<CurrentTimestamp>)
             .add_systems(PreUpdate, sync_res::<impeller2_wkt::SimulationTimeStep>)
-            .add_systems(PreUpdate, (set_floating_origin, (sync_pos, sync_object_3d, set_viewport_pos)).chain())
+            .add_systems(
+                PreUpdate,
+                (
+                    set_floating_origin,
+                    (sync_pos, sync_object_3d, set_viewport_pos),
+                )
+                    .chain(),
+            )
             .add_systems(Update, sync_paused)
             .add_systems(PreUpdate, set_selected_range)
             .add_systems(Update, update_eql_context)

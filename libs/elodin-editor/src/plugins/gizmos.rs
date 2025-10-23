@@ -1,14 +1,14 @@
 use bevy::render::view::RenderLayers;
 use bevy::{
-    app::{App, Plugin, Startup, Update, PostUpdate},
+    app::{App, Plugin, Startup, Update},
     ecs::system::{Query, Res, ResMut},
     gizmos::{
         config::{DefaultGizmoConfigGroup, GizmoConfigStore, GizmoLineJoint},
         gizmos::Gizmos,
     },
     log::warn,
-    math::{DVec3, Quat, Vec3, DQuat},
-    prelude::{IntoScheduleConfigs, Color, TransformSystem},
+    math::{DQuat, DVec3},
+    prelude::Color,
     transform::components::Transform,
 };
 use big_space::FloatingOriginSettings;

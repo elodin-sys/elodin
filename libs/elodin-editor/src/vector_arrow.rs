@@ -1,4 +1,4 @@
-use bevy::{prelude::*, math::DVec3};
+use bevy::{math::DVec3, prelude::*};
 use impeller2_wkt::{ComponentValue, WorldPos};
 use nox::{ArrayBuf, Quaternion, Vector3};
 
