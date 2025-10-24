@@ -5,7 +5,7 @@
 To simplify access to hierarchical, time-oriented data, we introduce **Elodin Query Language** (EQL).
 
 EQL is a **lightweight query language dedicated to time-series signals**.  
-It allows you to easily select components (e.g. `a.world_pos.x`, `rocket.fin_deflect[0]`), automatically handle time-based joins, and work with time windows (`.last("5m")`, `.first("10s")`).  
+It allows you to easily select components (e.g. `a.world_pos.x`, `rocket.fin_deflect[0]`), automatically handle time-based joins, and work with time windows (`.last("PT1m")`, `.first("PT1s")`).  
 EQL also provides specialized signal-oriented functions such as `fft` or `fftfreq`.
 
 ## From EQL to SQL
@@ -45,11 +45,11 @@ Anything not listed is not part of the current language (as of **September 29, 2
 | **Float literal**        | `12`, `-3`, `1.0`, `2.`         | Numeric literal                          | Grammar: optional `-`, digits, optional `.digits`. No exponent form (`1e3` not supported). |
 | **String literal**       | `"5m"`, `"10s"`, `"text"`       | String value                             | No escapes; cannot contain `'` or `"` inside. Used by `last`/`first`. |
 | **Binary operators**     | `+`, `-`, `*`, `/`              | Arithmetic in projections                | All four share one precedence level, left-associative. No comparisons/booleans. |
-| **Formula call (generic)**| `expr.method(args)`             | Call a method on a receiver              | Parser accepts a (single) tuple of args due to comma precedence; semantics only support the 4 methods below. |
+| **Formula call (generic)**| `expr.method(args)`             | Call a method on a receiver              | Parser accepts a (single) tuple of args due to comma precedence; semantics only support the formulas listed below (registered in `EqlFormula`). |
 | **Formula: fft()**        | `a.world_pos.x.fft()`           | Signal FFT                               | Receiver must be an array access (scalar from vector). No args. Emits `fft(...)` in SQL (requires DB UDF). |
 | **Formula: fftfreq()**    | `a.world_pos.time.fftfreq()`    | Frequency bins                           | Receiver must be `Time(...)` (component.time). No args. Emits `fftfreq(...)` in SQL (requires DB UDF). |
-| **Formula: last("Δt")**   | `(expr).last("5m")`             | Time window (latest Δt)                  | Exactly one string argument (duration). Appends `WHERE time >= to_timestamp(last - Δt)`. Duration parsed by `jiff::Span`. |
-| **Formula: first("Δt")**  | `(expr).first("10s")`           | Time window (earliest Δt)                | Exactly one string argument (duration). Appends `WHERE time <= to_timestamp(earliest + Δt)`. |
+| **Formula: last("Δt")**   | `(expr).last("PT2S")`           | Time window (latest Δt)                  | Exactly one ISO-8601 string argument like `"PT2S"` (parsed via `jiff::Span`). Appends `WHERE time >= to_timestamp(last - Δt)`. |
+| **Formula: first("Δt")**  | `(expr).first("PT5S")`          | Time window (earliest Δt)                | Exactly one ISO-8601 string argument like `"PT5S"`. Appends `WHERE time <= to_timestamp(earliest + Δt)`. |
 | **Formula: norm()** | `a.world_pos.norm()` | Euclidean norm of a vector component | No args. Expands to sqrt(∑ elem*elem) over all vector elements; works on numeric vector components. |
 | **Whitespace**           | spaces / tabs / newlines        | Ignored separators                       | Grammar skips whitespace where sensible. |
 | **Format string**        | `text ${expr} text`             | Parse into segments + embedded ASTs      | Separate entrypoint `fmt_string` returns `Vec<FmtNode>`. Raw `$` not allowed in plain segments. |
@@ -86,6 +86,3 @@ Anything not listed is not part of the current language (as of **September 29, 2
 | `(a.world_pos.x, a.world_pos[1])` | `select a_world_pos.a_world_pos[1] as "a.world_pos.x", a_world_pos.a_world_pos[2] as "a.world_pos.y" from a_world_pos;` | Mix dot-field and array index to select X and Y. |
 | `(a.world_pos, b.velocity, c.acceleration)` | `select a_world_pos.a_world_pos as "a.world_pos", b_velocity.b_velocity as "b.velocity", c_acceleration.c_acceleration as "c.acceleration" from a_world_pos join b_velocity on a_world_pos.time = b_velocity.time join c_acceleration on a_world_pos.time = c_acceleration.time;` | Select three full components with implicit time joins. |
 | **Invalid shapes** | `a.world_pos.x.fft(1024) · a.world_pos.time.fftfreq(1) · a.world_pos.last(10)` | `fft`/`fftfreq` take no args; `last`/`first` require a string duration like `"10s"`. |
-
-## Adding a new "EQL formula"
-- [Developer Guide](src/how-to-new-formula.md)
