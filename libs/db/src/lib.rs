@@ -408,25 +408,11 @@ impl DB {
     }
 
     pub fn copy_native(&self, target_db_path: impl AsRef<Path>) -> Result<PathBuf, Error> {
-        let target_db_path = target_db_path.as_ref();
-        let (parent_dir, final_db_dir) = if target_db_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .map(|n| n.eq_ignore_ascii_case("db"))
-            .unwrap_or(false)
-        {
-            (
-                target_db_path
-                    .parent()
-                    .map(Path::to_path_buf)
-                    .unwrap_or_else(|| PathBuf::from(".")),
-                target_db_path.to_path_buf(),
-            )
-        } else {
-            (target_db_path.to_path_buf(), target_db_path.join("db"))
-        };
-
-        let run_dir = parent_dir.clone();
+        let final_db_dir = target_db_path.as_ref().to_path_buf();
+        let parent_dir = final_db_dir
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
 
         if self.path.starts_with(&final_db_dir) || final_db_dir.starts_with(&self.path) {
             return Err(Error::Io(io::Error::new(
@@ -435,27 +421,15 @@ impl DB {
             )));
         }
 
-        if run_dir
-            .file_name()
-            .and_then(|n| n.to_str())
-            .map(|n| n.eq_ignore_ascii_case("db"))
-            .unwrap_or(false)
-        {
-            return Err(Error::Io(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "directory name \"db\" is not allowed",
-            )));
-        }
-
-        if run_dir.exists() || final_db_dir.exists() {
+        if final_db_dir.exists() {
             return Err(Error::Io(io::Error::new(
                 io::ErrorKind::AlreadyExists,
                 "target directory already exists",
             )));
         }
 
-        fs::create_dir_all(&run_dir)?;
-        let tmp_db_dir = run_dir.join("db.tmp");
+        fs::create_dir_all(&parent_dir)?;
+        let tmp_db_dir = parent_dir.join("db.tmp");
         if tmp_db_dir.exists() {
             fs::remove_dir_all(&tmp_db_dir)?;
         }
@@ -463,7 +437,7 @@ impl DB {
         copy_dir_native(&self.path, &tmp_db_dir)?;
         sync_dir(&tmp_db_dir)?;
         fs::rename(&tmp_db_dir, &final_db_dir)?;
-        sync_dir(&run_dir)?;
+        sync_dir(&parent_dir)?;
         Ok(final_db_dir)
     }
 

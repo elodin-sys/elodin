@@ -623,11 +623,10 @@ mod tests {
 
         let (archive_saved, _) = zip(save_future, write_future).await;
 
-        let expected_snapshot_path = native_root.join("db");
         assert_eq!(archive_saved.path, native_root);
-        assert!(expected_snapshot_path.exists());
+        assert!(native_root.exists());
 
-        let snapshot_db = DB::open(expected_snapshot_path.clone()).unwrap();
+        let snapshot_db = DB::open(native_root.clone()).unwrap();
         snapshot_db.with_state(|state| {
             let component = state
                 .get_component(component_id)

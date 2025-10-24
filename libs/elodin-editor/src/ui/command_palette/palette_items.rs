@@ -802,14 +802,9 @@ fn save_db_native_prompt_item() -> PaletteItem {
                     }
                 }
             }
-            let Some(name) = last_component.and_then(|c| c.to_str()) else {
+            let Some(_name) = last_component.and_then(|c| c.to_str()) else {
                 return PaletteEvent::Error("Invalid directory name".to_string());
             };
-            if name.eq_ignore_ascii_case("db") {
-                return PaletteEvent::Error(
-                    "The final directory name cannot be \"db\"".to_string(),
-                );
-            }
             let request_path = if path_is_absolute {
                 raw_path.clone()
             } else {
