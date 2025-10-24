@@ -490,13 +490,25 @@ impl DB {
                     .ok_or(Error::InvalidComponentId)?,
             );
 
-            let schema = ComponentSchema::read(path.join("schema"))?;
-            let metadata = ComponentMetadata::read(path.join("metadata"))?;
-            trace!("Read component metadata for {}", metadata.name);
-            component_metadata.insert(component_id, metadata);
+            let metadata_path = path.join("metadata");
+            if metadata_path.exists() {
+                let metadata = ComponentMetadata::read(metadata_path)?;
+                trace!("Read component metadata for {}", metadata.name);
+                component_metadata.insert(component_id, metadata);
+            }
+
+            let schema_path = path.join("schema");
+            if !schema_path.exists() {
+                warn!(
+                    component.id = ?component_id.0,
+                    component.dir = %path.display(),
+                    "Skipping component without schema while opening database"
+                );
+                continue;
+            }
 
             trace!("Opening component file {}", path.display());
-
+            let schema = ComponentSchema::read(schema_path)?;
             let component = Component::open(&path, component_id, schema.clone())?;
             if let Some((timestamp, _)) = component.time_series.latest() {
                 last_updated = timestamp.0.max(last_updated);
