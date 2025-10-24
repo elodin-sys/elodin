@@ -175,6 +175,14 @@ pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
+        // Probe ELODIN_KDL_DIR once to inform or warn about an invalid
+        // directory surfaces immediately on startup.
+        match impeller2_kdl::env::schematic_dir() {
+            Ok(Some(path)) => info!("ELODIN_KDL_DIR set to {:?}", path.display()),
+            Ok(None) => info!("ELODIN_KDL_DIR defaulted to current working directory"),
+            Err(err) => error!("{err}, falling back to current working directory"),
+        }
+
         app.init_resource::<Paused>()
             .init_resource::<SelectedObject>()
             .init_resource::<HoveredEntity>()
@@ -200,7 +208,8 @@ impl Plugin for UiPlugin {
             .add_systems(Update, query_plot::auto_bounds)
             .add_systems(Update, dashboard::update_nodes)
             .add_plugins(SchematicPlugin)
-            .add_plugins(LinePlot3dPlugin);
+            .add_plugins(LinePlot3dPlugin)
+            .add_plugins(command_palette::palette_items::plugin);
     }
 }
 

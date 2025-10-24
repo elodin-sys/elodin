@@ -34,14 +34,14 @@ cargo watch --watch ../../libs/elodin-editor \
 
 ### `ELODIN_ASSETS_DIR`
 
-The `ELODIN_ASSETS_DIR` environment variable can specify an "assets" folder,
-used to find external files like meshes or images. If no environment variable is
-set, it will look for an "assets" folder in the current working directory.
+The `ELODIN_ASSETS_DIR` environment variable specifies an "assets" directory,
+used to store external files like meshes or images. If no environment variable
+is set, it looks for an "assets" directory in the current directory.
 
 ### No variable
 This is probably the most typical usage.
 ```sh
-$ elodin; # Will look for "assets" folder.
+$ elodin; # Will look for "assets" directory.
 INFO ELODIN_ASSETS_DIR defaulted to "assets"
 ```
 ### Set variable for one run
@@ -57,3 +57,23 @@ $ elodin
 INFO ELODIN_ASSETS_DIR set to "/path/to/my-assets"
 ```
 
+### `ELODIN_KDL_DIR`
+
+The `ELODIN_KDL_DIR` environment variable specifies for schematic files, i.e.,
+files with a "kdl" extension. If no environment variable is set, it looks in the
+current working directory.
+
+### No variable
+This is probably the most typical usage.
+```sh
+$ elodin; # Looks for ".kdl"s in current working directory.
+```
+### Set variable for one run
+```sh
+$ ELODIN_KDL_DIR=my-kdls elodin
+```
+### Set variable for session
+```sh
+$ export ELODIN_KDL_DIR=/path/to/my-kdls; # Or place this in your shell's rc file.
+$ elodin
+```

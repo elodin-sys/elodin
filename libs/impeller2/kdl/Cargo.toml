@@ -16,3 +16,4 @@ impeller2-wkt.features = ["gui", "std"]
 thiserror = "2.0"
 miette.version = "7.0"
 miette.features = ["fancy"]
+tracing = "0.1.41"
