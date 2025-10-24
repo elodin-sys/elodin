@@ -33,7 +33,7 @@ pub fn schematic_dir() -> Result<Option<PathBuf>, Error> {
 
 /// Returns the `ELODIN_KDL_DIR` or the current working directory or an error.
 pub fn schematic_dir_or_cwd() -> Result<PathBuf, Error> {
-    if let Some(dir) = schematic_dir()? {
+    if let Ok(Some(dir)) = schematic_dir() {
         Ok(dir)
     } else {
         Ok(std::env::current_dir()?)
