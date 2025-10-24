@@ -26,7 +26,7 @@ use std::{
     collections::HashMap,
     ffi::OsStr,
     fs::{self, File},
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{self},
     net::{SocketAddr, ToSocketAddrs},
     ops::Range,
     path::{Path, PathBuf},
