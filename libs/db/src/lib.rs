@@ -220,7 +220,10 @@ fn copy_dir_native(src: &Path, dst: &Path) -> Result<(), Error> {
             copy_file_native(&src_path, &dst_path)?;
         } else {
             // skip non-regular entries
-            warn!("Skipping irregular file for db copy {:?}", src_path.display());
+            warn!(
+                "Skipping irregular file for db copy {:?}",
+                src_path.display()
+            );
         }
     }
     let metadata = fs::metadata(src)?;
