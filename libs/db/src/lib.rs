@@ -195,87 +195,9 @@ fn sync_dir(path: &Path) -> io::Result<()> {
     }
 }
 
-fn copy_sparse(src: &Path, dst: &Path) -> io::Result<()> {
-    const BUF_SIZE: usize = 128 * 1024;
-    let mut src_file = File::open(src)?;
-    let mut dst_file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(dst)?;
-    let metadata = src_file.metadata()?;
-    let mut buf = vec![0u8; BUF_SIZE];
-    loop {
-        let read = src_file.read(&mut buf)?;
-        if read == 0 {
-            break;
-        }
-        if buf[..read].iter().all(|&b| b == 0) {
-            dst_file.seek(SeekFrom::Current(read as i64))?;
-        } else {
-            dst_file.write_all(&buf[..read])?;
-        }
-    }
-    dst_file.set_len(metadata.len())?;
-    dst_file.sync_all()
-}
-
-#[cfg(any(target_os = "linux", target_os = "android"))]
-fn try_reflink(src: &Path, dst: &Path) -> io::Result<()> {
-    use std::os::fd::AsRawFd;
-    let src_file = File::open(src)?;
-    let dst_file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(dst)?;
-    const FICLONE: libc::c_ulong = 0x4004_9409;
-    let res = unsafe { libc::ioctl(dst_file.as_raw_fd(), FICLONE, src_file.as_raw_fd()) };
-    if res == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-fn try_reflink(src: &Path, dst: &Path) -> io::Result<()> {
-    use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
-    let src_c = CString::new(src.as_os_str().as_bytes())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains null byte"))?;
-    let dst_c = CString::new(dst.as_os_str().as_bytes())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains null byte"))?;
-    let res = unsafe { libc::clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) };
-    if res == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
-}
-
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "android",
-    target_os = "macos",
-    target_os = "ios"
-)))]
-fn try_reflink(_src: &Path, _dst: &Path) -> io::Result<()> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "reflink not supported on this platform",
-    ))
-}
-
 fn copy_file_native(src: &Path, dst: &Path) -> Result<(), Error> {
     let metadata = fs::metadata(src)?;
-    match try_reflink(src, dst) {
-        Ok(()) => {}
-        Err(_) => {
-            let _ = fs::remove_file(dst);
-            copy_sparse(src, dst)?;
-        }
-    }
+    reflink_copy::reflink_or_copy(src, dst)?;
     fs::set_permissions(dst, metadata.permissions())?;
     let file = File::open(dst)?;
     file.sync_all()?;
@@ -298,6 +220,7 @@ fn copy_dir_native(src: &Path, dst: &Path) -> Result<(), Error> {
             copy_file_native(&src_path, &dst_path)?;
         } else {
             // skip non-regular entries
+            warn!("Skipping irregular file for db copy {:?}", src_path.display());
         }
     }
     let metadata = fs::metadata(src)?;

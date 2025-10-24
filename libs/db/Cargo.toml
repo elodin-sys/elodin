@@ -98,3 +98,5 @@ tokio.optional = true
 
 # codegen
 postcard-c-codegen.path = "../postcard-c/codegen"
+hostname = "0.4.1"
+reflink-copy = "0.1.28"

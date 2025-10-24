@@ -444,21 +444,12 @@ Use a path that exists on the database host."
 }
 
 fn current_hostname() -> String {
-    const HOSTNAME_LEN: usize = 256;
-    let mut buf = [0u8; HOSTNAME_LEN];
-    let name = unsafe {
-        if libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) == 0 {
-            let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-            String::from_utf8_lossy(&buf[..len]).into_owned()
-        } else {
-            String::new()
-        }
-    };
-    if name.is_empty() {
-        "unknown-host".to_string()
-    } else {
-        name
-    }
+    hostname::get()
+        .map(|s| s.to_string_lossy().into())
+        .unwrap_or_else(|err| {
+            warn!("Could not resolve hostname: {err}");
+            "unknown-host".to_string()
+        })
 }
 
 fn format_host_target(host: &str, path: &Path) -> String {
