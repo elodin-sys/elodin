@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, path::PathBuf};
 
 use impeller2::types::{ComponentId, PacketId};
 use impeller2_wkt::{ErrorResponse, StreamId};
@@ -9,7 +9,7 @@ pub enum Error {
     MapOverflow,
     #[error("stellarator {0}")]
     Stellar(stellarator::Error),
-    #[error("io {0}")]
+    #[error("{0}")]
     Io(#[from] std::io::Error),
     #[error("impeller_stella {0}")]
     ImpellerStella(impeller2_stellar::Error),
@@ -44,6 +44,8 @@ pub enum Error {
     Parquet(#[from] parquet::errors::ParquetError),
     #[error("schema mismatch")]
     SchemaMismatch,
+    #[error("missing db_state file at {0}")]
+    MissingDbState(PathBuf),
 }
 
 impl From<impeller2_stellar::Error> for Error {

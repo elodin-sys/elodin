@@ -51,6 +51,7 @@ smallvec.features = ["const_generics", "union", "serde"]
 zerocopy.version = "0.8.2"
 pin-project = "1"
 rustfft = "6.2"
+libc = "0.2"
 
 # errors
 thiserror = "2"
@@ -97,3 +98,5 @@ tokio.optional = true
 
 # codegen
 postcard-c-codegen.path = "../postcard-c/codegen"
+hostname = "0.4.1"
+reflink-copy = "0.1.28"

@@ -1,6 +1,6 @@
 use std::{
     collections::BTreeMap,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     str::FromStr,
     time::Duration,
 };
@@ -12,7 +12,7 @@ use bevy::{
         system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
         world::World,
     },
-    log::{error, info},
+    log::{error, info, warn},
     pbr::{StandardMaterial, wireframe::WireframeConfig},
     prelude::{Deref, DerefMut, In, Resource},
     render::view::Visibility,
@@ -21,14 +21,15 @@ use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::TileId;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::{Timestamp, msg_id};
-use impeller2_bevy::{ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
+use impeller2_bevy::{CommandsExt, ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
 use impeller2_kdl::{
     ToKdl,
     env::{schematic_dir_or_cwd, schematic_file},
 };
 use impeller2_wkt::{
-    ComponentPath, ComponentValue, CurrentTimestamp, DbConfig, EarliestTimestamp, IsRecording,
-    LastUpdated, Material, Mesh, Object3D, SetDbConfig, SetStreamState, SimulationTimeStep,
+    ArchiveFormat, ArchiveSaved, ComponentPath, ComponentValue, CurrentTimestamp, DbConfig,
+    EarliestTimestamp, ErrorResponse, IsRecording, LastUpdated, Material, Mesh, Object3D,
+    SaveArchive, SetDbConfig, SetStreamState, SimulationTimeStep,
 };
 use miette::IntoDiagnostic;
 use nox::ArrayBuf;
@@ -38,6 +39,7 @@ use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
         HdrEnabled, Paused, colors,
+        command_palette::CommandPaletteState,
         plot::{GraphBundle, default_component_values},
         schematic::{
             CurrentSchematic, LoadSchematicParams, SchematicLiveReloadRx, load_schematic_file,
@@ -762,6 +764,131 @@ pub fn save_schematic_db() -> PaletteItem {
     )
 }
 
+fn save_db_native_prompt_item() -> PaletteItem {
+    PaletteItem::new(
+        LabelSource::placeholder("Enter a name for the Save DB directory"),
+        "",
+        |In(input): In<String>, mut commands: Commands| {
+            let trimmed = input.trim();
+            if trimmed.is_empty() {
+                return PaletteEvent::Error("Directory name cannot be empty".to_string());
+            }
+            let raw_path = PathBuf::from(trimmed);
+            let mut path_is_absolute =
+                raw_path.is_absolute() || trimmed.starts_with('/') || trimmed.starts_with('\\');
+            let mut last_component: Option<&std::ffi::OsStr> = None;
+            for component in raw_path.components() {
+                match component {
+                    Component::Normal(part) => {
+                        if part.is_empty() {
+                            return PaletteEvent::Error(
+                                "Path contains an empty segment".to_string(),
+                            );
+                        }
+                        last_component = Some(part);
+                    }
+                    Component::CurDir => {
+                        return PaletteEvent::Error(
+                            "`.` segments are not allowed in the path".to_string(),
+                        );
+                    }
+                    Component::ParentDir => {
+                        return PaletteEvent::Error(
+                            "Path may not traverse outside the workspace".to_string(),
+                        );
+                    }
+                    Component::Prefix(_) | Component::RootDir => {
+                        path_is_absolute = true;
+                    }
+                }
+            }
+            let Some(_name) = last_component.and_then(|c| c.to_str()) else {
+                return PaletteEvent::Error("Invalid directory name".to_string());
+            };
+            let request_path = if path_is_absolute {
+                raw_path.clone()
+            } else {
+                let cwd = match std::env::current_dir() {
+                    Ok(cwd) => cwd,
+                    Err(err) => {
+                        error!(?err, "Failed to resolve workspace directory");
+                        return PaletteEvent::Error(
+                            "Failed to resolve workspace directory".to_string(),
+                        );
+                    }
+                };
+                let target = cwd.join(&raw_path);
+                if target.exists() {
+                    return PaletteEvent::Error("Directory already exists".to_string());
+                }
+                if let Err(err) = target.strip_prefix(&cwd) {
+                    error!(?err, "Save path escaped workspace");
+                    return PaletteEvent::Error(
+                        "Path must stay within the workspace directory".to_string(),
+                    );
+                }
+                raw_path.clone()
+            };
+            commands.send_req_reply(
+                SaveArchive {
+                    path: request_path,
+                    format: ArchiveFormat::Native,
+                },
+                |In(res): In<Result<ArchiveSaved, ErrorResponse>>,
+                 mut palette_state: ResMut<CommandPaletteState>| {
+                    match res {
+                        Ok(saved) => {
+                            let display_path = std::env::current_dir()
+                                .ok()
+                                .and_then(|cwd| {
+                                    saved
+                                        .path
+                                        .strip_prefix(cwd)
+                                        .ok()
+                                        .map(|p| format!("{}", p.display()))
+                                })
+                                .unwrap_or_else(|| saved.path.display().to_string());
+                            info!(path = %display_path, "Saved DB snapshot");
+                    }
+                    Err(err) => {
+                        warn!(?err, "Failed to save DB snapshot");
+                        let message = if err.description.contains("Serde Deserialization Error")
+                        {
+                            "Connected database does not support native DB snapshots. Please update elodin-db and try again.".to_string()
+                        } else {
+                            err.description.clone()
+                        };
+                        palette_state.show = true;
+                        palette_state.filter.clear();
+                        palette_state.input_focus = true;
+                        palette_state.selected_index = 0;
+                        palette_state.page_stack.clear();
+                        palette_state.page_stack.push(save_db_native_prompt_page());
+                        palette_state.auto_open_item = None;
+                        palette_state.error = Some(message);
+                    }
+                }
+                true
+            },
+        );
+            PaletteEvent::Exit
+        },
+    )
+    .default()
+}
+
+fn save_db_native_prompt_page() -> PalettePage {
+    PalettePage::new(vec![save_db_native_prompt_item()]).prompt(
+        "Enter a directory name within the workspace or an absolute path on the database host",
+    )
+}
+
+pub fn save_db_native() -> PaletteItem {
+    PaletteItem::new("Save DB", PRESETS_LABEL, |_name: In<String>| {
+        save_db_native_prompt_page().into()
+    })
+}
+
 pub fn save_schematic_inner() -> PaletteItem {
     PaletteItem::new(
         LabelSource::placeholder("Enter a name for the schematic"),
@@ -1245,6 +1372,7 @@ impl Default for PalettePage {
             create_dashboard(None),
             create_sidebars(),
             create_3d_object(),
+            save_db_native(),
             save_schematic(),
             save_schematic_as(),
             save_schematic_db(),
