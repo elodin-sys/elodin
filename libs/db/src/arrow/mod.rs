@@ -474,10 +474,7 @@ fn format_host_target(host: &str, path: &Path) -> String {
 fn looks_like_windows_absolute(path: &Path) -> bool {
     path.to_str().is_some_and(|s| {
         let bytes = s.as_bytes();
-        (bytes.len() >= 3
-            && bytes[0].is_ascii_alphabetic()
-            && bytes[1] == b':'
-            && (bytes[2] == b'\\' || bytes[2] == b'/'))
+        (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
             || s.starts_with("\\\\")
     })
 }

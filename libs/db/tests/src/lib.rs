@@ -522,7 +522,7 @@ mod tests {
             description
         );
         assert!(
-            description.contains("C:\\\\Users\\\\tester\\\\snapshot"),
+            description.contains("C:\\Users\\tester\\snapshot"),
             "error description missing path: {}",
             description
         );
@@ -534,6 +534,19 @@ mod tests {
         assert!(
             !invalid_path.exists(),
             "invalid export path should not be created on unix hosts"
+        );
+
+        let invalid_drive_relative = std::path::PathBuf::from("C:Users\\tester\\snapshot2");
+        let save_archive = SaveArchive {
+            path: invalid_drive_relative.clone(),
+            format: ArchiveFormat::ArrowIpc,
+        };
+        let err = client.request(&save_archive).await.unwrap_err();
+        let description = err.to_string();
+        assert!(
+            description.contains("C:Users\\tester\\snapshot2"),
+            "error description missing drive-relative path: {}",
+            description
         );
     }
 
