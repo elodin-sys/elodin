@@ -854,22 +854,28 @@ fn save_db_native_prompt_item() -> PaletteItem {
                                 })
                                 .unwrap_or_else(|| saved.path.display().to_string());
                             info!(path = %display_path, "Saved DB snapshot");
-                        }
-                        Err(err) => {
-                            warn!(?err, "Failed to save DB snapshot");
-                            let message = if err.description.contains("Serde Deserialization Error")
-                            {
-                                "Connected database does not support native DB snapshots. Please update elodin-db and try again.".to_string()
-                            } else {
-                                err.description.clone()
-                            };
-                            palette_state.open_page(save_db_native_prompt_page);
-                            palette_state.handle_event(PaletteEvent::Error(message));
-                        }
                     }
-                    true
-                },
-            );
+                    Err(err) => {
+                        warn!(?err, "Failed to save DB snapshot");
+                        let message = if err.description.contains("Serde Deserialization Error")
+                        {
+                            "Connected database does not support native DB snapshots. Please update elodin-db and try again.".to_string()
+                        } else {
+                            err.description.clone()
+                        };
+                        palette_state.show = true;
+                        palette_state.filter.clear();
+                        palette_state.input_focus = true;
+                        palette_state.selected_index = 0;
+                        palette_state.page_stack.clear();
+                        palette_state.page_stack.push(save_db_native_prompt_page());
+                        palette_state.auto_open_item = None;
+                        palette_state.error = Some(message);
+                    }
+                }
+                true
+            },
+        );
             PaletteEvent::Exit
         },
     )

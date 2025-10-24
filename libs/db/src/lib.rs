@@ -1023,7 +1023,7 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + 'static>(
             Ok(_) => {}
             Err(err) if err.is_stream_closed() => {}
             Err(err) => {
-                warn!(?err, "error handling packet");
+                debug!(?err, "error handling packet");
                 if let Err(err) = pkt_tx
                     .send_msg(&ErrorResponse {
                         description: err.to_string(),
