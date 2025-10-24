@@ -475,6 +475,10 @@ impl DB {
         let mut start_timestamp = i64::MAX;
 
         info!("Opening database: {}", path.display());
+        let db_state_path = path.join("db_state");
+        if !db_state_path.exists() {
+            return Err(Error::MissingDbState(db_state_path));
+        }
         for elem in std::fs::read_dir(&path)? {
             let Ok(elem) = elem else { continue };
             let path = elem.path();
@@ -539,7 +543,7 @@ impl DB {
         }
 
         info!(db.path = ?path, "opened db");
-        let db_state = DbConfig::read(path.join("db_state"))?;
+        let db_state = DbConfig::read(db_state_path)?;
         let state = State {
             components,
             component_metadata,
