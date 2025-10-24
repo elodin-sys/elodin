@@ -837,13 +837,31 @@ pub fn set_selected_range(
     latest: Res<LastUpdated>,
     behavior: Res<TimeRangeBehavior>,
 ) {
-    selected_range.0 = behavior.calculate_selected_range(earliest.0, latest.0);
+    match behavior.calculate_selected_range(earliest.0, latest.0) {
+        Ok(range) => {
+            selected_range.0 = range;
+        }
+        Err(TimeRangeError::NoData) => {
+            // Nothing to do yet; keep previous selection until we have a valid dataset.
+        }
+        Err(TimeRangeError::InvalidRange { start, end }) => {
+            bevy::log::warn!(
+                "Time range selection skipped because start ({start:?}) is not before end ({end:?})"
+            );
+        }
+    }
 }
 
 #[derive(Resource, PartialEq, Eq, Clone, Copy)]
 pub struct TimeRangeBehavior {
     start: Offset,
     end: Offset,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeRangeError {
+    NoData,
+    InvalidRange { start: Timestamp, end: Timestamp },
 }
 
 #[derive(Resource, PartialEq, Eq, Clone, Copy, Debug)]
@@ -921,34 +939,90 @@ impl TimeRangeBehavior {
         }
     }
 
-    fn calculate_selected_range(&self, earliest: Timestamp, latest: Timestamp) -> Range<Timestamp> {
-        let start = match self.start {
-            Offset::Earliest(duration) => earliest + duration,
-            Offset::Latest(duration) => latest - duration,
-            Offset::Fixed(timestamp) => timestamp,
-        };
-        let end = match self.end {
-            Offset::Earliest(duration) => earliest + duration,
-            Offset::Latest(duration) => latest - duration,
-            Offset::Fixed(timestamp) => timestamp,
-        };
+    fn calculate_selected_range(
+        &self,
+        earliest: Timestamp,
+        latest: Timestamp,
+    ) -> Result<Range<Timestamp>, TimeRangeError> {
+        if earliest >= latest {
+            return Err(TimeRangeError::NoData);
+        }
 
-        clamp_range(earliest..latest, start..end)
+        let start = self.start.resolve(earliest, latest);
+        let end = self.end.resolve(earliest, latest);
+
+        if start >= end {
+            return Err(TimeRangeError::InvalidRange { start, end });
+        }
+
+        let clamped = clamp_range(earliest..latest, start..end);
+        if clamped.start >= clamped.end {
+            return Err(TimeRangeError::InvalidRange {
+                start: clamped.start,
+                end: clamped.end,
+            });
+        }
+
+        Ok(clamped)
     }
 
     pub fn is_subset(&self, earliest: Timestamp, latest: Timestamp) -> bool {
-        let start = match self.start {
-            Offset::Earliest(duration) => earliest + duration,
-            Offset::Latest(duration) => latest - duration,
-            Offset::Fixed(timestamp) => timestamp,
-        };
-        let end = match self.end {
-            Offset::Earliest(duration) => earliest + duration,
-            Offset::Latest(duration) => latest - duration,
-            Offset::Fixed(timestamp) => timestamp,
-        };
+        let start = self.start.resolve(earliest, latest);
+        let end = self.end.resolve(earliest, latest);
         let full_range = earliest..=latest;
         full_range.contains(&start) && full_range.contains(&end)
+    }
+}
+
+impl Offset {
+    pub(crate) fn resolve(&self, earliest: Timestamp, latest: Timestamp) -> Timestamp {
+        match self {
+            Offset::Earliest(duration) => earliest + *duration,
+            Offset::Latest(duration) => latest - *duration,
+            Offset::Fixed(timestamp) => *timestamp,
+        }
+    }
+}
+
+#[cfg(test)]
+mod time_range_tests {
+    use super::*;
+
+    fn timestamp_secs(sec: i64) -> Timestamp {
+        Timestamp(sec * 1_000_000)
+    }
+
+    #[test]
+    fn calculate_selected_range_accepts_valid_bounds() {
+        let behavior = TimeRangeBehavior::FULL;
+        let earliest = timestamp_secs(0);
+        let latest = timestamp_secs(10);
+
+        let result = behavior.calculate_selected_range(earliest, latest);
+        assert!(matches!(result, Ok(ref range) if range.start == earliest && range.end == latest));
+    }
+
+    #[test]
+    fn calculate_selected_range_rejects_inverted_bounds() {
+        let behavior = TimeRangeBehavior {
+            start: Offset::Earliest(Duration::from_secs(10)),
+            end: Offset::Latest(Duration::ZERO),
+        };
+        let earliest = timestamp_secs(0);
+        let latest = timestamp_secs(5);
+
+        let result = behavior.calculate_selected_range(earliest, latest);
+        assert!(matches!(result, Err(TimeRangeError::InvalidRange { .. })));
+    }
+
+    #[test]
+    fn calculate_selected_range_handles_no_data() {
+        let behavior = TimeRangeBehavior::FULL;
+        let earliest = timestamp_secs(0);
+        let latest = timestamp_secs(0);
+
+        let result = behavior.calculate_selected_range(earliest, latest);
+        assert!(matches!(result, Err(TimeRangeError::NoData)));
     }
 }
 
