@@ -15,6 +15,25 @@ order = 1
 
 ## v0.15
 
+### v0.15.2
+- **(feat)** Add native DB snapshot support. (#233)
+- **(feat)** ELODIN_KDL_DIR can specify schematics directory. (#244)
+- **(feat)** Add `normalize` and `body_frame` to vector_arrow. (#217) (#223)
+- **(feat)** Add compass mesh. (#253)
+- **(feat)** Add object3d plane. (#226)
+- **(feat)** Refactor EQL formulas. (#248) (#242)
+- **(feat)** Make firmware log more about its state. (#215)
+- **(doc)** Improve first-time developer experience. (#257)
+- **(fix)** Remove component ID from inspector header. (#224)
+- **(fix)** Keep viewport KDL flags consistent across schematic save and load. (#212)
+- **(fix)** Validate command-palette time range input and guard runtime selection. (#252)
+- **(fix)** Don't snake_case component names in editor. (#236)
+- **(chore)** Consolidate examples at root. (#249)
+- **(chore)** Move Aleph to repo root. (#237)
+- **(chore)** Migrate Continuous Integration (CI) to AWS. (#254)
+- **(chore)** Update to Rust 1.90.0 (#194)
+- **(chore)** Remove 'elodin create' command. (#213)
+
 ### v0.15.1
 - **(feat)** UI: Display tick count and add "Goto tick…" command. (#196)
 - **(feat)** Restore vector arrow schematic support. (#210)
