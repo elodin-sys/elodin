@@ -642,7 +642,7 @@ mod tests {
                 .expect("missing latest snapshot sample");
             let latest =
                 f64::from_le_bytes(buf.try_into().expect("component sample size mismatch"));
-            assert!((latest - 30.5).abs() < f64::EPSILON);
+            assert!((latest - 30.5).abs() <= f64::EPSILON);
         });
 
         db.with_state(|state| {
@@ -656,7 +656,7 @@ mod tests {
             let latest =
                 f64::from_le_bytes(buf.try_into().expect("component sample size mismatch"));
             assert!(
-                (latest - late_value).abs() < f64::EPSILON,
+                (latest - late_value).abs() <= f64::EPSILON,
                 "latest sample should include post-snapshot write"
             );
         });
