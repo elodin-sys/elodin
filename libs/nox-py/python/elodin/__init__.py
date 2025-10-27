@@ -402,21 +402,48 @@ class World(WorldBuilder):
         default_playback_speed: float = 1.0,
         max_ticks: Optional[int] = None,
         optimize: bool = False,
+        db_addr: Optional[str] = None,
     ):
+        """
+        Run the simulation.
+        
+        Args:
+            system: The system to run
+            sim_time_step: Simulation time step in seconds (default: 1/120)
+            run_time_step: Real-time execution rate in seconds (default: same as sim_time_step)
+            default_playback_speed: Default playback speed multiplier (default: 1.0)
+            max_ticks: Maximum number of ticks to run (default: unlimited)
+            optimize: Enable XLA optimizations (default: False)
+            db_addr: Address of existing database to connect to (e.g., "127.0.0.1:2240").
+                     If None, starts an embedded database. (default: None)
+        """
         current_frame = inspect.currentframe()
         if current_frame is None:
             raise Exception("No current frame")
         frame = current_frame.f_back
         if frame is None:
             raise Exception("No previous frame")
-        addr = super().run(
-            system,
-            sim_time_step,
-            run_time_step,
-            default_playback_speed,
-            max_ticks,
-            optimize,
-        )
+        
+        # Inject db_addr into sys.argv if provided
+        import sys
+        original_argv = sys.argv.copy()
+        try:
+            if db_addr is not None:
+                # Add --db-addr argument before calling the Rust code
+                sys.argv.extend(["--db-addr", db_addr])
+            
+            addr = super().run(
+                system,
+                sim_time_step,
+                run_time_step,
+                default_playback_speed,
+                max_ticks,
+                optimize,
+            )
+        finally:
+            # Restore original argv
+            sys.argv = original_argv
+        
         locals = frame.f_locals
         if addr is not None:
             impeller_client = Impeller.tcp(addr)

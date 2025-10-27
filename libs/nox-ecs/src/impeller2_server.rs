@@ -1,24 +1,41 @@
 use elodin_db::{DB, State, handle_conn};
 use impeller2::types::{ComponentId, Timestamp};
-use impeller2_wkt::{ComponentMetadata, EntityMetadata};
+use impeller2_wkt::{ComponentMetadata, EntityMetadata, SetComponentMetadata, UdpUnicast, Stream, StreamBehavior};
+use impeller2_stellar::Client;
 use nox_ecs::Error;
 use std::{
+    net::SocketAddr,
     sync::{Arc, atomic},
     time::{Duration, Instant},
 };
 use stellarator::struc_con::{Joinable, Thread};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::{Compiled, World, WorldExec};
 
 pub struct Server {
     db: elodin_db::Server,
     world: WorldExec<Compiled>,
+    mirror_addr: Option<SocketAddr>,
 }
 
 impl Server {
+    /// Create a new server with an embedded database
     pub fn new(db: elodin_db::Server, world: WorldExec<Compiled>) -> Self {
-        Self { db, world }
+        Self {
+            db,
+            world,
+            mirror_addr: None,
+        }
+    }
+    
+    /// Create a new server with an embedded database that mirrors to an external database
+    pub fn with_mirror(db: elodin_db::Server, world: WorldExec<Compiled>, mirror_addr: SocketAddr) -> Self {
+        Self {
+            db,
+            world,
+            mirror_addr: Some(mirror_addr),
+        }
     }
 
     pub async fn run(self) -> Result<(), Error> {
@@ -30,11 +47,26 @@ impl Server {
         self,
         is_cancelled: impl Fn() -> bool + 'static,
     ) -> Result<(), Error> {
-        tracing::info!("running server with cancellation");
-        let Self { db, mut world } = self;
+        let Self { db, mut world, mirror_addr } = self;
         let elodin_db::Server { listener, db } = db;
         let start_time = Timestamp::now();
+        
+        // Initialize embedded database as normal
         init_db(&db, &mut world.world, start_time)?;
+        
+        // If mirroring is enabled, set it up
+        if let Some(mirror_addr) = mirror_addr {
+            info!("setting up mirror to external database at {}", mirror_addr);
+            let listener_addr = listener.local_addr()?;
+            let db_clone = db.clone();
+            stellarator::spawn(async move {
+                if let Err(e) = setup_mirror(listener_addr, mirror_addr, db_clone).await {
+                    warn!("failed to setup mirror: {:?}", e);
+                }
+            });
+        }
+        
+        // Run the server normally
         let tick_db = db.clone();
         let stream: Thread<Option<Result<(), Error>>> =
             stellarator::struc_con::stellar(move || async move {
@@ -257,4 +289,61 @@ async fn tick(
         tick += 1;
         timestamp += world.world.sim_time_step().0;
     }
+}
+
+/// Set up mirroring from the embedded database to an external database
+/// 
+/// This mirrors the approach used in downlink.lua:
+/// 1. Connect to both databases
+/// 2. Get metadata from the embedded database and send to external database
+/// 3. Tell the embedded database to stream to the external database
+async fn setup_mirror(
+    source_addr: SocketAddr,
+    mirror_addr: SocketAddr,
+    _db: Arc<DB>,
+) -> Result<(), Error> {
+    info!("configuring mirror: {} -> {}", source_addr, mirror_addr);
+    
+    // Wait a moment for the embedded database to be fully ready
+    stellarator::sleep(Duration::from_millis(100)).await;
+    
+    // Connect to both databases
+    let mut source_client = Client::connect(source_addr)
+        .await
+        .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+    
+    let mut mirror_client = Client::connect(mirror_addr)
+        .await
+        .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+    
+    // Get metadata from source database using DumpMetadata message
+    use impeller2_wkt::DumpMetadata;
+    let metadata_resp = source_client.request(&DumpMetadata).await
+        .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))))?;
+    
+    info!("dumped {} components from source database", metadata_resp.component_metadata.len());
+    
+    // Send component metadata to mirror database
+    for component_metadata in metadata_resp.component_metadata {
+        let msg = SetComponentMetadata(component_metadata);
+        let (result, _) = mirror_client.send(&msg).await;
+        result.map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))))?;
+    }
+    
+    info!("metadata sent to mirror database");
+    
+    // Tell the embedded database to stream to the mirror via UDP
+    let udp_unicast = UdpUnicast {
+        stream: Stream {
+            behavior: StreamBehavior::RealTime,
+            id: 1,
+        },
+        addr: mirror_addr.to_string(),
+    };
+    
+    let (result, _) = source_client.send(&udp_unicast).await;
+    result.map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))))?;
+    
+    info!("mirror streaming configured successfully");
+    Ok(())
 }

@@ -31,6 +31,9 @@ pub enum Args {
         no_s10: bool,
         #[arg(long, default_value = None)]
         liveness_port: Option<u16>,
+        /// Connect to an existing database instead of starting an embedded one
+        #[arg(long, default_value = None)]
+        db_addr: Option<SocketAddr>,
     },
     Plan {
         out_dir: PathBuf,
@@ -223,6 +226,7 @@ impl WorldBuilder {
                 addr,
                 no_s10,
                 liveness_port,
+                db_addr,
             } => {
                 let exec = self.build_uncompiled(
                     py,
@@ -255,16 +259,27 @@ impl WorldBuilder {
                 if let Some(port) = liveness_port {
                     stellarator::struc_con::stellar(move || ::s10::liveness::monitor(port));
                 }
-                py.allow_threads(|| {
-                    stellarator::run(|| {
+                
+                // Clone addresses before moving into closure
+                let db_addr_clone = db_addr;
+                let addr_clone = addr;
+                
+                py.allow_threads(move || {
+                    stellarator::run(|| async move {
                         let tmpfile = tempfile::tempdir().unwrap().keep();
-                        nox_ecs::impeller2_server::Server::new(
-                            elodin_db::Server::new(tmpfile.join("db"), addr).unwrap(),
-                            exec,
-                        )
-                        .run_with_cancellation(|| {
+                        let embedded_db = elodin_db::Server::new(tmpfile.join("db"), addr_clone).unwrap();
+                        
+                        let server = if let Some(mirror_addr) = db_addr_clone {
+                            // Start embedded database with mirror to external database
+                            nox_ecs::impeller2_server::Server::with_mirror(embedded_db, exec, mirror_addr)
+                        } else {
+                            // Start embedded database without mirroring
+                            nox_ecs::impeller2_server::Server::new(embedded_db, exec)
+                        };
+                        
+                        server.run_with_cancellation(|| {
                             Python::with_gil(|py| py.check_signals().is_err())
-                        })
+                        }).await
                     })?;
 
                     Ok(None)
