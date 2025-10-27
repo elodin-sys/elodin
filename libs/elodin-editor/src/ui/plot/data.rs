@@ -978,7 +978,11 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         let (chunk_count, index_count) = self.draw_index_count(line_visible_range.clone());
         let desired_index_len = INDEX_BUFFER_LEN.min(pixel_width * 4);
         let divisor = desired_index_len - 2 * chunk_count;
-        let step = if divisor != 0 { index_count.div_ceil(divisor).max(1) } else { 1 };
+        let step = if divisor != 0 {
+            index_count.div_ceil(divisor).max(1)
+        } else {
+            1
+        };
         let mut view = &mut view[..];
         let mut count = 0;
         for chunk in self.draw_index_chunk_iter(line_visible_range) {
