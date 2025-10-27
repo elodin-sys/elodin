@@ -283,6 +283,12 @@ impl System {
             None => self.clone(),
         }
     }
+
+    pub fn __ror__(&self, other: PyObject) -> System {
+        // Handle the case where the left operand is None
+        // Return self unchanged (None is effectively skipped)
+        self.clone()
+    }
 }
 
 impl nox_ecs::System for System {
