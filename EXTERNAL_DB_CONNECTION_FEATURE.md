@@ -1,8 +1,8 @@
-# External Database Mirroring Feature - Implementation Summary
+# Bidirectional Database Mirroring Feature - Implementation Summary
 
 ## Overview
 
-This feature allows Elodin Python simulations to **mirror** data to an existing `elodin-db` instance while still running an embedded database. This leverages the database's existing mirroring capability (as documented in the db README) to achieve the desired functionality with minimal code changes.
+This feature allows Elodin Python simulations to **bidirectionally mirror** data with an existing `elodin-db` instance. The simulation runs an embedded database as normal, but automatically syncs data in both directions with an external database. This leverages the database's existing mirroring capability to achieve the desired functionality with minimal code changes.
 
 ## Key Insight
 
@@ -154,27 +154,34 @@ Server::new(embedded_db, world)
 Embedded DB → tick() → commit_world_head() → Local DB State
 ```
 
-### With Mirroring (New)
+### With Bidirectional Mirroring (New)
 ```
 Python Simulation
     ↓
 Server::with_mirror(embedded_db, world, mirror_addr)
     ↓
-Embedded DB → tick() → commit_world_head() → Local DB State
-    ↓ (automatic streaming via UdpUnicast)
-    ↓
-External DB (at mirror_addr) → Remote DB State
+Embedded DB ⟷ tick() ⟷ commit_world_head() ⟷ Local DB State
+    ↕ (bidirectional UDP streaming)
+    ↕
+External DB (at mirror_addr) ⟷ Remote DB State
 ```
 
-**Key insight**: The simulation behavior is **identical** in both cases. Mirroring is just an additional UDP stream that the embedded database sends out using its existing infrastructure.
+**Data Flow:**
+- **Forward**: Simulation → Embedded DB → External DB (via UDP stream #1)
+- **Reverse**: External DB → Embedded DB → Simulation (via UDP stream #2)
+- **Result**: Changes in either database propagate to the other
+
+**Key insight**: The simulation behavior is **identical** in both cases. Mirroring is just two additional UDP streams that keep the databases synchronized using the existing infrastructure.
 
 ## Benefits
 
-1. **Data Persistence**: External database retains data after simulation exits
-2. **Shared Viewing**: Multiple tools/editors can connect to the external database
-3. **Separation of Concerns**: Simulation runs independently from data storage
-4. **Debugging**: Historical data available for post-mortem analysis
-5. **Zero Performance Impact**: Streaming happens asynchronously via UDP
+1. **Bidirectional Control**: Write values to external DB (via Rust client, editor, etc.) and they flow into simulation
+2. **Data Persistence**: External database retains data after simulation exits
+3. **Shared Viewing**: Multiple tools/editors can connect to the external database
+4. **External Control**: Perfect for hardware-in-the-loop testing and real-time control
+5. **Separation of Concerns**: Simulation runs independently from data storage
+6. **Debugging**: Historical data available for post-mortem analysis
+7. **Zero Performance Impact**: Streaming happens asynchronously via UDP
 
 ## Implementation Details
 
@@ -185,9 +192,11 @@ External DB (at mirror_addr) → Remote DB State
    - Connects to both databases
    - Uses `DumpMetadata` to get component info from embedded DB
    - Sends `SetComponentMetadata` messages to external DB
-   - Sends `UdpUnicast` message to embedded DB with external address
-3. **Embedded database** → Automatically streams all data via UDP to external address
-4. **External database** → Receives and stores all telemetry
+   - Sends `UdpUnicast` (stream #1) to embedded DB → tells it to stream to external DB
+   - Sends `UdpUnicast` (stream #2) to external DB → tells it to stream back to embedded DB
+3. **Forward flow**: Embedded DB → UDP → External DB (simulation data mirrored out)
+4. **Reverse flow**: External DB → UDP → Embedded DB → `copy_db_to_world()` → Simulation
+5. **Result**: Bidirectional sync - external control inputs flow into simulation!
 
 ### Why This Approach is Superior
 

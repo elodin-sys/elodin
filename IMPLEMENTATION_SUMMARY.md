@@ -169,9 +169,8 @@ Should show live visualization of the simulation data!
 
 ## Known Limitations
 
-1. **UDP Only**: Mirroring uses UDP (may have packet loss on congested networks)
-2. **One-Way**: Data flows embedded → external, not bidirectional
-3. **External Control**: For external control of simulations, still use the existing `external_control` metadata pattern
+1. **UDP Only**: Mirroring uses UDP (may have packet loss on congested networks, but generally reliable on localhost)
+2. **Latency**: Small delay for values to propagate through the mirror (typically <1ms on localhost)
 
 ## Future Enhancements (Optional)
 

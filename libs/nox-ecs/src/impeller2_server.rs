@@ -332,8 +332,8 @@ async fn setup_mirror(
     
     info!("metadata sent to mirror database");
     
-    // Tell the embedded database to stream to the mirror via UDP
-    let udp_unicast = UdpUnicast {
+    // Tell the embedded database to stream to the mirror via UDP (forward direction)
+    let forward_stream = UdpUnicast {
         stream: Stream {
             behavior: StreamBehavior::RealTime,
             id: 1,
@@ -341,9 +341,25 @@ async fn setup_mirror(
         addr: mirror_addr.to_string(),
     };
     
-    let (result, _) = source_client.send(&udp_unicast).await;
+    let (result, _) = source_client.send(&forward_stream).await;
     result.map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))))?;
     
-    info!("mirror streaming configured successfully");
+    info!("forward streaming configured: embedded → external");
+    
+    // Tell the external database to stream BACK to the embedded database (reverse direction)
+    // This enables bidirectional control - values written to external DB flow back to simulation
+    let reverse_stream = UdpUnicast {
+        stream: Stream {
+            behavior: StreamBehavior::RealTime,
+            id: 2,
+        },
+        addr: source_addr.to_string(),
+    };
+    
+    let (result, _) = mirror_client.send(&reverse_stream).await;
+    result.map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))))?;
+    
+    info!("reverse streaming configured: external → embedded");
+    info!("bidirectional mirroring active: {} ↔ {}", source_addr, mirror_addr);
     Ok(())
 }
