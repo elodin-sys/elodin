@@ -41,6 +41,7 @@ use ui::{
     utils::FriendlyEpoch,
 };
 
+pub mod multi_window;
 pub mod object_3d;
 mod offset_parse;
 mod plugins;
@@ -181,6 +182,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(impeller2_bevy::Impeller2Plugin)
             .add_plugins(GizmoPlugin)
             .add_plugins(ui::UiPlugin)
+            .add_plugins(multi_window::MultiWindowPlugin)
             .add_plugins(FrameTimeDiagnosticsPlugin::default())
             .add_plugins(WireframePlugin::default())
             .add_plugins(editor_cam_touch::EditorCamTouchPlugin)

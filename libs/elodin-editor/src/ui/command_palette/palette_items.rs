@@ -422,6 +422,58 @@ pub fn create_viewport(tile_id: Option<TileId>) -> PaletteItem {
     )
 }
 
+pub fn add_new_window() -> PaletteItem {
+    PaletteItem::new(
+        "Add New Window",
+        TILES_LABEL,
+        move |_: In<String>| {
+            PalettePage::new(vec![
+                PaletteItem::new(
+                    "Empty Viewport",
+                    "Create a new window with an empty 3D viewport",
+                    move |_: In<String>, mut requests: ResMut<crate::multi_window::SecondaryWindowRequests>| {
+                        let viewport_pane = crate::ui::tiles::Pane::Viewport(
+                            crate::ui::tiles::ViewportPane {
+                                camera: None,
+                                nav_gizmo: None,
+                                nav_gizmo_camera: None,
+                                rect: None,
+                                label: "Secondary Viewport".to_string(),
+                            }
+                        );
+                        crate::multi_window::request_secondary_window(
+                            &mut requests,
+                            viewport_pane,
+                            None,
+                        );
+                        PaletteEvent::Exit
+                    },
+                ),
+                PaletteItem::new(
+                    "Current Tab",
+                    "Pop out the currently active tab to a new window",
+                    move |_: In<String>, tile_state: Res<TileState>, mut requests: ResMut<crate::multi_window::SecondaryWindowRequests>| {
+                        // Find the currently active pane
+                        let active_tiles = tile_state.tree.active_tiles();
+                        if let Some(active_tile_id) = active_tiles.first() {
+                            if let Some(egui_tiles::Tile::Pane(pane)) = tile_state.tree.tiles.get(*active_tile_id).cloned() {
+                                crate::multi_window::request_secondary_window(
+                                    &mut requests,
+                                    pane,
+                                    Some(*active_tile_id),
+                                );
+                            }
+                        }
+                        PaletteEvent::Exit
+                    },
+                ),
+            ])
+            .prompt("Select window type")
+            .into()
+        },
+    )
+}
+
 pub fn create_query_table(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Query Table",
@@ -1343,6 +1395,7 @@ impl Default for PalettePage {
                 },
             ),
             toggle_body_axes(),
+            add_new_window(),
             PaletteItem::new(
                 "Toggle Recording",
                 SIMULATION_LABEL,

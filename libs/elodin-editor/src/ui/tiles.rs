@@ -657,6 +657,7 @@ pub enum TreeAction {
     DeleteTab(TileId),
     SelectTile(TileId),
     RenameContainer(TileId, String),
+    PopOutPane(TileId),
 }
 
 enum TabState {
@@ -1143,6 +1144,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 let TreeBehavior { tree_actions, .. } = behavior;
                 tree_actions
             };
+            
+            // Track popout requests to process after state borrow
+            let mut pending_popouts: Vec<(Pane, Option<egui_tiles::TileId>)> = Vec::new();
+            
             let mut state_mut = state.get_mut(world);
             state_mut.viewport_contains_pointer.0 = ui.ui_contains_pointer();
 
@@ -1438,6 +1443,16 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     TreeAction::RenameContainer(tile_id, title) => {
                         ui_state.set_container_title(tile_id, title);
                     }
+                    TreeAction::PopOutPane(tile_id) => {
+                        // Get the pane from the tile
+                        if let Some(egui_tiles::Tile::Pane(pane)) = ui_state.tree.tiles.get(tile_id).cloned() {
+                            // Collect the popout request to process later
+                            pending_popouts.push((pane, Some(tile_id)));
+                            
+                            // Remove the pane from the main window
+                            ui_state.tree.tiles.remove(tile_id);
+                        }
+                    }
                 }
             }
             let tiles = ui_state.tree.tiles.iter();
@@ -1492,6 +1507,22 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if let Ok(mut stream) = state_mut.commands.get_entity(dash.entity) {
                             stream.try_insert(IsTileVisible(active_tiles.contains(tile_id)));
                         }
+                    }
+                }
+            }
+            
+            // Drop state_mut before accessing world again
+            drop(state_mut);
+            
+            // Process pending popout requests
+            if !pending_popouts.is_empty() {
+                if let Some(mut requests) = world.get_resource_mut::<crate::multi_window::SecondaryWindowRequests>() {
+                    for (pane, tile_id) in pending_popouts {
+                        crate::multi_window::request_secondary_window(
+                            &mut requests,
+                            pane,
+                            tile_id,
+                        );
                     }
                 }
             }

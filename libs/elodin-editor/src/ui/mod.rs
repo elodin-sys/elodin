@@ -49,6 +49,7 @@ pub mod plot_3d;
 pub mod query_plot;
 pub mod query_table;
 pub mod schematic;
+pub mod secondary_window;
 mod theme;
 pub mod tiles;
 pub mod time_label;
@@ -205,6 +206,7 @@ impl Plugin for UiPlugin {
             .add_systems(Update, tiles::shortcuts)
             .add_systems(Update, set_camera_viewport.after(render_layout))
             .add_systems(Update, sync_camera_grid_cell.after(render_layout))
+            .add_plugins(secondary_window::SecondaryWindowUiPlugin)
             .add_systems(Update, query_plot::auto_bounds)
             .add_systems(Update, dashboard::update_nodes)
             .add_plugins(SchematicPlugin)
