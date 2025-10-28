@@ -530,6 +530,85 @@ pub fn spawn_mesh(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::system::SystemState;
+
+    #[test]
+    fn literal_tuple_eql_keeps_world_pos_at_default() {
+        let eql_string = "(0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0)";
+        let ctx = eql::Context::default();
+        let expr = ctx
+            .parse_str(eql_string)
+            .expect("tuple literal should parse");
+
+        let mut world = World::new();
+        world.insert_resource(EntityMap::default());
+
+        let object_data = Object3D {
+            eql: eql_string.to_string(),
+            mesh: impeller2_wkt::Object3DMesh::Mesh {
+                mesh: Mesh::cuboid(1.0, 1.0, 1.0),
+                material: Material::color(1.0, 1.0, 1.0),
+            },
+            aux: (),
+        };
+
+        let entity = world
+            .spawn((
+                Object3DState {
+                    compiled_expr: Some(compile_eql_expr(expr)),
+                    scale_expr: None,
+                    scale_error: None,
+                    data: object_data,
+                },
+                Transform::default(),
+                GlobalTransform::default(),
+                Visibility::default(),
+                InheritedVisibility::default(),
+                ViewVisibility::default(),
+                GridCell::<i128>::default(),
+                impeller2_wkt::WorldPos::default(),
+            ))
+            .id();
+
+        let mut system_state: SystemState<(
+            Query<(
+                Entity,
+                &mut Object3DState,
+                &mut impeller2_wkt::WorldPos,
+                Option<&mut EllipsoidVisual>,
+            )>,
+            Query<&mut Transform>,
+            Res<EntityMap>,
+            Query<&'static ComponentValue>,
+        )> = SystemState::new(&mut world);
+
+        {
+            let (objects_query, transforms_query, entity_map_res, component_value_query) =
+                system_state.get_mut(&mut world);
+            update_object_3d_system(
+                objects_query,
+                transforms_query,
+                entity_map_res,
+                component_value_query,
+            );
+        }
+
+        system_state.apply(&mut world);
+
+        let world_pos = world
+            .get::<impeller2_wkt::WorldPos>(entity)
+            .expect("Object3D should have WorldPos");
+        assert_eq!(
+            *world_pos,
+            impeller2_wkt::WorldPos::default(),
+            "literal tuple should leave WorldPos at default"
+        );
+    }
+}
+
 pub struct Object3DPlugin;
 
 impl Plugin for Object3DPlugin {

@@ -123,7 +123,16 @@ impl Cli {
 
     pub fn editor(self, args: Args, rt: Runtime) -> miette::Result<()> {
         let cancel_token = CancelToken::new();
-        let thread = self.run_sim(&args, rt, cancel_token.clone())?;
+        let is_secondary = std::env::var_os("ELODIN_SECONDARY").is_some();
+        let mut backend_thread = None;
+        let mut secondary_process = None;
+        if !is_secondary {
+            backend_thread = Some(self.run_sim(&args, rt, cancel_token.clone())?);
+            if !matches!(args.sim, Simulator::None) {
+                secondary_process = Some(spawn_secondary_editor(&args)?);
+            }
+        }
+
         let mut app = self.editor_app()?;
         match args.sim {
             Simulator::None => {
@@ -145,7 +154,14 @@ impl Cli {
             .add_systems(Update, check_cancel_token);
         app.run();
         cancel_token.cancel();
-        thread.join().map_err(|_| miette!("join error"))?
+        if let Some(thread) = backend_thread {
+            thread.join().map_err(|_| miette!("join error"))??;
+        }
+        if let Some(mut child) = secondary_process {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        Ok(())
     }
 
     pub fn editor_app(&self) -> miette::Result<App> {
@@ -219,4 +235,16 @@ fn on_window_resize(
             warn!(?err, "failed to write window state");
         }
     }
+}
+
+fn spawn_secondary_editor(args: &Args) -> miette::Result<std::process::Child> {
+    let exe = std::env::current_exe().into_diagnostic()?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("editor");
+    let sim = args.sim.to_string();
+    if !sim.is_empty() {
+        cmd.arg(sim);
+    }
+    cmd.env("ELODIN_SECONDARY", "1");
+    cmd.spawn().into_diagnostic()
 }
