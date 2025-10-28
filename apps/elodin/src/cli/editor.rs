@@ -123,8 +123,10 @@ impl Cli {
 
     pub fn editor(self, args: Args, rt: Runtime) -> miette::Result<()> {
         let cancel_token = CancelToken::new();
-        let is_child = std::env::var_os("ELODIN_SECONDARY").is_some()
-            || std::env::var_os("ELODIN_TERTIARY").is_some();
+        let role_env = std::env::var("ELODIN_WINDOW_ROLE")
+            .ok()
+            .map(|s| s.to_ascii_lowercase());
+        let is_child = matches!(role_env.as_deref(), Some("motor") | Some("rate"));
         let mut backend_thread = None;
         let mut extra_processes = Vec::new();
         if !is_child {
@@ -239,7 +241,7 @@ fn on_window_resize(
 }
 
 fn spawn_additional_editors(args: &Args, count: usize) -> miette::Result<Vec<std::process::Child>> {
-    static ROLES: &[&str] = &["ELODIN_SECONDARY", "ELODIN_TERTIARY", "ELODIN_QUATERNARY"];
+    static ROLES: &[&str] = &["motor", "rate"];
     let exe = std::env::current_exe().into_diagnostic()?;
     let sim = args.sim.to_string();
     let mut children = Vec::new();
@@ -249,7 +251,7 @@ fn spawn_additional_editors(args: &Args, count: usize) -> miette::Result<Vec<std
         if !sim.is_empty() {
             cmd.arg(&sim);
         }
-        cmd.env(*role, "1");
+        cmd.env("ELODIN_WINDOW_ROLE", role);
         children.push(cmd.spawn().into_diagnostic()?);
     }
     Ok(children)

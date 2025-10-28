@@ -4,10 +4,6 @@ use bevy::ecs::{
 };
 use bevy_egui::egui;
 use egui::{Ui, load::SizedTexture};
-use egui_material_icons::{
-    icon_button,
-    icons::{ICON_LOCK, ICON_LOCK_OPEN_RIGHT},
-};
 use impeller2::types::Timestamp;
 use impeller2_bevy::{CurrentStreamId, PacketTx};
 use impeller2_wkt::{
@@ -27,7 +23,7 @@ use crate::{
     },
 };
 
-use super::{LockState, StreamTickOrigin, TimelineIcons, TimelineLock, TimelineSharedState};
+use super::{StreamTickOrigin, TimelineIcons};
 
 #[derive(SystemParam)]
 pub struct TimelineControls<'w> {
@@ -40,8 +36,6 @@ pub struct TimelineControls<'w> {
     earliest_timestamp: Res<'w, EarliestTimestamp>,
     behavior: ResMut<'w, TimeRangeBehavior>,
     tick_origin: ResMut<'w, StreamTickOrigin>,
-    lock: ResMut<'w, TimelineLock>,
-    shared: Res<'w, TimelineSharedState>,
 }
 
 impl WidgetSystem for TimelineControls<'_> {
@@ -65,16 +59,11 @@ impl WidgetSystem for TimelineControls<'_> {
             earliest_timestamp,
             mut behavior,
             mut tick_origin,
-            lock,
-            shared,
         } = state.get_mut(world);
 
         tick_origin.observe_stream(**stream_id);
         tick_origin.observe_tick(tick.0, earliest_timestamp.0);
 
-        let mut lock_state = lock.status();
-        let lock_owned = matches!(lock_state, LockState::Owned);
-        let controls_enabled = lock_owned;
         let mut tick_changed = false;
         let tick_step_duration = hifitime::Duration::from_seconds(tick_time.0);
         let tick_step_micros_i128 = tick_step_duration.total_nanoseconds() / 1000;
@@ -92,8 +81,7 @@ impl WidgetSystem for TimelineControls<'_> {
                             let btn_scale = 1.4;
                             ui.spacing_mut().item_spacing.x = 8.0;
 
-                            let jump_to_start_btn = ui.add_enabled(
-                                controls_enabled,
+                            let jump_to_start_btn = ui.add(
                                 EImageButton::new(icons.jump_to_start).scale(btn_scale, btn_scale),
                             );
 
@@ -103,8 +91,7 @@ impl WidgetSystem for TimelineControls<'_> {
                                 tick_origin.request_rebase();
                             }
 
-                            let frame_back_btn = ui.add_enabled(
-                                controls_enabled,
+                            let frame_back_btn = ui.add(
                                 EImageButton::new(icons.frame_back).scale(btn_scale, btn_scale),
                             );
 
@@ -120,17 +107,14 @@ impl WidgetSystem for TimelineControls<'_> {
                             }
 
                             if paused.0 {
-                                let play_btn = ui.add_enabled(
-                                    controls_enabled,
-                                    EImageButton::new(icons.play).scale(btn_scale, btn_scale),
-                                );
+                                let play_btn = ui
+                                    .add(EImageButton::new(icons.play).scale(btn_scale, btn_scale));
 
                                 if play_btn.clicked() {
                                     paused.0 = false;
                                 }
                             } else {
-                                let pause_btn = ui.add_enabled(
-                                    controls_enabled,
+                                let pause_btn = ui.add(
                                     EImageButton::new(icons.pause).scale(btn_scale, btn_scale),
                                 );
 
@@ -139,8 +123,7 @@ impl WidgetSystem for TimelineControls<'_> {
                                 }
                             }
 
-                            let frame_forward_btn = ui.add_enabled(
-                                controls_enabled,
+                            let frame_forward_btn = ui.add(
                                 EImageButton::new(icons.frame_forward).scale(btn_scale, btn_scale),
                             );
 
@@ -153,50 +136,13 @@ impl WidgetSystem for TimelineControls<'_> {
                                 tick_changed = true;
                             }
 
-                            let jump_to_end_btn = ui.add_enabled(
-                                controls_enabled,
+                            let jump_to_end_btn = ui.add(
                                 EImageButton::new(icons.jump_to_end).scale(btn_scale, btn_scale),
                             );
 
                             if jump_to_end_btn.clicked() {
                                 tick.0 = Timestamp(max_tick.0.0 - 1);
                                 tick_changed = true;
-                            }
-
-                            ui.add_space(12.0);
-                            let lock_icon = if lock_owned {
-                                ICON_LOCK
-                            } else {
-                                ICON_LOCK_OPEN_RIGHT
-                            };
-                            let lock_resp = icon_button(ui, lock_icon);
-                            if lock_resp.clicked() {
-                                lock_state = match lock_state {
-                                    LockState::Owned => {
-                                        lock.release();
-                                        lock.status()
-                                    }
-                                    LockState::Available => lock.try_acquire(),
-                                    LockState::HeldByOther => lock.try_acquire(),
-                                    LockState::Error => lock.try_acquire(),
-                                };
-                                if matches!(lock_state, LockState::Owned) {
-                                    shared.broadcast(tick.0.0);
-                                }
-                            }
-                            match lock_state {
-                                LockState::Owned => {
-                                    lock_resp.on_hover_text("Release timeline lock");
-                                }
-                                LockState::Available => {
-                                    lock_resp.on_hover_text("Take timeline lock");
-                                }
-                                LockState::HeldByOther => {
-                                    lock_resp.on_hover_text("Timeline locked by another window");
-                                }
-                                LockState::Error => {
-                                    lock_resp.on_hover_text("Timeline lock unavailable");
-                                }
                             }
                         },
                     );
@@ -274,9 +220,8 @@ impl WidgetSystem for TimelineControls<'_> {
                 });
             });
 
-        if tick_changed && controls_enabled {
+        if tick_changed {
             event.send_msg(SetStreamState::rewind(**stream_id, tick.0));
-            shared.broadcast(tick.0.0);
         }
     }
 }

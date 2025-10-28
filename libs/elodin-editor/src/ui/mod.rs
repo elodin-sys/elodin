@@ -22,8 +22,7 @@ use self::{command_palette::CommandPaletteState, timeline::timeline_slider};
 use egui::CornerRadius;
 use impeller2::types::ComponentId;
 use impeller2_bevy::ComponentValueMap;
-use impeller2_wkt::ComponentMetadata;
-use impeller2_wkt::ComponentValue;
+use impeller2_wkt::{ComponentMetadata, ComponentValue, DbConfig};
 
 use crate::{GridHandle, MainCamera, plugins::LogicalKeyState};
 
@@ -90,6 +89,58 @@ pub enum SelectedObject {
         entity: Entity,
     },
 }
+
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowRole {
+    Primary,
+    MotorPanel,
+    RatePanel,
+}
+
+impl WindowRole {
+    pub fn from_env() -> Self {
+        match std::env::var("ELODIN_WINDOW_ROLE")
+            .ok()
+            .as_deref()
+            .map(|s| s.to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("motor") => Self::MotorPanel,
+            Some("rate") => Self::RatePanel,
+            _ => Self::Primary,
+        }
+    }
+
+    pub fn timeline_enabled(self) -> bool {
+        matches!(self, Self::Primary)
+    }
+}
+
+const MOTOR_PANEL_KDL: &str = r#"
+tabs {
+    hsplit name="Motor Panel" {
+        vsplit share=0.4 {
+            graph "drone.motor_input"
+            graph "drone.motor_pwm"
+            graph "drone.motor_rpm"
+        }
+        graph "drone.thrust"
+    }
+}
+"#;
+
+const RATE_PANEL_KDL: &str = r#"
+tabs {
+    hsplit name="Rate Control Panel" {
+        vsplit {
+            graph "drone.rate_pid_state"
+        }
+        vsplit {
+            graph "drone.gyro, drone.ang_vel_setpoint" name="Drone: rate_control"
+        }
+    }
+}
+"#;
 
 impl SelectedObject {
     pub fn is_entity_selected(&self, id: impeller2::types::ComponentId) -> bool {
@@ -183,7 +234,8 @@ impl Plugin for UiPlugin {
             Err(err) => error!("{err}, falling back to current working directory"),
         }
 
-        app.init_resource::<Paused>()
+        app.insert_resource(WindowRole::from_env())
+            .init_resource::<Paused>()
             .init_resource::<SelectedObject>()
             .init_resource::<HoveredEntity>()
             .init_resource::<EntityFilter>()
@@ -195,17 +247,9 @@ impl Plugin for UiPlugin {
             .init_resource::<HdrEnabled>()
             .init_resource::<timeline_slider::UITick>()
             .init_resource::<timeline::StreamTickOrigin>()
-            .init_resource::<timeline::TimelineLock>()
-            .init_resource::<timeline::TimelineSharedState>()
             .init_resource::<command_palette::CommandPaletteState>()
             .add_event::<DialogEvent>()
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
-            .add_systems(
-                Update,
-                timeline::pull_shared_timeline
-                    .after(timeline_slider::sync_ui_tick)
-                    .before(render_layout),
-            )
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, shortcuts)
             .add_systems(Update, render_layout)
@@ -215,9 +259,23 @@ impl Plugin for UiPlugin {
             .add_systems(Update, sync_camera_grid_cell.after(render_layout))
             .add_systems(Update, query_plot::auto_bounds)
             .add_systems(Update, dashboard::update_nodes)
+            .add_systems(Update, apply_layout_override)
             .add_plugins(SchematicPlugin)
             .add_plugins(LinePlot3dPlugin)
             .add_plugins(command_palette::palette_items::plugin);
+    }
+}
+
+fn apply_layout_override(role: Res<WindowRole>, mut config: ResMut<DbConfig>) {
+    let content = match *role {
+        WindowRole::Primary => return,
+        WindowRole::MotorPanel => MOTOR_PANEL_KDL,
+        WindowRole::RatePanel => RATE_PANEL_KDL,
+    };
+
+    if config.schematic_content() != Some(content) {
+        config.set_schematic_content(content.to_string());
+        config.metadata.remove("schematic.path");
     }
 }
 

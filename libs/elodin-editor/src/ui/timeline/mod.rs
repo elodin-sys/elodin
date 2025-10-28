@@ -1,44 +1,23 @@
-use bevy::{
-    ecs::{
-        system::{Local, Res, ResMut, SystemParam, SystemState},
-        world::World,
-    },
-    prelude::Resource,
+use bevy::ecs::{
+    system::{Local, Res, SystemParam, SystemState},
+    world::World,
 };
 use bevy_egui::{EguiContexts, egui};
-use impeller2::types::Timestamp;
 use impeller2_wkt::{SimulationTimeStep, StreamId};
 use timeline_controls::TimelineControls;
 
-use std::{
-    fs::{OpenOptions, read_to_string, write},
-    io,
-    ops::RangeInclusive,
-    path::PathBuf,
-    sync::Mutex,
-};
+use std::ops::RangeInclusive;
 use timeline_slider::TimelineSlider;
 
 use crate::{
     SelectedTimeRange,
-    ui::{colors::get_scheme, images},
+    ui::{WindowRole, colors::get_scheme, images},
 };
 
 use super::widgets::{WidgetSystem, WidgetSystemExt};
 
 pub mod timeline_controls;
 pub mod timeline_slider;
-
-const LOCK_FILE_NAME: &str = "elodin_timeline.lock";
-const STATE_FILE_NAME: &str = "elodin_timeline.state";
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LockState {
-    Owned,
-    Available,
-    HeldByOther,
-    Error,
-}
 
 #[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug)]
 pub struct StreamTickOrigin {
@@ -230,172 +209,6 @@ impl DurationExt for hifitime::Duration {
     }
 }
 
-#[derive(Resource)]
-pub struct TimelineLock {
-    path: PathBuf,
-    inner: Mutex<TimelineLockInner>,
-}
-
-struct TimelineLockInner {
-    handle: Option<fslock::LockFile>,
-    cached: LockState,
-}
-
-impl Default for TimelineLock {
-    fn default() -> Self {
-        Self {
-            path: default_lock_path(),
-            inner: Mutex::new(TimelineLockInner {
-                handle: None,
-                cached: LockState::Available,
-            }),
-        }
-    }
-}
-
-impl TimelineLock {
-    pub fn status(&self) -> LockState {
-        let mut inner = self.inner.lock().unwrap();
-        if inner.handle.is_some() {
-            inner.cached = LockState::Owned;
-        } else {
-            inner.cached = self.peek_status_locked().unwrap_or(LockState::Error);
-        }
-        inner.cached
-    }
-
-    pub fn cached_status(&self) -> LockState {
-        let inner = self.inner.lock().unwrap();
-        inner.cached
-    }
-
-    pub fn try_acquire(&self) -> LockState {
-        let mut inner = self.inner.lock().unwrap();
-        if inner.handle.is_some() {
-            inner.cached = LockState::Owned;
-            return inner.cached;
-        }
-
-        if let Err(err) = ensure_lock_file(&self.path) {
-            bevy::log::warn!(?err, "failed to ensure timeline lock file");
-            inner.cached = LockState::Error;
-            return inner.cached;
-        }
-
-        match fslock::LockFile::open(&self.path) {
-            Ok(mut file) => match file.try_lock() {
-                Ok(true) => {
-                    inner.handle = Some(file);
-                    inner.cached = LockState::Owned;
-                }
-                Ok(false) => {
-                    inner.cached = LockState::HeldByOther;
-                }
-                Err(err) => {
-                    bevy::log::warn!(?err, "timeline lock acquisition error");
-                    inner.cached = LockState::Error;
-                }
-            },
-            Err(err) => {
-                bevy::log::warn!(?err, "timeline lock open error");
-                inner.cached = LockState::Error;
-            }
-        }
-        inner.cached
-    }
-
-    pub fn release(&self) {
-        let mut inner = self.inner.lock().unwrap();
-        if let Some(mut handle) = inner.handle.take() {
-            if let Err(err) = handle.unlock() {
-                bevy::log::warn!(?err, "timeline lock unlock error");
-            }
-        }
-        inner.cached = self.peek_status_locked().unwrap_or(LockState::Available);
-    }
-
-    fn peek_status_locked(&self) -> io::Result<LockState> {
-        ensure_lock_file(&self.path)?;
-        let mut file = fslock::LockFile::open(&self.path)?;
-        match file.try_lock()? {
-            true => {
-                let _ = file.unlock();
-                Ok(LockState::Available)
-            }
-            false => Ok(LockState::HeldByOther),
-        }
-    }
-}
-
-impl Drop for TimelineLock {
-    fn drop(&mut self) {
-        if let Ok(mut inner) = self.inner.lock() {
-            if let Some(mut handle) = inner.handle.take() {
-                let _ = handle.unlock();
-            }
-        }
-    }
-}
-
-fn default_lock_path() -> PathBuf {
-    let mut path = std::env::temp_dir();
-    path.push(LOCK_FILE_NAME);
-    path
-}
-
-fn ensure_lock_file(path: &PathBuf) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let _ = OpenOptions::new().create(true).write(true).open(path)?;
-    Ok(())
-}
-
-#[derive(Resource)]
-pub struct TimelineSharedState {
-    path: PathBuf,
-    last_seen: Mutex<Option<i64>>,
-}
-
-impl TimelineSharedState {
-    pub fn broadcast(&self, value: i64) {
-        if let Ok(mut seen) = self.last_seen.lock() {
-            if seen.map_or(false, |v| v == value) {
-                return;
-            }
-            if let Err(err) = write(&self.path, value.to_string()) {
-                bevy::log::warn!(?err, "timeline shared state write error");
-            } else {
-                *seen = Some(value);
-            }
-        }
-    }
-
-    pub fn poll(&self) -> Option<i64> {
-        let content = read_to_string(&self.path).ok()?;
-        let value = content.trim().parse::<i64>().ok()?;
-        let mut seen = self.last_seen.lock().ok()?;
-        if seen.map_or(false, |v| v == value) {
-            None
-        } else {
-            *seen = Some(value);
-            Some(value)
-        }
-    }
-}
-
-impl Default for TimelineSharedState {
-    fn default() -> Self {
-        let mut path = std::env::temp_dir();
-        path.push(STATE_FILE_NAME);
-        let _ = write(&path, "");
-        Self {
-            path,
-            last_seen: Mutex::new(None),
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
 pub struct TimelineIcons {
     pub jump_to_start: egui::TextureId,
@@ -411,33 +224,13 @@ pub struct TimelineIcons {
     pub vertical_chevrons: egui::TextureId,
 }
 
-pub fn pull_shared_timeline(
-    lock: Res<TimelineLock>,
-    shared: Res<TimelineSharedState>,
-    mut ui_tick: ResMut<timeline_slider::UITick>,
-    mut current_tick: ResMut<impeller2_wkt::CurrentTimestamp>,
-    mut tick_origin: ResMut<StreamTickOrigin>,
-    earliest: Res<impeller2_wkt::EarliestTimestamp>,
-) {
-    if matches!(lock.cached_status(), LockState::Owned) {
-        return;
-    }
-
-    if let Some(value) = shared.poll() {
-        ui_tick.0 = value;
-        current_tick.0 = Timestamp(value);
-        if Timestamp(value) <= earliest.0 {
-            tick_origin.request_rebase();
-        }
-    }
-}
-
 #[derive(SystemParam)]
 pub struct TimelinePanel<'w, 's> {
     contexts: EguiContexts<'w, 's>,
     images: Local<'s, images::Images>,
     tick_time: Res<'w, SimulationTimeStep>,
     selected_time_range: Res<'w, SelectedTimeRange>,
+    role: Res<'w, WindowRole>,
 }
 
 impl WidgetSystem for TimelinePanel<'_, '_> {
@@ -451,6 +244,11 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
         _args: Self::Args,
     ) {
         let state_mut = state.get_mut(world);
+        let role = *state_mut.role;
+        if !role.timeline_enabled() {
+            return;
+        }
+
         let mut contexts = state_mut.contexts;
         let images = state_mut.images;
         let tick_time = state_mut.tick_time;
