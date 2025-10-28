@@ -9,10 +9,7 @@ use timeline_controls::TimelineControls;
 use std::ops::RangeInclusive;
 use timeline_slider::TimelineSlider;
 
-use crate::{
-    SelectedTimeRange,
-    ui::{WindowRole, colors::get_scheme, images},
-};
+use crate::{SelectedTimeRange, ui::{colors::get_scheme, images}};
 
 use super::widgets::{WidgetSystem, WidgetSystemExt};
 
@@ -230,7 +227,6 @@ pub struct TimelinePanel<'w, 's> {
     images: Local<'s, images::Images>,
     tick_time: Res<'w, SimulationTimeStep>,
     selected_time_range: Res<'w, SelectedTimeRange>,
-    role: Res<'w, WindowRole>,
 }
 
 impl WidgetSystem for TimelinePanel<'_, '_> {
@@ -244,11 +240,6 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
         _args: Self::Args,
     ) {
         let state_mut = state.get_mut(world);
-        let role = *state_mut.role;
-        if !role.timeline_enabled() {
-            return;
-        }
-
         let mut contexts = state_mut.contexts;
         let images = state_mut.images;
         let tick_time = state_mut.tick_time;

@@ -123,18 +123,7 @@ impl Cli {
 
     pub fn editor(self, args: Args, rt: Runtime) -> miette::Result<()> {
         let cancel_token = CancelToken::new();
-        let role_env = std::env::var("ELODIN_WINDOW_ROLE")
-            .ok()
-            .map(|s| s.to_ascii_lowercase());
-        let is_child = matches!(role_env.as_deref(), Some("motor") | Some("rate"));
-        let mut backend_thread = None;
-        let mut extra_processes = Vec::new();
-        if !is_child {
-            backend_thread = Some(self.run_sim(&args, rt, cancel_token.clone())?);
-            if !matches!(args.sim, Simulator::None) {
-                extra_processes = spawn_additional_editors(&args, 2)?;
-            }
-        }
+        let backend_thread = self.run_sim(&args, rt, cancel_token.clone())?;
 
         let mut app = self.editor_app()?;
         match args.sim {
@@ -157,13 +146,7 @@ impl Cli {
             .add_systems(Update, check_cancel_token);
         app.run();
         cancel_token.cancel();
-        if let Some(thread) = backend_thread {
-            thread.join().map_err(|_| miette!("join error"))??;
-        }
-        for mut child in extra_processes {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+        backend_thread.join().map_err(|_| miette!("join error"))??;
         Ok(())
     }
 
@@ -238,21 +221,4 @@ fn on_window_resize(
             warn!(?err, "failed to write window state");
         }
     }
-}
-
-fn spawn_additional_editors(args: &Args, count: usize) -> miette::Result<Vec<std::process::Child>> {
-    static ROLES: &[&str] = &["motor", "rate"];
-    let exe = std::env::current_exe().into_diagnostic()?;
-    let sim = args.sim.to_string();
-    let mut children = Vec::new();
-    for role in ROLES.iter().take(count) {
-        let mut cmd = std::process::Command::new(&exe);
-        cmd.arg("editor");
-        if !sim.is_empty() {
-            cmd.arg(&sim);
-        }
-        cmd.env("ELODIN_WINDOW_ROLE", role);
-        children.push(cmd.spawn().into_diagnostic()?);
-    }
-    Ok(children)
 }

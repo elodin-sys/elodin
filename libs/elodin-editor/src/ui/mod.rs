@@ -5,8 +5,8 @@ use bevy::{
     },
     input::keyboard::Key,
     prelude::*,
-    render::camera::Viewport,
-    window::PrimaryWindow,
+    render::camera::{RenderTarget, Viewport},
+    window::{PrimaryWindow, WindowRef},
 };
 use bevy_egui::{
     EguiContext, EguiContexts,
@@ -22,15 +22,23 @@ use self::{command_palette::CommandPaletteState, timeline::timeline_slider};
 use egui::CornerRadius;
 use impeller2::types::ComponentId;
 use impeller2_bevy::ComponentValueMap;
-use impeller2_wkt::{ComponentMetadata, ComponentValue, DbConfig};
+use impeller2_wkt::{ComponentMetadata, ComponentValue};
 
-use crate::{GridHandle, MainCamera, plugins::LogicalKeyState};
+use crate::{
+    GridHandle, MainCamera,
+    plugins::{LogicalKeyState, navigation_gizmo::RenderLayerAlloc},
+};
 
 use self::inspector::entity::ComponentFilter;
 
 use self::command_palette::CommandPalette;
 use self::widgets::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystemExt};
 use self::{button::EImageButton, utils::MarginSides};
+use self::multi_window::{MotorPanelWindow, RatePanelWindow};
+use self::tiles::Pane;
+use crate::ui::plot::{GraphBundle, GraphState, PlotWidget};
+use egui_tiles::{Container, Tile, TileId};
+use std::collections::HashMap;
 
 pub mod actions;
 pub mod button;
@@ -47,6 +55,7 @@ pub mod plot;
 pub mod plot_3d;
 pub mod query_plot;
 pub mod query_table;
+mod multi_window;
 pub mod schematic;
 mod theme;
 pub mod tiles;
@@ -90,58 +99,6 @@ pub enum SelectedObject {
     },
 }
 
-#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WindowRole {
-    Primary,
-    MotorPanel,
-    RatePanel,
-}
-
-impl WindowRole {
-    pub fn from_env() -> Self {
-        match std::env::var("ELODIN_WINDOW_ROLE")
-            .ok()
-            .as_deref()
-            .map(|s| s.to_ascii_lowercase())
-            .as_deref()
-        {
-            Some("motor") => Self::MotorPanel,
-            Some("rate") => Self::RatePanel,
-            _ => Self::Primary,
-        }
-    }
-
-    pub fn timeline_enabled(self) -> bool {
-        matches!(self, Self::Primary)
-    }
-}
-
-const MOTOR_PANEL_KDL: &str = r#"
-tabs {
-    hsplit name="Motor Panel" {
-        vsplit share=0.4 {
-            graph "drone.motor_input"
-            graph "drone.motor_pwm"
-            graph "drone.motor_rpm"
-        }
-        graph "drone.thrust"
-    }
-}
-"#;
-
-const RATE_PANEL_KDL: &str = r#"
-tabs {
-    hsplit name="Rate Control Panel" {
-        vsplit {
-            graph "drone.rate_pid_state"
-        }
-        vsplit {
-            graph "drone.gyro, drone.ang_vel_setpoint" name="Drone: rate_control"
-        }
-    }
-}
-"#;
-
 impl SelectedObject {
     pub fn is_entity_selected(&self, id: impeller2::types::ComponentId) -> bool {
         matches!(self, SelectedObject::Entity(pair) if pair.impeller == id)
@@ -162,6 +119,23 @@ impl SelectedObject {
 
 #[derive(Resource, Default)]
 pub struct HoveredEntity(pub Option<EntityPair>);
+
+#[derive(Resource, Default)]
+struct SecondaryGraphs {
+    map: HashMap<(SecondaryGraphKind, String), GraphClone>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum SecondaryGraphKind {
+    Motor,
+    Rate,
+}
+
+#[derive(Clone, Copy)]
+struct GraphClone {
+    source: Entity,
+    clone: Entity,
+}
 
 #[derive(Resource, Default)]
 pub struct EntityFilter(pub String);
@@ -234,8 +208,7 @@ impl Plugin for UiPlugin {
             Err(err) => error!("{err}, falling back to current working directory"),
         }
 
-        app.insert_resource(WindowRole::from_env())
-            .init_resource::<Paused>()
+        app.init_resource::<Paused>()
             .init_resource::<SelectedObject>()
             .init_resource::<HoveredEntity>()
             .init_resource::<EntityFilter>()
@@ -247,8 +220,10 @@ impl Plugin for UiPlugin {
             .init_resource::<HdrEnabled>()
             .init_resource::<timeline_slider::UITick>()
             .init_resource::<timeline::StreamTickOrigin>()
+            .init_resource::<SecondaryGraphs>()
             .init_resource::<command_palette::CommandPaletteState>()
             .add_event::<DialogEvent>()
+            .add_systems(Startup, multi_window::spawn_secondary_windows)
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, shortcuts)
@@ -259,23 +234,9 @@ impl Plugin for UiPlugin {
             .add_systems(Update, sync_camera_grid_cell.after(render_layout))
             .add_systems(Update, query_plot::auto_bounds)
             .add_systems(Update, dashboard::update_nodes)
-            .add_systems(Update, apply_layout_override)
             .add_plugins(SchematicPlugin)
             .add_plugins(LinePlot3dPlugin)
             .add_plugins(command_palette::palette_items::plugin);
-    }
-}
-
-fn apply_layout_override(role: Res<WindowRole>, mut config: ResMut<DbConfig>) {
-    let content = match *role {
-        WindowRole::Primary => return,
-        WindowRole::MotorPanel => MOTOR_PANEL_KDL,
-        WindowRole::RatePanel => RATE_PANEL_KDL,
-    };
-
-    if config.schematic_content() != Some(content) {
-        config.set_schematic_content(content.to_string());
-        config.metadata.remove("schematic.path");
     }
 }
 
@@ -593,9 +554,400 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
     }
 }
 
+const MOTOR_PANEL_LAYOUT: &[(&str, f32)] = &[
+    ("drone.motor_input", 220.0),
+    ("drone.motor_pwm", 220.0),
+    ("drone.motor_rpm", 220.0),
+    ("drone.thrust", 220.0),
+];
+
+const RATE_PANEL_LAYOUT: &[(&str, f32)] = &[
+    ("drone.rate_pid_state", 260.0),
+    ("Drone: rate_control", 260.0),
+];
+
+fn render_graph_widget(
+    world: &mut World,
+    ui: &mut egui::Ui,
+    prefix: &str,
+    label: &str,
+    entity: Entity,
+    scrub_icon: egui::TextureId,
+    height: f32,
+    window_entity: Entity,
+) {
+    let display_label = RichText::new(label)
+        .color(get_scheme().text_primary)
+        .size(13.0);
+    ui.label(display_label);
+
+    let widget_id = format!("{prefix}_{label}");
+    let width = ui.available_width();
+    let mut rendered_rect = None;
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, height),
+        egui::Layout::top_down(egui::Align::Min),
+        |plot_ui| {
+            rendered_rect = Some(plot_ui.max_rect());
+            plot_ui.add_widget_with::<PlotWidget>(
+                world,
+                widget_id.as_str(),
+                (entity, scrub_icon),
+            );
+        },
+    );
+
+    if let Some(rect) = rendered_rect {
+        if let Ok(mut entity_mut) = world.get_entity_mut(entity) {
+            if let Some(mut camera) = entity_mut.get_mut::<Camera>() {
+                camera.target = RenderTarget::Window(WindowRef::Entity(window_entity));
+            }
+            if let Some(mut viewport_rect) = entity_mut.get_mut::<ViewportRect>() {
+                viewport_rect.0 = Some(rect);
+            } else {
+                entity_mut.insert(ViewportRect(Some(rect)));
+            }
+        }
+    }
+}
+
+fn collect_graphs_for_container(
+    tile_state: &tiles::TileState,
+    name: &str,
+) -> Vec<(String, Entity)> {
+    let mut graphs = Vec::new();
+    if let Some((&tile_id, _)) = tile_state
+        .container_titles
+        .iter()
+        .find(|(_, title)| title.as_str() == name)
+    {
+        collect_graphs_recursive(&tile_state.tree.tiles, tile_id, &mut graphs);
+    }
+    graphs
+}
+
+fn collect_graphs_recursive(
+    tiles: &egui_tiles::Tiles<Pane>,
+    tile_id: TileId,
+    out: &mut Vec<(String, Entity)>,
+) {
+    if let Some(tile) = tiles.get(tile_id) {
+        match tile {
+            Tile::Pane(Pane::Graph(graph)) => out.push((graph.label.clone(), graph.id)),
+            Tile::Pane(_) => {}
+            Tile::Container(container) => match container {
+                Container::Tabs(tabs) => {
+                    for child in tabs.children.iter().copied() {
+                        collect_graphs_recursive(tiles, child, out);
+                    }
+                }
+                Container::Linear(linear) => {
+                    for child in linear.children.iter().copied() {
+                        collect_graphs_recursive(tiles, child, out);
+                    }
+                }
+                Container::Grid(grid) => {
+                    for child in grid.children() {
+                        collect_graphs_recursive(tiles, *child, out);
+                    }
+                }
+            },
+        }
+    }
+}
+
+fn collect_graphs_by_labels(
+    tile_state: &tiles::TileState,
+    layout: &[(&str, f32)],
+) -> Vec<(String, Entity)> {
+    layout
+        .iter()
+        .filter_map(|(label, _)| {
+            find_graph_by_label(tile_state, label).map(|entity| ((*label).to_string(), entity))
+        })
+        .collect()
+}
+
+fn find_graph_by_label(
+    tile_state: &tiles::TileState,
+    label: &str,
+) -> Option<Entity> {
+    tile_state.tree.tiles.iter().find_map(|(_, tile)| match tile {
+        Tile::Pane(Pane::Graph(graph)) if graph.label == label => Some(graph.id),
+        _ => None,
+    })
+}
+
+fn graph_height(label: &str, layout: &[(&str, f32)]) -> f32 {
+    layout
+        .iter()
+        .find_map(|(name, height)| (*name == label).then_some(*height))
+        .unwrap_or(240.0)
+}
+
+fn spawn_graph_clone(world: &mut World, source: Entity, label: &str) -> Option<Entity> {
+    let source_state = world.get::<GraphState>(source)?;
+    let components = source_state.components.clone();
+    let auto_y_range = source_state.auto_y_range;
+    let y_range = source_state.y_range.clone();
+    let auto_x_range = source_state.auto_x_range;
+    let x_range = source_state.x_range.clone();
+    let graph_type = source_state.graph_type;
+    let line_width = source_state.line_width;
+    let zoom_factor = source_state.zoom_factor;
+    let pan_offset = source_state.pan_offset;
+    let locked = source_state.locked;
+
+    let mut render_layer_alloc = world.resource_mut::<RenderLayerAlloc>();
+    let mut bundle = GraphBundle::new(&mut render_layer_alloc, components, label.to_string());
+    drop(render_layer_alloc);
+
+    bundle.graph_state.auto_y_range = auto_y_range;
+    bundle.graph_state.y_range = y_range;
+    bundle.graph_state.auto_x_range = auto_x_range;
+    bundle.graph_state.x_range = x_range;
+    bundle.graph_state.graph_type = graph_type;
+    bundle.graph_state.line_width = line_width;
+    bundle.graph_state.zoom_factor = zoom_factor;
+    bundle.graph_state.pan_offset = pan_offset;
+    bundle.graph_state.locked = locked;
+
+    let clone = world.spawn(bundle).id();
+    Some(clone)
+}
+
+fn sync_graph_state(world: &mut World, clone: Entity, source: Entity) {
+    let Some(source_state) = world.get::<GraphState>(source) else {
+        return;
+    };
+    let components = source_state.components.clone();
+    let auto_y_range = source_state.auto_y_range;
+    let y_range = source_state.y_range.clone();
+    let auto_x_range = source_state.auto_x_range;
+    let x_range = source_state.x_range.clone();
+    let graph_type = source_state.graph_type;
+    let line_width = source_state.line_width;
+    let zoom_factor = source_state.zoom_factor;
+    let pan_offset = source_state.pan_offset;
+    let locked = source_state.locked;
+
+    let Some(mut clone_state) = world.get_mut::<GraphState>(clone) else {
+        return;
+    };
+
+    clone_state.components = components;
+    clone_state.auto_y_range = auto_y_range;
+    clone_state.y_range = y_range;
+    clone_state.auto_x_range = auto_x_range;
+    clone_state.x_range = x_range;
+    clone_state.graph_type = graph_type;
+    clone_state.line_width = line_width;
+    clone_state.zoom_factor = zoom_factor;
+    clone_state.pan_offset = pan_offset;
+    clone_state.locked = locked;
+}
+
+#[derive(SystemParam)]
+pub struct MotorPanelLayout<'w, 's> {
+    contexts: EguiContexts<'w, 's>,
+    images: Local<'s, images::Images>,
+}
+
+impl RootWidgetSystem for MotorPanelLayout<'_, '_> {
+    type Args = ();
+    type Output = ();
+
+    fn ctx_system(
+        world: &mut World,
+        state: &mut SystemState<Self>,
+        ctx: &mut egui::Context,
+        _args: Self::Args,
+    ) {
+        let mut window_query = world.query_filtered::<Entity, With<MotorPanelWindow>>();
+        let Some(window_entity) = window_query.iter(world).next() else {
+            return;
+        };
+
+        let graphs = {
+            let tile_state = world.resource::<tiles::TileState>();
+            let mut graphs = collect_graphs_for_container(&tile_state, "Motor Panel");
+            if graphs.is_empty() {
+                graphs = collect_graphs_by_labels(&tile_state, MOTOR_PANEL_LAYOUT);
+            }
+            graphs
+        };
+
+        let mut clones_to_render: Vec<(String, Entity, Entity)> = Vec::new();
+        for (label, source) in graphs {
+            let key = (SecondaryGraphKind::Motor, label.clone());
+
+            let existing = {
+                let mut secondary_graphs = world.resource_mut::<SecondaryGraphs>();
+                secondary_graphs
+                    .map
+                    .get_mut(&key)
+                    .map(|entry| {
+                        entry.source = source;
+                        entry.clone
+                    })
+            };
+
+            let clone_entity = if let Some(clone) = existing {
+                clone
+            } else {
+                let Some(clone) = spawn_graph_clone(world, source, &label) else {
+                    continue;
+                };
+                let mut secondary_graphs = world.resource_mut::<SecondaryGraphs>();
+                secondary_graphs
+                    .map
+                    .insert(key, GraphClone { source, clone });
+                clone
+            };
+
+            clones_to_render.push((label, clone_entity, source));
+        }
+
+        for (_, clone_entity, source) in clones_to_render.iter() {
+            sync_graph_state(world, *clone_entity, *source);
+        }
+
+        let MotorPanelLayout { mut contexts, images } = state.get_mut(world);
+
+        theme::set_theme(ctx);
+
+        let scrub_icon = contexts.add_image(images.icon_scrub.clone_weak());
+
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(0.0, 16.0);
+                if clones_to_render.is_empty() {
+                    ui.label(
+                        RichText::new("No graphs available")
+                            .color(get_scheme().text_secondary),
+                    );
+                    return;
+                }
+                for (label, entity, _) in &clones_to_render {
+                    let height = graph_height(label, MOTOR_PANEL_LAYOUT);
+                    render_graph_widget(
+                        world,
+                        ui,
+                        "motor_panel_plot",
+                        label,
+                        *entity,
+                        scrub_icon,
+                        height,
+                        window_entity,
+                    );
+                }
+            });
+    }
+}
+
+#[derive(SystemParam)]
+pub struct RatePanelLayout<'w, 's> {
+    contexts: EguiContexts<'w, 's>,
+    images: Local<'s, images::Images>,
+}
+
+impl RootWidgetSystem for RatePanelLayout<'_, '_> {
+    type Args = ();
+    type Output = ();
+
+    fn ctx_system(
+        world: &mut World,
+        state: &mut SystemState<Self>,
+        ctx: &mut egui::Context,
+        _args: Self::Args,
+    ) {
+        let mut window_query = world.query_filtered::<Entity, With<RatePanelWindow>>();
+        let Some(window_entity) = window_query.iter(world).next() else {
+            return;
+        };
+
+        let graphs = {
+            let tile_state = world.resource::<tiles::TileState>();
+            let mut graphs = collect_graphs_for_container(&tile_state, "Rate Control Panel");
+            if graphs.is_empty() {
+                graphs = collect_graphs_by_labels(&tile_state, RATE_PANEL_LAYOUT);
+            }
+            graphs
+        };
+
+        let mut clones_to_render: Vec<(String, Entity, Entity)> = Vec::new();
+        for (label, source) in graphs {
+            let key = (SecondaryGraphKind::Rate, label.clone());
+
+            let existing = {
+                let mut secondary_graphs = world.resource_mut::<SecondaryGraphs>();
+                secondary_graphs
+                    .map
+                    .get_mut(&key)
+                    .map(|entry| {
+                        entry.source = source;
+                        entry.clone
+                    })
+            };
+
+            let clone_entity = if let Some(clone) = existing {
+                clone
+            } else {
+                let Some(clone) = spawn_graph_clone(world, source, &label) else {
+                    continue;
+                };
+                let mut secondary_graphs = world.resource_mut::<SecondaryGraphs>();
+                secondary_graphs
+                    .map
+                    .insert(key, GraphClone { source, clone });
+                clone
+            };
+
+            clones_to_render.push((label, clone_entity, source));
+        }
+
+        for (_, clone_entity, source) in clones_to_render.iter() {
+            sync_graph_state(world, *clone_entity, *source);
+        }
+
+        let RatePanelLayout { mut contexts, images } = state.get_mut(world);
+
+        theme::set_theme(ctx);
+
+        let scrub_icon = contexts.add_image(images.icon_scrub.clone_weak());
+
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(0.0, 16.0);
+                if clones_to_render.is_empty() {
+                    ui.label(
+                        RichText::new("No graphs available")
+                            .color(get_scheme().text_secondary),
+                    );
+                    return;
+                }
+                for (label, entity, _) in &clones_to_render {
+                    let height = graph_height(label, RATE_PANEL_LAYOUT);
+                    render_graph_widget(
+                        world,
+                        ui,
+                        "rate_panel_plot",
+                        label,
+                        *entity,
+                        scrub_icon,
+                        height,
+                        window_entity,
+                    );
+                }
+            });
+    }
+}
+
 #[derive(SystemParam)]
 pub struct ViewportOverlay<'w, 's> {
-    window: Query<'w, 's, &'static Window>,
+    window: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     entities_meta: Query<'w, 's, EntityData<'static>>,
     hovered_entity: Res<'w, HoveredEntity>,
 }
@@ -660,13 +1012,29 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
 }
 
 pub fn render_layout(world: &mut World) {
-    world.add_root_widget::<MainLayout>("main_layout");
+    let mut primary_query = world.query_filtered::<Entity, With<PrimaryWindow>>();
+    if primary_query.iter(world).next().is_some() {
+        world.add_root_widget::<MainLayout>("main_layout");
+        world.add_root_widget::<ViewportOverlay>("viewport_overlay");
+        world.add_root_widget::<modal::ModalWithSettings>("modal_graph");
+        world.add_root_widget::<CommandPalette>("command_palette");
+    }
 
-    world.add_root_widget::<ViewportOverlay>("viewport_overlay");
+    let mut motor_query = world.query_filtered::<Entity, With<MotorPanelWindow>>();
+    if motor_query.iter(world).next().is_some() {
+        world.add_root_widget_with::<MotorPanelLayout, With<MotorPanelWindow>>(
+            "motor_panel_layout",
+            (),
+        );
+    }
 
-    world.add_root_widget::<modal::ModalWithSettings>("modal_graph");
-
-    world.add_root_widget::<CommandPalette>("command_palette");
+    let mut rate_query = world.query_filtered::<Entity, With<RatePanelWindow>>();
+    if rate_query.iter(world).next().is_some() {
+        world.add_root_widget_with::<RatePanelLayout, With<RatePanelWindow>>(
+            "rate_panel_layout",
+            (),
+        );
+    }
 }
 
 #[derive(QueryData)]
