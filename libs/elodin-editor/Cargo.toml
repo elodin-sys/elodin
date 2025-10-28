@@ -29,6 +29,7 @@ egui_table = "0.3"
 winit.version = "0.30.12"
 winit.features = ["rwh_05"]
 raw-window-handle = "0.5"
+fslock = "0.2"
 bevy_infinite_grid.git = "https://github.com/Cyannide/bevy_infinite_grid.git"
 bevy_infinite_grid.branch = "bevy-0.16"
 big_space.git = "https://github.com/elodin-sys/big_space.git"

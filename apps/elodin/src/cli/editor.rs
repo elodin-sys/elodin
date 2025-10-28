@@ -123,13 +123,14 @@ impl Cli {
 
     pub fn editor(self, args: Args, rt: Runtime) -> miette::Result<()> {
         let cancel_token = CancelToken::new();
-        let is_secondary = std::env::var_os("ELODIN_SECONDARY").is_some();
+        let is_child = std::env::var_os("ELODIN_SECONDARY").is_some()
+            || std::env::var_os("ELODIN_TERTIARY").is_some();
         let mut backend_thread = None;
-        let mut secondary_process = None;
-        if !is_secondary {
+        let mut extra_processes = Vec::new();
+        if !is_child {
             backend_thread = Some(self.run_sim(&args, rt, cancel_token.clone())?);
             if !matches!(args.sim, Simulator::None) {
-                secondary_process = Some(spawn_secondary_editor(&args)?);
+                extra_processes = spawn_additional_editors(&args, 2)?;
             }
         }
 
@@ -157,7 +158,7 @@ impl Cli {
         if let Some(thread) = backend_thread {
             thread.join().map_err(|_| miette!("join error"))??;
         }
-        if let Some(mut child) = secondary_process {
+        for mut child in extra_processes {
             let _ = child.kill();
             let _ = child.wait();
         }
@@ -237,14 +238,19 @@ fn on_window_resize(
     }
 }
 
-fn spawn_secondary_editor(args: &Args) -> miette::Result<std::process::Child> {
+fn spawn_additional_editors(args: &Args, count: usize) -> miette::Result<Vec<std::process::Child>> {
+    static ROLES: &[&str] = &["ELODIN_SECONDARY", "ELODIN_TERTIARY", "ELODIN_QUATERNARY"];
     let exe = std::env::current_exe().into_diagnostic()?;
-    let mut cmd = std::process::Command::new(exe);
-    cmd.arg("editor");
     let sim = args.sim.to_string();
-    if !sim.is_empty() {
-        cmd.arg(sim);
+    let mut children = Vec::new();
+    for role in ROLES.iter().take(count) {
+        let mut cmd = std::process::Command::new(&exe);
+        cmd.arg("editor");
+        if !sim.is_empty() {
+            cmd.arg(&sim);
+        }
+        cmd.env(*role, "1");
+        children.push(cmd.spawn().into_diagnostic()?);
     }
-    cmd.env("ELODIN_SECONDARY", "1");
-    cmd.spawn().into_diagnostic()
+    Ok(children)
 }

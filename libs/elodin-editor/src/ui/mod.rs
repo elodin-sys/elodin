@@ -195,9 +195,17 @@ impl Plugin for UiPlugin {
             .init_resource::<HdrEnabled>()
             .init_resource::<timeline_slider::UITick>()
             .init_resource::<timeline::StreamTickOrigin>()
+            .init_resource::<timeline::TimelineLock>()
+            .init_resource::<timeline::TimelineSharedState>()
             .init_resource::<command_palette::CommandPaletteState>()
             .add_event::<DialogEvent>()
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
+            .add_systems(
+                Update,
+                timeline::pull_shared_timeline
+                    .after(timeline_slider::sync_ui_tick)
+                    .before(render_layout),
+            )
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, shortcuts)
             .add_systems(Update, render_layout)

@@ -21,8 +21,8 @@ use crate::ui::{
 };
 
 use super::{
-    DurationExt, StreamTickOrigin, TimelineArgs, TimelineIcons, get_position_range,
-    position_from_value, value_from_position,
+    DurationExt, LockState, StreamTickOrigin, TimelineArgs, TimelineIcons, TimelineLock,
+    TimelineSharedState, get_position_range, position_from_value, value_from_position,
 };
 
 // ----------------------------------------------------------------------------
@@ -360,6 +360,8 @@ pub struct TimelineSlider<'w> {
     current_stream_id: Res<'w, CurrentStreamId>,
     tick_origin: ResMut<'w, StreamTickOrigin>,
     earliest_timestamp: Res<'w, EarliestTimestamp>,
+    lock: Res<'w, TimelineLock>,
+    shared: Res<'w, TimelineSharedState>,
 }
 
 impl WidgetSystem for TimelineSlider<'_> {
@@ -378,6 +380,8 @@ impl WidgetSystem for TimelineSlider<'_> {
             current_stream_id,
             mut tick_origin,
             earliest_timestamp,
+            lock,
+            shared,
         } = state.get_mut(world);
 
         tick_origin.observe_stream(**current_stream_id);
@@ -386,22 +390,27 @@ impl WidgetSystem for TimelineSlider<'_> {
         let handle_icon = icons.handle;
 
         ui.horizontal(|ui| {
-            let response = ui
-                .add(
-                    Timeline::new(
-                        &mut tick.bypass_change_detection().0,
-                        timeline_args.active_range,
-                    )
-                    .width(timeline_args.available_width)
-                    .height(timeline_args.line_height)
-                    .handle_image_id(handle_icon)
-                    .handle_aspect_ratio(12.0 / 30.0)
-                    .segments(timeline_args.segment_count)
-                    .fps(timeline_args.frames_per_second),
-                )
-                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            let slider_enabled = matches!(lock.cached_status(), LockState::Owned);
+            let slider_widget = Timeline::new(
+                &mut tick.bypass_change_detection().0,
+                timeline_args.active_range,
+            )
+            .width(timeline_args.available_width)
+            .height(timeline_args.line_height)
+            .handle_image_id(handle_icon)
+            .handle_aspect_ratio(12.0 / 30.0)
+            .segments(timeline_args.segment_count)
+            .fps(timeline_args.frames_per_second);
 
-            if response.changed() {
+            let response = if slider_enabled {
+                ui.add(slider_widget)
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+            } else {
+                let response = ui.add_enabled(false, slider_widget);
+                response.on_hover_cursor(egui::CursorIcon::NotAllowed)
+            };
+
+            if slider_enabled && response.changed() {
                 let target_timestamp = Timestamp(tick.0);
                 if target_timestamp <= earliest_timestamp.0 {
                     tick_origin.request_rebase();
@@ -409,7 +418,8 @@ impl WidgetSystem for TimelineSlider<'_> {
                 event.send_msg(SetStreamState::rewind(
                     **current_stream_id,
                     target_timestamp,
-                ))
+                ));
+                shared.broadcast(tick.0);
             }
         });
     }
