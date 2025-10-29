@@ -1,4 +1,4 @@
-use impeller2_wkt::{Color, Schematic, SchematicElem, VectorArrow3d};
+use impeller2_wkt::{Color, Schematic, SchematicElem, VectorArrow3d, WindowSchematic};
 use kdl::{KdlDocument, KdlNode};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -32,6 +32,7 @@ fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlS
         "tabs" | "hsplit" | "vsplit" | "viewport" | "graph" | "component_monitor"
         | "action_pane" | "query_table" | "query_plot" | "inspector" | "hierarchy"
         | "schematic_tree" | "dashboard" => Ok(SchematicElem::Panel(parse_panel(node, src)?)),
+        "window" => Ok(SchematicElem::Window(parse_window(node, src)?)),
         "object_3d" => Ok(SchematicElem::Object3d(parse_object_3d(node, src)?)),
         "line_3d" => Ok(SchematicElem::Line3d(parse_line_3d(node, src)?)),
         "vector_arrow" => Ok(SchematicElem::VectorArrow(parse_vector_arrow(node, src)?)),
@@ -40,6 +41,49 @@ fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlS
             src: src.to_string(),
             span: node.span(),
         }),
+    }
+}
+
+fn parse_window(node: &KdlNode, src: &str) -> Result<WindowSchematic, KdlSchematicError> {
+    let raw_path = node
+        .get("path")
+        .or_else(|| node.get("file"))
+        .or_else(|| node.get("name"))
+        .and_then(|v| v.as_string())
+        .ok_or_else(|| KdlSchematicError::MissingProperty {
+            property: "path".to_string(),
+            node: node.name().to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        })?;
+
+    let path = trim_wrapping_braces(raw_path.trim()).to_string();
+    if path.is_empty() {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "path".to_string(),
+            node: node.name().to_string(),
+            expected: "a non-empty relative path".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        });
+    }
+
+    let title = node
+        .get("title")
+        .or_else(|| node.get("display"))
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty());
+
+    Ok(WindowSchematic { title, path })
+}
+
+fn trim_wrapping_braces(value: &str) -> &str {
+    let bytes = value.as_bytes();
+    if bytes.len() >= 2 && bytes[0] == b'{' && bytes[bytes.len() - 1] == b'}' {
+        &value[1..value.len() - 1]
+    } else {
+        value
     }
 }
 

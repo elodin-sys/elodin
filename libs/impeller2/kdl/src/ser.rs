@@ -21,6 +21,7 @@ fn serialize_schematic_elem<T>(elem: &SchematicElem<T>) -> KdlNode {
         SchematicElem::Object3d(obj) => serialize_object_3d(obj),
         SchematicElem::Line3d(line) => serialize_line_3d(line),
         SchematicElem::VectorArrow(arrow) => serialize_vector_arrow(arrow),
+        SchematicElem::Window(window) => serialize_window(window),
     }
 }
 
@@ -117,6 +118,19 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
 
     if viewport.active {
         node.entries_mut().push(KdlEntry::new_prop("active", true));
+    }
+
+    node
+}
+
+fn serialize_window(window: &WindowSchematic) -> KdlNode {
+    let mut node = KdlNode::new("window");
+    node.entries_mut()
+        .push(KdlEntry::new_prop("path", window.path.clone()));
+
+    if let Some(title) = &window.title {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("title", title.clone()));
     }
 
     node

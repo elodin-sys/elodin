@@ -168,6 +168,9 @@ impl LoadSchematicParams<'_, '_> {
                 impeller2_wkt::SchematicElem::VectorArrow(vector_arrow) => {
                     self.spawn_vector_arrow(vector_arrow.clone());
                 }
+                impeller2_wkt::SchematicElem::Window(_window) => {
+                    // Secondary windows are handled in subsequent stages.
+                }
             }
         }
     }

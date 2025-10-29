@@ -112,6 +112,7 @@ impl WidgetSystem for TreeWidget<'_, '_> {
                     }
                     impeller2_wkt::SchematicElem::Line3d(_line3d) => {}
                     impeller2_wkt::SchematicElem::VectorArrow(_arrow) => {}
+                    impeller2_wkt::SchematicElem::Window(_window) => {}
                 }
             }
         });
