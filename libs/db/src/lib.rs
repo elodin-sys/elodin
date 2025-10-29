@@ -1344,11 +1344,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         Packet::Msg(m) if m.id == VTableStream::ID => {
             let VTableStream { id } = m.parse::<VTableStream>()?;
             let vtable = db
-                .with_state(|state| state.vtable_registry.get(dbg!(&id)).cloned().or_else(|| {
-                    eprintln!("VTABLE REG KEYS {:?}", state.vtable_registry.map.keys());
-                    None
-                }))
-                // Might be it.
+                .with_state(|state| state.vtable_registry.get(&id).cloned())
                 .ok_or(Error::InvalidMsgId)?;
             stellarator::spawn(handle_vtable_stream(
                 id,
