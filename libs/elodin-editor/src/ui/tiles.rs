@@ -149,6 +149,13 @@ impl WindowManager {
     ) -> Option<&mut SecondaryWindowState> {
         self.secondary.iter_mut().find(|s| s.id == id)
     }
+
+    pub fn find_secondary_by_entity(&self, entity: Entity) -> Option<SecondaryWindowId> {
+        self.secondary
+            .iter()
+            .find(|state| state.window_entity == Some(entity))
+            .map(|state| state.id)
+    }
 }
 
 #[derive(Resource, Default)]

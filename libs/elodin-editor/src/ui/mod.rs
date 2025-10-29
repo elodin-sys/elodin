@@ -8,7 +8,7 @@ use bevy::{
     input::keyboard::Key,
     prelude::*,
     render::camera::{RenderTarget, Viewport},
-    window::{PresentMode, PrimaryWindow, WindowRef, WindowResolution},
+    window::{PresentMode, PrimaryWindow, WindowCloseRequested, WindowRef, WindowResolution},
 };
 use bevy_egui::{
     EguiContext, EguiContexts,
@@ -212,9 +212,10 @@ impl Plugin for UiPlugin {
             .add_systems(Update, shortcuts)
             .add_systems(Update, render_layout)
             .add_systems(Update, sync_secondary_windows.after(render_layout))
+            .add_systems(Update, handle_secondary_close.after(sync_secondary_windows))
             .add_systems(
                 Update,
-                render_secondary_windows.after(sync_secondary_windows),
+                render_secondary_windows.after(handle_secondary_close),
             )
             .add_systems(Update, sync_hdr)
             .add_systems(Update, tiles::shortcuts)
@@ -698,6 +699,27 @@ fn sync_secondary_windows(
                 camera.target = RenderTarget::Window(window_ref);
                 camera.is_active = true;
             }
+        }
+    }
+}
+
+fn handle_secondary_close(
+    mut events: EventReader<WindowCloseRequested>,
+    mut windows: ResMut<tiles::WindowManager>,
+) {
+    let mut reopen = Vec::new();
+    for evt in events.read() {
+        let entity_bits = evt.window.to_bits();
+        let entity = Entity::from_bits(entity_bits);
+        if let Some(id) = windows.find_secondary_by_entity(entity) {
+            reopen.push(id);
+        }
+    }
+
+    for id in reopen {
+        if let Some(state) = windows.get_secondary_mut(id) {
+            state.window_entity = None;
+            state.graph_entities.clear();
         }
     }
 }
