@@ -277,8 +277,17 @@ impl System {
         System::new(pipe)
     }
 
-    pub fn __or__(&self, other: System) -> System {
-        self.pipe(other)
+    pub fn __or__(&self, other: Option<System>) -> System {
+        match other {
+            Some(other_sys) => self.pipe(other_sys),
+            None => self.clone(),
+        }
+    }
+
+    pub fn __ror__(&self, _other: PyObject) -> System {
+        // Handle the case where the left operand is None
+        // Return self unchanged (None is effectively skipped)
+        self.clone()
     }
 }
 
