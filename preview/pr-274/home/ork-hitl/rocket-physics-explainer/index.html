@@ -1,0 +1,881 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    
+<link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css" media="print" onload="this.media='all'; this.onload = null">
+<noscript><link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css"></noscript>
+
+    
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-274/fonts/spacegrotesk.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-274/fonts/ibm-plex-sans-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-274/fonts/ibm-plex-sans-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-274/fonts/ibm-plex-sans-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-274/fonts/ibm-plex-sans-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-274/fonts/ibm-plex-sans-700.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-274/fonts/ibm-plex-mono-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-274/fonts/ibm-plex-mono-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-274/fonts/ibm-plex-mono-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-274/fonts/ibm-plex-mono-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-274/fonts/ibm-plex-mono-700.woff2" type="font/woff2" crossorigin>
+
+    
+<link rel="stylesheet" href="https://docs.elodin.systems/preview/pr-274/main.css">
+
+    
+  <meta name="theme-color" content="#fff">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://docs.elodin.systems/preview/pr-274/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="https://docs.elodin.systems/preview/pr-274/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="https://docs.elodin.systems/preview/pr-274/favicon-16x16.png">
+  
+    <link rel="manifest" href="https://docs.elodin.systems/preview/pr-274/site.webmanifest" crossorigin>
+  
+
+
+  
+  
+    
+  
+
+  
+  
+    
+    
+  
+
+  
+    
+  
+  
+  
+  
+    
+  
+
+  
+
+
+  <meta name="robots" content="index, follow">
+  <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <meta name="bingbot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+
+
+	
+
+
+	
+
+<title>Rocket Physics Explainer | Elodin</title>
+<meta name="description" content="Simple explanation of rocket physics for simulation">
+<link rel="canonical" href="https://docs.elodin.systems/preview/pr-274/home/ork-hitl/rocket-physics-explainer/">
+
+
+  <meta name="twitter:card" content="summary_large_image">
+  
+    <meta name="twitter:image" content="https://docs.elodin.systems/preview/pr-274/logo.png">
+  
+  <meta name="twitter:title" content="Rocket Physics Explainer">
+  <meta name="twitter:description" content="Simple explanation of rocket physics for simulation">
+  <meta name="twitter:site" content="@elodinsystems">
+  <meta name="twitter:creator" content="@elodinsystems">
+
+  <meta property="og:title" content="Rocket Physics Explainer">
+  <meta property="og:description" content="Simple explanation of rocket physics for simulation">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://docs.elodin.systems/preview/pr-274/home/ork-hitl/rocket-physics-explainer/">
+
+  
+    <meta property="og:image" content="https://docs.elodin.systems/preview/pr-274/logo.png">
+  
+
+  <meta property="og:updated_time" content="">
+  <meta property="og:site_name" content="Rocket Physics Explainer">
+
+  
+
+  
+
+  
+  <meta property="og:locale" content="en_US">
+
+
+
+
+
+  
+
+
+
+
+
+<script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "BreadcrumbList",
+    
+      
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          {
+            "@type": "ListItem",
+            "position":  1 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-274/"
+          },
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  2 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-274/home/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  3 ,
+            "name": "Ork Hitl",
+            "item": "https://docs.elodin.systems/preview/pr-274/home/ork-hitl/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  4 ,
+            "name": "Rocket Physics Explainer",
+            "item": "https://docs.elodin.systems/preview/pr-274/home/ork-hitl/rocket-physics-explainer/"
+          },
+        
+      
+    
+  }
+</script>
+
+
+
+
+</head>
+
+<body class="docs single">
+  
+    
+    
+    
+  
+  
+    
+<header class="navbar fixed-top navbar-expand-md navbar-light">
+    <div class="container">
+        <div class="col-2" style="display: flex; gap: 20px">
+            <a
+                href="https://elodin.systems"
+                class="nav-link-icon"
+                target="_blank"
+                rel="noopener noreferrer"
+                ><svg
+                    width="20"
+                    height="25"
+                    viewBox="0 0 20 25"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                >
+                    <path
+                        d="M10 0H15C17.7615 0 20 2.23858 20 5V20.0001C20 22.7615 17.7615 25.0001 15 25.0001H5C2.23853 25.0001 0 22.7615 0 20V5C0 2.23858 2.23853 1.90735e-06 5 1.90735e-06V5V20.0001H15V5L5 5C5 2.23858 7.23853 0 10 0Z"
+                        fill="currentColor"
+                    />
+                </svg>
+            </a>
+            <span>
+                <select name="version" class="version-select" disabled>
+                    <option value="v0.15.2" selected>
+                        v0.15.2
+                    </option>
+                </select>
+            </span>
+        </div>
+
+        <div
+            class="col-2 d-none d-lg-block"
+            style="margin-left: 56px"
+        >
+            <form style="width: 264px">
+                <input
+                    id="userinput"
+                    class="form-control is-search"
+                    type="search"
+                    placeholder="Search"
+                    aria-label="Search"
+                    autocomplete="off"
+                />
+                <div id="suggestions" class="shadow bg-white rounded"></div>
+            </form>
+        </div>
+        <div class="col-2 d-none d-md-block"></div>
+        <div class="col-2" style="margin-left: 35px">
+            <ul class="navbar-nav main-nav me-auto">
+                      
+                <li
+                    class="nav-item home active"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-274/home/quickstart"
+                        >HOME</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-274/reference/overview"
+                        >Reference</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-274/releases/changelog"
+                        >Releases</a
+                    >
+                </li>
+                  
+            </ul>
+        </div>
+        <div class="col-1"></div>
+        <div
+            class="col-2 d-none d-xl-block"
+            style="margin-right: 63px"
+        >
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://github.com/elodin-sys/elodin">
+                        <i class="bx bxl-github"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://elodin.app/discord">
+                        <i class="bx bxl-discord-alt"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a id="mode-1" class="nav-link nav-link-icon toggle-dark">
+                        <i class='bx bxs-sun'></i>
+                    </a>
+                    <a id="mode-2" class="nav-link nav-link-icon toggle-light">
+                        <i class='bx bxs-moon'></i>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</header>
+
+  
+  <div class="wrap container tom-green" role="document">
+      <div class="content">
+          <div class="row flex-xxl-nowrap justify-content-center">
+              
+<div class="col-lg-5 col-xl-4 docs-sidebar d-none d-lg-block">
+    <nav class="docs-links" aria-label="Main navigation">
+          
+        <h3>Overview</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-274/home/quickstart/"
+                    >Quick Start</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-274/home/3-body/"
+                    >Three-Body Orbit</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-274/home/bouncing-ball/"
+                    >Bouncing Ball</a
+                >
+            </li>
+            
+        </ul>
+          
+         
+        <h3>Open Rocket &amp; HITL</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link active"
+                    href="https://docs.elodin.systems/preview/pr-274/home/ork-hitl/rocket-physics-explainer/"
+                    >Rocket Physics Explainer</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-274/home/ork-hitl/ork/"
+                    >OpenRocket</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-274/home/ork-hitl/rocket-sim-1/"
+                    >Part 1: Vertical Flight</a
+                >
+            </li>
+            
+        </ul>
+         
+         
+        <h3>Aleph</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-274/home/aleph/setup/"
+                    >Aleph Setup</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-274/home/aleph/fc-board-flash/"
+                    >Flash Expansion Board</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-274/home/aleph/reset/"
+                    >Factory Reset</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-274/home/aleph/betaflight/"
+                    >Betaflight Install</a
+                >
+            </li>
+            
+        </ul>
+         
+         
+        <h3>Elodin DB</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-274/home/db/overview/"
+                    >Overview</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-274/home/db/architecture/"
+                    >Architecture</a
+                >
+            </li>
+            
+        </ul>
+         
+         
+        <h3>The Tao of Elodin Sim</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-274/home/tao/introduction/"
+                    >What is Elodin</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-274/home/tao/ecs/"
+                    >Why ECS for Physics?</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-274/home/tao/data-flow/"
+                    >ECS Data Flow</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-274/home/tao/monte-carlo/"
+                    >Monte Carlo</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-274/home/tao/jax-nox/"
+                    >NumPy, JAX &amp; NOX</a
+                >
+            </li>
+            
+        </ul>
+          
+    </nav>
+</div>
+
+               
+<nav
+    class="docs-toc d-none d-xxl-block col-xl-3"
+    aria-label="Secondary navigation"
+>
+    <div class="page-links">
+        <h3>On this page</h3>
+        <nav id="TableOfContents">
+            <ul>
+                
+                <li><a href="https://docs.elodin.systems/preview/pr-274/home/ork-hitl/rocket-physics-explainer/#understanding-rocket-flight-simplified">Understanding Rocket Flight - Simplified</a></li>
+                
+                <ul>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/home/ork-hitl/rocket-physics-explainer/#introduction">Introduction</a>
+                    </li>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/home/ork-hitl/rocket-physics-explainer/#part-1-the-four-forces-on-a-rocket">Part 1: The Four Forces on a Rocket</a>
+                    </li>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/home/ork-hitl/rocket-physics-explainer/#part-2-how-rockets-stay-stable">Part 2: How Rockets Stay Stable</a>
+                    </li>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/home/ork-hitl/rocket-physics-explainer/#part-3-understanding-drag-in-detail">Part 3: Understanding Drag in Detail</a>
+                    </li>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/home/ork-hitl/rocket-physics-explainer/#part-4-the-rocket-motor">Part 4: The Rocket Motor</a>
+                    </li>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/home/ork-hitl/rocket-physics-explainer/#part-5-simplified-barrowman-method">Part 5: Simplified Barrowman Method</a>
+                    </li>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/home/ork-hitl/rocket-physics-explainer/#part-6-flight-phases">Part 6: Flight Phases</a>
+                    </li>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/home/ork-hitl/rocket-physics-explainer/#part-7-coordinate-systems-made-simple">Part 7: Coordinate Systems Made Simple</a>
+                    </li>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/home/ork-hitl/rocket-physics-explainer/#part-8-putting-it-all-together">Part 8: Putting It All Together</a>
+                    </li>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/home/ork-hitl/rocket-physics-explainer/#common-gotchas-and-tips">Common &quot;Gotchas&quot; and Tips</a>
+                    </li>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/home/ork-hitl/rocket-physics-explainer/#testing-your-understanding">Testing Your Understanding</a>
+                    </li>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/home/ork-hitl/rocket-physics-explainer/#real-world-example-estes-alpha-iii">Real-World Example: Estes Alpha III</a>
+                    </li>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/home/ork-hitl/rocket-physics-explainer/#summary-the-essential-physics">Summary: The Essential Physics</a>
+                    </li>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/home/ork-hitl/rocket-physics-explainer/#next-steps">Next Steps</a>
+                    </li>
+                    
+                </ul>
+                 
+            </ul>
+        </nav>
+    </div>
+</nav>
+ 
+              <main class="docs-content col-lg-11 col-xxl-10">
+                  <h1>Rocket Physics Explainer</h1>
+                  
+                  <p class="lead">Simple explanation of rocket physics for simulation</p>
+                   <h1 id="understanding-rocket-flight-simplified">Understanding Rocket Flight - Simplified</h1>
+<h2 id="introduction">Introduction</h2>
+<p>Have you ever launched a model rocket and wondered how high it went? Or why some rockets fly straight while others tumble? This guide will explain the physics behind rocket flight in a way that's easy to understand and code into a simulation.</p>
+<p>We'll build up from the simplest concepts to a complete understanding of how rockets fly, focusing on the practical physics you need rather than complex mathematics.</p>
+<h2 id="part-1-the-four-forces-on-a-rocket">Part 1: The Four Forces on a Rocket</h2>
+<p>Imagine a rocket as a tube being pushed and pulled by invisible hands. There are four main forces acting on it:</p>
+<h3 id="1-weight-gravity">1. Weight (Gravity)</h3>
+<p><strong>What it is:</strong> Earth pulling the rocket down
+<strong>How strong:</strong> Weight = mass × 9.81 m/s²
+<strong>Direction:</strong> Always straight down toward Earth's center
+<strong>Fun fact:</strong> This force never stops, even in space!</p>
+<h3 id="2-thrust">2. Thrust</h3>
+<p><strong>What it is:</strong> The push from hot gases shooting out the nozzle
+<strong>How strong:</strong> Depends on the motor (typically 5-100 Newtons for model rockets)
+<strong>Direction:</strong> Along the rocket's long axis, pushing it forward
+<strong>Fun fact:</strong> Thrust changes over time - strong at first, then gradually decreases</p>
+<h3 id="3-drag">3. Drag</h3>
+<p><strong>What it is:</strong> Air resistance trying to slow the rocket down
+<strong>How strong:</strong> Gets stronger with speed (proportional to velocity squared!)
+<strong>Direction:</strong> Opposite to the rocket's motion
+<strong>The equation:</strong> Drag = ½ × air_density × velocity² × drag_coefficient × area</p>
+<p>Think of drag like sticking your hand out a car window - the faster you go, the harder the air pushes back. But it's not linear - going twice as fast means FOUR times the drag!</p>
+<h3 id="4-lift-for-tilted-rockets">4. Lift (for tilted rockets)</h3>
+<p><strong>What it is:</strong> Sideways force when the rocket isn't pointing exactly where it's going
+<strong>When it matters:</strong> During wind or when the rocket tips
+<strong>Direction:</strong> Perpendicular to the rocket's motion
+<strong>Why we care:</strong> This is what makes rockets weathercock into the wind</p>
+<h2 id="part-2-how-rockets-stay-stable">Part 2: How Rockets Stay Stable</h2>
+<h3 id="the-seesaw-analogy">The Seesaw Analogy</h3>
+<p>Imagine your rocket as a seesaw (teeter-totter) flying through the air:</p>
+<ul>
+<li><strong>Center of Gravity (CG):</strong> The balance point where the rocket would balance on your finger</li>
+<li><strong>Center of Pressure (CP):</strong> The point where all the air forces seem to push</li>
+</ul>
+<p>For a stable rocket, the CP must be BEHIND the CG (toward the tail). Why?</p>
+<p>Think of it like this:</p>
+<ol>
+<li>If wind tips the rocket, air hits the sides</li>
+<li>The air pushes hardest at the CP</li>
+<li>If CP is behind CG, this push rotates the rocket back to straight</li>
+<li>If CP is ahead of CG, the push makes it flip more - unstable!</li>
+</ol>
+<p>This is why rockets have fins at the back - they move the CP backward!</p>
+<h3 id="the-weather-vane-effect">The Weather Vane Effect</h3>
+<p>A rocket with proper stability acts like a weather vane:</p>
+<ul>
+<li>Wind from the side creates more pressure on the fins</li>
+<li>This pressure creates a torque (turning force) around the CG</li>
+<li>The rocket naturally turns to point into the wind</li>
+<li>This is called "weathercocking" and is actually good - it keeps the rocket stable!</li>
+</ul>
+<h2 id="part-3-understanding-drag-in-detail">Part 3: Understanding Drag in Detail</h2>
+<h3 id="the-drag-coefficient-cd">The Drag Coefficient (Cd)</h3>
+<p>The drag coefficient is like a "slipperiness rating" for your rocket:</p>
+<ul>
+<li><strong>Streamlined rocket:</strong> Cd ≈ 0.3-0.5</li>
+<li><strong>Parachute deployed:</strong> Cd ≈ 1.5</li>
+<li><strong>Flat plate:</strong> Cd ≈ 2.0</li>
+</ul>
+<p>But here's the tricky part: Cd changes with speed! As you approach the speed of sound (Mach 1), drag increases dramatically. This is called the "transonic region" and it's why the sound barrier was so hard to break.</p>
+<p>For our simulation, we'll use a table of Cd values at different speeds and interpolate between them.</p>
+<h3 id="reference-area">Reference Area</h3>
+<p>This is the frontal area of your rocket - imagine looking at it head-on and tracing its outline. For a simple rocket, it's just:
+Area = π × radius²</p>
+<h2 id="part-4-the-rocket-motor">Part 4: The Rocket Motor</h2>
+<h3 id="thrust-curves">Thrust Curves</h3>
+<p>Real rocket motors don't provide constant thrust. A typical motor:</p>
+<ol>
+<li><strong>Ignition spike:</strong> Brief high thrust at start</li>
+<li><strong>Sustain phase:</strong> Steady thrust for most of the burn</li>
+<li><strong>Tail-off:</strong> Thrust decreases to zero</li>
+</ol>
+<p>We represent this with a thrust curve - thrust values at different times that we interpolate between.</p>
+<h3 id="mass-change">Mass Change</h3>
+<p>As the motor burns, the rocket gets lighter! A typical model rocket motor might:</p>
+<ul>
+<li>Start at 20 grams</li>
+<li>End at 10 grams</li>
+<li>This affects acceleration (F = ma, so less mass = more acceleration)</li>
+</ul>
+<h2 id="part-5-simplified-barrowman-method">Part 5: Simplified Barrowman Method</h2>
+<p>The Barrowman method calculates where the CP is located. We'll use a super simplified version:</p>
+<h3 id="for-a-basic-rocket">For a Basic Rocket:</h3>
+<ol>
+<li><strong>Nose cone CP:</strong> About 0.67 × nose_length from the tip</li>
+<li><strong>Body tube CP:</strong> At the middle of the tube</li>
+<li><strong>Fins CP:</strong> About 1/3 up from the fin's trailing edge</li>
+</ol>
+<p>The total CP is the weighted average based on the normal force each part produces.</p>
+<p>For beginners, we can just place the CP at a fixed location (like 60% back from the nose) and adjust based on fin size.</p>
+<h2 id="part-6-flight-phases">Part 6: Flight Phases</h2>
+<p>A rocket flight has distinct phases:</p>
+<h3 id="1-rail-phase-0-5-meters">1. Rail Phase (0-5 meters)</h3>
+<ul>
+<li>Rocket slides up the launch rail/rod</li>
+<li>No rotation allowed</li>
+<li>Only thrust, drag, and gravity matter</li>
+</ul>
+<h3 id="2-powered-flight-5-meters-to-motor-burnout">2. Powered Flight (5 meters to motor burnout)</h3>
+<ul>
+<li>All forces active</li>
+<li>Rocket can rotate</li>
+<li>Highest acceleration</li>
+<li>Speed increases rapidly</li>
+</ul>
+<h3 id="3-coast-phase-burnout-to-apogee">3. Coast Phase (burnout to apogee)</h3>
+<ul>
+<li>No thrust</li>
+<li>Drag and gravity slow the rocket</li>
+<li>Rocket continues rotating to face into relative wind</li>
+</ul>
+<h3 id="4-apogee-highest-point">4. Apogee (highest point)</h3>
+<ul>
+<li>Vertical velocity = 0</li>
+<li>Good time to deploy parachute</li>
+<li>Rocket might be tilted</li>
+</ul>
+<h3 id="5-recovery-apogee-to-ground">5. Recovery (apogee to ground)</h3>
+<ul>
+<li>Parachute deployed (if equipped)</li>
+<li>Huge increase in drag</li>
+<li>Slow, controlled descent</li>
+</ul>
+<h2 id="part-7-coordinate-systems-made-simple">Part 7: Coordinate Systems Made Simple</h2>
+<p>We need two coordinate systems:</p>
+<h3 id="world-coordinates">World Coordinates</h3>
+<p>Think of this as the view from the ground:</p>
+<ul>
+<li>X = East</li>
+<li>Y = North</li>
+<li>Z = Up</li>
+<li>Origin at launch pad</li>
+</ul>
+<h3 id="body-coordinates">Body Coordinates</h3>
+<p>Think of this as the rocket's perspective:</p>
+<ul>
+<li>X = Forward (nose direction)</li>
+<li>Y = Right wing</li>
+<li>Z = Down</li>
+<li>Origin at rocket's CG</li>
+</ul>
+<p>We use rotation matrices (or quaternions) to convert between them. Don't worry - the math looks scary but computers handle it easily!</p>
+<h2 id="part-8-putting-it-all-together">Part 8: Putting It All Together</h2>
+<p>Here's the simulation loop in plain English:</p>
+<pre class="z-code"><code><span class="z-text z-plain">For each time step (like 1/120th of a second):
+</span><span class="z-text z-plain">    1. Calculate current air density based on altitude
+</span><span class="z-text z-plain">    2. Get thrust from motor curve (or 0 if burned out)
+</span><span class="z-text z-plain">    3. Calculate velocity relative to air (including wind)
+</span><span class="z-text z-plain">    4. Calculate drag based on velocity
+</span><span class="z-text z-plain">    5. Calculate lift if rocket is tilted
+</span><span class="z-text z-plain">    6. Sum all forces (thrust + weight + drag + lift)
+</span><span class="z-text z-plain">    7. Calculate acceleration (F = ma, so a = F/m)
+</span><span class="z-text z-plain">    8. Update velocity (add acceleration × time_step)
+</span><span class="z-text z-plain">    9. Update position (add velocity × time_step)
+</span><span class="z-text z-plain">    10. Calculate rotation from aerodynamic forces
+</span><span class="z-text z-plain">    11. Check for apogee or ground hit
+</span><span class="z-text z-plain">    12. Deploy parachute if needed
+</span></code></pre>
+<h2 id="common-gotchas-and-tips">Common "Gotchas" and Tips</h2>
+<h3 id="1-units-matter">1. Units Matter!</h3>
+<p>Always use consistent units. We recommend SI (meters, kilograms, seconds, Newtons).</p>
+<h3 id="2-time-steps">2. Time Steps</h3>
+<p>Smaller time steps = more accurate but slower. 1/120 second is a good balance.</p>
+<h3 id="3-stability-margin">3. Stability Margin</h3>
+<p>CP should be at least 1 body diameter behind CG. This is called the "stability margin" or "static margin."</p>
+<h3 id="4-wind-effects">4. Wind Effects</h3>
+<p>Wind doesn't push the rocket sideways as much as you'd think - instead, it makes the rocket turn to face the wind, then thrust pushes it that direction.</p>
+<h3 id="5-the-thrust-line">5. The Thrust Line</h3>
+<p>Thrust always acts along the rocket's axis, not necessarily straight up! If the rocket tilts, thrust pushes it sideways too.</p>
+<h2 id="testing-your-understanding">Testing Your Understanding</h2>
+<p>Can you answer these questions?</p>
+<ol>
+<li>
+<p><strong>Why do rockets need fins?</strong></p>
+<ul>
+<li>Answer: To move the CP behind the CG for stability</li>
+</ul>
+</li>
+<li>
+<p><strong>What happens if you make the fins bigger?</strong></p>
+<ul>
+<li>Answer: CP moves further back, rocket becomes MORE stable but turns into wind more</li>
+</ul>
+</li>
+<li>
+<p><strong>Why does a rocket arc into the wind?</strong></p>
+<ul>
+<li>Answer: Wind creates angle of attack, fins create lift force, rocket rotates, thrust now pushes it sideways</li>
+</ul>
+</li>
+<li>
+<p><strong>What determines maximum altitude?</strong></p>
+<ul>
+<li>Answer: Total impulse (thrust × time), rocket mass, and drag</li>
+</ul>
+</li>
+<li>
+<p><strong>Why use a parachute?</strong></p>
+<ul>
+<li>Answer: Increases drag dramatically for safe landing velocity</li>
+</ul>
+</li>
+</ol>
+<h2 id="real-world-example-estes-alpha-iii">Real-World Example: Estes Alpha III</h2>
+<p>Let's look at a real model rocket:</p>
+<p><strong>Specifications:</strong></p>
+<ul>
+<li>Length: 31 cm</li>
+<li>Diameter: 2.5 cm</li>
+<li>Mass (no motor): 42 grams</li>
+<li>Motor: C6-5</li>
+<li>Fins: 3 triangular, 5 cm root chord</li>
+</ul>
+<p><strong>Expected Performance:</strong></p>
+<ul>
+<li>Max velocity: ~100 m/s</li>
+<li>Max altitude: ~335 meters</li>
+<li>Flight time: ~30 seconds with parachute</li>
+</ul>
+<p><strong>Forces at Launch (C6-5 motor):</strong></p>
+<ul>
+<li>Thrust: ~14 Newtons (peak)</li>
+<li>Weight: ~0.6 Newtons</li>
+<li>Net acceleration: ~20 g's!</li>
+</ul>
+<p><strong>At Max Speed:</strong></p>
+<ul>
+<li>Drag: ~2 Newtons</li>
+<li>Still accelerating at ~10 m/s²</li>
+</ul>
+<p><strong>At Apogee:</strong></p>
+<ul>
+<li>All kinetic energy converted to potential energy</li>
+<li>Velocity = 0</li>
+<li>Only gravity acts on rocket</li>
+</ul>
+<h2 id="summary-the-essential-physics">Summary: The Essential Physics</h2>
+<p>If you remember nothing else, remember these five concepts:</p>
+<ol>
+<li><strong>Four Forces:</strong> Thrust up, weight down, drag opposite to motion, lift when tilted</li>
+<li><strong>Stability:</strong> CP behind CG = stable, like a dart or arrow</li>
+<li><strong>Drag:</strong> Increases with velocity squared - this limits maximum speed</li>
+<li><strong>Mass Changes:</strong> Rocket gets lighter as fuel burns, affecting acceleration</li>
+<li><strong>Flight Phases:</strong> Powered ascent → coast → apogee → recovery</li>
+</ol>
+<p>With these concepts, you can understand and simulate any model rocket flight!</p>
+<h2 id="next-steps">Next Steps</h2>
+<p>Now that you understand the physics, we can start coding! We'll begin with the simplest possible simulation (1D vertical flight) and gradually add features until we have a full 3D simulation with stability and recovery.</p>
+<p>Remember: Every complex simulation started as a simple one. Master the basics first, then add complexity. Happy rocketing! 🚀</p>
+
+                  
+<div class="footer-line-padding"></div>
+<div class="footer-line"></div>
+<div class="docs-navigation d-flex justify-content-between">
+           
+    <!-- this is a spacing hack for expediency -->
+    <div class="footer-separator"></div>
+                  
+    <a href="https:&#x2F;&#x2F;docs.elodin.systems&#x2F;preview&#x2F;pr-274&#x2F;home&#x2F;aleph&#x2F;setup&#x2F;">
+        <div>
+            <div class="footer-card">&larr; Aleph Setup</div>
+        </div>
+    </a>
+           
+    <a href="https:&#x2F;&#x2F;docs.elodin.systems&#x2F;preview&#x2F;pr-274&#x2F;home&#x2F;aleph&#x2F;reset&#x2F;">
+        <div>
+            <div class="footer-card">Factory Reset &rarr;</div>
+        </div>
+    </a>
+                                          
+</div>
+
+              </main>
+          </div>
+      </div>
+  </div>
+  
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-274/js/main.js"></script>
+<script>
+    // https://mathjax.github.io/MathJax-demos-web/convert-configuration/convert-configuration.html
+    window.MathJax = {
+        tex: {
+            inlineMath: [
+                ["$", "$"],
+                ["\\(", "\\)"],
+            ],
+            displayMath: [
+                ["$$", "$$"],
+                ["\[\[", "\]\]"],
+            ],
+            processEscapes: true,
+            processEnvironments: true,
+        },
+        options: {
+            skipHtmlTags: ["script", "noscript", "style", "textarea", "pre"],
+        },
+    };
+</script>
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-274/js/tex-mml-chtml.js"></script>
+
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-274/js/elasticlunr.min.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-274/search_index.en.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-274/js/search.js"></script>
+
+
+</body>
+
+</html>
