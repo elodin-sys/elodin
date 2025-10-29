@@ -44,7 +44,7 @@ use crate::{
         schematic::{
             CurrentSchematic, LoadSchematicParams, SchematicLiveReloadRx, load_schematic_file,
         },
-        tiles::{self, TileState},
+        tiles,
         timeline::{StreamTickOrigin, timeline_slider::UITick},
     },
 };
@@ -268,7 +268,8 @@ pub fn create_action(tile_id: Option<TileId>) -> PaletteItem {
                                             PalettePage::new(vec![PaletteItem::new(
                                                 LabelSource::placeholder("Msg"),
                                                 "Contents of the msg as a lua table - {foo = \"bar\"}",
-                                                move |In(msg): In<String>, mut tile_state: ResMut<tiles::TileState>| {
+                                                move |In(msg): In<String>, mut windows: ResMut<tiles::WindowManager>| {
+                                                    let tile_state = windows.main_mut();
                                                     tile_state.create_action_tile(
                                                         msg_label.clone(),
                                                         format!("client:send_msg({name:?}, {msg})"),
@@ -285,7 +286,8 @@ pub fn create_action(tile_id: Option<TileId>) -> PaletteItem {
                                 PaletteItem::new(
                                     LabelSource::placeholder("Enter a lua command (i.e client:send_table)"),
                                     "Enter a custom lua command",
-                                    move |lua: In<String>, mut tile_state: ResMut<tiles::TileState>| {
+                                    move |lua: In<String>, mut windows: ResMut<tiles::WindowManager>| {
+                                        let tile_state = windows.main_mut();
                                         tile_state.create_action_tile(label.clone(), lua.0, tile_id);
                                         PaletteEvent::Exit
                                     },
@@ -329,8 +331,9 @@ fn graph_parts(
                       query: Query<&ComponentValue>,
                       entity_map: Res<EntityMap>,
                       mut render_layer_alloc: ResMut<RenderLayerAlloc>,
-                      mut tile_state: ResMut<tiles::TileState>,
+                      mut windows: ResMut<tiles::WindowManager>,
                       path_reg: Res<ComponentPathRegistry>| {
+                    let tile_state = windows.main_mut();
                     if let Some(component) = &part.component {
                         let component_id = component.id;
                         let Some(entity) = entity_map.get(&component_id) else {
@@ -388,7 +391,8 @@ fn monitor_parts(
             PaletteItem::new(
                 name.clone(),
                 "Component",
-                move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
+                move |_: In<String>, mut windows: ResMut<tiles::WindowManager>| {
+                    let tile_state = windows.main_mut();
                     if let Some(component) = &part.component {
                         tile_state.create_monitor_tile(component.name.clone(), tile_id);
                         PaletteEvent::Exit
@@ -415,7 +419,8 @@ pub fn create_viewport(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Viewport",
         TILES_LABEL,
-        move |_: In<String>, mut tile_state: ResMut<TileState>| {
+        move |_: In<String>, mut windows: ResMut<tiles::WindowManager>| {
+            let tile_state = windows.main_mut();
             tile_state.create_viewport_tile(tile_id);
             PaletteEvent::Exit
         },
@@ -426,7 +431,8 @@ pub fn create_query_table(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Query Table",
         TILES_LABEL,
-        move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
+        move |_: In<String>, mut windows: ResMut<tiles::WindowManager>| {
+            let tile_state = windows.main_mut();
             tile_state.create_query_table_tile(tile_id);
             PaletteEvent::Exit
         },
@@ -437,7 +443,8 @@ pub fn create_query_plot(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Query Plot",
         TILES_LABEL,
-        move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
+        move |_: In<String>, mut windows: ResMut<tiles::WindowManager>| {
+            let tile_state = windows.main_mut();
             tile_state.create_query_plot_tile(tile_id);
             PaletteEvent::Exit
         },
@@ -448,7 +455,8 @@ pub fn create_hierarchy(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Hierarchy",
         TILES_LABEL,
-        move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
+        move |_: In<String>, mut windows: ResMut<tiles::WindowManager>| {
+            let tile_state = windows.main_mut();
             tile_state.create_hierarchy_tile(tile_id);
             PaletteEvent::Exit
         },
@@ -459,7 +467,8 @@ pub fn create_inspector(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Inspector",
         TILES_LABEL,
-        move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
+        move |_: In<String>, mut windows: ResMut<tiles::WindowManager>| {
+            let tile_state = windows.main_mut();
             tile_state.create_inspector_tile(tile_id);
             PaletteEvent::Exit
         },
@@ -470,7 +479,8 @@ pub fn create_schematic_tree(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Schematic Tree",
         TILES_LABEL,
-        move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
+        move |_: In<String>, mut windows: ResMut<tiles::WindowManager>| {
+            let tile_state = windows.main_mut();
             tile_state.create_tree_tile(tile_id);
             PaletteEvent::Exit
         },
@@ -481,7 +491,8 @@ pub fn create_dashboard(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Dashboard",
         TILES_LABEL,
-        move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
+        move |_: In<String>, mut windows: ResMut<tiles::WindowManager>| {
+            let tile_state = windows.main_mut();
             tile_state.create_dashboard_tile(Default::default(), "Dashboard".to_string(), tile_id);
             PaletteEvent::Exit
         },
@@ -492,7 +503,8 @@ pub fn create_sidebars() -> PaletteItem {
     PaletteItem::new(
         "Create Sidebars",
         TILES_LABEL,
-        move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
+        move |_: In<String>, mut windows: ResMut<tiles::WindowManager>| {
+            let tile_state = windows.main_mut();
             tile_state.create_sidebars_layout();
             PaletteEvent::Exit
         },
@@ -509,7 +521,8 @@ pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
                         "Enter the name of the msg containing the video frames",
                     ),
                     "",
-                    move |In(msg_name): In<String>, mut tile_state: ResMut<tiles::TileState>| {
+                    move |In(msg_name): In<String>, mut windows: ResMut<tiles::WindowManager>| {
+                        let tile_state = windows.main_mut();
                         let msg_name = msg_name.trim();
                         let label = format!("Video Stream {}", msg_name);
                         tile_state.create_video_stream_tile(msg_id(msg_name), label, tile_id);

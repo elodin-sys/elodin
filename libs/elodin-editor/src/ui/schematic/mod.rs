@@ -37,14 +37,15 @@ pub struct SchematicParam<'w, 's> {
     pub objects_3d: Query<'w, 's, (Entity, &'static Object3DState)>,
     pub lines_3d: Query<'w, 's, (Entity, &'static Line3d)>,
     pub vector_arrows: Query<'w, 's, (Entity, &'static VectorArrow3d)>,
-    pub ui_state: Res<'w, tiles::TileState>,
+    pub windows: Res<'w, tiles::WindowManager>,
     pub dashboards: Query<'w, 's, &'static Dashboard<Entity>>,
     pub hdr_enabled: Res<'w, HdrEnabled>,
 }
 
 impl SchematicParam<'_, '_> {
     pub fn get_panel(&self, tile_id: TileId) -> Option<Panel<Entity>> {
-        let tiles = &self.ui_state.tree.tiles;
+        let ui_state = self.windows.main();
+        let tiles = &ui_state.tree.tiles;
         let tile = tiles.get(tile_id)?;
 
         match tile {
@@ -174,10 +175,7 @@ impl SchematicParam<'_, '_> {
                     }
 
                     // >>> FIX: pull the edited title from TileState <<<
-                    let name = self
-                        .ui_state
-                        .get_container_title(tile_id)
-                        .map(|s| s.to_string());
+                    let name = ui_state.get_container_title(tile_id).map(|s| s.to_string());
 
                     let split = Split {
                         panels,
@@ -200,7 +198,7 @@ impl SchematicParam<'_, '_> {
 
 pub fn tiles_to_schematic(param: SchematicParam, mut schematic: ResMut<CurrentSchematic>) {
     schematic.elems.clear();
-    if let Some(tile_id) = param.ui_state.tree.root() {
+    if let Some(tile_id) = param.windows.main().tree.root() {
         schematic
             .elems
             .extend(param.get_panel(tile_id).map(SchematicElem::Panel))

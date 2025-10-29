@@ -189,7 +189,7 @@ impl Plugin for UiPlugin {
             .init_resource::<EntityFilter>()
             .init_resource::<ComponentFilter>()
             .init_resource::<InspectorAnchor>()
-            .init_resource::<tiles::TileState>()
+            .init_resource::<tiles::WindowManager>()
             .init_resource::<FullscreenState>()
             .init_resource::<SettingModalState>()
             .init_resource::<HdrEnabled>()

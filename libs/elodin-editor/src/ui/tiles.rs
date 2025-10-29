@@ -18,6 +18,7 @@ use egui_tiles::{Container, Tile, TileId, Tiles};
 use impeller2_wkt::{Dashboard, Graph, Viewport};
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
 
 use super::{
     SelectedObject, ViewportRect,
@@ -66,12 +67,58 @@ pub struct TileIcons {
     pub entity: egui::TextureId,
 }
 
-#[derive(Resource, Clone)]
+#[derive(Clone)]
 pub struct TileState {
     pub tree: egui_tiles::Tree<Pane>,
     pub tree_actions: smallvec::SmallVec<[TreeAction; 4]>,
     pub graphs: HashMap<TileId, Entity>,
     pub container_titles: HashMap<TileId, String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SecondaryWindowDescriptor {
+    pub path: PathBuf,
+    pub title: Option<String>,
+}
+
+#[derive(Resource, Default)]
+pub struct WindowManager {
+    main: TileState,
+    secondary_blueprints: Vec<SecondaryWindowDescriptor>,
+}
+
+impl WindowManager {
+    pub fn main(&self) -> &TileState {
+        &self.main
+    }
+
+    pub fn main_mut(&mut self) -> &mut TileState {
+        &mut self.main
+    }
+
+    pub fn set_secondary_blueprints(&mut self, blueprints: Vec<SecondaryWindowDescriptor>) {
+        self.secondary_blueprints = blueprints;
+    }
+
+    pub fn secondary_blueprints(&self) -> &[SecondaryWindowDescriptor] {
+        &self.secondary_blueprints
+    }
+
+    pub fn clear_secondary_blueprints(&mut self) {
+        self.secondary_blueprints.clear();
+    }
+
+    pub fn take_secondary_blueprints(&mut self) -> Vec<SecondaryWindowDescriptor> {
+        std::mem::take(&mut self.secondary_blueprints)
+    }
+
+    pub fn take_main(&mut self) -> TileState {
+        std::mem::take(&mut self.main)
+    }
+
+    pub fn replace_main(&mut self, state: TileState) {
+        self.main = state;
+    }
 }
 
 #[derive(Resource, Default)]
@@ -962,7 +1009,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 pub struct TileSystem<'w, 's> {
     contexts: EguiContexts<'w, 's>,
     images: Local<'s, images::Images>,
-    ui_state: Res<'w, TileState>,
+    windows: Res<'w, WindowManager>,
 }
 
 impl WidgetSystem for TileSystem<'_, '_> {
@@ -979,7 +1026,7 @@ impl WidgetSystem for TileSystem<'_, '_> {
 
         let mut contexts = state_mut.contexts;
         let images = state_mut.images;
-        let ui_state = state_mut.ui_state;
+        let ui_state = state_mut.windows.main();
 
         let icons = TileIcons {
             add: contexts.add_image(images.icon_add.clone_weak()),
@@ -1127,8 +1174,9 @@ impl WidgetSystem for TileLayout<'_, '_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) {
-        world.resource_scope::<TileState, _>(|world, mut ui_state| {
+        world.resource_scope::<WindowManager, _>(|world, mut windows| {
             let icons = args;
+            let ui_state = windows.main_mut();
 
             let mut tree_actions = {
                 let tab_diffs = std::mem::take(&mut ui_state.tree_actions);
@@ -1499,7 +1547,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
     }
 }
 
-pub fn shortcuts(key_state: Res<LogicalKeyState>, mut ui_state: ResMut<TileState>) {
+pub fn shortcuts(key_state: Res<LogicalKeyState>, mut windows: ResMut<WindowManager>) {
+    let ui_state = windows.main_mut();
     if key_state.pressed(&Key::Control) && key_state.just_pressed(&Key::Tab) {
         let Some(tile_id) = ui_state.tree.root() else {
             return;
