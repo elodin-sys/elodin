@@ -29,8 +29,8 @@ use crate::{
         query_plot::QueryPlotData,
         schematic::EqlExt,
         tiles::{
-            DashboardPane, GraphPane, Pane, SecondaryWindowDescriptor, TileState, TreePane,
-            ViewportPane, WindowManager,
+            DashboardPane, GraphPane, Pane, SecondaryWindowDescriptor, SecondaryWindowState,
+            TileState, TreePane, ViewportPane, WindowManager,
         },
     },
     vector_arrow::VectorArrowState,
@@ -173,9 +173,16 @@ pub fn load_schematic_file(
 impl LoadSchematicParams<'_, '_> {
     pub fn load_schematic(&mut self, schematic: &Schematic, base_dir: Option<&Path>) {
         self.render_layer_alloc.free_all();
+        for mut secondary in self.windows.take_secondary() {
+            secondary
+                .tile_state
+                .clear(&mut self.commands, &mut self.selected_object);
+            if let Some(entity) = secondary.window_entity {
+                let _ = self.commands.entity(entity).despawn();
+            }
+        }
         let mut main_state = self.windows.take_main();
         main_state.clear(&mut self.commands, &mut self.selected_object);
-        self.windows.clear_secondary_blueprints();
         self.hdr_enabled.0 = false;
         for entity in self.objects_3d.iter() {
             self.commands.entity(entity).despawn();
@@ -187,7 +194,7 @@ impl LoadSchematicParams<'_, '_> {
         for entity in self.grid_lines.iter() {
             self.commands.entity(entity).despawn();
         }
-        let mut secondary_blueprints: Vec<SecondaryWindowDescriptor> = Vec::new();
+        let mut secondary_descriptors: Vec<SecondaryWindowDescriptor> = Vec::new();
 
         for elem in &schematic.elems {
             match elem {
@@ -205,14 +212,45 @@ impl LoadSchematicParams<'_, '_> {
                 }
                 impeller2_wkt::SchematicElem::Window(window) => {
                     if let Some(descriptor) = resolve_window_descriptor(window, base_dir) {
-                        secondary_blueprints.push(descriptor);
+                        secondary_descriptors.push(descriptor);
                     }
                 }
             }
         }
 
         self.windows.replace_main(main_state);
-        self.windows.set_secondary_blueprints(secondary_blueprints);
+
+        let mut secondary_states = Vec::new();
+
+        for descriptor in secondary_descriptors {
+            match std::fs::read_to_string(&descriptor.path) {
+                Ok(kdl) => match impeller2_wkt::Schematic::from_kdl(&kdl) {
+                    Ok(sec_schematic) => {
+                        let mut tile_state = TileState::default();
+                        for elem in &sec_schematic.elems {
+                            if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
+                                self.spawn_panel(&mut tile_state, panel, None);
+                            }
+                        }
+                        let id = self.windows.alloc_id();
+                        secondary_states.push(SecondaryWindowState {
+                            id,
+                            descriptor,
+                            tile_state,
+                            window_entity: None,
+                        });
+                    }
+                    Err(err) => {
+                        warn!(?err, path = %descriptor.path.display(), "Failed to parse secondary schematic");
+                    }
+                },
+                Err(err) => {
+                    warn!(?err, path = %descriptor.path.display(), "Failed to read secondary schematic");
+                }
+            }
+        }
+
+        self.windows.replace_secondary(secondary_states);
     }
 
     pub fn spawn_object_3d(&mut self, object_3d: Object3D) {

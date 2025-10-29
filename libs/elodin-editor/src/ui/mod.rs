@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use bevy::{
     ecs::{
         query::QueryData,
@@ -6,7 +8,7 @@ use bevy::{
     input::keyboard::Key,
     prelude::*,
     render::camera::Viewport,
-    window::PrimaryWindow,
+    window::{PresentMode, PrimaryWindow, WindowResolution},
 };
 use bevy_egui::{
     EguiContext, EguiContexts,
@@ -127,6 +129,14 @@ pub struct EntityPair {
     pub impeller: ComponentId,
 }
 
+#[derive(Component)]
+struct SecondaryWindowMarker {
+    id: tiles::SecondaryWindowId,
+}
+
+#[derive(Component)]
+struct ActiveSecondaryWindow;
+
 pub fn shortcuts(
     mut paused: ResMut<Paused>,
     command_palette_state: Res<CommandPaletteState>,
@@ -201,6 +211,11 @@ impl Plugin for UiPlugin {
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, shortcuts)
             .add_systems(Update, render_layout)
+            .add_systems(Update, sync_secondary_windows.after(render_layout))
+            .add_systems(
+                Update,
+                render_secondary_windows.after(sync_secondary_windows),
+            )
             .add_systems(Update, sync_hdr)
             .add_systems(Update, tiles::shortcuts)
             .add_systems(Update, set_camera_viewport.after(render_layout))
@@ -522,7 +537,7 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
                 ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");
-                ui.add_widget::<tiles::TileSystem>(world, "tile_system");
+                ui.add_widget_with::<tiles::TileSystem>(world, "tile_system", None);
             });
     }
 }
@@ -601,6 +616,125 @@ pub fn render_layout(world: &mut World) {
     world.add_root_widget::<modal::ModalWithSettings>("modal_graph");
 
     world.add_root_widget::<CommandPalette>("command_palette");
+}
+
+fn sync_secondary_windows(
+    mut commands: Commands,
+    mut windows: ResMut<tiles::WindowManager>,
+    existing: Query<(Entity, &SecondaryWindowMarker)>,
+) {
+    let mut existing_map: HashMap<tiles::SecondaryWindowId, Entity> = HashMap::new();
+    for (entity, marker) in existing.iter() {
+        existing_map.insert(marker.id, entity);
+    }
+
+    for (id, entity) in existing_map.clone() {
+        if windows.get_secondary(id).is_none() {
+            let _ = commands.entity(entity).despawn();
+            existing_map.remove(&id);
+        }
+    }
+
+    for state in windows.secondary_mut().iter_mut() {
+        if let Some(entity) = state.window_entity {
+            if existing_map.get(&state.id).copied() != Some(entity) {
+                state.window_entity = None;
+            }
+        }
+
+        if let Some(entity) = state.window_entity {
+            existing_map.insert(state.id, entity);
+            continue;
+        }
+
+        let mut title = state
+            .descriptor
+            .title
+            .clone()
+            .or_else(|| {
+                state
+                    .descriptor
+                    .path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+            })
+            .unwrap_or_else(|| "Panel".to_string());
+
+        if title.is_empty() {
+            title = "Panel".to_string();
+        }
+
+        let window_entity = commands
+            .spawn((
+                Window {
+                    title,
+                    resolution: WindowResolution::new(640.0, 480.0),
+                    present_mode: PresentMode::AutoVsync,
+                    ..Default::default()
+                },
+                SecondaryWindowMarker { id: state.id },
+            ))
+            .id();
+
+        state.window_entity = Some(window_entity);
+        existing_map.insert(state.id, window_entity);
+    }
+}
+
+fn render_secondary_windows(world: &mut World) {
+    let window_entries: Vec<(tiles::SecondaryWindowId, Entity)> = {
+        let windows = world.resource::<tiles::WindowManager>();
+        windows
+            .secondary()
+            .iter()
+            .filter_map(|state| state.window_entity.map(|entity| (state.id, entity)))
+            .collect()
+    };
+
+    for (id, entity) in window_entries {
+        let Ok(mut entity_mut) = world.get_entity_mut(entity) else {
+            continue;
+        };
+        entity_mut.insert(ActiveSecondaryWindow);
+        drop(entity_mut);
+
+        let widget_id = format!("secondary_window_{}", id.0);
+        world.add_root_widget_with::<SecondaryWindowRoot, With<ActiveSecondaryWindow>>(
+            &widget_id, id,
+        );
+
+        if let Ok(mut entity_mut) = world.get_entity_mut(entity) {
+            entity_mut.remove::<ActiveSecondaryWindow>();
+        }
+    }
+}
+
+#[derive(SystemParam)]
+struct SecondaryWindowRoot<'w, 's> {
+    _contexts: EguiContexts<'w, 's>,
+    _images: Local<'s, images::Images>,
+}
+
+impl RootWidgetSystem for SecondaryWindowRoot<'_, '_> {
+    type Args = tiles::SecondaryWindowId;
+    type Output = ();
+
+    fn ctx_system(
+        world: &mut World,
+        state: &mut SystemState<Self>,
+        ctx: &mut egui::Context,
+        id: Self::Args,
+    ) {
+        let _state_mut = state.get_mut(world);
+        theme::set_theme(ctx);
+
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| {
+                let widget_id = format!("tile_system_secondary_inner_{}", id.0);
+                ui.add_widget_with::<tiles::TileSystem>(world, &widget_id, Some(id));
+            });
+    }
 }
 
 #[derive(QueryData)]

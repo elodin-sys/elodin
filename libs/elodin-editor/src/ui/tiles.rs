@@ -81,10 +81,22 @@ pub struct SecondaryWindowDescriptor {
     pub title: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SecondaryWindowId(pub u32);
+
+#[derive(Clone)]
+pub struct SecondaryWindowState {
+    pub id: SecondaryWindowId,
+    pub descriptor: SecondaryWindowDescriptor,
+    pub tile_state: TileState,
+    pub window_entity: Option<Entity>,
+}
+
 #[derive(Resource, Default)]
 pub struct WindowManager {
     main: TileState,
-    secondary_blueprints: Vec<SecondaryWindowDescriptor>,
+    secondary: Vec<SecondaryWindowState>,
+    next_id: u32,
 }
 
 impl WindowManager {
@@ -96,28 +108,45 @@ impl WindowManager {
         &mut self.main
     }
 
-    pub fn set_secondary_blueprints(&mut self, blueprints: Vec<SecondaryWindowDescriptor>) {
-        self.secondary_blueprints = blueprints;
-    }
-
-    pub fn secondary_blueprints(&self) -> &[SecondaryWindowDescriptor] {
-        &self.secondary_blueprints
-    }
-
-    pub fn clear_secondary_blueprints(&mut self) {
-        self.secondary_blueprints.clear();
-    }
-
-    pub fn take_secondary_blueprints(&mut self) -> Vec<SecondaryWindowDescriptor> {
-        std::mem::take(&mut self.secondary_blueprints)
-    }
-
     pub fn take_main(&mut self) -> TileState {
         std::mem::take(&mut self.main)
     }
 
     pub fn replace_main(&mut self, state: TileState) {
         self.main = state;
+    }
+
+    pub fn secondary(&self) -> &[SecondaryWindowState] {
+        &self.secondary
+    }
+
+    pub fn secondary_mut(&mut self) -> &mut Vec<SecondaryWindowState> {
+        &mut self.secondary
+    }
+
+    pub fn take_secondary(&mut self) -> Vec<SecondaryWindowState> {
+        std::mem::take(&mut self.secondary)
+    }
+
+    pub fn replace_secondary(&mut self, states: Vec<SecondaryWindowState>) {
+        self.secondary = states;
+    }
+
+    pub fn alloc_id(&mut self) -> SecondaryWindowId {
+        let id = SecondaryWindowId(self.next_id);
+        self.next_id = self.next_id.wrapping_add(1);
+        id
+    }
+
+    pub fn get_secondary(&self, id: SecondaryWindowId) -> Option<&SecondaryWindowState> {
+        self.secondary.iter().find(|s| s.id == id)
+    }
+
+    pub fn get_secondary_mut(
+        &mut self,
+        id: SecondaryWindowId,
+    ) -> Option<&mut SecondaryWindowState> {
+        self.secondary.iter_mut().find(|s| s.id == id)
     }
 }
 
@@ -1013,40 +1042,54 @@ pub struct TileSystem<'w, 's> {
 }
 
 impl WidgetSystem for TileSystem<'_, '_> {
-    type Args = ();
+    type Args = Option<SecondaryWindowId>;
     type Output = ();
 
     fn ui_system(
         world: &mut World,
         state: &mut SystemState<Self>,
         ui: &mut egui::Ui,
-        _args: Self::Args,
+        target: Self::Args,
     ) {
-        let state_mut = state.get_mut(world);
+        let (icons, is_empty_tile_tree) = {
+            let params = state.get_mut(world);
+            let mut contexts = params.contexts;
+            let images = params.images;
+            let is_empty = match target {
+                Some(id) => params
+                    .windows
+                    .get_secondary(id)
+                    .map(|s| s.tile_state.is_empty() && s.tile_state.tree_actions.is_empty()),
+                None => Some(
+                    params.windows.main().is_empty()
+                        && params.windows.main().tree_actions.is_empty(),
+                ),
+            };
 
-        let mut contexts = state_mut.contexts;
-        let images = state_mut.images;
-        let ui_state = state_mut.windows.main();
+            let Some(is_empty) = is_empty else {
+                return;
+            };
 
-        let icons = TileIcons {
-            add: contexts.add_image(images.icon_add.clone_weak()),
-            close: contexts.add_image(images.icon_close.clone_weak()),
-            scrub: contexts.add_image(images.icon_scrub.clone_weak()),
-            tile_3d_viewer: contexts.add_image(images.icon_tile_3d_viewer.clone_weak()),
-            tile_graph: contexts.add_image(images.icon_tile_graph.clone_weak()),
+            let icons = TileIcons {
+                add: contexts.add_image(images.icon_add.clone_weak()),
+                close: contexts.add_image(images.icon_close.clone_weak()),
+                scrub: contexts.add_image(images.icon_scrub.clone_weak()),
+                tile_3d_viewer: contexts.add_image(images.icon_tile_3d_viewer.clone_weak()),
+                tile_graph: contexts.add_image(images.icon_tile_graph.clone_weak()),
 
-            subtract: contexts.add_image(images.icon_subtract.clone_weak()),
-            chart: contexts.add_image(images.icon_chart.clone_weak()),
-            setting: contexts.add_image(images.icon_setting.clone_weak()),
-            search: contexts.add_image(images.icon_search.clone_weak()),
-            chevron: contexts.add_image(images.icon_chevron_right.clone_weak()),
-            plot: contexts.add_image(images.icon_plot.clone_weak()),
-            viewport: contexts.add_image(images.icon_viewport.clone_weak()),
-            container: contexts.add_image(images.icon_container.clone_weak()),
-            entity: contexts.add_image(images.icon_entity.clone_weak()),
+                subtract: contexts.add_image(images.icon_subtract.clone_weak()),
+                chart: contexts.add_image(images.icon_chart.clone_weak()),
+                setting: contexts.add_image(images.icon_setting.clone_weak()),
+                search: contexts.add_image(images.icon_search.clone_weak()),
+                chevron: contexts.add_image(images.icon_chevron_right.clone_weak()),
+                plot: contexts.add_image(images.icon_plot.clone_weak()),
+                viewport: contexts.add_image(images.icon_viewport.clone_weak()),
+                container: contexts.add_image(images.icon_container.clone_weak()),
+                entity: contexts.add_image(images.icon_entity.clone_weak()),
+            };
+
+            (icons, is_empty)
         };
-
-        let is_empty_tile_tree = ui_state.is_empty() && ui_state.tree_actions.is_empty();
 
         egui::CentralPanel::default()
             .frame(Frame {
@@ -1065,7 +1108,14 @@ impl WidgetSystem for TileSystem<'_, '_> {
                         icons.clone(),
                     );
                 } else {
-                    ui.add_widget_with::<TileLayout>(world, "tile_layout", icons.clone());
+                    ui.add_widget_with::<TileLayout>(
+                        world,
+                        "tile_layout",
+                        TileLayoutArgs {
+                            icons: icons.clone(),
+                            window: target,
+                        },
+                    );
                 }
             });
     }
@@ -1164,8 +1214,14 @@ pub struct TileLayout<'w, 's> {
     node_updater_params: NodeUpdaterParams<'w, 's>,
 }
 
+#[derive(Clone)]
+pub struct TileLayoutArgs {
+    pub icons: TileIcons,
+    pub window: Option<SecondaryWindowId>,
+}
+
 impl WidgetSystem for TileLayout<'_, '_> {
-    type Args = TileIcons;
+    type Args = TileLayoutArgs;
     type Output = ();
 
     fn ui_system(
@@ -1175,8 +1231,13 @@ impl WidgetSystem for TileLayout<'_, '_> {
         args: Self::Args,
     ) {
         world.resource_scope::<WindowManager, _>(|world, mut windows| {
-            let icons = args;
-            let ui_state = windows.main_mut();
+            let TileLayoutArgs { icons, window } = args;
+            let Some(ui_state) = (match window {
+                Some(id) => windows.get_secondary_mut(id).map(|s| &mut s.tile_state),
+                None => Some(windows.main_mut()),
+            }) else {
+                return;
+            };
 
             let mut tree_actions = {
                 let tab_diffs = std::mem::take(&mut ui_state.tree_actions);
