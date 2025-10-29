@@ -1201,8 +1201,8 @@ impl PlotBounds {
         max_y: f64,
     ) -> Self {
         let (min_x, max_x) = (
-            (baseline.start.0 - earliest_timestamp.0) as f64,
-            (baseline.end.0 - earliest_timestamp.0) as f64,
+            baseline.start.0.saturating_sub(earliest_timestamp.0) as f64,
+            baseline.end.0.saturating_sub(earliest_timestamp.0) as f64,
         );
 
         let min_y = sigfig_round(min_y, 2);
