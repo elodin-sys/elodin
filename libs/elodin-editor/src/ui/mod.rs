@@ -7,8 +7,8 @@ use bevy::{
     },
     input::keyboard::Key,
     prelude::*,
-    render::camera::Viewport,
-    window::{PresentMode, PrimaryWindow, WindowResolution},
+    render::camera::{RenderTarget, Viewport},
+    window::{PresentMode, PrimaryWindow, WindowRef, WindowResolution},
 };
 use bevy_egui::{
     EguiContext, EguiContexts,
@@ -622,6 +622,7 @@ fn sync_secondary_windows(
     mut commands: Commands,
     mut windows: ResMut<tiles::WindowManager>,
     existing: Query<(Entity, &SecondaryWindowMarker)>,
+    mut cameras: Query<&mut Camera>,
 ) {
     let mut existing_map: HashMap<tiles::SecondaryWindowId, Entity> = HashMap::new();
     for (entity, marker) in existing.iter() {
@@ -644,7 +645,20 @@ fn sync_secondary_windows(
 
         if let Some(entity) = state.window_entity {
             existing_map.insert(state.id, entity);
+            let window_ref = WindowRef::Entity(entity);
+            for &graph in &state.graph_entities {
+                if let Ok(mut camera) = cameras.get_mut(graph) {
+                    camera.target = RenderTarget::Window(window_ref);
+                    camera.is_active = true;
+                }
+            }
             continue;
+        } else {
+            for &graph in &state.graph_entities {
+                if let Ok(mut camera) = cameras.get_mut(graph) {
+                    camera.is_active = false;
+                }
+            }
         }
 
         let mut title = state
@@ -678,6 +692,13 @@ fn sync_secondary_windows(
 
         state.window_entity = Some(window_entity);
         existing_map.insert(state.id, window_entity);
+        let window_ref = WindowRef::Entity(window_entity);
+        for &graph in &state.graph_entities {
+            if let Ok(mut camera) = cameras.get_mut(graph) {
+                camera.target = RenderTarget::Window(window_ref);
+                camera.is_active = true;
+            }
+        }
     }
 }
 

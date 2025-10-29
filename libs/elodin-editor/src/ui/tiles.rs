@@ -90,6 +90,7 @@ pub struct SecondaryWindowState {
     pub descriptor: SecondaryWindowDescriptor,
     pub tile_state: TileState,
     pub window_entity: Option<Entity>,
+    pub graph_entities: Vec<Entity>,
 }
 
 #[derive(Resource, Default)]

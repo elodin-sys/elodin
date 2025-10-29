@@ -16,7 +16,7 @@ use std::{
 };
 
 use crate::{
-    EqlContext,
+    EqlContext, MainCamera,
     object_3d::Object3DState,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
@@ -36,6 +36,12 @@ use crate::{
     vector_arrow::VectorArrowState,
 };
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PanelContext {
+    Main,
+    Secondary,
+}
+
 #[derive(Component)]
 pub struct SyncedViewport;
 
@@ -52,6 +58,7 @@ pub struct LoadSchematicParams<'w, 's> {
     pub eql: Res<'w, EqlContext>,
     pub selected_object: ResMut<'w, SelectedObject>,
     pub node_updater_params: NodeUpdaterParams<'w, 's>,
+    cameras: Query<'w, 's, &'static mut Camera>,
     objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
     vector_arrows: Query<'w, 's, Entity, With<VectorArrowState>>,
     grid_lines: Query<'w, 's, Entity, With<InfiniteGrid>>,
@@ -115,6 +122,38 @@ fn resolve_window_descriptor(
         path: resolved,
         title: window.title.clone(),
     })
+}
+
+fn collect_graph_entities(tile_state: &TileState) -> Vec<Entity> {
+    fn visit(tree: &egui_tiles::Tree<Pane>, tile_id: egui_tiles::TileId, out: &mut Vec<Entity>) {
+        let Some(tile) = tree.tiles.get(tile_id) else {
+            return;
+        };
+
+        match tile {
+            Tile::Pane(Pane::Graph(graph)) => out.push(graph.id),
+            Tile::Pane(_) => {}
+            Tile::Container(container) => match container {
+                egui_tiles::Container::Tabs(tabs) => {
+                    for child in &tabs.children {
+                        visit(tree, *child, out);
+                    }
+                }
+                egui_tiles::Container::Linear(linear) => {
+                    for child in &linear.children {
+                        visit(tree, *child, out);
+                    }
+                }
+                _ => {}
+            },
+        }
+    }
+
+    let mut entities = Vec::new();
+    if let Some(root) = tile_state.tree.root() {
+        visit(&tile_state.tree, root, &mut entities);
+    }
+    entities
 }
 
 pub fn render_diag(diagnostic: &dyn Diagnostic) -> String {
@@ -199,7 +238,7 @@ impl LoadSchematicParams<'_, '_> {
         for elem in &schematic.elems {
             match elem {
                 impeller2_wkt::SchematicElem::Panel(p) => {
-                    self.spawn_panel(&mut main_state, p, None);
+                    self.spawn_panel(&mut main_state, p, None, PanelContext::Main);
                 }
                 impeller2_wkt::SchematicElem::Object3d(object_3d) => {
                     self.spawn_object_3d(object_3d.clone());
@@ -229,7 +268,18 @@ impl LoadSchematicParams<'_, '_> {
                         let mut tile_state = TileState::default();
                         for elem in &sec_schematic.elems {
                             if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
-                                self.spawn_panel(&mut tile_state, panel, None);
+                                self.spawn_panel(
+                                    &mut tile_state,
+                                    panel,
+                                    None,
+                                    PanelContext::Secondary,
+                                );
+                            }
+                        }
+                        let graph_entities = collect_graph_entities(&tile_state);
+                        for &graph in &graph_entities {
+                            if let Ok(mut camera) = self.cameras.get_mut(graph) {
+                                camera.is_active = false;
                             }
                         }
                         let id = self.windows.alloc_id();
@@ -238,6 +288,7 @@ impl LoadSchematicParams<'_, '_> {
                             descriptor,
                             tile_state,
                             window_entity: None,
+                            graph_entities,
                         });
                     }
                     Err(err) => {
@@ -297,11 +348,12 @@ impl LoadSchematicParams<'_, '_> {
         ));
     }
 
-    pub fn spawn_panel(
+    fn spawn_panel(
         &mut self,
         tile_state: &mut TileState,
         panel: &Panel,
         parent_id: Option<TileId>,
+        context: PanelContext,
     ) -> Option<TileId> {
         match panel {
             Panel::Viewport(viewport) => {
@@ -337,7 +389,7 @@ impl LoadSchematicParams<'_, '_> {
                     tile_state.container_titles.insert(tile_id, name);
                 }
                 for (i, panel) in split.panels.iter().enumerate() {
-                    let child_id = self.spawn_panel(tile_state, panel, tile_id);
+                    let child_id = self.spawn_panel(tile_state, panel, tile_id, context);
                     let Some(tile_id) = tile_id else {
                         continue;
                     };
@@ -365,7 +417,7 @@ impl LoadSchematicParams<'_, '_> {
                 );
 
                 tabs.iter().for_each(|panel| {
-                    self.spawn_panel(tile_state, panel, tile_id);
+                    self.spawn_panel(tile_state, panel, tile_id, context);
                 });
                 tile_id
             }
@@ -409,10 +461,16 @@ impl LoadSchematicParams<'_, '_> {
                     components_tree,
                     graph_label.clone(),
                 );
+                if matches!(context, PanelContext::Secondary) {
+                    bundle.camera.is_active = false;
+                }
                 bundle.graph_state.auto_y_range = graph.auto_y_range;
                 bundle.graph_state.y_range = graph.y_range.clone();
                 bundle.graph_state.graph_type = graph.graph_type;
                 let graph_id = self.commands.spawn(bundle).id();
+                if matches!(context, PanelContext::Secondary) {
+                    self.commands.entity(graph_id).remove::<MainCamera>();
+                }
                 let graph = GraphPane::new(graph_id, graph_label);
                 tile_state.insert_tile(Tile::Pane(Pane::Graph(graph)), parent_id, false)
             }
