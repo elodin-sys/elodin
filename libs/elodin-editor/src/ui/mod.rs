@@ -8,7 +8,10 @@ use bevy::{
     input::keyboard::Key,
     prelude::*,
     render::camera::{RenderTarget, Viewport},
-    window::{PresentMode, PrimaryWindow, WindowCloseRequested, WindowRef, WindowResolution},
+    window::{
+        EnabledButtons, PresentMode, PrimaryWindow, WindowCloseRequested, WindowRef,
+        WindowResolution,
+    },
 };
 use bevy_egui::{
     EguiContext, EguiContexts,
@@ -21,11 +24,11 @@ use schematic::SchematicPlugin;
 
 use self::colors::get_scheme;
 use self::{command_palette::CommandPaletteState, timeline::timeline_slider};
-use egui::CornerRadius;
+use egui::{CornerRadius, Direction, UiBuilder};
 use impeller2::types::ComponentId;
 use impeller2_bevy::ComponentValueMap;
-use impeller2_wkt::ComponentMetadata;
 use impeller2_wkt::ComponentValue;
+use impeller2_wkt::{ComponentMetadata, Panel as SchematicPanel, Split as SchematicSplit};
 
 use crate::{GridHandle, MainCamera, plugins::LogicalKeyState};
 
@@ -33,7 +36,7 @@ use self::inspector::entity::ComponentFilter;
 
 use self::command_palette::CommandPalette;
 use self::widgets::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystemExt};
-use self::{button::EImageButton, utils::MarginSides};
+use self::{button::EImageButton, plot::PlotWidget, utils::MarginSides};
 
 pub mod actions;
 pub mod button;
@@ -685,6 +688,10 @@ fn sync_secondary_windows(
                     title,
                     resolution: WindowResolution::new(640.0, 480.0),
                     present_mode: PresentMode::AutoVsync,
+                    enabled_buttons: EnabledButtons {
+                        close: false,
+                        ..Default::default()
+                    },
                     ..Default::default()
                 },
                 SecondaryWindowMarker { id: state.id },
@@ -709,8 +716,7 @@ fn handle_secondary_close(
 ) {
     let mut reopen = Vec::new();
     for evt in events.read() {
-        let entity_bits = evt.window.to_bits();
-        let entity = Entity::from_bits(entity_bits);
+        let entity = evt.window;
         if let Some(id) = windows.find_secondary_by_entity(entity) {
             reopen.push(id);
         }
@@ -719,22 +725,33 @@ fn handle_secondary_close(
     for id in reopen {
         if let Some(state) = windows.get_secondary_mut(id) {
             state.window_entity = None;
-            state.graph_entities.clear();
         }
     }
 }
 
 fn render_secondary_windows(world: &mut World) {
-    let window_entries: Vec<(tiles::SecondaryWindowId, Entity)> = {
+    let window_entries: Vec<(
+        tiles::SecondaryWindowId,
+        Entity,
+        Option<SchematicPanel<Entity>>,
+    )> = {
         let windows = world.resource::<tiles::WindowManager>();
         windows
             .secondary()
             .iter()
-            .filter_map(|state| state.window_entity.map(|entity| (state.id, entity)))
+            .filter_map(|state| {
+                state
+                    .window_entity
+                    .map(|entity| (state.id, entity, state.root_panel.clone()))
+            })
             .collect()
     };
 
-    for (id, entity) in window_entries {
+    for (id, entity, panel) in window_entries {
+        let Some(panel) = panel else {
+            continue;
+        };
+
         let Ok(mut entity_mut) = world.get_entity_mut(entity) else {
             continue;
         };
@@ -743,7 +760,8 @@ fn render_secondary_windows(world: &mut World) {
 
         let widget_id = format!("secondary_window_{}", id.0);
         world.add_root_widget_with::<SecondaryWindowRoot, With<ActiveSecondaryWindow>>(
-            &widget_id, id,
+            &widget_id,
+            (id, panel),
         );
 
         if let Ok(mut entity_mut) = world.get_entity_mut(entity) {
@@ -754,30 +772,156 @@ fn render_secondary_windows(world: &mut World) {
 
 #[derive(SystemParam)]
 struct SecondaryWindowRoot<'w, 's> {
-    _contexts: EguiContexts<'w, 's>,
-    _images: Local<'s, images::Images>,
+    contexts: EguiContexts<'w, 's>,
+    images: Local<'s, images::Images>,
 }
 
 impl RootWidgetSystem for SecondaryWindowRoot<'_, '_> {
-    type Args = tiles::SecondaryWindowId;
+    type Args = (tiles::SecondaryWindowId, impeller2_wkt::Panel<Entity>);
     type Output = ();
 
     fn ctx_system(
         world: &mut World,
         state: &mut SystemState<Self>,
         ctx: &mut egui::Context,
-        id: Self::Args,
+        (id, panel): Self::Args,
     ) {
-        let _state_mut = state.get_mut(world);
+        let mut state_mut = state.get_mut(world);
+        let scrub_icon = state_mut
+            .contexts
+            .add_image(state_mut.images.icon_scrub.clone_weak());
+        drop(state_mut);
         theme::set_theme(ctx);
 
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
-                let widget_id = format!("tile_system_secondary_inner_{}", id.0);
-                ui.add_widget_with::<tiles::TileSystem>(world, &widget_id, Some(id));
+                let mut path = Vec::new();
+                render_panel_static(world, ui, &panel, id, scrub_icon, &mut path);
             });
     }
+}
+
+fn render_panel_static(
+    world: &mut World,
+    ui: &mut egui::Ui,
+    panel: &SchematicPanel<Entity>,
+    id: tiles::SecondaryWindowId,
+    scrub_icon: egui::TextureId,
+    path: &mut Vec<usize>,
+) {
+    match panel {
+        SchematicPanel::Graph(graph) => {
+            ui.push_id(("graph", id.0, path.clone()), |ui| {
+                ui.add_widget_with::<PlotWidget>(world, "graph", (graph.aux, scrub_icon));
+            });
+        }
+        SchematicPanel::Tabs(tabs) => {
+            if let Some(first) = tabs.first() {
+                path.push(0);
+                render_panel_static(world, ui, first, id, scrub_icon, path);
+                path.pop();
+            }
+        }
+        SchematicPanel::HSplit(split) => {
+            render_split(
+                world,
+                ui,
+                split,
+                id,
+                scrub_icon,
+                path,
+                Direction::LeftToRight,
+            );
+        }
+        SchematicPanel::VSplit(split) => {
+            render_split(world, ui, split, id, scrub_icon, path, Direction::TopDown);
+        }
+        _ => {}
+    }
+}
+
+fn render_split(
+    world: &mut World,
+    ui: &mut egui::Ui,
+    split: &SchematicSplit<Entity>,
+    id: tiles::SecondaryWindowId,
+    scrub_icon: egui::TextureId,
+    path: &mut Vec<usize>,
+    direction: Direction,
+) {
+    let fractions = normalized_shares(split.panels.len(), &split.shares);
+    match direction {
+        Direction::LeftToRight => {
+            let total_width = ui.available_width().max(0.0);
+            let total_height = ui.available_height().max(0.0);
+            let mut remaining = total_width;
+            for (index, child) in split.panels.iter().enumerate() {
+                let width = if index + 1 == split.panels.len() {
+                    remaining
+                } else {
+                    (total_width * fractions[index]).min(remaining)
+                };
+                let size = egui::vec2(width.max(0.0), total_height.max(0.0));
+                let rect = ui.allocate_exact_size(size, egui::Sense::hover()).0;
+                remaining = (remaining - width).max(0.0);
+                let builder = UiBuilder::new()
+                    .max_rect(rect)
+                    .layout(egui::Layout::top_down(egui::Align::Center));
+                let mut child_ui = ui.new_child(builder);
+                path.push(index);
+                render_panel_static(world, &mut child_ui, child, id, scrub_icon, path);
+                path.pop();
+            }
+        }
+        Direction::TopDown => {
+            let total_height = ui.available_height().max(0.0);
+            let total_width = ui.available_width().max(0.0);
+            let mut remaining = total_height;
+            for (index, child) in split.panels.iter().enumerate() {
+                let height = if index + 1 == split.panels.len() {
+                    remaining
+                } else {
+                    (total_height * fractions[index]).min(remaining)
+                };
+                let size = egui::vec2(total_width.max(0.0), height.max(0.0));
+                let rect = ui.allocate_exact_size(size, egui::Sense::hover()).0;
+                remaining = (remaining - height).max(0.0);
+                let builder = UiBuilder::new()
+                    .max_rect(rect)
+                    .layout(egui::Layout::top_down(egui::Align::Center));
+                let mut child_ui = ui.new_child(builder);
+                path.push(index);
+                render_panel_static(world, &mut child_ui, child, id, scrub_icon, path);
+                path.pop();
+            }
+        }
+        _ => {}
+    }
+}
+
+fn normalized_shares(len: usize, shares: &HashMap<usize, f32>) -> Vec<f32> {
+    if len == 0 {
+        return Vec::new();
+    }
+    let mut values = vec![1.0; len];
+    for (index, share) in shares {
+        if *index < len {
+            values[*index] = *share;
+        }
+    }
+    let sum: f32 = values.iter().copied().sum();
+    if sum > 0.0 {
+        for value in &mut values {
+            *value /= sum;
+        }
+    } else {
+        let fraction = 1.0 / len as f32;
+        for value in &mut values {
+            *value = fraction;
+        }
+    }
+    values
 }
 
 #[derive(QueryData)]

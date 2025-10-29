@@ -15,7 +15,7 @@ use bevy_render::{
 };
 use egui::UiBuilder;
 use egui_tiles::{Container, Tile, TileId, Tiles};
-use impeller2_wkt::{Dashboard, Graph, Viewport};
+use impeller2_wkt::{Dashboard, Graph, Panel, Viewport};
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -88,7 +88,7 @@ pub struct SecondaryWindowId(pub u32);
 pub struct SecondaryWindowState {
     pub id: SecondaryWindowId,
     pub descriptor: SecondaryWindowDescriptor,
-    pub tile_state: TileState,
+    pub root_panel: Option<Panel<Entity>>,
     pub window_entity: Option<Entity>,
     pub graph_entities: Vec<Entity>,
 }
@@ -1059,24 +1059,16 @@ impl WidgetSystem for TileSystem<'_, '_> {
         ui: &mut egui::Ui,
         target: Self::Args,
     ) {
+        if target.is_some() {
+            return;
+        }
+
         let (icons, is_empty_tile_tree) = {
             let params = state.get_mut(world);
             let mut contexts = params.contexts;
             let images = params.images;
-            let is_empty = match target {
-                Some(id) => params
-                    .windows
-                    .get_secondary(id)
-                    .map(|s| s.tile_state.is_empty() && s.tile_state.tree_actions.is_empty()),
-                None => Some(
-                    params.windows.main().is_empty()
-                        && params.windows.main().tree_actions.is_empty(),
-                ),
-            };
-
-            let Some(is_empty) = is_empty else {
-                return;
-            };
+            let is_empty =
+                params.windows.main().is_empty() && params.windows.main().tree_actions.is_empty();
 
             let icons = TileIcons {
                 add: contexts.add_image(images.icon_add.clone_weak()),
@@ -1238,14 +1230,14 @@ impl WidgetSystem for TileLayout<'_, '_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) {
+        let TileLayoutArgs { icons, window } = args;
+        if window.is_some() {
+            return;
+        }
+
         world.resource_scope::<WindowManager, _>(|world, mut windows| {
-            let TileLayoutArgs { icons, window } = args;
-            let Some(ui_state) = (match window {
-                Some(id) => windows.get_secondary_mut(id).map(|s| &mut s.tile_state),
-                None => Some(windows.main_mut()),
-            }) else {
-                return;
-            };
+            let ui_state = windows.main_mut();
+            let icons = icons;
 
             let mut tree_actions = {
                 let tab_diffs = std::mem::take(&mut ui_state.tree_actions);

@@ -821,10 +821,10 @@ fn clear_state_new_connection(
     windows
         .main_mut()
         .clear(&mut commands, &mut selected_object);
-    for mut secondary in windows.take_secondary() {
-        secondary
-            .tile_state
-            .clear(&mut commands, &mut selected_object);
+    for secondary in windows.take_secondary() {
+        for graph in secondary.graph_entities {
+            let _ = commands.entity(graph).despawn();
+        }
         if let Some(entity) = secondary.window_entity {
             let _ = commands.entity(entity).despawn();
         }
