@@ -6,6 +6,7 @@ use crate::{
     editor_cam_touch::*,
     ui::{theme::corner_radius_sm, utils::Shrink4},
 };
+use super::state::LockGroup;
 use bevy::{
     asset::Assets,
     ecs::{
@@ -22,7 +23,9 @@ use bevy::{
     },
     math::{DVec2, Rect, Vec2},
     prelude::{Component, ResMut},
-    render::camera::{Camera, OrthographicProjection, Projection, ScalingMode},
+    render::camera::{
+        Camera, OrthographicProjection, Projection, RenderTarget, ScalingMode, WindowRef,
+    },
     window::{PrimaryWindow, Window},
 };
 use bevy_egui::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke};
@@ -866,37 +869,36 @@ pub fn track_lock_toggles(
     mut sets: ParamSet<(Query<(Entity, &GraphState)>, Query<&mut GraphState>)>,
     mut tracker: ResMut<LockTracker>,
 ) {
-    let mut newly_locked: Vec<Entity> = Vec::new();
+    let mut newly_locked: HashMap<LockGroup, Vec<Entity>> = HashMap::new();
+    let mut sources: HashMap<LockGroup, (f32, f32, u64)> = HashMap::new();
 
     for (e, gs) in sets.p0().iter() {
         let prev = tracker.0.insert(e, gs.locked).unwrap_or(false);
+        if gs.locked {
+            sources
+                .entry(gs.lock_group)
+                .and_modify(|src| {
+                    if gs.x_rev > src.2 {
+                        *src = (gs.zoom_factor.x, gs.pan_offset.x, gs.x_rev);
+                    }
+                })
+                .or_insert((gs.zoom_factor.x, gs.pan_offset.x, gs.x_rev));
+        }
         if !prev && gs.locked {
-            newly_locked.push(e);
+            newly_locked.entry(gs.lock_group).or_default().push(e);
         }
     }
+
     if newly_locked.is_empty() {
         return;
     }
 
-    // pick source (locked with max x_rev)
-    let mut source: Option<(f32, f32, u64)> = None;
-    for (_e, g) in sets.p0().iter() {
-        if g.locked {
-            let cand = (g.zoom_factor.x, g.pan_offset.x, g.x_rev);
-            match source {
-                None => source = Some(cand),
-                Some(s) => {
-                    if cand.2 > s.2 {
-                        source = Some(cand);
-                    }
-                }
-            }
-        }
-    }
-
-    if let Some((zx, px, rev)) = source {
-        let mut p1 = sets.p1();
-        for e in newly_locked {
+    let mut p1 = sets.p1();
+    for (group, entities) in newly_locked {
+        let Some((zx, px, rev)) = sources.get(&group).copied() else {
+            continue;
+        };
+        for e in entities {
             if let Ok(mut me) = p1.get_mut(e) {
                 me.zoom_factor.x = zx;
                 me.pan_offset.x = px;
@@ -914,52 +916,66 @@ pub fn sync_locked_graphs(
         Query<(Entity, &mut GraphState)>,
     )>,
 ) {
-    let mut src: Option<(Entity, f32, f32, u64)> = None;
+    let mut sources: HashMap<LockGroup, (Entity, f32, f32, u64)> = HashMap::new();
     for (e, gs) in sets.p0().iter() {
         if gs.locked {
-            let cand = (e, gs.zoom_factor.x, gs.pan_offset.x, gs.x_rev);
-            match src {
-                None => src = Some(cand),
-                Some(s) => {
-                    if cand.3 > s.3 {
-                        src = Some(cand);
+            sources
+                .entry(gs.lock_group)
+                .and_modify(|src| {
+                    if gs.x_rev > src.3 {
+                        *src = (e, gs.zoom_factor.x, gs.pan_offset.x, gs.x_rev);
                     }
-                }
-            }
+                })
+                .or_insert((e, gs.zoom_factor.x, gs.pan_offset.x, gs.x_rev));
         }
     }
-    let Some((src_e, zx, px, _rev)) = src else {
+
+    if sources.is_empty() {
         return;
-    };
+    }
 
     for (e, mut gs) in sets.p1().iter_mut() {
-        if e == src_e || !gs.locked {
+        if !gs.locked {
             continue;
         }
-        gs.zoom_factor.x = zx;
-        gs.pan_offset.x = px;
+        if let Some((src_e, zx, px, _)) = sources.get(&gs.lock_group) {
+            if e == *src_e {
+                continue;
+            }
+            gs.zoom_factor.x = *zx;
+            gs.pan_offset.x = *px;
+        }
     }
 }
 
 pub fn zoom_graph(
     mut query: Query<(&mut GraphState, &Camera)>,
-    scroll_events: EventReader<MouseWheel>,
-    primary_window: Query<&Window, With<PrimaryWindow>>,
+    mut scroll_events: EventReader<MouseWheel>,
+    windows: Query<(Entity, &Window)>,
+    primary_window: Query<Entity, With<PrimaryWindow>>,
     key_state: Res<LogicalKeyState>,
     mut xclock: ResMut<XSyncClock>,
 ) {
-    let scroll_offset = scroll_offset_from_events(scroll_events);
-    if scroll_offset == 0. {
+    let scroll_offsets = scroll_offsets_from_events(&mut scroll_events);
+    if scroll_offsets.is_empty() {
         return;
     }
 
-    let Ok(window) = primary_window.single() else {
+    let Ok(primary_entity) = primary_window.get_single() else {
         return;
     };
-    let cursor_pos = window.physical_cursor_position();
 
     for (mut graph_state, camera) in &mut query {
-        let Some(cursor_pos) = cursor_pos else {
+        let Some(window_entity) = camera_window_entity(camera, primary_entity) else {
+            continue;
+        };
+        let Some(scroll_offset) = scroll_offsets.get(&window_entity) else {
+            continue;
+        };
+        let Ok(window) = windows.get(window_entity) else {
+            continue;
+        };
+        let Some(cursor_pos) = window.physical_cursor_position() else {
             continue;
         };
         let Some(viewport) = &camera.viewport else {
@@ -983,7 +999,7 @@ pub fn zoom_graph(
         };
 
         let old_scale = graph_state.zoom_factor;
-        graph_state.zoom_factor *= 1. - scroll_offset * ZOOM_SENSITIVITY * offset_mask;
+        graph_state.zoom_factor *= 1. - *scroll_offset * ZOOM_SENSITIVITY * offset_mask;
         graph_state.zoom_factor = graph_state.zoom_factor.clamp(Vec2::ZERO, Vec2::ONE);
 
         let cursor_pos = (cursor_pos - viewport.physical_position.as_vec2())
@@ -1017,19 +1033,35 @@ pub struct LastPos(Option<Vec2>);
 pub fn pan_graph(
     mut query: Query<(Entity, &mut GraphState, &Camera, Option<&LastPos>)>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
-    primary_window: Query<&Window, With<PrimaryWindow>>,
+    windows: Query<(Entity, &Window)>,
+    primary_window: Query<Entity, With<PrimaryWindow>>,
     key_state: Res<LogicalKeyState>,
     mut commands: Commands,
     mut xclock: ResMut<XSyncClock>,
 ) {
-    let Ok(window) = primary_window.single() else {
-        return;
-    };
-    let Some(cursor_pos) = window.physical_cursor_position() else {
+    let Ok(primary_entity) = primary_window.get_single() else {
         return;
     };
 
     for (entity, mut graph_state, camera, last_pos) in &mut query {
+        let Some(window_entity) = camera_window_entity(camera, primary_entity) else {
+            if let Ok(mut e) = commands.get_entity(entity) {
+                e.try_insert(LastPos(None));
+            }
+            continue;
+        };
+        let Ok(window) = windows.get(window_entity) else {
+            if let Ok(mut e) = commands.get_entity(entity) {
+                e.try_insert(LastPos(None));
+            }
+            continue;
+        };
+        let Some(cursor_pos) = window.physical_cursor_position() else {
+            if let Ok(mut e) = commands.get_entity(entity) {
+                e.try_insert(LastPos(None));
+            }
+            continue;
+        };
         let last_pos = last_pos.and_then(|p| p.0);
         let Some(viewport) = &camera.viewport else {
             continue;
@@ -1098,26 +1130,33 @@ pub fn reset_graph(
     mut last_click: Local<Option<Instant>>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     mut query: Query<(&mut GraphState, &Camera)>,
-    primary_window: Query<&Window, With<PrimaryWindow>>,
+    windows: Query<(Entity, &Window)>,
+    primary_window: Query<Entity, With<PrimaryWindow>>,
     mut xclock: ResMut<XSyncClock>,
 ) {
     if mouse_buttons.just_released(MouseButton::Left) {
         *last_click = Some(Instant::now());
     }
 
-    let Ok(window) = primary_window.single() else {
-        return;
-    };
-    let Some(cursor_pos) = window.physical_cursor_position() else {
-        return;
-    };
-
     if mouse_buttons.just_pressed(MouseButton::Left)
         && last_click
             .map(|t| t.elapsed() < Duration::from_millis(250))
             .unwrap_or_default()
     {
+        let Ok(primary_entity) = primary_window.get_single() else {
+            return;
+        };
+
         for (mut graph_state, camera) in &mut query {
+            let Some(window_entity) = camera_window_entity(camera, primary_entity) else {
+                continue;
+            };
+            let Ok(window) = windows.get(window_entity) else {
+                continue;
+            };
+            let Some(cursor_pos) = window.physical_cursor_position() else {
+                continue;
+            };
             let Some(viewport) = &camera.viewport else {
                 continue;
             };
@@ -1147,15 +1186,32 @@ pub fn reset_graph(
     }
 }
 
-fn scroll_offset_from_events(mut scroll_events: EventReader<MouseWheel>) -> f32 {
+fn scroll_offsets_from_events(scroll_events: &mut EventReader<MouseWheel>) -> HashMap<Entity, f32> {
     let pixels_per_line = SCROLL_PIXELS_PER_LINE;
-    scroll_events
-        .read()
-        .map(|ev| match ev.unit {
+    let mut offsets: HashMap<Entity, f32> = HashMap::new();
+    for ev in scroll_events.read() {
+        let delta = match ev.unit {
             MouseScrollUnit::Pixel => ev.y,
             MouseScrollUnit::Line => ev.y * pixels_per_line,
-        })
-        .sum::<f32>()
+        };
+        offsets
+            .entry(ev.window)
+            .and_modify(|v| *v += delta)
+            .or_insert(delta);
+    }
+    offsets
+}
+
+fn camera_window_entity(camera: &Camera, primary_entity: Entity) -> Option<Entity> {
+    match &camera.target {
+        RenderTarget::Window(window_ref) => match window_ref {
+            WindowRef::Primary => Some(primary_entity),
+            WindowRef::Entity(entity) => Some(*entity),
+            _ => None,
+        },
+        RenderTarget::Default => Some(primary_entity),
+        _ => None,
+    }
 }
 
 pub trait Vec2Ext {

@@ -25,12 +25,12 @@ use crate::{
         dashboard::{NodeUpdaterParams, spawn_dashboard},
         modal::ModalDialog,
         monitor::MonitorPane,
-        plot::GraphBundle,
+        plot::{GraphBundle, LockGroup},
         query_plot::QueryPlotData,
         schematic::EqlExt,
         tiles::{
-            DashboardPane, GraphPane, Pane, SecondaryWindowDescriptor, SecondaryWindowState,
-            TileState, TreePane, ViewportPane, WindowManager,
+            DashboardPane, GraphPane, Pane, SecondaryWindowDescriptor, SecondaryWindowId,
+            SecondaryWindowState, TileState, TreePane, ViewportPane, WindowManager,
         },
     },
     vector_arrow::VectorArrowState,
@@ -39,7 +39,16 @@ use crate::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PanelContext {
     Main,
-    Secondary,
+    Secondary(SecondaryWindowId),
+}
+
+impl PanelContext {
+    fn lock_group(self) -> LockGroup {
+        match self {
+            PanelContext::Main => LockGroup::Global,
+            PanelContext::Secondary(id) => LockGroup::Secondary(id.0),
+        }
+    }
 }
 
 #[derive(Component)]
@@ -273,7 +282,7 @@ impl LoadSchematicParams<'_, '_> {
                                     &mut tile_state,
                                     panel,
                                     None,
-                                    PanelContext::Secondary,
+                                    PanelContext::Secondary(id),
                                 );
                             }
                         }
@@ -465,19 +474,22 @@ impl LoadSchematicParams<'_, '_> {
                 }
 
                 let graph_label = graph_label(graph);
+                let lock_group = context.lock_group();
+
                 let mut bundle = GraphBundle::new(
                     &mut self.render_layer_alloc,
                     components_tree,
                     graph_label.clone(),
+                    lock_group,
                 );
-                if matches!(context, PanelContext::Secondary) {
+                if matches!(context, PanelContext::Secondary(_)) {
                     bundle.camera.is_active = false;
                 }
                 bundle.graph_state.auto_y_range = graph.auto_y_range;
                 bundle.graph_state.y_range = graph.y_range.clone();
                 bundle.graph_state.graph_type = graph.graph_type;
                 let graph_id = self.commands.spawn(bundle).id();
-                if matches!(context, PanelContext::Secondary) {
+                if matches!(context, PanelContext::Secondary(_)) {
                     self.commands.entity(graph_id).remove::<MainCamera>();
                 }
                 let graph = GraphPane::new(graph_id, graph_label);
@@ -525,10 +537,12 @@ impl LoadSchematicParams<'_, '_> {
                 tile_state.insert_tile(Tile::Pane(Pane::SchematicTree(pane)), parent_id, false)
             }
             Panel::QueryPlot(plot) => {
+                let lock_group = context.lock_group();
                 let graph_bundle = GraphBundle::new(
                     &mut self.render_layer_alloc,
                     BTreeMap::default(),
                     "Query Plot".to_string(),
+                    lock_group,
                 );
                 let entity = self
                     .commands

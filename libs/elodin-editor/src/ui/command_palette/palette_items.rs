@@ -40,7 +40,7 @@ use crate::{
     ui::{
         HdrEnabled, Paused, colors,
         command_palette::CommandPaletteState,
-        plot::{GraphBundle, default_component_values},
+        plot::{GraphBundle, LockGroup, default_component_values},
         schematic::{
             CurrentSchematic, LoadSchematicParams, SchematicLiveReloadRx, load_schematic_file,
         },
@@ -356,6 +356,7 @@ fn graph_parts(
                             &mut render_layer_alloc,
                             components,
                             "Graph".to_string(),
+                            LockGroup::Global,
                         );
                         tile_state.create_graph_tile(tile_id, bundle);
                         PaletteEvent::Exit

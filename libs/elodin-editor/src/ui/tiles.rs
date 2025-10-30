@@ -33,7 +33,7 @@ use super::{
     images,
     inspector::{InspectorContent, InspectorIcons},
     monitor::{MonitorPane, MonitorWidget},
-    plot::{GraphBundle, GraphState, PlotWidget},
+    plot::{GraphBundle, GraphState, LockGroup, PlotWidget},
     query_plot::QueryPlotData,
     query_table::{QueryTableData, QueryTablePane, QueryTableWidget},
     schematic::{graph_label, viewport_label},
@@ -1548,6 +1548,11 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         }
                         let graph_label = graph_label(&Graph::default());
 
+                        let lock_group = match window {
+                            Some(id) => LockGroup::Secondary(id.0),
+                            None => LockGroup::Global,
+                        };
+
                         let graph_bundle = if let Some(graph_bundle) = *graph_bundle {
                             graph_bundle
                         } else {
@@ -1555,6 +1560,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 &mut state_mut.render_layer_alloc,
                                 BTreeMap::default(),
                                 graph_label.clone(),
+                                lock_group,
                             )
                         };
                         let graph_id = state_mut.commands.spawn(graph_bundle).id();
@@ -1696,10 +1702,16 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         }
                     }
                     TreeAction::AddQueryPlot(parent_tile_id) => {
+                        let lock_group = match window {
+                            Some(id) => LockGroup::Secondary(id.0),
+                            None => LockGroup::Global,
+                        };
+
                         let graph_bundle = GraphBundle::new(
                             &mut state_mut.render_layer_alloc,
                             BTreeMap::default(),
                             "Query Plot".to_string(),
+                            lock_group,
                         );
                         let entity = state_mut
                             .commands

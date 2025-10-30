@@ -31,7 +31,18 @@ pub struct GraphBundle {
     pub main_camera: MainCamera,
 }
 
-#[derive(Clone, Debug, Component)]
+#[derive(Clone, Debug, Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LockGroup {
+    Global,
+    Secondary(u32),
+}
+
+impl Default for LockGroup {
+    fn default() -> Self {
+        LockGroup::Global
+    }
+}
+
 pub struct GraphState {
     pub components: BTreeMap<ComponentPath, GraphStateComponent>,
     pub enabled_lines: BTreeMap<(ComponentPath, usize), (Entity, Color32)>,
@@ -48,6 +59,7 @@ pub struct GraphState {
     pub widget_width: f64,
     pub visible_range: LineVisibleRange,
     pub locked: bool,
+    pub lock_group: LockGroup,
 
     // peer-ready metadata (not used until widget.rs switches to peers)
     pub x_rev: u64,
@@ -59,6 +71,7 @@ impl GraphBundle {
         render_layer_alloc: &mut RenderLayerAlloc,
         components: BTreeMap<ComponentPath, GraphStateComponent>,
         label: String,
+        lock_group: LockGroup,
     ) -> Self {
         let Some(layer) = render_layer_alloc.alloc() else {
             todo!("ran out of layers")
@@ -80,6 +93,7 @@ impl GraphBundle {
             widget_width: 1920.0,
             visible_range: LineVisibleRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)),
             locked: false,
+            lock_group,
             x_rev: 0,
             x_dirty: false,
         };
