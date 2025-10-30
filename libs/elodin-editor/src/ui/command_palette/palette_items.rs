@@ -42,7 +42,8 @@ use crate::{
         command_palette::CommandPaletteState,
         plot::{GraphBundle, LockGroup, default_component_values},
         schematic::{
-            CurrentSchematic, LoadSchematicParams, SchematicLiveReloadRx, load_schematic_file,
+            CurrentSchematic, CurrentSecondarySchematics, LoadSchematicParams,
+            SchematicLiveReloadRx, load_schematic_file,
         },
         tiles,
         timeline::{StreamTickOrigin, timeline_slider::UITick},
@@ -742,7 +743,10 @@ pub fn save_schematic() -> PaletteItem {
     PaletteItem::new(
         "Save Schematic",
         PRESETS_LABEL,
-        |_name: In<String>, db_config: Res<DbConfig>, schematic: Res<CurrentSchematic>| {
+        |_name: In<String>,
+         db_config: Res<DbConfig>,
+         schematic: Res<CurrentSchematic>,
+         secondary: Res<CurrentSecondarySchematics>| {
             match db_config.schematic_path() {
                 Some(path) => {
                     let kdl = schematic.0.to_kdl();
@@ -752,6 +756,8 @@ pub fn save_schematic() -> PaletteItem {
                         error!(?e, "saving schematic to {:?}", dest.display());
                     } else {
                         info!("saved schematic to {:?}", dest.display());
+                        let base_dir = dest.parent().unwrap_or_else(|| Path::new("."));
+                        write_secondary_schematics(base_dir, &secondary);
                     }
                     PaletteEvent::Exit
                 }
@@ -907,7 +913,9 @@ pub fn save_schematic_inner() -> PaletteItem {
     PaletteItem::new(
         LabelSource::placeholder("Enter a name for the schematic"),
         "",
-        move |In(name): In<String>, schematic: Res<CurrentSchematic>| {
+        move |In(name): In<String>,
+              schematic: Res<CurrentSchematic>,
+              secondary: Res<CurrentSecondarySchematics>| {
             let kdl = schematic.0.to_kdl();
             let path = PathBuf::from(name).with_extension("kdl");
             let dest = schematic_file(&path);
@@ -915,11 +923,36 @@ pub fn save_schematic_inner() -> PaletteItem {
                 error!(?e, "saving schematic");
             } else {
                 info!("saved schematic to {:?}", dest.display());
+                let base_dir = dest.parent().unwrap_or_else(|| Path::new("."));
+                write_secondary_schematics(base_dir, &secondary);
             }
             PaletteEvent::Exit
         },
     )
     .default()
+}
+
+fn write_secondary_schematics(base_dir: &Path, secondary: &CurrentSecondarySchematics) {
+    for entry in &secondary.0 {
+        let dest = base_dir.join(&entry.file_name);
+        if let Some(parent) = dest.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            error!(
+                ?e,
+                path = %dest.display(),
+                "creating directory for secondary schematic"
+            );
+            continue;
+        }
+
+        let kdl = entry.schematic.to_kdl();
+        if let Err(e) = std::fs::write(&dest, kdl) {
+            error!(?e, path = %dest.display(), "saving secondary schematic");
+        } else {
+            info!(path = %dest.display(), "saved secondary schematic");
+        }
+    }
 }
 
 pub fn load_schematic() -> PaletteItem {

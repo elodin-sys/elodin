@@ -293,6 +293,12 @@ impl LoadSchematicParams<'_, '_> {
                                 path = %descriptor.path.display(),
                                 "Secondary schematic produced no graphs"
                             );
+                        } else {
+                            info!(
+                                path = %descriptor.path.display(),
+                                graphs = graph_entities.len(),
+                                "Loaded secondary schematic"
+                            );
                         }
 
                         for &graph in &graph_entities {
@@ -455,7 +461,34 @@ impl LoadSchematicParams<'_, '_> {
                     .0
                     .parse_str(&graph.eql)
                     .inspect_err(|err| {
-                        warn!(?err, "error parsing graph eql");
+                        let (ctx, path) = match context {
+                            PanelContext::Main => ("main".to_string(), None),
+                            PanelContext::Secondary(id) => {
+                                let path = self
+                                    .windows
+                                    .get_secondary(id)
+                                    .map(|s| s.descriptor.path.display().to_string());
+                                (format!("secondary({})", id.0), path)
+                            }
+                        };
+                        if let Some(p) = path {
+                            warn!(
+                                ?err,
+                                eql = %graph.eql,
+                                name = ?graph.name,
+                                context = %ctx,
+                                path = %p,
+                                "error parsing graph eql"
+                            );
+                        } else {
+                            warn!(
+                                ?err,
+                                eql = %graph.eql,
+                                name = ?graph.name,
+                                context = %ctx,
+                                "error parsing graph eql"
+                            );
+                        }
                     })
                     .ok()?;
                 let mut component_vec = eql.to_graph_components();
