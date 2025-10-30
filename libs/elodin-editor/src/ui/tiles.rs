@@ -50,6 +50,7 @@ use crate::{
     },
     ui::dashboard::NodeUpdaterParams,
 };
+use crate::ui::compute_secondary_window_title;
 
 #[derive(Clone)]
 pub struct TileIcons {
@@ -1261,21 +1262,7 @@ impl RootWidgetSystem for TileSystem<'_, '_> {
             world
                 .get_resource::<WindowManager>()
                 .and_then(|windows| windows.get_secondary(id))
-                .map(|state| {
-                    state
-                        .descriptor
-                        .title
-                        .clone()
-                        .or_else(|| {
-                            state
-                                .descriptor
-                                .path
-                                .file_stem()
-                                .map(|s| s.to_string_lossy().into_owned())
-                        })
-                        .unwrap_or_else(|| "Panel".to_string())
-                })
-                .map(|title| (id, title))
+                .map(|state| (id, compute_secondary_window_title(state)))
         });
 
         if let Some((id, title)) = header.as_ref() {

@@ -864,7 +864,7 @@ fn render_secondary_windows(world: &mut World) {
     }
 }
 
-fn compute_secondary_window_title(state: &tiles::SecondaryWindowState) -> String {
+pub(crate) fn compute_secondary_window_title(state: &tiles::SecondaryWindowState) -> String {
     state
         .descriptor
         .title
