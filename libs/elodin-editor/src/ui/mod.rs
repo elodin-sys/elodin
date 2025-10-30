@@ -220,6 +220,10 @@ impl Plugin for UiPlugin {
             .add_systems(Update, handle_secondary_close.after(sync_secondary_windows))
             .add_systems(
                 Update,
+                set_secondary_camera_viewport.after(sync_secondary_windows),
+            )
+            .add_systems(
+                Update,
                 render_secondary_windows.after(handle_secondary_close),
             )
             .add_systems(Update, sync_hdr)
@@ -652,10 +656,11 @@ fn sync_secondary_windows(
         if let Some(entity) = state.window_entity {
             existing_map.insert(state.id, entity);
             let window_ref = WindowRef::Entity(entity);
-            for &graph in &state.graph_entities {
+            for (index, &graph) in state.graph_entities.iter().enumerate() {
                 if let Ok(mut camera) = cameras.get_mut(graph) {
                     camera.target = RenderTarget::Window(window_ref);
                     camera.is_active = true;
+                    camera.order = 10 + index as isize;
                 }
             }
             continue;
@@ -703,10 +708,11 @@ fn sync_secondary_windows(
         state.window_entity = Some(window_entity);
         existing_map.insert(state.id, window_entity);
         let window_ref = WindowRef::Entity(window_entity);
-        for &graph in &state.graph_entities {
+        for (index, &graph) in state.graph_entities.iter().enumerate() {
             if let Ok(mut camera) = cameras.get_mut(graph) {
                 camera.target = RenderTarget::Window(window_ref);
                 camera.is_active = true;
+                camera.order = 10 + index as isize;
             }
         }
     }
@@ -829,6 +835,60 @@ fn set_camera_viewport(
             physical_size: UVec2::new(viewport_size.x as u32, viewport_size.y as u32),
             depth: 0.0..1.0,
         });
+    }
+}
+
+fn set_secondary_camera_viewport(
+    windows: Res<tiles::WindowManager>,
+    mut cameras: Query<(&mut Camera, &ViewportRect)>,
+    window_query: Query<(&Window, &bevy_egui::EguiContextSettings)>,
+) {
+    for state in windows.secondary() {
+        let Some(window_entity) = state.window_entity else {
+            continue;
+        };
+
+        let Ok((window, egui_settings)) = window_query.get(window_entity) else {
+            continue;
+        };
+        let scale_factor = window.scale_factor() * egui_settings.scale_factor;
+
+        for (index, &graph) in state.graph_entities.iter().enumerate() {
+            let Ok((mut camera, viewport_rect)) = cameras.get_mut(graph) else {
+                continue;
+            };
+
+            let Some(available_rect) = viewport_rect.0 else {
+                camera.is_active = false;
+                camera.viewport = Some(Viewport {
+                    physical_position: UVec2::new(0, 0),
+                    physical_size: UVec2::new(1, 1),
+                    depth: 0.0..1.0,
+                });
+                continue;
+            };
+
+            let viewport_pos = available_rect.left_top().to_vec2() * scale_factor;
+            let viewport_size = available_rect.size() * scale_factor;
+
+            if viewport_size.x < 1.0 || viewport_size.y < 1.0 {
+                camera.is_active = false;
+                camera.viewport = Some(Viewport {
+                    physical_position: UVec2::new(0, 0),
+                    physical_size: UVec2::new(1, 1),
+                    depth: 0.0..1.0,
+                });
+                continue;
+            }
+
+            camera.is_active = true;
+            camera.order = 10 + index as isize;
+            camera.viewport = Some(Viewport {
+                physical_position: UVec2::new(viewport_pos.x as u32, viewport_pos.y as u32),
+                physical_size: UVec2::new(viewport_size.x as u32, viewport_size.y as u32),
+                depth: 0.0..1.0,
+            });
+        }
     }
 }
 

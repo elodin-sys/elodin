@@ -18,7 +18,7 @@ use egui_tiles::{Container, Tile, TileId, Tiles};
 use impeller2_wkt::{Dashboard, Graph, Viewport};
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
+use std::{fmt::Write as _, path::PathBuf};
 
 use super::{
     SelectedObject, ViewportRect,
@@ -317,6 +317,51 @@ impl TileState {
     pub fn create_tree_tile(&mut self, tile_id: Option<TileId>) {
         self.tree_actions
             .push(TreeAction::AddSchematicTree(tile_id));
+    }
+
+    pub fn debug_dump(&self) -> String {
+        fn visit(
+            tree: &egui_tiles::Tree<Pane>,
+            tile_id: egui_tiles::TileId,
+            depth: usize,
+            out: &mut String,
+        ) {
+            let indent = "  ".repeat(depth);
+            if let Some(tile) = tree.tiles.get(tile_id) {
+                match tile {
+                    Tile::Container(container) => {
+                        let _ = writeln!(out, "{}Container::{:?}", indent, container.kind());
+                        for child in container.children() {
+                            visit(tree, *child, depth + 1, out);
+                        }
+                    }
+                    Tile::Pane(pane) => {
+                        let (kind, label): (&str, &str) = match pane {
+                            Pane::Viewport(viewport) => ("Viewport", viewport.label.as_str()),
+                            Pane::Graph(graph) => ("Graph", graph.label.as_str()),
+                            Pane::Monitor(monitor) => ("Monitor", monitor.label.as_str()),
+                            Pane::QueryTable(_) => ("QueryTable", "QueryTable"),
+                            Pane::QueryPlot(_) => ("QueryPlot", "QueryPlot"),
+                            Pane::ActionTile(action) => ("Action", action.label.as_str()),
+                            Pane::VideoStream(video) => ("VideoStream", video.label.as_str()),
+                            Pane::Dashboard(dashboard) => ("Dashboard", dashboard.label.as_str()),
+                            Pane::Hierarchy => ("Hierarchy", "Hierarchy"),
+                            Pane::Inspector => ("Inspector", "Inspector"),
+                            Pane::SchematicTree(_) => ("SchematicTree", "SchematicTree"),
+                        };
+                        let _ = writeln!(out, "{}Pane::{} ({})", indent, kind, label);
+                    }
+                }
+            }
+        }
+
+        let mut out = String::new();
+        if let Some(root) = self.tree.root() {
+            visit(&self.tree, root, 0, &mut out);
+        } else {
+            let _ = writeln!(out, "<empty>");
+        }
+        out
     }
 
     pub fn create_sidebars_layout(&mut self) {
