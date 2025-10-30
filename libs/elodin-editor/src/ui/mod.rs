@@ -18,6 +18,7 @@ use bevy_egui::{
     EguiContext, EguiContexts,
     egui::{self, Color32, Label, Margin, RichText},
 };
+use egui_tiles::{Container, Tile};
 
 use big_space::GridCell;
 use plot_3d::LinePlot3dPlugin;
@@ -672,22 +673,7 @@ fn sync_secondary_windows(
             }
         }
 
-        let mut title = state
-            .descriptor
-            .title
-            .clone()
-            .or_else(|| {
-                state
-                    .descriptor
-                    .path
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().into_owned())
-            })
-            .unwrap_or_else(|| "Panel".to_string());
-
-        if title.is_empty() {
-            title = "Panel".to_string();
-        }
+        let title = compute_secondary_window_title(state);
 
         let window_entity = commands
             .spawn((
@@ -754,20 +740,115 @@ fn handle_primary_close(
     }
 }
 
+fn secondary_window_container_title(state: &tiles::SecondaryWindowState) -> Option<String> {
+    let root = state.tile_state.tree.root()?;
+    find_named_container_title(
+        &state.tile_state.tree,
+        &state.tile_state.container_titles,
+        root,
+    )
+}
+
+fn find_named_container_title(
+    tree: &egui_tiles::Tree<tiles::Pane>,
+    titles: &HashMap<egui_tiles::TileId, String>,
+    tile_id: egui_tiles::TileId,
+) -> Option<String> {
+    if let Some(title) = titles
+        .get(&tile_id)
+        .and_then(|value| normalize_title(value))
+    {
+        return Some(title);
+    }
+
+    let tile = tree.tiles.get(tile_id)?;
+    if let Tile::Container(container) = tile {
+        match container {
+            Container::Tabs(tabs) => {
+                for child in &tabs.children {
+                    if let Some(found) = find_named_container_title(tree, titles, *child) {
+                        return Some(found);
+                    }
+                }
+            }
+            Container::Linear(linear) => {
+                for child in &linear.children {
+                    if let Some(found) = find_named_container_title(tree, titles, *child) {
+                        return Some(found);
+                    }
+                }
+            }
+            Container::Grid(grid) => {
+                for child in grid.children() {
+                    if let Some(found) = find_named_container_title(tree, titles, *child) {
+                        return Some(found);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn normalize_title(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn friendly_title_from_stem(stem: &str) -> Option<String> {
+    let words: Vec<String> = stem
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| {
+            let mut chars = segment.chars();
+            let mut word = String::new();
+            if let Some(first) = chars.next() {
+                word.extend(first.to_uppercase());
+            }
+            for ch in chars {
+                word.extend(ch.to_lowercase());
+            }
+            word
+        })
+        .filter(|word| !word.is_empty())
+        .collect();
+
+    if words.is_empty() {
+        None
+    } else {
+        Some(words.join(" "))
+    }
+}
+
 fn render_secondary_windows(world: &mut World) {
-    let window_entries: Vec<(tiles::SecondaryWindowId, Entity)> = {
+    let window_entries: Vec<(tiles::SecondaryWindowId, Entity, String)> = {
         let windows = world.resource::<tiles::WindowManager>();
         windows
             .secondary()
             .iter()
-            .filter_map(|state| state.window_entity.map(|entity| (state.id, entity)))
+            .filter_map(|state| {
+                state
+                    .window_entity
+                    .map(|entity| (state.id, entity, compute_secondary_window_title(state)))
+            })
             .collect()
     };
 
-    for (id, entity) in window_entries {
+    for (id, entity, desired_title) in window_entries {
         let Ok(mut entity_mut) = world.get_entity_mut(entity) else {
             continue;
         };
+
+        if let Some(mut window) = entity_mut.get_mut::<Window>() {
+            if window.title != desired_title {
+                window.title = desired_title;
+            }
+        }
 
         entity_mut.insert(ActiveSecondaryWindow);
 
@@ -781,6 +862,23 @@ fn render_secondary_windows(world: &mut World) {
             entity_mut.remove::<ActiveSecondaryWindow>();
         }
     }
+}
+
+fn compute_secondary_window_title(state: &tiles::SecondaryWindowState) -> String {
+    state
+        .descriptor
+        .title
+        .clone()
+        .or_else(|| secondary_window_container_title(state))
+        .or_else(|| {
+            state
+                .descriptor
+                .path
+                .file_stem()
+                .and_then(|s| friendly_title_from_stem(&s.to_string_lossy()))
+        })
+        .filter(|title| !title.is_empty())
+        .unwrap_or_else(|| "Panel".to_string())
 }
 
 #[derive(QueryData)]
