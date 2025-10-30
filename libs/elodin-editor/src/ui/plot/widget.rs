@@ -2,11 +2,11 @@ use bevy::prelude::*;
 use egui_material_icons::{icon_button, icons::*};
 use std::collections::HashMap;
 
+use super::state::LockGroup;
 use crate::{
     editor_cam_touch::*,
     ui::{theme::corner_radius_sm, utils::Shrink4},
 };
-use super::state::LockGroup;
 use bevy::{
     asset::Assets,
     ecs::{

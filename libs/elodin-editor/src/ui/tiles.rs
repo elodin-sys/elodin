@@ -40,6 +40,7 @@ use super::{
     video_stream::{IsTileVisible, VideoDecoderHandle},
     widgets::{RootWidgetSystem, WidgetSystem, WidgetSystemExt},
 };
+use crate::ui::compute_secondary_window_title;
 use crate::{
     EqlContext, GridHandle, MainCamera,
     object_3d::{EditableEQL, compile_eql_expr},
@@ -50,7 +51,6 @@ use crate::{
     },
     ui::dashboard::NodeUpdaterParams,
 };
-use crate::ui::compute_secondary_window_title;
 
 #[derive(Clone)]
 pub struct TileIcons {
