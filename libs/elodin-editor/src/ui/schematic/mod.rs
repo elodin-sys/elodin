@@ -12,9 +12,10 @@ use crate::{
 };
 use bevy::{ecs::system::SystemParam, prelude::*};
 use egui_tiles::{Tile, TileId};
+use impeller2_bevy::ComponentMetadataRegistry;
 use impeller2_wkt::{
     ActionPane, ComponentMonitor, ComponentPath, Dashboard, Line3d, Panel, Schematic,
-    SchematicElem, Split, VectorArrow3d, Viewport,
+    SchematicElem, Split, VectorArrow3d, Viewport, WindowSchematic,
 };
 
 pub mod tree;
@@ -24,6 +25,16 @@ pub use load::*;
 
 #[derive(Resource, Debug, Clone, Deref, DerefMut)]
 pub struct CurrentSchematic(pub Schematic<Entity>);
+
+#[derive(Debug, Clone)]
+pub struct SecondarySchematic {
+    pub file_name: String,
+    pub title: Option<String>,
+    pub schematic: Schematic<Entity>,
+}
+
+#[derive(Resource, Debug, Default, Clone)]
+pub struct CurrentSecondarySchematics(pub Vec<SecondarySchematic>);
 
 #[derive(SystemParam)]
 pub struct SchematicParam<'w, 's> {
@@ -37,14 +48,23 @@ pub struct SchematicParam<'w, 's> {
     pub objects_3d: Query<'w, 's, (Entity, &'static Object3DState)>,
     pub lines_3d: Query<'w, 's, (Entity, &'static Line3d)>,
     pub vector_arrows: Query<'w, 's, (Entity, &'static VectorArrow3d)>,
-    pub ui_state: Res<'w, tiles::TileState>,
+    pub windows: Res<'w, tiles::WindowManager>,
     pub dashboards: Query<'w, 's, &'static Dashboard<Entity>>,
     pub hdr_enabled: Res<'w, HdrEnabled>,
+    pub metadata: Res<'w, ComponentMetadataRegistry>,
 }
 
 impl SchematicParam<'_, '_> {
     pub fn get_panel(&self, tile_id: TileId) -> Option<Panel<Entity>> {
-        let tiles = &self.ui_state.tree.tiles;
+        self.get_panel_from_state(self.windows.main(), tile_id)
+    }
+
+    pub fn get_panel_from_state(
+        &self,
+        state: &tiles::TileState,
+        tile_id: TileId,
+    ) -> Option<Panel<Entity>> {
+        let tiles = &state.tree.tiles;
         let tile = tiles.get(tile_id)?;
 
         match tile {
@@ -77,20 +97,21 @@ impl SchematicParam<'_, '_> {
                     let graph_state = self.graph_states.get(graph.id).ok()?;
                     let mut eql = String::new();
                     let mut colors: Vec<impeller2_wkt::Color> = vec![];
-                    // Build EQL from enabled lines
-                    if !graph_state.enabled_lines.is_empty() {
-                        let mut parts: Vec<String> =
-                            Vec::with_capacity(graph_state.enabled_lines.len());
-                        for ((path, index), (_, color)) in graph_state.enabled_lines.iter() {
-                            let c: egui::Color32 = *color;
-                            parts.push(format!("{}[{}]", path, index));
-                            colors.push(impeller2_wkt::Color::from_color32(c));
+                    let mut parts: Vec<String> = Vec::new();
+
+                    for (component_path, component_values) in &graph_state.components {
+                        for (index, (enabled, color)) in component_values.iter().enumerate() {
+                            if !*enabled {
+                                continue;
+                            }
+                            parts.push(component_expr(component_path, index, &self.metadata));
+                            colors.push(impeller2_wkt::Color::from_color32(*color));
                         }
-                        eql = parts.join(",");
                     }
 
-                    // Fallback: if no explicit lines, use the non-editable label as EQL (e.g. "drone.motor_pwm")
-                    if eql.is_empty() && !graph_state.label.is_empty() {
+                    if !parts.is_empty() {
+                        eql = parts.join(", ");
+                    } else if !graph_state.label.is_empty() {
                         eql = graph_state.label.clone();
                     }
 
@@ -147,7 +168,7 @@ impl SchematicParam<'_, '_> {
                 egui_tiles::Container::Tabs(t) => {
                     let mut tabs = vec![];
                     for tile_id in &t.children {
-                        if let Some(tab) = self.get_panel(*tile_id) {
+                        if let Some(tab) = self.get_panel_from_state(state, *tile_id) {
                             tabs.push(tab)
                         }
                     }
@@ -159,7 +180,7 @@ impl SchematicParam<'_, '_> {
                     let mut shares = HashMap::new();
 
                     for child_id in &linear.children {
-                        if let Some(panel) = self.get_panel(*child_id) {
+                        if let Some(panel) = self.get_panel_from_state(state, *child_id) {
                             if let Some((_, share)) =
                                 linear.shares.iter().find(|(id, _)| *id == child_id)
                             {
@@ -173,11 +194,7 @@ impl SchematicParam<'_, '_> {
                         return None;
                     }
 
-                    // >>> FIX: pull the edited title from TileState <<<
-                    let name = self
-                        .ui_state
-                        .get_container_title(tile_id)
-                        .map(|s| s.to_string());
+                    let name = state.get_container_title(tile_id).map(|s| s.to_string());
 
                     let split = Split {
                         panels,
@@ -198,9 +215,13 @@ impl SchematicParam<'_, '_> {
     }
 }
 
-pub fn tiles_to_schematic(param: SchematicParam, mut schematic: ResMut<CurrentSchematic>) {
+pub fn tiles_to_schematic(
+    param: SchematicParam,
+    mut schematic: ResMut<CurrentSchematic>,
+    mut secondary: ResMut<CurrentSecondarySchematics>,
+) {
     schematic.elems.clear();
-    if let Some(tile_id) = param.ui_state.tree.root() {
+    if let Some(tile_id) = param.windows.main().tree.root() {
         schematic
             .elems
             .extend(param.get_panel(tile_id).map(SchematicElem::Panel))
@@ -224,6 +245,33 @@ pub fn tiles_to_schematic(param: SchematicParam, mut schematic: ResMut<CurrentSc
             .iter()
             .map(|(entity, arrow)| SchematicElem::VectorArrow(arrow.map_aux(|_| entity))),
     );
+
+    secondary.0.clear();
+    let mut window_elems = Vec::new();
+    let mut name_counts: HashMap<String, usize> = HashMap::new();
+    for state in param.windows.secondary() {
+        let base_stem = preferred_secondary_stem(state);
+        let unique_stem = ensure_unique_stem(&mut name_counts, &base_stem);
+        let file_name = format!("{unique_stem}.kdl");
+
+        let mut window_schematic = Schematic::default();
+        if let Some(root_id) = state.tile_state.tree.root()
+            && let Some(panel) = param.get_panel_from_state(&state.tile_state, root_id)
+        {
+            window_schematic.elems.push(SchematicElem::Panel(panel));
+        }
+        secondary.0.push(SecondarySchematic {
+            file_name: file_name.clone(),
+            title: state.descriptor.title.clone(),
+            schematic: window_schematic,
+        });
+        window_elems.push(SchematicElem::Window(WindowSchematic {
+            title: state.descriptor.title.clone(),
+            path: file_name,
+        }));
+    }
+
+    schematic.elems.extend(window_elems);
 }
 
 pub struct SchematicPlugin;
@@ -231,11 +279,88 @@ pub struct SchematicPlugin;
 impl Plugin for SchematicPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(CurrentSchematic(Default::default()))
+            .insert_resource(CurrentSecondarySchematics::default())
             .add_systems(PostUpdate, tiles_to_schematic)
             .add_systems(PostUpdate, sync_schematic.before(tiles_to_schematic))
             .init_resource::<SchematicLiveReloadRx>()
             .add_systems(PreUpdate, load::schematic_live_reload);
     }
+}
+
+fn preferred_secondary_stem(state: &tiles::SecondaryWindowState) -> String {
+    if let Some(title) = state.descriptor.title.as_deref() {
+        let stem = sanitize_to_stem(title);
+        if !stem.is_empty() {
+            return stem;
+        }
+    }
+    if let Some(stem) = state.descriptor.path.file_stem().and_then(|s| s.to_str()) {
+        let stem = sanitize_to_stem(stem);
+        if !stem.is_empty() {
+            return stem;
+        }
+    }
+    "secondary".to_string()
+}
+
+fn sanitize_to_stem(input: &str) -> String {
+    let mut stem = String::new();
+    let mut last_dash = false;
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            stem.push(ch.to_ascii_lowercase());
+            last_dash = false;
+        } else if (matches!(ch, '-' | '_') || ch.is_whitespace()) && !last_dash && !stem.is_empty()
+        {
+            stem.push('-');
+            last_dash = true;
+        }
+    }
+    stem.trim_matches('-').to_string()
+}
+
+fn ensure_unique_stem(counts: &mut HashMap<String, usize>, stem: &str) -> String {
+    let base = if stem.is_empty() { "secondary" } else { stem };
+    let entry = counts.entry(base.to_string()).or_insert(0);
+    let current = *entry;
+    *entry += 1;
+    if current == 0 {
+        base.to_string()
+    } else {
+        format!("{base}-{}", current + 1)
+    }
+}
+
+fn component_expr(
+    component_path: &ComponentPath,
+    index: usize,
+    metadata: &ComponentMetadataRegistry,
+) -> String {
+    // Full component path string (e.g., "drone.rate_pid_state")
+    let base = component_path.to_string();
+
+    if let Some(meta) = metadata.0.get(&component_path.id)
+        && let Some(name) = meta
+            .element_names()
+            .split(',')
+            .map(|s| s.trim())
+            .nth(index)
+            .filter(|s| !s.is_empty())
+    {
+        // If element name itself contains dots or non-identifier chars,
+        // prefer index notation for compatibility with the EQL loader.
+        let simple = name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if simple && !name.contains('.') {
+            if base.ends_with(name) {
+                return base.to_string();
+            }
+            return format!("{base}.{name}");
+        } else {
+            return format!("{base}[{index}]");
+        }
+    }
+
+    format!("{base}[{index}]")
 }
 
 pub trait EqlExt {

@@ -38,6 +38,7 @@ pub enum SchematicElem<T = ()> {
     Object3d(Object3D<T>),
     Line3d(Line3d<T>),
     VectorArrow(VectorArrow3d<T>),
+    Window(WindowSchematic),
 }
 
 impl<T> SchematicElem<T> {
@@ -47,8 +48,15 @@ impl<T> SchematicElem<T> {
             SchematicElem::Object3d(obj) => SchematicElem::Object3d(obj.map_aux(|_| ())),
             SchematicElem::Line3d(line) => SchematicElem::Line3d(line.map_aux(|_| ())),
             SchematicElem::VectorArrow(arrow) => SchematicElem::VectorArrow(arrow.map_aux(|_| ())),
+            SchematicElem::Window(window) => SchematicElem::Window(window),
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct WindowSchematic {
+    pub title: Option<String>,
+    pub path: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

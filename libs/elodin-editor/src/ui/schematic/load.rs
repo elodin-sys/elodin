@@ -1,17 +1,22 @@
 use bevy::{ecs::system::SystemParam, prelude::*};
-use bevy_egui::egui::Color32;
+use bevy_egui::egui::{Color32, Id};
 use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::{Container, Tile, TileId};
 use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
 use impeller2_kdl::FromKdl;
 use impeller2_kdl::KdlSchematicError;
-use impeller2_wkt::{DbConfig, Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport};
+use impeller2_wkt::{
+    DbConfig, Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowSchematic,
+};
 use miette::{Diagnostic, miette};
 use std::time::Duration;
-use std::{collections::BTreeMap, path::Path};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
 use crate::{
-    EqlContext,
+    EqlContext, MainCamera,
     object_3d::Object3DState,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
@@ -20,13 +25,31 @@ use crate::{
         dashboard::{NodeUpdaterParams, spawn_dashboard},
         modal::ModalDialog,
         monitor::MonitorPane,
-        plot::GraphBundle,
+        plot::{GraphBundle, LockGroup},
         query_plot::QueryPlotData,
         schematic::EqlExt,
-        tiles::{DashboardPane, GraphPane, Pane, TileState, TreePane, ViewportPane},
+        tiles::{
+            DashboardPane, GraphPane, Pane, SecondaryWindowDescriptor, SecondaryWindowId,
+            SecondaryWindowState, TileState, TreePane, ViewportPane, WindowManager,
+        },
     },
     vector_arrow::VectorArrowState,
 };
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PanelContext {
+    Main,
+    Secondary(SecondaryWindowId),
+}
+
+impl PanelContext {
+    fn lock_group(self) -> LockGroup {
+        match self {
+            PanelContext::Main => LockGroup::Global,
+            PanelContext::Secondary(id) => LockGroup::Secondary(id.0),
+        }
+    }
+}
 
 #[derive(Component)]
 pub struct SyncedViewport;
@@ -34,7 +57,7 @@ pub struct SyncedViewport;
 #[derive(SystemParam)]
 pub struct LoadSchematicParams<'w, 's> {
     pub commands: Commands<'w, 's>,
-    pub tile_state: ResMut<'w, TileState>,
+    pub windows: ResMut<'w, WindowManager>,
     pub asset_server: Res<'w, AssetServer>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub materials: ResMut<'w, Assets<StandardMaterial>>,
@@ -44,6 +67,7 @@ pub struct LoadSchematicParams<'w, 's> {
     pub eql: Res<'w, EqlContext>,
     pub selected_object: ResMut<'w, SelectedObject>,
     pub node_updater_params: NodeUpdaterParams<'w, 's>,
+    cameras: Query<'w, 's, &'static mut Camera>,
     objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
     vector_arrows: Query<'w, 's, Entity, With<VectorArrowState>>,
     grid_lines: Query<'w, 's, Entity, With<InfiniteGrid>>,
@@ -81,8 +105,64 @@ pub fn sync_schematic(
         }) else {
             return;
         };
-        params.load_schematic(&schematic);
+        params.load_schematic(&schematic, None);
     }
+}
+
+fn resolve_window_descriptor(
+    window: &WindowSchematic,
+    base_dir: Option<&Path>,
+) -> Option<SecondaryWindowDescriptor> {
+    let mut resolved = PathBuf::from(&window.path);
+
+    if resolved.as_os_str().is_empty() {
+        return None;
+    }
+
+    if resolved.is_relative() {
+        if let Some(base) = base_dir {
+            resolved = base.join(resolved);
+        } else if let Ok(cwd) = std::env::current_dir() {
+            resolved = cwd.join(resolved);
+        }
+    }
+
+    Some(SecondaryWindowDescriptor {
+        path: resolved,
+        title: window.title.clone(),
+    })
+}
+
+fn collect_graph_entities(tile_state: &TileState) -> Vec<Entity> {
+    fn visit(tree: &egui_tiles::Tree<Pane>, tile_id: egui_tiles::TileId, out: &mut Vec<Entity>) {
+        let Some(tile) = tree.tiles.get(tile_id) else {
+            return;
+        };
+
+        match tile {
+            Tile::Pane(Pane::Graph(graph)) => out.push(graph.id),
+            Tile::Pane(_) => {}
+            Tile::Container(container) => match container {
+                egui_tiles::Container::Tabs(tabs) => {
+                    for child in &tabs.children {
+                        visit(tree, *child, out);
+                    }
+                }
+                egui_tiles::Container::Linear(linear) => {
+                    for child in &linear.children {
+                        visit(tree, *child, out);
+                    }
+                }
+                _ => {}
+            },
+        }
+    }
+
+    let mut entities = Vec::new();
+    if let Some(root) = tile_state.tree.root() {
+        visit(&tile_state.tree, root, &mut entities);
+    }
+    entities
 }
 
 pub fn render_diag(diagnostic: &dyn Diagnostic) -> String {
@@ -133,16 +213,24 @@ pub fn load_schematic_file(
     });
     if let Ok(kdl) = std::fs::read_to_string(path) {
         let schematic = impeller2_wkt::Schematic::from_kdl(&kdl)?;
-        params.load_schematic(&schematic);
+        params.load_schematic(&schematic, path.parent());
     }
     Ok(())
 }
 
 impl LoadSchematicParams<'_, '_> {
-    pub fn load_schematic(&mut self, schematic: &Schematic) {
+    pub fn load_schematic(&mut self, schematic: &Schematic, base_dir: Option<&Path>) {
         self.render_layer_alloc.free_all();
-        self.tile_state
-            .clear(&mut self.commands, &mut self.selected_object);
+        for secondary in self.windows.take_secondary() {
+            for graph in secondary.graph_entities {
+                self.commands.entity(graph).despawn();
+            }
+            if let Some(entity) = secondary.window_entity {
+                self.commands.entity(entity).despawn();
+            }
+        }
+        let mut main_state = self.windows.take_main();
+        main_state.clear(&mut self.commands, &mut self.selected_object);
         self.hdr_enabled.0 = false;
         for entity in self.objects_3d.iter() {
             self.commands.entity(entity).despawn();
@@ -154,10 +242,12 @@ impl LoadSchematicParams<'_, '_> {
         for entity in self.grid_lines.iter() {
             self.commands.entity(entity).despawn();
         }
+        let mut secondary_descriptors: Vec<SecondaryWindowDescriptor> = Vec::new();
+
         for elem in &schematic.elems {
             match elem {
                 impeller2_wkt::SchematicElem::Panel(p) => {
-                    self.spawn_panel(p, None);
+                    self.spawn_panel(&mut main_state, p, None, PanelContext::Main);
                 }
                 impeller2_wkt::SchematicElem::Object3d(object_3d) => {
                     self.spawn_object_3d(object_3d.clone());
@@ -168,8 +258,84 @@ impl LoadSchematicParams<'_, '_> {
                 impeller2_wkt::SchematicElem::VectorArrow(vector_arrow) => {
                     self.spawn_vector_arrow(vector_arrow.clone());
                 }
+                impeller2_wkt::SchematicElem::Window(window) => {
+                    if let Some(descriptor) = resolve_window_descriptor(window, base_dir) {
+                        secondary_descriptors.push(descriptor);
+                    }
+                }
             }
         }
+
+        self.windows.replace_main(main_state);
+
+        let mut secondary_states = Vec::new();
+
+        for descriptor in secondary_descriptors {
+            match std::fs::read_to_string(&descriptor.path) {
+                Ok(kdl) => match impeller2_wkt::Schematic::from_kdl(&kdl) {
+                    Ok(sec_schematic) => {
+                        let id = self.windows.alloc_id();
+                        let mut tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
+                        for elem in &sec_schematic.elems {
+                            if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
+                                self.spawn_panel(
+                                    &mut tile_state,
+                                    panel,
+                                    None,
+                                    PanelContext::Secondary(id),
+                                );
+                            }
+                        }
+
+                        let graph_entities = collect_graph_entities(&tile_state);
+                        if graph_entities.is_empty() {
+                            warn!(
+                                path = %descriptor.path.display(),
+                                "Secondary schematic produced no graphs"
+                            );
+                        } else {
+                            info!(
+                                path = %descriptor.path.display(),
+                                graphs = graph_entities.len(),
+                                "Loaded secondary schematic"
+                            );
+                        }
+
+                        for &graph in &graph_entities {
+                            if let Ok(mut camera) = self.cameras.get_mut(graph) {
+                                camera.is_active = false;
+                            }
+                        }
+
+                        secondary_states.push(SecondaryWindowState {
+                            id,
+                            descriptor,
+                            tile_state,
+                            window_entity: None,
+                            graph_entities,
+                        });
+                    }
+                    Err(err) => {
+                        let diag = render_diag(&err);
+                        let report = miette!(err.clone());
+                        warn!(
+                            ?report,
+                            path = %descriptor.path.display(),
+                            "Failed to parse secondary schematic: \n{diag}"
+                        );
+                    }
+                },
+                Err(err) => {
+                    warn!(
+                        ?err,
+                        path = %descriptor.path.display(),
+                        "Failed to read secondary schematic"
+                    );
+                }
+            }
+        }
+
+        self.windows.replace_secondary(secondary_states);
     }
 
     pub fn spawn_object_3d(&mut self, object_3d: Object3D) {
@@ -216,7 +382,13 @@ impl LoadSchematicParams<'_, '_> {
         ));
     }
 
-    pub fn spawn_panel(&mut self, panel: &Panel, parent_id: Option<TileId>) -> Option<TileId> {
+    fn spawn_panel(
+        &mut self,
+        tile_state: &mut TileState,
+        panel: &Panel,
+        parent_id: Option<TileId>,
+        context: PanelContext,
+    ) -> Option<TileId> {
         match panel {
             Panel::Viewport(viewport) => {
                 let label = viewport_label(viewport);
@@ -231,11 +403,7 @@ impl LoadSchematicParams<'_, '_> {
                     label,
                 );
                 self.hdr_enabled.0 |= viewport.hdr;
-                self.tile_state.insert_tile(
-                    Tile::Pane(Pane::Viewport(pane)),
-                    parent_id,
-                    viewport.active,
-                )
+                tile_state.insert_tile(Tile::Pane(Pane::Viewport(pane)), parent_id, viewport.active)
             }
             Panel::HSplit(split) | Panel::VSplit(split) => {
                 let linear = egui_tiles::Linear::new(
@@ -246,16 +414,16 @@ impl LoadSchematicParams<'_, '_> {
                     },
                     vec![],
                 );
-                let tile_id = self.tile_state.insert_tile(
+                let tile_id = tile_state.insert_tile(
                     Tile::Container(Container::Linear(linear)),
                     parent_id,
                     false,
                 );
                 if let (Some(tile_id), Some(name)) = (tile_id, split.name.clone()) {
-                    self.tile_state.container_titles.insert(tile_id, name);
+                    tile_state.container_titles.insert(tile_id, name);
                 }
                 for (i, panel) in split.panels.iter().enumerate() {
-                    let child_id = self.spawn_panel(panel, tile_id);
+                    let child_id = self.spawn_panel(tile_state, panel, tile_id, context);
                     let Some(tile_id) = tile_id else {
                         continue;
                     };
@@ -267,7 +435,7 @@ impl LoadSchematicParams<'_, '_> {
                         continue;
                     };
                     let Some(Tile::Container(Container::Linear(linear))) =
-                        self.tile_state.tree.tiles.get_mut(tile_id)
+                        tile_state.tree.tiles.get_mut(tile_id)
                     else {
                         continue;
                     };
@@ -276,14 +444,14 @@ impl LoadSchematicParams<'_, '_> {
                 tile_id
             }
             Panel::Tabs(tabs) => {
-                let tile_id = self.tile_state.insert_tile(
+                let tile_id = tile_state.insert_tile(
                     Tile::Container(Container::new_tabs(vec![])),
                     parent_id,
                     false,
                 );
 
                 tabs.iter().for_each(|panel| {
-                    self.spawn_panel(panel, tile_id);
+                    self.spawn_panel(tile_state, panel, tile_id, context);
                 });
                 tile_id
             }
@@ -293,7 +461,34 @@ impl LoadSchematicParams<'_, '_> {
                     .0
                     .parse_str(&graph.eql)
                     .inspect_err(|err| {
-                        warn!(?err, "error parsing graph eql");
+                        let (ctx, path) = match context {
+                            PanelContext::Main => ("main".to_string(), None),
+                            PanelContext::Secondary(id) => {
+                                let path = self
+                                    .windows
+                                    .get_secondary(id)
+                                    .map(|s| s.descriptor.path.display().to_string());
+                                (format!("secondary({})", id.0), path)
+                            }
+                        };
+                        if let Some(p) = path {
+                            warn!(
+                                ?err,
+                                eql = %graph.eql,
+                                name = ?graph.name,
+                                context = %ctx,
+                                path = %p,
+                                "error parsing graph eql"
+                            );
+                        } else {
+                            warn!(
+                                ?err,
+                                eql = %graph.eql,
+                                name = ?graph.name,
+                                context = %ctx,
+                                "error parsing graph eql"
+                            );
+                        }
                     })
                     .ok()?;
                 let mut component_vec = eql.to_graph_components();
@@ -322,23 +517,30 @@ impl LoadSchematicParams<'_, '_> {
                 }
 
                 let graph_label = graph_label(graph);
+                let lock_group = context.lock_group();
+
                 let mut bundle = GraphBundle::new(
                     &mut self.render_layer_alloc,
                     components_tree,
                     graph_label.clone(),
+                    lock_group,
                 );
+                if matches!(context, PanelContext::Secondary(_)) {
+                    bundle.camera.is_active = false;
+                }
                 bundle.graph_state.auto_y_range = graph.auto_y_range;
                 bundle.graph_state.y_range = graph.y_range.clone();
                 bundle.graph_state.graph_type = graph.graph_type;
                 let graph_id = self.commands.spawn(bundle).id();
+                if matches!(context, PanelContext::Secondary(_)) {
+                    self.commands.entity(graph_id).remove::<MainCamera>();
+                }
                 let graph = GraphPane::new(graph_id, graph_label);
-                self.tile_state
-                    .insert_tile(Tile::Pane(Pane::Graph(graph)), parent_id, false)
+                tile_state.insert_tile(Tile::Pane(Pane::Graph(graph)), parent_id, false)
             }
             Panel::ComponentMonitor(monitor) => {
                 let pane = MonitorPane::new("Monitor".to_string(), monitor.component_name.clone());
-                self.tile_state
-                    .insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
+                tile_state.insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
             }
             Panel::QueryTable(data) => {
                 let entity = self
@@ -349,8 +551,7 @@ impl LoadSchematicParams<'_, '_> {
                     })
                     .id();
                 let pane = super::query_table::QueryTablePane { entity };
-                self.tile_state
-                    .insert_tile(Tile::Pane(Pane::QueryTable(pane)), parent_id, false)
+                tile_state.insert_tile(Tile::Pane(Pane::QueryTable(pane)), parent_id, false)
             }
             Panel::ActionPane(action) => {
                 let entity = self
@@ -365,28 +566,26 @@ impl LoadSchematicParams<'_, '_> {
                     entity,
                     label: "Action".to_string(),
                 };
-                self.tile_state
-                    .insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false)
+                tile_state.insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false)
             }
             Panel::Inspector => {
-                self.tile_state
-                    .insert_tile(Tile::Pane(Pane::Inspector), parent_id, false)
+                tile_state.insert_tile(Tile::Pane(Pane::Inspector), parent_id, false)
             }
             Panel::Hierarchy => {
-                self.tile_state
-                    .insert_tile(Tile::Pane(Pane::Hierarchy), parent_id, false)
+                tile_state.insert_tile(Tile::Pane(Pane::Hierarchy), parent_id, false)
             }
             Panel::SchematicTree => {
                 let entity = self.commands.spawn(super::TreeWidgetState::default()).id();
                 let pane = TreePane { entity };
-                self.tile_state
-                    .insert_tile(Tile::Pane(Pane::SchematicTree(pane)), parent_id, false)
+                tile_state.insert_tile(Tile::Pane(Pane::SchematicTree(pane)), parent_id, false)
             }
             Panel::QueryPlot(plot) => {
+                let lock_group = context.lock_group();
                 let graph_bundle = GraphBundle::new(
                     &mut self.render_layer_alloc,
                     BTreeMap::default(),
                     "Query Plot".to_string(),
+                    lock_group,
                 );
                 let entity = self
                     .commands
@@ -397,8 +596,7 @@ impl LoadSchematicParams<'_, '_> {
                     .insert(graph_bundle)
                     .id();
                 let pane = Pane::QueryPlot(super::query_plot::QueryPlotPane { entity, rect: None });
-                self.tile_state
-                    .insert_tile(Tile::Pane(pane), parent_id, false)
+                tile_state.insert_tile(Tile::Pane(pane), parent_id, false)
             }
             Panel::Dashboard(dashboard) => {
                 let Ok(dashboard) = spawn_dashboard(
@@ -412,7 +610,7 @@ impl LoadSchematicParams<'_, '_> {
                 }) else {
                     return None;
                 };
-                self.tile_state.insert_tile(
+                tile_state.insert_tile(
                     Tile::Pane(Pane::Dashboard(DashboardPane {
                         entity: dashboard,
                         label: "dashboard".to_string(),
@@ -459,5 +657,5 @@ pub fn schematic_live_reload(
 ) {
     let Some(rx) = &mut rx.0 else { return };
     let Ok(schematic) = rx.try_recv() else { return };
-    params.load_schematic(&schematic);
+    params.load_schematic(&schematic, None);
 }

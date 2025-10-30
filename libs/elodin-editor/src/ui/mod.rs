@@ -1,17 +1,24 @@
+use std::collections::HashMap;
+
 use bevy::{
+    app::AppExit,
     ecs::{
         query::QueryData,
         system::{SystemParam, SystemState},
     },
     input::keyboard::Key,
     prelude::*,
-    render::camera::Viewport,
-    window::PrimaryWindow,
+    render::camera::{RenderTarget, Viewport},
+    window::{
+        EnabledButtons, PresentMode, PrimaryWindow, WindowCloseRequested, WindowRef,
+        WindowResolution,
+    },
 };
 use bevy_egui::{
     EguiContext, EguiContexts,
     egui::{self, Color32, Label, Margin, RichText},
 };
+use egui_tiles::{Container, Tile};
 
 use big_space::GridCell;
 use plot_3d::LinePlot3dPlugin;
@@ -127,6 +134,14 @@ pub struct EntityPair {
     pub impeller: ComponentId,
 }
 
+#[derive(Component)]
+struct SecondaryWindowMarker {
+    id: tiles::SecondaryWindowId,
+}
+
+#[derive(Component)]
+struct ActiveSecondaryWindow;
+
 pub fn shortcuts(
     mut paused: ResMut<Paused>,
     command_palette_state: Res<CommandPaletteState>,
@@ -189,7 +204,7 @@ impl Plugin for UiPlugin {
             .init_resource::<EntityFilter>()
             .init_resource::<ComponentFilter>()
             .init_resource::<InspectorAnchor>()
-            .init_resource::<tiles::TileState>()
+            .init_resource::<tiles::WindowManager>()
             .init_resource::<FullscreenState>()
             .init_resource::<SettingModalState>()
             .init_resource::<HdrEnabled>()
@@ -200,7 +215,18 @@ impl Plugin for UiPlugin {
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, shortcuts)
+            .add_systems(Update, handle_primary_close.before(render_layout))
             .add_systems(Update, render_layout)
+            .add_systems(Update, sync_secondary_windows.after(render_layout))
+            .add_systems(Update, handle_secondary_close.after(sync_secondary_windows))
+            .add_systems(
+                Update,
+                set_secondary_camera_viewport.after(sync_secondary_windows),
+            )
+            .add_systems(
+                Update,
+                render_secondary_windows.after(handle_secondary_close),
+            )
             .add_systems(Update, sync_hdr)
             .add_systems(Update, tiles::shortcuts)
             .add_systems(Update, set_camera_viewport.after(render_layout))
@@ -522,7 +548,7 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
                 ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");
-                ui.add_widget::<tiles::TileSystem>(world, "tile_system");
+                ui.add_widget_with::<tiles::TileSystem>(world, "tile_system", None);
             });
     }
 }
@@ -603,6 +629,258 @@ pub fn render_layout(world: &mut World) {
     world.add_root_widget::<CommandPalette>("command_palette");
 }
 
+fn sync_secondary_windows(
+    mut commands: Commands,
+    mut windows: ResMut<tiles::WindowManager>,
+    existing: Query<(Entity, &SecondaryWindowMarker)>,
+    mut cameras: Query<&mut Camera>,
+) {
+    let mut existing_map: HashMap<tiles::SecondaryWindowId, Entity> = HashMap::new();
+    for (entity, marker) in existing.iter() {
+        existing_map.insert(marker.id, entity);
+    }
+
+    for (id, entity) in existing_map.clone() {
+        if windows.get_secondary(id).is_none() {
+            commands.entity(entity).despawn();
+            existing_map.remove(&id);
+        }
+    }
+
+    for state in windows.secondary_mut().iter_mut() {
+        if let Some(entity) = state.window_entity
+            && existing_map.get(&state.id).copied() != Some(entity)
+        {
+            state.window_entity = None;
+        }
+
+        if let Some(entity) = state.window_entity {
+            existing_map.insert(state.id, entity);
+            let window_ref = WindowRef::Entity(entity);
+            for (index, &graph) in state.graph_entities.iter().enumerate() {
+                if let Ok(mut camera) = cameras.get_mut(graph) {
+                    camera.target = RenderTarget::Window(window_ref);
+                    camera.is_active = true;
+                    camera.order = 10 + index as isize;
+                }
+            }
+            continue;
+        } else {
+            for &graph in &state.graph_entities {
+                if let Ok(mut camera) = cameras.get_mut(graph) {
+                    camera.is_active = false;
+                }
+            }
+        }
+
+        let title = compute_secondary_window_title(state);
+
+        let window_entity = commands
+            .spawn((
+                Window {
+                    title,
+                    resolution: WindowResolution::new(640.0, 480.0),
+                    present_mode: PresentMode::AutoVsync,
+                    enabled_buttons: EnabledButtons {
+                        close: true,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                SecondaryWindowMarker { id: state.id },
+            ))
+            .id();
+
+        state.window_entity = Some(window_entity);
+        existing_map.insert(state.id, window_entity);
+        let window_ref = WindowRef::Entity(window_entity);
+        for (index, &graph) in state.graph_entities.iter().enumerate() {
+            if let Ok(mut camera) = cameras.get_mut(graph) {
+                camera.target = RenderTarget::Window(window_ref);
+                camera.is_active = true;
+                camera.order = 10 + index as isize;
+            }
+        }
+    }
+}
+
+fn handle_secondary_close(
+    mut events: EventReader<WindowCloseRequested>,
+    mut windows: ResMut<tiles::WindowManager>,
+) {
+    let mut to_remove = Vec::new();
+    for evt in events.read() {
+        let entity = evt.window;
+        if let Some(id) = windows.find_secondary_by_entity(entity) {
+            to_remove.push(id);
+        }
+    }
+
+    if !to_remove.is_empty() {
+        windows
+            .secondary_mut()
+            .retain(|state| !to_remove.contains(&state.id));
+    }
+}
+
+fn handle_primary_close(
+    mut events: EventReader<WindowCloseRequested>,
+    primary: Query<Entity, With<PrimaryWindow>>,
+    mut exit: EventWriter<AppExit>,
+) {
+    let Some(primary_entity) = primary.iter().next() else {
+        return;
+    };
+
+    for evt in events.read() {
+        let entity = evt.window;
+        if entity == primary_entity {
+            exit.write(AppExit::Success);
+        }
+    }
+}
+
+fn secondary_window_container_title(state: &tiles::SecondaryWindowState) -> Option<String> {
+    let root = state.tile_state.tree.root()?;
+    find_named_container_title(
+        &state.tile_state.tree,
+        &state.tile_state.container_titles,
+        root,
+    )
+}
+
+fn find_named_container_title(
+    tree: &egui_tiles::Tree<tiles::Pane>,
+    titles: &HashMap<egui_tiles::TileId, String>,
+    tile_id: egui_tiles::TileId,
+) -> Option<String> {
+    if let Some(title) = titles
+        .get(&tile_id)
+        .and_then(|value| normalize_title(value))
+    {
+        return Some(title);
+    }
+
+    let tile = tree.tiles.get(tile_id)?;
+    if let Tile::Container(container) = tile {
+        match container {
+            Container::Tabs(tabs) => {
+                for child in &tabs.children {
+                    if let Some(found) = find_named_container_title(tree, titles, *child) {
+                        return Some(found);
+                    }
+                }
+            }
+            Container::Linear(linear) => {
+                for child in &linear.children {
+                    if let Some(found) = find_named_container_title(tree, titles, *child) {
+                        return Some(found);
+                    }
+                }
+            }
+            Container::Grid(grid) => {
+                for child in grid.children() {
+                    if let Some(found) = find_named_container_title(tree, titles, *child) {
+                        return Some(found);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn normalize_title(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn friendly_title_from_stem(stem: &str) -> Option<String> {
+    let words: Vec<String> = stem
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| {
+            let mut chars = segment.chars();
+            let mut word = String::new();
+            if let Some(first) = chars.next() {
+                word.extend(first.to_uppercase());
+            }
+            for ch in chars {
+                word.extend(ch.to_lowercase());
+            }
+            word
+        })
+        .filter(|word| !word.is_empty())
+        .collect();
+
+    if words.is_empty() {
+        None
+    } else {
+        Some(words.join(" "))
+    }
+}
+
+fn render_secondary_windows(world: &mut World) {
+    let window_entries: Vec<(tiles::SecondaryWindowId, Entity, String)> = {
+        let windows = world.resource::<tiles::WindowManager>();
+        windows
+            .secondary()
+            .iter()
+            .filter_map(|state| {
+                state
+                    .window_entity
+                    .map(|entity| (state.id, entity, compute_secondary_window_title(state)))
+            })
+            .collect()
+    };
+
+    for (id, entity, desired_title) in window_entries {
+        let Ok(mut entity_mut) = world.get_entity_mut(entity) else {
+            continue;
+        };
+
+        if let Some(mut window) = entity_mut.get_mut::<Window>()
+            && window.title != desired_title
+        {
+            window.title = desired_title;
+        }
+
+        entity_mut.insert(ActiveSecondaryWindow);
+
+        let widget_id = format!("secondary_window_{}", id.0);
+        world.add_root_widget_with::<tiles::TileSystem, With<ActiveSecondaryWindow>>(
+            &widget_id,
+            Some(id),
+        );
+
+        if let Ok(mut entity_mut) = world.get_entity_mut(entity) {
+            entity_mut.remove::<ActiveSecondaryWindow>();
+        }
+    }
+}
+
+pub(crate) fn compute_secondary_window_title(state: &tiles::SecondaryWindowState) -> String {
+    state
+        .descriptor
+        .title
+        .clone()
+        .or_else(|| secondary_window_container_title(state))
+        .or_else(|| {
+            state
+                .descriptor
+                .path
+                .file_stem()
+                .and_then(|s| friendly_title_from_stem(&s.to_string_lossy()))
+        })
+        .filter(|title| !title.is_empty())
+        .unwrap_or_else(|| "Panel".to_string())
+}
+
 #[derive(QueryData)]
 #[query_data(mutable)]
 struct CameraViewportQuery {
@@ -655,6 +933,60 @@ fn set_camera_viewport(
             physical_size: UVec2::new(viewport_size.x as u32, viewport_size.y as u32),
             depth: 0.0..1.0,
         });
+    }
+}
+
+fn set_secondary_camera_viewport(
+    windows: Res<tiles::WindowManager>,
+    mut cameras: Query<(&mut Camera, &ViewportRect)>,
+    window_query: Query<(&Window, &bevy_egui::EguiContextSettings)>,
+) {
+    for state in windows.secondary() {
+        let Some(window_entity) = state.window_entity else {
+            continue;
+        };
+
+        let Ok((window, egui_settings)) = window_query.get(window_entity) else {
+            continue;
+        };
+        let scale_factor = window.scale_factor() * egui_settings.scale_factor;
+
+        for (index, &graph) in state.graph_entities.iter().enumerate() {
+            let Ok((mut camera, viewport_rect)) = cameras.get_mut(graph) else {
+                continue;
+            };
+
+            let Some(available_rect) = viewport_rect.0 else {
+                camera.is_active = false;
+                camera.viewport = Some(Viewport {
+                    physical_position: UVec2::new(0, 0),
+                    physical_size: UVec2::new(1, 1),
+                    depth: 0.0..1.0,
+                });
+                continue;
+            };
+
+            let viewport_pos = available_rect.left_top().to_vec2() * scale_factor;
+            let viewport_size = available_rect.size() * scale_factor;
+
+            if viewport_size.x < 1.0 || viewport_size.y < 1.0 {
+                camera.is_active = false;
+                camera.viewport = Some(Viewport {
+                    physical_position: UVec2::new(0, 0),
+                    physical_size: UVec2::new(1, 1),
+                    depth: 0.0..1.0,
+                });
+                continue;
+            }
+
+            camera.is_active = true;
+            camera.order = 10 + index as isize;
+            camera.viewport = Some(Viewport {
+                physical_position: UVec2::new(viewport_pos.x as u32, viewport_pos.y as u32),
+                physical_size: UVec2::new(viewport_size.x as u32, viewport_size.y as u32),
+                depth: 0.0..1.0,
+            });
+        }
     }
 }
 

@@ -1,0 +1,8 @@
+    hsplit name="Rate Control Panel" {
+        vsplit {
+            graph "drone.rate_pid_state"
+        }
+        vsplit {
+            graph "drone.gyro, drone.ang_vel_setpoint" name="Drone: rate_control"
+        }
+    }
