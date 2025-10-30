@@ -31,7 +31,7 @@ pub struct GraphBundle {
     pub main_camera: MainCamera,
 }
 
-#[derive(Clone, Debug, Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LockGroup {
     Global,
     Secondary(u32),
@@ -43,6 +43,7 @@ impl Default for LockGroup {
     }
 }
 
+#[derive(Clone, Debug, Component)]
 pub struct GraphState {
     pub components: BTreeMap<ComponentPath, GraphStateComponent>,
     pub enabled_lines: BTreeMap<(ComponentPath, usize), (Entity, Color32)>,

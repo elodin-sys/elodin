@@ -23,10 +23,8 @@ use bevy::{
     },
     math::{DVec2, Rect, Vec2},
     prelude::{Component, ResMut},
-    render::camera::{
-        Camera, OrthographicProjection, Projection, RenderTarget, ScalingMode, WindowRef,
-    },
-    window::{PrimaryWindow, Window},
+    render::camera::{Camera, OrthographicProjection, Projection, RenderTarget, ScalingMode},
+    window::{PrimaryWindow, Window, WindowRef},
 };
 use bevy_egui::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke};
 use impeller2::types::Timestamp;
@@ -400,6 +398,8 @@ impl TimeseriesPlot {
         selected_object: &mut SelectedObject,
         time_range_behavior: &mut TimeRangeBehavior,
     ) {
+        egui_material_icons::initialize(ui.ctx());
+
         let response = ui.allocate_rect(self.rect, egui::Sense::click_and_drag());
         let pointer_pos = ui.input(|i| i.pointer.latest_pos());
 
@@ -736,7 +736,7 @@ pub fn auto_y_bounds(
     mut lines: ResMut<Assets<Line>>,
     mut xy_lines: ResMut<Assets<XYLine>>,
 ) {
-    for mut graph_state in &mut graph_states {
+    for mut graph_state in graph_states.iter_mut() {
         if graph_state.auto_y_range {
             let mut y_min: Option<f32> = None;
             let mut y_max: Option<f32> = None;
@@ -778,7 +778,7 @@ pub fn sync_graphs(
     mut collected_graph_data: ResMut<CollectedGraphData>,
     mut commands: Commands,
 ) {
-    for mut graph_state in &mut graph_states {
+    for mut graph_state in graph_states.iter_mut() {
         let graph_state = &mut *graph_state;
 
         for (component_path, component_values) in &graph_state.components {
@@ -961,18 +961,18 @@ pub fn zoom_graph(
         return;
     }
 
-    let Ok(primary_entity) = primary_window.get_single() else {
+    let Ok(primary_entity) = primary_window.single() else {
         return;
     };
 
-    for (mut graph_state, camera) in &mut query {
+    for (mut graph_state, camera) in query.iter_mut() {
         let Some(window_entity) = camera_window_entity(camera, primary_entity) else {
             continue;
         };
         let Some(scroll_offset) = scroll_offsets.get(&window_entity) else {
             continue;
         };
-        let Ok(window) = windows.get(window_entity) else {
+        let Ok((_, window)) = windows.get(window_entity) else {
             continue;
         };
         let Some(cursor_pos) = window.physical_cursor_position() else {
@@ -1039,18 +1039,18 @@ pub fn pan_graph(
     mut commands: Commands,
     mut xclock: ResMut<XSyncClock>,
 ) {
-    let Ok(primary_entity) = primary_window.get_single() else {
+    let Ok(primary_entity) = primary_window.single() else {
         return;
     };
 
-    for (entity, mut graph_state, camera, last_pos) in &mut query {
+    for (entity, mut graph_state, camera, last_pos) in query.iter_mut() {
         let Some(window_entity) = camera_window_entity(camera, primary_entity) else {
             if let Ok(mut e) = commands.get_entity(entity) {
                 e.try_insert(LastPos(None));
             }
             continue;
         };
-        let Ok(window) = windows.get(window_entity) else {
+        let Ok((_, window)) = windows.get(window_entity) else {
             if let Ok(mut e) = commands.get_entity(entity) {
                 e.try_insert(LastPos(None));
             }
@@ -1143,15 +1143,15 @@ pub fn reset_graph(
             .map(|t| t.elapsed() < Duration::from_millis(250))
             .unwrap_or_default()
     {
-        let Ok(primary_entity) = primary_window.get_single() else {
+        let Ok(primary_entity) = primary_window.single() else {
             return;
         };
 
-        for (mut graph_state, camera) in &mut query {
+        for (mut graph_state, camera) in query.iter_mut() {
             let Some(window_entity) = camera_window_entity(camera, primary_entity) else {
                 continue;
             };
-            let Ok(window) = windows.get(window_entity) else {
+            let Ok((_, window)) = windows.get(window_entity) else {
                 continue;
             };
             let Some(cursor_pos) = window.physical_cursor_position() else {
@@ -1207,9 +1207,7 @@ fn camera_window_entity(camera: &Camera, primary_entity: Entity) -> Option<Entit
         RenderTarget::Window(window_ref) => match window_ref {
             WindowRef::Primary => Some(primary_entity),
             WindowRef::Entity(entity) => Some(*entity),
-            _ => None,
         },
-        RenderTarget::Default => Some(primary_entity),
         _ => None,
     }
 }
