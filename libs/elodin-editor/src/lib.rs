@@ -823,10 +823,10 @@ fn clear_state_new_connection(
         .clear(&mut commands, &mut selected_object);
     for secondary in windows.take_secondary() {
         for graph in secondary.graph_entities {
-            let _ = commands.entity(graph).despawn();
+            commands.entity(graph).despawn();
         }
         if let Some(entity) = secondary.window_entity {
-            let _ = commands.entity(entity).despawn();
+            commands.entity(entity).despawn();
         }
     }
     windows.replace_secondary(Vec::new());

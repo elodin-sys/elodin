@@ -769,7 +769,7 @@ impl GraphPane {
 impl TileState {
     pub fn new(tree_id: Id) -> Self {
         Self {
-            tree: egui_tiles::Tree::new_tabs(tree_id.clone(), vec![]),
+            tree: egui_tiles::Tree::new_tabs(tree_id, vec![]),
             tree_actions: SmallVec::new(),
             graphs: HashMap::new(),
             container_titles: HashMap::new(),
@@ -778,7 +778,7 @@ impl TileState {
     }
 
     fn reset_tree(&mut self) {
-        self.tree = egui_tiles::Tree::new_tabs(self.tree_id.clone(), vec![]);
+        self.tree = egui_tiles::Tree::new_tabs(self.tree_id, vec![]);
     }
 }
 
@@ -1146,9 +1146,7 @@ impl<'w, 's> TileSystem<'w, 's> {
             ),
         };
 
-        let Some(is_empty_tile_tree) = is_empty else {
-            return None;
-        };
+        let is_empty_tile_tree = is_empty?;
 
         let icons = TileIcons {
             add: contexts.add_image(images.icon_add.clone_weak()),

@@ -214,10 +214,10 @@ impl LoadSchematicParams<'_, '_> {
         self.render_layer_alloc.free_all();
         for secondary in self.windows.take_secondary() {
             for graph in secondary.graph_entities {
-                let _ = self.commands.entity(graph).despawn();
+                self.commands.entity(graph).despawn();
             }
             if let Some(entity) = secondary.window_entity {
-                let _ = self.commands.entity(entity).despawn();
+                self.commands.entity(entity).despawn();
             }
         }
         let mut main_state = self.windows.take_main();

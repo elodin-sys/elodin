@@ -641,16 +641,16 @@ fn sync_secondary_windows(
 
     for (id, entity) in existing_map.clone() {
         if windows.get_secondary(id).is_none() {
-            let _ = commands.entity(entity).despawn();
+            commands.entity(entity).despawn();
             existing_map.remove(&id);
         }
     }
 
     for state in windows.secondary_mut().iter_mut() {
-        if let Some(entity) = state.window_entity {
-            if existing_map.get(&state.id).copied() != Some(entity) {
-                state.window_entity = None;
-            }
+        if let Some(entity) = state.window_entity
+            && existing_map.get(&state.id).copied() != Some(entity)
+        {
+            state.window_entity = None;
         }
 
         if let Some(entity) = state.window_entity {
@@ -769,7 +769,6 @@ fn render_secondary_windows(world: &mut World) {
             continue;
         };
         entity_mut.insert(ActiveSecondaryWindow);
-        drop(entity_mut);
 
         let widget_id = format!("secondary_window_{}", id.0);
         world.add_root_widget_with::<tiles::TileSystem, With<ActiveSecondaryWindow>>(
