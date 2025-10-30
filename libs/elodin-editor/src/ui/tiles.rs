@@ -7,7 +7,7 @@ use bevy::{
 use bevy_editor_cam::prelude::{EditorCam, EnabledMotion, OrbitConstraint};
 use bevy_egui::{
     EguiContexts,
-    egui::{self, Color32, CornerRadius, Frame, Id, RichText, Stroke, Ui, Visuals, vec2},
+    egui::{self, Color32, CornerRadius, Frame, Id, RichText, Stroke, TopBottomPanel, Ui, Visuals, vec2},
 };
 use bevy_render::{
     camera::{Exposure, PhysicalCameraParameters},
@@ -1255,12 +1255,48 @@ impl RootWidgetSystem for TileSystem<'_, '_> {
             colors::TRANSPARENT
         };
 
+        let header = target.and_then(|id| {
+            world
+                .get_resource::<WindowManager>()
+                .and_then(|windows| windows.get_secondary(id))
+                .map(|state| {
+                    state
+                        .descriptor
+                        .title
+                        .clone()
+                        .or_else(|| {
+                            state
+                                .descriptor
+                                .path
+                                .file_stem()
+                                .map(|s| s.to_string_lossy().into_owned())
+                        })
+                        .unwrap_or_else(|| "Panel".to_string())
+                })
+                .map(|title| (id, title))
+        });
+
+        if let Some((id, title)) = header.as_ref() {
+            egui::TopBottomPanel::top(format!("secondary_header_{:?}", id))
+                .exact_height(30.0)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        // leave room for native window buttons on macOS
+                        ui.add_space(60.0);
+                        ui.label(RichText::new(title).strong());
+                    });
+                });
+        }
+
         let central = egui::CentralPanel::default().frame(Frame {
             fill: fill_color,
             ..Default::default()
         });
 
         central.show(ctx, |ui| {
+            if header.is_some() {
+                ui.add_space(6.0);
+            }
             Self::render_panel_contents(
                 world,
                 ui,

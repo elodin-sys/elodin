@@ -696,7 +696,7 @@ fn sync_secondary_windows(
                     resolution: WindowResolution::new(640.0, 480.0),
                     present_mode: PresentMode::AutoVsync,
                     enabled_buttons: EnabledButtons {
-                        close: false,
+                        close: true,
                         ..Default::default()
                     },
                     ..Default::default()
@@ -722,18 +722,18 @@ fn handle_secondary_close(
     mut events: EventReader<WindowCloseRequested>,
     mut windows: ResMut<tiles::WindowManager>,
 ) {
-    let mut reopen = Vec::new();
+    let mut to_remove = Vec::new();
     for evt in events.read() {
         let entity = evt.window;
         if let Some(id) = windows.find_secondary_by_entity(entity) {
-            reopen.push(id);
+            to_remove.push(id);
         }
     }
 
-    for id in reopen {
-        if let Some(state) = windows.get_secondary_mut(id) {
-            state.window_entity = None;
-        }
+    if !to_remove.is_empty() {
+        windows
+            .secondary_mut()
+            .retain(|state| !to_remove.contains(&state.id));
     }
 }
 
