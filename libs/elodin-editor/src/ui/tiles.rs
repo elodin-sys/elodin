@@ -35,6 +35,7 @@ use super::{
     query_plot::QueryPlotData,
     query_table::{QueryTableData, QueryTablePane, QueryTableWidget},
     schematic::{graph_label, viewport_label},
+    secondary_window,
     video_stream::{IsTileVisible, VideoDecoderHandle},
     widgets::{RootWidgetSystem, WidgetSystem, WidgetSystemExt},
 };
@@ -1255,21 +1256,34 @@ impl RootWidgetSystem for TileSystem<'_, '_> {
             colors::TRANSPARENT
         };
 
-        egui::CentralPanel::default()
-            .frame(Frame {
-                fill: fill_color,
-                ..Default::default()
-            })
-            .show(ctx, |ui| {
-                Self::render_panel_contents(
-                    world,
-                    ui,
-                    target,
-                    icons.clone(),
-                    is_empty_tile_tree,
-                    read_only,
-                );
-            });
+        let central = egui::CentralPanel::default().frame(Frame {
+            fill: fill_color,
+            ..Default::default()
+        });
+
+        let padding = if target.is_some() {
+            world
+                .get_resource::<secondary_window::SecondaryTitlePadding>()
+                .map(|p| p.0)
+                .unwrap_or(false)
+        } else {
+            false
+        };
+
+        central.show(ctx, |ui| {
+            if padding {
+                ui.add_space(24.0);
+            }
+
+            Self::render_panel_contents(
+                world,
+                ui,
+                target,
+                icons.clone(),
+                is_empty_tile_tree,
+                read_only,
+            );
+        });
     }
 }
 
@@ -1751,10 +1765,11 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 let egui_tiles::Tile::Pane(pane) = tile else {
                     continue;
                 };
+                let visible = read_only || active_tiles.contains(tile_id);
                 match pane {
                     Pane::Viewport(viewport) => {
                         let Some(cam) = viewport.camera else { continue };
-                        if active_tiles.contains(tile_id) {
+                        if visible {
                             if let Ok(mut cam) = state_mut.commands.get_entity(cam) {
                                 cam.try_insert(ViewportRect(viewport.rect));
                             }
@@ -1766,7 +1781,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     Pane::Inspector => {}
                     Pane::SchematicTree(_) => {}
                     Pane::Graph(graph) => {
-                        if active_tiles.contains(tile_id) {
+                        if visible {
                             if let Ok(mut cam) = state_mut.commands.get_entity(graph.id) {
                                 cam.try_insert(ViewportRect(graph.rect));
                             }
@@ -1777,7 +1792,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     Pane::Monitor(_) => {}
                     Pane::QueryTable(_) => {}
                     Pane::QueryPlot(query_plot) => {
-                        if active_tiles.contains(tile_id) {
+                        if visible {
                             if let Ok(mut cam) = state_mut.commands.get_entity(query_plot.entity) {
                                 cam.try_insert(ViewportRect(query_plot.rect));
                             }
@@ -1789,13 +1804,13 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     Pane::ActionTile(_) => {}
                     Pane::VideoStream(stream) => {
                         if let Ok(mut stream) = state_mut.commands.get_entity(stream.entity) {
-                            stream.try_insert(IsTileVisible(active_tiles.contains(tile_id)));
+                            stream.try_insert(IsTileVisible(visible));
                         }
                     }
 
                     Pane::Dashboard(dash) => {
                         if let Ok(mut stream) = state_mut.commands.get_entity(dash.entity) {
-                            stream.try_insert(IsTileVisible(active_tiles.contains(tile_id)));
+                            stream.try_insert(IsTileVisible(visible));
                         }
                     }
                 }

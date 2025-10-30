@@ -37,7 +37,7 @@ use self::inspector::entity::ComponentFilter;
 
 use self::command_palette::CommandPalette;
 use self::widgets::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystemExt};
-use self::{button::EImageButton, utils::MarginSides};
+use self::{button::EImageButton, secondary_window::SecondaryTitlePadding, utils::MarginSides};
 
 pub mod actions;
 pub mod button;
@@ -55,6 +55,7 @@ pub mod plot_3d;
 pub mod query_plot;
 pub mod query_table;
 pub mod schematic;
+pub mod secondary_window;
 mod theme;
 pub mod tiles;
 pub mod time_label;
@@ -755,6 +756,10 @@ fn handle_primary_close(
 }
 
 fn render_secondary_windows(world: &mut World) {
+    if !world.contains_resource::<SecondaryTitlePadding>() {
+        world.insert_resource(SecondaryTitlePadding::default());
+    }
+
     let window_entries: Vec<(tiles::SecondaryWindowId, Entity)> = {
         let windows = world.resource::<tiles::WindowManager>();
         windows
@@ -765,9 +770,20 @@ fn render_secondary_windows(world: &mut World) {
     };
 
     for (id, entity) in window_entries {
+        let decorations = world
+            .get::<Window>(entity)
+            .map(|window| window.decorations)
+            .unwrap_or(true);
+
+        {
+            let mut padding = world.resource_mut::<SecondaryTitlePadding>();
+            padding.0 = !decorations;
+        }
+
         let Ok(mut entity_mut) = world.get_entity_mut(entity) else {
             continue;
         };
+
         entity_mut.insert(ActiveSecondaryWindow);
 
         let widget_id = format!("secondary_window_{}", id.0);
