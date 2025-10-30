@@ -310,11 +310,21 @@ impl LoadSchematicParams<'_, '_> {
                         });
                     }
                     Err(err) => {
-                        warn!(?err, path = %descriptor.path.display(), "Failed to parse secondary schematic");
+                        let diag = render_diag(&err);
+                        let report = miette!(err.clone());
+                        warn!(
+                            ?report,
+                            path = %descriptor.path.display(),
+                            "Failed to parse secondary schematic: \n{diag}"
+                        );
                     }
                 },
                 Err(err) => {
-                    warn!(?err, path = %descriptor.path.display(), "Failed to read secondary schematic");
+                    warn!(
+                        ?err,
+                        path = %descriptor.path.display(),
+                        "Failed to read secondary schematic"
+                    );
                 }
             }
         }
