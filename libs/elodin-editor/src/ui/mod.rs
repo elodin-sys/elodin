@@ -844,10 +844,10 @@ fn render_secondary_windows(world: &mut World) {
             continue;
         };
 
-        if let Some(mut window) = entity_mut.get_mut::<Window>() {
-            if window.title != desired_title {
-                window.title = desired_title;
-            }
+        if let Some(mut window) = entity_mut.get_mut::<Window>()
+            && window.title != desired_title
+        {
+            window.title = desired_title;
         }
 
         entity_mut.insert(ActiveSecondaryWindow);

@@ -31,16 +31,11 @@ pub struct GraphBundle {
     pub main_camera: MainCamera,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum LockGroup {
+    #[default]
     Global,
     Secondary(u32),
-}
-
-impl Default for LockGroup {
-    fn default() -> Self {
-        LockGroup::Global
-    }
 }
 
 #[derive(Clone, Debug, Component)]
