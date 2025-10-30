@@ -35,7 +35,6 @@ use super::{
     query_plot::QueryPlotData,
     query_table::{QueryTableData, QueryTablePane, QueryTableWidget},
     schematic::{graph_label, viewport_label},
-    secondary_window,
     video_stream::{IsTileVisible, VideoDecoderHandle},
     widgets::{RootWidgetSystem, WidgetSystem, WidgetSystemExt},
 };
@@ -1261,20 +1260,7 @@ impl RootWidgetSystem for TileSystem<'_, '_> {
             ..Default::default()
         });
 
-        let padding = if target.is_some() {
-            world
-                .get_resource::<secondary_window::SecondaryTitlePadding>()
-                .map(|p| p.0)
-                .unwrap_or(false)
-        } else {
-            false
-        };
-
         central.show(ctx, |ui| {
-            if padding {
-                ui.add_space(24.0);
-            }
-
             Self::render_panel_contents(
                 world,
                 ui,
