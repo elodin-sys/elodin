@@ -339,25 +339,24 @@ fn component_expr(
     // Full component path string (e.g., "drone.rate_pid_state")
     let base = component_path.to_string();
 
-    if let Some(meta) = metadata.0.get(&component_path.id) {
-        if let Some(name) = meta
+    if let Some(meta) = metadata.0.get(&component_path.id)
+        && let Some(name) = meta
             .element_names()
             .split(',')
             .map(|s| s.trim())
             .nth(index)
             .filter(|s| !s.is_empty())
-        {
-            // If element name itself contains dots or non-identifier chars,
-            // prefer index notation for compatibility with the EQL loader.
-            let simple = name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
-            if simple && !name.contains('.') {
-                if base.ends_with(name) {
-                    return base.to_string();
-                }
-                return format!("{base}.{name}");
-            } else {
-                return format!("{base}[{index}]");
+    {
+        // If element name itself contains dots or non-identifier chars,
+        // prefer index notation for compatibility with the EQL loader.
+        let simple = name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if simple && !name.contains('.') {
+            if base.ends_with(name) {
+                return base.to_string();
             }
+            return format!("{base}.{name}");
+        } else {
+            return format!("{base}[{index}]");
         }
     }
 
