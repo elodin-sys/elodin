@@ -889,6 +889,20 @@ pub fn save_db_native() -> PaletteItem {
     })
 }
 
+pub fn clear_schematic() -> PaletteItem {
+    PaletteItem::new(
+        "Clear Schematic",
+        PRESETS_LABEL,
+        |_: In<String>, mut params: LoadSchematicParams, mut rx: ResMut<SchematicLiveReloadRx>| {
+            // Load an empty schematic in-memory and disable live reload
+            // to avoid reloading a previously watched file.
+            params.load_schematic(&impeller2_wkt::Schematic::default());
+            rx.0 = None;
+            PaletteEvent::Exit
+        },
+    )
+}
+
 pub fn save_schematic_inner() -> PaletteItem {
     PaletteItem::new(
         LabelSource::placeholder("Enter a name for the schematic"),
@@ -1377,6 +1391,7 @@ impl Default for PalettePage {
             save_schematic_as(),
             save_schematic_db(),
             load_schematic(),
+            clear_schematic(),
             set_color_scheme(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {
                 let _ = opener::open("https://docs.elodin.systems");
