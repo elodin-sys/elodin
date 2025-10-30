@@ -7,6 +7,7 @@ use std::{
     fmt::Write,
     sync::{Arc, atomic},
     time::{Duration, Instant},
+    collections::HashSet,
 };
 use stellarator::struc_con::{Joinable, Thread};
 use tracing::warn;
@@ -46,7 +47,7 @@ impl Server {
                     handles.push(stellarator::spawn(handle_conn(stream, db.clone())).drop_guard());
                 }
             });
-        let tick = stellarator::spawn(tick(tick_db, world, is_cancelled, || false, start_time));
+        let tick = stellarator::spawn(tick(tick_db, world, is_cancelled, start_time));
         futures_lite::future::race(async { stream.join().await.unwrap().unwrap() }, async {
             tick.await
                 .map_err(|_| stellarator::Error::JoinFailed)
@@ -191,7 +192,9 @@ pub fn commit_world_head(
     state: &State,
     world: &mut WorldExec<Compiled>,
     timestamp: Timestamp,
+    exclusions: &HashSet<ComponentId>,
 ) -> Result<(), Error> {
+    let mut pair_name = String::new();
     for (component_id, (schema, _)) in world.world.metadata.component_map.iter() {
         let Some(column) = world.world.host.get_mut(component_id) else {
             continue;
@@ -209,17 +212,29 @@ pub fn commit_world_head(
             else {
                 continue;
             };
-            let pair_name = format!("{}.{}", entity_metadata.name, component_metadata.name);
 
-            // Skip writing back external control components
-            if component_metadata
-                .metadata
-                .get("external_control")
-                .map(|s| s == "true")
-                .unwrap_or(false)
-            {
+            pair_name.clear();
+            if let Err(err) = write!(
+                pair_name,
+                "{}.{}",
+                entity_metadata.name, component_metadata.name
+            ) {
+                warn!(?err, "error constructing name");
                 continue;
             }
+
+            if exclusions.contains(component_id) {
+                continue;
+            }
+            // // Skip writing back external control components
+            // if component_metadata
+            //     .metadata
+            //     .get("external_control")
+            //     .map(|s| s == "true")
+            //     .unwrap_or(false)
+            // {
+            //     continue;
+            // }
 
             let pair_id = ComponentId::new(&pair_name);
             let Some(component) = state.get_component(pair_id) else {
@@ -236,16 +251,24 @@ async fn tick(
     db: Arc<DB>,
     mut world: WorldExec<Compiled>,
     is_cancelled: impl Fn() -> bool + 'static,
-    must_wait: impl Fn() -> bool + 'static,
     mut timestamp: Timestamp,
 ) {
     // XXX This is what world.run ultimately calls.
     let mut start = Instant::now();
     let mut tick = 0;
+    let external_controls: HashSet<ComponentId> = external_controls(&world).collect();
+    let wait_for_write: Vec<ComponentId> = wait_for_write(&world).collect();
+    let mut wait_for_write_times = collect_timestamps(&db, &wait_for_write);
+    // wait_for_write_times.clear();
     while db.recording_cell.wait().await {
         if tick >= world.world.max_tick() {
             db.recording_cell.set_playing(false);
             world.world.metadata.max_tick = u64::MAX;
+        }
+        let mut timeout = 10000;
+        while timeout > 0 && !timestamps_changed(&db, &mut wait_for_write_times).unwrap_or(true) {
+            stellarator::sleep(Duration::from_millis(1)).await;
+            timeout -= 1;
         }
         // loop {}
         db.with_state(|state| copy_db_to_world(state, &mut world));
@@ -253,7 +276,7 @@ async fn tick(
             warn!(?err, "error ticking world");
         }
         db.with_state(|state| {
-            if let Err(err) = commit_world_head(state, &mut world, timestamp) {
+            if let Err(err) = commit_world_head(state, &mut world, timestamp, &external_controls) {
                 warn!(?err, "error committing head");
             }
         });
@@ -262,9 +285,6 @@ async fn tick(
         let sleep_time = time_step.saturating_sub(start.elapsed());
         if is_cancelled() {
             return;
-        }
-        while must_wait() {
-            stellarator::sleep(Duration::from_millis(1)).await;
         }
         stellarator::sleep(sleep_time).await;
         let now = Instant::now();
@@ -276,21 +296,30 @@ async fn tick(
     }
 }
 
-/// Collect all entity and component IDs that are marked with "external_control" metadata
-pub fn external_controls(world: &WorldExec<Compiled>) -> Vec<ComponentId> {
-    let mut external_controls = Vec::new();
-    for (component_id, (_, component_metadata)) in world.world.metadata.component_map.iter() {
-        // Check if this component has external_control metadata
-        if component_metadata
-            .metadata
-            .get("external_control")
-            .map(|s| s == "true")
-            .unwrap_or(false)
-        {
-            external_controls.push(*component_id);
-        }
-    }
-    external_controls
+/// Collect all component IDs that are marked with "external_control" metadata
+pub fn external_controls(world: &WorldExec<Compiled>) -> impl Iterator<Item = ComponentId> + '_ {
+    world.world.metadata.component_map.iter()
+        .filter(|(_, (_, component_metadata))| {
+            component_metadata
+                .metadata
+                .get("external_control")
+                .map(|s| s == "true")
+                .unwrap_or(false)
+        })
+        .map(|(component_id, _)| *component_id)
+}
+
+/// Collect all component IDs that are marked with "wait_for_write" metadata
+pub fn wait_for_write(world: &WorldExec<Compiled>) -> impl Iterator<Item = ComponentId> + '_ {
+    world.world.metadata.component_map.iter()
+        .filter(|(_, (_, component_metadata))| {
+            component_metadata
+                .metadata
+                .get("wait_for_write")
+                .map(|s| s == "true")
+                .unwrap_or(false)
+        })
+        .map(|(component_id, _)| *component_id)
 }
 
 /// Check if any external control components have been updated since the last check
@@ -298,7 +327,6 @@ pub fn external_controls(world: &WorldExec<Compiled>) -> Vec<ComponentId> {
 /// timestamp for each external control component that was updated
 pub fn collect_timestamps(db: &DB, components: &[ComponentId]) -> Vec<(ComponentId, Timestamp)> {
     // Use the external_controls function to get all external control components
-
     db.with_state(|state| {
         let mut timestamps = vec![];
         for component_id in components.iter() {
@@ -316,7 +344,10 @@ pub fn collect_timestamps(db: &DB, components: &[ComponentId]) -> Vec<(Component
     })
 }
 
-pub fn update_timestamps(db: &DB, components: &mut [(ComponentId, Timestamp)]) -> bool {
+pub fn timestamps_changed(db: &DB, components: &mut [(ComponentId, Timestamp)]) -> Option<bool> {
+    if components.is_empty() {
+        return None;
+    }
     db.with_state(|state| {
         let mut changed = false;
         for (component_id, timestamp) in components.iter_mut() {
@@ -325,10 +356,12 @@ pub fn update_timestamps(db: &DB, components: &mut [(ComponentId, Timestamp)]) -
                     if *timestamp != *curr_timestamp {
                         changed = true;
                         *timestamp = *curr_timestamp;
+                        tracing::info!("time stamp changed");
+                        std::eprintln!("time stamp changed");
                     }
                 }
             }
         }
-        changed
+        Some(changed)
     })
 }

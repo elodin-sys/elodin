@@ -21,6 +21,7 @@ impl Exec {
                                  py: Python<'_>,
                                  external_controls: &mut [(ComponentId, Timestamp)],
     ) -> Result<bool, Error> {
+        // This proves this isn't being called currently.
         loop { }
         if external_controls.is_empty() {
             return Ok(true);
@@ -31,10 +32,10 @@ impl Exec {
         
         loop {
             // Check if we have updates using the impeller2_server function
-            if nox_ecs::impeller2_server::update_timestamps(
+            if nox_ecs::impeller2_server::timestamps_changed(
                 &self.db,
                 external_controls,
-            ) {
+            ).unwrap_or(true) {
                 return Ok(true);
             }
             
@@ -74,15 +75,17 @@ impl Exec {
                 ProgressStyle::with_template("{bar:50} {pos:>6}/{len:6} remaining: {eta}").unwrap(),
             );
         let mut timestamp = Timestamp::now();
-        let external_controls = nox_ecs::impeller2_server::external_controls(&self.exec);
+        let external_controls: Vec<_> = nox_ecs::impeller2_server::external_controls(&self.exec).collect();
+        let exclusions: HashSet<_> = external_controls.iter().cloned().collect();
         let mut external_controls_timestamped = nox_ecs::impeller2_server::collect_timestamps(&self.db, &external_controls);
+
         for _ in 0..ticks {
             // Wait for external control components to be updated before running the next tick
             self.wait_for_external_controls(py, &mut external_controls_timestamped)?;
             
             self.exec.run()?;
             self.db.with_state(|state| {
-                nox_ecs::impeller2_server::commit_world_head(state, &mut self.exec, timestamp)
+                nox_ecs::impeller2_server::commit_world_head(state, &mut self.exec, timestamp, &exclusions)
             })?;
             timestamp += self.exec.world.sim_time_step().0;
             py.check_signals()?;

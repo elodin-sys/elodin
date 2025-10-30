@@ -63,7 +63,7 @@ FinDeflect = ty.Annotated[jax.Array, el.Component("fin_deflect", el.ComponentTyp
 
 FinControlTrim = ty.Annotated[
     jax.Array,
-    el.Component("fin_control_trim", el.ComponentType.F64, metadata={"external_control": "true"}),
+    el.Component("fin_control_trim", el.ComponentType.F64, metadata={"external_control": "true", "wait_for_write": "true"}),
 ]
 
 VRelAccel = ty.Annotated[
