@@ -894,8 +894,6 @@ pub fn clear_schematic() -> PaletteItem {
         "Clear Schematic",
         PRESETS_LABEL,
         |_: In<String>, mut params: LoadSchematicParams, mut rx: ResMut<SchematicLiveReloadRx>| {
-            // Load an empty schematic in-memory and disable live reload
-            // to avoid reloading a previously watched file.
             params.load_schematic(&impeller2_wkt::Schematic::default());
             rx.0 = None;
             PaletteEvent::Exit
