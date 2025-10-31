@@ -4,10 +4,10 @@ use impeller2::types::{ComponentId, Timestamp};
 use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 use nox_ecs::Error;
 use std::{
+    collections::HashSet,
     fmt::Write,
     sync::{Arc, atomic},
     time::{Duration, Instant},
-    collections::HashSet,
 };
 use stellarator::struc_con::{Joinable, Thread};
 use tracing::warn;
@@ -133,7 +133,6 @@ pub fn init_db(
 
 pub fn copy_db_to_world(state: &State, world: &mut WorldExec<Compiled>) {
     let world = &mut world.world;
-    let mut pair_name = String::new();
     for (component_id, (schema, _)) in world.metadata.component_map.iter() {
         let Some(column) = world.host.get_mut(component_id) else {
             continue;
@@ -155,17 +154,7 @@ pub fn copy_db_to_world(state: &State, world: &mut WorldExec<Compiled>) {
                 continue;
             };
 
-            pair_name.clear();
-            if let Err(err) = write!(
-                pair_name,
-                "{}.{}",
-                entity_metadata.name, component_metadata.name
-            ) {
-                warn!(?err, "error constructing name");
-                continue;
-            }
-            let pair_id = ComponentId::new(&pair_name);
-
+            let pair_id = ComponentId::from_pair(&entity_metadata.name, &component_metadata.name);
             let Some(component) = state.get_component(pair_id) else {
                 continue;
             };
@@ -188,13 +177,44 @@ pub fn copy_db_to_world(state: &State, world: &mut WorldExec<Compiled>) {
     }
 }
 
+pub type PairId = ComponentId;
+
+/// Collect the pair IDs. For each component ID and associated entity ID, create
+/// the composite `PairId`, which is equivalent to
+/// `ComponentId::new(&format!("{}.{}", entity_name, component_name))`, but we
+/// don't allocate a string.
+pub fn get_pair_ids(
+    world: &WorldExec<Compiled>,
+    components: &[ComponentId],
+) -> Result<Vec<PairId>, Error> {
+    let mut results = vec![];
+    for component_id in components {
+        if let Some((schema, component_metadata)) = world.world.metadata.component_map.get(&component_id) {
+            let Some(column) = world.world.host.get(component_id) else {
+                continue;
+            };
+            let entity_ids = bytemuck::try_cast_slice::<_, u64>(column.entity_ids.as_slice()).unwrap();
+            let size = schema.size();
+            for (i, entity_id) in entity_ids.iter().enumerate() {
+                let offset = i * size;
+                let entity_id = impeller2::types::EntityId(*entity_id);
+                let Some(entity_metadata) = world.world.metadata.entity_metadata.get(&entity_id) else {
+                    continue;
+                };
+                let pair_id = ComponentId::from_pair(&entity_metadata.name, &component_metadata.name);
+                results.push(pair_id);
+            }
+        }
+    }
+    Ok(results)
+}
+
 pub fn commit_world_head(
     state: &State,
     world: &mut WorldExec<Compiled>,
     timestamp: Timestamp,
-    exclusions: &HashSet<ComponentId>,
+    exclusions: Option<&HashSet<ComponentId>>,
 ) -> Result<(), Error> {
-    let mut pair_name = String::new();
     for (component_id, (schema, _)) in world.world.metadata.component_map.iter() {
         let Some(column) = world.world.host.get_mut(component_id) else {
             continue;
@@ -207,36 +227,18 @@ pub fn commit_world_head(
             let Some(entity_metadata) = world.world.metadata.entity_metadata.get(&entity_id) else {
                 continue;
             };
-            let Some((_, component_metadata)) =
+            let Some((_schema, component_metadata)) =
                 world.world.metadata.component_map.get(component_id)
             else {
                 continue;
             };
 
-            pair_name.clear();
-            if let Err(err) = write!(
-                pair_name,
-                "{}.{}",
-                entity_metadata.name, component_metadata.name
-            ) {
-                warn!(?err, "error constructing name");
+            if let Some(exclusions) = exclusions
+                && exclusions.contains(component_id) {
                 continue;
             }
 
-            if exclusions.contains(component_id) {
-                continue;
-            }
-            // // Skip writing back external control components
-            // if component_metadata
-            //     .metadata
-            //     .get("external_control")
-            //     .map(|s| s == "true")
-            //     .unwrap_or(false)
-            // {
-            //     continue;
-            // }
-
-            let pair_id = ComponentId::new(&pair_name);
+            let pair_id = ComponentId::from_pair(&entity_metadata.name, &component_metadata.name);
             let Some(component) = state.get_component(pair_id) else {
                 continue;
             };
@@ -257,8 +259,8 @@ async fn tick(
     let mut tick = 0;
     let external_controls: HashSet<ComponentId> = external_controls(&world).collect();
     let wait_for_write: Vec<ComponentId> = wait_for_write(&world).collect();
-    let mut wait_for_write_times = collect_timestamps(&db, &wait_for_write);
-    // wait_for_write_times.clear();
+    let wait_for_write_pair_ids: Vec<PairId> = get_pair_ids(&world, &wait_for_write).unwrap();
+    let mut wait_for_write_pair_ids = collect_timestamps(&db, &wait_for_write_pair_ids);
     let run_time_step: Option<Duration> = world.world.metadata.run_time_step.map(|time_step| time_step.0);
     while db.recording_cell.wait().await {
         let start = Instant::now();
@@ -266,22 +268,26 @@ async fn tick(
             db.recording_cell.set_playing(false);
             world.world.metadata.max_tick = u64::MAX;
         }
-        let mut timeout = 10000;
-        while timeout > 0 && !timestamps_changed(&db, &mut wait_for_write_times).unwrap_or(true) {
-            stellarator::sleep(Duration::from_millis(1)).await;
-            timeout -= 1;
-        }
         // loop {}
         db.with_state(|state| copy_db_to_world(state, &mut world));
         if let Err(err) = world.run() {
             warn!(?err, "error ticking world");
         }
         db.with_state(|state| {
-            if let Err(err) = commit_world_head(state, &mut world, timestamp, &external_controls) {
+            if let Err(err) =
+                commit_world_head(state, &mut world, timestamp, Some(&external_controls))
+            {
                 warn!(?err, "error committing head");
             }
         });
         db.last_updated.store(timestamp);
+        while !wait_for_write_pair_ids.is_empty()
+            && !timestamps_changed(&db, &mut wait_for_write_pair_ids).unwrap_or(false) {
+            stellarator::sleep(Duration::from_millis(1)).await;
+            if is_cancelled() {
+                return;
+            }
+        }
         if is_cancelled() {
             return;
         }
@@ -298,7 +304,11 @@ async fn tick(
 
 /// Collect all component IDs that are marked with "external_control" metadata
 pub fn external_controls(world: &WorldExec<Compiled>) -> impl Iterator<Item = ComponentId> + '_ {
-    world.world.metadata.component_map.iter()
+    world
+        .world
+        .metadata
+        .component_map
+        .iter()
         .filter(|(_, (_, component_metadata))| {
             component_metadata
                 .metadata
@@ -311,15 +321,20 @@ pub fn external_controls(world: &WorldExec<Compiled>) -> impl Iterator<Item = Co
 
 /// Collect all component IDs that are marked with "wait_for_write" metadata
 pub fn wait_for_write(world: &WorldExec<Compiled>) -> impl Iterator<Item = ComponentId> + '_ {
-    world.world.metadata.component_map.iter()
-        .filter(|(_, (_, component_metadata))| {
+    world
+        .world
+        .metadata
+        .component_map
+        .iter()
+        .filter(|(component_id, (_schema, component_metadata))| {
+            dbg!(component_metadata, component_id);
             component_metadata
                 .metadata
                 .get("wait_for_write")
                 .map(|s| s == "true")
                 .unwrap_or(false)
         })
-        .map(|(component_id, _)| *component_id)
+        .map(|(component_id, y)| *component_id)
 }
 
 /// Check if any external control components have been updated since the last check
@@ -344,24 +359,25 @@ pub fn collect_timestamps(db: &DB, components: &[ComponentId]) -> Vec<(Component
     })
 }
 
-pub fn timestamps_changed(db: &DB, components: &mut [(ComponentId, Timestamp)]) -> Option<bool> {
+pub fn timestamps_changed(db: &DB, components: &mut [(PairId, Timestamp)]) -> Option<bool> {
     if components.is_empty() {
         return None;
     }
     db.with_state(|state| {
-        let mut changed = false;
+        let mut changed = None;
         for (component_id, timestamp) in components.iter_mut() {
             if let Some(component) = state.get_component(*component_id) {
                 if let Some((curr_timestamp, _)) = component.time_series.latest() {
                     if *timestamp != *curr_timestamp {
-                        changed = true;
+                        changed = Some(true);
                         *timestamp = *curr_timestamp;
-                        tracing::info!("time stamp changed");
-                        std::eprintln!("time stamp changed");
+                        // tracing::info!("time stamp changed");
+                    } else if changed.is_none() {
+                        changed = Some(false);
                     }
                 }
             }
         }
-        Some(changed)
+        changed
     })
 }
