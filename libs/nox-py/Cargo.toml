@@ -20,8 +20,11 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # python
-pyo3 = "0.23.0"
-numpy.version = "0.23"
+pyo3 = "0.26"
+numpy.version = "0.26"
+
+# noxla 
+noxla.path = "../noxla"
 
 # nox
 nox-ecs.path = "../nox-ecs"

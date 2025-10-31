@@ -38,25 +38,49 @@ fn main() -> anyhow::Result<()> {
     let xla_dir = env_var_rerun("XLA_EXTENSION_DIR")
         .map_or_else(|| out_dir.join("xla_extension"), PathBuf::from);
     if !xla_dir.exists() {
-        if cfg!(feature = "shared") {
-            download_shared_xla(&out_dir)?;
-        } else {
-            download_xla(&out_dir)?;
-        }
+        download_xla(&out_dir)?;
     }
 
-    let mut config = cpp_build::Config::new();
-    config
+    // Build the C++ kernels as a static lib
+    let mut kernels = cc::Build::new();
+    kernels
+        .cpp(true)
         .flag("-std=c++17")
         .flag("-DLLVM_ON_UNIX=1")
         .flag("-DLLVM_VERSION_STRING=")
-        .flag(&format!("-isystem{}", xla_dir.join("include").display()))
-        .file("./vendor/jaxlib/cpu/cpu_kernels.cc")
-        .file("./vendor/jaxlib/cpu/lapack_kernels.cc")
-        .include("./vendor");
+        .flag_if_supported("-fPIC")
+        .files([
+            "./vendor/jaxlib/cpu/cpu_kernels.cc",
+            "./vendor/jaxlib/cpu/sparse_kernels.cc",
+            "./vendor/jaxlib/cpu/lapack_kernels.cc",
+            "./vendor/jaxlib/cpu/lapack_kernels_using_lapack.cc",
+        ])
+        .include("./vendor")
+        .include(xla_dir.join("include"))
+        .cargo_metadata(false)
+        .warnings(false);
+
+    kernels.compile("noxla_kernels"); // libnoxla_kernels.a => OUT_DIR
+
+    println!("cargo:rustc-link-search=native={}", out_dir.display());
+
+    #[cfg(feature = "link-kernels")]
+    println!("cargo:rustc-link-lib=static=noxla_kernels");
+
+    let kernels_path = out_dir.join("libnoxla_kernels.a");
+    println!("cargo:noxla_kernels={}", kernels_path.display());
+
+    let mut config = cpp_build::Config::new();
+    config
+        .flag_if_supported("-std=c++17")
+        .include(xla_dir.join("include"))
+        .include("./vendor")
+        // .include(format!("{out_dir}/xla_extension/include"))
+        .build("src/lib.rs");
+
     if cfg!(feature = "cuda") {
+        let cuda = find_cuda_helper::find_cuda_root().expect("No CUDA found!");
         find_cuda_helper::include_cuda();
-        let cuda = find_cuda_helper::find_cuda_root().unwrap();
         config
             .include(cuda.join("include"))
             .include(&cuda)
@@ -90,8 +114,13 @@ fn main() -> anyhow::Result<()> {
             .file("./vendor/jaxlib/gpu/sparse_kernels.cc")
             .define("JAX_GPU_CUDA", Some("1"));
         cuda_config.compile("jaxlib_cuda");
+        config.build("src/lib.rs")
     }
-    config.build("src/lib.rs");
+
+    println!("cargo:rerun-if-changed=vendor/jaxlib/cpu/cpu_kernels.cc");
+    println!("cargo:rerun-if-changed=vendor/jaxlib/cpu/sparse_kernels.cc");
+    println!("cargo:rerun-if-changed=vendor/jaxlib/cpu/lapack_kernels.cc");
+    println!("cargo:rerun-if-changed=vendor/jaxlib/cpu/lapack_kernels_using_lapack.cc");
     println!("cargo:rerun-if-changed=src/executable.rs");
     println!("cargo:rerun-if-changed=src/literal.rs");
     println!("cargo:rerun-if-changed=src/op.rs");
@@ -118,6 +147,8 @@ fn main() -> anyhow::Result<()> {
     // Explicitly link libstdc++ on Linux to avoid "DSO missing from command line" errors.
     // Note: --copy-dt-needed-entries is not supported by rust-lld (default in Rust 1.90+)
     if os == OS::Linux {
+        println!("cargo:rustc-link-arg=-Wl,--copy-dt-needed-entries");
+        println!("cargo:rustc-link-lib=dylib=gfortran");
         println!("cargo:rustc-link-arg=-Wl,-lstdc++");
     }
 
@@ -148,51 +179,16 @@ fn download_jax_metal(jax_dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn download_shared_xla(xla_dir: &Path) -> anyhow::Result<()> {
-    let os = env::var("CARGO_CFG_TARGET_OS").expect("Unable to get TARGET_OS");
-    let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("Unable to get TARGET_ARCH");
-    let url = match (os.as_str(), arch.as_str()) {
-        ("macos", arch) => format!(
-            "https://github.com/elixir-nx/xla/releases/download/v0.7.0/xla_extension-{}-darwin-cpu.tar.gz",
-            arch
-        ),
-        ("linux", arch) => {
-            if true {
-                format!(
-                    "https://github.com/elixir-nx/xla/releases/download/v0.7.0/xla_extension-{}-linux-gnu-cuda12.tar.gz",
-                    arch
-                )
-            } else {
-                format!(
-                    "https://github.com/elixir-nx/xla/releases/download/v0.7.0/xla_extension-{}-linux-gnu-cpu.tar.gz",
-                    arch
-                )
-            }
-        }
-
-        (os, arch) => panic!("{}-{} is an unsupported platform", os, arch),
-    };
-
-    let buf = download_file(&url)?;
-    let mut bytes = io::Cursor::new(buf);
-
-    let tar = GzDecoder::new(&mut bytes);
-    let mut archive = Archive::new(tar);
-    archive.unpack(xla_dir)?;
-
-    Ok(())
-}
-
 fn download_xla(xla_dir: &Path) -> anyhow::Result<()> {
     let os = env::var("CARGO_CFG_TARGET_OS").expect("Unable to get TARGET_OS");
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("Unable to get TARGET_ARCH");
     let url = match (os.as_str(), arch.as_str()) {
         ("macos", arch) => format!(
-            "https://github.com/elodin-sys/xla/releases/download/v0.5.4/xla_extension-{}-darwin-cpu.tar.gz",
+            "https://github.com/elodin-sys/xla-next/releases/download/v0.9.1/xla_extension-0.9.1-{}-darwin-cpu.tar.gz",
             arch
         ),
         ("linux", arch) => format!(
-            "https://github.com/elodin-sys/xla/releases/download/v0.5.4/xla_extension-{}-linux-gnu-cpu.tar.gz",
+            "https://github.com/elodin-sys/xla-next/releases/download/v0.9.1/xla_extension-0.9.1-{}-linux-gnu-cpu.tar.gz",
             arch
         ),
         (os, arch) => panic!("{}-{} is an unsupported platform", os, arch),
