@@ -226,7 +226,7 @@ impl TimeseriesPlot {
         let start = self.selected_range.start;
         let end = visible_time_range.end;
         let start_count = (visible_time_range.start.0 - start.0) / step_size_micro as i64 - 1;
-        let end_count = (end.0 - start.0) / step_size_micro as i64 + 1;
+        let end_count = end.0.saturating_sub(start.0) / step_size_micro as i64 + 1;
 
         for i in start_count..=end_count {
             let offset_float = step_size_float * i as f64;
@@ -237,7 +237,7 @@ impl TimeseriesPlot {
                 .value_to_screen_pos(
                     self.rect,
                     (
-                        self.timestamp_to_x(Timestamp(start.0 + offset_float as i64)),
+                        self.timestamp_to_x(Timestamp(start.0.saturating_add(offset_float as i64))),
                         0.0,
                     )
                         .into(),
@@ -539,12 +539,12 @@ impl TimeseriesPlot {
     }
 
     fn timestamp_to_x(&self, timestamp: Timestamp) -> f64 {
-        (timestamp.0 - self.earliest_timestamp.0) as f64
+        timestamp.0.saturating_sub(self.earliest_timestamp.0) as f64
     }
 
     fn visible_time_range(&self) -> Range<Timestamp> {
-        Timestamp(self.bounds.min_x as i64 + self.earliest_timestamp.0)
-            ..Timestamp(self.bounds.max_x as i64 + self.earliest_timestamp.0)
+        Timestamp((self.bounds.min_x as i64).saturating_add(self.earliest_timestamp.0))
+            ..Timestamp((self.bounds.max_x as i64).saturating_add(self.earliest_timestamp.0))
     }
 }
 
@@ -1246,8 +1246,8 @@ impl PlotBounds {
     }
 
     pub fn timestamp_range(&self, earliest_timestamp: Timestamp) -> Range<Timestamp> {
-        let min_x = (self.min_x as i64) + earliest_timestamp.0;
-        let max_x = (self.max_x as i64) + earliest_timestamp.0;
+        let min_x = (self.min_x as i64).saturating_add(earliest_timestamp.0);
+        let max_x = (self.max_x as i64).saturating_add(earliest_timestamp.0);
         Timestamp(min_x)..Timestamp(max_x)
     }
 

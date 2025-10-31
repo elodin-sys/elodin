@@ -1008,8 +1008,8 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     }
 
     pub fn garbage_collect(&mut self, line_visible_range: Range<Timestamp>) {
-        let first_half = nodit::interval::ee(i64::MIN, line_visible_range.start.0 - 1);
-        let second_half = nodit::interval::ee(line_visible_range.end.0 + 1, i64::MAX);
+        let first_half = nodit::interval::ii(i64::MIN, line_visible_range.start.0.saturating_sub(1));
+        let second_half = nodit::interval::ii(line_visible_range.end.0.saturating_add(1), i64::MAX);
         for (range, chunk) in self
             .tree
             .overlapping(first_half)
