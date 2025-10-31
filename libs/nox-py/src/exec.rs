@@ -85,7 +85,7 @@ impl Exec {
             
             self.exec.run()?;
             self.db.with_state(|state| {
-                nox_ecs::impeller2_server::commit_world_head(state, &mut self.exec, timestamp, &exclusions)
+                nox_ecs::impeller2_server::commit_world_head(state, &mut self.exec, timestamp, Some(&exclusions))
             })?;
             timestamp += self.exec.world.sim_time_step().0;
             py.check_signals()?;

@@ -254,13 +254,14 @@ async fn tick(
     mut timestamp: Timestamp,
 ) {
     // XXX This is what world.run ultimately calls.
-    let mut start = Instant::now();
     let mut tick = 0;
     let external_controls: HashSet<ComponentId> = external_controls(&world).collect();
     let wait_for_write: Vec<ComponentId> = wait_for_write(&world).collect();
     let mut wait_for_write_times = collect_timestamps(&db, &wait_for_write);
     // wait_for_write_times.clear();
+    let run_time_step: Option<Duration> = world.world.metadata.run_time_step.map(|time_step| time_step.0);
     while db.recording_cell.wait().await {
+        let start = Instant::now();
         if tick >= world.world.max_tick() {
             db.recording_cell.set_playing(false);
             world.world.metadata.max_tick = u64::MAX;
@@ -281,15 +282,14 @@ async fn tick(
             }
         });
         db.last_updated.store(timestamp);
-        let time_step = world.world.metadata.run_time_step.0;
-        let sleep_time = time_step.saturating_sub(start.elapsed());
         if is_cancelled() {
             return;
         }
-        stellarator::sleep(sleep_time).await;
-        let now = Instant::now();
-        while start < now {
-            start += time_step;
+        // We only wait if there is a run_time_step set and it's >= the time elapsed.
+        if let Some(run_time_step) = run_time_step.as_ref() {
+            if let Some(sleep_time) = run_time_step.checked_sub(start.elapsed()) {
+                stellarator::sleep(sleep_time).await;
+            }
         }
         tick += 1;
         timestamp += world.world.sim_time_step().0;
