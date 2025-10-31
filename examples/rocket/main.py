@@ -63,7 +63,11 @@ FinDeflect = ty.Annotated[jax.Array, el.Component("fin_deflect", el.ComponentTyp
 
 FinControlTrim = ty.Annotated[
     jax.Array,
-    el.Component("fin_control_trim", el.ComponentType.F64, metadata={"external_control": "true", "wait_for_write": "false"}),
+    el.Component(
+        "fin_control_trim",
+        el.ComponentType.F64,
+        metadata={"external_control": "true", "wait_for_write": "false"},
+    ),
 ]
 
 VRelAccel = ty.Annotated[
@@ -523,7 +527,7 @@ sys = non_effectors | el.six_dof(sys=effectors, integrator=el.Integrator.Rk4)
 w.run(
     sys,
     sim_time_step=SIM_TIME_STEP,
-    #run_time_step=SIM_TIME_STEP,  # This creates real-time streaming
+    # run_time_step=SIM_TIME_STEP,  # This creates real-time streaming
     default_playback_speed=1.0,
     # Ensure external control components are properly handled
     # The copy_db_to_world should run before each tick

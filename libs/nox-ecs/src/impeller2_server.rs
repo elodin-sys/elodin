@@ -189,19 +189,24 @@ pub fn get_pair_ids(
 ) -> Result<Vec<PairId>, Error> {
     let mut results = vec![];
     for component_id in components {
-        if let Some((schema, component_metadata)) = world.world.metadata.component_map.get(&component_id) {
+        if let Some((schema, component_metadata)) =
+            world.world.metadata.component_map.get(&component_id)
+        {
             let Some(column) = world.world.host.get(component_id) else {
                 continue;
             };
-            let entity_ids = bytemuck::try_cast_slice::<_, u64>(column.entity_ids.as_slice()).unwrap();
+            let entity_ids =
+                bytemuck::try_cast_slice::<_, u64>(column.entity_ids.as_slice()).unwrap();
             let size = schema.size();
             for (i, entity_id) in entity_ids.iter().enumerate() {
                 let offset = i * size;
                 let entity_id = impeller2::types::EntityId(*entity_id);
-                let Some(entity_metadata) = world.world.metadata.entity_metadata.get(&entity_id) else {
+                let Some(entity_metadata) = world.world.metadata.entity_metadata.get(&entity_id)
+                else {
                     continue;
                 };
-                let pair_id = ComponentId::from_pair(&entity_metadata.name, &component_metadata.name);
+                let pair_id =
+                    ComponentId::from_pair(&entity_metadata.name, &component_metadata.name);
                 results.push(pair_id);
             }
         }
@@ -234,7 +239,8 @@ pub fn commit_world_head(
             };
 
             if let Some(exclusions) = exclusions
-                && exclusions.contains(component_id) {
+                && exclusions.contains(component_id)
+            {
                 continue;
             }
 
@@ -261,7 +267,11 @@ async fn tick(
     let wait_for_write: Vec<ComponentId> = wait_for_write(&world).collect();
     let wait_for_write_pair_ids: Vec<PairId> = get_pair_ids(&world, &wait_for_write).unwrap();
     let mut wait_for_write_pair_ids = collect_timestamps(&db, &wait_for_write_pair_ids);
-    let run_time_step: Option<Duration> = world.world.metadata.run_time_step.map(|time_step| time_step.0);
+    let run_time_step: Option<Duration> = world
+        .world
+        .metadata
+        .run_time_step
+        .map(|time_step| time_step.0);
     while db.recording_cell.wait().await {
         let start = Instant::now();
         if tick >= world.world.max_tick() {
@@ -282,7 +292,8 @@ async fn tick(
         });
         db.last_updated.store(timestamp);
         while !wait_for_write_pair_ids.is_empty()
-            && !timestamps_changed(&db, &mut wait_for_write_pair_ids).unwrap_or(false) {
+            && !timestamps_changed(&db, &mut wait_for_write_pair_ids).unwrap_or(false)
+        {
             stellarator::sleep(Duration::from_millis(1)).await;
             if is_cancelled() {
                 return;
