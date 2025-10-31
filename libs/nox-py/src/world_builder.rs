@@ -601,11 +601,10 @@ impl WorldBuilder {
         let mut start = time::Instant::now();
         let ts = time::Duration::from_secs_f64(sim_time_step);
         self.world.metadata.sim_time_step = TimeStep(ts);
-        self.world.metadata.run_time_step = TimeStep(ts);
         self.world.metadata.default_playback_speed = default_playback_speed;
         if let Some(ts) = run_time_step {
             let ts = time::Duration::from_secs_f64(ts);
-            self.world.metadata.run_time_step = TimeStep(ts);
+            self.world.metadata.run_time_step = Some(TimeStep(ts));
         }
         if let Some(max_ticks) = max_ticks {
             self.world.metadata.max_tick = max_ticks;
@@ -645,11 +644,10 @@ impl WorldBuilder {
     > {
         let ts = time::Duration::from_secs_f64(sim_time_step);
         self.world.metadata.sim_time_step = TimeStep(ts);
-        self.world.metadata.run_time_step = TimeStep(ts);
         self.world.metadata.default_playback_speed = default_playback_speed;
         if let Some(ts) = run_time_step {
             let ts = time::Duration::from_secs_f64(ts);
-            self.world.metadata.run_time_step = TimeStep(ts);
+            self.world.metadata.run_time_step = Some(TimeStep(ts));
         }
         if let Some(max_ticks) = max_ticks {
             self.world.metadata.max_tick = max_ticks;
