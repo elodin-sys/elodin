@@ -5,7 +5,6 @@ use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 use nox_ecs::Error;
 use std::{
     collections::HashSet,
-    fmt::Write,
     sync::{Arc, atomic},
     time::{Duration, Instant},
 };
@@ -189,7 +188,7 @@ pub fn get_pair_ids(
 ) -> Result<Vec<PairId>, Error> {
     let mut results = vec![];
     for component_id in components {
-        if let Some((schema, component_metadata)) =
+        if let Some((_schema, component_metadata)) =
             world.world.metadata.component_map.get(&component_id)
         {
             let Some(column) = world.world.host.get(component_id) else {
@@ -197,9 +196,7 @@ pub fn get_pair_ids(
             };
             let entity_ids =
                 bytemuck::try_cast_slice::<_, u64>(column.entity_ids.as_slice()).unwrap();
-            let size = schema.size();
-            for (i, entity_id) in entity_ids.iter().enumerate() {
-                let offset = i * size;
+            for entity_id in entity_ids.iter() {
                 let entity_id = impeller2::types::EntityId(*entity_id);
                 let Some(entity_metadata) = world.world.metadata.entity_metadata.get(&entity_id)
                 else {
@@ -345,7 +342,7 @@ pub fn wait_for_write(world: &WorldExec<Compiled>) -> impl Iterator<Item = Compo
                 .map(|s| s == "true")
                 .unwrap_or(false)
         })
-        .map(|(component_id, y)| *component_id)
+        .map(|(component_id, _)| *component_id)
 }
 
 /// Check if any external control components have been updated since the last check
