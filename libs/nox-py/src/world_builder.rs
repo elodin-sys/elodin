@@ -598,15 +598,19 @@ impl WorldBuilder {
                 }
                 
                 println!("\n[Operation Breakdown]");
-                for (op, count) in op_vec.iter().take(10) {
-                    println!("  {:20} {:6} ({:.1}%)", 
-                        op, 
-                        count, 
-                        (**count as f64 / instruction_count as f64) * 100.0
-                    );
-                }
-                if op_vec.len() > 10 {
-                    println!("  ... and {} more operation types", op_vec.len() - 10);
+                if instruction_count > 0 {
+                    for (op, count) in op_vec.iter().take(10) {
+                        println!("  {:20} {:6} ({:.1}%)", 
+                            op, 
+                            count, 
+                            (**count as f64 / instruction_count as f64) * 100.0
+                        );
+                    }
+                    if op_vec.len() > 10 {
+                        println!("  ... and {} more operation types", op_vec.len() - 10);
+                    }
+                } else {
+                    println!("  No operations found in HLO");
                 }
 
                 println!("\n[Memory Footprint]");
@@ -615,13 +619,17 @@ impl WorldBuilder {
                 println!("  Total memory:       {:.2} KB", input_memory_kb + output_memory_kb);
 
                 println!("\n[Top Components by Memory]");
-                for (name, bytes) in component_memory.iter().take(10) {
-                    let kb = *bytes as f64 / 1024.0;
-                    println!("  {:40} {:8.2} KB ({:.1}%)", 
-                        name, 
-                        kb,
-                        (kb / input_memory_kb) * 100.0
-                    );
+                if input_memory_kb > 0.0 {
+                    for (name, bytes) in component_memory.iter().take(10) {
+                        let kb = *bytes as f64 / 1024.0;
+                        println!("  {:40} {:8.2} KB ({:.1}%)", 
+                            name, 
+                            kb,
+                            (kb / input_memory_kb) * 100.0
+                        );
+                    }
+                } else {
+                    println!("  No input memory components found");
                 }
 
                 // Deep analysis output
@@ -655,13 +663,15 @@ impl WorldBuilder {
                             sum_b.cmp(&sum_a)
                         });
                         
-                        for (category, ops) in cat_vec {
-                            let total: usize = ops.iter().map(|(_, c)| c).sum();
-                            println!("    {:30} {:6} ops ({:.1}%)", 
-                                category, 
-                                total,
-                                (total as f64 / instruction_count as f64) * 100.0
-                            );
+                        if instruction_count > 0 {
+                            for (category, ops) in cat_vec {
+                                let total: usize = ops.iter().map(|(_, c)| c).sum();
+                                println!("    {:30} {:6} ops ({:.1}%)", 
+                                    category, 
+                                    total,
+                                    (total as f64 / instruction_count as f64) * 100.0
+                                );
+                            }
                         }
                     }
                     
@@ -721,8 +731,12 @@ impl WorldBuilder {
                         
                         println!("Python lines generating the most HLO operations:");
                         
-                        // Try to load and show code context
-                        let mut shown_code = HashSet::new();
+                        // Get the directory containing the simulation file
+                        let sim_dir = path.parent().unwrap_or_else(|| Path::new("."));
+                        
+                        // Cache file contents to avoid re-reading
+                        let mut file_contents_cache = HashMap::<String, Vec<String>>::new();
+                        
                         for (source_loc, op_count) in source_heat_map.iter().take(10) {
                             println!("\n  {} - {} ops", source_loc, op_count);
                             
@@ -733,22 +747,25 @@ impl WorldBuilder {
                                 
                                 if let Ok(line_num) = line_num_str.parse::<usize>() {
                                     // Try to read the file and show the line
-                                    if file_name == "main.py" && !shown_code.contains(file_name) {
-                                        let file_path = path.parent().unwrap().join(file_name);
-                                        if let Ok(content) = std::fs::read_to_string(&file_path) {
-                                            let lines: Vec<&str> = content.lines().collect();
-                                            if line_num > 0 && line_num <= lines.len() {
-                                                let code_line = lines[line_num - 1].trim();
-                                                if !code_line.is_empty() {
-                                                    println!("    Code: {}", code_line);
-                                                }
-                                            }
+                                    // Support both single-file and multi-file projects
+                                    // Get or load file contents
+                                    let lines = file_contents_cache.entry(file_name.to_string()).or_insert_with(|| {
+                                        let file_path = sim_dir.join(file_name);
+                                        std::fs::read_to_string(&file_path)
+                                            .ok()
+                                            .map(|content| content.lines().map(String::from).collect())
+                                            .unwrap_or_default()
+                                    });
+                                    
+                                    if line_num > 0 && line_num <= lines.len() {
+                                        let code_line = lines[line_num - 1].trim();
+                                        if !code_line.is_empty() {
+                                            println!("    Code: {}", code_line);
                                         }
                                     }
                                 }
                             }
                         }
-                        shown_code.insert("main.py");
                     } else {
                         println!("  (Location mapping requires source line metadata in HLO)");
                         println!("  Resolved {} Python source locations from HLO", loc_map.len());
@@ -760,81 +777,87 @@ impl WorldBuilder {
                     let mut recommendations = Vec::new();
                     
                     // 1. Excessive reshaping
-                    let reshape_count = op_counts.get("mhlo.reshape").unwrap_or(&0);
-                    let reshape_pct = (*reshape_count as f64 / instruction_count as f64) * 100.0;
-                    if reshape_pct > 15.0 {
-                        recommendations.push((
-                            reshape_pct,
-                            "HIGH".to_string(),
-                            format!("Excessive reshaping ({:.1}% of ops)", reshape_pct),
-                            vec![
-                                "Consider preallocating arrays with correct shapes".to_string(),
-                                "Use jnp.reshape() sparingly - chain operations without intermediate reshapes".to_string(),
-                                "Check for implicit broadcasting causing extra reshapes".to_string(),
-                            ]
-                        ));
-                    }
-                    
-                    // 2. Shape operations overhead
-                    let shape_ops_pct: f64 = if let Some(categories) = &categorized_ops {
-                        if let Some(shape_ops) = categories.get("Shape Operations") {
-                            let total: usize = shape_ops.iter().map(|(_, c)| c).sum();
-                            (total as f64 / instruction_count as f64) * 100.0
+                    if instruction_count > 0 {
+                        let reshape_count = op_counts.get("mhlo.reshape").unwrap_or(&0);
+                        let reshape_pct = (*reshape_count as f64 / instruction_count as f64) * 100.0;
+                        if reshape_pct > 15.0 {
+                            recommendations.push((
+                                reshape_pct,
+                                "HIGH".to_string(),
+                                format!("Excessive reshaping ({:.1}% of ops)", reshape_pct),
+                                vec![
+                                    "Consider preallocating arrays with correct shapes".to_string(),
+                                    "Use jnp.reshape() sparingly - chain operations without intermediate reshapes".to_string(),
+                                    "Check for implicit broadcasting causing extra reshapes".to_string(),
+                                ]
+                            ));
+                        }
+                        
+                        // 2. Shape operations overhead
+                        let shape_ops_pct: f64 = if let Some(categories) = &categorized_ops {
+                            if let Some(shape_ops) = categories.get("Shape Operations") {
+                                let total: usize = shape_ops.iter().map(|(_, c)| c).sum();
+                                (total as f64 / instruction_count as f64) * 100.0
+                            } else {
+                                0.0
+                            }
                         } else {
                             0.0
-                        }
-                    } else {
-                        0.0
-                    };
-                    
-                    if shape_ops_pct > 20.0 {
-                        recommendations.push((
-                            shape_ops_pct,
-                            "HIGH".to_string(),
-                            format!("Heavy shape manipulation ({:.1}% of ops)", shape_ops_pct),
-                            vec![
-                                "Review tensor shape consistency across function boundaries".to_string(),
-                                "Use jax.jit with static_argnums for constant shapes".to_string(),
-                                "Consider using einsum instead of reshape + matmul chains".to_string(),
-                            ]
-                        ));
-                    }
-                    
-                    // 3. Memory hotspots
-                    if let Some((component_name, bytes)) = component_memory.first() {
-                        let pct = (*bytes as f64 / input_memory_bytes as f64) * 100.0;
-                        if pct > 80.0 {
-                            let kb = *bytes as f64 / 1024.0;
+                        };
+                        
+                        if shape_ops_pct > 20.0 {
                             recommendations.push((
-                                pct,
-                                "MEDIUM".to_string(),
-                                format!("Single component dominates memory: {} ({:.1}% = {:.2} KB)", component_name, pct, kb),
+                                shape_ops_pct,
+                                "HIGH".to_string(),
+                                format!("Heavy shape manipulation ({:.1}% of ops)", shape_ops_pct),
                                 vec![
-                                    format!("Review if {} buffer size is necessary", component_name),
-                                    "Consider using smaller data types (f32 vs f64) if precision allows".to_string(),
-                                    "Investigate if buffer can be reduced or windowed".to_string(),
+                                    "Review tensor shape consistency across function boundaries".to_string(),
+                                    "Use jax.jit with static_argnums for constant shapes".to_string(),
+                                    "Consider using einsum instead of reshape + matmul chains".to_string(),
                                 ]
                             ));
                         }
                     }
                     
-                    // 4. Control flow overhead
-                    let select_count = op_counts.get("mhlo.select").unwrap_or(&0);
-                    let compare_count = op_counts.get("mhlo.compare").unwrap_or(&0);
-                    let control_flow_count = select_count + compare_count;
-                    let control_flow_pct = (control_flow_count as f64 / instruction_count as f64) * 100.0;
+                    // 3. Memory hotspots
+                    if input_memory_bytes > 0 {
+                        if let Some((component_name, bytes)) = component_memory.first() {
+                            let pct = (*bytes as f64 / input_memory_bytes as f64) * 100.0;
+                            if pct > 80.0 {
+                                let kb = *bytes as f64 / 1024.0;
+                                recommendations.push((
+                                    pct,
+                                    "MEDIUM".to_string(),
+                                    format!("Single component dominates memory: {} ({:.1}% = {:.2} KB)", component_name, pct, kb),
+                                    vec![
+                                        format!("Review if {} buffer size is necessary", component_name),
+                                        "Consider using smaller data types (f32 vs f64) if precision allows".to_string(),
+                                        "Investigate if buffer can be reduced or windowed".to_string(),
+                                    ]
+                                ));
+                            }
+                        }
+                    }
                     
-                    if control_flow_pct > 5.0 {
-                        recommendations.push((
-                            control_flow_pct,
-                            "LOW".to_string(),
-                            format!("Conditional operations present ({:.1}% of ops)", control_flow_pct),
-                            vec![
-                                "JAX jit() struggles with dynamic control flow - consider using jax.lax.cond".to_string(),
-                                "Static conditions can be hoisted outside @el.map functions".to_string(),
-                                "Review jax.lax.select usage for vectorization opportunities".to_string(),
-                            ]
-                        ));
+                    // 4. Control flow overhead
+                    if instruction_count > 0 {
+                        let select_count = op_counts.get("mhlo.select").unwrap_or(&0);
+                        let compare_count = op_counts.get("mhlo.compare").unwrap_or(&0);
+                        let control_flow_count = select_count + compare_count;
+                        let control_flow_pct = (control_flow_count as f64 / instruction_count as f64) * 100.0;
+                        
+                        if control_flow_pct > 5.0 {
+                            recommendations.push((
+                                control_flow_pct,
+                                "LOW".to_string(),
+                                format!("Conditional operations present ({:.1}% of ops)", control_flow_pct),
+                                vec![
+                                    "JAX jit() struggles with dynamic control flow - consider using jax.lax.cond".to_string(),
+                                    "Static conditions can be hoisted outside @el.map functions".to_string(),
+                                    "Review jax.lax.select usage for vectorization opportunities".to_string(),
+                                ]
+                            ));
+                        }
                     }
                     
                     // 5. Function call overhead
@@ -856,13 +879,13 @@ impl WorldBuilder {
                     recommendations.sort_by(|a, b| {
                         // First by priority, then by percentage
                         match (a.1.as_str(), b.1.as_str()) {
-                            ("HIGH", "HIGH") => b.0.partial_cmp(&a.0).unwrap(),
+                            ("HIGH", "HIGH") => b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal),
                             ("HIGH", _) => std::cmp::Ordering::Less,
                             (_, "HIGH") => std::cmp::Ordering::Greater,
-                            ("MEDIUM", "MEDIUM") => b.0.partial_cmp(&a.0).unwrap(),
+                            ("MEDIUM", "MEDIUM") => b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal),
                             ("MEDIUM", _) => std::cmp::Ordering::Less,
                             (_, "MEDIUM") => std::cmp::Ordering::Greater,
-                            _ => b.0.partial_cmp(&a.0).unwrap(),
+                            _ => b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal),
                         }
                     });
                     
