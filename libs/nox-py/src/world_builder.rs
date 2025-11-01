@@ -431,19 +431,18 @@ impl WorldBuilder {
                             }
                         }
                         // Parse fused locations: #loc651 = loc(fused[#loc128, #loc129])
-                        else if trimmed.starts_with("#loc") && trimmed.contains(" = loc(fused[") {
-                            if let Some(eq_pos) = trimmed.find(" = loc(fused[") {
-                                let loc_id = &trimmed[..eq_pos];
-                                let after_fused = &trimmed[eq_pos + 13..]; // Skip " = loc(fused["
-                                if let Some(bracket_end) = after_fused.find("])") {
-                                    let locs_str = &after_fused[..bracket_end];
-                                    // Parse comma-separated loc refs
-                                    let fused_locs: Vec<String> = locs_str
-                                        .split(',')
-                                        .map(|s| s.trim().to_string())
-                                        .collect();
-                                    fused_map.insert(loc_id.to_string(), fused_locs);
-                                }
+                        else if trimmed.starts_with("#loc") && trimmed.contains(" = loc(fused[")
+                            && let Some(eq_pos) = trimmed.find(" = loc(fused[") {
+                            let loc_id = &trimmed[..eq_pos];
+                            let after_fused = &trimmed[eq_pos + 13..]; // Skip " = loc(fused["
+                            if let Some(bracket_end) = after_fused.find("])") {
+                                let locs_str = &after_fused[..bracket_end];
+                                // Parse comma-separated loc refs
+                                let fused_locs: Vec<String> = locs_str
+                                    .split(',')
+                                    .map(|s| s.trim().to_string())
+                                    .collect();
+                                fused_map.insert(loc_id.to_string(), fused_locs);
                             }
                         }
                     }
@@ -480,19 +479,18 @@ impl WorldBuilder {
                                 // In deep mode, collect operation details and source mapping
                                 if deep {
                                     op_details.entry(op_name.to_string())
-                                        .or_insert_with(Vec::new)
+                                        .or_default()
                                         .push(trimmed.to_string());
                                     
                                     // Extract source location reference: loc(#loc123)
-                                    if let Some(loc_ref_start) = trimmed.rfind("loc(#loc") {
-                                        if let Some(loc_ref_end) = trimmed[loc_ref_start..].find(')') {
-                                            let loc_ref = &trimmed[loc_ref_start+4..loc_ref_start+loc_ref_end];
-                                            // Resolve to actual source location
-                                            if let Some(source_loc) = loc_map.get(loc_ref) {
-                                                source_line_ops.entry(source_loc.clone())
-                                                    .or_insert_with(Vec::new)
-                                                    .push(op_name.to_string());
-                                            }
+                                    if let Some(loc_ref_start) = trimmed.rfind("loc(#loc")
+                                        && let Some(loc_ref_end) = trimmed[loc_ref_start..].find(')') {
+                                        let loc_ref = &trimmed[loc_ref_start+4..loc_ref_start+loc_ref_end];
+                                        // Resolve to actual source location
+                                        if let Some(source_loc) = loc_map.get(loc_ref) {
+                                            source_line_ops.entry(source_loc.clone())
+                                                .or_default()
+                                                .push(op_name.to_string());
                                         }
                                     }
                                 }
@@ -527,7 +525,7 @@ impl WorldBuilder {
                             "Other"
                         };
                         categories.entry(category)
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push((op.clone(), *count));
                     }
                     Some(categories)
@@ -696,17 +694,16 @@ impl WorldBuilder {
                         let trimmed = line.trim();
                         if trimmed.contains("mhlo.multiply") || trimmed.contains("mhlo.dot") {
                             // Very rough estimate: extract tensor dimensions if possible
-                            if let Some(tensor_start) = trimmed.find("tensor<") {
-                                if let Some(tensor_end) = trimmed[tensor_start..].find('>') {
-                                    let tensor_info = &trimmed[tensor_start+7..tensor_start+tensor_end];
-                                    // Parse something like "1x6xf64" or "1xf64"
-                                    let dims: Vec<u64> = tensor_info
-                                        .split('x')
-                                        .filter_map(|s| s.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().ok())
-                                        .collect();
-                                    if !dims.is_empty() {
-                                        total_flops_estimate += dims.iter().product::<u64>();
-                                    }
+                            if let Some(tensor_start) = trimmed.find("tensor<")
+                                && let Some(tensor_end) = trimmed[tensor_start..].find('>') {
+                                let tensor_info = &trimmed[tensor_start+7..tensor_start+tensor_end];
+                                // Parse something like "1x6xf64" or "1xf64"
+                                let dims: Vec<u64> = tensor_info
+                                    .split('x')
+                                    .filter_map(|s| s.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().ok())
+                                    .collect();
+                                if !dims.is_empty() {
+                                    total_flops_estimate += dims.iter().product::<u64>();
                                 }
                             }
                         }
@@ -820,22 +817,21 @@ impl WorldBuilder {
                     }
                     
                     // 3. Memory hotspots
-                    if input_memory_bytes > 0 {
-                        if let Some((component_name, bytes)) = component_memory.first() {
-                            let pct = (*bytes as f64 / input_memory_bytes as f64) * 100.0;
-                            if pct > 80.0 {
-                                let kb = *bytes as f64 / 1024.0;
-                                recommendations.push((
-                                    pct,
-                                    "MEDIUM".to_string(),
-                                    format!("Single component dominates memory: {} ({:.1}% = {:.2} KB)", component_name, pct, kb),
-                                    vec![
-                                        format!("Review if {} buffer size is necessary", component_name),
-                                        "Consider using smaller data types (f32 vs f64) if precision allows".to_string(),
-                                        "Investigate if buffer can be reduced or windowed".to_string(),
-                                    ]
-                                ));
-                            }
+                    if input_memory_bytes > 0
+                        && let Some((component_name, bytes)) = component_memory.first() {
+                        let pct = (*bytes as f64 / input_memory_bytes as f64) * 100.0;
+                        if pct > 80.0 {
+                            let kb = *bytes as f64 / 1024.0;
+                            recommendations.push((
+                                pct,
+                                "MEDIUM".to_string(),
+                                format!("Single component dominates memory: {} ({:.1}% = {:.2} KB)", component_name, pct, kb),
+                                vec![
+                                    format!("Review if {} buffer size is necessary", component_name),
+                                    "Consider using smaller data types (f32 vs f64) if precision allows".to_string(),
+                                    "Investigate if buffer can be reduced or windowed".to_string(),
+                                ]
+                            ));
                         }
                     }
                     
