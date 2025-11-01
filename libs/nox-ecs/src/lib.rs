@@ -373,6 +373,16 @@ impl Exec {
     }
 }
 
+impl<S: ExecState> Exec<S> {
+    pub fn metadata(&self) -> &ExecMetadata {
+        &self.metadata
+    }
+
+    pub fn hlo_module(&self) -> &HloModuleProto {
+        &self.hlo_module
+    }
+}
+
 impl Exec<Compiled> {
     fn run(&mut self, client: &mut Buffers<PjRtBuffer>) -> Result<(), Error> {
         let mut buffers = BufferArgsRef::default().untuple_result(true);
