@@ -324,23 +324,26 @@ impl WorldBuilder {
                 let sim_file_dir = path.parent().unwrap_or_else(|| Path::new("."));
                 let output_dir = sim_file_dir.join("profile_output");
                 std::fs::create_dir_all(&output_dir)?;
-                
+
                 // Set XLA flags for HTML output if requested
                 let html_path = if html {
                     let html_dir = output_dir.join("html");
                     std::fs::create_dir_all(&html_dir)?;
-                    
+
                     // Set XLA_FLAGS to dump HTML (unsafe but necessary for XLA)
-                    let xla_flags = format!("--xla_dump_to={} --xla_dump_hlo_as_html", html_dir.display());
+                    let xla_flags = format!(
+                        "--xla_dump_to={} --xla_dump_hlo_as_html",
+                        html_dir.display()
+                    );
                     unsafe {
                         std::env::set_var("XLA_FLAGS", &xla_flags);
                     }
-                    
+
                     Some(html_dir)
                 } else {
                     None
                 };
-                
+
                 // Build uncompiled execution to get HLO module
                 let exec = self.build_uncompiled(
                     py,
@@ -354,13 +357,13 @@ impl WorldBuilder {
                 // Create client and compile to get compile time
                 let mut client = nox::Client::cpu()?;
                 client.disable_optimizations();
-                
+
                 let build_time_ms = exec.profiler.build.mean();
-                
+
                 let compile_start = time::Instant::now();
                 let mut compiled_exec = exec.compile(client)?;
                 let compile_time_ms = compile_start.elapsed().as_secs_f64() * 1000.0;
-                
+
                 // Clear XLA_FLAGS after compilation
                 if html {
                     unsafe {
@@ -369,15 +372,17 @@ impl WorldBuilder {
                 }
 
                 // Get HLO text and save to file
-                let hlo_text = compiled_exec.tick_exec.hlo_module()
+                let hlo_text = compiled_exec
+                    .tick_exec
+                    .hlo_module()
                     .computation()
                     .to_hlo_text()
                     .map_err(|e| Error::NoxEcs(nox_ecs::Error::Nox(nox_ecs::nox::Error::Xla(e))))?;
-                
+
                 // Save HLO dump to output directory
                 let hlo_dump_path = output_dir.join("hlo_dump.txt");
                 std::fs::write(&hlo_dump_path, &hlo_text)?;
-                
+
                 // Deep analysis mode - save additional formats and capture more data
                 let xla_flags = if deep {
                     // Capture XLA environment variables
@@ -394,15 +399,15 @@ impl WorldBuilder {
                 let mut instruction_count = 0;
                 let mut op_details = HashMap::<String, Vec<String>>::new(); // Store details for deep mode
                 let mut source_line_ops = HashMap::<String, Vec<String>>::new(); // Map source lines to operations
-                
+
                 // First pass: build location map (#loc123 -> "file.py:line" or vec of fused locs)
                 let mut loc_map = HashMap::<String, String>::new();
                 let mut fused_map = HashMap::<String, Vec<String>>::new();
-                
+
                 if deep {
                     for line in hlo_text.lines() {
                         let trimmed = line.trim();
-                        
+
                         // Parse direct location definitions: #loc123 = loc("file.py":456:0)
                         if trimmed.starts_with("#loc") && trimmed.contains(" = loc(\"") {
                             if let Some(eq_pos) = trimmed.find(" = loc(\"") {
@@ -412,41 +417,45 @@ impl WorldBuilder {
                                 if let Some(quote_end) = after_eq.find('"') {
                                     let file_path = &after_eq[..quote_end];
                                     // Now parse :line:col after the quote
-                                    let after_quote = &after_eq[quote_end+1..];
+                                    let after_quote = &after_eq[quote_end + 1..];
                                     if file_path.contains(".py") && after_quote.starts_with(':') {
                                         // Parse :line:col)
                                         let line_col = &after_quote[1..]; // Skip the first :
                                         if let Some(colon_pos) = line_col.find(':') {
                                             let line_num = &line_col[..colon_pos];
                                             // Extract just filename for readability
-                                            let filename = if let Some(slash) = file_path.rfind('/') {
-                                                &file_path[slash+1..]
+                                            let filename = if let Some(slash) = file_path.rfind('/')
+                                            {
+                                                &file_path[slash + 1..]
                                             } else {
                                                 file_path
                                             };
-                                            loc_map.insert(loc_id.to_string(), format!("{}:{}", filename, line_num));
+                                            loc_map.insert(
+                                                loc_id.to_string(),
+                                                format!("{}:{}", filename, line_num),
+                                            );
                                         }
                                     }
                                 }
                             }
                         }
                         // Parse fused locations: #loc651 = loc(fused[#loc128, #loc129])
-                        else if trimmed.starts_with("#loc") && trimmed.contains(" = loc(fused[")
-                            && let Some(eq_pos) = trimmed.find(" = loc(fused[") {
+                        else if trimmed.starts_with("#loc")
+                            && trimmed.contains(" = loc(fused[")
+                            && let Some(eq_pos) = trimmed.find(" = loc(fused[")
+                        {
                             let loc_id = &trimmed[..eq_pos];
                             let after_fused = &trimmed[eq_pos + 13..]; // Skip " = loc(fused["
                             if let Some(bracket_end) = after_fused.find("])") {
                                 let locs_str = &after_fused[..bracket_end];
                                 // Parse comma-separated loc refs
-                                let fused_locs: Vec<String> = locs_str
-                                    .split(',')
-                                    .map(|s| s.trim().to_string())
-                                    .collect();
+                                let fused_locs: Vec<String> =
+                                    locs_str.split(',').map(|s| s.trim().to_string()).collect();
                                 fused_map.insert(loc_id.to_string(), fused_locs);
                             }
                         }
                     }
-                    
+
                     // Resolve fused locations recursively (simple one-level resolution for now)
                     let mut fused_resolutions = Vec::new();
                     for (fused_id, constituent_locs) in &fused_map {
@@ -463,7 +472,7 @@ impl WorldBuilder {
                         loc_map.insert(fused_id, resolved);
                     }
                 }
-                
+
                 // Second pass: count instructions and map to source
                 for line in hlo_text.lines() {
                     let trimmed = line.trim();
@@ -475,20 +484,25 @@ impl WorldBuilder {
                             // Get the first word (operation type)
                             if let Some(op_name) = after_eq.split_whitespace().next() {
                                 *op_counts.entry(op_name.to_string()).or_insert(0) += 1;
-                                
+
                                 // In deep mode, collect operation details and source mapping
                                 if deep {
-                                    op_details.entry(op_name.to_string())
+                                    op_details
+                                        .entry(op_name.to_string())
                                         .or_default()
                                         .push(trimmed.to_string());
-                                    
+
                                     // Extract source location reference: loc(#loc123)
                                     if let Some(loc_ref_start) = trimmed.rfind("loc(#loc")
-                                        && let Some(loc_ref_end) = trimmed[loc_ref_start..].find(')') {
-                                        let loc_ref = &trimmed[loc_ref_start+4..loc_ref_start+loc_ref_end];
+                                        && let Some(loc_ref_end) =
+                                            trimmed[loc_ref_start..].find(')')
+                                    {
+                                        let loc_ref = &trimmed
+                                            [loc_ref_start + 4..loc_ref_start + loc_ref_end];
                                         // Resolve to actual source location
                                         if let Some(source_loc) = loc_map.get(loc_ref) {
-                                            source_line_ops.entry(source_loc.clone())
+                                            source_line_ops
+                                                .entry(source_loc.clone())
                                                 .or_default()
                                                 .push(op_name.to_string());
                                         }
@@ -502,7 +516,7 @@ impl WorldBuilder {
                 // Sort operations by count (descending)
                 let mut op_vec: Vec<_> = op_counts.iter().collect();
                 op_vec.sort_by(|a, b| b.1.cmp(a.1));
-                
+
                 // Categorize operations for deep analysis
                 let categorized_ops = if deep {
                     let mut categories = HashMap::<&str, Vec<(String, usize)>>::new();
@@ -511,20 +525,27 @@ impl WorldBuilder {
                             "Arithmetic (Multiply/Dot)"
                         } else if op.contains("add") || op.contains("subtract") {
                             "Arithmetic (Add/Sub)"
-                        } else if op.contains("reshape") || op.contains("transpose") || op.contains("broadcast") {
+                        } else if op.contains("reshape")
+                            || op.contains("transpose")
+                            || op.contains("broadcast")
+                        {
                             "Shape Operations"
                         } else if op.contains("compare") || op.contains("select") {
                             "Control Flow"
                         } else if op.contains("constant") {
                             "Constants"
-                        } else if op.contains("slice") || op.contains("gather") || op.contains("dynamic") {
+                        } else if op.contains("slice")
+                            || op.contains("gather")
+                            || op.contains("dynamic")
+                        {
                             "Indexing"
                         } else if op == "call" {
                             "Function Calls"
                         } else {
                             "Other"
                         };
-                        categories.entry(category)
+                        categories
+                            .entry(category)
                             .or_default()
                             .push((op.clone(), *count));
                     }
@@ -536,10 +557,16 @@ impl WorldBuilder {
                 // Calculate memory footprint with per-component tracking
                 let element_size = |prim_type: impeller2::types::PrimType| -> usize {
                     match prim_type {
-                        impeller2::types::PrimType::Bool | impeller2::types::PrimType::U8 | impeller2::types::PrimType::I8 => 1,
+                        impeller2::types::PrimType::Bool
+                        | impeller2::types::PrimType::U8
+                        | impeller2::types::PrimType::I8 => 1,
                         impeller2::types::PrimType::U16 | impeller2::types::PrimType::I16 => 2,
-                        impeller2::types::PrimType::U32 | impeller2::types::PrimType::I32 | impeller2::types::PrimType::F32 => 4,
-                        impeller2::types::PrimType::U64 | impeller2::types::PrimType::I64 | impeller2::types::PrimType::F64 => 8,
+                        impeller2::types::PrimType::U32
+                        | impeller2::types::PrimType::I32
+                        | impeller2::types::PrimType::F32 => 4,
+                        impeller2::types::PrimType::U64
+                        | impeller2::types::PrimType::I64
+                        | impeller2::types::PrimType::F64 => 8,
                     }
                 };
 
@@ -549,7 +576,8 @@ impl WorldBuilder {
 
                 for id in &compiled_exec.tick_exec.metadata().arg_ids {
                     if let Some(col) = compiled_exec.world.column_by_id(*id) {
-                        let shape_size: usize = col.schema.shape().iter().map(|&x| x as usize).product();
+                        let shape_size: usize =
+                            col.schema.shape().iter().map(|&x| x as usize).product();
                         let elem_size = element_size(col.schema.prim_type);
                         let mem_bytes = col.len() * shape_size * elem_size;
                         input_memory_bytes += mem_bytes;
@@ -559,7 +587,8 @@ impl WorldBuilder {
 
                 for id in &compiled_exec.tick_exec.metadata().ret_ids {
                     if let Some(col) = compiled_exec.world.column_by_id(*id) {
-                        let shape_size: usize = col.schema.shape().iter().map(|&x| x as usize).product();
+                        let shape_size: usize =
+                            col.schema.shape().iter().map(|&x| x as usize).product();
                         let elem_size = element_size(col.schema.prim_type);
                         let mem_bytes = col.len() * shape_size * elem_size;
                         output_memory_bytes += mem_bytes;
@@ -577,7 +606,7 @@ impl WorldBuilder {
                 println!("\n[Compilation]");
                 println!("  Build time:        {:.3} ms", build_time_ms);
                 println!("  Compile time:      {:.3} ms", compile_time_ms);
-                
+
                 println!("\n[HLO Analysis]");
                 println!("  Total instructions: {}", instruction_count);
                 println!("  HLO text dump:      {}", hlo_dump_path.display());
@@ -586,21 +615,27 @@ impl WorldBuilder {
                     if let Ok(entries) = std::fs::read_dir(html_dir) {
                         let html_files: Vec<_> = entries
                             .filter_map(|e| e.ok())
-                            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("html"))
+                            .filter(|e| {
+                                e.path().extension().and_then(|s| s.to_str()) == Some("html")
+                            })
                             .collect();
                         if !html_files.is_empty() {
-                            println!("  HTML visualization: {} (open in browser)", html_dir.display());
+                            println!(
+                                "  HTML visualization: {} (open in browser)",
+                                html_dir.display()
+                            );
                             println!("    Found {} HTML file(s)", html_files.len());
                         }
                     }
                 }
-                
+
                 println!("\n[Operation Breakdown]");
                 if instruction_count > 0 {
                     for (op, count) in op_vec.iter().take(10) {
-                        println!("  {:20} {:6} ({:.1}%)", 
-                            op, 
-                            count, 
+                        println!(
+                            "  {:20} {:6} ({:.1}%)",
+                            op,
+                            count,
                             (**count as f64 / instruction_count as f64) * 100.0
                         );
                     }
@@ -614,14 +649,18 @@ impl WorldBuilder {
                 println!("\n[Memory Footprint]");
                 println!("  Input memory:       {:.2} KB", input_memory_kb);
                 println!("  Output memory:      {:.2} KB", output_memory_kb);
-                println!("  Total memory:       {:.2} KB", input_memory_kb + output_memory_kb);
+                println!(
+                    "  Total memory:       {:.2} KB",
+                    input_memory_kb + output_memory_kb
+                );
 
                 println!("\n[Top Components by Memory]");
                 if input_memory_kb > 0.0 {
                     for (name, bytes) in component_memory.iter().take(10) {
                         let kb = *bytes as f64 / 1024.0;
-                        println!("  {:40} {:8.2} KB ({:.1}%)", 
-                            name, 
+                        println!(
+                            "  {:40} {:8.2} KB ({:.1}%)",
+                            name,
                             kb,
                             (kb / input_memory_kb) * 100.0
                         );
@@ -633,7 +672,7 @@ impl WorldBuilder {
                 // Deep analysis output
                 if deep {
                     println!("\n[Deep Analysis Mode]");
-                    
+
                     // XLA Flags
                     if !xla_flags.is_empty() {
                         println!("\n  Active XLA Flags:");
@@ -643,14 +682,14 @@ impl WorldBuilder {
                     } else {
                         println!("\n  No XLA environment variables detected");
                     }
-                    
+
                     // Note about graph visualization
                     if !html {
                         println!("\n  Graph Visualization:");
                         println!("    Use --html flag for interactive HTML visualization");
                         println!("    Or XLA_FLAGS=\"--xla_dump_hlo_as_dot\" for GraphViz output");
                     }
-                    
+
                     // Operation categories
                     if let Some(ref categories) = categorized_ops {
                         println!("\n  Operation Categories:");
@@ -660,19 +699,20 @@ impl WorldBuilder {
                             let sum_b: usize = b.1.iter().map(|(_, c)| c).sum();
                             sum_b.cmp(&sum_a)
                         });
-                        
+
                         if instruction_count > 0 {
                             for (category, ops) in cat_vec {
                                 let total: usize = ops.iter().map(|(_, c)| c).sum();
-                                println!("    {:30} {:6} ops ({:.1}%)", 
-                                    category, 
+                                println!(
+                                    "    {:30} {:6} ops ({:.1}%)",
+                                    category,
                                     total,
                                     (total as f64 / instruction_count as f64) * 100.0
                                 );
                             }
                         }
                     }
-                    
+
                     // Sample operations with shapes (first few of each type)
                     println!("\n  Sample Operations (with shapes):");
                     for (op, count) in op_vec.iter().take(5) {
@@ -681,13 +721,14 @@ impl WorldBuilder {
                             for detail in details.iter().take(2) {
                                 // Extract and show just the interesting part (type/shape info)
                                 if let Some(colon_pos) = detail.find(':') {
-                                    let type_info = &detail[colon_pos..].chars().take(80).collect::<String>();
+                                    let type_info =
+                                        &detail[colon_pos..].chars().take(80).collect::<String>();
                                     println!("      {}", type_info);
                                 }
                             }
                         }
                     }
-                    
+
                     // Theoretical FLOP estimate for multiply/dot operations
                     let mut total_flops_estimate = 0u64;
                     for line in hlo_text.lines() {
@@ -695,12 +736,20 @@ impl WorldBuilder {
                         if trimmed.contains("mhlo.multiply") || trimmed.contains("mhlo.dot") {
                             // Very rough estimate: extract tensor dimensions if possible
                             if let Some(tensor_start) = trimmed.find("tensor<")
-                                && let Some(tensor_end) = trimmed[tensor_start..].find('>') {
-                                let tensor_info = &trimmed[tensor_start+7..tensor_start+tensor_end];
+                                && let Some(tensor_end) = trimmed[tensor_start..].find('>')
+                            {
+                                let tensor_info =
+                                    &trimmed[tensor_start + 7..tensor_start + tensor_end];
                                 // Parse something like "1x6xf64" or "1xf64"
                                 let dims: Vec<u64> = tensor_info
                                     .split('x')
-                                    .filter_map(|s| s.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().ok())
+                                    .filter_map(|s| {
+                                        s.chars()
+                                            .take_while(|c| c.is_ascii_digit())
+                                            .collect::<String>()
+                                            .parse()
+                                            .ok()
+                                    })
                                     .collect();
                                 if !dims.is_empty() {
                                     total_flops_estimate += dims.iter().product::<u64>();
@@ -708,52 +757,60 @@ impl WorldBuilder {
                             }
                         }
                     }
-                    
+
                     if total_flops_estimate > 0 {
                         println!("\n  Estimated Compute:");
-                        println!("    Theoretical FLOPs: ~{} operations", total_flops_estimate);
+                        println!(
+                            "    Theoretical FLOPs: ~{} operations",
+                            total_flops_estimate
+                        );
                         println!("    (Very rough estimate from multiply/dot operations)");
                     }
-                    
+
                     // === OPTIMIZATION OPPORTUNITIES ===
                     println!("\n=== OPTIMIZATION OPPORTUNITIES ===");
-                    
+
                     // Analyze source code hot spots
                     println!("\n[Hot Spots in Python Code]");
                     if !source_line_ops.is_empty() {
-                        let mut source_heat_map: Vec<_> = source_line_ops.iter()
+                        let mut source_heat_map: Vec<_> = source_line_ops
+                            .iter()
                             .map(|(loc, ops)| (loc, ops.len()))
                             .collect();
                         source_heat_map.sort_by(|a, b| b.1.cmp(&a.1));
-                        
+
                         println!("Python lines generating the most HLO operations:");
-                        
+
                         // Get the directory containing the simulation file
                         let sim_dir = path.parent().unwrap_or_else(|| Path::new("."));
-                        
+
                         // Cache file contents to avoid re-reading
                         let mut file_contents_cache = HashMap::<String, Vec<String>>::new();
-                        
+
                         for (source_loc, op_count) in source_heat_map.iter().take(10) {
                             println!("\n  {} - {} ops", source_loc, op_count);
-                            
+
                             // Parse filename and line number
                             if let Some(colon_pos) = source_loc.rfind(':') {
                                 let file_name = &source_loc[..colon_pos];
-                                let line_num_str = &source_loc[colon_pos+1..];
-                                
+                                let line_num_str = &source_loc[colon_pos + 1..];
+
                                 if let Ok(line_num) = line_num_str.parse::<usize>() {
                                     // Try to read the file and show the line
                                     // Support both single-file and multi-file projects
                                     // Get or load file contents
-                                    let lines = file_contents_cache.entry(file_name.to_string()).or_insert_with(|| {
-                                        let file_path = sim_dir.join(file_name);
-                                        std::fs::read_to_string(&file_path)
-                                            .ok()
-                                            .map(|content| content.lines().map(String::from).collect())
-                                            .unwrap_or_default()
-                                    });
-                                    
+                                    let lines = file_contents_cache
+                                        .entry(file_name.to_string())
+                                        .or_insert_with(|| {
+                                            let file_path = sim_dir.join(file_name);
+                                            std::fs::read_to_string(&file_path)
+                                                .ok()
+                                                .map(|content| {
+                                                    content.lines().map(String::from).collect()
+                                                })
+                                                .unwrap_or_default()
+                                        });
+
                                     if line_num > 0 && line_num <= lines.len() {
                                         let code_line = lines[line_num - 1].trim();
                                         if !code_line.is_empty() {
@@ -765,18 +822,22 @@ impl WorldBuilder {
                         }
                     } else {
                         println!("  (Location mapping requires source line metadata in HLO)");
-                        println!("  Resolved {} Python source locations from HLO", loc_map.len());
+                        println!(
+                            "  Resolved {} Python source locations from HLO",
+                            loc_map.len()
+                        );
                     }
-                    
+
                     // Identify anti-patterns and optimization opportunities
                     println!("\n[Detected Optimization Patterns]");
-                    
+
                     let mut recommendations = Vec::new();
-                    
+
                     // 1. Excessive reshaping
                     if instruction_count > 0 {
                         let reshape_count = op_counts.get("mhlo.reshape").unwrap_or(&0);
-                        let reshape_pct = (*reshape_count as f64 / instruction_count as f64) * 100.0;
+                        let reshape_pct =
+                            (*reshape_count as f64 / instruction_count as f64) * 100.0;
                         if reshape_pct > 15.0 {
                             recommendations.push((
                                 reshape_pct,
@@ -789,7 +850,7 @@ impl WorldBuilder {
                                 ]
                             ));
                         }
-                        
+
                         // 2. Shape operations overhead
                         let shape_ops_pct: f64 = if let Some(categories) = &categorized_ops {
                             if let Some(shape_ops) = categories.get("Shape Operations") {
@@ -801,24 +862,28 @@ impl WorldBuilder {
                         } else {
                             0.0
                         };
-                        
+
                         if shape_ops_pct > 20.0 {
                             recommendations.push((
                                 shape_ops_pct,
                                 "HIGH".to_string(),
                                 format!("Heavy shape manipulation ({:.1}% of ops)", shape_ops_pct),
                                 vec![
-                                    "Review tensor shape consistency across function boundaries".to_string(),
-                                    "Use jax.jit with static_argnums for constant shapes".to_string(),
-                                    "Consider using einsum instead of reshape + matmul chains".to_string(),
-                                ]
+                                    "Review tensor shape consistency across function boundaries"
+                                        .to_string(),
+                                    "Use jax.jit with static_argnums for constant shapes"
+                                        .to_string(),
+                                    "Consider using einsum instead of reshape + matmul chains"
+                                        .to_string(),
+                                ],
                             ));
                         }
                     }
-                    
+
                     // 3. Memory hotspots
                     if input_memory_bytes > 0
-                        && let Some((component_name, bytes)) = component_memory.first() {
+                        && let Some((component_name, bytes)) = component_memory.first()
+                    {
                         let pct = (*bytes as f64 / input_memory_bytes as f64) * 100.0;
                         if pct > 80.0 {
                             let kb = *bytes as f64 / 1024.0;
@@ -834,14 +899,15 @@ impl WorldBuilder {
                             ));
                         }
                     }
-                    
+
                     // 4. Control flow overhead
                     if instruction_count > 0 {
                         let select_count = op_counts.get("mhlo.select").unwrap_or(&0);
                         let compare_count = op_counts.get("mhlo.compare").unwrap_or(&0);
                         let control_flow_count = select_count + compare_count;
-                        let control_flow_pct = (control_flow_count as f64 / instruction_count as f64) * 100.0;
-                        
+                        let control_flow_pct =
+                            (control_flow_count as f64 / instruction_count as f64) * 100.0;
+
                         if control_flow_pct > 5.0 {
                             recommendations.push((
                                 control_flow_pct,
@@ -855,45 +921,54 @@ impl WorldBuilder {
                             ));
                         }
                     }
-                    
+
                     // 5. Function call overhead
                     let call_count = op_counts.get("call").unwrap_or(&0);
                     if *call_count > 50 {
                         recommendations.push((
                             *call_count as f64,
                             "MEDIUM".to_string(),
-                            format!("{} function calls - potential inlining opportunities", call_count),
+                            format!(
+                                "{} function calls - potential inlining opportunities",
+                                call_count
+                            ),
                             vec![
                                 "JAX may benefit from inlining small functions".to_string(),
-                                "Consider using jax.jit(inline=True) for helper functions".to_string(),
+                                "Consider using jax.jit(inline=True) for helper functions"
+                                    .to_string(),
                                 "Review if scan/vmap could replace explicit calls".to_string(),
-                            ]
+                            ],
                         ));
                     }
-                    
+
                     // Sort recommendations by severity/impact
                     recommendations.sort_by(|a, b| {
                         // First by priority, then by percentage
                         match (a.1.as_str(), b.1.as_str()) {
-                            ("HIGH", "HIGH") => b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal),
+                            ("HIGH", "HIGH") => {
+                                b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
+                            }
                             ("HIGH", _) => std::cmp::Ordering::Less,
                             (_, "HIGH") => std::cmp::Ordering::Greater,
-                            ("MEDIUM", "MEDIUM") => b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal),
+                            ("MEDIUM", "MEDIUM") => {
+                                b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
+                            }
                             ("MEDIUM", _) => std::cmp::Ordering::Less,
                             (_, "MEDIUM") => std::cmp::Ordering::Greater,
                             _ => b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal),
                         }
                     });
-                    
+
                     // Print recommendations
-                    for (i, (_, priority, issue, suggestions)) in recommendations.iter().enumerate() {
+                    for (i, (_, priority, issue, suggestions)) in recommendations.iter().enumerate()
+                    {
                         println!("\n{}. [{}] {}", i + 1, priority, issue);
                         println!("   Recommendations:");
                         for suggestion in suggestions {
                             println!("   • {}", suggestion);
                         }
                     }
-                    
+
                     if recommendations.is_empty() {
                         println!("\n✓ No major optimization opportunities detected!");
                         println!("  Your code is already well-optimized for JAX.");
@@ -903,33 +978,58 @@ impl WorldBuilder {
                 // Optionally run execution analysis if ticks are specified
                 if ticks > 0 {
                     println!("\n[Runtime Analysis - {} ticks]", ticks);
-                    
+
                     // Set up exec with database (similar to bench command)
                     let db_dir = tempfile::tempdir()?;
                     let db_dir_path = db_dir.keep();
                     let db = elodin_db::DB::create(db_dir_path.join("db"))?;
-                    nox_ecs::impeller2_server::init_db(&db, &mut compiled_exec.world, impeller2::types::Timestamp::now())?;
-                    
-                    let mut exec_with_db = Exec { exec: compiled_exec, db };
-                    
+                    nox_ecs::impeller2_server::init_db(
+                        &db,
+                        &mut compiled_exec.world,
+                        impeller2::types::Timestamp::now(),
+                    )?;
+
+                    let mut exec_with_db = Exec {
+                        exec: compiled_exec,
+                        db,
+                    };
+
                     // Run the simulation
                     let exec_start = time::Instant::now();
                     exec_with_db.run(py, ticks, false)?;
                     let total_exec_time = exec_start.elapsed().as_secs_f64() * 1000.0;
-                    
+
                     // Get runtime profile metrics
                     let profile = exec_with_db.profile();
-                    
+
                     println!("  Execution time:");
                     println!("    Total:              {:.3} ms", total_exec_time);
-                    println!("    Per tick (avg):     {:.3} ms", total_exec_time / ticks as f64);
-                    println!("    copy_to_client:     {:.3} ms", profile["copy_to_client"]);
-                    println!("    execute_buffers:    {:.3} ms", profile["execute_buffers"]);
+                    println!(
+                        "    Per tick (avg):     {:.3} ms",
+                        total_exec_time / ticks as f64
+                    );
+                    println!(
+                        "    copy_to_client:     {:.3} ms",
+                        profile["copy_to_client"]
+                    );
+                    println!(
+                        "    execute_buffers:    {:.3} ms",
+                        profile["execute_buffers"]
+                    );
                     println!("    copy_to_host:       {:.3} ms", profile["copy_to_host"]);
-                    println!("    add_to_history:     {:.3} ms", profile["add_to_history"]);
+                    println!(
+                        "    add_to_history:     {:.3} ms",
+                        profile["add_to_history"]
+                    );
                     println!("  Performance:");
-                    println!("    Real-time factor:   {:.1}x", profile["real_time_factor"]);
-                    println!("    Throughput:         {:.1} ticks/sec", 1000.0 / profile["tick"]);
+                    println!(
+                        "    Real-time factor:   {:.1}x",
+                        profile["real_time_factor"]
+                    );
+                    println!(
+                        "    Throughput:         {:.1} ticks/sec",
+                        1000.0 / profile["tick"]
+                    );
                 }
 
                 println!();
