@@ -149,6 +149,54 @@ w.run(system,
 
 External clients can then connect and control these components in real-time. See the [Rust client example](../db/examples/rust_client/README.md) for a complete implementation.
 
+## Performance Profiling
+
+Analyze and optimize your simulation's computational complexity with the built-in profiler:
+
+```bash
+# Quick profile - static analysis only
+python sim.py profile
+
+# With runtime metrics
+python sim.py profile --ticks 100
+
+# Deep analysis - optimization opportunities
+python sim.py profile --deep
+
+# Generate interactive HTML visualization
+python sim.py profile --html --deep
+```
+
+### Profile Output
+
+The profiler provides:
+- **Compilation metrics** - Build and compile times
+- **HLO instruction analysis** - Operation counts and types
+- **Memory footprint** - Per-component breakdown
+- **Hot spot identification** - Python lines generating the most operations (with `--deep`)
+- **Actionable recommendations** - Ranked optimization opportunities (with `--deep`)
+
+Example output:
+```
+[Hot Spots in Python Code]
+  main.py:339 - 504 ops
+    Code: coefs = jnp.array([map_coordinates(coef, coords, 1, mode="nearest") for coef in aero])
+
+[Detected Optimization Patterns]
+1. [HIGH] Heavy shape manipulation (21.6% of ops)
+   • Review tensor shape consistency across function boundaries
+   • Consider using einsum instead of reshape + matmul chains
+```
+
+### When to Use
+
+- **Development**: Quick `profile` to check complexity of new systems
+- **Optimization**: `profile --deep` to identify bottlenecks and get specific recommendations
+- **Debugging**: `profile --html` for visual inspection of the computation graph
+- **Benchmarking**: `profile --deep --ticks 1000` for complete static + runtime analysis
+
+Output files are saved to `profile_output/` directory next to your simulation file for easy access.
+
 ## Database Integration
 
 ### Embedded Database (Default)
