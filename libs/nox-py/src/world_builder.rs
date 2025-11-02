@@ -42,14 +42,8 @@ pub enum Args {
     Bench {
         #[arg(long, default_value = "1000")]
         ticks: usize,
-    },
-    Profile {
-        #[arg(long, default_value = "0")]
-        ticks: usize,
         #[arg(long, default_value = "false")]
-        deep: bool,
-        #[arg(long, default_value = "false")]
-        html: bool,
+        profile: bool,
     },
 }
 
@@ -286,144 +280,148 @@ impl WorldBuilder {
                 std::fs::write(&plan_path, toml)?;
                 Ok(None)
             }
-            Args::Bench { ticks } => {
-                let mut exec = self.build(
-                    py,
-                    sys,
-                    sim_time_step,
-                    run_time_step,
-                    default_playback_speed,
-                    max_ticks,
-                    optimize,
-                )?;
-                exec.run(py, ticks, true)?;
-                let profile = exec.profile();
-                println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
-                println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
-                println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
-                println!("add_to_history time:  {:.3} ms", profile["add_to_history"]);
-                println!("= tick time:          {:.3} ms", profile["tick"]);
-                println!("build time:           {:.3} ms", profile["build"]);
-                println!("compile time:         {:.3} ms", profile["compile"]);
-                println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
-                Ok(None)
-            }
-            Args::Components => {
-                // Discover components and entities without running the simulation
-                let discovery_result = self.discover_components(py)?;
+            Args::Bench {
+                ticks,
+                profile: enable_profiling,
+            } => {
+                if !enable_profiling {
+                    // Standard bench mode - just run and show timing
+                    let mut exec = self.build(
+                        py,
+                        sys,
+                        sim_time_step,
+                        run_time_step,
+                        default_playback_speed,
+                        max_ticks,
+                        optimize,
+                    )?;
+                    exec.run(py, ticks, true)?;
+                    let profile = exec.profile();
+                    println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
+                    println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
+                    println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
+                    println!("add_to_history time:  {:.3} ms", profile["add_to_history"]);
+                    println!("= tick time:          {:.3} ms", profile["tick"]);
+                    println!("build time:           {:.3} ms", profile["build"]);
+                    println!("compile time:         {:.3} ms", profile["compile"]);
+                    println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
+                    Ok(None)
+                } else {
+                    // Profiling mode enabled - run full analysis with DOT graph export
 
-                // Convert to JSON and print
-                let json_module = py.import("json")?;
-                let json_str = json_module.call_method1("dumps", (discovery_result,))?;
-                println!("{}", json_str.extract::<String>()?);
+                    // Set up output directory near the simulation file
+                    let sim_file_dir = path.parent().unwrap_or_else(|| Path::new("."));
+                    let output_dir = sim_file_dir.join("profile_output");
+                    std::fs::create_dir_all(&output_dir)?;
 
-                Ok(None)
-            }
-            Args::Profile { ticks, deep, html } => {
-                // Set up output directory near the simulation file
-                let sim_file_dir = path.parent().unwrap_or_else(|| Path::new("."));
-                let output_dir = sim_file_dir.join("profile_output");
-                std::fs::create_dir_all(&output_dir)?;
+                    // Set XLA flags for DOT graph output
+                    let dot_dir = output_dir.join("graphs");
+                    std::fs::create_dir_all(&dot_dir)?;
 
-                // Set XLA flags for HTML output if requested
-                let html_path = if html {
-                    let html_dir = output_dir.join("html");
-                    std::fs::create_dir_all(&html_dir)?;
-
-                    // Set XLA_FLAGS to dump HTML (unsafe but necessary for XLA)
-                    let xla_flags = format!(
-                        "--xla_dump_to={} --xla_dump_hlo_as_html",
-                        html_dir.display()
-                    );
+                    let xla_flags =
+                        format!("--xla_dump_to={} --xla_dump_hlo_as_dot", dot_dir.display());
                     unsafe {
                         std::env::set_var("XLA_FLAGS", &xla_flags);
                     }
 
-                    Some(html_dir)
-                } else {
-                    None
-                };
+                    // Build and compile
+                    let exec = self.build_uncompiled(
+                        py,
+                        sys,
+                        sim_time_step,
+                        run_time_step,
+                        default_playback_speed,
+                        max_ticks,
+                    )?;
 
-                // Build uncompiled execution to get HLO module
-                let exec = self.build_uncompiled(
-                    py,
-                    sys,
-                    sim_time_step,
-                    run_time_step,
-                    default_playback_speed,
-                    max_ticks,
-                )?;
+                    let mut client = nox::Client::cpu()?;
+                    if !optimize {
+                        client.disable_optimizations();
+                    }
 
-                // Create client and compile to get compile time
-                let mut client = nox::Client::cpu()?;
-                client.disable_optimizations();
+                    let build_time_ms = exec.profiler.build.mean();
 
-                let build_time_ms = exec.profiler.build.mean();
+                    let compile_start = time::Instant::now();
+                    let mut compiled_exec = exec.compile(client)?;
+                    let compile_time_ms = compile_start.elapsed().as_secs_f64() * 1000.0;
 
-                let compile_start = time::Instant::now();
-                let mut compiled_exec = exec.compile(client)?;
-                let compile_time_ms = compile_start.elapsed().as_secs_f64() * 1000.0;
-
-                // Clear XLA_FLAGS after compilation
-                if html {
+                    // Clear XLA_FLAGS after compilation
                     unsafe {
                         std::env::remove_var("XLA_FLAGS");
                     }
-                }
 
-                // Get HLO text and save to file
-                let hlo_text = compiled_exec
-                    .tick_exec
-                    .hlo_module()
-                    .computation()
-                    .to_hlo_text()
-                    .map_err(|e| Error::NoxEcs(nox_ecs::Error::Nox(nox_ecs::nox::Error::Xla(e))))?;
+                    // Rename DOT files to simpler names
+                    if let Ok(entries) = std::fs::read_dir(&dot_dir) {
+                        for entry in entries.filter_map(|e| e.ok()) {
+                            let path = entry.path();
+                            if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+                                // Simplify: module_0001.jit__unnamed_wrapped_function_.cpu_after_optimizations.dot
+                                // → cpu_after_optimizations.dot
+                                let new_name = if filename.contains("before_optimizations")
+                                    && filename.ends_with(".dot")
+                                {
+                                    "before_optimizations.dot"
+                                } else if filename.contains("cpu_after_optimizations")
+                                    && filename.ends_with(".dot")
+                                {
+                                    "cpu_after_optimizations.dot"
+                                } else if filename.contains("ir-no-opt.ll") {
+                                    "llvm_ir_before_opt.ll"
+                                } else if filename.contains("ir-with-opt.ll") {
+                                    "llvm_ir_after_opt.ll"
+                                } else if filename.ends_with(".o") {
+                                    "compiled_module.o"
+                                } else {
+                                    continue; // Keep other files as-is
+                                };
 
-                // Save HLO dump to output directory
-                let hlo_dump_path = output_dir.join("hlo_dump.txt");
-                std::fs::write(&hlo_dump_path, &hlo_text)?;
+                                let new_path = dot_dir.join(new_name);
+                                let _ = std::fs::rename(&path, &new_path);
+                            }
+                        }
+                    }
 
-                // Deep analysis mode - save additional formats and capture more data
-                let xla_flags = if deep {
-                    // Capture XLA environment variables
-                    let xla_flags: Vec<(String, String)> = std::env::vars()
-                        .filter(|(k, _)| k.starts_with("XLA_") || k.starts_with("TF_XLA_"))
-                        .collect();
-                    xla_flags
-                } else {
-                    vec![]
-                };
+                    // Get HLO text and save to file
+                    let hlo_text = compiled_exec
+                        .tick_exec
+                        .hlo_module()
+                        .computation()
+                        .to_hlo_text()
+                        .map_err(|e| {
+                            Error::NoxEcs(nox_ecs::Error::Nox(nox_ecs::nox::Error::Xla(e)))
+                        })?;
 
-                // Count total instructions and categorize by operation type
-                let mut op_counts = HashMap::<String, usize>::new();
-                let mut instruction_count = 0;
-                let mut op_details = HashMap::<String, Vec<String>>::new(); // Store details for deep mode
-                let mut source_line_ops = HashMap::<String, Vec<String>>::new(); // Map source lines to operations
+                    // Save HLO dump to output directory
+                    let hlo_dump_path = output_dir.join("hlo_dump.txt");
+                    std::fs::write(&hlo_dump_path, &hlo_text)?;
 
-                // First pass: build location map (#loc123 -> "file.py:line" or vec of fused locs)
-                let mut loc_map = HashMap::<String, String>::new();
-                let mut fused_map = HashMap::<String, Vec<String>>::new();
+                    // === FULL PROFILING ANALYSIS ===
 
-                if deep {
+                    // Parse and analyze HLO
+                    let mut op_counts = HashMap::<String, usize>::new();
+                    let mut instruction_count = 0;
+                    let mut op_details = HashMap::<String, Vec<String>>::new();
+                    let mut source_line_ops = HashMap::<String, Vec<String>>::new();
+
+                    // Build location map
+                    let mut loc_map = HashMap::<String, String>::new();
+                    let mut fused_map = HashMap::<String, Vec<String>>::new();
+
                     for line in hlo_text.lines() {
                         let trimmed = line.trim();
 
-                        // Parse direct location definitions: #loc123 = loc("file.py":456:0)
+                        // Parse direct location definitions
                         if trimmed.starts_with("#loc") && trimmed.contains(" = loc(\"") {
                             if let Some(eq_pos) = trimmed.find(" = loc(\"") {
                                 let loc_id = &trimmed[..eq_pos];
-                                let after_eq = &trimmed[eq_pos + 8..]; // Skip " = loc(\""
-                                // Find closing quote for the path
+                                let after_eq = &trimmed[eq_pos + 8..];
                                 if let Some(quote_end) = after_eq.find('"') {
                                     let file_path = &after_eq[..quote_end];
-                                    // Now parse :line:col after the quote
                                     let after_quote = &after_eq[quote_end + 1..];
                                     if file_path.contains(".py") && after_quote.starts_with(':') {
-                                        // Parse :line:col)
-                                        let line_col = &after_quote[1..]; // Skip the first :
+                                        let line_col = &after_quote[1..];
                                         if let Some(colon_pos) = line_col.find(':') {
                                             let line_num = &line_col[..colon_pos];
-                                            // Extract just filename for readability
                                             let filename = if let Some(slash) = file_path.rfind('/')
                                             {
                                                 &file_path[slash + 1..]
@@ -439,16 +437,15 @@ impl WorldBuilder {
                                 }
                             }
                         }
-                        // Parse fused locations: #loc651 = loc(fused[#loc128, #loc129])
+                        // Parse fused locations
                         else if trimmed.starts_with("#loc")
                             && trimmed.contains(" = loc(fused[")
                             && let Some(eq_pos) = trimmed.find(" = loc(fused[")
                         {
                             let loc_id = &trimmed[..eq_pos];
-                            let after_fused = &trimmed[eq_pos + 13..]; // Skip " = loc(fused["
+                            let after_fused = &trimmed[eq_pos + 13..];
                             if let Some(bracket_end) = after_fused.find("])") {
                                 let locs_str = &after_fused[..bracket_end];
-                                // Parse comma-separated loc refs
                                 let fused_locs: Vec<String> =
                                     locs_str.split(',').map(|s| s.trim().to_string()).collect();
                                 fused_map.insert(loc_id.to_string(), fused_locs);
@@ -456,29 +453,27 @@ impl WorldBuilder {
                         }
                     }
 
-                    // Resolve fused locations recursively (simple one-level resolution for now)
+                    // Resolve fused locations
                     let mut fused_resolutions = Vec::new();
                     for (fused_id, constituent_locs) in &fused_map {
                         for constituent_loc in constituent_locs {
                             if let Some(resolved) = loc_map.get(constituent_loc) {
-                                // Store the first resolved location from the fused set
                                 fused_resolutions.push((fused_id.clone(), resolved.clone()));
                                 break;
                             }
                         }
                     }
-                    // Insert all fused resolutions
                     for (fused_id, resolved) in fused_resolutions {
                         loc_map.insert(fused_id, resolved);
                     }
-                }
 
-                // Helper function to extract tensor dimensions from HLO text
-                let parse_tensor_dims = |text: &str| -> Vec<u64> {
-                    let mut dims = Vec::new();
-                    if let Some(tensor_start) = text.find("tensor<") {
-                        if let Some(tensor_end) = text[tensor_start..].find('>') {
-                            let tensor_spec = &text[tensor_start+7..tensor_start+tensor_end];
+                    // Complexity estimation helpers
+                    let parse_tensor_dims = |text: &str| -> Vec<u64> {
+                        let mut dims = Vec::new();
+                        if let Some(tensor_start) = text.find("tensor<")
+                            && let Some(tensor_end) = text[tensor_start..].find('>')
+                        {
+                            let tensor_spec = &text[tensor_start + 7..tensor_start + tensor_end];
                             for part in tensor_spec.split('x') {
                                 if let Ok(dim) = part.parse::<u64>() {
                                     dims.push(dim);
@@ -487,426 +482,232 @@ impl WorldBuilder {
                                 }
                             }
                         }
-                    }
-                    dims
-                };
-                
-                // Helper function to estimate operation complexity (FLOPs)
-                let estimate_op_complexity = |op_name: &str, hlo_line: &str| -> u64 {
-                    let dims = parse_tensor_dims(hlo_line);
-                    let tensor_size: u64 = if dims.is_empty() { 1 } else { dims.iter().product() };
-                    
-                    let base_cost = if op_name.contains("dot_general") {
-                        return tensor_size * 10;
-                    } else if op_name.contains("dot") {
-                        return tensor_size * 2;
-                    } else if op_name.contains("convolution") {
-                        return tensor_size * 20;
-                    } else if op_name.contains("reduce") {
-                        return tensor_size * 2;
-                    } else if op_name.contains("sin") || op_name.contains("cos") || 
-                              op_name.contains("exp") || op_name.contains("log") ||
-                              op_name.contains("sqrt") || op_name.contains("rsqrt") {
-                        return tensor_size * 10;
-                    } else if op_name.contains("divide") {
-                        5
-                    } else if op_name == "call" {
-                        3
-                    } else if op_name.contains("gather") || op_name.contains("scatter") {
-                        3
-                    } else if op_name.contains("select") {
-                        2
-                    } else if op_name.contains("add") || op_name.contains("subtract") ||
-                              op_name.contains("multiply") || op_name.contains("compare") ||
-                              op_name.contains("negate") {
-                        1
-                    } else if op_name.contains("reshape") || op_name.contains("transpose") ||
-                              op_name.contains("broadcast") || op_name.contains("constant") ||
-                              op_name.contains("convert") {
-                        0
-                    } else {
-                        1
+                        dims
                     };
-                    
-                    base_cost * tensor_size
-                };
-                
-                // Second pass: count instructions, map to source, and calculate complexity
-                let mut source_line_complexity = HashMap::<String, u64>::new();
-                let mut op_complexity = HashMap::<String, u64>::new();
-                let mut total_complexity = 0u64;
-                
-                for line in hlo_text.lines() {
-                    let trimmed = line.trim();
-                    if trimmed.starts_with('%') {
-                        instruction_count += 1;
-                        // Extract operation type (the word after the '=')
-                        if let Some(eq_pos) = trimmed.find('=') {
-                            let after_eq = &trimmed[eq_pos + 1..].trim();
-                            // Get the first word (operation type)
-                            if let Some(op_name) = after_eq.split_whitespace().next() {
-                                *op_counts.entry(op_name.to_string()).or_insert(0) += 1;
-                                
-                                // Calculate complexity for this operation
-                                let complexity = estimate_op_complexity(op_name, trimmed);
-                                *op_complexity.entry(op_name.to_string()).or_insert(0) += complexity;
-                                total_complexity += complexity;
 
-                                // In deep mode, collect operation details and source mapping
-                                if deep {
+                    let estimate_op_complexity = |op_name: &str, hlo_line: &str| -> u64 {
+                        let dims = parse_tensor_dims(hlo_line);
+                        let tensor_size: u64 = if dims.is_empty() {
+                            1
+                        } else {
+                            dims.iter().product()
+                        };
+
+                        let base_cost = if op_name.contains("dot_general") {
+                            return tensor_size * 10;
+                        } else if op_name.contains("dot") {
+                            return tensor_size * 2;
+                        } else if op_name.contains("convolution") {
+                            return tensor_size * 20;
+                        } else if op_name.contains("reduce") {
+                            return tensor_size * 2;
+                        } else if op_name.contains("sin")
+                            || op_name.contains("cos")
+                            || op_name.contains("exp")
+                            || op_name.contains("log")
+                            || op_name.contains("sqrt")
+                            || op_name.contains("rsqrt")
+                        {
+                            return tensor_size * 10;
+                        } else if op_name.contains("divide") {
+                            5
+                        } else if op_name == "call"
+                            || op_name.contains("gather")
+                            || op_name.contains("scatter")
+                        {
+                            3
+                        } else if op_name.contains("select") {
+                            2
+                        } else if op_name.contains("add")
+                            || op_name.contains("subtract")
+                            || op_name.contains("multiply")
+                            || op_name.contains("compare")
+                            || op_name.contains("negate")
+                        {
+                            1
+                        } else if op_name.contains("reshape")
+                            || op_name.contains("transpose")
+                            || op_name.contains("broadcast")
+                            || op_name.contains("constant")
+                            || op_name.contains("convert")
+                        {
+                            0
+                        } else {
+                            1
+                        };
+
+                        base_cost * tensor_size
+                    };
+
+                    // Analyze HLO: count ops and calculate complexity
+                    let mut source_line_complexity = HashMap::<String, u64>::new();
+                    let mut op_complexity = HashMap::<String, u64>::new();
+                    let mut total_complexity = 0u64;
+
+                    for line in hlo_text.lines() {
+                        let trimmed = line.trim();
+                        if trimmed.starts_with('%') {
+                            instruction_count += 1;
+                            if let Some(eq_pos) = trimmed.find('=') {
+                                let after_eq = &trimmed[eq_pos + 1..].trim();
+                                if let Some(op_name) = after_eq.split_whitespace().next() {
+                                    *op_counts.entry(op_name.to_string()).or_insert(0) += 1;
+
+                                    let complexity = estimate_op_complexity(op_name, trimmed);
+                                    *op_complexity.entry(op_name.to_string()).or_insert(0) +=
+                                        complexity;
+                                    total_complexity += complexity;
+
                                     op_details
                                         .entry(op_name.to_string())
                                         .or_default()
                                         .push(trimmed.to_string());
 
-                                    // Extract source location reference: loc(#loc123)
+                                    // Extract source location
                                     if let Some(loc_ref_start) = trimmed.rfind("loc(#loc")
                                         && let Some(loc_ref_end) =
                                             trimmed[loc_ref_start..].find(')')
                                     {
                                         let loc_ref = &trimmed
                                             [loc_ref_start + 4..loc_ref_start + loc_ref_end];
-                                        // Resolve to actual source location
                                         if let Some(source_loc) = loc_map.get(loc_ref) {
                                             source_line_ops
                                                 .entry(source_loc.clone())
                                                 .or_default()
                                                 .push(op_name.to_string());
-                                            
-                                            // Accumulate complexity per source line
-                                            *source_line_complexity.entry(source_loc.clone()).or_insert(0) += complexity;
+                                            *source_line_complexity
+                                                .entry(source_loc.clone())
+                                                .or_insert(0) += complexity;
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                }
 
-                // Sort operations by count (descending)
-                let mut op_vec: Vec<_> = op_counts.iter().collect();
-                op_vec.sort_by(|a, b| b.1.cmp(a.1));
-                
-                // Sort operations by complexity (descending) for deep mode
-                let mut op_complexity_vec: Vec<_> = op_complexity.iter().collect();
-                op_complexity_vec.sort_by(|a, b| b.1.cmp(a.1));
+                    // Sort operations
+                    let mut op_vec: Vec<_> = op_counts.iter().collect();
+                    op_vec.sort_by(|a, b| b.1.cmp(a.1));
+                    let mut op_complexity_vec: Vec<_> = op_complexity.iter().collect();
+                    op_complexity_vec.sort_by(|a, b| b.1.cmp(a.1));
 
-                // Categorize operations for deep analysis
-                let categorized_ops = if deep {
-                    let mut categories = HashMap::<&str, Vec<(String, usize)>>::new();
-                    for (op, count) in &op_counts {
-                        let category = if op.contains("multiply") || op.contains("dot") {
-                            "Arithmetic (Multiply/Dot)"
-                        } else if op.contains("add") || op.contains("subtract") {
-                            "Arithmetic (Add/Sub)"
-                        } else if op.contains("reshape")
-                            || op.contains("transpose")
-                            || op.contains("broadcast")
-                        {
-                            "Shape Operations"
-                        } else if op.contains("compare") || op.contains("select") {
-                            "Control Flow"
-                        } else if op.contains("constant") {
-                            "Constants"
-                        } else if op.contains("slice")
-                            || op.contains("gather")
-                            || op.contains("dynamic")
-                        {
-                            "Indexing"
-                        } else if op == "call" {
-                            "Function Calls"
-                        } else {
-                            "Other"
-                        };
-                        categories
-                            .entry(category)
-                            .or_default()
-                            .push((op.clone(), *count));
-                    }
-                    Some(categories)
-                } else {
-                    None
-                };
+                    // Analyze components memory
+                    let element_size = |prim_type: impeller2::types::PrimType| -> usize {
+                        match prim_type {
+                            impeller2::types::PrimType::Bool
+                            | impeller2::types::PrimType::U8
+                            | impeller2::types::PrimType::I8 => 1,
+                            impeller2::types::PrimType::U16 | impeller2::types::PrimType::I16 => 2,
+                            impeller2::types::PrimType::U32
+                            | impeller2::types::PrimType::I32
+                            | impeller2::types::PrimType::F32 => 4,
+                            impeller2::types::PrimType::U64
+                            | impeller2::types::PrimType::I64
+                            | impeller2::types::PrimType::F64 => 8,
+                        }
+                    };
 
-                // Calculate memory footprint with per-component tracking
-                let element_size = |prim_type: impeller2::types::PrimType| -> usize {
-                    match prim_type {
-                        impeller2::types::PrimType::Bool
-                        | impeller2::types::PrimType::U8
-                        | impeller2::types::PrimType::I8 => 1,
-                        impeller2::types::PrimType::U16 | impeller2::types::PrimType::I16 => 2,
-                        impeller2::types::PrimType::U32
-                        | impeller2::types::PrimType::I32
-                        | impeller2::types::PrimType::F32 => 4,
-                        impeller2::types::PrimType::U64
-                        | impeller2::types::PrimType::I64
-                        | impeller2::types::PrimType::F64 => 8,
-                    }
-                };
+                    let mut input_memory_bytes = 0usize;
+                    let mut component_memory: Vec<(String, usize)> = Vec::new();
 
-                let mut input_memory_bytes = 0usize;
-                let mut output_memory_bytes = 0usize;
-                let mut component_memory: Vec<(String, usize)> = Vec::new();
-
-                for id in &compiled_exec.tick_exec.metadata().arg_ids {
-                    if let Some(col) = compiled_exec.world.column_by_id(*id) {
-                        let shape_size: usize =
-                            col.schema.shape().iter().map(|&x| x as usize).product();
-                        let elem_size = element_size(col.schema.prim_type);
-                        let mem_bytes = col.len() * shape_size * elem_size;
-                        input_memory_bytes += mem_bytes;
-                        component_memory.push((col.metadata.name.clone(), mem_bytes));
-                    }
-                }
-
-                for id in &compiled_exec.tick_exec.metadata().ret_ids {
-                    if let Some(col) = compiled_exec.world.column_by_id(*id) {
-                        let shape_size: usize =
-                            col.schema.shape().iter().map(|&x| x as usize).product();
-                        let elem_size = element_size(col.schema.prim_type);
-                        let mem_bytes = col.len() * shape_size * elem_size;
-                        output_memory_bytes += mem_bytes;
-                    }
-                }
-
-                // Sort components by memory usage (descending)
-                component_memory.sort_by(|a, b| b.1.cmp(&a.1));
-
-                let input_memory_kb = input_memory_bytes as f64 / 1024.0;
-                let output_memory_kb = output_memory_bytes as f64 / 1024.0;
-
-                // Print formatted output
-                println!("\n=== SYSTEM PROFILE ===");
-                println!("\n[Compilation]");
-                println!("  Build time:        {:.3} ms", build_time_ms);
-                println!("  Compile time:      {:.3} ms", compile_time_ms);
-
-                println!("\n[HLO Analysis]");
-                println!("  Total instructions: {}", instruction_count);
-                println!("  HLO text dump:      {}", hlo_dump_path.display());
-                if let Some(html_dir) = &html_path {
-                    // List HTML files that were generated
-                    if let Ok(entries) = std::fs::read_dir(html_dir) {
-                        let html_files: Vec<_> = entries
-                            .filter_map(|e| e.ok())
-                            .filter(|e| {
-                                e.path().extension().and_then(|s| s.to_str()) == Some("html")
-                            })
-                            .collect();
-                        if !html_files.is_empty() {
-                            println!(
-                                "  HTML visualization: {} (open in browser)",
-                                html_dir.display()
-                            );
-                            println!("    Found {} HTML file(s)", html_files.len());
+                    for id in &compiled_exec.tick_exec.metadata().arg_ids {
+                        if let Some(col) = compiled_exec.world.column_by_id(*id) {
+                            let shape_size: usize =
+                                col.schema.shape().iter().map(|&x| x as usize).product();
+                            let elem_size = element_size(col.schema.prim_type);
+                            let mem_bytes = col.len() * shape_size * elem_size;
+                            input_memory_bytes += mem_bytes;
+                            component_memory.push((col.metadata.name.clone(), mem_bytes));
                         }
                     }
-                }
 
-                println!("\n[Operation Breakdown]");
-                if instruction_count > 0 {
-                    if deep && total_complexity > 0 {
-                        println!("  By Complexity (estimated FLOPs):");
-                        for (op, complexity) in op_complexity_vec.iter().take(10) {
-                            let count = op_counts.get(*op).unwrap_or(&0);
-                            let complexity_pct = (**complexity as f64 / total_complexity as f64) * 100.0;
-                            let count_pct = (*count as f64 / instruction_count as f64) * 100.0;
-                            println!(
-                                "  {:20} {:6} FLOPs ({:5.1}%) - {:4} ops ({:4.1}%)",
-                                op, complexity, complexity_pct, count, count_pct
-                            );
-                        }
-                        if op_complexity_vec.len() > 10 {
-                            println!("  ... and {} more operation types", op_complexity_vec.len() - 10);
-                        }
-                        println!("\n  Total estimated FLOPs: {}", total_complexity);
-                    } else {
-                        for (op, count) in op_vec.iter().take(10) {
-                            println!(
-                                "  {:20} {:6} ({:.1}%)",
-                                op,
-                                count,
-                                (**count as f64 / instruction_count as f64) * 100.0
-                            );
-                        }
-                        if op_vec.len() > 10 {
-                            println!("  ... and {} more operation types", op_vec.len() - 10);
-                        }
-                    }
-                } else {
-                    println!("  No operations found in HLO");
-                }
+                    component_memory.sort_by(|a, b| b.1.cmp(&a.1));
+                    let input_memory_kb = input_memory_bytes as f64 / 1024.0;
 
-                println!("\n[Memory Footprint]");
-                println!("  Input memory:       {:.2} KB", input_memory_kb);
-                println!("  Output memory:      {:.2} KB", output_memory_kb);
-                println!(
-                    "  Total memory:       {:.2} KB",
-                    input_memory_kb + output_memory_kb
-                );
+                    // Print analysis
+                    println!("\n=== SYSTEM PROFILE ===");
+                    println!("\n[Compilation]");
+                    println!("  Build time:        {:.3} ms", build_time_ms);
+                    println!("  Compile time:      {:.3} ms", compile_time_ms);
 
-                println!("\n[Top Components by Memory]");
-                if input_memory_kb > 0.0 {
-                    for (name, bytes) in component_memory.iter().take(10) {
-                        let kb = *bytes as f64 / 1024.0;
+                    println!("\n[HLO Analysis]");
+                    println!("  Total instructions: {}", instruction_count);
+                    println!("  HLO text dump:      {}", hlo_dump_path.display());
+
+                    // Check for DOT graph files (using simplified names)
+                    let optimized_dot = dot_dir.join("cpu_after_optimizations.dot");
+                    let before_opt_dot = dot_dir.join("before_optimizations.dot");
+
+                    if optimized_dot.exists() || before_opt_dot.exists() {
+                        let dot_count = [&optimized_dot, &before_opt_dot]
+                            .iter()
+                            .filter(|p| p.exists())
+                            .count();
                         println!(
-                            "  {:40} {:8.2} KB ({:.1}%)",
-                            name,
-                            kb,
-                            (kb / input_memory_kb) * 100.0
+                            "  Graph visualization: {} ({} DOT files)",
+                            dot_dir.display(),
+                            dot_count
+                        );
+
+                        if optimized_dot.exists() {
+                            println!("    View with: xdot {}", optimized_dot.display());
+                            println!(
+                                "    Or render: dot -Tpng {} -o graph.png",
+                                optimized_dot.display()
+                            );
+                        } else if before_opt_dot.exists() {
+                            println!("    View with: xdot {}", before_opt_dot.display());
+                            println!(
+                                "    Or render: dot -Tpng {} -o graph.png",
+                                before_opt_dot.display()
+                            );
+                        }
+                    }
+
+                    println!("\n[Operation Breakdown]");
+                    println!("  By Complexity (estimated FLOPs):");
+                    for (op, complexity) in op_complexity_vec.iter().take(10) {
+                        let count = op_counts.get(*op).unwrap_or(&0);
+                        let complexity_pct =
+                            (**complexity as f64 / total_complexity as f64) * 100.0;
+                        let count_pct = (*count as f64 / instruction_count as f64) * 100.0;
+                        println!(
+                            "  {:20} {:6} FLOPs ({:5.1}%) - {:4} ops ({:4.1}%)",
+                            op, complexity, complexity_pct, count, count_pct
                         );
                     }
-                } else {
-                    println!("  No input memory components found");
-                }
+                    println!("\n  Total estimated FLOPs: {}", total_complexity);
 
-                // Deep analysis output
-                if deep {
-                    println!("\n[Deep Analysis Mode]");
-
-                    // XLA Flags
-                    if !xla_flags.is_empty() {
-                        println!("\n  Active XLA Flags:");
-                        for (key, value) in &xla_flags {
-                            println!("    {} = {}", key, value);
-                        }
-                    } else {
-                        println!("\n  No XLA environment variables detected");
-                    }
-
-                    // Note about graph visualization
-                    if !html {
-                        println!("\n  Graph Visualization:");
-                        println!("    Use --html flag for interactive HTML visualization");
-                        println!("    Or XLA_FLAGS=\"--xla_dump_hlo_as_dot\" for GraphViz output");
-                    }
-
-                    // Operation categories
-                    if let Some(ref categories) = categorized_ops {
-                        println!("\n  Operation Categories:");
-                        let mut cat_vec: Vec<_> = categories.iter().collect();
-                        cat_vec.sort_by(|a, b| {
-                            let sum_a: usize = a.1.iter().map(|(_, c)| c).sum();
-                            let sum_b: usize = b.1.iter().map(|(_, c)| c).sum();
-                            sum_b.cmp(&sum_a)
-                        });
-
-                        if instruction_count > 0 {
-                            for (category, ops) in cat_vec {
-                                let total: usize = ops.iter().map(|(_, c)| c).sum();
-                                println!(
-                                    "    {:30} {:6} ops ({:.1}%)",
-                                    category,
-                                    total,
-                                    (total as f64 / instruction_count as f64) * 100.0
-                                );
-                            }
-                        }
-                    }
-
-                    // Sample operations with shapes (first few of each type)
-                    println!("\n  Sample Operations (with shapes):");
-                    for (op, count) in op_vec.iter().take(5) {
-                        if let Some(details) = op_details.get(*op) {
-                            println!("    {} ({} instances):", op, count);
-                            for detail in details.iter().take(2) {
-                                // Extract and show just the interesting part (type/shape info)
-                                if let Some(colon_pos) = detail.find(':') {
-                                    let type_info =
-                                        &detail[colon_pos..].chars().take(80).collect::<String>();
-                                    println!("      {}", type_info);
-                                }
-                            }
-                        }
-                    }
-
-                    // Theoretical FLOP estimate for multiply/dot operations
-                    let mut total_flops_estimate = 0u64;
-                    for line in hlo_text.lines() {
-                        let trimmed = line.trim();
-                        if trimmed.contains("mhlo.multiply") || trimmed.contains("mhlo.dot") {
-                            // Very rough estimate: extract tensor dimensions if possible
-                            if let Some(tensor_start) = trimmed.find("tensor<")
-                                && let Some(tensor_end) = trimmed[tensor_start..].find('>')
-                            {
-                                let tensor_info =
-                                    &trimmed[tensor_start + 7..tensor_start + tensor_end];
-                                // Parse something like "1x6xf64" or "1xf64"
-                                let dims: Vec<u64> = tensor_info
-                                    .split('x')
-                                    .filter_map(|s| {
-                                        s.chars()
-                                            .take_while(|c| c.is_ascii_digit())
-                                            .collect::<String>()
-                                            .parse()
-                                            .ok()
-                                    })
-                                    .collect();
-                                if !dims.is_empty() {
-                                    total_flops_estimate += dims.iter().product::<u64>();
-                                }
-                            }
-                        }
-                    }
-
-                    if total_flops_estimate > 0 {
-                        println!("\n  Estimated Compute:");
-                        println!(
-                            "    Theoretical FLOPs: ~{} operations",
-                            total_flops_estimate
-                        );
-                        println!("    (Very rough estimate from multiply/dot operations)");
-                    }
-
-                    // === OPTIMIZATION OPPORTUNITIES ===
-                    println!("\n=== OPTIMIZATION OPPORTUNITIES ===");
-
-                    // Analyze source code hot spots
-                    println!("\n[Hot Spots in Python Code]");
+                    println!("\n[Hot Spots by Complexity]");
                     if !source_line_ops.is_empty() {
-                        // Create combined view with both op count and complexity
                         let mut source_heat_map: Vec<_> = source_line_ops
                             .iter()
                             .map(|(loc, ops)| {
                                 let op_count = ops.len();
-                                let complexity = source_line_complexity.get(loc).copied().unwrap_or(0);
+                                let complexity =
+                                    source_line_complexity.get(loc).copied().unwrap_or(0);
                                 (loc, op_count, complexity)
                             })
                             .collect();
-                        
-                        // Sort by complexity (FLOPs) for better optimization targeting
                         source_heat_map.sort_by(|a, b| b.2.cmp(&a.2));
 
-                        if total_complexity > 0 {
-                            println!("Ranked by computational complexity (estimated FLOPs):");
-                        } else {
-                            println!("Ranked by operation count:");
-                        }
-
-                        // Get the directory containing the simulation file
+                        println!("Top Python lines by computational cost:");
                         let sim_dir = path.parent().unwrap_or_else(|| Path::new("."));
-
-                        // Cache file contents to avoid re-reading
                         let mut file_contents_cache = HashMap::<String, Vec<String>>::new();
 
                         for (source_loc, op_count, complexity) in source_heat_map.iter().take(10) {
-                            if total_complexity > 0 {
-                                let complexity_pct = (*complexity as f64 / total_complexity as f64) * 100.0;
-                                println!("\n  {} - {} ops, {} FLOPs ({:.1}% of compute)", 
-                                    source_loc, op_count, complexity, complexity_pct);
-                            } else {
-                                println!("\n  {} - {} ops", source_loc, op_count);
-                            }
+                            let complexity_pct =
+                                (*complexity as f64 / total_complexity as f64) * 100.0;
+                            println!(
+                                "\n  {} - {} ops, {} FLOPs ({:.1}%)",
+                                source_loc, op_count, complexity, complexity_pct
+                            );
 
-                            // Parse filename and line number
                             if let Some(colon_pos) = source_loc.rfind(':') {
                                 let file_name = &source_loc[..colon_pos];
                                 let line_num_str = &source_loc[colon_pos + 1..];
 
                                 if let Ok(line_num) = line_num_str.parse::<usize>() {
-                                    // Try to read the file and show the line
-                                    // Support both single-file and multi-file projects
-                                    // Get or load file contents
                                     let lines = file_contents_cache
                                         .entry(file_name.to_string())
                                         .or_insert_with(|| {
@@ -928,166 +729,20 @@ impl WorldBuilder {
                                 }
                             }
                         }
-                    } else {
-                        println!("  (Location mapping requires source line metadata in HLO)");
+                    }
+
+                    println!("\n[Top Components by Memory]");
+                    for (name, bytes) in component_memory.iter().take(10) {
+                        let kb = *bytes as f64 / 1024.0;
                         println!(
-                            "  Resolved {} Python source locations from HLO",
-                            loc_map.len()
+                            "  {:40} {:8.2} KB ({:.1}%)",
+                            name,
+                            kb,
+                            (kb / input_memory_kb) * 100.0
                         );
                     }
 
-                    // Identify anti-patterns and optimization opportunities
-                    println!("\n[Detected Optimization Patterns]");
-
-                    let mut recommendations = Vec::new();
-
-                    // 1. Excessive reshaping
-                    if instruction_count > 0 {
-                        let reshape_count = op_counts.get("mhlo.reshape").unwrap_or(&0);
-                        let reshape_pct =
-                            (*reshape_count as f64 / instruction_count as f64) * 100.0;
-                        if reshape_pct > 15.0 {
-                            recommendations.push((
-                                reshape_pct,
-                                "HIGH".to_string(),
-                                format!("Excessive reshaping ({:.1}% of ops)", reshape_pct),
-                                vec![
-                                    "Consider preallocating arrays with correct shapes".to_string(),
-                                    "Use jnp.reshape() sparingly - chain operations without intermediate reshapes".to_string(),
-                                    "Check for implicit broadcasting causing extra reshapes".to_string(),
-                                ]
-                            ));
-                        }
-
-                        // 2. Shape operations overhead
-                        let shape_ops_pct: f64 = if let Some(categories) = &categorized_ops {
-                            if let Some(shape_ops) = categories.get("Shape Operations") {
-                                let total: usize = shape_ops.iter().map(|(_, c)| c).sum();
-                                (total as f64 / instruction_count as f64) * 100.0
-                            } else {
-                                0.0
-                            }
-                        } else {
-                            0.0
-                        };
-
-                        if shape_ops_pct > 20.0 {
-                            recommendations.push((
-                                shape_ops_pct,
-                                "HIGH".to_string(),
-                                format!("Heavy shape manipulation ({:.1}% of ops)", shape_ops_pct),
-                                vec![
-                                    "Review tensor shape consistency across function boundaries"
-                                        .to_string(),
-                                    "Use jax.jit with static_argnums for constant shapes"
-                                        .to_string(),
-                                    "Consider using einsum instead of reshape + matmul chains"
-                                        .to_string(),
-                                ],
-                            ));
-                        }
-                    }
-
-                    // 3. Memory hotspots
-                    if input_memory_bytes > 0
-                        && let Some((component_name, bytes)) = component_memory.first()
-                    {
-                        let pct = (*bytes as f64 / input_memory_bytes as f64) * 100.0;
-                        if pct > 80.0 {
-                            let kb = *bytes as f64 / 1024.0;
-                            recommendations.push((
-                                pct,
-                                "MEDIUM".to_string(),
-                                format!("Single component dominates memory: {} ({:.1}% = {:.2} KB)", component_name, pct, kb),
-                                vec![
-                                    format!("Review if {} buffer size is necessary", component_name),
-                                    "Consider using smaller data types (f32 vs f64) if precision allows".to_string(),
-                                    "Investigate if buffer can be reduced or windowed".to_string(),
-                                ]
-                            ));
-                        }
-                    }
-
-                    // 4. Control flow overhead
-                    if instruction_count > 0 {
-                        let select_count = op_counts.get("mhlo.select").unwrap_or(&0);
-                        let compare_count = op_counts.get("mhlo.compare").unwrap_or(&0);
-                        let control_flow_count = select_count + compare_count;
-                        let control_flow_pct =
-                            (control_flow_count as f64 / instruction_count as f64) * 100.0;
-
-                        if control_flow_pct > 5.0 {
-                            recommendations.push((
-                                control_flow_pct,
-                                "LOW".to_string(),
-                                format!("Conditional operations present ({:.1}% of ops)", control_flow_pct),
-                                vec![
-                                    "JAX jit() struggles with dynamic control flow - consider using jax.lax.cond".to_string(),
-                                    "Static conditions can be hoisted outside @el.map functions".to_string(),
-                                    "Review jax.lax.select usage for vectorization opportunities".to_string(),
-                                ]
-                            ));
-                        }
-                    }
-
-                    // 5. Function call overhead
-                    let call_count = op_counts.get("call").unwrap_or(&0);
-                    if *call_count > 50 {
-                        recommendations.push((
-                            *call_count as f64,
-                            "MEDIUM".to_string(),
-                            format!(
-                                "{} function calls - potential inlining opportunities",
-                                call_count
-                            ),
-                            vec![
-                                "JAX may benefit from inlining small functions".to_string(),
-                                "Consider using jax.jit(inline=True) for helper functions"
-                                    .to_string(),
-                                "Review if scan/vmap could replace explicit calls".to_string(),
-                            ],
-                        ));
-                    }
-
-                    // Sort recommendations by severity/impact
-                    recommendations.sort_by(|a, b| {
-                        // First by priority, then by percentage
-                        match (a.1.as_str(), b.1.as_str()) {
-                            ("HIGH", "HIGH") => {
-                                b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
-                            }
-                            ("HIGH", _) => std::cmp::Ordering::Less,
-                            (_, "HIGH") => std::cmp::Ordering::Greater,
-                            ("MEDIUM", "MEDIUM") => {
-                                b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
-                            }
-                            ("MEDIUM", _) => std::cmp::Ordering::Less,
-                            (_, "MEDIUM") => std::cmp::Ordering::Greater,
-                            _ => b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal),
-                        }
-                    });
-
-                    // Print recommendations
-                    for (i, (_, priority, issue, suggestions)) in recommendations.iter().enumerate()
-                    {
-                        println!("\n{}. [{}] {}", i + 1, priority, issue);
-                        println!("   Recommendations:");
-                        for suggestion in suggestions {
-                            println!("   • {}", suggestion);
-                        }
-                    }
-
-                    if recommendations.is_empty() {
-                        println!("\n✓ No major optimization opportunities detected!");
-                        println!("  Your code is already well-optimized for JAX.");
-                    }
-                }
-
-                // Optionally run execution analysis if ticks are specified
-                if ticks > 0 {
-                    println!("\n[Runtime Analysis - {} ticks]", ticks);
-
-                    // Set up exec with database (similar to bench command)
+                    // Runtime analysis follows
                     let db_dir = tempfile::tempdir()?;
                     let db_dir_path = db_dir.keep();
                     let db = elodin_db::DB::create(db_dir_path.join("db"))?;
@@ -1101,46 +756,29 @@ impl WorldBuilder {
                         exec: compiled_exec,
                         db,
                     };
-
-                    // Run the simulation
-                    let exec_start = time::Instant::now();
-                    exec_with_db.run(py, ticks, false)?;
-                    let total_exec_time = exec_start.elapsed().as_secs_f64() * 1000.0;
-
-                    // Get runtime profile metrics
+                    exec_with_db.run(py, ticks, true)?;
                     let profile = exec_with_db.profile();
 
-                    println!("  Execution time:");
-                    println!("    Total:              {:.3} ms", total_exec_time);
-                    println!(
-                        "    Per tick (avg):     {:.3} ms",
-                        total_exec_time / ticks as f64
-                    );
-                    println!(
-                        "    copy_to_client:     {:.3} ms",
-                        profile["copy_to_client"]
-                    );
-                    println!(
-                        "    execute_buffers:    {:.3} ms",
-                        profile["execute_buffers"]
-                    );
-                    println!("    copy_to_host:       {:.3} ms", profile["copy_to_host"]);
-                    println!(
-                        "    add_to_history:     {:.3} ms",
-                        profile["add_to_history"]
-                    );
-                    println!("  Performance:");
-                    println!(
-                        "    Real-time factor:   {:.1}x",
-                        profile["real_time_factor"]
-                    );
-                    println!(
-                        "    Throughput:         {:.1} ticks/sec",
-                        1000.0 / profile["tick"]
-                    );
-                }
+                    println!("\n[Runtime Metrics]");
+                    println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
+                    println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
+                    println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
+                    println!("build time:           {:.3} ms", profile["build"]);
+                    println!("compile time:         {:.3} ms", profile["compile"]);
+                    println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
 
-                println!();
+                    Ok(None)
+                }
+            }
+            Args::Components => {
+                // Discover components and entities without running the simulation
+                let discovery_result = self.discover_components(py)?;
+
+                // Convert to JSON and print
+                let json_module = py.import("json")?;
+                let json_str = json_module.call_method1("dumps", (discovery_result,))?;
+                println!("{}", json_str.extract::<String>()?);
+
                 Ok(None)
             }
         }

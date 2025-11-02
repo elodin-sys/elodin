@@ -154,46 +154,81 @@ External clients can then connect and control these components in real-time. See
 Analyze and optimize your simulation's computational complexity with the built-in profiler:
 
 ```bash
-# Quick profile - static analysis only
-python sim.py profile
+# Standard benchmark - runtime metrics only
+python sim.py bench --ticks 100
 
-# With runtime metrics
-python sim.py profile --ticks 100
-
-# Deep analysis - optimization opportunities
-python sim.py profile --deep
-
-# Generate interactive HTML visualization
-python sim.py profile --html --deep
+# Full profiling - complexity analysis + runtime metrics + graph visualization
+python sim.py bench --ticks 100 --profile
 ```
 
-### Profile Output
+### Profiling Output (`--profile` flag)
 
-The profiler provides:
-- **Compilation metrics** - Build and compile times
-- **HLO instruction analysis** - Operation counts and types
-- **Memory footprint** - Per-component breakdown
-- **Hot spot identification** - Python lines generating the most operations (with `--deep`)
-- **Actionable recommendations** - Ranked optimization opportunities (with `--deep`)
+The profiler provides complexity-weighted analysis to identify truly expensive code paths:
 
-Example output:
+**Complexity-Weighted Hot Spots:**
 ```
-[Hot Spots in Python Code]
-  main.py:339 - 504 ops
-    Code: coefs = jnp.array([map_coordinates(coef, coords, 1, mode="nearest") for coef in aero])
+[Hot Spots by Complexity]
+Top Python lines by computational cost:
 
-[Detected Optimization Patterns]
-1. [HIGH] Heavy shape manipulation (21.6% of ops)
-   • Review tensor shape consistency across function boundaries
-   • Consider using einsum instead of reshape + matmul chains
+  main.py:180 - 26 ops, 2897 FLOPs (16.2% of compute)
+    Code: signal = jax.lax.scan(f, init, signal[2:])[1]
+    
+  main.py:420 - 3 ops, 1440 FLOPs (8.1% of compute)
+    Code: return jnp.concatenate((buffer[1:], a_rel.reshape(1, 3)))
+```
+
+**Operation Breakdown by Actual Cost:**
+```
+[Operation Breakdown]
+  By Complexity (estimated FLOPs):
+  call                   5769 FLOPs (32.3%) -   97 ops ( 2.0%)  ⚠️ High cost/op
+  mhlo.multiply          1185 FLOPs ( 6.6%) - 1068 ops (21.8%)  ✓ Low cost/op
+```
+
+The profiler automatically includes:
+- **Complexity-weighted rankings** - Operations weighted by computational cost (FLOPs), not just count
+- **HLO analysis** - Instruction breakdown and operation categorization
+- **Memory footprint** - Per-component memory usage
+- **Hot spot identification** - Python source lines ranked by actual compute cost
+- **DOT graph visualization** - Computation graphs in Graphviz format (saved to `profile_output/graphs/`)
+- **Runtime metrics** - Execution timing and throughput
+
+### Viewing the Computation Graph
+
+After profiling, you can visualize the HLO computation graph. The profiler generates 2 DOT files:
+
+- `cpu_after_optimizations.dot` - Optimized graph (recommended starting point)
+- `before_optimizations.dot` - Pre-optimization graph
+
+```bash
+# Interactive viewer (recommended - requires xdot)
+xdot profile_output/graphs/cpu_after_optimizations.dot
+
+# Or use the exact command from the profile output
+
+# Render to PNG
+dot -Tpng profile_output/graphs/cpu_after_optimizations.dot -o graph.png
+open graph.png
+
+# Render to SVG (better for large graphs)
+dot -Tsvg profile_output/graphs/cpu_after_optimizations.dot -o graph.svg
+```
+
+**Install visualization tools (if needed):**
+```bash
+# macOS (includes both dot and xdot)
+brew install graphviz
+brew install xdot
+
+# Ubuntu/Debian
+sudo apt-get install graphviz xdot
 ```
 
 ### When to Use
 
-- **Development**: Quick `profile` to check complexity of new systems
-- **Optimization**: `profile --deep` to identify bottlenecks and get specific recommendations
-- **Debugging**: `profile --html` for visual inspection of the computation graph
-- **Benchmarking**: `profile --deep --ticks 1000` for complete static + runtime analysis
+- **Development**: Standard `bench` for quick performance checks
+- **Optimization**: `bench --profile` to identify computationally expensive code and get actionable insights
+- **Verification**: Re-run `bench --profile` after optimizations to measure improvements
 
 Output files are saved to `profile_output/` directory next to your simulation file for easy access.
 
