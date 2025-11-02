@@ -473,7 +473,69 @@ impl WorldBuilder {
                     }
                 }
 
-                // Second pass: count instructions and map to source
+                // Helper function to extract tensor dimensions from HLO text
+                let parse_tensor_dims = |text: &str| -> Vec<u64> {
+                    let mut dims = Vec::new();
+                    if let Some(tensor_start) = text.find("tensor<") {
+                        if let Some(tensor_end) = text[tensor_start..].find('>') {
+                            let tensor_spec = &text[tensor_start+7..tensor_start+tensor_end];
+                            for part in tensor_spec.split('x') {
+                                if let Ok(dim) = part.parse::<u64>() {
+                                    dims.push(dim);
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    dims
+                };
+                
+                // Helper function to estimate operation complexity (FLOPs)
+                let estimate_op_complexity = |op_name: &str, hlo_line: &str| -> u64 {
+                    let dims = parse_tensor_dims(hlo_line);
+                    let tensor_size: u64 = if dims.is_empty() { 1 } else { dims.iter().product() };
+                    
+                    let base_cost = if op_name.contains("dot_general") {
+                        return tensor_size * 10;
+                    } else if op_name.contains("dot") {
+                        return tensor_size * 2;
+                    } else if op_name.contains("convolution") {
+                        return tensor_size * 20;
+                    } else if op_name.contains("reduce") {
+                        return tensor_size * 2;
+                    } else if op_name.contains("sin") || op_name.contains("cos") || 
+                              op_name.contains("exp") || op_name.contains("log") ||
+                              op_name.contains("sqrt") || op_name.contains("rsqrt") {
+                        return tensor_size * 10;
+                    } else if op_name.contains("divide") {
+                        5
+                    } else if op_name == "call" {
+                        3
+                    } else if op_name.contains("gather") || op_name.contains("scatter") {
+                        3
+                    } else if op_name.contains("select") {
+                        2
+                    } else if op_name.contains("add") || op_name.contains("subtract") ||
+                              op_name.contains("multiply") || op_name.contains("compare") ||
+                              op_name.contains("negate") {
+                        1
+                    } else if op_name.contains("reshape") || op_name.contains("transpose") ||
+                              op_name.contains("broadcast") || op_name.contains("constant") ||
+                              op_name.contains("convert") {
+                        0
+                    } else {
+                        1
+                    };
+                    
+                    base_cost * tensor_size
+                };
+                
+                // Second pass: count instructions, map to source, and calculate complexity
+                let mut source_line_complexity = HashMap::<String, u64>::new();
+                let mut op_complexity = HashMap::<String, u64>::new();
+                let mut total_complexity = 0u64;
+                
                 for line in hlo_text.lines() {
                     let trimmed = line.trim();
                     if trimmed.starts_with('%') {
@@ -484,6 +546,11 @@ impl WorldBuilder {
                             // Get the first word (operation type)
                             if let Some(op_name) = after_eq.split_whitespace().next() {
                                 *op_counts.entry(op_name.to_string()).or_insert(0) += 1;
+                                
+                                // Calculate complexity for this operation
+                                let complexity = estimate_op_complexity(op_name, trimmed);
+                                *op_complexity.entry(op_name.to_string()).or_insert(0) += complexity;
+                                total_complexity += complexity;
 
                                 // In deep mode, collect operation details and source mapping
                                 if deep {
@@ -505,6 +572,9 @@ impl WorldBuilder {
                                                 .entry(source_loc.clone())
                                                 .or_default()
                                                 .push(op_name.to_string());
+                                            
+                                            // Accumulate complexity per source line
+                                            *source_line_complexity.entry(source_loc.clone()).or_insert(0) += complexity;
                                         }
                                     }
                                 }
@@ -516,6 +586,10 @@ impl WorldBuilder {
                 // Sort operations by count (descending)
                 let mut op_vec: Vec<_> = op_counts.iter().collect();
                 op_vec.sort_by(|a, b| b.1.cmp(a.1));
+                
+                // Sort operations by complexity (descending) for deep mode
+                let mut op_complexity_vec: Vec<_> = op_complexity.iter().collect();
+                op_complexity_vec.sort_by(|a, b| b.1.cmp(a.1));
 
                 // Categorize operations for deep analysis
                 let categorized_ops = if deep {
@@ -631,16 +705,33 @@ impl WorldBuilder {
 
                 println!("\n[Operation Breakdown]");
                 if instruction_count > 0 {
-                    for (op, count) in op_vec.iter().take(10) {
-                        println!(
-                            "  {:20} {:6} ({:.1}%)",
-                            op,
-                            count,
-                            (**count as f64 / instruction_count as f64) * 100.0
-                        );
-                    }
-                    if op_vec.len() > 10 {
-                        println!("  ... and {} more operation types", op_vec.len() - 10);
+                    if deep && total_complexity > 0 {
+                        println!("  By Complexity (estimated FLOPs):");
+                        for (op, complexity) in op_complexity_vec.iter().take(10) {
+                            let count = op_counts.get(*op).unwrap_or(&0);
+                            let complexity_pct = (**complexity as f64 / total_complexity as f64) * 100.0;
+                            let count_pct = (*count as f64 / instruction_count as f64) * 100.0;
+                            println!(
+                                "  {:20} {:6} FLOPs ({:5.1}%) - {:4} ops ({:4.1}%)",
+                                op, complexity, complexity_pct, count, count_pct
+                            );
+                        }
+                        if op_complexity_vec.len() > 10 {
+                            println!("  ... and {} more operation types", op_complexity_vec.len() - 10);
+                        }
+                        println!("\n  Total estimated FLOPs: {}", total_complexity);
+                    } else {
+                        for (op, count) in op_vec.iter().take(10) {
+                            println!(
+                                "  {:20} {:6} ({:.1}%)",
+                                op,
+                                count,
+                                (**count as f64 / instruction_count as f64) * 100.0
+                            );
+                        }
+                        if op_vec.len() > 10 {
+                            println!("  ... and {} more operation types", op_vec.len() - 10);
+                        }
                     }
                 } else {
                     println!("  No operations found in HLO");
@@ -773,13 +864,24 @@ impl WorldBuilder {
                     // Analyze source code hot spots
                     println!("\n[Hot Spots in Python Code]");
                     if !source_line_ops.is_empty() {
+                        // Create combined view with both op count and complexity
                         let mut source_heat_map: Vec<_> = source_line_ops
                             .iter()
-                            .map(|(loc, ops)| (loc, ops.len()))
+                            .map(|(loc, ops)| {
+                                let op_count = ops.len();
+                                let complexity = source_line_complexity.get(loc).copied().unwrap_or(0);
+                                (loc, op_count, complexity)
+                            })
                             .collect();
-                        source_heat_map.sort_by(|a, b| b.1.cmp(&a.1));
+                        
+                        // Sort by complexity (FLOPs) for better optimization targeting
+                        source_heat_map.sort_by(|a, b| b.2.cmp(&a.2));
 
-                        println!("Python lines generating the most HLO operations:");
+                        if total_complexity > 0 {
+                            println!("Ranked by computational complexity (estimated FLOPs):");
+                        } else {
+                            println!("Ranked by operation count:");
+                        }
 
                         // Get the directory containing the simulation file
                         let sim_dir = path.parent().unwrap_or_else(|| Path::new("."));
@@ -787,8 +889,14 @@ impl WorldBuilder {
                         // Cache file contents to avoid re-reading
                         let mut file_contents_cache = HashMap::<String, Vec<String>>::new();
 
-                        for (source_loc, op_count) in source_heat_map.iter().take(10) {
-                            println!("\n  {} - {} ops", source_loc, op_count);
+                        for (source_loc, op_count, complexity) in source_heat_map.iter().take(10) {
+                            if total_complexity > 0 {
+                                let complexity_pct = (*complexity as f64 / total_complexity as f64) * 100.0;
+                                println!("\n  {} - {} ops, {} FLOPs ({:.1}% of compute)", 
+                                    source_loc, op_count, complexity, complexity_pct);
+                            } else {
+                                println!("\n  {} - {} ops", source_loc, op_count);
+                            }
 
                             // Parse filename and line number
                             if let Some(colon_pos) = source_loc.rfind(':') {

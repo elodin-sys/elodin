@@ -87,23 +87,23 @@ test_steps = [
         steps=[
             nix_step(
                 label=":python: ball",
-                command="python3 examples/ball/main.py bench --ticks 100",
+                command="python3 examples/ball/main.py profile --ticks 100 --deep",
             ),
             nix_step(
                 label=":python: drone",
-                command="python3 examples/drone/main.py bench --ticks 100",
+                command="python3 examples/drone/main.py profile --ticks 100 --deep",
             ),
             nix_step(
                 label=":python: rocket",
-                command="python3 examples/rocket/main.py bench --ticks 100",
+                command="python3 examples/rocket/main.py profile --ticks 100 --deep",
             ),
             nix_step(
                 label=":python: three-body",
-                command="python3 examples/three-body/main.py bench --ticks 100",
+                command="python3 examples/three-body/main.py profile --ticks 100 --deep",
             ),
             nix_step(
                 label=":python: cube-sat",
-                command="python3 examples/cube-sat/main.py bench --ticks 10",
+                command="python3 examples/cube-sat/main.py profile --ticks 100 --deep",
             ),
         ],
     ),
