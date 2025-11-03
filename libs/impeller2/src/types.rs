@@ -74,7 +74,6 @@ const fn fnv1a_extend(hash: u64, bytes: &[u8]) -> u64 {
     h
 }
 
-
 impl From<&'_ str> for ComponentId {
     fn from(value: &'_ str) -> Self {
         ComponentId::new(value)
@@ -1108,9 +1107,18 @@ mod tests {
     #[test]
     fn test_component_id_wait_for_write_discovery() {
         assert_eq!(ComponentId(3810108550136042869), ComponentId::new("rocket"));
-        assert_eq!(ComponentId(7104182885603133857), ComponentId::new("rocket."));
-        assert_eq!(ComponentId(7786622236758618069), ComponentId::new("rocket.fin_control_trim"));
-        assert_eq!(ComponentId(7719952719430115905), ComponentId::new("fin_control_trim"));
+        assert_eq!(
+            ComponentId(7104182885603133857),
+            ComponentId::new("rocket.")
+        );
+        assert_eq!(
+            ComponentId(7786622236758618069),
+            ComponentId::new("rocket.fin_control_trim")
+        );
+        assert_eq!(
+            ComponentId(7719952719430115905),
+            ComponentId::new("fin_control_trim")
+        );
     }
 
     #[test]
