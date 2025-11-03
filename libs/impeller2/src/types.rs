@@ -48,6 +48,7 @@ impl ComponentId {
     /// This does not require a string allocation. This will produce the same hash
     /// as `ComponentId::new()` with two names joined with a '.'.
     /// ```
+    /// # use impeller2::types::ComponentId;
     /// assert_eq!(ComponentId::new("a.b"), ComponentId::from_pair("a", "b"));
     /// ```
     pub const fn from_pair(root_name: &str, component_name: &str) -> Self {
