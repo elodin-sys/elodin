@@ -189,7 +189,7 @@ pub fn get_pair_ids(
     let mut results = vec![];
     for component_id in components {
         if let Some((_schema, component_metadata)) =
-            world.world.metadata.component_map.get(&component_id)
+            world.world.metadata.component_map.get(component_id)
         {
             let Some(column) = world.world.host.get(component_id) else {
                 continue;
@@ -300,10 +300,10 @@ async fn tick(
             return;
         }
         // We only wait if there is a run_time_step set and it's >= the time elapsed.
-        if let Some(run_time_step) = run_time_step.as_ref() {
-            if let Some(sleep_time) = run_time_step.checked_sub(start.elapsed()) {
-                stellarator::sleep(sleep_time).await;
-            }
+        if let Some(run_time_step) = run_time_step.as_ref()
+            && let Some(sleep_time) = run_time_step.checked_sub(start.elapsed())
+        {
+            stellarator::sleep(sleep_time).await;
         }
         tick += 1;
         timestamp += world.world.sim_time_step().0;
@@ -374,15 +374,15 @@ pub fn timestamps_changed(db: &DB, components: &mut [(PairId, Timestamp)]) -> Op
     db.with_state(|state| {
         let mut changed = None;
         for (component_id, timestamp) in components.iter_mut() {
-            if let Some(component) = state.get_component(*component_id) {
-                if let Some((curr_timestamp, _)) = component.time_series.latest() {
-                    if *timestamp != *curr_timestamp {
-                        changed = Some(true);
-                        *timestamp = *curr_timestamp;
-                        // tracing::info!("time stamp changed");
-                    } else if changed.is_none() {
-                        changed = Some(false);
-                    }
+            if let Some(component) = state.get_component(*component_id)
+                && let Some((curr_timestamp, _)) = component.time_series.latest()
+            {
+                if *timestamp != *curr_timestamp {
+                    changed = Some(true);
+                    *timestamp = *curr_timestamp;
+                    // tracing::info!("time stamp changed");
+                } else if changed.is_none() {
+                    changed = Some(false);
                 }
             }
         }
