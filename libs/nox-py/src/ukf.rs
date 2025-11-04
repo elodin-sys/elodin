@@ -7,10 +7,10 @@ use crate::Error;
 
 #[pyfunction]
 pub fn unscented_transform(
-    points: PyObject,
-    mean_weights: PyObject,
-    covar_weights: PyObject,
-) -> Result<(PyObject, PyObject), Error> {
+    points: Py<PyAny>,
+    mean_weights: Py<PyAny>,
+    covar_weights: Py<PyAny>,
+) -> Result<(Py<PyAny>, Py<PyAny>), Error> {
     let points: Tensor<f64, (Dyn, Dyn), Op> = Tensor::from_inner(Noxpr::jax(points));
     let mean_weights: Tensor<f64, Dyn, Op> = Tensor::from_inner(Noxpr::jax(mean_weights));
     let covar_weights: Tensor<f64, Dyn, Op> = Tensor::from_inner(Noxpr::jax(covar_weights));
@@ -22,12 +22,12 @@ pub fn unscented_transform(
 
 #[pyfunction]
 pub fn cross_covar(
-    x_hat: PyObject,
-    z_hat: PyObject,
-    points_x: PyObject,
-    points_z: PyObject,
-    covar_weights: PyObject,
-) -> Result<PyObject, Error> {
+    x_hat: Py<PyAny>,
+    z_hat: Py<PyAny>,
+    points_x: Py<PyAny>,
+    points_z: Py<PyAny>,
+    covar_weights: Py<PyAny>,
+) -> Result<Py<PyAny>, Error> {
     let x_hat: Tensor<f64, Dyn, Op> = Tensor::from_inner(Noxpr::jax(x_hat));
     let z_hat: Tensor<f64, Dyn, Op> = Tensor::from_inner(Noxpr::jax(z_hat));
     let points_x: Tensor<f64, (Dyn, Dyn), Op> = Tensor::from_inner(Noxpr::jax(points_x));
@@ -38,13 +38,14 @@ pub fn cross_covar(
 }
 
 #[pyfunction]
+#[allow(clippy::type_complexity)]
 pub fn predict(
-    sigma_points: PyObject,
-    prop_fn: PyObject,
-    mean_weights: PyObject,
-    covar_weights: PyObject,
-    prop_covar: PyObject,
-) -> Result<(PyObject, PyObject, PyObject), Error> {
+    sigma_points: Py<PyAny>,
+    prop_fn: Py<PyAny>,
+    mean_weights: Py<PyAny>,
+    covar_weights: Py<PyAny>,
+    prop_covar: Py<PyAny>,
+) -> Result<(Py<PyAny>, Py<PyAny>, Py<PyAny>), Error> {
     let sigma_points: Tensor<f64, (Dyn, Dyn), Op> = Tensor::from_inner(Noxpr::jax(sigma_points));
     let mean_weights: Tensor<f64, Dyn, Op> = Tensor::from_inner(Noxpr::jax(mean_weights));
     let covar_weights: Tensor<f64, Dyn, Op> = Tensor::from_inner(Noxpr::jax(covar_weights));
@@ -52,7 +53,7 @@ pub fn predict(
 
     let prop_fn_wrapper = |x: Tensor<f64, Dyn, Op>| -> Tensor<f64, Dyn, Op> {
         let py_x = x.inner().to_jax().unwrap();
-        let result = Python::with_gil(|py| prop_fn.call1(py, (py_x,)).unwrap());
+        let result = Python::attach(|py| prop_fn.call1(py, (py_x,)).unwrap());
         Tensor::from_inner(Noxpr::jax(result))
     };
 
@@ -72,14 +73,15 @@ pub fn predict(
 }
 
 #[pyfunction]
+#[allow(clippy::type_complexity)]
 pub fn innovate(
-    x_points: PyObject,
-    z: PyObject,
-    measure_fn: PyObject,
-    mean_weights: PyObject,
-    covar_weights: PyObject,
-    noise_covar: PyObject,
-) -> Result<(PyObject, PyObject, PyObject), Error> {
+    x_points: Py<PyAny>,
+    z: Py<PyAny>,
+    measure_fn: Py<PyAny>,
+    mean_weights: Py<PyAny>,
+    covar_weights: Py<PyAny>,
+    noise_covar: Py<PyAny>,
+) -> Result<(Py<PyAny>, Py<PyAny>, Py<PyAny>), Error> {
     let x_points: Tensor<f64, (Dyn, Dyn), Op> = Tensor::from_inner(Noxpr::jax(x_points));
     let z: Tensor<f64, Dyn, Op> = Tensor::from_inner(Noxpr::jax(z));
     let mean_weights: Tensor<f64, Dyn, Op> = Tensor::from_inner(Noxpr::jax(mean_weights));
@@ -90,7 +92,7 @@ pub fn innovate(
         |x: Tensor<f64, Dyn, Op>, z: Tensor<f64, Dyn, Op>| -> Tensor<f64, Dyn, Op> {
             let py_x = x.inner().to_jax().unwrap();
             let py_z = z.inner().to_jax().unwrap();
-            let result = Python::with_gil(|py| measure_fn.call1(py, (py_x, py_z)).unwrap());
+            let result = Python::attach(|py| measure_fn.call1(py, (py_x, py_z)).unwrap());
             Tensor::from_inner(Noxpr::jax(result))
         };
 
@@ -112,13 +114,13 @@ pub fn innovate(
 #[pyclass]
 pub struct UKFState {
     #[pyo3(get, set)]
-    x_hat: PyObject,
+    x_hat: Py<PyAny>,
     #[pyo3(get, set)]
-    covar: PyObject,
+    covar: Py<PyAny>,
     #[pyo3(get, set)]
-    prop_covar: PyObject,
+    prop_covar: Py<PyAny>,
     #[pyo3(get, set)]
-    noise_covar: PyObject,
+    noise_covar: Py<PyAny>,
     config: UncheckedMerweConfig,
 }
 
@@ -126,15 +128,15 @@ pub struct UKFState {
 impl UKFState {
     #[new]
     fn new(
-        x_hat: PyObject,
-        covar: PyObject,
-        prop_covar: PyObject,
-        noise_covar: PyObject,
+        x_hat: Py<PyAny>,
+        covar: Py<PyAny>,
+        prop_covar: Py<PyAny>,
+        noise_covar: Py<PyAny>,
         alpha: f64,
         beta: f64,
         kappa: f64,
     ) -> PyResult<Self> {
-        let x_shape: Vec<usize> = Python::with_gil(|py| {
+        let x_shape: Vec<usize> = Python::attach(|py| {
             Ok::<_, crate::Error>(x_hat.getattr(py, "shape")?.extract::<Vec<usize>>(py)?)
         })?;
         let n = x_shape[0];
@@ -151,15 +153,15 @@ impl UKFState {
 
     fn update(
         &mut self,
-        z: PyObject,
-        prop_fn: PyObject,
-        measure_fn: PyObject,
+        z: Py<PyAny>,
+        prop_fn: Py<PyAny>,
+        measure_fn: Py<PyAny>,
     ) -> Result<(), crate::Error> {
         let z: Tensor<f64, Dyn, Op> = Tensor::from_inner(Noxpr::jax(z));
 
         let prop_fn_wrapper = |x: Tensor<f64, Dyn, Op>| -> Tensor<f64, Dyn, Op> {
             let py_x = x.inner().to_jax().unwrap();
-            let result = Python::with_gil(|py| prop_fn.call1(py, (py_x,)).unwrap());
+            let result = Python::attach(|py| prop_fn.call1(py, (py_x,)).unwrap());
             Tensor::from_inner(Noxpr::jax(result))
         };
 
@@ -167,18 +169,18 @@ impl UKFState {
             |x: Tensor<f64, Dyn, Op>, z: Tensor<f64, Dyn, Op>| -> Tensor<f64, Dyn, Op> {
                 let py_x = x.inner().to_jax().unwrap();
                 let py_z = z.inner().to_jax().unwrap();
-                let result = Python::with_gil(|py| measure_fn.call1(py, (py_x, py_z)).unwrap());
+                let result = Python::attach(|py| measure_fn.call1(py, (py_x, py_z)).unwrap());
                 Tensor::from_inner(Noxpr::jax(result))
             };
 
         let x_hat: Tensor<f64, Dyn, Op> =
-            Python::with_gil(|py| Tensor::from_inner(Noxpr::jax(self.x_hat.clone_ref(py))));
+            Python::attach(|py| Tensor::from_inner(Noxpr::jax(self.x_hat.clone_ref(py))));
         let covar: Tensor<f64, (Dyn, Dyn), Op> =
-            Python::with_gil(|py| Tensor::from_inner(Noxpr::jax(self.covar.clone_ref(py))));
+            Python::attach(|py| Tensor::from_inner(Noxpr::jax(self.covar.clone_ref(py))));
         let prop_covar: Tensor<f64, (Dyn, Dyn), Op> =
-            Python::with_gil(|py| Tensor::from_inner(Noxpr::jax(self.prop_covar.clone_ref(py))));
+            Python::attach(|py| Tensor::from_inner(Noxpr::jax(self.prop_covar.clone_ref(py))));
         let noise_covar: Tensor<f64, (Dyn, Dyn), Op> =
-            Python::with_gil(|py| Tensor::from_inner(Noxpr::jax(self.noise_covar.clone_ref(py))));
+            Python::attach(|py| Tensor::from_inner(Noxpr::jax(self.noise_covar.clone_ref(py))));
 
         let state = UncheckedState {
             x_hat,

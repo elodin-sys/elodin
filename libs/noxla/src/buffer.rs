@@ -5,10 +5,10 @@ use cpp::{cpp, cpp_class};
 use std::{marker::PhantomData, mem::ManuallyDrop, pin::Pin};
 
 cpp! {{
-    #include "xla/client/xla_builder.h"
-    #include "xla/client/lib/constants.h"
-    #include "xla/client/lib/matrix.h"
-    #include "xla/statusor.h"
+    #include "xla/hlo/builder/xla_builder.h"
+    #include "xla/hlo/builder/lib/constants.h"
+    #include "xla/hlo/builder/lib/matrix.h"
+    #include "xla/tsl/platform/status.h"
     #include "xla/literal_util.h"
     using namespace xla;
 }}
@@ -53,7 +53,7 @@ impl PjRtBuffer {
 
         let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
         unsafe {
-            cpp!([self as "std::unique_ptr<PjRtBuffer>*", dst_ptr as "char*", shape as "xla::Shape", out_status as "Status*"] {
+            cpp!([self as "std::unique_ptr<PjRtBuffer>*", dst_ptr as "char*", shape as "xla::Shape", out_status as "absl::Status*"] {
                 auto literal = std::make_unique<xla::MutableBorrowingLiteral>(dst_ptr, shape);
                 *out_status = (*self)->ToLiteralSync(literal.get());
             });
@@ -66,12 +66,12 @@ impl PjRtBuffer {
     pub fn to_literal_sync(&self) -> Result<Literal> {
         let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
         let lit = unsafe {
-            cpp!([self as "std::unique_ptr<PjRtBuffer>*", out_status as "Status*"] -> Literal as "std::shared_ptr<Literal>" {
+            cpp!([self as "std::unique_ptr<PjRtBuffer>*", out_status as "absl::Status*"] -> Literal as "std::shared_ptr<Literal>" {
                 auto status = (*self)->ToLiteralSync();
                 if (status.ok()) {
                     return std::move(status.value());
                 }else{
-                    *out_status = Status(status.status());
+                    *out_status = absl::Status(status.status());
                     return std::make_shared<Literal>(Literal());
                 }
             })

@@ -116,6 +116,7 @@ fn tuple_op() -> Result<()> {
     let y = crate::Literal::vector(&[4.2f32, 1.337f32]);
     let x = client.copy_literal(&x)?;
     let y = client.copy_literal(&y)?;
+    /*
     let result = tuple.execute_buffers(BufferArgsRef::from([&x, &y]))?;
     let result = result[0].to_literal_sync()?;
     assert_eq!(result.shape()?.tuple_size(), Some(2));
@@ -123,6 +124,17 @@ fn tuple_op() -> Result<()> {
     let result = result.decompose_tuple()?;
     assert_eq!(result[1].typed_buf::<f32>()?, &[4.2, 1.337]);
     assert_eq!(result[0].typed_buf::<f32>()?, &[3.1]);
+    */
+    // Execute with untupling: returns one buffer per tuple element.
+    let results = tuple.execute_buffers(BufferArgsRef::from([&x, &y]).untuple_result(true))?;
+    // Single device => flat Vec<PjRtBuffer> with 2 outputs.
+    assert_eq!(results.len(), 2);
+    // Element order matches the tuple order in the HLO.
+    let a = results[0].to_literal_sync()?; // x
+    let b = results[1].to_literal_sync()?; // y
+    // Verify contents (replaces the old tuple-literal shape check).
+    assert_eq!(a.typed_buf::<f32>()?, &[3.1]);
+    assert_eq!(b.typed_buf::<f32>()?, &[4.2, 1.337]);
     Ok(())
 }
 

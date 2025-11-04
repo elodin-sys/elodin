@@ -24,7 +24,7 @@ pub struct PyFnSystem {
 
 impl Clone for PyFnSystem {
     fn clone(&self) -> Self {
-        Python::with_gil(|py| Self {
+        Python::attach(|py| Self {
             sys: self.sys.clone_ref(py),
             input_ids: self.input_ids.clone(),
             output_ids: self.output_ids.clone(),
@@ -38,7 +38,7 @@ impl Clone for PyFnSystem {
 impl PyFnSystem {
     #[new]
     fn new(
-        sys: PyObject,
+        sys: Py<PyAny>,
         input_ids: Vec<String>,
         output_ids: Vec<String>,
         edge_ids: Vec<String>,
@@ -75,7 +75,7 @@ impl nox_ecs::System for PyFnSystem {
     }
 
     fn compile(&self, world: &World) -> Result<nox_ecs::CompiledSystem, nox_ecs::Error> {
-        let sys = Python::with_gil(|py| self.sys.clone_ref(py));
+        let sys = Python::attach(|py| self.sys.clone_ref(py));
         let mut input_ids = self.input_ids.clone();
         let output_ids = self.output_ids.clone();
         let builder = nox_ecs::SystemBuilder::new(world);
@@ -126,7 +126,7 @@ impl nox_ecs::System for PyFnSystem {
         } else {
             NoxprTy::Tuple(tys.collect())
         };
-        let func = Python::with_gil(|py| {
+        let func = Python::attach(|py| {
             let func = sys.call1(py, (py_builder,))?;
             let jax = py.import("jax").unwrap();
             // Clean up unused variable warning
@@ -193,7 +193,7 @@ def build_expr(jit, args):
 
         let comp = fun
             .call1(py, (func, input_arrays))?
-            .extract::<PyObject>(py)?;
+            .extract::<Py<PyAny>>(py)?;
         let comp = comp.call_method0(py, "as_serialized_hlo_module_proto")?;
         let comp = comp
             .downcast_bound::<PyBytes>(py)
@@ -284,7 +284,7 @@ impl System {
         }
     }
 
-    pub fn __ror__(&self, _other: PyObject) -> System {
+    pub fn __ror__(&self, _other: Py<PyAny>) -> System {
         // Handle the case where the left operand is None
         // Return self unchanged (None is effectively skipped)
         self.clone()
@@ -307,12 +307,12 @@ impl nox_ecs::System for System {
 
 fn noxpr_to_callable(func: Arc<NoxprFn>) -> Py<PyAny> {
     if let NoxprNode::Jax(j) = &*func.inner.node {
-        return Python::with_gil(|py| j.clone_ref(py));
+        return Python::attach(|py| j.clone_ref(py));
     }
     let func = JaxNoxprFn {
         tracer: Default::default(),
         inner: func,
     };
 
-    Python::with_gil(|py| func.into_py_any(py).unwrap())
+    Python::attach(|py| func.into_py_any(py).unwrap())
 }

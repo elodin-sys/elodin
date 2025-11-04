@@ -52,7 +52,7 @@ impl GraphQueryInner {
         py: Python<'_>,
         from_query: QueryInner,
         to_query: QueryInner,
-    ) -> Result<PyObject, Error> {
+    ) -> Result<Py<PyAny>, Error> {
         let dict = PyDict::new(py);
         let exprs = exprs_from_edges_queries(&self.query.edges, from_query.query, to_query.query);
         for (len, (a, b)) in exprs.iter() {
@@ -74,7 +74,7 @@ impl GraphQueryInner {
         &self,
         from_query: QueryInner,
         to_query: QueryInner,
-        new_buf: PyObject,
+        new_buf: Py<PyAny>,
         metadata: Component,
     ) -> QueryInner {
         let mut entity_map = BTreeMap::new();
@@ -116,18 +116,18 @@ impl Edge {
         }
     }
 
-    fn flatten(&self) -> Result<((PyObject,), Option<()>), Error> {
+    fn flatten(&self) -> Result<((Py<PyAny>,), Option<()>), Error> {
         let jax = self.inner.clone().into_inner().to_jax()?;
         Ok(((jax,), None))
     }
 
     #[staticmethod]
-    fn unflatten(_aux: PyObject, _jax: PyObject) -> Self {
+    fn unflatten(_aux: Py<PyAny>, _jax: Py<PyAny>) -> Self {
         todo!()
     }
 
     // #[staticmethod]
-    // fn from_array(jax: PyObject) -> Self {
+    // fn from_array(jax: Py<PyAny>) -> Self {
     //     todo!()
     // }
 
@@ -142,7 +142,7 @@ impl Edge {
     }
 
     #[staticmethod]
-    fn from_array(_arr: PyObject) -> Self {
+    fn from_array(_arr: Py<PyAny>) -> Self {
         todo!()
     }
 }

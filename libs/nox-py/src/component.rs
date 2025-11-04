@@ -42,7 +42,7 @@ impl Component {
         py: Python<'_>,
         name: String,
         ty: Option<ComponentType>,
-        metadata: HashMap<String, PyObject>,
+        metadata: HashMap<String, Py<PyAny>>,
     ) -> Result<Self, Error> {
         let metadata = metadata
             .into_iter()
@@ -64,17 +64,17 @@ impl Component {
     }
 
     #[staticmethod]
-    pub fn id(py: Python<'_>, component: PyObject) -> Result<String, Error> {
+    pub fn id(py: Python<'_>, component: Py<PyAny>) -> Result<String, Error> {
         Self::name(py, component)
     }
 
     #[staticmethod]
-    pub fn name(py: Python<'_>, component: PyObject) -> Result<String, Error> {
+    pub fn name(py: Python<'_>, component: Py<PyAny>) -> Result<String, Error> {
         Component::of(py, component).map(|metadata| metadata.name.to_string())
     }
 
     #[staticmethod]
-    pub fn index(py: Python<'_>, component: PyObject) -> Result<ShapeIndexer, Error> {
+    pub fn index(py: Python<'_>, component: Py<PyAny>) -> Result<ShapeIndexer, Error> {
         let component = Component::of(py, component)?;
         //let metadata = Metadata::of(py, component)?.inner;
         let ty = component.ty.unwrap();
@@ -99,7 +99,7 @@ impl Component {
     }
 
     #[staticmethod]
-    pub fn of(py: Python<'_>, component: PyObject) -> Result<Self, Error> {
+    pub fn of(py: Python<'_>, component: Py<PyAny>) -> Result<Self, Error> {
         let mut component_data = component
             .getattr(py, intern!(py, "__metadata__"))
             .and_then(|metadata| {
@@ -304,7 +304,7 @@ impl Clone for ShapeIndexer {
             strides: self.strides.clone(),
             shape: self.shape.clone(),
             index: self.index.clone(),
-            py_list: Python::with_gil(|py| self.py_list.clone_ref(py)),
+            py_list: Python::attach(|py| self.py_list.clone_ref(py)),
             items: self.items.clone(),
         }
     }
@@ -337,9 +337,9 @@ impl ShapeIndexer {
                 })
                 .collect()
         };
-        let py_list = Python::with_gil(|py| {
+        let py_list = Python::attach(|py| {
             // Create a Python list of items
-            let items_py: Vec<PyObject> = items
+            let items_py: Vec<Py<PyAny>> = items
                 .iter()
                 .map(|x| {
                     // Extract what we need and create a new Python object
@@ -349,7 +349,7 @@ impl ShapeIndexer {
                         x.index.clone(),
                         x.strides.clone(),
                     );
-                    // Convert to PyObject
+                    // Convert to Py<PyAny>
                     Py::new(py, new_indexer).unwrap().into_py_any(py).unwrap()
                 })
                 .collect();
@@ -381,7 +381,7 @@ impl ShapeIndexer {
         }
     }
 
-    fn __getitem__(&self, py: Python<'_>, index: PyObject) -> PyResult<PyObject> {
+    fn __getitem__(&self, py: Python<'_>, index: Py<PyAny>) -> PyResult<Py<PyAny>> {
         self.py_list.call_method1(py, "__getitem__", (index,))
     }
 }

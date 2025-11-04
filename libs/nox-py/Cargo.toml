@@ -20,8 +20,11 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # python
-pyo3 = "0.23.0"
-numpy.version = "0.23"
+pyo3 = "0.26"
+numpy.version = "0.26"
+
+# noxla 
+noxla.path = "../noxla"
 
 # nox
 nox-ecs.path = "../nox-ecs"
@@ -76,3 +79,10 @@ s10.path = "../s10"
 zerocopy.version = "0.8.2"
 env_logger = "0.11.8"
 convert_case = "0.8.0"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# LAPACK/BLAS dependencies for Linux
+netlib-src = { version = "0.9", features = ["static"] }
+lapack-src = { version = "0.13", features = ["netlib"] }
+lapack-sys = "0.15"
+blas = "0.23"

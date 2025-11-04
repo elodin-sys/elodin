@@ -24,7 +24,10 @@ num-traits = { version = "0.2.15", default-features = false }
 thiserror = { version = "2.0", default-features = false }
 seq-macro = "0.3.5"
 fn-traits = "0.2"
-faer = { version = "0.20", default-features = false, features = ["cholesky", "lu"] }
+faer = { version = "0.20", default-features = false, features = [
+  "cholesky",
+  "lu",
+] }
 libm = "0.2.8"
 inplace_it = "0.3.6"
 smallvec.version = "1.11.2"
@@ -48,9 +51,9 @@ zerocopy.features = ["derive"]
 xla = { optional = true, workspace = true }
 
 # jax
-pyo3.version = "0.23.0"
+pyo3.version = "0.26"
 pyo3.optional = true
-numpy.version = "0.23.0"
+numpy.version = "0.26"
 numpy.optional = true
 
 # debug
@@ -63,13 +66,11 @@ traversal = "0.1.2"
 
 tracing = "0.1"
 
-[target.'cfg(not(target_os = "macos"))'.dependencies]
-lapack-src = { version = "0.10", features = ["netlib"], optional = true }
-netlib-src = { version = "0.8", features = ["static"], optional = true }
-[target.'cfg(target_os = "macos")'.dependencies]
-lapack-src = { version = "0.10", features = ["accelerate"], optional = true }
+lapack-sys = "0.14.0"
+lapack-src = { version = "0.13", features = ["netlib"], optional = true }
+netlib-src = { version = "0.9", features = ["static"] }
 
 [build-dependencies]
 which = "6.0.3"
-pyo3-build-config.version = "0.23.0"
+pyo3-build-config.version = "0.26"
 pyo3-build-config.optional = true
