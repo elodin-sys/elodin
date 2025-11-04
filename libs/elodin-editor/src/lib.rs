@@ -37,7 +37,7 @@ use ui::{
     colors::{ColorExt, get_scheme},
     inspector::viewport::set_viewport_pos,
     plot::{CollectedGraphData, gpu::LineHandle},
-    tiles::{self, TileState},
+    tiles,
     utils::FriendlyEpoch,
 };
 
@@ -788,7 +788,7 @@ pub fn setup_clear_state(mut packet_handlers: ResMut<PacketHandlers>, mut comman
 fn clear_state_new_connection(
     PacketHandlerInput { packet, .. }: PacketHandlerInput,
     mut entity_map: ResMut<EntityMap>,
-    mut ui_state: ResMut<TileState>,
+    mut windows: ResMut<tiles::WindowManager>,
     mut selected_object: ResMut<SelectedObject>,
     mut render_layer_alloc: ResMut<RenderLayerAlloc>,
     mut value_map: Query<&mut ComponentValueMap>,
@@ -818,7 +818,18 @@ fn clear_state_new_connection(
         }
     }
     synced_glbs.0.clear();
-    ui_state.clear(&mut commands, &mut selected_object);
+    windows
+        .main_mut()
+        .clear(&mut commands, &mut selected_object);
+    for secondary in windows.take_secondary() {
+        for graph in secondary.graph_entities {
+            commands.entity(graph).despawn();
+        }
+        if let Some(entity) = secondary.window_entity {
+            commands.entity(entity).despawn();
+        }
+    }
+    windows.replace_secondary(Vec::new());
     *graph_data = CollectedGraphData::default();
     render_layer_alloc.free_all();
 }

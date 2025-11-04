@@ -143,28 +143,16 @@ def world() -> tuple[el.World, el.EntityId]:
                     graph "drone.ang_vel_setpoint"
                 }
             }
-            hsplit name = "Motor Panel" {
-                vsplit share=0.4 {
-                    graph "drone.motor_input"
-                    graph "drone.motor_pwm"
-                    graph "drone.motor_rpm"
-                }
-                graph "drone.thrust"
-            }
-            hsplit name="Rate Control Panel" {
-                vsplit {
-                    graph "drone.rate_pid_state"
-                }
-                vsplit {
-                    graph "drone.gyro, drone.ang_vel_setpoint" name="Drone: rate_control"
-                }
-            }
             vsplit name="Sensor Panel" {
                 graph "drone.gyro"
                 graph "drone.accel"
                 graph "drone.magnetometer"
             }
         }
+        
+        window path="{examples/drone/motor-panel.kdl}"
+        window path="{examples/drone/rate-control-panel.kdl}"
+
         vector_arrow "(1, 0, 0)" origin="drone.world_pos" scale=1.0 name="Drone Velocity X" body_frame=#true
         vector_arrow "(0, 1, 0)" origin="drone.world_pos" scale=1.0 name="Drone Velocity Y" body_frame=#true
         vector_arrow "(0, 0, 1)" origin="drone.world_pos" scale=1.0 name="Drone Velocity Z" body_frame=#true
