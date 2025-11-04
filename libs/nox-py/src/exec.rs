@@ -2,14 +2,10 @@ use std::collections::HashMap;
 
 use crate::*;
 
-use core::time::Duration;
-use impeller2::types::{ComponentId, Timestamp};
+use impeller2::types::Timestamp;
 use impeller2_wkt::ArchiveFormat;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
-use nox_ecs::{
-    Compiled,
-    impeller2_server::{self, PairId},
-};
+use nox_ecs::Compiled;
 use pyo3::exceptions::PyTypeError;
 use pyo3::types::IntoPyDict;
 
@@ -17,43 +13,6 @@ use pyo3::types::IntoPyDict;
 pub struct Exec {
     pub exec: nox_ecs::WorldExec<Compiled>,
     pub db: elodin_db::DB,
-}
-
-impl Exec {
-    /// Wait for external control components to be updated
-    fn wait_for_write_or_timeout(
-        &mut self,
-        py: Python<'_>,
-        maybe_timeout: Option<Duration>,
-        external_controls: &mut [(ComponentId, Timestamp)],
-    ) -> Result<bool, Error> {
-        if external_controls.is_empty() {
-            return Ok(true);
-        }
-        // Check for updates with a timeout to avoid infinite waiting
-        let start_time = std::time::Instant::now();
-
-        loop {
-            // Check if we have updates using the impeller2_server function
-            if nox_ecs::impeller2_server::timestamps_changed(&self.db, external_controls)
-                .unwrap_or(true)
-            {
-                return Ok(true);
-            }
-
-            if let Some(timeout) = maybe_timeout
-                && start_time.elapsed() > timeout
-            {
-                return Ok(false);
-            }
-
-            // Allow Python signals to be processed
-            py.check_signals()?;
-
-            // Small sleep to avoid busy waiting
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-    }
 }
 
 #[pymethods]
@@ -77,30 +36,15 @@ impl Exec {
                 ProgressStyle::with_template("{bar:50} {pos:>6}/{len:6} remaining: {eta}").unwrap(),
             );
         let mut timestamp = Timestamp::now();
-        let external_controls: HashSet<_> =
-            impeller2_server::external_controls(&self.exec).collect();
-        let wait_for_write: Vec<ComponentId> =
-            impeller2_server::wait_for_write(&self.exec).collect();
-        let wait_for_write_pair_ids: Vec<PairId> =
-            impeller2_server::get_pair_ids(&self.exec, &wait_for_write).unwrap();
-        let mut wait_for_write_pair_ids =
-            impeller2_server::collect_timestamps(&self.db, &wait_for_write_pair_ids);
 
         for _ in 0..ticks {
             self.exec.run()?;
             self.db.with_state(|state| {
-                nox_ecs::impeller2_server::commit_world_head(
-                    state,
-                    &mut self.exec,
-                    timestamp,
-                    Some(&external_controls),
-                )
+                nox_ecs::impeller2_server::commit_world_head(state, &mut self.exec, timestamp, None)
             })?;
             timestamp += self.exec.world.sim_time_step().0;
             py.check_signals()?;
             progress_bar.inc(1);
-            // Wait for external control components to be updated before running the next tick
-            self.wait_for_write_or_timeout(py, None, &mut wait_for_write_pair_ids)?;
         }
         progress_bar.finish_and_clear();
         Ok(())
