@@ -334,8 +334,7 @@ pub fn wait_for_write(world: &WorldExec<Compiled>) -> impl Iterator<Item = Compo
         .metadata
         .component_map
         .iter()
-        .filter(|(component_id, (_schema, component_metadata))| {
-            dbg!(component_metadata, component_id);
+        .filter(|(_component_id, (_schema, component_metadata))| {
             component_metadata
                 .metadata
                 .get("wait_for_write")

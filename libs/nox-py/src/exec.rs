@@ -87,8 +87,6 @@ impl Exec {
             impeller2_server::collect_timestamps(&self.db, &wait_for_write_pair_ids);
 
         for _ in 0..ticks {
-            // Wait for external control components to be updated before running the next tick
-            self.wait_for_write_or_timeout(py, None, &mut wait_for_write_pair_ids)?;
             self.exec.run()?;
             self.db.with_state(|state| {
                 nox_ecs::impeller2_server::commit_world_head(
@@ -101,6 +99,8 @@ impl Exec {
             timestamp += self.exec.world.sim_time_step().0;
             py.check_signals()?;
             progress_bar.inc(1);
+            // Wait for external control components to be updated before running the next tick
+            self.wait_for_write_or_timeout(py, None, &mut wait_for_write_pair_ids)?;
         }
         progress_bar.finish_and_clear();
         Ok(())
