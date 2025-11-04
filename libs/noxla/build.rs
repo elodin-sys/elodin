@@ -41,32 +41,8 @@ fn main() -> anyhow::Result<()> {
         download_xla(&out_dir)?;
     }
 
-    // Build the C++ kernels as a static lib
-    let mut kernels = cc::Build::new();
-    kernels
-        .cpp(true)
-        .flag("-std=c++17")
-        .flag("-DLLVM_ON_UNIX=1")
-        .flag("-DLLVM_VERSION_STRING=")
-        .flag_if_supported("-fPIC")
-        .files([
-            "./vendor/jaxlib/cpu/cpu_kernels.cc",
-            "./vendor/jaxlib/cpu/sparse_kernels.cc",
-            "./vendor/jaxlib/cpu/lapack_kernels.cc",
-            "./vendor/jaxlib/cpu/lapack_kernels_using_lapack.cc",
-        ])
-        .include("./vendor")
-        .include(xla_dir.join("include"))
-        .cargo_metadata(false)
-        .warnings(false);
-
-    kernels.compile("noxla_kernels"); // libnoxla_kernels.a => OUT_DIR
-
-    println!("cargo:rustc-link-search=native={}", out_dir.display());
-
-    #[cfg(feature = "link-kernels")]
-    println!("cargo:rustc-link-lib=static=noxla_kernels");
-
+    // The CPU kernels are now compiled directly with cpp_build below
+    // This ensures their global constructors run when the library is loaded
     let kernels_path = out_dir.join("libnoxla_kernels.a");
     println!("cargo:noxla_kernels={}", kernels_path.display());
 
@@ -76,6 +52,11 @@ fn main() -> anyhow::Result<()> {
         .flag_if_supported("-w") // Suppress all warnings from third-party XLA C++ code
         .include(xla_dir.join("include"))
         .include("./vendor")
+        // Add the CPU kernel files directly to the cpp_build
+        .file("./vendor/jaxlib/cpu/cpu_kernels.cc")
+        .file("./vendor/jaxlib/cpu/sparse_kernels.cc")
+        .file("./vendor/jaxlib/cpu/lapack_kernels.cc")
+        .file("./vendor/jaxlib/cpu/lapack_kernels_using_lapack.cc")
         // .include(format!("{out_dir}/xla_extension/include"))
         .build("src/lib.rs");
 
@@ -146,8 +127,10 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // Explicitly link libstdc++ on Linux to avoid "DSO missing from command line" errors.
+    // Explicitly link libstdc++ and BLAS/LAPACK on Linux to avoid "DSO missing from command line" errors.
     if os == OS::Linux {
+        println!("cargo:rustc-link-lib=dylib=lapack");
+        println!("cargo:rustc-link-lib=dylib=blas");
         println!("cargo:rustc-link-lib=dylib=gfortran");
         println!("cargo:rustc-link-lib=dylib=stdc++");
     }
@@ -166,6 +149,7 @@ fn main() -> anyhow::Result<()> {
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=SystemConfiguration");
         println!("cargo:rustc-link-lib=framework=Security");
+        println!("cargo:rustc-link-lib=framework=Accelerate");
     }
 
     Ok(())

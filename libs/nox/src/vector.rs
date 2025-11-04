@@ -122,8 +122,10 @@ impl<T: Field + RealField, const N: usize, R: OwnedRepr> Vector<T, N, R> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "noxpr"))]
 mod tests {
+    // Tests require std for println!
+    extern crate std;
 
     use core::f64::consts::FRAC_PI_4;
 

@@ -518,8 +518,15 @@ mod tests {
                 return;
             }
 
-            let stdlib_path = env!("PYTHON_STDLIB_PATH");
-            let purelib_path = env!("PYTHON_PURELIB_PATH");
+            // Try to get Python paths from environment, fall back to standard init if not available
+            let Ok(stdlib_path) = std::env::var("PYTHON_STDLIB_PATH") else {
+                Python::initialize();
+                return;
+            };
+            let Ok(purelib_path) = std::env::var("PYTHON_PURELIB_PATH") else {
+                Python::initialize();
+                return;
+            };
 
             unsafe {
                 if ffi::Py_IsInitialized() == 0 {
