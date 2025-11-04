@@ -1536,8 +1536,9 @@ dependencies = [
 
 [[package]]
 name = "bevy_editor_cam"
-version = "0.5.0"
-source = "git+https://github.com/tomara-x/bevy_editor_cam.git?branch=bevy-0.16#ac2f9428ff599155e0c9ec6fa54575536c478e7c"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9af8d3356e79e205e9e907cffaaedddaddb61d5c97a56036d5ee0e6839eac8ce"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1609,8 +1610,9 @@ dependencies = [
 
 [[package]]
 name = "bevy_framepace"
-version = "0.19.0"
-source = "git+https://github.com/aloucks/bevy_framepace.git?branch=bevy-0.16#1eddd125c9965075e7e4dfefc1bee75ec5e0b15e"
+version = "0.19.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71feda15f8c1ff799e8f0914204b56d86760b2c64304317fdacf444e2ef0f8a3"
 dependencies = [
  "bevy_app",
  "bevy_diagnostic",
@@ -1745,7 +1747,8 @@ dependencies = [
 [[package]]
 name = "bevy_infinite_grid"
 version = "0.15.0"
-source = "git+https://github.com/Cyannide/bevy_infinite_grid.git?branch=bevy-0.16#387aaf815d3e8d4f70873af25a6d2f868e823ffe"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0e6a879a57fc6e274d83582eeb387e06f7eaa652224ad9dada0ef97b8326568"
 dependencies = [
  "bevy",
 ]
