@@ -155,6 +155,7 @@ pub fn spawn_gizmo(
             NavGizmoParent { main_camera },
             Transform::from_xyz(0.0, 0.0, 0.0),
             GlobalTransform::default(),
+            Name::new("nav gizmo"),
         ))
         .observe(drag_nav_gizmo)
         .id();
@@ -245,21 +246,26 @@ pub fn spawn_gizmo(
             Camera {
                 order: 3,
                 hdr: false,
-                // NOTE: Don't clear on the NavGizmoCamera because the MainCamera already cleared the window
+                // NOTE: Don't clear on the NavGizmoCamera because the
+                // MainCamera already cleared the window.
                 clear_color: ClearColorConfig::None,
                 ..Default::default()
             },
-            Projection::from(OrthographicProjection {
-                // 6 world units per pixel of window height.
-                scaling_mode: bevy::render::camera::ScalingMode::FixedVertical {
-                    viewport_height: 6.0,
-                },
-                ..OrthographicProjection::default_3d()
-            }),
+            // I played with a orthographic projection but it left a lot to be
+            // desired.
+            //
+            // Projection::from(OrthographicProjection {
+            //     // 6 world units per pixel of window height.
+            //     scaling_mode: bevy::render::camera::ScalingMode::FixedVertical {
+            //         viewport_height: 6.0,
+            //     },
+            //     ..OrthographicProjection::default_3d()
+            // }),
             Camera3d::default(),
             render_layers.clone(),
             NavGizmoParent { main_camera },
             NavGizmoCamera,
+            Name::new("nav gizmo camera"),
         ))
         .id();
 

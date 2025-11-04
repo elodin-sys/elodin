@@ -441,6 +441,7 @@ pub fn create_object_3d_entity(
             ViewVisibility::default(),
             GridCell::<i128>::default(),
             impeller2_wkt::WorldPos::default(),
+            Name::new("object_3d"),
         ))
         .id();
 
@@ -471,6 +472,9 @@ pub fn spawn_mesh(
             let url = format!("{path}#Scene0");
             let scene = assets.load(&url);
             commands.entity(entity).insert(SceneRoot(scene));
+            commands
+                .entity(entity)
+                .insert(Name::new(format!("object_3d {}", &path)));
             None
         }
         impeller2_wkt::Object3DMesh::Mesh { mesh, material } => {
