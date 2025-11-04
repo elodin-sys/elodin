@@ -249,6 +249,13 @@ pub fn spawn_gizmo(
                 clear_color: ClearColorConfig::None,
                 ..Default::default()
             },
+            Projection::from(OrthographicProjection {
+                // 6 world units per pixel of window height.
+                scaling_mode: bevy::render::camera::ScalingMode::FixedVertical {
+                    viewport_height: 6.0,
+                },
+                ..OrthographicProjection::default_3d()
+            }),
             Camera3d::default(),
             render_layers.clone(),
             NavGizmoParent { main_camera },
