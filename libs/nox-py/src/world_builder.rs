@@ -318,11 +318,35 @@ impl WorldBuilder {
                     let dot_dir = output_dir.join("graphs");
                     std::fs::create_dir_all(&dot_dir)?;
 
-                    let xla_flags =
+                    // Save existing XLA_FLAGS to restore later
+                    let previous_xla_flags = std::env::var("XLA_FLAGS").ok();
+                    let new_flags =
                         format!("--xla_dump_to={} --xla_dump_hlo_as_dot", dot_dir.display());
+
+                    // Combine with existing flags if present
+                    let combined_flags = if let Some(ref prev) = previous_xla_flags {
+                        format!("{} {}", prev, new_flags)
+                    } else {
+                        new_flags
+                    };
+
                     unsafe {
-                        std::env::set_var("XLA_FLAGS", &xla_flags);
+                        std::env::set_var("XLA_FLAGS", &combined_flags);
                     }
+
+                    // Guard to restore XLA_FLAGS on scope exit (even on error)
+                    struct XlaFlagsGuard(Option<String>);
+                    impl Drop for XlaFlagsGuard {
+                        fn drop(&mut self) {
+                            unsafe {
+                                match &self.0 {
+                                    Some(prev) => std::env::set_var("XLA_FLAGS", prev),
+                                    None => std::env::remove_var("XLA_FLAGS"),
+                                }
+                            }
+                        }
+                    }
+                    let _xla_guard = XlaFlagsGuard(previous_xla_flags);
 
                     // Build and compile
                     let exec = self.build_uncompiled(
@@ -345,32 +369,56 @@ impl WorldBuilder {
                     let mut compiled_exec = exec.compile(client)?;
                     let compile_time_ms = compile_start.elapsed().as_secs_f64() * 1000.0;
 
-                    // Clear XLA_FLAGS after compilation
-                    unsafe {
-                        std::env::remove_var("XLA_FLAGS");
-                    }
+                    // XLA_FLAGS automatically restored when _xla_guard is dropped here
+                    drop(_xla_guard);
 
-                    // Rename DOT files to simpler names
+                    // Rename DOT files to simpler names while preserving module numbers
                     if let Ok(entries) = std::fs::read_dir(&dot_dir) {
                         for entry in entries.filter_map(|e| e.ok()) {
                             let path = entry.path();
                             if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+                                // Extract module number if present (e.g., "module_0001" -> "0001")
+                                let module_num = filename
+                                    .strip_prefix("module_")
+                                    .and_then(|s| s.split('.').next())
+                                    .unwrap_or("");
+
                                 // Simplify: module_0001.jit__unnamed_wrapped_function_.cpu_after_optimizations.dot
-                                // → cpu_after_optimizations.dot
+                                // → module_0001_cpu_after_optimizations.dot (or cpu_after_optimizations.dot if no module num)
                                 let new_name = if filename.contains("before_optimizations")
                                     && filename.ends_with(".dot")
                                 {
-                                    "before_optimizations.dot"
+                                    if module_num.is_empty() {
+                                        "before_optimizations.dot".to_string()
+                                    } else {
+                                        format!("module_{}_before_optimizations.dot", module_num)
+                                    }
                                 } else if filename.contains("cpu_after_optimizations")
                                     && filename.ends_with(".dot")
                                 {
-                                    "cpu_after_optimizations.dot"
+                                    if module_num.is_empty() {
+                                        "cpu_after_optimizations.dot".to_string()
+                                    } else {
+                                        format!("module_{}_cpu_after_optimizations.dot", module_num)
+                                    }
                                 } else if filename.contains("ir-no-opt.ll") {
-                                    "llvm_ir_before_opt.ll"
+                                    if module_num.is_empty() {
+                                        "llvm_ir_before_opt.ll".to_string()
+                                    } else {
+                                        format!("module_{}_llvm_ir_before_opt.ll", module_num)
+                                    }
                                 } else if filename.contains("ir-with-opt.ll") {
-                                    "llvm_ir_after_opt.ll"
+                                    if module_num.is_empty() {
+                                        "llvm_ir_after_opt.ll".to_string()
+                                    } else {
+                                        format!("module_{}_llvm_ir_after_opt.ll", module_num)
+                                    }
                                 } else if filename.ends_with(".o") {
-                                    "compiled_module.o"
+                                    if module_num.is_empty() {
+                                        "compiled_module.o".to_string()
+                                    } else {
+                                        format!("module_{}_compiled.o", module_num)
+                                    }
                                 } else {
                                     continue; // Keep other files as-is
                                 };
@@ -634,33 +682,40 @@ impl WorldBuilder {
                     println!("  Total instructions: {}", instruction_count);
                     println!("  HLO text dump:      {}", hlo_dump_path.display());
 
-                    // Check for DOT graph files (using simplified names)
-                    let optimized_dot = dot_dir.join("cpu_after_optimizations.dot");
-                    let before_opt_dot = dot_dir.join("before_optimizations.dot");
+                    // Check for DOT graph files
+                    if let Ok(entries) = std::fs::read_dir(&dot_dir) {
+                        let dot_files: Vec<_> = entries
+                            .filter_map(|e| e.ok())
+                            .map(|e| e.path())
+                            .filter(|p| p.extension().map(|ext| ext == "dot").unwrap_or(false))
+                            .collect();
 
-                    if optimized_dot.exists() || before_opt_dot.exists() {
-                        let dot_count = [&optimized_dot, &before_opt_dot]
-                            .iter()
-                            .filter(|p| p.exists())
-                            .count();
-                        println!(
-                            "  Graph visualization: {} ({} DOT files)",
-                            dot_dir.display(),
-                            dot_count
-                        );
+                        if !dot_files.is_empty() {
+                            println!(
+                                "  Graph visualization: {} ({} DOT file{})",
+                                dot_dir.display(),
+                                dot_files.len(),
+                                if dot_files.len() == 1 { "" } else { "s" }
+                            );
 
-                        if optimized_dot.exists() {
-                            println!("    View with: xdot {}", optimized_dot.display());
-                            println!(
-                                "    Or render: dot -Tpng {} -o graph.png",
-                                optimized_dot.display()
-                            );
-                        } else if before_opt_dot.exists() {
-                            println!("    View with: xdot {}", before_opt_dot.display());
-                            println!(
-                                "    Or render: dot -Tpng {} -o graph.png",
-                                before_opt_dot.display()
-                            );
+                            // Show example viewing command for the first optimized graph found
+                            let example_file = dot_files
+                                .iter()
+                                .find(|p| {
+                                    p.file_name()
+                                        .and_then(|n| n.to_str())
+                                        .map(|n| n.contains("after_optimizations"))
+                                        .unwrap_or(false)
+                                })
+                                .or_else(|| dot_files.first());
+
+                            if let Some(file) = example_file {
+                                println!("    View with: xdot {}", file.display());
+                                println!(
+                                    "    Or render: dot -Tpng {} -o graph.png",
+                                    file.display()
+                                );
+                            }
                         }
                     }
 
