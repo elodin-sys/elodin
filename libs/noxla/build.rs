@@ -147,11 +147,9 @@ fn main() -> anyhow::Result<()> {
     }
 
     // Explicitly link libstdc++ on Linux to avoid "DSO missing from command line" errors.
-    // Note: --copy-dt-needed-entries is not supported by rust-lld (default in Rust 1.90+)
     if os == OS::Linux {
-        println!("cargo:rustc-link-arg=-Wl,--copy-dt-needed-entries");
         println!("cargo:rustc-link-lib=dylib=gfortran");
-        println!("cargo:rustc-link-arg=-Wl,-lstdc++");
+        println!("cargo:rustc-link-lib=dylib=stdc++");
     }
 
     if cfg!(feature = "shared") {
