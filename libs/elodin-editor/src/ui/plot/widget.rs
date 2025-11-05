@@ -22,7 +22,8 @@ use bevy::{
     },
     math::{DVec2, Rect, Vec2},
     prelude::{Component, ResMut},
-    render::camera::{Camera, OrthographicProjection, Projection, RenderTarget, ScalingMode},
+    render::camera::{Camera, Projection},
+    camera::{OrthographicProjection,RenderTarget,ScalingMode},
     window::{PrimaryWindow, Window, WindowRef},
 };
 use bevy_egui::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke};

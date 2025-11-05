@@ -1,8 +1,10 @@
 use bevy::{
-    core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
+    core_pipeline::{tonemapping::Tonemapping},
+    post_process::bloom::Bloom,
     ecs::system::{SystemParam, SystemState},
     input::keyboard::Key,
     log::info,
+    camera::{PhysicalCameraParameters, visibility::RenderLayers},
     prelude::*,
     window::{Monitor, Window, WindowPosition},
 };
@@ -12,8 +14,7 @@ use bevy_egui::{
     egui::{self, Color32, CornerRadius, Frame, Id, RichText, Stroke, Ui, Visuals, vec2},
 };
 use bevy_render::{
-    camera::{Exposure, PhysicalCameraParameters},
-    view::RenderLayers,
+    camera::{Exposure},
 };
 use egui::UiBuilder;
 use egui_tiles::{Container, Tile, TileId, Tiles};

@@ -10,9 +10,9 @@ use bevy::{
     log::{Level, LogPlugin},
     math::{DQuat, DVec3},
     pbr::{
-        DirectionalLightShadowMap,
         wireframe::{WireframeConfig, WireframePlugin},
     },
+    light::DirectionalLightShadowMap,
     prelude::*,
     window::{PresentMode, WindowResolution, WindowTheme},
     winit::WinitSettings,

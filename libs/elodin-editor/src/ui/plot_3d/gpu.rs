@@ -40,8 +40,9 @@ use bevy::{
         },
         render_resource::{binding_types::uniform_buffer, *},
         renderer::{RenderDevice, RenderQueue},
-        view::{ExtractedView, Msaa, RenderLayers, ViewTarget},
+        view::{ExtractedView, Msaa, ViewTarget},
     },
+    camera::visibility::RenderLayers,
     transform::components::{GlobalTransform, Transform},
 };
 use bevy_render::{

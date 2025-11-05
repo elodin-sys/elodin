@@ -1,4 +1,4 @@
-use bevy::render::view::RenderLayers;
+use bevy::camera::visibility::RenderLayers;
 use bevy::{
     app::{App, Plugin, Startup, Update},
     ecs::system::{Query, Res, ResMut},
