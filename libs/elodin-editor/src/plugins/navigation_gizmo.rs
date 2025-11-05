@@ -2,7 +2,7 @@ use crate::{MainCamera, plugins::gizmos::GIZMO_RENDER_LAYER};
 use bevy::animation::{AnimationTarget, AnimationTargetId, animated_field};
 use bevy::math::{DVec3, Dir3};
 use bevy::prelude::*;
-use bevy::render::camera::Viewport;
+use bevy::camera::Viewport;
 use bevy::camera::visibility::RenderLayers;
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;

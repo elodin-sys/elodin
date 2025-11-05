@@ -31,7 +31,7 @@ use bevy::{
         system::lifetimeless::{Read, SRes},
         world::FromWorld,
     },
-    prelude::{Color, Resource},
+    prelude::{Color, Resource, Shader},
     render::{
         RenderApp,
         extract_component::UniformComponentPlugin,
@@ -40,6 +40,7 @@ use bevy::{
         renderer::RenderDevice,
         view::ViewTarget,
     },
+    mesh::VertexBufferLayout,
 };
 use bevy_render::extract_component::ExtractComponent;
 use bevy_render::sync_world::{MainEntity, SyncToRenderWorld, TemporaryRenderEntity};

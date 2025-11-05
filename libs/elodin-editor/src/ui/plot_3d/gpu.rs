@@ -30,7 +30,7 @@ use bevy::{
     image::BevyDefault,
     math::{Mat4, Vec4},
     pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup},
-    prelude::{Color, Deref, Resource},
+    prelude::{Color, Deref, Resource, Shader},
     render::{
         ExtractSchedule, MainWorld, Render, RenderApp, RenderSet,
         extract_component::{ComponentUniforms, DynamicUniformIndex, UniformComponentPlugin},
@@ -44,6 +44,7 @@ use bevy::{
     },
     camera::visibility::RenderLayers,
     transform::components::{GlobalTransform, Transform},
+    mesh::VertexBufferLayout,
 };
 use bevy_render::{
     extract_component::ExtractComponent,
