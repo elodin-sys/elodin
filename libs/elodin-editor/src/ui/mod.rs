@@ -1705,7 +1705,7 @@ fn capture_primary_window_layout(
 }
 
 fn handle_secondary_close(
-    mut events: EventReader<WindowCloseRequested>,
+    mut events: MessageReader<WindowCloseRequested>,
     mut windows: ResMut<tiles::WindowManager>,
     window_query: Query<(Entity, &Window)>,
     screens: Query<(Entity, &Monitor)>,
@@ -1733,9 +1733,9 @@ fn handle_secondary_close(
 }
 
 fn handle_primary_close(
-    mut events: EventReader<WindowCloseRequested>,
+    mut events: MessageReader<WindowCloseRequested>,
     primary: Query<Entity, With<PrimaryWindow>>,
-    mut exit: EventWriter<AppExit>,
+    mut exit: MessageWriter<AppExit>,
 ) {
     let Some(primary_entity) = primary.iter().next() else {
         return;

@@ -306,13 +306,13 @@ fn side_clicked_cb(
     Query<(Entity, &Transform, &EditorCam), With<MainCamera>>,
     Query<&NavGizmoParent>,
     Query<&DraggedMarker>,
-    EventWriter<LookToTrigger>,
+    MessageWriter<LookToTrigger>,
 ) {
     move |click: On<Pointer<Click>>,
           query: Query<(Entity, &Transform, &EditorCam), With<MainCamera>>,
           nav_gizmo: Query<&NavGizmoParent>,
           drag_query: Query<&DraggedMarker>,
-          mut look_to: EventWriter<LookToTrigger>| {
+          mut look_to: MessageWriter<LookToTrigger>| {
         let Ok(nav_gizmo) = nav_gizmo.get(click.target) else {
             return;
         };
