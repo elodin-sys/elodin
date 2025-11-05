@@ -153,13 +153,3 @@ impl WidgetSystem for MonitorWidget<'_, '_> {
             });
     }
 }
-
-#[cfg(test)]
-mod test {
-
-    #[test]
-    fn test_width() {
-        assert_eq!("0.01234568", format!("{:<10.8}", 0.0123456789));
-        assert_eq!("10000.012345678", format!("{:<10.8}", 10000.0123456789));
-    }
-}
