@@ -348,8 +348,8 @@ impl<P: PhaseItem> RenderCommand<P> for SetLineBindGroup {
 
     fn render<'w>(
         _item: &P,
-        _view: bevy::ecs::query::ROQueryItem<'w, Self::ViewQuery>,
-        uniform_index: Option<bevy::ecs::query::ROQueryItem<'w, Self::ItemQuery>>,
+        _view: bevy::ecs::query::ROQueryItem<'w, '_, Self::ViewQuery>,
+        uniform_index: Option<bevy::ecs::query::ROQueryItem<'w, '_, Self::ItemQuery>>,
         bind_group: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
@@ -376,8 +376,8 @@ impl<P: PhaseItem> RenderCommand<P> for DrawLine {
 
     fn render<'w>(
         _item: &P,
-        _view: bevy::ecs::query::ROQueryItem<'w, Self::ViewQuery>,
-        handle: Option<bevy::ecs::query::ROQueryItem<'w, Self::ItemQuery>>,
+        _view: bevy::ecs::query::ROQueryItem<'w, '_, Self::ViewQuery>,
+        handle: Option<bevy::ecs::query::ROQueryItem<'w, '_, Self::ItemQuery>>,
         _param: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {

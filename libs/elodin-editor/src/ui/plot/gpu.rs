@@ -20,7 +20,7 @@ use bevy::image::BevyDefault;
 use bevy::render::renderer::RenderQueue;
 use bevy::render::view::{ExtractedView, Msaa};
 use bevy::camera::visibility::RenderLayers;
-use bevy::render::{ExtractSchedule, MainWorld, Render, RenderSet};
+use bevy::render::{ExtractSchedule, MainWorld, Render, RenderSystems};
 use bevy::sprite_render::{Mesh2dPipeline, Mesh2dPipelineKey, SetMesh2dViewBindGroup};
 use bevy::{
     app::Plugin,
@@ -90,7 +90,7 @@ impl Plugin for PlotGpuPlugin {
             .configure_sets(
                 Render,
                 PlotSystem::QueueLine
-                    .in_set(RenderSet::Queue)
+                    .in_set(RenderSystems::Queue)
                     .ambiguous_with(
                         bevy::pbr::queue_material_meshes::<bevy::pbr::StandardMaterial>,
                     ),
@@ -98,7 +98,7 @@ impl Plugin for PlotGpuPlugin {
             .add_systems(ExtractSchedule, extract_lines)
             .add_systems(
                 Render,
-                prepare_uniform_bind_group.in_set(RenderSet::PrepareBindGroups),
+                prepare_uniform_bind_group.in_set(RenderSystems::PrepareBindGroups),
             )
             .add_systems(
                 Render,
@@ -432,8 +432,8 @@ impl<P: PhaseItem> RenderCommand<P> for SetLineBindGroup {
 
     fn render<'w>(
         _item: &P,
-        _view: bevy::ecs::query::ROQueryItem<'w, Self::ViewQuery>,
-        uniform_index: Option<bevy::ecs::query::ROQueryItem<'w, Self::ItemQuery>>,
+        _view: bevy::ecs::query::ROQueryItem<'w, '_, Self::ViewQuery>,
+        uniform_index: Option<bevy::ecs::query::ROQueryItem<'w, '_, Self::ItemQuery>>,
         bind_group: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
@@ -460,8 +460,8 @@ impl<P: PhaseItem> RenderCommand<P> for DrawLine {
 
     fn render<'w>(
         _item: &P,
-        _view: bevy::ecs::query::ROQueryItem<'w, Self::ViewQuery>,
-        handle: Option<bevy::ecs::query::ROQueryItem<'w, Self::ItemQuery>>,
+        _view: bevy::ecs::query::ROQueryItem<'w, '_, Self::ViewQuery>,
+        handle: Option<bevy::ecs::query::ROQueryItem<'w, '_, Self::ItemQuery>>,
         _param: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
