@@ -26,16 +26,6 @@ checksum = "415ed64958754dbe991900f3940677e6a7eefb4d7367afd70d642677b0c7d19d"
 
 [[package]]
 name = "accesskit"
-version = "0.17.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3d3b8f9bae46a948369bc4a03e815d4ed6d616bd00de4051133a5019dc31c5a"
-dependencies = [
- "enumn",
- "serde",
-]
-
-[[package]]
-name = "accesskit"
 version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "becf0eb5215b6ecb0a739c31c21bd83c4f326524c9b46b7e882d77559b60a529"
@@ -45,6 +35,10 @@ name = "accesskit"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf203f9d3bd8f29f98833d1fbef628df18f759248a547e7e01cfbf63cda36a99"
+dependencies = [
+ "enumn",
+ "serde",
+]
 
 [[package]]
 name = "accesskit_consumer"
@@ -5976,7 +5970,6 @@ checksum = "bc4feb366740ded31a004a0e4452fbf84e80ef432ecf8314c485210229672fd1"
 dependencies = [
  "bytemuck",
  "emath 0.31.1",
- "serde",
 ]
 
 [[package]]
@@ -5995,14 +5988,12 @@ version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "25dd34cec49ab55d85ebf70139cb1ccd29c977ef6b6ba4fe85489d6877ee9ef3"
 dependencies = [
- "accesskit 0.17.1",
  "ahash",
  "bitflags 2.9.4",
  "emath 0.31.1",
  "epaint 0.31.1",
  "nohash-hasher",
  "profiling",
- "serde",
 ]
 
 [[package]]
@@ -6011,6 +6002,7 @@ version = "0.33.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b75645894de4ca1695ab3ab7201c7953bb95c1725aafeefa6822dc901ad2a81b"
 dependencies = [
+ "accesskit 0.21.1",
  "ahash",
  "bitflags 2.9.4",
  "emath 0.33.2",
@@ -6018,39 +6010,40 @@ dependencies = [
  "log",
  "nohash-hasher",
  "profiling",
+ "serde",
  "smallvec",
  "unicode-segmentation",
 ]
 
 [[package]]
 name = "egui_material_icons"
-version = "0.3.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a8fbdd1ecd47e2308795f3a79fc3b61456191b9276766b0009d9bcff72330ad"
+checksum = "3ff7d3715b5ee29fe75afd19420756b3e0a970149b62712af1b3204a68e2012b"
 dependencies = [
- "egui 0.31.1",
+ "egui 0.33.0",
 ]
 
 [[package]]
 name = "egui_table"
-version = "0.3.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "448481435bd5741d1636fcd52775bef23eb25692927c8f2d06e72c0c2836b9ab"
+checksum = "8cc6e7eef49daf597eab65ed37c1b0058e34a1b7b10b4a0239a6e244c66917a9"
 dependencies = [
- "egui 0.31.1",
+ "egui 0.33.0",
  "serde",
  "vec1",
 ]
 
 [[package]]
 name = "egui_tiles"
-version = "0.12.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67756b63b283a65bd0534b0c2a5fb1a12a5768bb6383d422147cc93193d09cfc"
+checksum = "ebfac3ca35f5e4fe217d3b03312111b234fe55ce059faf62b4cb47f7cf6d54f1"
 dependencies = [
  "ahash",
- "egui 0.31.1",
- "itertools 0.13.0",
+ "egui 0.33.0",
+ "itertools 0.14.0",
  "log",
  "serde",
 ]
@@ -6197,7 +6190,7 @@ dependencies = [
  "big_space",
  "const-fnv1a-hash",
  "directories",
- "egui 0.31.1",
+ "egui 0.33.0",
  "egui_material_icons",
  "egui_table",
  "egui_tiles",
@@ -6257,7 +6250,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e4cadcff7a5353ba72b7fea76bf2122b5ebdbc68e8155aa56dfdea90083fe1b"
 dependencies = [
  "bytemuck",
- "serde",
 ]
 
 [[package]]
@@ -6267,6 +6259,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e561352ae95c22ad179fb56c38d6e6eecd86cf4925cf5c70e738dd01df9b620"
 dependencies = [
  "bytemuck",
+ "serde",
 ]
 
 [[package]]
@@ -6464,8 +6457,6 @@ dependencies = [
  "nohash-hasher",
  "parking_lot",
  "profiling",
- "rayon",
- "serde",
 ]
 
 [[package]]
@@ -6484,6 +6475,8 @@ dependencies = [
  "nohash-hasher",
  "parking_lot",
  "profiling",
+ "rayon",
+ "serde",
 ]
 
 [[package]]
