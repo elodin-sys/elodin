@@ -155,6 +155,7 @@ pub fn spawn_gizmo(
             NavGizmoParent { main_camera },
             Transform::from_xyz(0.0, 0.0, 0.0),
             GlobalTransform::default(),
+            Name::new("nav gizmo"),
         ))
         .observe(drag_nav_gizmo)
         .id();
@@ -178,20 +179,20 @@ pub fn spawn_gizmo(
         ),
         // front
         (
-            crate::ui::colors::bevy::RED,
+            crate::ui::colors::bevy::GREY_900,
             Transform::from_xyz(0.0, 0.0, distance),
             side_clicked_cb(Dir3::NEG_Z),
         ),
         // back
         (
-            crate::ui::colors::bevy::GREY_900,
+            crate::ui::colors::bevy::GREEN,
             Transform::from_xyz(0.0, 0.0, -distance)
                 .with_rotation(Quat::from_rotation_y(consts::PI)),
             side_clicked_cb(Dir3::Z),
         ),
         // right
         (
-            crate::ui::colors::bevy::GREEN,
+            crate::ui::colors::bevy::RED,
             Transform::from_xyz(distance, 0.0, 0.0)
                 .with_rotation(Quat::from_rotation_y(consts::PI / 2.0)),
             side_clicked_cb(Dir3::NEG_X),
@@ -245,7 +246,8 @@ pub fn spawn_gizmo(
             Camera {
                 order: 3,
                 hdr: false,
-                // NOTE: Don't clear on the NavGizmoCamera because the MainCamera already cleared the window
+                // NOTE: Don't clear on the NavGizmoCamera because the
+                // MainCamera already cleared the window.
                 clear_color: ClearColorConfig::None,
                 ..Default::default()
             },
@@ -253,6 +255,7 @@ pub fn spawn_gizmo(
             render_layers.clone(),
             NavGizmoParent { main_camera },
             NavGizmoCamera,
+            Name::new("nav gizmo camera"),
         ))
         .id();
 
@@ -329,7 +332,7 @@ fn side_clicked_cb(
 }
 
 pub fn sync_nav_camera(
-    main_transform_query: Query<&Transform, (With<MainCamera>, Without<NavGizmoParent>)>,
+    main_transform_query: Query<&GlobalTransform, (With<MainCamera>, Without<NavGizmoParent>)>,
     mut nav_transform_query: Query<(Entity, &NavGizmoParent, &mut Transform), With<NavGizmo>>,
     mut commands: Commands,
 ) {
@@ -338,7 +341,7 @@ pub fn sync_nav_camera(
             commands.entity(entity).despawn();
             continue;
         };
-        nav_transform.rotation = main.rotation.conjugate();
+        nav_transform.rotation = main.rotation().conjugate();
     }
 }
 

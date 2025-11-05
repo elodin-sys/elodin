@@ -669,6 +669,7 @@ impl ViewportPane {
                 Transform::from_translation(Vec3::new(5.0, 5.0, 10.0))
                     .looking_at(Vec3::ZERO, Vec3::Y),
                 impeller2_wkt::WorldPos::default(),
+                Name::new("viewport"),
             ))
             .id();
         let pos = viewport
@@ -728,6 +729,7 @@ impl ViewportPane {
             GridHandle { grid: grid_id },
             crate::ui::inspector::viewport::Viewport::new(parent, pos, look_at),
             ChildOf(parent),
+            Name::new("viewport camera3d"),
         ));
 
         camera.insert(Bloom { ..default() });
