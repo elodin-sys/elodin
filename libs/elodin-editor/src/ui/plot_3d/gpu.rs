@@ -151,7 +151,7 @@ impl Plugin for Plot3dGpuPlugin {
 
 fn update_uniform_model(mut query: Query<(&mut LineUniform, &GlobalTransform)>) {
     for (mut uniform, transform) in query.iter_mut() {
-        uniform.model = transform.compute_matrix();
+        uniform.model = transform.to_matrix();
     }
 }
 #[derive(Component, Debug, Clone, ExtractComponent)]
