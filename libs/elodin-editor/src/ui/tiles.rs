@@ -1,10 +1,10 @@
+use bevy::log::info;
 use bevy::{
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     ecs::system::{SystemParam, SystemState},
     input::keyboard::Key,
     prelude::*,
 };
-use bevy::log::info;
 use bevy_editor_cam::prelude::{EditorCam, EnabledMotion, OrbitConstraint};
 use bevy_egui::{
     EguiContexts,
@@ -411,7 +411,11 @@ impl TileState {
     }
 
     pub fn collect_graph_entities(&self) -> Vec<Entity> {
-        fn visit(tree: &egui_tiles::Tree<Pane>, tile_id: egui_tiles::TileId, out: &mut Vec<Entity>) {
+        fn visit(
+            tree: &egui_tiles::Tree<Pane>,
+            tile_id: egui_tiles::TileId,
+            out: &mut Vec<Entity>,
+        ) {
             let Some(tile) = tree.tiles.get(tile_id) else {
                 return;
             };
