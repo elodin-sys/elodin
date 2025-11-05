@@ -35,7 +35,7 @@ impl LogicalKeyState {
 
 fn update_logical_key_state(
     mut key_state: ResMut<LogicalKeyState>,
-    mut keyboard_events: EventReader<KeyboardInput>,
+    mut keyboard_events: MessageReader<KeyboardInput>,
 ) {
     key_state.just_pressed.clear();
     key_state.just_released.clear();
