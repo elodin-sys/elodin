@@ -25,8 +25,10 @@ smallvec.version = "1.11.2"
 compact_str = "0.9"
 
 # bevy
-bevy.version = "0.16"
+bevy.version = "0.17"
 bevy.optional = true
+bevy.default-features = false
+bevy.features = ["bevy_asset"]
 
 # serde
 serde.version = "1.0"
