@@ -136,7 +136,7 @@ impl RootWidgetSystem for CommandPalette<'_> {
         };
         if let Some(mut item) = auto_open_item {
             item.system.initialize(world);
-            let event = item.system.run(filter, world);
+            let event = item.system.run(filter, world).expect("Missing event");
             let mut state_mut = state.get_mut(world);
             state_mut.command_palette_state.handle_event(event);
         }
@@ -450,7 +450,7 @@ impl WidgetSystem for PaletteItems<'_> {
                         });
 
                         if btn.clicked() || (i == selected_index && hit_enter) {
-                            return Some(item.system.run(filter.clone(), world));
+                            return Some(item.system.run(filter.clone(), world).expect("system.run failed"));
                         }
                     }
                     None
