@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://docs.elodin.systems/preview/pr-277/sitemap.xml
