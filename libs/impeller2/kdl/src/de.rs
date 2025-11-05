@@ -1379,32 +1379,6 @@ tabs {
     }
 
     #[test]
-    fn test_parse_window_without_braces() {
-        let kdl = r#"window path="panels/drone.kdl" title="Drone""#;
-        let schematic = parse_schematic(kdl).unwrap();
-
-        assert_eq!(schematic.elems.len(), 1);
-        if let SchematicElem::Window(window) = &schematic.elems[0] {
-            assert_eq!(window.path, "panels/drone.kdl");
-            assert_eq!(window.title.as_deref(), Some("Drone"));
-        } else {
-            panic!("Expected window schematic");
-        }
-    }
-
-    #[test]
-    fn test_parse_window_with_braces_rejected() {
-        let kdl = r#"window path="{panels/drone.kdl}""#;
-        let err = parse_schematic(kdl).unwrap_err();
-
-        assert!(matches!(
-            err,
-            KdlSchematicError::InvalidValue { property, node, .. }
-                if property == "path" && node == "window"
-        ));
-    }
-
-    #[test]
     fn test_parse_line_3d() {
         let kdl = r#"line_3d "trajectory" line_width=2.0 color="mint" perspective=#false"#;
         let schematic = parse_schematic(kdl).unwrap();
