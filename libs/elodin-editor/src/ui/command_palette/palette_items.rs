@@ -483,11 +483,9 @@ pub fn create_viewport(tile_id: Option<TileId>) -> PaletteItem {
 }
 
 pub fn create_window() -> PaletteItem {
-    PaletteItem::new(
-        "Create Window",
-        TILES_LABEL,
-        move |_: In<String>| {
-            PalettePage::new(vec![PaletteItem::new(
+    PaletteItem::new("Create Window", TILES_LABEL, move |_: In<String>| {
+        PalettePage::new(vec![
+            PaletteItem::new(
                 LabelSource::placeholder("Enter window title"),
                 "Leave blank for a default title",
                 move |In(title): In<String>,
@@ -503,11 +501,11 @@ pub fn create_window() -> PaletteItem {
                     PaletteEvent::Exit
                 },
             )
-            .default()])
-            .prompt("Enter a title for the new window")
-            .into()
-        },
-    )
+            .default(),
+        ])
+        .prompt("Enter a title for the new window")
+        .into()
+    })
 }
 
 pub fn create_query_table(tile_id: Option<TileId>) -> PaletteItem {
