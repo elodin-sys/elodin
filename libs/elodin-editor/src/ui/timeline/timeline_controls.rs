@@ -165,12 +165,12 @@ impl WidgetSystem for TimelineControls<'_> {
                                         ui.memory_mut(|mem| mem.toggle_popup(popup_id));
                                     }
                                     configure_combo_box(ui.style_mut());
-                                    egui::popup::popup_above_or_below_widget(
+                                    egui::Popup::popup_above_or_below_widget(
                                         ui,
                                         popup_id,
                                         &res,
                                         egui::containers::AboveOrBelow::Above,
-                                        egui::popup::PopupCloseBehavior::CloseOnClickOutside,
+                                        egui::containers::PopupCloseBehavior::CloseOnClickOutside,
                                         time_range_window(
                                             &mut behavior,
                                             earliest_timestamp.0,
