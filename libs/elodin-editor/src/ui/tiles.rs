@@ -170,6 +170,31 @@ impl WindowManager {
             .find(|state| state.window_entity == Some(entity))
             .map(|state| state.id)
     }
+
+    pub fn create_secondary_window(&mut self, title: Option<String>) -> SecondaryWindowId {
+        let id = self.alloc_id();
+        let cleaned_title = title.and_then(|t| {
+            let trimmed = t.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+        let descriptor = SecondaryWindowDescriptor {
+            path: PathBuf::from(format!("secondary-window-{}.kdl", id.0)),
+            title: cleaned_title.or_else(|| Some(format!("Window {}", id.0 + 1))),
+        };
+        let tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
+        self.secondary.push(SecondaryWindowState {
+            id,
+            descriptor,
+            tile_state,
+            window_entity: None,
+            graph_entities: Vec::new(),
+        });
+        id
+    }
 }
 
 #[derive(Resource, Default)]

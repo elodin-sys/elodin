@@ -482,6 +482,34 @@ pub fn create_viewport(tile_id: Option<TileId>) -> PaletteItem {
     )
 }
 
+pub fn create_window() -> PaletteItem {
+    PaletteItem::new(
+        "Create Window",
+        TILES_LABEL,
+        move |_: In<String>| {
+            PalettePage::new(vec![PaletteItem::new(
+                LabelSource::placeholder("Enter window title"),
+                "Leave blank for a default title",
+                move |In(title): In<String>,
+                      mut windows: ResMut<tiles::WindowManager>,
+                      mut palette_state: ResMut<CommandPaletteState>| {
+                    let title_opt = if title.trim().is_empty() {
+                        None
+                    } else {
+                        Some(title.trim().to_string())
+                    };
+                    let id = windows.create_secondary_window(title_opt);
+                    palette_state.target_window = Some(id);
+                    PaletteEvent::Exit
+                },
+            )
+            .default()])
+            .prompt("Enter a title for the new window")
+            .into()
+        },
+    )
+}
+
 pub fn create_query_table(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Query Table",
@@ -1512,6 +1540,7 @@ impl Default for PalettePage {
             goto_tick(),
             fix_current_time_range(),
             set_time_range_behavior(),
+            create_window(),
             create_graph(None),
             create_action(None),
             create_monitor(None),
