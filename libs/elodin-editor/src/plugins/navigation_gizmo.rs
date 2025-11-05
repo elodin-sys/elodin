@@ -290,7 +290,7 @@ pub fn drag_nav_gizmo(
             .as_vec2()
         / 75.0;
     let anchor = transform
-        .compute_matrix()
+        .to_matrix()
         .as_dmat4()
         .inverse()
         .transform_point3(DVec3::ZERO);
