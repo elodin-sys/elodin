@@ -28,6 +28,8 @@ in
       (rustToolchain pkgs)
       pkg-config
       clang
+      pkgs.cmake
+      pkgs.gfortran
     ];
 
     buildInputs = [ffmpeg-full];
