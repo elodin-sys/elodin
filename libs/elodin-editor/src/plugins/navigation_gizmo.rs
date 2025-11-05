@@ -30,7 +30,7 @@ fn cube_color_highlight(
     mut graphs: ResMut<Assets<AnimationGraph>>,
     mut commands: Commands,
 ) {
-    if let Ok(entity) = target_query.get_mut(event.target) {
+    if let Ok(entity) = target_query.get_mut(event.event().event_target()) {
         let target = AnimationTargetId::from_name(&Name::new(entity.to_string()));
         let mut animation = AnimationClip::default();
 
@@ -65,7 +65,7 @@ fn cube_color_reset(
     mut graphs: ResMut<Assets<AnimationGraph>>,
     mut commands: Commands,
 ) {
-    if let Ok(entity) = target_query.get_mut(event.target) {
+    if let Ok(entity) = target_query.get_mut(event.event().event_target()) {
         let target = AnimationTargetId::from_name(&Name::new(entity.to_string()));
         let mut animation = AnimationClip::default();
 
@@ -271,16 +271,17 @@ pub fn drag_nav_gizmo(
     mut query: Query<(&mut Transform, &mut EditorCam, &Camera), With<MainCamera>>,
     mut commands: Commands,
 ) {
-    let Ok(nav_gizmo) = nav_gizmo.get(drag.target) else {
+    let drag_target = drag.event().event_target();
+    let Ok(nav_gizmo) = nav_gizmo.get(drag_target) else {
         return;
     };
     let Ok((transform, mut editor_cam, cam)) = query.get_mut(nav_gizmo.main_camera) else {
         return;
     };
     if drag.delta.length() > 0.1 {
-        commands.entity(drag.target).insert(DraggedMarker);
+        commands.entity(drag_target).insert(DraggedMarker);
     } else {
-        commands.entity(drag.target).remove::<DraggedMarker>();
+        commands.entity(drag_target).remove::<DraggedMarker>();
     }
     let delta = drag.delta
         * cam
@@ -313,14 +314,15 @@ fn side_clicked_cb(
           nav_gizmo: Query<&NavGizmoParent>,
           drag_query: Query<&DraggedMarker>,
           mut look_to: MessageWriter<LookToTrigger>| {
-        let Ok(nav_gizmo) = nav_gizmo.get(click.target) else {
+        let target = click.event().event_target();
+        let Ok(nav_gizmo) = nav_gizmo.get(target) else {
             return;
         };
         let Ok((entity, transform, editor_cam)) = query.get(nav_gizmo.main_camera) else {
             return;
         };
 
-        if drag_query.get(click.target).is_ok() {
+        if drag_query.get(target).is_ok() {
             return;
         }
         if click.button == PointerButton::Primary {
