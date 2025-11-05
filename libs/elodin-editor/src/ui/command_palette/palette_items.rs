@@ -175,7 +175,7 @@ impl LabelSource {
     pub fn get(&mut self, world: &mut World, filter: &str) -> String {
         match self {
             LabelSource::Label(l) => l.clone(),
-            LabelSource::System(system) => system.run(filter, world),
+            LabelSource::System(system) => system.run(filter, world).expect("Missing label"),
         }
     }
 }
