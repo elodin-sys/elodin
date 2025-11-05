@@ -372,13 +372,10 @@ fn graph_parts(
                       mut windows: ResMut<tiles::WindowManager>,
                       path_reg: Res<ComponentPathRegistry>,
                       palette_state: Res<CommandPaletteState>| {
-                    let Some(tile_state) = target_tile_state_mut(
-                        &mut windows,
-                        palette_state.target_window,
-                    ) else {
-                        return PaletteEvent::Error(
-                            "Secondary window unavailable".to_string(),
-                        );
+                    let Some(tile_state) =
+                        target_tile_state_mut(&mut windows, palette_state.target_window)
+                    else {
+                        return PaletteEvent::Error("Secondary window unavailable".to_string());
                     };
                     if let Some(component) = &part.component {
                         let component_id = component.id;
@@ -441,13 +438,10 @@ fn monitor_parts(
                 move |_: In<String>,
                       mut windows: ResMut<tiles::WindowManager>,
                       palette_state: Res<CommandPaletteState>| {
-                    let Some(tile_state) = target_tile_state_mut(
-                        &mut windows,
-                        palette_state.target_window,
-                    ) else {
-                        return PaletteEvent::Error(
-                            "Secondary window unavailable".to_string(),
-                        );
+                    let Some(tile_state) =
+                        target_tile_state_mut(&mut windows, palette_state.target_window)
+                    else {
+                        return PaletteEvent::Error("Secondary window unavailable".to_string());
                     };
                     if let Some(component) = &part.component {
                         tile_state.create_monitor_tile(component.name.clone(), tile_id);
@@ -478,8 +472,7 @@ pub fn create_viewport(tile_id: Option<TileId>) -> PaletteItem {
         move |_: In<String>,
               mut windows: ResMut<tiles::WindowManager>,
               palette_state: Res<CommandPaletteState>| {
-            let Some(tile_state) =
-                target_tile_state_mut(&mut windows, palette_state.target_window)
+            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
             else {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
@@ -496,8 +489,7 @@ pub fn create_query_table(tile_id: Option<TileId>) -> PaletteItem {
         move |_: In<String>,
               mut windows: ResMut<tiles::WindowManager>,
               palette_state: Res<CommandPaletteState>| {
-            let Some(tile_state) =
-                target_tile_state_mut(&mut windows, palette_state.target_window)
+            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
             else {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
@@ -514,8 +506,7 @@ pub fn create_query_plot(tile_id: Option<TileId>) -> PaletteItem {
         move |_: In<String>,
               mut windows: ResMut<tiles::WindowManager>,
               palette_state: Res<CommandPaletteState>| {
-            let Some(tile_state) =
-                target_tile_state_mut(&mut windows, palette_state.target_window)
+            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
             else {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
@@ -532,8 +523,7 @@ pub fn create_hierarchy(tile_id: Option<TileId>) -> PaletteItem {
         move |_: In<String>,
               mut windows: ResMut<tiles::WindowManager>,
               palette_state: Res<CommandPaletteState>| {
-            let Some(tile_state) =
-                target_tile_state_mut(&mut windows, palette_state.target_window)
+            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
             else {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
@@ -550,8 +540,7 @@ pub fn create_inspector(tile_id: Option<TileId>) -> PaletteItem {
         move |_: In<String>,
               mut windows: ResMut<tiles::WindowManager>,
               palette_state: Res<CommandPaletteState>| {
-            let Some(tile_state) =
-                target_tile_state_mut(&mut windows, palette_state.target_window)
+            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
             else {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
@@ -568,8 +557,7 @@ pub fn create_schematic_tree(tile_id: Option<TileId>) -> PaletteItem {
         move |_: In<String>,
               mut windows: ResMut<tiles::WindowManager>,
               palette_state: Res<CommandPaletteState>| {
-            let Some(tile_state) =
-                target_tile_state_mut(&mut windows, palette_state.target_window)
+            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
             else {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
@@ -586,8 +574,7 @@ pub fn create_dashboard(tile_id: Option<TileId>) -> PaletteItem {
         move |_: In<String>,
               mut windows: ResMut<tiles::WindowManager>,
               palette_state: Res<CommandPaletteState>| {
-            let Some(tile_state) =
-                target_tile_state_mut(&mut windows, palette_state.target_window)
+            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
             else {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
@@ -604,8 +591,7 @@ pub fn create_sidebars() -> PaletteItem {
         move |_: In<String>,
               mut windows: ResMut<tiles::WindowManager>,
               palette_state: Res<CommandPaletteState>| {
-            let Some(tile_state) =
-                target_tile_state_mut(&mut windows, palette_state.target_window)
+            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
             else {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
@@ -631,9 +617,7 @@ pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
                         let Some(tile_state) =
                             target_tile_state_mut(&mut windows, palette_state.target_window)
                         else {
-                            return PaletteEvent::Error(
-                                "Secondary window unavailable".to_string(),
-                            );
+                            return PaletteEvent::Error("Secondary window unavailable".to_string());
                         };
                         let msg_name = msg_name.trim();
                         let label = format!("Video Stream {}", msg_name);
