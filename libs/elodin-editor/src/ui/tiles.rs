@@ -4,6 +4,7 @@ use bevy::{
     input::keyboard::Key,
     prelude::*,
 };
+use bevy::log::info;
 use bevy_editor_cam::prelude::{EditorCam, EnabledMotion, OrbitConstraint};
 use bevy_egui::{
     EguiContexts,
@@ -181,11 +182,28 @@ impl WindowManager {
                 Some(trimmed.to_string())
             }
         });
+        let path = cleaned_title
+            .as_deref()
+            .map(|title| {
+                let stem = super::schematic::sanitize_to_stem(title);
+                if stem.is_empty() {
+                    format!("secondary-window-{}.kdl", id.0)
+                } else {
+                    format!("{stem}.kdl")
+                }
+            })
+            .unwrap_or_else(|| format!("secondary-window-{}.kdl", id.0));
         let descriptor = SecondaryWindowDescriptor {
-            path: PathBuf::from(format!("secondary-window-{}.kdl", id.0)),
+            path: PathBuf::from(path),
             title: cleaned_title.or_else(|| Some(format!("Window {}", id.0 + 1))),
         };
         let tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
+        info!(
+            id = id.0,
+            title = descriptor.title.as_deref().unwrap_or(""),
+            path = %descriptor.path.display(),
+            "Created secondary window"
+        );
         self.secondary.push(SecondaryWindowState {
             id,
             descriptor,

@@ -256,18 +256,10 @@ impl LoadSchematicParams<'_, '_> {
                         }
 
                         let graph_entities = tile_state.collect_graph_entities();
-                        if graph_entities.is_empty() {
-                            warn!(
-                                path = %descriptor.path.display(),
-                                "Secondary schematic produced no graphs"
-                            );
-                        } else {
-                            info!(
-                                path = %descriptor.path.display(),
-                                graphs = graph_entities.len(),
-                                "Loaded secondary schematic"
-                            );
-                        }
+                        info!(
+                            path = %descriptor.path.display(),
+                            "Loaded secondary schematic"
+                        );
 
                         for &graph in &graph_entities {
                             if let Ok(mut camera) = self.cameras.get_mut(graph) {

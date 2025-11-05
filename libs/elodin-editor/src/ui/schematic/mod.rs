@@ -303,7 +303,7 @@ fn preferred_secondary_stem(state: &tiles::SecondaryWindowState) -> String {
     "secondary".to_string()
 }
 
-fn sanitize_to_stem(input: &str) -> String {
+pub fn sanitize_to_stem(input: &str) -> String {
     let mut stem = String::new();
     let mut last_dash = false;
     for ch in input.chars() {
