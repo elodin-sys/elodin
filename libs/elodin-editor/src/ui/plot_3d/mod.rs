@@ -12,7 +12,7 @@ use bevy::{
         system::{Commands, Query, Res, ResMut},
     },
     math::{Mat4, Vec4},
-    render::view::RenderLayers,
+    camera::visibility::RenderLayers,
 };
 use big_space::GridCell;
 use eql;

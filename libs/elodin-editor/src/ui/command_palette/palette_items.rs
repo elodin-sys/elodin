@@ -15,7 +15,7 @@ use bevy::{
     log::{error, info, warn},
     pbr::{StandardMaterial, wireframe::WireframeConfig},
     prelude::{Deref, DerefMut, In, Resource},
-    render::view::Visibility,
+    camera::visibility::Visibility,
 };
 use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::TileId;

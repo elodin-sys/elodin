@@ -115,7 +115,7 @@ pub fn eql_autocomplete(
         ui.scope(|ui| {
             configure_combo_box(ui.style_mut());
             ui.style_mut().spacing.menu_margin = egui::Margin::same(4);
-            egui::popup::popup_below_widget(
+            egui::Popup::popup_below_widget(
                 ui,
                 id,
                 &query_res.clone().with_new_rect(query_res.rect.expand(8.0)),
