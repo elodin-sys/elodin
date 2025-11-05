@@ -4,7 +4,7 @@ use bevy::ecs::system::Query;
 use bevy::input::touch::Touch;
 use bevy::math::{DVec3, Vec2};
 use bevy::prelude::{Res, ResMut, Resource, Touches};
-use bevy::render::camera::Camera;
+use bevy::camera::Camera;
 use bevy::transform::components::Transform;
 use bevy_editor_cam::controller::component::EditorCam;
 

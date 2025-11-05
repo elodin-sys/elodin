@@ -10,8 +10,7 @@ use bevy::{
     input::keyboard::Key,
     log::{error, info, warn},
     prelude::*,
-    render::camera::{Viewport},
-    camera::RenderTarget,
+    camera::{RenderTarget,Viewport},
     window::{
         EnabledButtons, Monitor, NormalizedWindowRef, PresentMode, PrimaryWindow,
         WindowCloseRequested, WindowMoved, WindowRef, WindowResized, WindowResolution,

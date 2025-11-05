@@ -4,7 +4,7 @@ use bevy::{
     ecs::system::{SystemParam, SystemState},
     input::keyboard::Key,
     log::info,
-    camera::{PhysicalCameraParameters, visibility::RenderLayers},
+    camera::{Exposure, PhysicalCameraParameters, visibility::RenderLayers},
     prelude::*,
     window::{Monitor, Window, WindowPosition},
 };
@@ -12,9 +12,6 @@ use bevy_editor_cam::prelude::{EditorCam, EnabledMotion, OrbitConstraint};
 use bevy_egui::{
     EguiContexts,
     egui::{self, Color32, CornerRadius, Frame, Id, RichText, Stroke, Ui, Visuals, vec2},
-};
-use bevy_render::{
-    camera::{Exposure},
 };
 use egui::UiBuilder;
 use egui_tiles::{Container, Tile, TileId, Tiles};

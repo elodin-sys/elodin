@@ -5980,6 +5980,7 @@ checksum = "084980ebede2fb1ad6c4f54285b3e489052ef2b6aa4016e4c19349417adc75c5"
 dependencies = [
  "bytemuck",
  "emath 0.33.2",
+ "serde",
 ]
 
 [[package]]
@@ -6021,7 +6022,7 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ff7d3715b5ee29fe75afd19420756b3e0a970149b62712af1b3204a68e2012b"
 dependencies = [
- "egui 0.33.0",
+ "egui 0.33.2",
 ]
 
 [[package]]
@@ -6030,7 +6031,7 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8cc6e7eef49daf597eab65ed37c1b0058e34a1b7b10b4a0239a6e244c66917a9"
 dependencies = [
- "egui 0.33.0",
+ "egui 0.33.2",
  "serde",
  "vec1",
 ]
@@ -6042,7 +6043,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebfac3ca35f5e4fe217d3b03312111b234fe55ce059faf62b4cb47f7cf6d54f1"
 dependencies = [
  "ahash",
- "egui 0.33.0",
+ "egui 0.33.2",
  "itertools 0.14.0",
  "log",
  "serde",
@@ -6190,7 +6191,7 @@ dependencies = [
  "big_space",
  "const-fnv1a-hash",
  "directories",
- "egui 0.33.0",
+ "egui 0.33.2",
  "egui_material_icons",
  "egui_table",
  "egui_tiles",
