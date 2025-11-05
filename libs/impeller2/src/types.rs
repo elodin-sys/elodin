@@ -805,7 +805,9 @@ impl<B: IoBuf> OwnedTable<B> {
         registry: &impl crate::registry::VTableRegistry,
         sink: &mut D,
     ) -> Result<Result<(), D::Error>, Error> {
-        let vtable = registry.get(&self.id).ok_or(Error::VTableNotFound)?;
+        let vtable = registry
+            .get(&self.id)
+            .ok_or_else(|| Error::VTableNotFound(self.id))?;
         vtable.apply(stellarator_buf::deref(&self.buf), sink)
     }
 }
