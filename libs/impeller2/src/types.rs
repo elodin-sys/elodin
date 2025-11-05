@@ -807,7 +807,7 @@ impl<B: IoBuf> OwnedTable<B> {
     ) -> Result<Result<(), D::Error>, Error> {
         let vtable = registry
             .get(&self.id)
-            .ok_or_else(|| Error::VTableNotFound(self.id))?;
+            .ok_or(Error::VTableNotFound(self.id))?;
         vtable.apply(stellarator_buf::deref(&self.buf), sink)
     }
 }
