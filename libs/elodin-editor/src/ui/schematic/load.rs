@@ -133,38 +133,6 @@ fn resolve_window_descriptor(
     })
 }
 
-fn collect_graph_entities(tile_state: &TileState) -> Vec<Entity> {
-    fn visit(tree: &egui_tiles::Tree<Pane>, tile_id: egui_tiles::TileId, out: &mut Vec<Entity>) {
-        let Some(tile) = tree.tiles.get(tile_id) else {
-            return;
-        };
-
-        match tile {
-            Tile::Pane(Pane::Graph(graph)) => out.push(graph.id),
-            Tile::Pane(_) => {}
-            Tile::Container(container) => match container {
-                egui_tiles::Container::Tabs(tabs) => {
-                    for child in &tabs.children {
-                        visit(tree, *child, out);
-                    }
-                }
-                egui_tiles::Container::Linear(linear) => {
-                    for child in &linear.children {
-                        visit(tree, *child, out);
-                    }
-                }
-                _ => {}
-            },
-        }
-    }
-
-    let mut entities = Vec::new();
-    if let Some(root) = tile_state.tree.root() {
-        visit(&tile_state.tree, root, &mut entities);
-    }
-    entities
-}
-
 pub fn render_diag(diagnostic: &dyn Diagnostic) -> String {
     let mut buf = String::new();
     miette::GraphicalReportHandler::new_themed(miette::GraphicalTheme::unicode_nocolor())
@@ -287,7 +255,7 @@ impl LoadSchematicParams<'_, '_> {
                             }
                         }
 
-                        let graph_entities = collect_graph_entities(&tile_state);
+                        let graph_entities = tile_state.collect_graph_entities();
                         if graph_entities.is_empty() {
                             warn!(
                                 path = %descriptor.path.display(),

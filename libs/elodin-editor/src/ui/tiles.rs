@@ -392,6 +392,29 @@ impl TileState {
         out
     }
 
+    pub fn collect_graph_entities(&self) -> Vec<Entity> {
+        fn visit(tree: &egui_tiles::Tree<Pane>, tile_id: egui_tiles::TileId, out: &mut Vec<Entity>) {
+            let Some(tile) = tree.tiles.get(tile_id) else {
+                return;
+            };
+            match tile {
+                Tile::Pane(Pane::Graph(graph)) => out.push(graph.id),
+                Tile::Pane(_) => {}
+                Tile::Container(container) => {
+                    for child in container.children() {
+                        visit(tree, *child, out);
+                    }
+                }
+            }
+        }
+
+        let mut entities = Vec::new();
+        if let Some(root) = self.tree.root() {
+            visit(&self.tree, root, &mut entities);
+        }
+        entities
+    }
+
     pub fn create_sidebars_layout(&mut self) {
         self.tree_actions.push(TreeAction::AddSidebars);
     }

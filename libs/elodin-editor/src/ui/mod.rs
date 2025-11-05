@@ -648,6 +648,8 @@ fn sync_secondary_windows(
     }
 
     for state in windows.secondary_mut().iter_mut() {
+        state.graph_entities = state.tile_state.collect_graph_entities();
+
         if let Some(entity) = state.window_entity
             && existing_map.get(&state.id).copied() != Some(entity)
         {
