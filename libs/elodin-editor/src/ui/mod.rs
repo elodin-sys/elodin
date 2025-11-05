@@ -15,7 +15,7 @@ use bevy::{
     },
 };
 use bevy_egui::{
-    EguiContext, EguiContexts,
+    EguiContext, EguiContexts, EguiTextureHandle,
     egui::{self, Color32, Label, Margin, RichText},
 };
 use egui_tiles::{Container, Tile};
@@ -534,9 +534,13 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         theme::set_theme(ctx);
 
         let titlebar_icons = TitlebarIcons {
-            icon_fullscreen: contexts.add_image(images.icon_fullscreen.clone_weak()),
-            icon_exit_fullscreen: contexts.add_image(images.icon_exit_fullscreen.clone_weak()),
-            icon_close: contexts.add_image(images.icon_close.clone_weak()),
+            icon_fullscreen: contexts.add_image(EguiTextureHandle::Weak(
+                images.icon_fullscreen.id(),
+            )),
+            icon_exit_fullscreen: contexts.add_image(EguiTextureHandle::Weak(
+                images.icon_exit_fullscreen.id(),
+            )),
+            icon_close: contexts.add_image(EguiTextureHandle::Weak(images.icon_close.id())),
         };
 
         world.add_root_widget_with::<Titlebar, With<PrimaryWindow>>("titlebar", titlebar_icons);

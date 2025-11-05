@@ -6,7 +6,7 @@ use bevy::{
     input::keyboard::Key,
     prelude::Resource,
 };
-use bevy_egui::EguiContexts;
+use bevy_egui::{EguiContexts, EguiTextureHandle};
 use egui::{Margin, Modifiers, epaint::Shadow};
 use palette_items::PaletteItem;
 
@@ -164,7 +164,7 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
         let images = state_mut.images;
 
         let command_palette_icons = CommandPaletteIcons {
-            link: contexts.add_image(images.icon_link.clone_weak()),
+            link: contexts.add_image(EguiTextureHandle::Weak(images.icon_link.id())),
         };
 
         if !command_palette_state.show {
