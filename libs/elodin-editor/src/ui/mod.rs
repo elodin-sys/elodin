@@ -368,7 +368,7 @@ pub enum DialogAction {
     Custom(String), // Custom action identifier
 }
 
-#[derive(Clone, Debug, Event)]
+#[derive(Clone, Debug, Message)]
 pub struct DialogEvent {
     pub action: DialogAction,
     pub id: String,
