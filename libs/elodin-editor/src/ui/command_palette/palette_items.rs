@@ -250,10 +250,10 @@ const TIME_LABEL: &str = "Time";
 const HELP_LABEL: &str = "Help";
 const PRESETS_LABEL: &str = "Presets";
 
-fn target_tile_state_mut<'a>(
-    windows: &'a mut tiles::WindowManager,
+fn target_tile_state_mut(
+    windows: &mut tiles::WindowManager,
     target: Option<tiles::SecondaryWindowId>,
-) -> Option<&'a mut tiles::TileState> {
+) -> Option<&mut tiles::TileState> {
     match target {
         Some(id) => windows
             .get_secondary_mut(id)

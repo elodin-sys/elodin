@@ -839,16 +839,15 @@ fn render_secondary_windows(world: &mut World) {
             .collect()
     };
 
-    if let Some(mut palette_state) = world.get_resource_mut::<CommandPaletteState>() {
-        if let Some(target) = palette_state.target_window {
-            if !window_entries.iter().any(|(id, _, _)| *id == target) {
-                palette_state.target_window = None;
-                if palette_state.auto_open_item.is_none() {
-                    palette_state.show = false;
-                    palette_state.filter.clear();
-                    palette_state.page_stack.clear();
-                }
-            }
+    if let Some(mut palette_state) = world.get_resource_mut::<CommandPaletteState>()
+        && let Some(target) = palette_state.target_window
+        && !window_entries.iter().any(|(id, _, _)| *id == target)
+    {
+        palette_state.target_window = None;
+        if palette_state.auto_open_item.is_none() {
+            palette_state.show = false;
+            palette_state.filter.clear();
+            palette_state.page_stack.clear();
         }
     }
 
