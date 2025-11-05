@@ -799,6 +799,7 @@ struct TreeBehavior<'w> {
     world: &'w mut World,
     container_titles: HashMap<TileId, String>,
     read_only: bool,
+    target_window: Option<SecondaryWindowId>,
 }
 
 #[derive(Clone)]
@@ -1120,6 +1121,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             layout
                 .cmd_palette_state
                 .open_page(move || palette_items::create_tiles(tile_id));
+            layout.cmd_palette_state.target_window = self.target_window;
         }
     }
 }
@@ -1137,7 +1139,7 @@ impl<'w, 's> TileSystem<'w, 's> {
         state: &mut SystemState<Self>,
         target: Option<SecondaryWindowId>,
     ) -> Option<(TileIcons, bool, bool)> {
-        let read_only = target.is_some();
+        let read_only = false;
         let params = state.get_mut(world);
         let mut contexts = params.contexts;
         let images = params.images;
@@ -1182,7 +1184,14 @@ impl<'w, 's> TileSystem<'w, 's> {
         read_only: bool,
     ) {
         if is_empty_tile_tree && !read_only {
-            ui.add_widget_with::<TileLayoutEmpty>(world, "tile_layout_empty", icons);
+            ui.add_widget_with::<TileLayoutEmpty>(
+                world,
+                "tile_layout_empty",
+                TileLayoutEmptyArgs {
+                    icons: icons.clone(),
+                    window: target,
+                },
+            );
             return;
         }
 
@@ -1305,8 +1314,14 @@ pub struct TileLayoutEmpty<'w> {
     cmd_palette_state: ResMut<'w, CommandPaletteState>,
 }
 
+#[derive(Clone)]
+pub struct TileLayoutEmptyArgs {
+    pub icons: TileIcons,
+    pub window: Option<SecondaryWindowId>,
+}
+
 impl WidgetSystem for TileLayoutEmpty<'_> {
-    type Args = TileIcons;
+    type Args = TileLayoutEmptyArgs;
     type Output = ();
 
     fn ui_system(
@@ -1317,7 +1332,7 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
     ) {
         let mut state_mut = state.get_mut(world);
 
-        let icons = args;
+        let TileLayoutEmptyArgs { icons, window } = args;
 
         let button_height = 160.0;
         let button_width = 240.0;
@@ -1345,6 +1360,7 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
                         state_mut
                             .cmd_palette_state
                             .open_item(palette_items::create_viewport(None));
+                        state_mut.cmd_palette_state.target_window = window;
                     }
 
                     let create_graph_btn = ui.add(
@@ -1358,6 +1374,7 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
                         state_mut
                             .cmd_palette_state
                             .open_item(palette_items::create_graph(None));
+                        state_mut.cmd_palette_state.target_window = window;
                     }
 
                     let create_monitor_btn = ui.add(
@@ -1371,6 +1388,7 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
                         state_mut
                             .cmd_palette_state
                             .open_item(palette_items::create_monitor(None));
+                        state_mut.cmd_palette_state.target_window = window;
                     }
                 });
             },
@@ -1433,6 +1451,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     tree_actions: tab_diffs,
                     container_titles: ui_state.container_titles.clone(),
                     read_only,
+                    target_window: window,
                 };
                 ui_state.tree.ui(&mut behavior, ui);
 

@@ -4,7 +4,8 @@ use bevy::{
         world::World,
     },
     input::keyboard::Key,
-    prelude::Resource,
+    prelude::{Resource, With},
+    window::PrimaryWindow,
 };
 use bevy_egui::EguiContexts;
 use egui::{Margin, Modifiers, epaint::Shadow};
@@ -14,7 +15,7 @@ use crate::{
     plugins::LogicalKeyState,
     ui::{
         colors::{self, ColorExt, get_scheme, with_opacity},
-        images, theme,
+        images, theme, tiles,
         utils::{MarginSides, Shrink4},
     },
 };
@@ -37,11 +38,14 @@ pub struct CommandPaletteState {
     pub selected_index: usize,
     pub auto_open_item: Option<PaletteItem>,
     pub error: Option<String>,
+    pub target_window: Option<tiles::SecondaryWindowId>,
 }
 
 impl CommandPaletteState {
     pub fn open_item(&mut self, item: PaletteItem) {
+        let target_window = self.target_window;
         *self = CommandPaletteState::default();
+        self.target_window = target_window;
         self.auto_open_item = Some(item);
         self.show = true;
     }
@@ -56,6 +60,7 @@ impl CommandPaletteState {
                 self.error = None;
                 self.show = false;
                 self.selected_index = 0;
+                self.target_window = None;
             }
             PaletteEvent::NextPage {
                 next_page,
@@ -93,7 +98,10 @@ impl RootWidgetSystem for CommandPalette<'_> {
         _ctx: &mut egui::Context,
         _args: Self::Args,
     ) {
-        let clicked_elsewhere = world.add_root_widget::<PaletteWindow>("command_palette_window");
+        let _ = world.add_root_widget_with::<PaletteWindow, With<PrimaryWindow>>(
+            "command_palette_window",
+            None,
+        );
 
         let (auto_open_item, filter) = {
             let state_mut = state.get_mut(world);
@@ -109,13 +117,13 @@ impl RootWidgetSystem for CommandPalette<'_> {
                 command_palette_state.show = !command_palette_state.show;
                 if command_palette_state.show {
                     command_palette_state.input_focus = true;
+                    command_palette_state.target_window = None;
                 }
             }
 
-            if kbd.just_pressed(&Key::Escape)
-                || (clicked_elsewhere && command_palette_state.auto_open_item.is_none())
-            {
+            if kbd.just_pressed(&Key::Escape) {
                 command_palette_state.show = false;
+                command_palette_state.target_window = None;
             }
 
             if !command_palette_state.show {
@@ -149,29 +157,38 @@ pub struct PaletteWindow<'w, 's> {
 }
 
 impl RootWidgetSystem for PaletteWindow<'_, '_> {
-    type Args = ();
+    type Args = Option<tiles::SecondaryWindowId>;
     type Output = bool;
 
     fn ctx_system(
         world: &mut World,
         state: &mut SystemState<Self>,
         ctx: &mut egui::Context,
-        _args: Self::Args,
+        args: Self::Args,
     ) -> Self::Output {
-        let state_mut = state.get_mut(world);
-        let mut command_palette_state = state_mut.command_palette_state;
-        let mut contexts = state_mut.contexts;
-        let images = state_mut.images;
+        let (command_palette_icons, auto_open_none) = {
+            let state_mut = state.get_mut(world);
+            let mut command_palette_state = state_mut.command_palette_state;
 
-        let command_palette_icons = CommandPaletteIcons {
-            link: contexts.add_image(images.icon_link.clone_weak()),
+            if command_palette_state.target_window != args {
+                return false;
+            }
+
+            if !command_palette_state.show {
+                command_palette_state.filter.clear();
+                command_palette_state.page_stack.clear();
+                return false;
+            }
+
+            let auto_open_none = command_palette_state.auto_open_item.is_none();
+            let mut contexts = state_mut.contexts;
+            let images = state_mut.images;
+
+            let icons = CommandPaletteIcons {
+                link: contexts.add_image(images.icon_link.clone_weak()),
+            };
+            (icons, auto_open_none)
         };
-
-        if !command_palette_state.show {
-            command_palette_state.filter = "".to_string();
-            command_palette_state.page_stack.clear();
-            return false;
-        }
 
         let screen_rect = ctx.screen_rect();
         let palette_width = (screen_rect.width() / 2.0).clamp(500.0, 900.0);
@@ -215,7 +232,14 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
             return false;
         };
 
-        cmd_window.response.clicked_elsewhere()
+        if cmd_window.response.clicked_elsewhere() && auto_open_none {
+            let state_mut = state.get_mut(world);
+            let mut command_palette_state = state_mut.command_palette_state;
+            command_palette_state.show = false;
+            command_palette_state.target_window = None;
+        }
+
+        false
     }
 }
 

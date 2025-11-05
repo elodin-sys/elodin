@@ -839,6 +839,19 @@ fn render_secondary_windows(world: &mut World) {
             .collect()
     };
 
+    if let Some(mut palette_state) = world.get_resource_mut::<CommandPaletteState>() {
+        if let Some(target) = palette_state.target_window {
+            if !window_entries.iter().any(|(id, _, _)| *id == target) {
+                palette_state.target_window = None;
+                if palette_state.auto_open_item.is_none() {
+                    palette_state.show = false;
+                    palette_state.filter.clear();
+                    palette_state.page_stack.clear();
+                }
+            }
+        }
+    }
+
     for (id, entity, desired_title) in window_entries {
         let Ok(mut entity_mut) = world.get_entity_mut(entity) else {
             continue;
@@ -855,6 +868,11 @@ fn render_secondary_windows(world: &mut World) {
         let widget_id = format!("secondary_window_{}", id.0);
         world.add_root_widget_with::<tiles::TileSystem, With<ActiveSecondaryWindow>>(
             &widget_id,
+            Some(id),
+        );
+        let palette_widget_id = format!("secondary_command_palette_{}", id.0);
+        world.add_root_widget_with::<command_palette::PaletteWindow, With<ActiveSecondaryWindow>>(
+            &palette_widget_id,
             Some(id),
         );
 
