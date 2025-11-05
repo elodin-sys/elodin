@@ -7,6 +7,7 @@ use bevy::{
     camera::{Exposure, PhysicalCameraParameters, visibility::RenderLayers},
     prelude::*,
     window::{Monitor, Window, WindowPosition},
+    render::view::Hdr,
 };
 use bevy_editor_cam::prelude::{EditorCam, EnabledMotion, OrbitConstraint};
 use bevy_egui::{
@@ -1105,7 +1106,6 @@ impl ViewportPane {
             Transform::default(),
             Camera3d::default(),
             Camera {
-                hdr: viewport.hdr,
                 clear_color: ClearColorConfig::Default,
                 order: 1,
                 ..Default::default()
@@ -1138,6 +1138,9 @@ impl ViewportPane {
             Name::new("viewport camera3d"),
         ));
 
+        if viewport.hdr {
+            camera.insert(Hdr);
+        }
         camera.insert(Bloom { ..default() });
         camera.insert(EnvironmentMapLight {
             diffuse_map: asset_server.load("embedded://elodin_editor/assets/diffuse.ktx2"),

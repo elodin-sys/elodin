@@ -86,7 +86,6 @@ impl GraphBundle {
         GraphBundle {
             camera: Camera {
                 order: 2,
-                hdr: false,
                 ..Default::default()
             },
             tonemapping: Tonemapping::None,
