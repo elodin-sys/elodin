@@ -23,6 +23,7 @@ promote tag:
   #!/usr/bin/env sh
   dir=$(mktemp -d)
   gh release download {{tag}} --pattern 'elodin-*.whl' --dir $dir
+  echo "uv publish \"$dir/*.whl\""
   uv publish "$dir/*.whl"
 
 public-changelog:

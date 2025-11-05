@@ -56,8 +56,8 @@ The Elodin simulation world.
 
     Run the simulation.
     - `system` : [elodin.System], the systems to run, can be supplied as a list of systems delineated by pipes.
-    - `sim_time_step` : `float`, optional, the amount of simulated time between each tick, defaults to 1 / 120.0.
-    - `run_time_step` : `float`, optional, the amount of real time between each tick, defaults to real-time playback by matching the `sim_time_step`.
+    - `sim_time_step` : `float`, optional, the amount of simulated time between each tick, defaults to `1 / 120.0`.
+    - `run_time_step` : `float | None`, optional, the amount of real time between each tick. By default it is `None` and runs at max speed. For real-time playback set to same value as `sim_time_step`.
     - `default_playback_speed` : `float`, optional, the default playback speed of the Elodin client when running this simulation, defaults to 1.0 (real-time).
     - `max_ticks` : `integer`, optional, the maximum number of ticks to run the simulation for before stopping.
     - `optimize` : `bool`, optional flag to enable runtime optimizations for the simulation code, defaults to `False`. If optimizations are enabled, the simulation will start slower but run faster.

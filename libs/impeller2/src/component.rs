@@ -12,6 +12,9 @@ use alloc::vec::Vec;
 pub trait Component {
     const NAME: &'static str;
     const ASSET: bool = false;
+    // This is not as useful anymore with the entities having been removed,
+    // and it's slightly misleading since to get it a time series from the database,
+    // you'd need to do `ComponentId::from_pair(entity_name, Self::NAME)`..
     const COMPONENT_ID: ComponentId = ComponentId::new(Self::NAME);
 
     #[cfg(feature = "alloc")]

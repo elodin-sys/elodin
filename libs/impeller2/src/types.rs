@@ -36,9 +36,42 @@ use stellarator_buf::{IoBuf, Slice};
 pub struct ComponentId(pub u64);
 
 impl ComponentId {
+    // #[deprecated(note = "Prefer the from_pair() for ComponentId construction")]
     pub const fn new(str: &str) -> Self {
-        ComponentId(const_fnv1a_hash::fnv1a_hash_str_64(str) & !(1u64 << 63)) // NOTE: we mask the last bit so the number can fit in an i64, and thus be lua compatible
+        // NOTE: We mask the last bit so the number can fit in an i64, and thus
+        // be Lua compatible.
+        ComponentId(const_fnv1a_hash::fnv1a_hash_str_64(str) & !(1u64 << 63))
     }
+
+    /// Construct a component from a root name and component name.
+    ///
+    /// This does not require a string allocation. This will produce the same hash
+    /// as `ComponentId::new()` with two names joined with a '.'.
+    /// ```
+    /// # use impeller2::types::ComponentId;
+    /// assert_eq!(ComponentId::new("a.b"), ComponentId::from_pair("a", "b"));
+    /// ```
+    pub const fn from_pair(root_name: &str, component_name: &str) -> Self {
+        let mut h = const_fnv1a_hash::fnv1a_hash_str_64(root_name);
+        h = fnv1a_extend(h, b".");
+        h = fnv1a_extend(h, component_name.as_bytes());
+        ComponentId(h & !(1u64 << 63))
+    }
+}
+
+const FNV_PRIME: u64 = 0x100000001b3;
+
+// This allows us to continue a fnv1a hash.
+const fn fnv1a_extend(hash: u64, bytes: &[u8]) -> u64 {
+    let mut h = hash;
+    let mut i = 0;
+    let len = bytes.len();
+    while i < len {
+        h ^= bytes[i] as u64;
+        h = h.wrapping_mul(FNV_PRIME);
+        i += 1
+    }
+    h
 }
 
 impl From<&'_ str> for ComponentId {
@@ -1047,5 +1080,55 @@ mod tests {
         assert_eq!(PrimType::U8.padding(5), 0);
         assert_eq!(PrimType::U16.padding(12), 0);
         assert_eq!(PrimType::U16.padding(11), 1);
+    }
+
+    // #[test]
+    // fn test_fnv1a_concat() {
+    //     let a = "foo";
+    //     let b = "bar";
+
+    //     let combined = format!("{}.{}", a, b);
+    //     let combined_hash = const_fnv1a_hash::fnv1a_hash_str_64(&combined);
+    //     let incremental_hash = fnv1a_concat(a, b);
+
+    //     assert_eq!(combined_hash, incremental_hash);
+    // }
+
+    #[test]
+    fn test_component_id_from_pair() {
+        let a = "foo";
+        let b = "bar";
+
+        let combined = format!("{}.{}", a, b);
+
+        assert_eq!(ComponentId::new(&combined), ComponentId::from_pair(a, b));
+    }
+
+    #[test]
+    fn test_component_id_wait_for_write_discovery() {
+        assert_eq!(ComponentId(3810108550136042869), ComponentId::new("rocket"));
+        assert_eq!(
+            ComponentId(7104182885603133857),
+            ComponentId::new("rocket.")
+        );
+        assert_eq!(
+            ComponentId(7786622236758618069),
+            ComponentId::new("rocket.fin_control_trim")
+        );
+        assert_eq!(
+            ComponentId(7719952719430115905),
+            ComponentId::new("fin_control_trim")
+        );
+    }
+
+    #[test]
+    fn test_bridge() {
+        let id = msg_id("bridge");
+        assert_eq!(168, id[0]);
+        assert_eq!(236, id[1]);
+
+        let id = msg_id("Bridge");
+        assert_eq!(35, id[0]);
+        assert_eq!(155, id[1]);
     }
 }

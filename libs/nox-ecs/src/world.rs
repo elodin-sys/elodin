@@ -48,7 +48,7 @@ pub struct WorldMetadata {
     pub tick: u64,
     pub entity_len: u64,
     pub sim_time_step: TimeStep,
-    pub run_time_step: TimeStep,
+    pub run_time_step: Option<TimeStep>,
     pub default_playback_speed: f64,
     pub max_tick: u64,
     pub schematic_path: Option<PathBuf>,
@@ -145,7 +145,7 @@ impl World {
         self.metadata.sim_time_step
     }
 
-    pub fn run_time_step(&self) -> TimeStep {
+    pub fn run_time_step(&self) -> Option<TimeStep> {
         self.metadata.run_time_step
     }
 

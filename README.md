@@ -118,17 +118,15 @@ just install
 
 ### Python Development (Local Setup)
 ```sh
-cd libs/nox-py
 uv venv --python 3.12
 source .venv/bin/activate
-uvx maturin develop --uv
-uv sync
+uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
 
-cargo run --manifest-path=../../apps/elodin/Cargo.toml editor ../../examples/three-body/main.py
+cargo run --manifest-path=apps/elodin/Cargo.toml editor examples/three-body/main.py
 ```
 
 > [!NOTE]
-> Local setup instructions were validated on M1 architecture, macOS 15.1.1 on 2025-08-26.
+> Local setup instructions were validated on M1 architecture, macOS 15.6.1 on 2025-11-03.
 
 ## Additional Resources
 

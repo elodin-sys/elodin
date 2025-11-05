@@ -36,10 +36,11 @@ impl Exec {
                 ProgressStyle::with_template("{bar:50} {pos:>6}/{len:6} remaining: {eta}").unwrap(),
             );
         let mut timestamp = Timestamp::now();
+
         for _ in 0..ticks {
             self.exec.run()?;
             self.db.with_state(|state| {
-                nox_ecs::impeller2_server::commit_world_head(state, &mut self.exec, timestamp)
+                nox_ecs::impeller2_server::commit_world_head(state, &mut self.exec, timestamp, None)
             })?;
             timestamp += self.exec.world.sim_time_step().0;
             py.check_signals()?;

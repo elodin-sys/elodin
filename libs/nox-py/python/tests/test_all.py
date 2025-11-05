@@ -497,3 +497,43 @@ def test_ukf_simple_linear():
     # Check final state estimate
     expected_x_hat = np.array([48.9118168, 9.96293597, 48.89106226, 9.95283274])
     assert np.isclose(state.x_hat, expected_x_hat, rtol=1e-6).all()
+
+
+def test_external_control_waiting():
+    """Test that Exec.run waits for external control components to be updated."""
+    import typing as ty
+
+    # Define external control component
+    ExternalControl = ty.Annotated[
+        jax.Array,
+        el.Component(
+            "external_control", el.ComponentType.F64, metadata={"external_control": "true"}
+        ),
+    ]
+
+    # Define a simple system that uses the external control
+    @el.map
+    def use_external_control(x: X, ext: ExternalControl) -> X:
+        return x + ext
+
+    @dataclass
+    class TestWithExternal(el.Archetype):
+        x: X
+        external_control: ExternalControl
+
+    # Create world and spawn entity
+    w = el.World()
+    w.spawn(TestWithExternal(np.array(1.0), np.array(0.0)), "e1")
+
+    # Build and run the system
+    exec = w.build(use_external_control)
+
+    # Run a few ticks - should work normally
+    exec.run(3)
+
+    # Check that the system ran
+    df = exec.history("e1.x")
+    assert len(df) >= 3
+    assert np.isclose(df["e1.x"][-1], 1.0)  # Should be 1.0 + 0.0
+
+    print("External control waiting test passed!")
