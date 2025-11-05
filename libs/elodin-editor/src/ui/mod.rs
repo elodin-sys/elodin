@@ -8,7 +8,8 @@ use bevy::{
     },
     input::keyboard::Key,
     prelude::*,
-    render::camera::{RenderTarget, Viewport},
+    render::camera::{Viewport},
+    camera::RenderTarget,
     window::{
         EnabledButtons, PresentMode, PrimaryWindow, WindowCloseRequested, WindowRef,
         WindowResolution,

@@ -1,8 +1,10 @@
 use bevy::log::info;
 use bevy::{
-    core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
+    core_pipeline::{tonemapping::Tonemapping},
+    post_process::bloom::Bloom,
     ecs::system::{SystemParam, SystemState},
     input::keyboard::Key,
+    camera::{PhysicalCameraParameters, visibility::RenderLayers},
     prelude::*,
 };
 use bevy_editor_cam::prelude::{EditorCam, EnabledMotion, OrbitConstraint};
@@ -13,8 +15,7 @@ use bevy_egui::{
     },
 };
 use bevy_render::{
-    camera::{Exposure, PhysicalCameraParameters},
-    view::RenderLayers,
+    camera::{Exposure},
 };
 use egui::UiBuilder;
 use egui_tiles::{Container, Tile, TileId, Tiles};
