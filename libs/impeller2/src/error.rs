@@ -1,3 +1,4 @@
+use crate::types::PacketId;
 use thiserror::Error;
 #[derive(Error, Debug, Clone)]
 #[cfg_attr(feature = "std", derive(miette::Diagnostic))]
@@ -49,12 +50,12 @@ pub enum Error {
         )
     )]
     InvalidComponentData,
-    #[error("vtable not found")]
+    #[error("vtable not found for packet ID {0:?}")]
     #[cfg_attr(
         feature = "std",
         diagnostic(code(impeller::vtable_not_found), help("vtable not found"))
     )]
-    VTableNotFound,
+    VTableNotFound(PacketId),
     #[error("postcard {0}")]
     #[cfg_attr(
         feature = "std",

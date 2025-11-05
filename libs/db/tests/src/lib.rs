@@ -614,8 +614,27 @@ mod tests {
             }
         };
 
+        let native_root_for_writer = native_root.clone();
         let write_future = async move {
-            sleep(Duration::from_millis(10)).await;
+            // Wait until the snapshot copy has actually started by polling for the
+            // temporary directory (db.tmp). This ensures the snapshot barrier is
+            // active before sending the late write, making the test deterministic.
+            let parent = native_root_for_writer
+                .parent()
+                .map(std::path::Path::to_path_buf)
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            let tmp_db_dir = parent.join(format!(
+                "{}.tmp",
+                native_root_for_writer
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+            ));
+            let start = std::time::Instant::now();
+            while !tmp_db_dir.exists() && start.elapsed() < Duration::from_secs(1) {
+                sleep(Duration::from_millis(5)).await;
+            }
+
             let mut pkt = LenPacket::table(vtable_id, 8);
             pkt.extend_aligned(&[late_value]);
             writer_client.send(pkt).await.0.unwrap();
@@ -645,21 +664,34 @@ mod tests {
             assert!((latest - 30.5).abs() <= f64::EPSILON);
         });
 
-        db.with_state(|state| {
-            let component = state
-                .get_component(component_id)
-                .expect("missing component");
-            let (_, buf) = component
-                .time_series
-                .latest()
-                .expect("missing latest sample");
-            let latest =
-                f64::from_le_bytes(buf.try_into().expect("component sample size mismatch"));
-            assert!(
-                (latest - late_value).abs() <= f64::EPSILON,
-                "latest sample should include post-snapshot write"
-            );
-        });
+        // The client `send` completes when bytes are written to the socket, not
+        // when the server has applied the write. Poll the DB briefly until the
+        // late write becomes visible, then assert.
+        let mut latest_seen = f64::NAN;
+        let start = std::time::Instant::now();
+        let timeout = Duration::from_millis(500);
+        loop {
+            latest_seen = db.with_state(|state| {
+                let component = state
+                    .get_component(component_id)
+                    .expect("missing component");
+                let (_, buf) = component
+                    .time_series
+                    .latest()
+                    .expect("missing latest sample");
+                f64::from_le_bytes(buf.try_into().expect("component sample size mismatch"))
+            });
+            if (latest_seen - late_value).abs() <= f64::EPSILON {
+                break;
+            }
+            if start.elapsed() > timeout {
+                panic!(
+                    "latest sample should include post-snapshot write; got {}",
+                    latest_seen
+                );
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
 
         let _ = std::fs::remove_dir_all(native_root);
     }

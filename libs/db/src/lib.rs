@@ -316,11 +316,31 @@ impl DB {
 
     pub fn flush_all(&self) -> Result<(), Error> {
         self.with_state(|state| -> Result<(), Error> {
+            // Ensure time-series data is fully flushed
             for component in state.components.values() {
                 component.sync_all()?;
             }
+            // Ensure message logs are fully flushed
             for msg_log in state.msg_logs.values() {
                 msg_log.sync_all()?;
+            }
+            // Additionally, make metadata and schema durable for each component
+            for component_id in state.components.keys() {
+                let comp_dir = self.path.join(component_id.to_string());
+                let schema_path = comp_dir.join("schema");
+                if schema_path.exists() {
+                    let file = File::open(&schema_path)?;
+                    file.sync_all()?;
+                }
+                let metadata_path = comp_dir.join("metadata");
+                if metadata_path.exists() {
+                    let file = File::open(&metadata_path)?;
+                    file.sync_all()?;
+                }
+                if comp_dir.exists() {
+                    // Best-effort sync of the component directory entry
+                    let _ = sync_dir(&comp_dir);
+                }
             }
             Ok(())
         })?;
@@ -355,7 +375,13 @@ impl DB {
         }
 
         fs::create_dir_all(&parent_dir)?;
-        let tmp_db_dir = parent_dir.join("db.tmp");
+        let tmp_db_dir = {
+            let name = final_db_dir
+                .file_name()
+                .unwrap_or(OsStr::new("db"))
+                .to_string_lossy();
+            parent_dir.join(format!("{}.tmp", name))
+        };
         if tmp_db_dir.exists() {
             fs::remove_dir_all(&tmp_db_dir)?;
         }
@@ -844,13 +870,40 @@ impl Decomponentize for DBSink<'_> {
         timestamp: Option<Timestamp>,
     ) -> Result<(), Error> {
         let _snapshot_guard = self.snapshot_barrier.enter_writer();
-        let timestamp = timestamp.unwrap_or(self.table_received);
+        let mut timestamp = timestamp.unwrap_or(self.table_received);
         let value_buf = value.as_bytes();
         let Some(component) = self.components.get(&component_id) else {
             return Err(Error::ComponentNotFound(component_id));
         };
         let time_series_empty = component.time_series.index().is_empty();
-        component.time_series.push_buf(timestamp, value_buf)?;
+        // In auto-timestamp mode (no explicit timestamp provided), concurrent writers
+        // may occasionally observe a slightly newer last timestamp and reject with
+        // TimeTravel. In that case, clamp the timestamp to last+1 and retry.
+        if let Err(err) = component.time_series.push_buf(timestamp, value_buf) {
+            match err {
+                Error::TimeTravel if timestamp == self.table_received => {
+                    // Retry with a monotonic bump based on the latest sample seen.
+                    let mut attempts = 0u8;
+                    loop {
+                        if let Some((last_ts, _)) = component.time_series.latest() {
+                            // ensure strictly non-decreasing order
+                            timestamp = Timestamp(last_ts.0.saturating_add(1));
+                        } else {
+                            timestamp = Timestamp::now();
+                        }
+                        match component.time_series.push_buf(timestamp, value_buf) {
+                            Ok(()) => break,
+                            Err(Error::TimeTravel) if attempts < 8 => {
+                                attempts = attempts.saturating_add(1);
+                                continue;
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    }
+                }
+                other => return Err(other),
+            }
+        }
         if time_series_empty {
             debug!("sunk new time series for component {}", component_id);
             self.sunk_new_time_series = true;
