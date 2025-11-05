@@ -131,6 +131,10 @@ impl PalettePage {
         self.prompt = Some(prompt.to_string());
         self
     }
+
+    pub fn into_event(self) -> PaletteEvent {
+        self.into()
+    }
 }
 
 pub struct PaletteItem {
@@ -301,10 +305,10 @@ pub fn create_action(tile_id: Option<TileId>) -> PaletteItem {
                                                     PaletteEvent::Exit
                                                 },
                                             ).default()])
-                                            .into()
+                                            .into_event()
                                         },
                                     ).default()])
-                                    .into()
+                                    .into_event()
                                 }),
                                 PaletteItem::new(
                                     LabelSource::placeholder("Enter a lua command (i.e client:send_table)"),
@@ -326,13 +330,13 @@ pub fn create_action(tile_id: Option<TileId>) -> PaletteItem {
                                 )
                                 .default(),
                             ]).prompt("Enter a lua command to send")
-                            .into()
+                            .into_event()
                         },
                     )
                     .default(),
                 ])
                 .prompt("Enter a label for the action button")
-                .into()
+                .into_event()
     })
 }
 
@@ -343,7 +347,7 @@ pub fn create_graph(tile_id: Option<TileId>) -> PaletteItem {
         move |_: In<String>, context: Res<EqlContext>| {
             PalettePage::new(graph_parts(&context.0.component_parts, tile_id))
                 .prompt("Select a component to graph")
-                .into()
+                .into_event()
         },
     )
 }
@@ -397,7 +401,7 @@ fn graph_parts(
                         tile_state.create_graph_tile(tile_id, bundle);
                         PaletteEvent::Exit
                     } else {
-                        PalettePage::new(graph_parts(&part.children, tile_id)).into()
+                        PalettePage::new(graph_parts(&part.children, tile_id)).into_event()
                     }
                 },
             )
@@ -412,7 +416,7 @@ pub fn create_monitor(tile_id: Option<TileId>) -> PaletteItem {
         move |_: In<String>, eql: Res<EqlContext>| {
             PalettePage::new(monitor_parts(&eql.0.component_parts, tile_id))
                 .prompt("Select a component to monitor")
-                .into()
+                .into_event()
         },
     )
 }
@@ -440,7 +444,7 @@ fn monitor_parts(
                         tile_state.create_monitor_tile(component.name.clone(), tile_id);
                         PaletteEvent::Exit
                     } else {
-                        PalettePage::new(monitor_parts(&part.children, tile_id)).into()
+                        PalettePage::new(monitor_parts(&part.children, tile_id)).into_event()
                     }
                 },
             )
@@ -454,7 +458,7 @@ fn toggle_body_axes() -> PaletteItem {
         // For now, return an empty page
         PalettePage::new(vec![])
             .prompt("Body axes functionality is temporarily disabled during refactor")
-            .into()
+            .into_event()
     })
 }
 
@@ -646,7 +650,7 @@ pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
                 )
                 .default(),
             ])
-            .into()
+            .into_event()
         },
     )
 }
@@ -757,13 +761,13 @@ fn set_time_range_behavior() -> PaletteItem {
                         .default(),
                     ])
                     .prompt("Enter the end offset")
-                    .into()
+                    .into_event()
                 },
             )
             .default(),
         ])
         .prompt("Enter the start offset")
-        .into()
+        .into_event()
     })
 }
 
@@ -840,7 +844,7 @@ fn goto_tick() -> PaletteItem {
             .default(),
         ])
         .prompt("Enter the tick to jump to")
-        .into()
+        .into_event()
     })
 }
 
@@ -848,7 +852,7 @@ pub fn save_schematic_as() -> PaletteItem {
     PaletteItem::new(
         "Save Schematic As...",
         PRESETS_LABEL,
-        |_name: In<String>| PalettePage::new(vec![save_schematic_inner()]).into(),
+        |_name: In<String>| PalettePage::new(vec![save_schematic_inner()]).into_event(),
     )
 }
 
@@ -874,7 +878,7 @@ pub fn save_schematic() -> PaletteItem {
                     }
                     PaletteEvent::Exit
                 }
-                None => PalettePage::new(vec![save_schematic_inner()]).into(),
+                None => PalettePage::new(vec![save_schematic_inner()]).into_event(),
             }
         },
     )
@@ -1018,7 +1022,7 @@ fn save_db_native_prompt_page() -> PalettePage {
 
 pub fn save_db_native() -> PaletteItem {
     PaletteItem::new("Save DB", PRESETS_LABEL, |_name: In<String>| {
-        save_db_native_prompt_page().into()
+        save_db_native_prompt_page().into_event()
     })
 }
 
@@ -1111,7 +1115,7 @@ pub fn load_schematic() -> PaletteItem {
             }
             file.pop();
         }
-        PalettePage::new(items).into()
+        PalettePage::new(items).into_event()
     })
 }
 
@@ -1179,7 +1183,7 @@ pub fn set_color_scheme() -> PaletteItem {
                 PaletteEvent::Exit
             }));
         }
-        PalettePage::new(items).into()
+        PalettePage::new(items).into_event()
     })
 }
 
@@ -1226,7 +1230,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
         .default(),
     ])
     .prompt("Enter color for mesh")
-    .into()
+    .into_event()
 }
 
 fn parse_color(
@@ -1299,7 +1303,7 @@ pub fn create_3d_object() -> PaletteItem {
                                         ).default()
                                     ])
                                     .prompt("Enter GLTF path")
-                                    .into()
+                                    .into_event()
                                 }
                             },
                         ),
@@ -1327,7 +1331,7 @@ pub fn create_3d_object() -> PaletteItem {
                                         ).default()
                                     ])
                                     .prompt("Enter sphere radius")
-                                    .into()
+                                    .into_event()
                                 }
                             },
                         ),
@@ -1365,7 +1369,7 @@ pub fn create_3d_object() -> PaletteItem {
                                         ).default()
                                     ])
                                     .prompt("Enter cylinder dimensions")
-                                    .into()
+                                    .into_event()
                                 }
                             },
                         ),
@@ -1403,7 +1407,7 @@ pub fn create_3d_object() -> PaletteItem {
                                         ).default()
                                     ])
                                     .prompt("Enter cuboid dimensions")
-                                    .into()
+                                    .into_event()
                                 }
                             },
                         ),
@@ -1444,18 +1448,18 @@ pub fn create_3d_object() -> PaletteItem {
                                         .default()
                                     ])
                                     .prompt("Enter plane size")
-                                    .into()
+                                    .into_event()
                                 }
                             },
                         ),
                     ])
                     .prompt("Choose 3D object visualization type")
-                    .into()
+                    .into_event()
                 },
             ).default()
         ])
         .prompt("Enter EQL expression for 3D object positioning")
-        .into()
+        .into_event()
     })
 }
 

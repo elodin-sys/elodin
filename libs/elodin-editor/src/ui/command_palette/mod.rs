@@ -51,7 +51,7 @@ impl CommandPaletteState {
     }
 
     pub fn open_page(&mut self, page: impl Fn() -> PalettePage + Send + Sync + 'static) {
-        self.open_item(PaletteItem::new("", "", move |_: In<String>| page().into()));
+        self.open_item(PaletteItem::new("", "", move |_: In<String>| page().into_event()));
     }
 
     pub fn handle_event(&mut self, event: PaletteEvent) {
