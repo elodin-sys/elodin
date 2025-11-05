@@ -1,7 +1,7 @@
 //! GPU rendering for plot data
 #![allow(dead_code)] // Shader struct fields appear unused to Rust but are used by GPU
 
-use bevy::asset::{AssetApp, Assets, weak_handle};
+use bevy::asset::{AssetApp, Assets, uuid_handle};
 use bevy::color::ColorToComponents;
 use bevy::core_pipeline::core_2d::CORE_2D_DEPTH_FORMAT;
 use bevy::ecs::bundle::Bundle;
@@ -54,9 +54,9 @@ use crate::ui::plot::{CHUNK_COUNT, CHUNK_LEN, Line, XYLine};
 
 use super::BufferShardAlloc;
 
-const LINE_SHADER_HANDLE: Handle<Shader> = weak_handle!("e44f3b60-cb86-42a2-b7d8-d8dbf1f0299a");
-const POINT_SHADER_HANDLE: Handle<Shader> = weak_handle!("4f1aa57d-aacd-4d17-859f-0dad0ee3890f");
-const BAR_SHADER_HANDLE: Handle<Shader> = weak_handle!("091989F7-D5B1-4C6C-B9C1-EDD5EE51F1B1");
+const LINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("e44f3b60-cb86-42a2-b7d8-d8dbf1f0299a");
+const POINT_SHADER_HANDLE: Handle<Shader> = uuid_handle!("4f1aa57d-aacd-4d17-859f-0dad0ee3890f");
+const BAR_SHADER_HANDLE: Handle<Shader> = uuid_handle!("091989F7-D5B1-4C6C-B9C1-EDD5EE51F1B1");
 
 pub const VALUE_BUFFER_SIZE: NonZeroU64 =
     NonZeroU64::new((CHUNK_COUNT * CHUNK_LEN * size_of::<f32>()) as u64).unwrap();
