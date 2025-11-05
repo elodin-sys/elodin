@@ -80,14 +80,14 @@ impl WidgetSystem for MonitorWidget<'_, '_> {
                     {
                         let layout = egui::Layout::centered_and_justified(ui.layout().main_dir());
 
-                        ui.allocate_ui_with_layout([220., 170.].into(), layout, |ui| {
+                        ui.allocate_ui_with_layout([130., 60.].into(), layout, |ui| {
                             Frame::NONE
                                 .stroke(Stroke::new(1.0, get_scheme().border_primary))
                                 .outer_margin(egui::Margin::symmetric(8, 8))
                                 .inner_margin(egui::Margin::symmetric(8, 0))
                                 .show(ui, |ui| {
-                                    ui.set_width(210. - 8.);
-                                    ui.set_height(150.);
+                                    ui.set_width(120. - 8.);
+                                    ui.set_height(50.);
                                     ui.with_layout(
                                         egui::Layout::bottom_up(egui::Align::LEFT),
                                         |ui| {
@@ -121,10 +121,14 @@ impl WidgetSystem for MonitorWidget<'_, '_> {
                                                     v.to_string()
                                                 }
                                                 impeller2_bevy::ElementValueMut::F64(v) => {
-                                                    format!("{v:.8}")
+                                                    let mut str = format!("{v:.8}");
+                                                    str.truncate(10);
+                                                    str
                                                 }
                                                 impeller2_bevy::ElementValueMut::F32(v) => {
-                                                    format!("{v:.8}")
+                                                    let mut str = format!("{v:.8}");
+                                                    str.truncate(10);
+                                                    str
                                                 }
                                                 impeller2_bevy::ElementValueMut::Bool(v) => {
                                                     v.to_string()
@@ -147,5 +151,15 @@ impl WidgetSystem for MonitorWidget<'_, '_> {
                     }
                 });
             });
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    #[test]
+    fn test_width() {
+        assert_eq!("0.01234568", format!("{:<10.8}", 0.0123456789));
+        assert_eq!("10000.012345678", format!("{:<10.8}", 10000.0123456789));
     }
 }
