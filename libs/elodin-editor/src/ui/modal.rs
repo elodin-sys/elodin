@@ -51,7 +51,7 @@ use impeller2_bevy::{ComponentMetadataRegistry, ComponentPathRegistry};
 // use bevy::prelude::*;
 // use crate::ui::{DialogEvent, DialogAction};
 //
-// fn handle_dialog_events(mut dialog_events: EventReader<DialogEvent>) {
+// fn handle_dialog_events(mut dialog_events: MessageReader<DialogEvent>) {
 //     for event in dialog_events.read() {
 //         match &event.action {
 //             DialogAction::Close => {
@@ -365,7 +365,7 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
 #[derive(SystemParam)]
 pub struct ModalDialog<'w, 's> {
     setting_modal_state: ResMut<'w, SettingModalState>,
-    dialog_events: EventWriter<'w, DialogEvent>,
+    dialog_events: MessageWriter<'w, DialogEvent>,
     _phantom: std::marker::PhantomData<&'s ()>,
 }
 
