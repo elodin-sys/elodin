@@ -294,7 +294,7 @@ pub struct TitlebarIcons {
 #[derive(SystemParam)]
 pub struct Titlebar<'w, 's> {
     fullscreen_state: ResMut<'w, FullscreenState>,
-    app_exit: EventWriter<'w, AppExit>,
+    app_exit: MessageWriter<'w, AppExit>,
     windows: Query<
         'w,
         's,
@@ -707,7 +707,7 @@ fn sync_secondary_windows(
 }
 
 fn handle_secondary_close(
-    mut events: EventReader<WindowCloseRequested>,
+    mut events: MessageReader<WindowCloseRequested>,
     mut windows: ResMut<tiles::WindowManager>,
 ) {
     let mut to_remove = Vec::new();
@@ -726,9 +726,9 @@ fn handle_secondary_close(
 }
 
 fn handle_primary_close(
-    mut events: EventReader<WindowCloseRequested>,
+    mut events: MessageReader<WindowCloseRequested>,
     primary: Query<Entity, With<PrimaryWindow>>,
-    mut exit: EventWriter<AppExit>,
+    mut exit: MessageWriter<AppExit>,
 ) {
     let Some(primary_entity) = primary.iter().next() else {
         return;
