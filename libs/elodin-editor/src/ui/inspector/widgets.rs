@@ -85,7 +85,7 @@ pub fn eql_autocomplete(
             }
             ui.memory_mut(|mem| {
                 mem.data.remove::<usize>(suggestion_memory_id);
-                mem.close_popup();
+                mem.close_popup(suggestion_memory_id);
             });
         }
     }
@@ -115,7 +115,7 @@ pub fn eql_autocomplete(
         ui.scope(|ui| {
             configure_combo_box(ui.style_mut());
             ui.style_mut().spacing.menu_margin = egui::Margin::same(4);
-            egui::Popup::popup_below_widget(
+            egui::popup_below_widget(
                 ui,
                 id,
                 &query_res.clone().with_new_rect(query_res.rect.expand(8.0)),
@@ -138,7 +138,7 @@ pub fn eql_autocomplete(
                                     *current_query = patch.clone();
                                     ui.memory_mut(|mem| {
                                         mem.data.remove::<usize>(suggestion_memory_id);
-                                        mem.close_popup();
+                                        mem.close_popup(suggestion_memory_id);
                                     });
                                 }
                             }
@@ -152,7 +152,7 @@ pub fn eql_autocomplete(
             ui.memory_mut(|mem| {
                 mem.data.remove::<usize>(suggestion_memory_id);
                 if mem.is_popup_open(id) {
-                    mem.close_popup();
+                    mem.close_popup(id);
                 }
             });
         }
@@ -251,7 +251,7 @@ pub fn node_color_picker(ui: &mut egui::Ui, label: &str, color: &mut impeller2_w
             && (ui.input(|i| i.key_pressed(egui::Key::Escape))
                 || popup_response.clicked_elsewhere())
         {
-            ui.memory_mut(|mem| mem.close_popup());
+            ui.memory_mut(|mem| mem.close_popup(color_id));
         }
     }
 
