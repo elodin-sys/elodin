@@ -130,6 +130,15 @@ fn resolve_window_descriptor(
     Some(SecondaryWindowDescriptor {
         path: resolved,
         title: window.title.clone(),
+        monitor: window.monitor.clone(),
+        monitor_index: window.monitor_index.map(|index| index as usize),
+        position: window
+            .position
+            .map(|coords| IVec2::new(coords[0], coords[1])),
+        size: window
+            .size
+            .map(|dimensions| Vec2::new(dimensions[0], dimensions[1])),
+        fullscreen: window.fullscreen.unwrap_or(false),
     })
 }
 

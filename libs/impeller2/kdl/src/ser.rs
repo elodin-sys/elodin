@@ -132,6 +132,31 @@ fn serialize_window(window: &WindowSchematic) -> KdlNode {
         node.entries_mut()
             .push(KdlEntry::new_prop("title", title.clone()));
     }
+    if let Some(monitor) = &window.monitor {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("monitor", monitor.clone()));
+    }
+    if let Some(index) = window.monitor_index {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("monitor_index", i128::from(index)));
+    }
+    if let Some(true) = window.fullscreen {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("fullscreen", true));
+    }
+    if let (Some(position), Some(size)) = (window.position, window.size) {
+        let mut rect = KdlNode::new("rect");
+        rect.entries_mut()
+            .push(KdlEntry::new(i128::from(position[0])));
+        rect.entries_mut()
+            .push(KdlEntry::new(i128::from(position[1])));
+        rect.entries_mut().push(KdlEntry::new(size[0] as f64));
+        rect.entries_mut().push(KdlEntry::new(size[1] as f64));
+        node.children_mut()
+            .get_or_insert_with(KdlDocument::new)
+            .nodes_mut()
+            .push(rect);
+    }
 
     node
 }

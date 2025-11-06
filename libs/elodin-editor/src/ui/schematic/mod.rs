@@ -268,6 +268,11 @@ pub fn tiles_to_schematic(
         window_elems.push(SchematicElem::Window(WindowSchematic {
             title: state.descriptor.title.clone(),
             path: file_name,
+            monitor: state.descriptor.monitor.clone(),
+            monitor_index: state.descriptor.monitor_index.map(|index| index as u32),
+            position: state.descriptor.position.map(|p| [p.x, p.y]),
+            size: state.descriptor.size.map(|s| [s.x, s.y]),
+            fullscreen: state.descriptor.fullscreen.then_some(true),
         }));
     }
 

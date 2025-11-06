@@ -84,6 +84,11 @@ pub struct TileState {
 pub struct SecondaryWindowDescriptor {
     pub path: PathBuf,
     pub title: Option<String>,
+    pub monitor: Option<String>,
+    pub monitor_index: Option<usize>,
+    pub position: Option<IVec2>,
+    pub size: Option<Vec2>,
+    pub fullscreen: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -196,6 +201,11 @@ impl WindowManager {
         let descriptor = SecondaryWindowDescriptor {
             path: PathBuf::from(path),
             title: cleaned_title.or_else(|| Some(format!("Window {}", id.0 + 1))),
+            monitor: None,
+            monitor_index: None,
+            position: None,
+            size: None,
+            fullscreen: false,
         };
         let tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
         info!(

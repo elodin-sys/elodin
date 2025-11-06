@@ -10,8 +10,8 @@ use bevy::{
     prelude::*,
     render::camera::{RenderTarget, Viewport},
     window::{
-        EnabledButtons, PresentMode, PrimaryWindow, WindowCloseRequested, WindowRef,
-        WindowResolution,
+        EnabledButtons, Monitor, MonitorSelection, PresentMode, PrimaryMonitor, PrimaryWindow,
+        Window, WindowCloseRequested, WindowMode, WindowPosition, WindowRef, WindowResolution,
     },
 };
 use bevy_egui::{
@@ -233,6 +233,10 @@ impl Plugin for UiPlugin {
             .add_systems(Update, sync_camera_grid_cell.after(render_layout))
             .add_systems(Update, query_plot::auto_bounds)
             .add_systems(Update, dashboard::update_nodes)
+            .add_systems(
+                PostUpdate,
+                capture_secondary_window_metadata.before(schematic::tiles_to_schematic),
+            )
             .add_plugins(SchematicPlugin)
             .add_plugins(LinePlot3dPlugin)
             .add_plugins(command_palette::palette_items::plugin);
@@ -634,7 +638,10 @@ fn sync_secondary_windows(
     mut windows: ResMut<tiles::WindowManager>,
     existing: Query<(Entity, &SecondaryWindowMarker)>,
     mut cameras: Query<&mut Camera>,
+    monitors: Query<(Entity, &Monitor)>,
+    primary_monitor: Query<Entity, With<PrimaryMonitor>>,
 ) {
+    let monitor_snapshots = collect_monitor_snapshots(&monitors, primary_monitor.iter().next());
     let mut existing_map: HashMap<tiles::SecondaryWindowId, Entity> = HashMap::new();
     for (entity, marker) in existing.iter() {
         existing_map.insert(marker.id, entity);
@@ -677,20 +684,10 @@ fn sync_secondary_windows(
 
         let title = compute_secondary_window_title(state);
 
+        let window = build_window_from_descriptor(title, &state.descriptor, &monitor_snapshots);
+
         let window_entity = commands
-            .spawn((
-                Window {
-                    title,
-                    resolution: WindowResolution::new(640.0, 480.0),
-                    present_mode: PresentMode::AutoVsync,
-                    enabled_buttons: EnabledButtons {
-                        close: true,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-                SecondaryWindowMarker { id: state.id },
-            ))
+            .spawn((window, SecondaryWindowMarker { id: state.id }))
             .id();
 
         state.window_entity = Some(window_entity);
@@ -701,6 +698,27 @@ fn sync_secondary_windows(
                 camera.target = RenderTarget::Window(window_ref);
                 camera.is_active = true;
                 camera.order = 10 + index as isize;
+            }
+        }
+    }
+}
+
+fn capture_secondary_window_metadata(
+    mut manager: ResMut<tiles::WindowManager>,
+    window_query: Query<(Entity, &Window)>,
+    monitors: Query<(Entity, &Monitor)>,
+    primary_monitor: Query<Entity, With<PrimaryMonitor>>,
+) {
+    if manager.secondary().is_empty() {
+        return;
+    }
+
+    let monitor_snapshots = collect_monitor_snapshots(&monitors, primary_monitor.iter().next());
+
+    for state in manager.secondary_mut().iter_mut() {
+        if let Some(window_entity) = state.window_entity {
+            if let Ok((_, window)) = window_query.get(window_entity) {
+                apply_window_to_descriptor(&mut state.descriptor, window, &monitor_snapshots);
             }
         }
     }
@@ -825,6 +843,208 @@ fn friendly_title_from_stem(stem: &str) -> Option<String> {
     } else {
         Some(words.join(" "))
     }
+}
+
+#[derive(Clone)]
+struct MonitorSnapshot {
+    index: usize,
+    entity: Entity,
+    name: Option<String>,
+    physical_position: IVec2,
+    physical_size: UVec2,
+    is_primary: bool,
+}
+
+fn collect_monitor_snapshots(
+    monitors: &Query<(Entity, &Monitor)>,
+    primary_entity: Option<Entity>,
+) -> Vec<MonitorSnapshot> {
+    let mut snapshots: Vec<MonitorSnapshot> = monitors
+        .iter()
+        .map(|(entity, monitor)| MonitorSnapshot {
+            index: 0,
+            entity,
+            name: monitor.name.clone(),
+            physical_position: monitor.physical_position,
+            physical_size: monitor.physical_size(),
+            is_primary: false,
+        })
+        .collect();
+
+    snapshots.sort_by(|a, b| {
+        a.physical_position
+            .x
+            .cmp(&b.physical_position.x)
+            .then(a.physical_position.y.cmp(&b.physical_position.y))
+    });
+
+    for (index, snapshot) in snapshots.iter_mut().enumerate() {
+        snapshot.index = index;
+        if Some(snapshot.entity) == primary_entity {
+            snapshot.is_primary = true;
+        }
+    }
+
+    if primary_entity.is_none() && !snapshots.is_empty() {
+        snapshots[0].is_primary = true;
+    }
+
+    snapshots
+}
+
+fn build_window_from_descriptor(
+    title: String,
+    descriptor: &tiles::SecondaryWindowDescriptor,
+    monitors: &[MonitorSnapshot],
+) -> Window {
+    let (width, height) = descriptor
+        .size
+        .map(|size| (size.x.max(1.0), size.y.max(1.0)))
+        .unwrap_or((640.0, 480.0));
+
+    let mut window = Window {
+        title,
+        resolution: WindowResolution::new(width, height),
+        present_mode: PresentMode::AutoVsync,
+        enabled_buttons: EnabledButtons {
+            close: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    if let Some(position) = descriptor.position {
+        window.position = WindowPosition::At(position);
+    } else if let Some(index) = descriptor.monitor_index {
+        window.position = WindowPosition::Centered(MonitorSelection::Index(index));
+    } else if let Some(name) = descriptor.monitor.as_ref() {
+        if let Some(snapshot) = monitors
+            .iter()
+            .find(|monitor| monitor.name.as_ref() == Some(name))
+        {
+            window.position = WindowPosition::Centered(MonitorSelection::Index(snapshot.index));
+        }
+    }
+
+    window.mode = if descriptor.fullscreen {
+        let selection = monitor_selection_from_descriptor(descriptor, monitors);
+        WindowMode::BorderlessFullscreen(selection)
+    } else {
+        WindowMode::Windowed
+    };
+
+    window
+}
+
+fn monitor_selection_from_descriptor(
+    descriptor: &tiles::SecondaryWindowDescriptor,
+    monitors: &[MonitorSnapshot],
+) -> MonitorSelection {
+    if let Some(index) = descriptor.monitor_index {
+        if index < monitors.len() {
+            return MonitorSelection::Index(index);
+        }
+    }
+
+    if let Some(name) = &descriptor.monitor {
+        if let Some(snapshot) = monitors
+            .iter()
+            .find(|monitor| monitor.name.as_ref() == Some(name))
+        {
+            return MonitorSelection::Index(snapshot.index);
+        }
+    }
+
+    if let Some(snapshot) = monitors.iter().find(|monitor| monitor.is_primary) {
+        return MonitorSelection::Index(snapshot.index);
+    }
+
+    MonitorSelection::Primary
+}
+
+fn apply_window_to_descriptor(
+    descriptor: &mut tiles::SecondaryWindowDescriptor,
+    window: &Window,
+    monitors: &[MonitorSnapshot],
+) {
+    descriptor.fullscreen = matches!(
+        window.mode,
+        WindowMode::BorderlessFullscreen(_) | WindowMode::Fullscreen(_, _)
+    );
+    descriptor.size = Some(window.size());
+    descriptor.position = match window.position {
+        WindowPosition::At(position) => Some(position),
+        _ => None,
+    };
+    let monitor_index = determine_monitor_index(window, monitors);
+    descriptor.monitor_index = monitor_index;
+    descriptor.monitor = monitor_index
+        .and_then(|index| monitors.iter().find(|monitor| monitor.index == index))
+        .and_then(|monitor| monitor.name.clone());
+}
+
+fn determine_monitor_index(window: &Window, monitors: &[MonitorSnapshot]) -> Option<usize> {
+    match window.mode {
+        WindowMode::BorderlessFullscreen(selection) => {
+            if let Some(index) = monitor_selection_to_index(selection, monitors) {
+                return Some(index);
+            }
+        }
+        WindowMode::Fullscreen(selection, _) => {
+            if let Some(index) = monitor_selection_to_index(selection, monitors) {
+                return Some(index);
+            }
+        }
+        WindowMode::Windowed => {}
+    }
+
+    match window.position {
+        WindowPosition::Centered(selection) => monitor_selection_to_index(selection, monitors),
+        WindowPosition::At(position) => {
+            let physical_size = window.resolution.physical_size();
+            find_monitor_by_point(monitors, position, physical_size)
+        }
+        WindowPosition::Automatic => None,
+    }
+}
+
+fn monitor_selection_to_index(
+    selection: MonitorSelection,
+    monitors: &[MonitorSnapshot],
+) -> Option<usize> {
+    match selection {
+        MonitorSelection::Current => None,
+        MonitorSelection::Primary => monitors
+            .iter()
+            .find(|monitor| monitor.is_primary)
+            .map(|monitor| monitor.index),
+        MonitorSelection::Index(index) => Some(index),
+        MonitorSelection::Entity(entity) => monitors
+            .iter()
+            .find(|monitor| monitor.entity == entity)
+            .map(|monitor| monitor.index),
+    }
+}
+
+fn find_monitor_by_point(
+    monitors: &[MonitorSnapshot],
+    position: IVec2,
+    size: UVec2,
+) -> Option<usize> {
+    let center_x = position.x + (size.x as i32 / 2);
+    let center_y = position.y + (size.y as i32 / 2);
+
+    monitors.iter().find_map(|monitor| {
+        let left = monitor.physical_position.x;
+        let right = monitor.physical_position.x + monitor.physical_size.x as i32;
+        let top = monitor.physical_position.y;
+        let bottom = monitor.physical_position.y + monitor.physical_size.y as i32;
+        if center_x >= left && center_x < right && center_y >= top && center_y < bottom {
+            Some(monitor.index)
+        } else {
+            None
+        }
+    })
 }
 
 fn render_secondary_windows(world: &mut World) {
