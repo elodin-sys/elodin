@@ -25,7 +25,7 @@ use crate::{
         dashboard::{NodeUpdaterParams, spawn_dashboard},
         modal::ModalDialog,
         monitor::MonitorPane,
-        plot::{GraphBundle, LockGroup},
+        plot::GraphBundle,
         query_plot::QueryPlotData,
         schematic::EqlExt,
         tiles::{
@@ -40,15 +40,6 @@ use crate::{
 enum PanelContext {
     Main,
     Secondary(SecondaryWindowId),
-}
-
-impl PanelContext {
-    fn lock_group(self) -> LockGroup {
-        match self {
-            PanelContext::Main => LockGroup::Global,
-            PanelContext::Secondary(id) => LockGroup::Secondary(id.0),
-        }
-    }
 }
 
 #[derive(Component)]
@@ -477,13 +468,11 @@ impl LoadSchematicParams<'_, '_> {
                 }
 
                 let graph_label = graph_label(graph);
-                let lock_group = context.lock_group();
 
                 let mut bundle = GraphBundle::new(
                     &mut self.render_layer_alloc,
                     components_tree,
                     graph_label.clone(),
-                    lock_group,
                 );
                 if matches!(context, PanelContext::Secondary(_)) {
                     bundle.camera.is_active = false;
@@ -540,12 +529,10 @@ impl LoadSchematicParams<'_, '_> {
                 tile_state.insert_tile(Tile::Pane(Pane::SchematicTree(pane)), parent_id, false)
             }
             Panel::QueryPlot(plot) => {
-                let lock_group = context.lock_group();
                 let graph_bundle = GraphBundle::new(
                     &mut self.render_layer_alloc,
                     BTreeMap::default(),
                     "Query Plot".to_string(),
-                    lock_group,
                 );
                 let entity = self
                     .commands

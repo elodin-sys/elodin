@@ -40,7 +40,7 @@ use crate::{
     ui::{
         HdrEnabled, Paused, colors,
         command_palette::CommandPaletteState,
-        plot::{GraphBundle, LockGroup, default_component_values},
+        plot::{GraphBundle, default_component_values},
         schematic::{
             CurrentSchematic, CurrentSecondarySchematics, LoadSchematicParams,
             SchematicLiveReloadRx, load_schematic_file,
@@ -262,12 +262,6 @@ fn target_tile_state_mut(
     }
 }
 
-fn target_lock_group(target: Option<tiles::SecondaryWindowId>) -> LockGroup {
-    target
-        .map(|id| LockGroup::Secondary(id.0))
-        .unwrap_or(LockGroup::Global)
-}
-
 pub fn create_action(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new("Create Action", TILES_LABEL, move |_: In<String>| {
         PalettePage::new(vec![
@@ -399,7 +393,6 @@ fn graph_parts(
                             &mut render_layer_alloc,
                             components,
                             "Graph".to_string(),
-                            target_lock_group(palette_state.target_window),
                         );
                         tile_state.create_graph_tile(tile_id, bundle);
                         PaletteEvent::Exit
