@@ -8,23 +8,28 @@ default:
 version:
   @echo "v$(cargo metadata --format-version 1 | jq -r '.packages[] | select(.name == "elodin") | .version')"
 
-auto-tag:
+tag new_tag:
   #!/usr/bin/env sh
   current_tag=$(git describe --tags --abbrev=0)
-  new_tag=$(just version)
+  new_tag="{{new_tag}}"
   if [ "$current_tag" = "$new_tag" ]; then
-    echo "Latest tag is already '$new_tag'"; exit 0
+    echo "error: Latest tag is already '$new_tag'" >&2; exit 1
   fi
   echo "🏷️ Tagging HEAD with '$new_tag'"
+  sh -x <<EOF
   git tag -a $new_tag -m "Elodin $new_tag"
   git push origin $new_tag
+  EOF
 
 promote tag:
-  #!/usr/bin/env sh
+  #!/usr/bin/env sh -x
+  if [ -z "$UV_PUBLISH_TOKEN" ]; then
+     echo "error: Set UV_PUBLISH_TOKEN to the token." >&2;
+     exit 1;
+  fi
   dir=$(mktemp -d)
   gh release download {{tag}} --pattern 'elodin-*.whl' --dir $dir
-  echo "uv publish \"$dir/*.whl\""
-  uv publish "$dir/*.whl"
+  uv publish "$dir/*.whl" --token "$UV_PUBLISH_TOKEN"
 
 public-changelog:
   #!/usr/bin/env sh

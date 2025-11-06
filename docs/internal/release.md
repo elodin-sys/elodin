@@ -7,10 +7,10 @@
 5. Run `just public-changelog` to generate the public-facing changelog in the docs site from the `CHANGELOG.md` file.
 6. Choose your next version number. In preparation for running the following commands, set the `VERSION` environment variable. For example if the new version is `0.1.2`, then run `export VERSION=0.1.2`.
 7. Create a new release branch with the new version number. Create a branch named `release/v$VERSION` by running `git checkout -b release/v$VERSION`.
-8. Add and commit the changes to the release branch by running `git commit -am "chore: release v$VERSION"`.
+8. Add and commit the changes to the release branch by running `git commit -m "chore: release v$VERSION"`.
 9. Push the release branch to the remote repository by running `git push -u origin release/v$VERSION`.
 10. Create a pull request from the release branch to the `main` branch. If using the GitHub CLI, you can run `gh pr create --base main --head release/v$VERSION --title "Release v$VERSION"` to create the pull request.
-11. Once the pull request is merged and the CI pipeline has passed for the `main` branch, run `just auto-tag` on the updated `main` branch. This recipe will:
+11. Once the pull request is merged and the CI pipeline has passed for the `main` branch, run `just tag v$VERSION` on the updated `main` branch. This recipe will:
     - Create a new git tag with the new version number.
     - Push the tag to the remote repository, which will trigger GitHub Actions to start building release artifacts.
     - Re-tag the latest container images with the new version number.
