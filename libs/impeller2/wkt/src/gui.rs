@@ -57,8 +57,15 @@ impl<T> SchematicElem<T> {
 pub struct WindowSchematic {
     pub title: Option<String>,
     pub path: String,
-    pub monitor: Option<String>,
-    pub monitor_index: Option<u32>,
+    #[serde(rename = "screen", alias = "physical_screen", alias = "monitor")]
+    pub screen: Option<String>,
+    #[serde(
+        rename = "screenIdx",
+        alias = "screen_idx",
+        alias = "physical_screen_index",
+        alias = "monitor_index"
+    )]
+    pub screen_idx: Option<u32>,
     pub position: Option<[i32; 2]>,
     pub size: Option<[f32; 2]>,
     pub fullscreen: Option<bool>,

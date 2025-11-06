@@ -86,14 +86,19 @@ fn parse_window(node: &KdlNode, src: &str) -> Result<WindowSchematic, KdlSchemat
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty());
 
-    let monitor = node
-        .get("monitor")
+    let screen = node
+        .get("screen")
+        .or_else(|| node.get("physical_screen"))
+        .or_else(|| node.get("monitor"))
         .and_then(|v| v.as_string())
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty());
 
-    let monitor_index = node
-        .get("monitor_index")
+    let screen_index = node
+        .get("screenIdx")
+        .or_else(|| node.get("screen_idx"))
+        .or_else(|| node.get("physical_screen_index"))
+        .or_else(|| node.get("monitor_index"))
         .and_then(|v| v.as_integer())
         .map(|v| v.max(0) as u32);
 
@@ -150,8 +155,8 @@ fn parse_window(node: &KdlNode, src: &str) -> Result<WindowSchematic, KdlSchemat
     Ok(WindowSchematic {
         title,
         path: path.to_string(),
-        monitor,
-        monitor_index,
+        screen,
+        screen_idx: screen_index,
         position,
         size,
         fullscreen: if fullscreen { Some(true) } else { None },

@@ -4,7 +4,7 @@ use bevy::{
     app::AppExit,
     ecs::{
         query::QueryData,
-        system::{SystemParam, SystemState},
+        system::{NonSend, SystemParam, SystemState},
     },
     input::keyboard::Key,
     prelude::*,
@@ -714,6 +714,7 @@ fn capture_secondary_window_metadata(
     window_query: Query<(Entity, &Window)>,
     monitors: Query<(Entity, &Monitor)>,
     primary_monitor: Query<Entity, With<PrimaryMonitor>>,
+    winit_windows: NonSend<bevy::winit::WinitWindows>,
 ) {
     if manager.secondary().is_empty() {
         return;
@@ -723,8 +724,34 @@ fn capture_secondary_window_metadata(
 
     for state in manager.secondary_mut().iter_mut() {
         if let Some(window_entity) = state.window_entity {
-            if let Ok((_, window)) = window_query.get(window_entity) {
+            if let Ok((entity, window)) = window_query.get(window_entity) {
                 apply_window_to_descriptor(&mut state.descriptor, window, &monitor_snapshots);
+
+                if let Some(winit_window) = winit_windows.get_window(entity) {
+                    if let Some(handle) = winit_window.current_monitor() {
+                        let monitor_position = handle.position();
+                        let monitor_size = handle.size();
+                        let handle_name = handle.name();
+
+                        let matched_snapshot = monitor_snapshots.iter().find(|snapshot| {
+                            snapshot.physical_position.x == monitor_position.x
+                                && snapshot.physical_position.y == monitor_position.y
+                                && snapshot.physical_size.x == monitor_size.width
+                                && snapshot.physical_size.y == monitor_size.height
+                        });
+
+                        if let Some(snapshot) = matched_snapshot {
+                            state.descriptor.screen_index = Some(snapshot.index);
+                            if let Some(name) =
+                                snapshot.name.clone().or_else(|| handle_name.clone())
+                            {
+                                state.descriptor.screen = Some(name);
+                            }
+                        } else if let Some(name) = handle_name {
+                            state.descriptor.screen = Some(name);
+                        }
+                    }
+                }
             }
         }
     }
@@ -953,9 +980,9 @@ fn build_window_from_descriptor(
 
     if let Some(position) = descriptor.position {
         window.position = WindowPosition::At(position);
-    } else if let Some(index) = descriptor.monitor_index {
+    } else if let Some(index) = descriptor.screen_index {
         window.position = WindowPosition::Centered(MonitorSelection::Index(index));
-    } else if let Some(name) = descriptor.monitor.as_ref() {
+    } else if let Some(name) = descriptor.screen.as_ref() {
         if let Some(snapshot) = monitors
             .iter()
             .find(|monitor| monitor.name.as_ref() == Some(name))
@@ -978,13 +1005,13 @@ fn monitor_selection_from_descriptor(
     descriptor: &tiles::SecondaryWindowDescriptor,
     monitors: &[MonitorSnapshot],
 ) -> MonitorSelection {
-    if let Some(index) = descriptor.monitor_index {
+    if let Some(index) = descriptor.screen_index {
         if index < monitors.len() {
             return MonitorSelection::Index(index);
         }
     }
 
-    if let Some(name) = &descriptor.monitor {
+    if let Some(name) = &descriptor.screen {
         if let Some(snapshot) = monitors
             .iter()
             .find(|monitor| monitor.name.as_ref() == Some(name))
@@ -1017,7 +1044,7 @@ fn apply_descriptor_to_window_component(
         window.resolution.set(size.x, size.y);
     }
 
-    let monitor_selection = (descriptor.monitor.is_some() || descriptor.monitor_index.is_some())
+    let monitor_selection = (descriptor.screen.is_some() || descriptor.screen_index.is_some())
         .then(|| monitor_selection_from_descriptor(descriptor, monitors));
 
     match (descriptor.position, monitor_selection) {
@@ -1052,8 +1079,8 @@ fn apply_window_to_descriptor(
         _ => None,
     };
     let monitor_index = determine_monitor_index(window, monitors);
-    descriptor.monitor_index = monitor_index;
-    descriptor.monitor = monitor_index
+    descriptor.screen_index = monitor_index;
+    descriptor.screen = monitor_index
         .and_then(|index| monitors.iter().find(|monitor| monitor.index == index))
         .and_then(|monitor| monitor.name.clone());
 }

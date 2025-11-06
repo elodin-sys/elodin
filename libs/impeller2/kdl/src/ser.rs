@@ -132,13 +132,13 @@ fn serialize_window(window: &WindowSchematic) -> KdlNode {
         node.entries_mut()
             .push(KdlEntry::new_prop("title", title.clone()));
     }
-    if let Some(monitor) = &window.monitor {
+    if let Some(screen) = &window.screen {
         node.entries_mut()
-            .push(KdlEntry::new_prop("monitor", monitor.clone()));
+            .push(KdlEntry::new_prop("screen", screen.clone()));
     }
-    if let Some(index) = window.monitor_index {
+    if let Some(index) = window.screen_idx {
         node.entries_mut()
-            .push(KdlEntry::new_prop("monitor_index", i128::from(index)));
+            .push(KdlEntry::new_prop("screenIdx", i128::from(index)));
     }
     if let Some(true) = window.fullscreen {
         node.entries_mut()

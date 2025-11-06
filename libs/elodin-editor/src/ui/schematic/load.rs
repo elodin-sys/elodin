@@ -130,8 +130,8 @@ fn resolve_window_descriptor(
     Some(SecondaryWindowDescriptor {
         path: resolved,
         title: window.title.clone(),
-        monitor: window.monitor.clone(),
-        monitor_index: window.monitor_index.map(|index| index as usize),
+        screen: window.screen.clone(),
+        screen_index: window.screen_idx.map(|index| index as usize),
         position: window
             .position
             .map(|coords| IVec2::new(coords[0], coords[1])),
