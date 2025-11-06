@@ -1,3 +1,4 @@
+use bevy::log::info;
 use bevy::{
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     ecs::system::{SystemParam, SystemState},
@@ -169,6 +170,48 @@ impl WindowManager {
             .iter()
             .find(|state| state.window_entity == Some(entity))
             .map(|state| state.id)
+    }
+
+    pub fn create_secondary_window(&mut self, title: Option<String>) -> SecondaryWindowId {
+        let id = self.alloc_id();
+        let cleaned_title = title.and_then(|t| {
+            let trimmed = t.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+        let path = cleaned_title
+            .as_deref()
+            .map(|title| {
+                let stem = super::schematic::sanitize_to_stem(title);
+                if stem.is_empty() {
+                    format!("secondary-window-{}.kdl", id.0)
+                } else {
+                    format!("{stem}.kdl")
+                }
+            })
+            .unwrap_or_else(|| format!("secondary-window-{}.kdl", id.0));
+        let descriptor = SecondaryWindowDescriptor {
+            path: PathBuf::from(path),
+            title: cleaned_title.or_else(|| Some(format!("Window {}", id.0 + 1))),
+        };
+        let tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
+        info!(
+            id = id.0,
+            title = descriptor.title.as_deref().unwrap_or(""),
+            path = %descriptor.path.display(),
+            "Created secondary window"
+        );
+        self.secondary.push(SecondaryWindowState {
+            id,
+            descriptor,
+            tile_state,
+            window_entity: None,
+            graph_entities: Vec::new(),
+        });
+        id
     }
 }
 
@@ -365,6 +408,33 @@ impl TileState {
             let _ = writeln!(out, "<empty>");
         }
         out
+    }
+
+    pub fn collect_graph_entities(&self) -> Vec<Entity> {
+        fn visit(
+            tree: &egui_tiles::Tree<Pane>,
+            tile_id: egui_tiles::TileId,
+            out: &mut Vec<Entity>,
+        ) {
+            let Some(tile) = tree.tiles.get(tile_id) else {
+                return;
+            };
+            match tile {
+                Tile::Pane(Pane::Graph(graph)) => out.push(graph.id),
+                Tile::Pane(_) => {}
+                Tile::Container(container) => {
+                    for child in container.children() {
+                        visit(tree, *child, out);
+                    }
+                }
+            }
+        }
+
+        let mut entities = Vec::new();
+        if let Some(root) = self.tree.root() {
+            visit(&self.tree, root, &mut entities);
+        }
+        entities
     }
 
     pub fn create_sidebars_layout(&mut self) {
@@ -799,6 +869,7 @@ struct TreeBehavior<'w> {
     world: &'w mut World,
     container_titles: HashMap<TileId, String>,
     read_only: bool,
+    target_window: Option<SecondaryWindowId>,
 }
 
 #[derive(Clone)]
@@ -1120,6 +1191,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             layout
                 .cmd_palette_state
                 .open_page(move || palette_items::create_tiles(tile_id));
+            layout.cmd_palette_state.target_window = self.target_window;
         }
     }
 }
@@ -1137,7 +1209,7 @@ impl<'w, 's> TileSystem<'w, 's> {
         state: &mut SystemState<Self>,
         target: Option<SecondaryWindowId>,
     ) -> Option<(TileIcons, bool, bool)> {
-        let read_only = target.is_some();
+        let read_only = false;
         let params = state.get_mut(world);
         let mut contexts = params.contexts;
         let images = params.images;
@@ -1182,7 +1254,14 @@ impl<'w, 's> TileSystem<'w, 's> {
         read_only: bool,
     ) {
         if is_empty_tile_tree && !read_only {
-            ui.add_widget_with::<TileLayoutEmpty>(world, "tile_layout_empty", icons);
+            ui.add_widget_with::<TileLayoutEmpty>(
+                world,
+                "tile_layout_empty",
+                TileLayoutEmptyArgs {
+                    icons: icons.clone(),
+                    window: target,
+                },
+            );
             return;
         }
 
@@ -1305,8 +1384,14 @@ pub struct TileLayoutEmpty<'w> {
     cmd_palette_state: ResMut<'w, CommandPaletteState>,
 }
 
+#[derive(Clone)]
+pub struct TileLayoutEmptyArgs {
+    pub icons: TileIcons,
+    pub window: Option<SecondaryWindowId>,
+}
+
 impl WidgetSystem for TileLayoutEmpty<'_> {
-    type Args = TileIcons;
+    type Args = TileLayoutEmptyArgs;
     type Output = ();
 
     fn ui_system(
@@ -1317,7 +1402,7 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
     ) {
         let mut state_mut = state.get_mut(world);
 
-        let icons = args;
+        let TileLayoutEmptyArgs { icons, window } = args;
 
         let button_height = 160.0;
         let button_width = 240.0;
@@ -1345,6 +1430,7 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
                         state_mut
                             .cmd_palette_state
                             .open_item(palette_items::create_viewport(None));
+                        state_mut.cmd_palette_state.target_window = window;
                     }
 
                     let create_graph_btn = ui.add(
@@ -1358,6 +1444,7 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
                         state_mut
                             .cmd_palette_state
                             .open_item(palette_items::create_graph(None));
+                        state_mut.cmd_palette_state.target_window = window;
                     }
 
                     let create_monitor_btn = ui.add(
@@ -1371,6 +1458,7 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
                         state_mut
                             .cmd_palette_state
                             .open_item(palette_items::create_monitor(None));
+                        state_mut.cmd_palette_state.target_window = window;
                     }
                 });
             },
@@ -1433,6 +1521,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     tree_actions: tab_diffs,
                     container_titles: ui_state.container_titles.clone(),
                     read_only,
+                    target_window: window,
                 };
                 ui_state.tree.ui(&mut behavior, ui);
 

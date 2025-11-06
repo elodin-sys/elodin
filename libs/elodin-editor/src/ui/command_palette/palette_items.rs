@@ -250,6 +250,24 @@ const TIME_LABEL: &str = "Time";
 const HELP_LABEL: &str = "Help";
 const PRESETS_LABEL: &str = "Presets";
 
+fn target_tile_state_mut(
+    windows: &mut tiles::WindowManager,
+    target: Option<tiles::SecondaryWindowId>,
+) -> Option<&mut tiles::TileState> {
+    match target {
+        Some(id) => windows
+            .get_secondary_mut(id)
+            .map(|state| &mut state.tile_state),
+        None => Some(windows.main_mut()),
+    }
+}
+
+fn target_lock_group(target: Option<tiles::SecondaryWindowId>) -> LockGroup {
+    target
+        .map(|id| LockGroup::Secondary(id.0))
+        .unwrap_or(LockGroup::Global)
+}
+
 pub fn create_action(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new("Create Action", TILES_LABEL, move |_: In<String>| {
         PalettePage::new(vec![
@@ -269,8 +287,18 @@ pub fn create_action(tile_id: Option<TileId>) -> PaletteItem {
                                             PalettePage::new(vec![PaletteItem::new(
                                                 LabelSource::placeholder("Msg"),
                                                 "Contents of the msg as a lua table - {foo = \"bar\"}",
-                                                move |In(msg): In<String>, mut windows: ResMut<tiles::WindowManager>| {
-                                                    let tile_state = windows.main_mut();
+                                                move |In(msg): In<String>,
+                                                      mut windows: ResMut<tiles::WindowManager>,
+                                                      palette_state: Res<CommandPaletteState>| {
+                                                    let Some(tile_state) = target_tile_state_mut(
+                                                        &mut windows,
+                                                        palette_state.target_window,
+                                                    ) else {
+                                                        return PaletteEvent::Error(
+                                                            "Secondary window unavailable"
+                                                                .to_string(),
+                                                        );
+                                                    };
                                                     tile_state.create_action_tile(
                                                         msg_label.clone(),
                                                         format!("client:send_msg({name:?}, {msg})"),
@@ -287,8 +315,17 @@ pub fn create_action(tile_id: Option<TileId>) -> PaletteItem {
                                 PaletteItem::new(
                                     LabelSource::placeholder("Enter a lua command (i.e client:send_table)"),
                                     "Enter a custom lua command",
-                                    move |lua: In<String>, mut windows: ResMut<tiles::WindowManager>| {
-                                        let tile_state = windows.main_mut();
+                                    move |lua: In<String>,
+                                          mut windows: ResMut<tiles::WindowManager>,
+                                          palette_state: Res<CommandPaletteState>| {
+                                        let Some(tile_state) = target_tile_state_mut(
+                                            &mut windows,
+                                            palette_state.target_window,
+                                        ) else {
+                                            return PaletteEvent::Error(
+                                                "Secondary window unavailable".to_string(),
+                                            );
+                                        };
                                         tile_state.create_action_tile(label.clone(), lua.0, tile_id);
                                         PaletteEvent::Exit
                                     },
@@ -333,8 +370,13 @@ fn graph_parts(
                       entity_map: Res<EntityMap>,
                       mut render_layer_alloc: ResMut<RenderLayerAlloc>,
                       mut windows: ResMut<tiles::WindowManager>,
-                      path_reg: Res<ComponentPathRegistry>| {
-                    let tile_state = windows.main_mut();
+                      path_reg: Res<ComponentPathRegistry>,
+                      palette_state: Res<CommandPaletteState>| {
+                    let Some(tile_state) =
+                        target_tile_state_mut(&mut windows, palette_state.target_window)
+                    else {
+                        return PaletteEvent::Error("Secondary window unavailable".to_string());
+                    };
                     if let Some(component) = &part.component {
                         let component_id = component.id;
                         let Some(entity) = entity_map.get(&component_id) else {
@@ -357,7 +399,7 @@ fn graph_parts(
                             &mut render_layer_alloc,
                             components,
                             "Graph".to_string(),
-                            LockGroup::Global,
+                            target_lock_group(palette_state.target_window),
                         );
                         tile_state.create_graph_tile(tile_id, bundle);
                         PaletteEvent::Exit
@@ -393,8 +435,14 @@ fn monitor_parts(
             PaletteItem::new(
                 name.clone(),
                 "Component",
-                move |_: In<String>, mut windows: ResMut<tiles::WindowManager>| {
-                    let tile_state = windows.main_mut();
+                move |_: In<String>,
+                      mut windows: ResMut<tiles::WindowManager>,
+                      palette_state: Res<CommandPaletteState>| {
+                    let Some(tile_state) =
+                        target_tile_state_mut(&mut windows, palette_state.target_window)
+                    else {
+                        return PaletteEvent::Error("Secondary window unavailable".to_string());
+                    };
                     if let Some(component) = &part.component {
                         tile_state.create_monitor_tile(component.name.clone(), tile_id);
                         PaletteEvent::Exit
@@ -421,20 +469,56 @@ pub fn create_viewport(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Viewport",
         TILES_LABEL,
-        move |_: In<String>, mut windows: ResMut<tiles::WindowManager>| {
-            let tile_state = windows.main_mut();
+        move |_: In<String>,
+              mut windows: ResMut<tiles::WindowManager>,
+              palette_state: Res<CommandPaletteState>| {
+            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
+            else {
+                return PaletteEvent::Error("Secondary window unavailable".to_string());
+            };
             tile_state.create_viewport_tile(tile_id);
             PaletteEvent::Exit
         },
     )
 }
 
+pub fn create_window() -> PaletteItem {
+    PaletteItem::new("Create Window", TILES_LABEL, move |_: In<String>| {
+        PalettePage::new(vec![
+            PaletteItem::new(
+                LabelSource::placeholder("Enter window title"),
+                "Leave blank for a default title",
+                move |In(title): In<String>,
+                      mut windows: ResMut<tiles::WindowManager>,
+                      mut palette_state: ResMut<CommandPaletteState>| {
+                    let title_opt = if title.trim().is_empty() {
+                        None
+                    } else {
+                        Some(title.trim().to_string())
+                    };
+                    let id = windows.create_secondary_window(title_opt);
+                    palette_state.target_window = Some(id);
+                    PaletteEvent::Exit
+                },
+            )
+            .default(),
+        ])
+        .prompt("Enter a title for the new window")
+        .into()
+    })
+}
+
 pub fn create_query_table(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Query Table",
         TILES_LABEL,
-        move |_: In<String>, mut windows: ResMut<tiles::WindowManager>| {
-            let tile_state = windows.main_mut();
+        move |_: In<String>,
+              mut windows: ResMut<tiles::WindowManager>,
+              palette_state: Res<CommandPaletteState>| {
+            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
+            else {
+                return PaletteEvent::Error("Secondary window unavailable".to_string());
+            };
             tile_state.create_query_table_tile(tile_id);
             PaletteEvent::Exit
         },
@@ -445,8 +529,13 @@ pub fn create_query_plot(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Query Plot",
         TILES_LABEL,
-        move |_: In<String>, mut windows: ResMut<tiles::WindowManager>| {
-            let tile_state = windows.main_mut();
+        move |_: In<String>,
+              mut windows: ResMut<tiles::WindowManager>,
+              palette_state: Res<CommandPaletteState>| {
+            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
+            else {
+                return PaletteEvent::Error("Secondary window unavailable".to_string());
+            };
             tile_state.create_query_plot_tile(tile_id);
             PaletteEvent::Exit
         },
@@ -457,8 +546,13 @@ pub fn create_hierarchy(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Hierarchy",
         TILES_LABEL,
-        move |_: In<String>, mut windows: ResMut<tiles::WindowManager>| {
-            let tile_state = windows.main_mut();
+        move |_: In<String>,
+              mut windows: ResMut<tiles::WindowManager>,
+              palette_state: Res<CommandPaletteState>| {
+            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
+            else {
+                return PaletteEvent::Error("Secondary window unavailable".to_string());
+            };
             tile_state.create_hierarchy_tile(tile_id);
             PaletteEvent::Exit
         },
@@ -469,8 +563,13 @@ pub fn create_inspector(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Inspector",
         TILES_LABEL,
-        move |_: In<String>, mut windows: ResMut<tiles::WindowManager>| {
-            let tile_state = windows.main_mut();
+        move |_: In<String>,
+              mut windows: ResMut<tiles::WindowManager>,
+              palette_state: Res<CommandPaletteState>| {
+            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
+            else {
+                return PaletteEvent::Error("Secondary window unavailable".to_string());
+            };
             tile_state.create_inspector_tile(tile_id);
             PaletteEvent::Exit
         },
@@ -481,8 +580,13 @@ pub fn create_schematic_tree(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Schematic Tree",
         TILES_LABEL,
-        move |_: In<String>, mut windows: ResMut<tiles::WindowManager>| {
-            let tile_state = windows.main_mut();
+        move |_: In<String>,
+              mut windows: ResMut<tiles::WindowManager>,
+              palette_state: Res<CommandPaletteState>| {
+            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
+            else {
+                return PaletteEvent::Error("Secondary window unavailable".to_string());
+            };
             tile_state.create_tree_tile(tile_id);
             PaletteEvent::Exit
         },
@@ -493,8 +597,13 @@ pub fn create_dashboard(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Dashboard",
         TILES_LABEL,
-        move |_: In<String>, mut windows: ResMut<tiles::WindowManager>| {
-            let tile_state = windows.main_mut();
+        move |_: In<String>,
+              mut windows: ResMut<tiles::WindowManager>,
+              palette_state: Res<CommandPaletteState>| {
+            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
+            else {
+                return PaletteEvent::Error("Secondary window unavailable".to_string());
+            };
             tile_state.create_dashboard_tile(Default::default(), "Dashboard".to_string(), tile_id);
             PaletteEvent::Exit
         },
@@ -505,8 +614,13 @@ pub fn create_sidebars() -> PaletteItem {
     PaletteItem::new(
         "Create Sidebars",
         TILES_LABEL,
-        move |_: In<String>, mut windows: ResMut<tiles::WindowManager>| {
-            let tile_state = windows.main_mut();
+        move |_: In<String>,
+              mut windows: ResMut<tiles::WindowManager>,
+              palette_state: Res<CommandPaletteState>| {
+            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
+            else {
+                return PaletteEvent::Error("Secondary window unavailable".to_string());
+            };
             tile_state.create_sidebars_layout();
             PaletteEvent::Exit
         },
@@ -523,8 +637,14 @@ pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
                         "Enter the name of the msg containing the video frames",
                     ),
                     "",
-                    move |In(msg_name): In<String>, mut windows: ResMut<tiles::WindowManager>| {
-                        let tile_state = windows.main_mut();
+                    move |In(msg_name): In<String>,
+                          mut windows: ResMut<tiles::WindowManager>,
+                          palette_state: Res<CommandPaletteState>| {
+                        let Some(tile_state) =
+                            target_tile_state_mut(&mut windows, palette_state.target_window)
+                        else {
+                            return PaletteEvent::Error("Secondary window unavailable".to_string());
+                        };
                         let msg_name = msg_name.trim();
                         let label = format!("Video Stream {}", msg_name);
                         tile_state.create_video_stream_tile(msg_id(msg_name), label, tile_id);
@@ -1418,6 +1538,7 @@ impl Default for PalettePage {
             goto_tick(),
             fix_current_time_range(),
             set_time_range_behavior(),
+            create_window(),
             create_graph(None),
             create_action(None),
             create_monitor(None),

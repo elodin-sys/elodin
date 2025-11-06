@@ -57,12 +57,22 @@ fn parse_window(node: &KdlNode, src: &str) -> Result<WindowSchematic, KdlSchemat
             span: node.span(),
         })?;
 
-    let path = trim_wrapping_braces(raw_path.trim()).to_string();
+    let path = raw_path.trim();
     if path.is_empty() {
         return Err(KdlSchematicError::InvalidValue {
             property: "path".to_string(),
             node: node.name().to_string(),
             expected: "a non-empty relative path".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        });
+    }
+
+    if path.contains('{') || path.contains('}') {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "path".to_string(),
+            node: node.name().to_string(),
+            expected: "a path without braces".to_string(),
             src: src.to_string(),
             span: node.span(),
         });
@@ -75,16 +85,10 @@ fn parse_window(node: &KdlNode, src: &str) -> Result<WindowSchematic, KdlSchemat
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty());
 
-    Ok(WindowSchematic { title, path })
-}
-
-fn trim_wrapping_braces(value: &str) -> &str {
-    let bytes = value.as_bytes();
-    if bytes.len() >= 2 && bytes[0] == b'{' && bytes[bytes.len() - 1] == b'}' {
-        &value[1..value.len() - 1]
-    } else {
-        value
-    }
+    Ok(WindowSchematic {
+        title,
+        path: path.to_string(),
+    })
 }
 
 fn parse_panel(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
