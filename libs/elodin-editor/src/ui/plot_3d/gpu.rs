@@ -9,7 +9,7 @@ use crate::{
 };
 use bevy::{
     app::{Plugin, PostUpdate},
-    asset::{AssetApp, Assets, Handle, load_internal_asset},
+    asset::{AssetApp, Assets, Handle, uuid_handle, load_internal_asset},
     color::ColorToComponents,
     core_pipeline::{
         core_3d::{CORE_3D_DEPTH_FORMAT, Transparent3d},
@@ -54,8 +54,7 @@ use bevy_render::{
 use big_space::GridCell;
 use binding_types::storage_buffer_read_only_sized;
 
-const LINE_SHADER_HANDLE: Handle<Shader> =
-    Handle::weak_from_u128(267882706676311365151377673216596804695);
+const LINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("bfffa3c4-9401-4b6e-b3ab-3564180352f1");
 
 #[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum PlotSystem {
@@ -84,7 +83,7 @@ impl Plugin for Plot3dGpuPlugin {
                 PlotSystem::QueueLine
                     .in_set(RenderSet::Queue)
                     .ambiguous_with(
-                        bevy::pbr::queue_material_meshes::<bevy::pbr::StandardMaterial>,
+                        bevy::pbr::queue_material_meshes,
                     ),
             )
             .add_systems(ExtractSchedule, extract_lines)
@@ -272,7 +271,7 @@ impl SpecializedRenderPipeline for LinePipeline {
             .clone();
 
         let layout = vec![
-            view_layout,
+            //view_layout,
             self.uniform_layout.clone(),
             self.values_layout.clone(),
             self.index_layout.clone(),
@@ -287,14 +286,14 @@ impl SpecializedRenderPipeline for LinePipeline {
         RenderPipelineDescriptor {
             vertex: VertexState {
                 shader: LINE_SHADER_HANDLE,
-                entry_point: "vertex".into(),
+                entry_point: Some("vertex".into()),
                 shader_defs: shader_defs.clone(),
                 buffers: line_vertex_buffer_layouts(),
             },
             fragment: Some(FragmentState {
                 shader: LINE_SHADER_HANDLE,
                 shader_defs,
-                entry_point: "fragment".into(),
+                entry_point: Some("fragment".into()),
                 targets: vec![Some(ColorTargetState {
                     format,
                     blend: Some(BlendState::ALPHA_BLENDING),

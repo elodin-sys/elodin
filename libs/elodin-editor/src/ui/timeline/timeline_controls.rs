@@ -165,7 +165,7 @@ impl WidgetSystem for TimelineControls<'_> {
                                         ui.memory_mut(|mem| mem.toggle_popup(popup_id));
                                     }
                                     configure_combo_box(ui.style_mut());
-                                    egui::Popup::popup_above_or_below_widget(
+                                    egui::popup_above_or_below_widget(
                                         ui,
                                         popup_id,
                                         &res,

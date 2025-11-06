@@ -48,7 +48,7 @@ fn create_startup_window(
         commands.spawn((
             Window {
                 title: "Elodin".to_owned(),
-                resolution: WindowResolution::new(730.0, 470.0),
+                resolution: WindowResolution::new(730, 470),
                 resize_constraints: WindowResizeConstraints {
                     min_width: 730.0,
                     min_height: 470.0,

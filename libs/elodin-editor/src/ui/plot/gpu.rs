@@ -92,7 +92,7 @@ impl Plugin for PlotGpuPlugin {
                 PlotSystem::QueueLine
                     .in_set(RenderSystems::Queue)
                     .ambiguous_with(
-                        bevy::pbr::queue_material_meshes::<bevy::pbr::StandardMaterial>,
+                        bevy::pbr::queue_material_meshes,
                     ),
             )
             .add_systems(ExtractSchedule, extract_lines)
@@ -356,14 +356,14 @@ impl SpecializedRenderPipeline for LinePipeline {
         RenderPipelineDescriptor {
             vertex: VertexState {
                 shader: shader.clone(),
-                entry_point: "vertex".into(),
+                entry_point: Some("vertex".into()),
                 shader_defs: shader_defs.clone(),
                 buffers: line_vertex_buffer_layouts(),
             },
             fragment: Some(FragmentState {
                 shader,
                 shader_defs,
-                entry_point: "fragment".into(),
+                entry_point: Some("fragment".into()),
                 targets: vec![Some(ColorTargetState {
                     format,
                     blend: Some(BlendState::ALPHA_BLENDING),
