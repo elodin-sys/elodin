@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    
+<link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css" media="print" onload="this.media='all'; this.onload = null">
+<noscript><link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css"></noscript>
+
+    
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-297/fonts/spacegrotesk.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-297/fonts/ibm-plex-sans-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-297/fonts/ibm-plex-sans-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-297/fonts/ibm-plex-sans-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-297/fonts/ibm-plex-sans-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-297/fonts/ibm-plex-sans-700.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-297/fonts/ibm-plex-mono-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-297/fonts/ibm-plex-mono-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-297/fonts/ibm-plex-mono-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-297/fonts/ibm-plex-mono-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-297/fonts/ibm-plex-mono-700.woff2" type="font/woff2" crossorigin>
+
+    
+<link rel="stylesheet" href="https://docs.elodin.systems/preview/pr-297/main.css">
+
+    
+  <meta name="theme-color" content="#fff">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://docs.elodin.systems/preview/pr-297/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="https://docs.elodin.systems/preview/pr-297/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="https://docs.elodin.systems/preview/pr-297/favicon-16x16.png">
+  
+    <link rel="manifest" href="https://docs.elodin.systems/preview/pr-297/site.webmanifest" crossorigin>
+  
+
+
+  
+  
+    
+  
+
+  
+  
+    
+    
+  
+
+  
+    
+  
+  
+  
+  
+    
+  
+
+  
+
+
+  <meta name="robots" content="index, follow">
+  <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <meta name="bingbot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+
+
+	
+
+
+	
+
+<title>Why ECS for Physics? | Elodin</title>
+<meta name="description" content="Why ECS for Physics?">
+<link rel="canonical" href="https://docs.elodin.systems/preview/pr-297/home/tao/ecs/">
+
+
+  <meta name="twitter:card" content="summary_large_image">
+  
+    <meta name="twitter:image" content="https://docs.elodin.systems/preview/pr-297/logo.png">
+  
+  <meta name="twitter:title" content="Why ECS for Physics?">
+  <meta name="twitter:description" content="Why ECS for Physics?">
+  <meta name="twitter:site" content="@elodinsystems">
+  <meta name="twitter:creator" content="@elodinsystems">
+
+  <meta property="og:title" content="Why ECS for Physics?">
+  <meta property="og:description" content="Why ECS for Physics?">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://docs.elodin.systems/preview/pr-297/home/tao/ecs/">
+
+  
+    <meta property="og:image" content="https://docs.elodin.systems/preview/pr-297/logo.png">
+  
+
+  <meta property="og:updated_time" content="">
+  <meta property="og:site_name" content="Why ECS for Physics?">
+
+  
+
+  
+
+  
+  <meta property="og:locale" content="en_US">
+
+
+
+
+
+  
+
+
+
+
+
+<script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "BreadcrumbList",
+    
+      
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          {
+            "@type": "ListItem",
+            "position":  1 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-297/"
+          },
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  2 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-297/home/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  3 ,
+            "name": "Tao",
+            "item": "https://docs.elodin.systems/preview/pr-297/home/tao/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  4 ,
+            "name": "Ecs",
+            "item": "https://docs.elodin.systems/preview/pr-297/home/tao/ecs/"
+          },
+        
+      
+    
+  }
+</script>
+
+
+
+
+</head>
+
+<body class="docs single">
+  
+    
+    
+    
+  
+  
+    
+<header class="navbar fixed-top navbar-expand-md navbar-light">
+    <div class="container">
+        <div class="col-2" style="display: flex; gap: 20px">
+            <a
+                href="https://elodin.systems"
+                class="nav-link-icon"
+                target="_blank"
+                rel="noopener noreferrer"
+                ><svg
+                    width="20"
+                    height="25"
+                    viewBox="0 0 20 25"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                >
+                    <path
+                        d="M10 0H15C17.7615 0 20 2.23858 20 5V20.0001C20 22.7615 17.7615 25.0001 15 25.0001H5C2.23853 25.0001 0 22.7615 0 20V5C0 2.23858 2.23853 1.90735e-06 5 1.90735e-06V5V20.0001H15V5L5 5C5 2.23858 7.23853 0 10 0Z"
+                        fill="currentColor"
+                    />
+                </svg>
+            </a>
+            <span>
+                <select name="version" class="version-select" disabled>
+                    <option value="v0.15.4-alpha.0" selected>
+                        v0.15.4-alpha.0
+                    </option>
+                </select>
+            </span>
+        </div>
+
+        <div
+            class="col-2 d-none d-lg-block"
+            style="margin-left: 56px"
+        >
+            <form style="width: 264px">
+                <input
+                    id="userinput"
+                    class="form-control is-search"
+                    type="search"
+                    placeholder="Search"
+                    aria-label="Search"
+                    autocomplete="off"
+                />
+                <div id="suggestions" class="shadow bg-white rounded"></div>
+            </form>
+        </div>
+        <div class="col-2 d-none d-md-block"></div>
+        <div class="col-2" style="margin-left: 35px">
+            <ul class="navbar-nav main-nav me-auto">
+                      
+                <li
+                    class="nav-item home active"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-297/home/quickstart"
+                        >HOME</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-297/reference/overview"
+                        >Reference</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-297/releases/changelog"
+                        >Releases</a
+                    >
+                </li>
+                  
+            </ul>
+        </div>
+        <div class="col-1"></div>
+        <div
+            class="col-2 d-none d-xl-block"
+            style="margin-right: 63px"
+        >
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://github.com/elodin-sys/elodin">
+                        <i class="bx bxl-github"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://elodin.app/discord">
+                        <i class="bx bxl-discord-alt"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a id="mode-1" class="nav-link nav-link-icon toggle-dark">
+                        <i class='bx bxs-sun'></i>
+                    </a>
+                    <a id="mode-2" class="nav-link nav-link-icon toggle-light">
+                        <i class='bx bxs-moon'></i>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</header>
+
+  
+  <div class="wrap container tom-green" role="document">
+      <div class="content">
+          <div class="row flex-xxl-nowrap justify-content-center">
+              
+<div class="col-lg-5 col-xl-4 docs-sidebar d-none d-lg-block">
+    <nav class="docs-links" aria-label="Main navigation">
+          
+        <h3>Overview</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-297/home/quickstart/"
+                    >Quick Start</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-297/home/3-body/"
+                    >Three-Body Orbit</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-297/home/bouncing-ball/"
+                    >Bouncing Ball</a
+                >
+            </li>
+            
+        </ul>
+          
+         
+        <h3>Aleph</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-297/home/aleph/setup/"
+                    >Aleph Setup</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-297/home/aleph/fc-board-flash/"
+                    >Flash Expansion Board</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-297/home/aleph/reset/"
+                    >Factory Reset</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-297/home/aleph/betaflight/"
+                    >Betaflight Install</a
+                >
+            </li>
+            
+        </ul>
+         
+         
+        <h3>Elodin DB</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-297/home/db/overview/"
+                    >Overview</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-297/home/db/architecture/"
+                    >Architecture</a
+                >
+            </li>
+            
+        </ul>
+         
+         
+        <h3>The Tao of Elodin Sim</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-297/home/tao/introduction/"
+                    >What is Elodin</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link active"
+                    href="https://docs.elodin.systems/preview/pr-297/home/tao/ecs/"
+                    >Why ECS for Physics?</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-297/home/tao/data-flow/"
+                    >ECS Data Flow</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-297/home/tao/monte-carlo/"
+                    >Monte Carlo</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-297/home/tao/jax-nox/"
+                    >NumPy, JAX &amp; NOX</a
+                >
+            </li>
+            
+        </ul>
+          
+    </nav>
+</div>
+
+               
+<nav
+    class="docs-toc d-none d-xxl-block col-xl-3"
+    aria-label="Secondary navigation"
+>
+    <div class="page-links">
+        <h3>On this page</h3>
+        <nav id="TableOfContents">
+            <ul>
+                
+                <li><a href="https://docs.elodin.systems/preview/pr-297/home/tao/ecs/#a-history-lesson-on-ecs">A History Lesson on ECS</a></li>
+                 
+                <li><a href="https://docs.elodin.systems/preview/pr-297/home/tao/ecs/#an-ecs-based-configurable-physics-engine">An ECS-based Configurable Physics Engine</a></li>
+                 
+            </ul>
+        </nav>
+    </div>
+</nav>
+ 
+              <main class="docs-content col-lg-11 col-xxl-10">
+                  <h1>Why ECS for Physics?</h1>
+                   <p>At Elodin's core is a physics toolkit that utilizes the ECS design pattern.
+This toolkit allows our users to create incredibly efficient physics simulations easily.
+Elodin's ECS engine is unique in that it does all the computation using <a href="https://openxla.org/xla">XLA</a>, a compiler for linear algebra.
+Our engine allows your simulations to run on GPU, TPU, or CPU, all with no code changes.</p>
+<h2 id="a-history-lesson-on-ecs">A History Lesson on ECS</h2>
+<p>ECS stands for Entity Component System, a design pattern that has recently come into vogue. It is most used in the context of video games, but as we will find out, it has been used in other places. I'm going to tell a slightly falsified version of the history of ECS to motivate its existence. The first thing to understand is how video games, simulations, and many other software pieces were historically developed using a vaguely object-oriented model. The player would be a class like:</p>
+<pre data-lang="swift" class="language-swift z-code"><code class="language-swift" data-lang="swift"><span class="z-source z-swift"><span class="z-storage z-type z-swift">struct</span> Player {
+</span><span class="z-source z-swift">   <span class="z-storage z-type z-swift">var</span> pos: Vector3<span class="z-keyword z-operator z-comparative z-swift">&lt;</span>f64<span class="z-keyword z-operator z-comparative z-swift">&gt;</span>
+</span><span class="z-source z-swift">   <span class="z-storage z-type z-swift">var</span> vel: Vector3<span class="z-keyword z-operator z-comparative z-swift">&lt;</span>f64<span class="z-keyword z-operator z-comparative z-swift">&gt;</span>
+</span><span class="z-source z-swift">}
+</span></code></pre>
+<p>Enemies would be another class in a similar vein. Maybe you would share some attributes between similar types of objects using inheritance, like:</p>
+<pre data-lang="swift" class="language-swift z-code"><code class="language-swift" data-lang="swift"><span class="z-source z-swift"><span class="z-storage z-type z-swift">struct</span> GameObject {
+</span><span class="z-source z-swift">   <span class="z-storage z-type z-swift">var</span> pos: Vector3<span class="z-keyword z-operator z-comparative z-swift">&lt;</span>f64<span class="z-keyword z-operator z-comparative z-swift">&gt;</span>
+</span><span class="z-source z-swift">   <span class="z-storage z-type z-swift">var</span> vel: Vector3<span class="z-keyword z-operator z-comparative z-swift">&lt;</span>f64<span class="z-keyword z-operator z-comparative z-swift">&gt;</span>
+</span><span class="z-source z-swift">}
+</span><span class="z-source z-swift"><span class="z-storage z-type z-swift">struct</span> Player: GameObject {
+</span><span class="z-source z-swift">  <span class="z-storage z-type z-swift">var</span> inventory: [InventoryItem]
+</span><span class="z-source z-swift">}
+</span><span class="z-source z-swift"><span class="z-storage z-type z-swift">struct</span> Enemy: GameObject {}
+</span></code></pre>
+<p>This way of modeling virtual worlds can feel natural since it matches how we often think about the world. But it has some serious downsides. One key problem is that the world does not have a strict hierarchy. Oftentimes, two things may share a similar behavior but are unrelated in the traditional sense. The other issue is performance. The game object style stores all of an object's data together in a single class, often in the heap. At first, this sounds like an advantage since you can load a single object's data together at the same time. But it has some serious downsides. What if I want to integrate the velocity of all the <code>GameObjects</code> and add it to the position? I will have to write a for loop over all the GameObjects in the world and run the integrate function each time. Each time that function runs, the CPU loads the required fields from RAM and into the CPU cache. But, the CPU doesn't just load the needed fields; it loads all the memory around the <code>GameObject</code> into the cache. This process is called cache prefetching. Ideally, all the GameObjects would be loaded into the cache at once since accessing RAM is slow. But it's time-consuming for the CPU to do that since they are all spread around the heap and are usually large. The next issue is that it is difficult for systems like this to utilize vector instructions effectively. Vector instructions allow you to run the same computation many times in parallel.</p>
+<p>ECS has taken the game development world by storm because it solves both problems simply and elegantly. ECS is best visualized as a table</p>
+<table><thead><tr><th>Entity ID</th><th>Pos</th><th>Vel</th><th>Health</th><th>Inventory</th></tr></thead><tbody>
+<tr><td>1</td><td>0,0,0</td><td>10,0,0</td><td>1.0</td><td></td></tr>
+<tr><td>2</td><td>1,1,2</td><td>0,0,0</td><td>0.0</td><td>[Apple, Pear]</td></tr>
+</tbody></table>
+<p>In ECS, you have entities, components, and systems. Entities are collections of components and an ID. Components are individual properties associated with an entity, like position, velocity, or health. In an ECS system, the integrated example from above would look like this:</p>
+<pre data-lang="rust" class="language-rust z-code"><code class="language-rust" data-lang="rust"><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-function z-rust"><span class="z-storage z-type z-function z-rust">fn</span> </span><span class="z-entity z-name z-function z-rust">integrate</span></span><span class="z-meta z-function z-rust"><span class="z-meta z-function z-parameters z-rust"><span class="z-punctuation z-section z-parameters z-begin z-rust">(</span><span class="z-variable z-parameter z-rust">query</span><span class="z-punctuation z-separator z-rust">:</span> <span class="z-meta z-generic z-rust">Query<span class="z-punctuation z-definition z-generic z-begin z-rust">&lt;</span><span class="z-punctuation z-section z-group z-begin z-rust">(</span>Pos, Vel<span class="z-punctuation z-section z-group z-end z-rust">)</span><span class="z-punctuation z-definition z-generic z-end z-rust">&gt;</span></span></span><span class="z-meta z-function z-rust"><span class="z-meta z-function z-parameters z-rust"><span class="z-punctuation z-section z-parameters z-end z-rust">)</span></span></span></span><span class="z-meta z-function z-rust"> </span><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-begin z-rust">{</span>
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust">  <span class="z-keyword z-control z-rust">for</span> <span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span><span class="z-storage z-modifier z-rust">mut</span> pos<span class="z-punctuation z-separator z-rust">,</span> vel</span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span> <span class="z-keyword z-operator z-rust">in</span> query <span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-begin z-rust">{</span>
+</span></span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"><span class="z-meta z-block z-rust">    pos <span class="z-keyword z-operator z-assignment z-rust">+=</span> <span class="z-constant z-other z-rust">DELTA_T</span> <span class="z-keyword z-operator z-arithmetic z-rust">*</span> vel
+</span></span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"><span class="z-meta z-block z-rust">  </span><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-end z-rust">}</span></span>
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"></span><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-end z-rust">}</span></span></span>
+</span></code></pre>
+<p>The code above describes a system, basically a function that operates on a set of components. When this function is run, the computer prefetches all the positions and all the velocities at once. This means that while <code>integrate</code> is running, you never have any cache-missing. It also means that you can effectively utilize vector instructions to speed up the computation. Below is a hypothetical implementation of <code>integrate</code>, where you interact with the entire array at once.</p>
+<pre data-lang="rust" class="language-rust z-code"><code class="language-rust" data-lang="rust"><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-function z-rust"><span class="z-storage z-type z-function z-rust">fn</span> </span><span class="z-entity z-name z-function z-rust">integrate</span></span><span class="z-meta z-function z-rust"><span class="z-meta z-function z-parameters z-rust"><span class="z-punctuation z-section z-parameters z-begin z-rust">(</span><span class="z-variable z-parameter z-rust">pos</span><span class="z-punctuation z-separator z-rust">:</span> <span class="z-meta z-generic z-rust">Array<span class="z-punctuation z-definition z-generic z-begin z-rust">&lt;</span>Pos<span class="z-punctuation z-definition z-generic z-end z-rust">&gt;</span></span>, <span class="z-variable z-parameter z-rust">vel</span><span class="z-punctuation z-separator z-rust">:</span> <span class="z-meta z-generic z-rust">Array<span class="z-punctuation z-definition z-generic z-begin z-rust">&lt;</span>Vel<span class="z-punctuation z-definition z-generic z-end z-rust">&gt;</span></span></span><span class="z-meta z-function z-rust"><span class="z-meta z-function z-parameters z-rust"><span class="z-punctuation z-section z-parameters z-end z-rust">)</span></span></span></span><span class="z-meta z-function z-rust"> </span><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-begin z-rust">{</span>
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust">  pos <span class="z-keyword z-operator z-assignment z-rust">+=</span> <span class="z-constant z-other z-rust">DELTA_T</span> <span class="z-keyword z-operator z-arithmetic z-rust">*</span> vel<span class="z-punctuation z-terminator z-rust">;</span>
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"></span><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-end z-rust">}</span></span></span>
+</span></code></pre>
+<p>The clean version of the ECS story is that it has become a more appealing technology as CPU and GPU speed has rapidly outpaced the speed of memory. High-performance applications are usually dominated not by the actual computation time but by memory waits.</p>
+<p>The true history is that ECS has likely been developed numerous times independently. Some sources (i.e., Wikipedia) cite the 1998 game Thief: The Dark Project as the first time it was used, but they were largely popularized roughly ten years later in a series of blog posts by Adam Martin. Recently, they are starting to gain traction outside of game development.</p>
+<h2 id="an-ecs-based-configurable-physics-engine">An ECS-based Configurable Physics Engine</h2>
+<p>ECS isn't just great for video games; it is widely applicable to all kinds of applications. In particular, simulations are a perfect fit for ECS. Simulations benefit from both the organization and performance aspects of ECS; after all, what are video games but complex, not very realistic simulations?</p>
+<p>We want to build an ECS-based physics engine that utilizes all of ECS's benefits and is easy for non-professional software engineers to use. Historically, writing code that utilizes vectorized operations was a harrowing manual process. Engineers had to write code in an obscure, often difficult-to-read way (<a href="https://mcyoung.xyz/2023/11/27/simd-base64/">https://mcyoung.xyz/2023/11/27/simd-base64/</a>). While the results were very performant, they were not very readable. Simulation code is already difficult to understand due to its heavy reliance on often obscure mathematical methods. Adding complex performance optimizations to that is a recipe for confusion.</p>
+<p>Thankfully, there is another math-heavy field that deals with this exact problem – Machine Learning (ML). There are several systems built for machine learning that allow efficient vectorized operations without sacrificing readability. We will focus on two related projects, JAX and XLA. XLA is a compiler that compiles linear algebra operations to GPU, CPU, or TPU. JAX is a JIT for Python that turns standard numpy operations into XLA intermediate representation called StableHLO – technically, it uses MHLO, which is a compatible but distinct IR to StableHLO, which is then converted by XLA into StableHLO. JAX is wonderful because it allows anyone comfortable with Numpy to write efficient code for the GPU. Python is quickly becoming the lingua franca of scientific programming, so this feature is of particular interest.</p>
+<p>Our simulation engine works by merging ECS and Jax into a unified platform. We have ported a subset of Jax's features to Rust, a system we call Nox. Here is an example of how to write a basic six DOF (degrees-of-freedom) physics engine using Nox and our ECS.</p>
+<pre data-lang="rust" class="language-rust z-code"><code class="language-rust" data-lang="rust"><span class="z-source z-rust"><span class="z-meta z-annotation z-rust"><span class="z-punctuation z-definition z-annotation z-rust">#</span><span class="z-punctuation z-section z-group z-begin z-rust">[</span><span class="z-variable z-annotation z-rust">derive</span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span></span></span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust">Clone<span class="z-punctuation z-separator z-rust">,</span> Component<span class="z-punctuation z-separator z-rust">,</span> Default</span></span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span></span><span class="z-punctuation z-section z-group z-end z-rust">]</span></span>
+</span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-storage z-type z-struct z-rust">struct</span> </span><span class="z-meta z-struct z-rust"><span class="z-entity z-name z-struct z-rust">Pos</span></span><span class="z-meta z-struct z-rust"><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span><span class="z-meta z-generic z-rust">SpatialPos<span class="z-punctuation z-definition z-generic z-begin z-rust">&lt;</span><span class="z-storage z-type z-rust">f64</span><span class="z-punctuation z-definition z-generic z-end z-rust">&gt;</span></span></span><span class="z-punctuation z-section z-group z-end z-rust">)</span></span><span class="z-punctuation z-terminator z-rust">;</span>
+</span><span class="z-source z-rust"><span class="z-meta z-annotation z-rust"><span class="z-punctuation z-definition z-annotation z-rust">#</span><span class="z-punctuation z-section z-group z-begin z-rust">[</span><span class="z-variable z-annotation z-rust">derive</span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span></span></span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust">Clone<span class="z-punctuation z-separator z-rust">,</span> Component<span class="z-punctuation z-separator z-rust">,</span> Default</span></span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span></span><span class="z-punctuation z-section z-group z-end z-rust">]</span></span>
+</span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-storage z-type z-struct z-rust">struct</span> </span><span class="z-meta z-struct z-rust"><span class="z-entity z-name z-struct z-rust">Vel</span></span><span class="z-meta z-struct z-rust"><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span><span class="z-meta z-generic z-rust">SpatialMotion<span class="z-punctuation z-definition z-generic z-begin z-rust">&lt;</span><span class="z-storage z-type z-rust">f64</span><span class="z-punctuation z-definition z-generic z-end z-rust">&gt;</span></span></span><span class="z-punctuation z-section z-group z-end z-rust">)</span></span><span class="z-punctuation z-terminator z-rust">;</span>
+</span><span class="z-source z-rust"><span class="z-meta z-annotation z-rust"><span class="z-punctuation z-definition z-annotation z-rust">#</span><span class="z-punctuation z-section z-group z-begin z-rust">[</span><span class="z-variable z-annotation z-rust">derive</span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span></span></span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust">Clone<span class="z-punctuation z-separator z-rust">,</span> Component<span class="z-punctuation z-separator z-rust">,</span> Default</span></span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span></span><span class="z-punctuation z-section z-group z-end z-rust">]</span></span>
+</span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-storage z-type z-struct z-rust">struct</span> </span><span class="z-meta z-struct z-rust"><span class="z-entity z-name z-struct z-rust">Accel</span></span><span class="z-meta z-struct z-rust"><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span><span class="z-meta z-generic z-rust">SpatialMotion<span class="z-punctuation z-definition z-generic z-begin z-rust">&lt;</span><span class="z-storage z-type z-rust">f64</span><span class="z-punctuation z-definition z-generic z-end z-rust">&gt;</span></span></span><span class="z-punctuation z-section z-group z-end z-rust">)</span></span><span class="z-punctuation z-terminator z-rust">;</span>
+</span><span class="z-source z-rust"><span class="z-meta z-annotation z-rust"><span class="z-punctuation z-definition z-annotation z-rust">#</span><span class="z-punctuation z-section z-group z-begin z-rust">[</span><span class="z-variable z-annotation z-rust">derive</span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span></span></span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust">Clone<span class="z-punctuation z-separator z-rust">,</span> Component<span class="z-punctuation z-separator z-rust">,</span> Default</span></span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span></span><span class="z-punctuation z-section z-group z-end z-rust">]</span></span>
+</span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-storage z-type z-struct z-rust">struct</span> </span><span class="z-meta z-struct z-rust"><span class="z-entity z-name z-struct z-rust">ExternalForce</span></span><span class="z-meta z-struct z-rust"><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span><span class="z-meta z-generic z-rust">SpatialForce<span class="z-punctuation z-definition z-generic z-begin z-rust">&lt;</span><span class="z-storage z-type z-rust">f64</span><span class="z-punctuation z-definition z-generic z-end z-rust">&gt;</span></span></span><span class="z-punctuation z-section z-group z-end z-rust">)</span></span><span class="z-punctuation z-terminator z-rust">;</span>
+</span><span class="z-source z-rust"><span class="z-meta z-annotation z-rust"><span class="z-punctuation z-definition z-annotation z-rust">#</span><span class="z-punctuation z-section z-group z-begin z-rust">[</span><span class="z-variable z-annotation z-rust">derive</span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span></span></span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust">Clone<span class="z-punctuation z-separator z-rust">,</span> Component<span class="z-punctuation z-separator z-rust">,</span> Default</span></span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span></span><span class="z-punctuation z-section z-group z-end z-rust">]</span></span>
+</span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-storage z-type z-struct z-rust">struct</span> </span><span class="z-meta z-struct z-rust"><span class="z-entity z-name z-struct z-rust">Inertia</span></span><span class="z-meta z-struct z-rust"><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span><span class="z-meta z-generic z-rust">SpatialInertia<span class="z-punctuation z-definition z-generic z-begin z-rust">&lt;</span><span class="z-storage z-type z-rust">f64</span><span class="z-punctuation z-definition z-generic z-end z-rust">&gt;</span></span></span><span class="z-punctuation z-section z-group z-end z-rust">)</span></span><span class="z-punctuation z-terminator z-rust">;</span>
+</span><span class="z-source z-rust"><span class="z-meta z-annotation z-rust"><span class="z-punctuation z-definition z-annotation z-rust">#</span><span class="z-punctuation z-section z-group z-begin z-rust">[</span><span class="z-variable z-annotation z-rust">derive</span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span></span></span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust">Archetype<span class="z-punctuation z-separator z-rust">,</span> Default</span></span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span></span><span class="z-punctuation z-section z-group z-end z-rust">]</span></span>
+</span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-storage z-type z-struct z-rust">struct</span> </span><span class="z-meta z-struct z-rust"><span class="z-entity z-name z-struct z-rust">Body</span> </span><span class="z-meta z-struct z-rust"><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-begin z-rust">{</span>
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-meta z-block z-rust">    <span class="z-variable z-other z-member z-rust">pos</span><span class="z-punctuation z-separator z-type z-rust">:</span> Pos,
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-meta z-block z-rust">    <span class="z-variable z-other z-member z-rust">vel</span><span class="z-punctuation z-separator z-type z-rust">:</span> Vel,
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-meta z-block z-rust">    <span class="z-variable z-other z-member z-rust">accel</span><span class="z-punctuation z-separator z-type z-rust">:</span> Accel,
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-meta z-block z-rust">    <span class="z-variable z-other z-member z-rust">external_force</span><span class="z-punctuation z-separator z-type z-rust">:</span> ExternalForce
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-meta z-block z-rust"></span><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-end z-rust">}</span></span></span>
+</span><span class="z-source z-rust">
+</span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-function z-rust"><span class="z-storage z-type z-function z-rust">fn</span> </span><span class="z-entity z-name z-function z-rust">calculate_accel</span></span><span class="z-meta z-function z-rust"><span class="z-meta z-function z-parameters z-rust"><span class="z-punctuation z-section z-parameters z-begin z-rust">(</span><span class="z-variable z-parameter z-rust">query</span><span class="z-punctuation z-separator z-rust">:</span> <span class="z-meta z-generic z-rust">Query<span class="z-punctuation z-definition z-generic z-begin z-rust">&lt;</span><span class="z-punctuation z-section z-group z-begin z-rust">(</span>Inertia, ExternalForce<span class="z-punctuation z-section z-group z-end z-rust">)</span><span class="z-punctuation z-definition z-generic z-end z-rust">&gt;</span></span></span><span class="z-meta z-function z-rust"><span class="z-meta z-function z-parameters z-rust"><span class="z-punctuation z-section z-parameters z-end z-rust">)</span></span></span></span><span class="z-meta z-function z-rust"> <span class="z-meta z-function z-return-type z-rust"><span class="z-punctuation z-separator z-rust">-&gt;</span> <span class="z-meta z-generic z-rust">ComponentArray<span class="z-punctuation z-definition z-generic z-begin z-rust">&lt;</span>Accel<span class="z-punctuation z-definition z-generic z-end z-rust">&gt;</span></span></span> </span><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-begin z-rust">{</span>
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust">  query<span class="z-punctuation z-accessor z-dot z-rust">.</span><span class="z-support z-function z-rust">map</span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span><span class="z-meta z-function z-closure z-rust"><span class="z-meta z-function z-parameters z-rust"><span class="z-punctuation z-section z-parameters z-begin z-rust">|</span></span></span><span class="z-meta z-function z-closure z-rust"><span class="z-meta z-function z-parameters z-rust"><span class="z-variable z-parameter z-rust">inertia</span><span class="z-punctuation z-separator z-rust">,</span> <span class="z-variable z-parameter z-rust">force</span><span class="z-punctuation z-section z-parameters z-end z-rust">|</span></span> </span><span class="z-meta z-function z-closure z-rust"><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-begin z-rust">{</span>
+</span></span></span></span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"><span class="z-meta z-group z-rust"><span class="z-meta z-function z-closure z-rust"><span class="z-meta z-block z-rust">    Accel<span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span>force <span class="z-keyword z-operator z-arithmetic z-rust">/</span> inertia</span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span>
+</span></span></span></span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"><span class="z-meta z-group z-rust"><span class="z-meta z-function z-closure z-rust"><span class="z-meta z-block z-rust">  </span><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-end z-rust">}</span></span></span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span>
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"></span><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-end z-rust">}</span></span></span>
+</span><span class="z-source z-rust">
+</span><span class="z-source z-rust"><span class="z-storage z-type z-rust">let</span> world <span class="z-keyword z-operator z-assignment z-rust">=</span> <span class="z-meta z-path z-rust">World<span class="z-punctuation z-accessor z-rust">::</span></span>default<span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span><span class="z-punctuation z-terminator z-rust">;</span>
+</span><span class="z-source z-rust">world<span class="z-punctuation z-accessor z-dot z-rust">.</span><span class="z-support z-function z-rust">spawn</span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span>Body <span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-begin z-rust">{</span>
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-group z-rust"><span class="z-meta z-block z-rust">  pos<span class="z-punctuation z-separator z-rust">:</span> Pos<span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span><span class="z-meta z-path z-rust">SpatialPos<span class="z-punctuation z-accessor z-rust">::</span></span>linear<span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span><span class="z-constant z-numeric z-float z-rust">1.</span><span class="z-constant z-numeric z-float z-rust">0</span><span class="z-punctuation z-separator z-rust">,</span> <span class="z-constant z-numeric z-float z-rust">0.</span><span class="z-constant z-numeric z-float z-rust">0</span><span class="z-punctuation z-separator z-rust">,</span> <span class="z-constant z-numeric z-float z-rust">0.</span><span class="z-constant z-numeric z-float z-rust">0</span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span>
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-group z-rust"><span class="z-meta z-block z-rust">  external_force<span class="z-punctuation z-separator z-rust">:</span> ExternalForce<span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span><span class="z-meta z-path z-rust">SpatialForce<span class="z-punctuation z-accessor z-rust">::</span></span>linear<span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span><span class="z-constant z-numeric z-float z-rust">0.</span><span class="z-constant z-numeric z-float z-rust">0</span><span class="z-punctuation z-separator z-rust">,</span> <span class="z-keyword z-operator z-arithmetic z-rust">-</span><span class="z-constant z-numeric z-float z-rust">9.</span><span class="z-constant z-numeric z-float z-rust">8</span><span class="z-punctuation z-separator z-rust">,</span> <span class="z-constant z-numeric z-float z-rust">0.</span><span class="z-constant z-numeric z-float z-rust">0</span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span>
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-group z-rust"><span class="z-meta z-block z-rust">  inertia<span class="z-punctuation z-separator z-rust">:</span> Inertia<span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span><span class="z-meta z-path z-rust">SpatialInertia<span class="z-punctuation z-accessor z-rust">::</span></span>mass<span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span><span class="z-constant z-numeric z-float z-rust">1.</span><span class="z-constant z-numeric z-float z-rust">0</span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span>
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-group z-rust"><span class="z-meta z-block z-rust">  <span class="z-keyword z-operator z-range z-rust">..</span><span class="z-support z-type z-rust">Default</span><span class="z-meta z-path z-rust"><span class="z-punctuation z-accessor z-rust">::</span></span>default<span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span>
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-group z-rust"><span class="z-meta z-block z-rust"></span><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-end z-rust">}</span></span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span><span class="z-punctuation z-terminator z-rust">;</span>
+</span><span class="z-source z-rust">
+</span><span class="z-source z-rust"><span class="z-storage z-type z-rust">let</span> exec <span class="z-keyword z-operator z-assignment z-rust">=</span> world<span class="z-punctuation z-accessor z-dot z-rust">.</span><span class="z-support z-function z-rust">build</span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span>calculate_accel<span class="z-punctuation z-accessor z-dot z-rust">.</span><span class="z-meta z-path z-rust">rk4<span class="z-punctuation z-accessor z-rust">::</span></span><span class="z-meta z-generic z-rust"><span class="z-punctuation z-definition z-generic z-begin z-rust">&lt;</span><span class="z-punctuation z-section z-group z-begin z-rust">(</span>Pos, Vel<span class="z-punctuation z-section z-group z-end z-rust">)</span>, <span class="z-punctuation z-section z-group z-begin z-rust">(</span>Vel, Accel<span class="z-punctuation z-section z-group z-end z-rust">)</span><span class="z-punctuation z-definition z-generic z-end z-rust">&gt;</span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span><span class="z-punctuation z-terminator z-rust">;</span>
+</span><span class="z-source z-rust">exec<span class="z-punctuation z-accessor z-dot z-rust">.</span><span class="z-support z-function z-rust">run</span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span><span class="z-punctuation z-terminator z-rust">;</span>
+</span></code></pre>
+<p>Let's walk through what's happening here, and how it works.
+The first code block is dedicated to setting up all the components required for a six-dof system.
+You'll see references to <code>SpatialPos</code>, SpatialMotion, and SpatialForce.
+These are from Featherstone's Spatial Vector Algebra and are a compact way of representing the state of a rigid body with six degrees of freedom.
+You can read a short intro <a href="https://homes.cs.washington.edu/~todorov/courses/amath533/FeatherstoneSlides.pdf">here</a> or in <a href="https://link.springer.com/book/10.1007/978-1-4899-7560-7">Rigid Body Dynamics Algorithms (Featherstone - 2008)</a>.</p>
+<p>Next, you see the <code>Body</code> struct, which is an <code>Archetype</code>, which is a collection of different components that will be found together in an ECS. It allows us to initialize all the components together.</p>
+<p>Then you can see <code>calculate_accel</code>, a function that takes the external forces and torques (SpatialForce contains both) acting on an object and converts them to accelerations.</p>
+<p>Then we spawn a single body into the <code>World</code>, a collection of entities and associated components.</p>
+<p>Then, we build an executable from that world and our systems. You can see that we call a method called <code>rk4</code> on <code>calculate_accel</code>. RK4 refers to Runga Kutta 4, a widely used integrator for differential equations. RK4 works with differential equations in the form:</p>
+<p>$$
+\frac{du}{dt}=f(t,u),\quad u(t_0)=u_0
+$$</p>
+<p>In the function call, you can see two generic parameters (2 tuples). The first specifies which components make up $u$ and the second specifies which components make up $\frac{du}{dt}$</p>
+<p>As you can see, we have built a fairly simple but complete physics simulation in 34 lines of code. It can run on GPU, CPU, or TPU (Tensor Processing Unit).</p>
+<p>Running seamlessly on GPUs is not the only nice benefit of our ECS-based Physics engine. You can also see the type-safety that coding like this provides. Math-heavy code can easily fall victim to type errors when everything is stored in untyped matrices. After all, position and velocity are both just vectors of floats and especially when combined with dense shorthand notation, the room for error is immense. Our ECS system uses typing to guide the reader and writer, ensuring that type errors do not occur.</p>
+<p>We plan to provide several prebuilt simulation pipelines and components, including a version of the popular MuJoCo algorithm and the algorithm used in the Basilisk Astrodynamics framework.</p>
+
+                  
+<div class="footer-line-padding"></div>
+<div class="footer-line"></div>
+<div class="docs-navigation d-flex justify-content-between">
+                                       
+    <a href="https:&#x2F;&#x2F;docs.elodin.systems&#x2F;preview&#x2F;pr-297&#x2F;home&#x2F;tao&#x2F;introduction&#x2F;">
+        <div>
+            <div class="footer-card">&larr; What is Elodin</div>
+        </div>
+    </a>
+       
+    <!-- this is a spacing hack for expediency -->
+    <div class="footer-separator"></div>
+        
+    <a href="https:&#x2F;&#x2F;docs.elodin.systems&#x2F;preview&#x2F;pr-297&#x2F;home&#x2F;tao&#x2F;data-flow&#x2F;">
+        <div>
+            <div class="footer-card">ECS Data Flow &rarr;</div>
+        </div>
+    </a>
+              
+</div>
+
+              </main>
+          </div>
+      </div>
+  </div>
+  
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-297/js/main.js"></script>
+<script>
+    // https://mathjax.github.io/MathJax-demos-web/convert-configuration/convert-configuration.html
+    window.MathJax = {
+        tex: {
+            inlineMath: [
+                ["$", "$"],
+                ["\\(", "\\)"],
+            ],
+            displayMath: [
+                ["$$", "$$"],
+                ["\[\[", "\]\]"],
+            ],
+            processEscapes: true,
+            processEnvironments: true,
+        },
+        options: {
+            skipHtmlTags: ["script", "noscript", "style", "textarea", "pre"],
+        },
+    };
+</script>
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-297/js/tex-mml-chtml.js"></script>
+
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-297/js/elasticlunr.min.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-297/search_index.en.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-297/js/search.js"></script>
+
+
+</body>
+
+</html>
