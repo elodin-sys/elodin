@@ -600,7 +600,7 @@ impl PaletteItemWidget {
                     .image(image_id, image_rect, default_uv, self.text_color);
 
                 let layout_job = self.label_with_matched_chars(font_id.clone());
-                let galley = ui.fonts(|f| f.layout_job(layout_job));
+                let galley = ui.fonts_mut(|f| f.layout_job(layout_job));
                 ui.painter().galley(
                     egui::pos2(image_rect.right_top().x + 8.0, image_rect.right_top().y),
                     galley,
@@ -608,7 +608,7 @@ impl PaletteItemWidget {
                 );
             } else {
                 let layout_job = self.label_with_matched_chars(font_id.clone());
-                let galley = ui.fonts(|f| f.layout_job(layout_job));
+                let galley = ui.fonts_mut(|f| f.layout_job(layout_job));
                 ui.painter()
                     .galley(inner_rect.left_top(), galley, self.text_color);
             }

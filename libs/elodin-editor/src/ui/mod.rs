@@ -329,7 +329,7 @@ impl Plugin for UiPlugin {
                 render_secondary_windows.after(handle_secondary_close),
             )
             .add_systems(First, fix_visibility_hierarchy)
-            .add_systems(Update, sync_hdr)
+            //.add_systems(Update, sync_hdr)
             .add_systems(Update, tiles::shortcuts)
             .add_systems(Update, set_camera_viewport.after(render_layout))
             .add_systems(Update, sync_camera_grid_cell.after(render_layout))
@@ -404,21 +404,6 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
 
         theme::set_theme(ctx);
 
-<<<<<<< HEAD
-=======
-        let titlebar_icons = TitlebarIcons {
-            icon_fullscreen: contexts.add_image(EguiTextureHandle::Weak(
-                images.icon_fullscreen.id(),
-            )),
-            icon_exit_fullscreen: contexts.add_image(EguiTextureHandle::Weak(
-                images.icon_exit_fullscreen.id(),
-            )),
-            icon_close: contexts.add_image(EguiTextureHandle::Weak(images.icon_close.id())),
-        };
-
-        world.add_root_widget_with::<Titlebar, With<PrimaryWindow>>("titlebar", titlebar_icons);
-
->>>>>>> cececcfc (Replace Handle.clone_weak)
         #[cfg(not(target_family = "wasm"))]
         world.add_root_widget::<status_bar::StatusBar>("status_bar");
 
@@ -621,7 +606,23 @@ fn sync_secondary_windows(
         };
 
         let window_entity = commands
+<<<<<<< HEAD
             .spawn((window_component, SecondaryWindowMarker { id: state.id }))
+=======
+            .spawn((
+                Window {
+                    title,
+                    resolution: WindowResolution::new(640, 480),
+                    present_mode: PresentMode::AutoVsync,
+                    enabled_buttons: EnabledButtons {
+                        close: true,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                SecondaryWindowMarker { id: state.id },
+            ))
+>>>>>>> ad013157 (A few hacks to reach compiling state)
             .id();
 
         state.window_entity = Some(window_entity);
@@ -2192,8 +2193,8 @@ fn sync_camera_grid_cell(
         }
     }
 }
-fn sync_hdr(hdr_enabled: ResMut<HdrEnabled>, mut query: Query<&mut Camera>) {
-    for mut cam in query.iter_mut() {
-        cam.hdr = hdr_enabled.0;
-    }
-}
+//fn sync_hdr(hdr_enabled: ResMut<HdrEnabled>, mut query: Query<&mut Camera>) {
+//    for mut cam in query.iter_mut() {
+//        cam.hdr = hdr_enabled.0;
+//    }
+//}

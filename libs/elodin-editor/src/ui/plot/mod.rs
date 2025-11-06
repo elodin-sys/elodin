@@ -28,7 +28,7 @@ use bevy::{
 };
 
 fn load_material_icons(mut egui_contexts: EguiContexts) {
-    let ctx = egui_contexts.ctx_mut();
+    let ctx = egui_contexts.ctx_mut().expect("Failed to get egui context");
     egui_material_icons::initialize(ctx);
 }
 
