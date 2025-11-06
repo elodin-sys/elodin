@@ -101,6 +101,7 @@ pub struct SecondaryWindowState {
     pub tile_state: TileState,
     pub window_entity: Option<Entity>,
     pub graph_entities: Vec<Entity>,
+    pub descriptor_applied: bool,
 }
 
 #[derive(Resource)]
@@ -220,6 +221,7 @@ impl WindowManager {
             tile_state,
             window_entity: None,
             graph_entities: Vec::new(),
+            descriptor_applied: false,
         });
         id
     }

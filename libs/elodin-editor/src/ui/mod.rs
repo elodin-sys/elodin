@@ -225,6 +225,10 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
+                apply_secondary_window_descriptor_to_window.after(sync_secondary_windows),
+            )
+            .add_systems(
+                Update,
                 render_secondary_windows.after(handle_secondary_close),
             )
             .add_systems(Update, sync_hdr)
@@ -661,6 +665,7 @@ fn sync_secondary_windows(
             && existing_map.get(&state.id).copied() != Some(entity)
         {
             state.window_entity = None;
+            state.descriptor_applied = false;
         }
 
         if let Some(entity) = state.window_entity {
@@ -691,6 +696,7 @@ fn sync_secondary_windows(
             .id();
 
         state.window_entity = Some(window_entity);
+        state.descriptor_applied = false;
         existing_map.insert(state.id, window_entity);
         let window_ref = WindowRef::Entity(window_entity);
         for (index, &graph) in state.graph_entities.iter().enumerate() {
@@ -720,6 +726,38 @@ fn capture_secondary_window_metadata(
             if let Ok((_, window)) = window_query.get(window_entity) {
                 apply_window_to_descriptor(&mut state.descriptor, window, &monitor_snapshots);
             }
+        }
+    }
+}
+
+fn apply_secondary_window_descriptor_to_window(
+    mut manager: ResMut<tiles::WindowManager>,
+    mut window_query: Query<&mut Window>,
+    monitors: Query<(Entity, &Monitor)>,
+    primary_monitor: Query<Entity, With<PrimaryMonitor>>,
+) {
+    if manager.secondary().is_empty() {
+        return;
+    }
+
+    let monitor_snapshots = collect_monitor_snapshots(&monitors, primary_monitor.iter().next());
+
+    for state in manager.secondary_mut().iter_mut() {
+        if state.descriptor_applied {
+            continue;
+        }
+
+        let Some(window_entity) = state.window_entity else {
+            continue;
+        };
+
+        if let Ok(mut window) = window_query.get_mut(window_entity) {
+            apply_descriptor_to_window_component(
+                &mut window,
+                &state.descriptor,
+                &monitor_snapshots,
+            );
+            state.descriptor_applied = true;
         }
     }
 }
@@ -960,6 +998,43 @@ fn monitor_selection_from_descriptor(
     }
 
     MonitorSelection::Primary
+}
+
+fn apply_descriptor_to_window_component(
+    window: &mut Window,
+    descriptor: &tiles::SecondaryWindowDescriptor,
+    monitors: &[MonitorSnapshot],
+) {
+    if descriptor.fullscreen {
+        let selection = monitor_selection_from_descriptor(descriptor, monitors);
+        window.mode = WindowMode::BorderlessFullscreen(selection);
+        return;
+    }
+
+    window.mode = WindowMode::Windowed;
+
+    if let Some(size) = descriptor.size {
+        window.resolution.set(size.x, size.y);
+    }
+
+    let monitor_selection = (descriptor.monitor.is_some() || descriptor.monitor_index.is_some())
+        .then(|| monitor_selection_from_descriptor(descriptor, monitors));
+
+    match (descriptor.position, monitor_selection) {
+        (Some(position), Some(selection)) => {
+            // Center first so winit associates the window with the desired monitor,
+            // then restore the recorded coordinates.
+            window.position = WindowPosition::Centered(selection);
+            window.position = WindowPosition::At(position);
+        }
+        (Some(position), None) => {
+            window.position = WindowPosition::At(position);
+        }
+        (None, Some(selection)) => {
+            window.position = WindowPosition::Centered(selection);
+        }
+        (None, None) => {}
+    }
 }
 
 fn apply_window_to_descriptor(

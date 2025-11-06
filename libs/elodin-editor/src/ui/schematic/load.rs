@@ -282,6 +282,7 @@ impl LoadSchematicParams<'_, '_> {
                             tile_state,
                             window_entity: None,
                             graph_entities,
+                            descriptor_applied: false,
                         });
                     }
                     Err(err) => {
