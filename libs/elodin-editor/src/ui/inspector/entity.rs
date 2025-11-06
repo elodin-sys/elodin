@@ -22,7 +22,7 @@ use crate::{
         colors::get_scheme,
         inspector::search,
         label,
-    plot::{GraphBundle, default_component_values},
+        plot::{GraphBundle, default_component_values},
         tiles::TreeAction,
         utils::{MarginSides, format_num},
         widgets::WidgetSystem,
