@@ -227,7 +227,7 @@ impl Plugin for UiPlugin {
                 Update,
                 render_secondary_windows.after(handle_secondary_close),
             )
-            .add_systems(Update, sync_hdr)
+            //.add_systems(Update, sync_hdr)
             .add_systems(Update, tiles::shortcuts)
             .add_systems(Update, set_camera_viewport.after(render_layout))
             .add_systems(Update, sync_camera_grid_cell.after(render_layout))
@@ -685,7 +685,7 @@ fn sync_secondary_windows(
             .spawn((
                 Window {
                     title,
-                    resolution: WindowResolution::new(640.0, 480.0),
+                    resolution: WindowResolution::new(640, 480),
                     present_mode: PresentMode::AutoVsync,
                     enabled_buttons: EnabledButtons {
                         close: true,
@@ -1025,8 +1025,8 @@ fn sync_camera_grid_cell(
         }
     }
 }
-fn sync_hdr(hdr_enabled: ResMut<HdrEnabled>, mut query: Query<&mut Camera>) {
-    for mut cam in query.iter_mut() {
-        cam.hdr = hdr_enabled.0;
-    }
-}
+//fn sync_hdr(hdr_enabled: ResMut<HdrEnabled>, mut query: Query<&mut Camera>) {
+//    for mut cam in query.iter_mut() {
+//        cam.hdr = hdr_enabled.0;
+//    }
+//}

@@ -103,7 +103,7 @@ pub struct PositionSync;
 impl EditorPlugin {
     pub fn new(width: f32, height: f32) -> Self {
         Self {
-            window_resolution: WindowResolution::new(width, height),
+            window_resolution: WindowResolution::new(width as u32, height as u32),
         }
     }
 }
@@ -177,9 +177,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
             .add_plugins(big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
             .add_plugins(EmbeddedAssetPlugin)
-            .add_plugins(EguiPlugin {
-                enable_multipass_for_primary_context: false,
-            })
+            .add_plugins(EguiPlugin::default())
             .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
             .add_plugins(NavigationGizmoPlugin)
             .add_plugins(impeller2_bevy::Impeller2Plugin)
