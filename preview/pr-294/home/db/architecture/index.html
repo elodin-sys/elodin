@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    
+<link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css" media="print" onload="this.media='all'; this.onload = null">
+<noscript><link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css"></noscript>
+
+    
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-294/fonts/spacegrotesk.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-294/fonts/ibm-plex-sans-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-294/fonts/ibm-plex-sans-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-294/fonts/ibm-plex-sans-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-294/fonts/ibm-plex-sans-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-294/fonts/ibm-plex-sans-700.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-294/fonts/ibm-plex-mono-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-294/fonts/ibm-plex-mono-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-294/fonts/ibm-plex-mono-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-294/fonts/ibm-plex-mono-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-294/fonts/ibm-plex-mono-700.woff2" type="font/woff2" crossorigin>
+
+    
+<link rel="stylesheet" href="https://docs.elodin.systems/preview/pr-294/main.css">
+
+    
+  <meta name="theme-color" content="#fff">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://docs.elodin.systems/preview/pr-294/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="https://docs.elodin.systems/preview/pr-294/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="https://docs.elodin.systems/preview/pr-294/favicon-16x16.png">
+  
+    <link rel="manifest" href="https://docs.elodin.systems/preview/pr-294/site.webmanifest" crossorigin>
+  
+
+
+  
+  
+    
+  
+
+  
+  
+    
+    
+  
+
+  
+    
+  
+  
+  
+  
+    
+  
+
+  
+
+
+  <meta name="robots" content="index, follow">
+  <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <meta name="bingbot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+
+
+	
+
+
+	
+
+<title>Architecture | Elodin</title>
+<meta name="description" content="Overview of Elodin DB&#x27;s Architecture">
+<link rel="canonical" href="https://docs.elodin.systems/preview/pr-294/home/db/architecture/">
+
+
+  <meta name="twitter:card" content="summary_large_image">
+  
+    <meta name="twitter:image" content="https://docs.elodin.systems/preview/pr-294/logo.png">
+  
+  <meta name="twitter:title" content="Architecture">
+  <meta name="twitter:description" content="Overview of Elodin DB&#x27;s Architecture">
+  <meta name="twitter:site" content="@elodinsystems">
+  <meta name="twitter:creator" content="@elodinsystems">
+
+  <meta property="og:title" content="Architecture">
+  <meta property="og:description" content="Overview of Elodin DB&#x27;s Architecture">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://docs.elodin.systems/preview/pr-294/home/db/architecture/">
+
+  
+    <meta property="og:image" content="https://docs.elodin.systems/preview/pr-294/logo.png">
+  
+
+  <meta property="og:updated_time" content="">
+  <meta property="og:site_name" content="Architecture">
+
+  
+
+  
+
+  
+  <meta property="og:locale" content="en_US">
+
+
+
+
+
+  
+
+
+
+
+
+<script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "BreadcrumbList",
+    
+      
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          {
+            "@type": "ListItem",
+            "position":  1 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-294/"
+          },
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  2 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-294/home/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  3 ,
+            "name": "Db",
+            "item": "https://docs.elodin.systems/preview/pr-294/home/db/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  4 ,
+            "name": "Architecture",
+            "item": "https://docs.elodin.systems/preview/pr-294/home/db/architecture/"
+          },
+        
+      
+    
+  }
+</script>
+
+
+
+
+</head>
+
+<body class="docs single">
+  
+    
+    
+    
+  
+  
+    
+<header class="navbar fixed-top navbar-expand-md navbar-light">
+    <div class="container">
+        <div class="col-2" style="display: flex; gap: 20px">
+            <a
+                href="https://elodin.systems"
+                class="nav-link-icon"
+                target="_blank"
+                rel="noopener noreferrer"
+                ><svg
+                    width="20"
+                    height="25"
+                    viewBox="0 0 20 25"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                >
+                    <path
+                        d="M10 0H15C17.7615 0 20 2.23858 20 5V20.0001C20 22.7615 17.7615 25.0001 15 25.0001H5C2.23853 25.0001 0 22.7615 0 20V5C0 2.23858 2.23853 1.90735e-06 5 1.90735e-06V5V20.0001H15V5L5 5C5 2.23858 7.23853 0 10 0Z"
+                        fill="currentColor"
+                    />
+                </svg>
+            </a>
+            <span>
+                <select name="version" class="version-select" disabled>
+                    <option value="v0.15.3-alpha.0" selected>
+                        v0.15.3-alpha.0
+                    </option>
+                </select>
+            </span>
+        </div>
+
+        <div
+            class="col-2 d-none d-lg-block"
+            style="margin-left: 56px"
+        >
+            <form style="width: 264px">
+                <input
+                    id="userinput"
+                    class="form-control is-search"
+                    type="search"
+                    placeholder="Search"
+                    aria-label="Search"
+                    autocomplete="off"
+                />
+                <div id="suggestions" class="shadow bg-white rounded"></div>
+            </form>
+        </div>
+        <div class="col-2 d-none d-md-block"></div>
+        <div class="col-2" style="margin-left: 35px">
+            <ul class="navbar-nav main-nav me-auto">
+                      
+                <li
+                    class="nav-item home active"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-294/home/quickstart"
+                        >HOME</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-294/reference/overview"
+                        >Reference</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-294/releases/changelog"
+                        >Releases</a
+                    >
+                </li>
+                  
+            </ul>
+        </div>
+        <div class="col-1"></div>
+        <div
+            class="col-2 d-none d-xl-block"
+            style="margin-right: 63px"
+        >
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://github.com/elodin-sys/elodin">
+                        <i class="bx bxl-github"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://elodin.app/discord">
+                        <i class="bx bxl-discord-alt"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a id="mode-1" class="nav-link nav-link-icon toggle-dark">
+                        <i class='bx bxs-sun'></i>
+                    </a>
+                    <a id="mode-2" class="nav-link nav-link-icon toggle-light">
+                        <i class='bx bxs-moon'></i>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</header>
+
+  
+  <div class="wrap container tom-green" role="document">
+      <div class="content">
+          <div class="row flex-xxl-nowrap justify-content-center">
+              
+<div class="col-lg-5 col-xl-4 docs-sidebar d-none d-lg-block">
+    <nav class="docs-links" aria-label="Main navigation">
+          
+        <h3>Overview</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-294/home/quickstart/"
+                    >Quick Start</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-294/home/3-body/"
+                    >Three-Body Orbit</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-294/home/bouncing-ball/"
+                    >Bouncing Ball</a
+                >
+            </li>
+            
+        </ul>
+          
+         
+        <h3>Aleph</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-294/home/aleph/setup/"
+                    >Aleph Setup</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-294/home/aleph/fc-board-flash/"
+                    >Flash Expansion Board</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-294/home/aleph/reset/"
+                    >Factory Reset</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-294/home/aleph/betaflight/"
+                    >Betaflight Install</a
+                >
+            </li>
+            
+        </ul>
+         
+         
+        <h3>Elodin DB</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-294/home/db/overview/"
+                    >Overview</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link active"
+                    href="https://docs.elodin.systems/preview/pr-294/home/db/architecture/"
+                    >Architecture</a
+                >
+            </li>
+            
+        </ul>
+         
+         
+        <h3>The Tao of Elodin Sim</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-294/home/tao/introduction/"
+                    >What is Elodin</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-294/home/tao/ecs/"
+                    >Why ECS for Physics?</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-294/home/tao/data-flow/"
+                    >ECS Data Flow</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-294/home/tao/monte-carlo/"
+                    >Monte Carlo</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-294/home/tao/jax-nox/"
+                    >NumPy, JAX &amp; NOX</a
+                >
+            </li>
+            
+        </ul>
+          
+    </nav>
+</div>
+
+               
+<nav
+    class="docs-toc d-none d-xxl-block col-xl-3"
+    aria-label="Secondary navigation"
+>
+    <div class="page-links">
+        <h3>On this page</h3>
+        <nav id="TableOfContents">
+            <ul>
+                
+                <li><a href="https://docs.elodin.systems/preview/pr-294/home/db/architecture/#data-model">Data Model</a></li>
+                 
+                <li><a href="https://docs.elodin.systems/preview/pr-294/home/db/architecture/#vtable">VTable</a></li>
+                 
+                <li><a href="https://docs.elodin.systems/preview/pr-294/home/db/architecture/#messages">Messages</a></li>
+                 
+                <li><a href="https://docs.elodin.systems/preview/pr-294/home/db/architecture/#on-disk-layout">On Disk Layout</a></li>
+                 
+            </ul>
+        </nav>
+    </div>
+</nav>
+ 
+              <main class="docs-content col-lg-11 col-xxl-10">
+                  <h1>Architecture</h1>
+                   <p>Elodin DB is built around the same entity-component concepts that Elodin Sim and Impeller use. In essence entities represent logical "objects" in the system -- think sensors, actuators, spacecraft. Components represent individual pieces of telemetry - think a sensor reading, an attitude estimate, an actuator commanded position, etc.</p>
+<h2 id="data-model">Data Model</h2>
+<p>The core primitive of Elodin DB is the tensor, or the n-dimensional array. A scalar is a 0 dimensional tensor, a vector is a 1 dimensional tensor, a matrix is a 2 dimensional tensor, and so on. Tensors in Elodin DB have a dimension, a primitive type (f64, f32, etc), and their associated data. Tensors are fixed size and dense (non-sparse).</p>
+<div class="el-info warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bx bx-info-circle" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15"><p>We are using tensor in the ML framework / programming sense, not the pure mathematical sense.</p>
+</div>
+    </div>
+</div>
+<p>Elodin DB stores tensors in time-series columns associated with a particular entity-component pair. Conceptually each entity-component pair is a table with each row being a timestamp, and a tensor. Timestamps are stored as i64 microsecond offsets from Unix epoch.</p>
+<table><thead><tr><th>Time</th><th>Data</th></tr></thead><tbody>
+<tr><td>1742223919e6</td><td>[1.0, 2.0, 3.0]</td></tr>
+<tr><td>1742223919</td><td>[4.0, 5.0, 6.0]</td></tr>
+</tbody></table>
+<h2 id="vtable">VTable</h2>
+<p>Elodin DB uses a dynamic data-extraction system for fast data-ingest. Instead of requiring that data is sent in a fixed format - Elodin DB allows users to generate a vtable that describes the data being ingested. Loosely this can be thought of as a collection of offsets combined with entity and component ids. We borrowed the concept of a vtable from FlatBuffers, which use them in a similar manner.</p>
+<p>One of the powers of VTables is that it lets us send raw structs over the wire, without serializing them. For instance take this struct:</p>
+<pre data-lang="rust" class="language-rust z-code"><code class="language-rust" data-lang="rust"><span class="z-source z-rust"><span class="z-meta z-annotation z-rust"><span class="z-punctuation z-definition z-annotation z-rust">#</span><span class="z-punctuation z-section z-group z-begin z-rust">[</span><span class="z-variable z-annotation z-rust">repr</span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span></span></span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust">C</span></span><span class="z-meta z-annotation z-parameters z-rust"><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span></span><span class="z-punctuation z-section z-group z-end z-rust">]</span></span>
+</span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-storage z-type z-struct z-rust">struct</span> </span><span class="z-meta z-struct z-rust"><span class="z-entity z-name z-struct z-rust">Data</span> </span><span class="z-meta z-struct z-rust"><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-begin z-rust">{</span>
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-meta z-block z-rust">    <span class="z-storage z-modifier z-rust">pub</span> <span class="z-variable z-other z-member z-rust">ts</span><span class="z-punctuation z-separator z-type z-rust">:</span> <span class="z-storage z-type z-rust">u32</span>,
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-meta z-block z-rust">    <span class="z-storage z-modifier z-rust">pub</span> <span class="z-variable z-other z-member z-rust">mag</span><span class="z-punctuation z-separator z-type z-rust">:</span> [<span class="z-storage z-type z-rust">f32</span>; 3],
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-meta z-block z-rust">    <span class="z-storage z-modifier z-rust">pub</span> <span class="z-variable z-other z-member z-rust">gyro</span><span class="z-punctuation z-separator z-type z-rust">:</span> [<span class="z-storage z-type z-rust">f32</span>; 3],
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-meta z-block z-rust">    <span class="z-storage z-modifier z-rust">pub</span> <span class="z-variable z-other z-member z-rust">accel</span><span class="z-punctuation z-separator z-type z-rust">:</span> [<span class="z-storage z-type z-rust">f32</span>; 3],
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-meta z-block z-rust">    <span class="z-storage z-modifier z-rust">pub</span> <span class="z-variable z-other z-member z-rust">mag_temp</span><span class="z-punctuation z-separator z-type z-rust">:</span> <span class="z-storage z-type z-rust">f32</span>,
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-meta z-block z-rust">    <span class="z-storage z-modifier z-rust">pub</span> <span class="z-variable z-other z-member z-rust">mag_sample</span><span class="z-punctuation z-separator z-type z-rust">:</span> <span class="z-storage z-type z-rust">u32</span>,
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-meta z-block z-rust">    <span class="z-storage z-modifier z-rust">pub</span> <span class="z-variable z-other z-member z-rust">baro</span><span class="z-punctuation z-separator z-type z-rust">:</span> <span class="z-storage z-type z-rust">f32</span>,
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-meta z-block z-rust">    <span class="z-storage z-modifier z-rust">pub</span> <span class="z-variable z-other z-member z-rust">baro_temp</span><span class="z-punctuation z-separator z-type z-rust">:</span> <span class="z-storage z-type z-rust">f32</span>,
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-struct z-rust"><span class="z-meta z-block z-rust"></span><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-end z-rust">}</span></span></span>
+</span></code></pre>
+<p>This struct contains a number of fields each associated with a different component. We can send Elodin DB this struct, unchanged, by formulating a VTable like below.</p>
+<pre data-lang="lua" class="language-lua z-code"><code class="language-lua" data-lang="lua"><span class="z-source z-lua"><span class="z-storage z-modifier z-lua">local</span> <span class="z-variable z-other z-lua">vt</span> <span class="z-keyword z-operator z-assignment z-lua">=</span> <span class="z-variable z-function z-lua">VTableBuilder</span><span class="z-meta z-function-call z-arguments z-lua"><span class="z-meta z-group z-lua"><span class="z-punctuation z-section z-group z-begin z-lua">(</span><span class="z-constant z-numeric z-integer z-decimal z-lua">1</span><span class="z-punctuation z-section z-group z-end z-lua">)</span></span></span>
+</span><span class="z-source z-lua"><span class="z-storage z-modifier z-lua">local</span> <span class="z-variable z-other z-lua">entity_ids</span> <span class="z-keyword z-operator z-assignment z-lua">=</span> <span class="z-meta z-mapping z-lua"><span class="z-punctuation z-section z-block z-begin z-lua">{</span> <span class="z-constant z-numeric z-integer z-decimal z-lua">1</span> <span class="z-punctuation z-section z-block z-end z-lua">}</span></span>
+</span><span class="z-source z-lua"><span class="z-variable z-other z-lua">vt</span><span class="z-punctuation z-accessor z-lua">:</span><span class="z-meta z-property z-lua"><span class="z-variable z-function z-lua">column</span></span><span class="z-meta z-function-call z-arguments z-lua"><span class="z-meta z-group z-lua"><span class="z-punctuation z-section z-group z-begin z-lua">(</span><span class="z-variable z-function z-lua">ComponentId</span><span class="z-meta z-function-call z-arguments z-lua"><span class="z-meta z-group z-lua"><span class="z-punctuation z-section z-group z-begin z-lua">(</span><span class="z-string z-quoted z-double z-lua"><span class="z-punctuation z-definition z-string z-begin z-lua">&quot;</span>ts<span class="z-punctuation z-definition z-string z-end z-lua">&quot;</span></span><span class="z-punctuation z-section z-group z-end z-lua">)</span></span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-string z-quoted z-double z-lua"><span class="z-punctuation z-definition z-string z-begin z-lua">&quot;</span>u32<span class="z-punctuation z-definition z-string z-end z-lua">&quot;</span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-meta z-mapping z-lua"><span class="z-punctuation z-section z-block z-begin z-lua">{</span><span class="z-punctuation z-section z-block z-end z-lua">}</span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-variable z-other z-lua">entity_ids</span><span class="z-punctuation z-section z-group z-end z-lua">)</span></span></span>
+</span><span class="z-source z-lua"><span class="z-variable z-other z-lua">vt</span><span class="z-punctuation z-accessor z-lua">:</span><span class="z-meta z-property z-lua"><span class="z-variable z-function z-lua">column</span></span><span class="z-meta z-function-call z-arguments z-lua"><span class="z-meta z-group z-lua"><span class="z-punctuation z-section z-group z-begin z-lua">(</span><span class="z-variable z-function z-lua">ComponentId</span><span class="z-meta z-function-call z-arguments z-lua"><span class="z-meta z-group z-lua"><span class="z-punctuation z-section z-group z-begin z-lua">(</span><span class="z-string z-quoted z-double z-lua"><span class="z-punctuation z-definition z-string z-begin z-lua">&quot;</span>mag<span class="z-punctuation z-definition z-string z-end z-lua">&quot;</span></span><span class="z-punctuation z-section z-group z-end z-lua">)</span></span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-string z-quoted z-double z-lua"><span class="z-punctuation z-definition z-string z-begin z-lua">&quot;</span>f32<span class="z-punctuation z-definition z-string z-end z-lua">&quot;</span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-meta z-mapping z-lua"><span class="z-punctuation z-section z-block z-begin z-lua">{</span> <span class="z-constant z-numeric z-integer z-decimal z-lua">3</span> <span class="z-punctuation z-section z-block z-end z-lua">}</span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-variable z-other z-lua">entity_ids</span><span class="z-punctuation z-section z-group z-end z-lua">)</span></span></span>
+</span><span class="z-source z-lua"><span class="z-variable z-other z-lua">vt</span><span class="z-punctuation z-accessor z-lua">:</span><span class="z-meta z-property z-lua"><span class="z-variable z-function z-lua">column</span></span><span class="z-meta z-function-call z-arguments z-lua"><span class="z-meta z-group z-lua"><span class="z-punctuation z-section z-group z-begin z-lua">(</span><span class="z-variable z-function z-lua">ComponentId</span><span class="z-meta z-function-call z-arguments z-lua"><span class="z-meta z-group z-lua"><span class="z-punctuation z-section z-group z-begin z-lua">(</span><span class="z-string z-quoted z-double z-lua"><span class="z-punctuation z-definition z-string z-begin z-lua">&quot;</span>gyro<span class="z-punctuation z-definition z-string z-end z-lua">&quot;</span></span><span class="z-punctuation z-section z-group z-end z-lua">)</span></span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-string z-quoted z-double z-lua"><span class="z-punctuation z-definition z-string z-begin z-lua">&quot;</span>f32<span class="z-punctuation z-definition z-string z-end z-lua">&quot;</span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-meta z-mapping z-lua"><span class="z-punctuation z-section z-block z-begin z-lua">{</span> <span class="z-constant z-numeric z-integer z-decimal z-lua">3</span> <span class="z-punctuation z-section z-block z-end z-lua">}</span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-variable z-other z-lua">entity_ids</span><span class="z-punctuation z-section z-group z-end z-lua">)</span></span></span>
+</span><span class="z-source z-lua"><span class="z-variable z-other z-lua">vt</span><span class="z-punctuation z-accessor z-lua">:</span><span class="z-meta z-property z-lua"><span class="z-variable z-function z-lua">column</span></span><span class="z-meta z-function-call z-arguments z-lua"><span class="z-meta z-group z-lua"><span class="z-punctuation z-section z-group z-begin z-lua">(</span><span class="z-variable z-function z-lua">ComponentId</span><span class="z-meta z-function-call z-arguments z-lua"><span class="z-meta z-group z-lua"><span class="z-punctuation z-section z-group z-begin z-lua">(</span><span class="z-string z-quoted z-double z-lua"><span class="z-punctuation z-definition z-string z-begin z-lua">&quot;</span>accel<span class="z-punctuation z-definition z-string z-end z-lua">&quot;</span></span><span class="z-punctuation z-section z-group z-end z-lua">)</span></span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-string z-quoted z-double z-lua"><span class="z-punctuation z-definition z-string z-begin z-lua">&quot;</span>f32<span class="z-punctuation z-definition z-string z-end z-lua">&quot;</span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-meta z-mapping z-lua"><span class="z-punctuation z-section z-block z-begin z-lua">{</span> <span class="z-constant z-numeric z-integer z-decimal z-lua">3</span> <span class="z-punctuation z-section z-block z-end z-lua">}</span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-variable z-other z-lua">entity_ids</span><span class="z-punctuation z-section z-group z-end z-lua">)</span></span></span>
+</span><span class="z-source z-lua"><span class="z-variable z-other z-lua">vt</span><span class="z-punctuation z-accessor z-lua">:</span><span class="z-meta z-property z-lua"><span class="z-variable z-function z-lua">column</span></span><span class="z-meta z-function-call z-arguments z-lua"><span class="z-meta z-group z-lua"><span class="z-punctuation z-section z-group z-begin z-lua">(</span><span class="z-variable z-function z-lua">ComponentId</span><span class="z-meta z-function-call z-arguments z-lua"><span class="z-meta z-group z-lua"><span class="z-punctuation z-section z-group z-begin z-lua">(</span><span class="z-string z-quoted z-double z-lua"><span class="z-punctuation z-definition z-string z-begin z-lua">&quot;</span>mag_temp<span class="z-punctuation z-definition z-string z-end z-lua">&quot;</span></span><span class="z-punctuation z-section z-group z-end z-lua">)</span></span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-string z-quoted z-double z-lua"><span class="z-punctuation z-definition z-string z-begin z-lua">&quot;</span>f32<span class="z-punctuation z-definition z-string z-end z-lua">&quot;</span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-meta z-mapping z-lua"><span class="z-punctuation z-section z-block z-begin z-lua">{</span><span class="z-punctuation z-section z-block z-end z-lua">}</span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-variable z-other z-lua">entity_ids</span><span class="z-punctuation z-section z-group z-end z-lua">)</span></span></span>
+</span><span class="z-source z-lua"><span class="z-variable z-other z-lua">vt</span><span class="z-punctuation z-accessor z-lua">:</span><span class="z-meta z-property z-lua"><span class="z-variable z-function z-lua">column</span></span><span class="z-meta z-function-call z-arguments z-lua"><span class="z-meta z-group z-lua"><span class="z-punctuation z-section z-group z-begin z-lua">(</span><span class="z-variable z-function z-lua">ComponentId</span><span class="z-meta z-function-call z-arguments z-lua"><span class="z-meta z-group z-lua"><span class="z-punctuation z-section z-group z-begin z-lua">(</span><span class="z-string z-quoted z-double z-lua"><span class="z-punctuation z-definition z-string z-begin z-lua">&quot;</span>mag_sample<span class="z-punctuation z-definition z-string z-end z-lua">&quot;</span></span><span class="z-punctuation z-section z-group z-end z-lua">)</span></span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-string z-quoted z-double z-lua"><span class="z-punctuation z-definition z-string z-begin z-lua">&quot;</span>u32<span class="z-punctuation z-definition z-string z-end z-lua">&quot;</span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-meta z-mapping z-lua"><span class="z-punctuation z-section z-block z-begin z-lua">{</span><span class="z-punctuation z-section z-block z-end z-lua">}</span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-variable z-other z-lua">entity_ids</span><span class="z-punctuation z-section z-group z-end z-lua">)</span></span></span>
+</span><span class="z-source z-lua"><span class="z-variable z-other z-lua">vt</span><span class="z-punctuation z-accessor z-lua">:</span><span class="z-meta z-property z-lua"><span class="z-variable z-function z-lua">column</span></span><span class="z-meta z-function-call z-arguments z-lua"><span class="z-meta z-group z-lua"><span class="z-punctuation z-section z-group z-begin z-lua">(</span><span class="z-variable z-function z-lua">ComponentId</span><span class="z-meta z-function-call z-arguments z-lua"><span class="z-meta z-group z-lua"><span class="z-punctuation z-section z-group z-begin z-lua">(</span><span class="z-string z-quoted z-double z-lua"><span class="z-punctuation z-definition z-string z-begin z-lua">&quot;</span>baro<span class="z-punctuation z-definition z-string z-end z-lua">&quot;</span></span><span class="z-punctuation z-section z-group z-end z-lua">)</span></span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-string z-quoted z-double z-lua"><span class="z-punctuation z-definition z-string z-begin z-lua">&quot;</span>f32<span class="z-punctuation z-definition z-string z-end z-lua">&quot;</span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-meta z-mapping z-lua"><span class="z-punctuation z-section z-block z-begin z-lua">{</span><span class="z-punctuation z-section z-block z-end z-lua">}</span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-variable z-other z-lua">entity_ids</span><span class="z-punctuation z-section z-group z-end z-lua">)</span></span></span>
+</span><span class="z-source z-lua"><span class="z-variable z-other z-lua">vt</span><span class="z-punctuation z-accessor z-lua">:</span><span class="z-meta z-property z-lua"><span class="z-variable z-function z-lua">column</span></span><span class="z-meta z-function-call z-arguments z-lua"><span class="z-meta z-group z-lua"><span class="z-punctuation z-section z-group z-begin z-lua">(</span><span class="z-variable z-function z-lua">ComponentId</span><span class="z-meta z-function-call z-arguments z-lua"><span class="z-meta z-group z-lua"><span class="z-punctuation z-section z-group z-begin z-lua">(</span><span class="z-string z-quoted z-double z-lua"><span class="z-punctuation z-definition z-string z-begin z-lua">&quot;</span>baro_temp<span class="z-punctuation z-definition z-string z-end z-lua">&quot;</span></span><span class="z-punctuation z-section z-group z-end z-lua">)</span></span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-string z-quoted z-double z-lua"><span class="z-punctuation z-definition z-string z-begin z-lua">&quot;</span>f32<span class="z-punctuation z-definition z-string z-end z-lua">&quot;</span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-meta z-mapping z-lua"><span class="z-punctuation z-section z-block z-begin z-lua">{</span><span class="z-punctuation z-section z-block z-end z-lua">}</span></span><span class="z-punctuation z-separator z-comma z-lua">,</span> <span class="z-variable z-other z-lua">entity_ids</span><span class="z-punctuation z-section z-group z-end z-lua">)</span></span></span>
+</span></code></pre>
+<p>In this example we are using a Lua script with the VTableBuilder API. Each time we call <code>column</code> it increments the internal offset by the size of the tensor. So the final VTable looks like this</p>
+<table><thead><tr><th>Offset</th><th>Component ID</th><th>Type</th><th>Shape</th><th>Entity IDs</th></tr></thead><tbody>
+<tr><td>0</td><td>ts</td><td>u32</td><td>[]</td><td>[1]</td></tr>
+<tr><td>4</td><td>mag</td><td>f32</td><td>[3]</td><td>[1]</td></tr>
+<tr><td>16</td><td>gyro</td><td>f32</td><td>[3]</td><td>[1]</td></tr>
+<tr><td>28</td><td>accel</td><td>f32</td><td>[3]</td><td>[1]</td></tr>
+<tr><td>40</td><td>mag_temp</td><td>f32</td><td>[]</td><td>[1]</td></tr>
+<tr><td>44</td><td>mag_sample</td><td>u32</td><td>[]</td><td>[1]</td></tr>
+<tr><td>48</td><td>baro</td><td>f32</td><td>[]</td><td>[1]</td></tr>
+<tr><td>52</td><td>baro_temp</td><td>f32</td><td>[]</td><td>[1]</td></tr>
+</tbody></table>
+<h2 id="messages">Messages</h2>
+<p>Up until now we've discussed how to store telemetry that best fits into a time series of fixed-size tensors. Sometimes our data doesn't fit cleanly into the concept of "telemetry" and fixed sized structures. What if we want to send a single message that contains a variable length sequence of commands? What if we want to send compressed data that is variable length? What if we want to signal a state transition using an enum?</p>
+<p>For these cases, Elodin DB supports messages which are variable length, <a href="https://docs.rs/postcard/latest/postcard/">postcard</a> encoded. This allows you to pack virtually any data structure that postcard can represent.</p>
+<div class="el-info warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bx bx-info-circle" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15"><p>Technically, you can store any variable length data in a message, but for all of Elodin DB's features to work postcard is the best choice.</p>
+</div>
+    </div>
+</div>
+<p>Messages are stored in a table made up of three-columns: a timestamp, an "offset" column, and a "data" column. The offset column is encoded using the <a href="https://cedardb.com/blog/german_strings/">Umbra string format</a> (also called German Strings). Instead of just storing a length and offset to the data - an Umbra string optionally stores the data inline with the length. This allows for fast path lookups up data less than 12 bytes. Our implementation of this table is designed to be compatible with the Arrow <a href="https://arrow.apache.org/docs/format/Columnar.html#variable-size-binary-view-layout">"Variable-size Binary View Layout"</a>.</p>
+<h2 id="on-disk-layout">On Disk Layout</h2>
+<p>Elodin DB uses a collection of memory mapped files to store data. Each separate column in a table maps to a different memory mapped file in its own directory. The files are not meant to be human readable. The directory structure is documented here for information purposes only.</p>
+<pre class="z-code"><code><span class="z-text z-plain">- &lt;component_id&gt; - encoded as a 64 bit integer
+</span><span class="z-text z-plain">  - &lt;entity_id&gt; - encodeded as a 64 bit integer
+</span><span class="z-text z-plain">    - index - the timestamps associated with the data
+</span><span class="z-text z-plain">    - data - the list of tensors
+</span><span class="z-text z-plain">- msgs
+</span><span class="z-text z-plain">  - &lt;msg_id&gt;
+</span><span class="z-text z-plain">    - timestamps - the timestamps associated with each message entry
+</span><span class="z-text z-plain">    - offset - the UmbraBuf associated with each message
+</span><span class="z-text z-plain">    - data_log - the actual message data
+</span><span class="z-text z-plain">- db_state - Stores certain database settings
+</span></code></pre>
+
+                  
+<div class="footer-line-padding"></div>
+<div class="footer-line"></div>
+<div class="docs-navigation d-flex justify-content-between">
+                    
+    <a href="https:&#x2F;&#x2F;docs.elodin.systems&#x2F;preview&#x2F;pr-294&#x2F;home&#x2F;aleph&#x2F;betaflight&#x2F;">
+        <div>
+            <div class="footer-card">&larr; Betaflight Install</div>
+        </div>
+    </a>
+               
+    <!-- this is a spacing hack for expediency -->
+    <div class="footer-separator"></div>
+                             
+</div>
+
+              </main>
+          </div>
+      </div>
+  </div>
+  
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-294/js/main.js"></script>
+<script>
+    // https://mathjax.github.io/MathJax-demos-web/convert-configuration/convert-configuration.html
+    window.MathJax = {
+        tex: {
+            inlineMath: [
+                ["$", "$"],
+                ["\\(", "\\)"],
+            ],
+            displayMath: [
+                ["$$", "$$"],
+                ["\[\[", "\]\]"],
+            ],
+            processEscapes: true,
+            processEnvironments: true,
+        },
+        options: {
+            skipHtmlTags: ["script", "noscript", "style", "textarea", "pre"],
+        },
+    };
+</script>
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-294/js/tex-mml-chtml.js"></script>
+
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-294/js/elasticlunr.min.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-294/search_index.en.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-294/js/search.js"></script>
+
+
+</body>
+
+</html>
