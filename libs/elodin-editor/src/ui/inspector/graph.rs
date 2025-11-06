@@ -240,7 +240,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                             && (ui.input(|i| i.key_pressed(egui::Key::Escape))
                                 || popup_response.clicked_elsewhere())
                         {
-                            ui.memory_mut(|mem| mem.close_popup());
+                            ui.memory_mut(|mem| mem.close_popup(color_id));
                         }
                         query_plot.data.color = impeller2_wkt::Color::from_color32(color);
                     }
@@ -349,7 +349,7 @@ fn component_value(
                     && (ui.input(|i| i.key_pressed(egui::Key::Escape))
                         || popup_response.clicked_elsewhere())
                 {
-                    ui.memory_mut(|mem| mem.close_popup());
+                    ui.memory_mut(|mem| mem.close_popup(color_id));
                 }
             }
         }
