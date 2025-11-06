@@ -202,8 +202,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.15.1" selected>
-                        v0.15.1
+                    <option value="v0.15.3" selected>
+                        v0.15.3
                     </option>
                 </select>
             </span>
@@ -564,8 +564,8 @@ and running the simulation. The <code>World</code> object also provides helper m
 <p>Run the simulation.</p>
 <ul>
 <li><code>system</code> : <a href="/reference/python-api/#elodin-system">elodin.System</a>, the systems to run, can be supplied as a list of systems delineated by pipes.</li>
-<li><code>sim_time_step</code> : <code>float</code>, optional, the amount of simulated time between each tick, defaults to 1 / 120.0.</li>
-<li><code>run_time_step</code> : <code>float</code>, optional, the amount of real time between each tick, defaults to real-time playback by matching the <code>sim_time_step</code>.</li>
+<li><code>sim_time_step</code> : <code>float</code>, optional, the amount of simulated time between each tick, defaults to <code>1 / 120.0</code>.</li>
+<li><code>run_time_step</code> : <code>float | None</code>, optional, the amount of real time between each tick. By default it is <code>None</code> and runs at max speed. For real-time playback set to same value as <code>sim_time_step</code>.</li>
 <li><code>default_playback_speed</code> : <code>float</code>, optional, the default playback speed of the Elodin client when running this simulation, defaults to 1.0 (real-time).</li>
 <li><code>max_ticks</code> : <code>integer</code>, optional, the maximum number of ticks to run the simulation for before stopping.</li>
 <li><code>optimize</code> : <code>bool</code>, optional flag to enable runtime optimizations for the simulation code, defaults to <code>False</code>. If optimizations are enabled, the simulation will start slower but run faster.</li>
