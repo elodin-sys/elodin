@@ -15,6 +15,18 @@ order = 1
 
 ## v0.15
 
+### v0.15.3
+- feat: Add "Clear Schematic" to command palette. (#276)
+- feat: Add "Create Window" to command palette. (#293)
+- feat: Add multiple window support from KDL. (#275)
+- feat: Implement `wait_for_write` functionality. (#277)
+- feat: Provide packet ID on no vtable error. (#287)
+- feat: Allow conditional systems. (#269)
+- fix: Avoid divide by zero on plot. (#270)
+- fix: Resize monitor boxes. (#286)
+- fix: Axes widget matches world. (#282)
+- chore: Switch some bevy dependencies to upstream sources. (#280)
+
 ### v0.15.2
 - **(feat)** Add native DB snapshot support. (#233)
 - **(feat)** ELODIN_KDL_DIR can specify schematics directory. (#244)
