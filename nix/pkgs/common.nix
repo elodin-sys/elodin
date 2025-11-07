@@ -28,9 +28,6 @@
         ".hpp"
         ".jinja"
       ];
-      matchesExclude = lib.any (exclude: lib.hasPrefix exclude relPath) [
-        "/libs/basilisk-rs/vendor"
-      ];
     in
       (type == "directory" && matchesPrefix && !matchesExclude) || matchesSuffix;
   in

@@ -293,7 +293,6 @@ See the `examples/` directory for complete examples:
 
 - **Impeller2** - High-performance telemetry protocol
 - **Nox** - Tensor and linear algebra library
-- **Basilisk** - Astrodynamics simulation framework (external)
 
 ## Contributing
 

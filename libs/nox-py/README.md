@@ -721,9 +721,8 @@ Key integration points:
 - JAX JIT compilation works across the entire train/sim loop
 - Compatible with JAXMarl's centralized training patterns
 
-### Basilisk
+### ROCI ADCS
 ```python
-# Import Basilisk components via roci
 from roci.adcs import mekf, triad
 ```
 

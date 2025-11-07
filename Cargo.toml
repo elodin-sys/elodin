@@ -9,7 +9,6 @@ members = [
     "libs/nox-frames",
     "libs/noxla",
     "apps/elodin",
-    "libs/basilisk-rs",
     "libs/roci",
     "libs/roci/macros",
     "libs/roci/adcs",
@@ -81,7 +80,6 @@ roci-adcs.path = "libs/roci/adcs"
 nox.path = "libs/nox"
 nox.default-features = false
 nox-ecs.path = "libs/nox-ecs"
-basilisk.path = "libs/basilisk-rs"
 nox-frames.path = "libs/nox-frames"
 wmm.path = "libs/wmm"
 
