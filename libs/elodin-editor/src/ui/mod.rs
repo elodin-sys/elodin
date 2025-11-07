@@ -20,8 +20,7 @@ use bevy_egui::{
     egui::{self, Color32, Label, Margin, RichText},
 };
 use egui_tiles::{Container, Tile};
-use winit::dpi::PhysicalPosition;
-use winit::monitor::MonitorHandle;
+use winit::{dpi::PhysicalPosition, monitor::MonitorHandle, window::Fullscreen};
 
 use big_space::GridCell;
 use plot_3d::LinePlot3dPlugin;
@@ -755,6 +754,9 @@ fn apply_secondary_window_monitors(
         let x = monitor_pos.x + (monitor_size.width as i32 - window_size.width as i32) / 2;
         let y = monitor_pos.y + (monitor_size.height as i32 - window_size.height as i32) / 2;
 
+        let monitor_handle = target_monitor.clone();
+        window.set_fullscreen(Some(Fullscreen::Borderless(Some(monitor_handle))));
+        window.set_fullscreen(None);
         window.set_outer_position(PhysicalPosition::new(x, y));
         state.applied_screen_index = Some(screen_index);
         state.skip_metadata_capture = true;
