@@ -701,7 +701,14 @@ fn sync_secondary_windows(
         }
 
         let title = compute_secondary_window_title(state);
-        resolve_descriptor_size_from_percent(state.descriptor.view(), &monitor_snapshots);
+        {
+            let view = state.descriptor.view();
+            resolve_descriptor_size_from_percent(view, &monitor_snapshots);
+        }
+        {
+            let view = state.descriptor.view();
+            resolve_descriptor_position_from_percent(view, &monitor_snapshots);
+        }
 
         let window = build_window_from_descriptor(title, &state.descriptor, &monitor_snapshots);
 
@@ -803,7 +810,14 @@ fn apply_secondary_window_descriptor_to_window(
             continue;
         };
 
-        resolve_descriptor_size_from_percent(state.descriptor.view(), &monitor_snapshots);
+        {
+            let view = state.descriptor.view();
+            resolve_descriptor_size_from_percent(view, &monitor_snapshots);
+        }
+        {
+            let view = state.descriptor.view();
+            resolve_descriptor_position_from_percent(view, &monitor_snapshots);
+        }
         apply_descriptor_to_window_component(&mut window, &state.descriptor, &monitor_snapshots);
 
         let mut applied_to_winit = false;
@@ -834,10 +848,14 @@ fn apply_primary_window_descriptor_to_window(
     };
 
     let monitor_snapshots = collect_monitor_snapshots(&monitors, primary_monitor.iter().next());
-    resolve_descriptor_size_from_percent(
-        manager.primary_descriptor_mut().view(),
-        &monitor_snapshots,
-    );
+    {
+        let view = manager.primary_descriptor_mut().view();
+        resolve_descriptor_size_from_percent(view, &monitor_snapshots);
+    }
+    {
+        let view = manager.primary_descriptor_mut().view();
+        resolve_descriptor_position_from_percent(view, &monitor_snapshots);
+    }
     apply_descriptor_to_window_component(
         &mut window,
         manager.primary_descriptor(),
@@ -990,7 +1008,11 @@ pub(super) fn collect_monitor_snapshots(
         .map(|(entity, monitor)| MonitorSnapshot {
             index: 0,
             entity,
-            name: monitor.name.clone(),
+            name: monitor
+                .name
+                .as_deref()
+                .map(sanitize_screen_label)
+                .filter(|s| !s.is_empty()),
             physical_position: monitor.physical_position,
             physical_size: monitor.physical_size(),
             is_primary: false,
@@ -1016,6 +1038,22 @@ pub(super) fn collect_monitor_snapshots(
     }
 
     snapshots
+}
+
+pub(crate) fn sanitize_screen_label(input: &str) -> String {
+    let without_hash: String = input.chars().filter(|&ch| ch != '#').collect();
+
+    let collapsed = without_hash
+        .split_whitespace()
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    if collapsed.is_empty() {
+        without_hash.trim().to_string()
+    } else {
+        collapsed
+    }
 }
 
 fn build_window_from_descriptor(
@@ -1136,6 +1174,7 @@ fn apply_window_to_descriptor_view(
         size,
         size_percent,
         position,
+        position_percent,
         screen,
         screen_index,
     } = descriptor;
@@ -1150,6 +1189,7 @@ fn apply_window_to_descriptor_view(
     } else {
         *size = Some(window.size());
     }
+    *position_percent = None;
     *position = match window.position {
         WindowPosition::At(position) => Some(position),
         _ => None,
@@ -1160,6 +1200,7 @@ fn apply_window_to_descriptor_view(
         .and_then(|index| monitors.iter().find(|monitor| monitor.index == index))
         .and_then(|monitor| monitor.name.clone());
     let monitor_snapshot = monitor_index.and_then(|index| monitors.get(index));
+    update_position_percent_from_pixels(position_percent, *position, monitor_snapshot);
     update_size_percent_from_pixels(size_percent, *size, monitor_snapshot);
 }
 
@@ -1173,6 +1214,7 @@ fn extract_screen_metadata_from_winit(
         size,
         size_percent,
         position,
+        position_percent,
         screen,
         screen_index,
     } = descriptor;
@@ -1180,6 +1222,7 @@ fn extract_screen_metadata_from_winit(
     extract_monitor_from_winit_fields(screen, screen_index, monitors, window.current_monitor());
     let ctx = PositionExtractionContext {
         position,
+        position_percent,
         size,
         size_percent,
         screen,
@@ -1201,7 +1244,10 @@ fn extract_monitor_from_winit_fields(
 
     let monitor_position = handle.position();
     let monitor_size = handle.size();
-    let handle_name = handle.name();
+    let handle_name = handle
+        .name()
+        .map(|name| sanitize_screen_label(&name))
+        .filter(|s| !s.is_empty());
 
     let matched_snapshot = monitors.iter().find(|snapshot| {
         snapshot.physical_position.x == monitor_position.x
@@ -1222,6 +1268,7 @@ fn extract_monitor_from_winit_fields(
 
 struct PositionExtractionContext<'a> {
     position: &'a mut Option<IVec2>,
+    position_percent: &'a mut Option<Vec2>,
     size: &'a mut Option<Vec2>,
     size_percent: &'a mut Option<Vec2>,
     screen: &'a Option<String>,
@@ -1236,6 +1283,7 @@ fn extract_position_from_winit_fields(
 ) {
     if ctx.fullscreen {
         *ctx.position = None;
+        *ctx.position_percent = None;
     } else if let Ok(pos) = window.outer_position() {
         *ctx.position = Some(IVec2::new(pos.x, pos.y));
     }
@@ -1246,6 +1294,7 @@ fn extract_position_from_winit_fields(
 
     let monitor_snapshot =
         resolve_monitor_for_descriptor(*ctx.screen_index, ctx.screen.as_deref(), monitors);
+    update_position_percent_from_pixels(ctx.position_percent, *ctx.position, monitor_snapshot);
     update_size_percent_from_pixels(ctx.size_percent, Some(current_size), monitor_snapshot);
 }
 
@@ -1273,6 +1322,33 @@ fn update_size_percent_from_pixels(
     };
 
     *size_percent = Some(Vec2::new(round_percent(width), round_percent(height)));
+}
+
+fn update_position_percent_from_pixels(
+    position_percent: &mut Option<Vec2>,
+    position: Option<IVec2>,
+    monitor: Option<&MonitorSnapshot>,
+) {
+    let Some(pos) = position else {
+        *position_percent = None;
+        return;
+    };
+    let Some(snapshot) = monitor else {
+        return;
+    };
+    if snapshot.physical_size.x == 0 || snapshot.physical_size.y == 0 {
+        return;
+    }
+
+    let rel_x = pos.x - snapshot.physical_position.x;
+    let rel_y = pos.y - snapshot.physical_position.y;
+    let percent_x = rel_x as f32 / snapshot.physical_size.x as f32 * 100.0;
+    let percent_y = rel_y as f32 / snapshot.physical_size.y as f32 * 100.0;
+
+    *position_percent = Some(Vec2::new(
+        round_percent(percent_x),
+        round_percent(percent_y),
+    ));
 }
 
 pub(super) fn resolve_monitor_for_descriptor<'a>(
@@ -1320,6 +1396,44 @@ fn resolve_descriptor_size_from_percent(
     let width = snapshot.physical_size.x as f32 * percent.x / 100.0;
     let height = snapshot.physical_size.y as f32 * percent.y / 100.0;
     *size = Some(Vec2::new(width.max(1.0), height.max(1.0)));
+}
+
+fn resolve_descriptor_position_from_percent(
+    descriptor: tiles::WindowDescriptorView<'_>,
+    monitors: &[MonitorSnapshot],
+) {
+    let tiles::WindowDescriptorView {
+        position,
+        position_percent,
+        screen,
+        screen_index,
+        ..
+    } = descriptor;
+
+    if position.is_some() {
+        return;
+    }
+
+    let Some(percent) = *position_percent else {
+        return;
+    };
+
+    let screen_name = screen.as_ref().map(|s| s.as_str());
+    let Some(snapshot) = resolve_monitor_for_descriptor(*screen_index, screen_name, monitors)
+    else {
+        return;
+    };
+
+    if snapshot.physical_size.x == 0 || snapshot.physical_size.y == 0 {
+        return;
+    }
+
+    let offset_x = (snapshot.physical_size.x as f32 * percent.x / 100.0).round() as i32;
+    let offset_y = (snapshot.physical_size.y as f32 * percent.y / 100.0).round() as i32;
+
+    let x = snapshot.physical_position.x + offset_x;
+    let y = snapshot.physical_position.y + offset_y;
+    *position = Some(IVec2::new(x, y));
 }
 
 pub(super) fn round_percent(value: f32) -> f32 {

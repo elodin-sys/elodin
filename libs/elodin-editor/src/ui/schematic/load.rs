@@ -27,6 +27,7 @@ use crate::{
         monitor::MonitorPane,
         plot::{GraphBundle, LockGroup},
         query_plot::QueryPlotData,
+        sanitize_screen_label,
         schematic::EqlExt,
         tiles::{
             DashboardPane, GraphPane, Pane, PrimaryWindowDescriptor, SecondaryWindowDescriptor,
@@ -128,20 +129,36 @@ fn resolve_window_descriptor(
         }
     }
 
+    let (position_pixels, position_percent) = interpret_rect_position(window.position);
     let (size_pixels, size_percent) = interpret_rect_size(window.size);
+    let screen = window
+        .screen
+        .as_deref()
+        .map(sanitize_screen_label)
+        .filter(|s| !s.is_empty());
 
     Some(SecondaryWindowDescriptor {
         path: resolved,
         title: window.title.clone(),
-        screen: window.screen.clone(),
+        screen,
         screen_index: window.screen_idx.map(|index| index as usize),
-        position: window
-            .position
-            .map(|coords| IVec2::new(coords[0], coords[1])),
+        position: position_pixels,
+        position_percent,
         size: size_pixels,
         size_percent,
         fullscreen: window.fullscreen.unwrap_or(false),
     })
+}
+
+fn interpret_rect_position(position: Option<[i32; 2]>) -> (Option<IVec2>, Option<Vec2>) {
+    let Some([x, y]) = position else {
+        return (None, None);
+    };
+    if (0..=100).contains(&x) && (0..=100).contains(&y) {
+        (None, Some(Vec2::new(x as f32, y as f32)))
+    } else {
+        (Some(IVec2::new(x, y)), None)
+    }
 }
 
 fn interpret_rect_size(size: Option<[f32; 2]>) -> (Option<Vec2>, Option<Vec2>) {
@@ -261,13 +278,19 @@ impl LoadSchematicParams<'_, '_> {
                     }
                 }
                 impeller2_wkt::SchematicElem::MainWindow(window) => {
+                    let (position_pixels, position_percent) =
+                        interpret_rect_position(window.position);
                     let (size_pixels, size_percent) = interpret_rect_size(window.size);
+                    let screen = window
+                        .screen
+                        .as_deref()
+                        .map(sanitize_screen_label)
+                        .filter(|s| !s.is_empty());
                     *self.windows.primary_descriptor_mut() = PrimaryWindowDescriptor {
-                        screen: window.screen.clone(),
+                        screen,
                         screen_index: window.screen_idx.map(|index| index as usize),
-                        position: window
-                            .position
-                            .map(|coords| IVec2::new(coords[0], coords[1])),
+                        position: position_pixels,
+                        position_percent,
                         size: size_pixels,
                         size_percent,
                         fullscreen: window.fullscreen.unwrap_or(false),

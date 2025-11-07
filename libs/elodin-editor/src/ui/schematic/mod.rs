@@ -276,10 +276,16 @@ pub fn tiles_to_schematic(
             title: state.descriptor.title.clone(),
             schematic: window_schematic,
         });
-        let size_percent = window_size_percent_for_serialization(
+        let size_entry = window_size_percent_for_serialization(
             &state.descriptor,
             state.descriptor.size_percent,
             state.descriptor.size,
+            &monitor_snapshots,
+        );
+        let position_entry = window_position_percent_for_serialization(
+            &state.descriptor,
+            state.descriptor.position_percent,
+            state.descriptor.position,
             &monitor_snapshots,
         );
         window_elems.push(SchematicElem::Window(WindowSchematic {
@@ -287,8 +293,8 @@ pub fn tiles_to_schematic(
             path: file_name,
             screen: state.descriptor.screen.clone(),
             screen_idx: state.descriptor.screen_index.map(|index| index as u32),
-            position: state.descriptor.position.map(|p| [p.x, p.y]),
-            size: size_percent,
+            position: position_entry,
+            size: size_entry,
             fullscreen: state.descriptor.fullscreen.then_some(true),
         }));
     }
@@ -322,11 +328,17 @@ fn primary_window_schematic(
         descriptor.size,
         monitors,
     );
+    let position_percent = window_position_percent_for_serialization(
+        descriptor,
+        descriptor.position_percent,
+        descriptor.position,
+        monitors,
+    );
 
     Some(SchematicElem::MainWindow(PrimaryWindowSchematic {
         screen: descriptor.screen.clone(),
         screen_idx: descriptor.screen_index.map(|index| index as u32),
-        position: descriptor.position.map(|p| [p.x, p.y]),
+        position: position_percent,
         size: size_percent,
         fullscreen: descriptor.fullscreen.then_some(true),
     }))
@@ -343,19 +355,54 @@ fn window_size_percent_for_serialization(
     }
 
     let size = size_pixels?;
-    let monitor = resolve_monitor_for_descriptor(
+    if let Some(monitor) = resolve_monitor_for_descriptor(
         descriptor.screen_index(),
         descriptor.screen().map(|s| s.as_str()),
         monitors,
-    )?;
-    if monitor.physical_size.x == 0 || monitor.physical_size.y == 0 {
-        return None;
+    )
+    .filter(|monitor| monitor.physical_size.x > 0 && monitor.physical_size.y > 0)
+    {
+        return Some([
+            round_percent(size.x / monitor.physical_size.x as f32 * 100.0),
+            round_percent(size.y / monitor.physical_size.y as f32 * 100.0),
+        ]);
     }
 
-    Some([
-        round_percent(size.x / monitor.physical_size.x as f32 * 100.0),
-        round_percent(size.y / monitor.physical_size.y as f32 * 100.0),
-    ])
+    Some([size.x, size.y])
+}
+
+fn window_position_percent_for_serialization(
+    descriptor: &impl tiles::WindowDescriptorInfo,
+    stored_percent: Option<Vec2>,
+    position_pixels: Option<IVec2>,
+    monitors: &[MonitorSnapshot],
+) -> Option<[i32; 2]> {
+    if let Some(percent) = stored_percent {
+        return Some([
+            round_percent(percent.x) as i32,
+            round_percent(percent.y) as i32,
+        ]);
+    }
+
+    let position = position_pixels?;
+    if let Some(monitor) = resolve_monitor_for_descriptor(
+        descriptor.screen_index(),
+        descriptor.screen().map(|s| s.as_str()),
+        monitors,
+    )
+    .filter(|monitor| monitor.physical_size.x > 0 && monitor.physical_size.y > 0)
+    {
+        let rel_x = position.x - monitor.physical_position.x;
+        let rel_y = position.y - monitor.physical_position.y;
+        let percent_x = rel_x as f32 / monitor.physical_size.x as f32 * 100.0;
+        let percent_y = rel_y as f32 / monitor.physical_size.y as f32 * 100.0;
+        return Some([
+            round_percent(percent_x) as i32,
+            round_percent(percent_y) as i32,
+        ]);
+    }
+
+    Some([position.x, position.y])
 }
 
 pub struct SchematicPlugin;

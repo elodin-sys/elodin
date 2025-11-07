@@ -87,6 +87,7 @@ pub struct SecondaryWindowDescriptor {
     pub screen: Option<String>,
     pub screen_index: Option<usize>,
     pub position: Option<IVec2>,
+    pub position_percent: Option<Vec2>,
     pub size: Option<Vec2>,
     pub size_percent: Option<Vec2>,
     pub fullscreen: bool,
@@ -97,6 +98,7 @@ pub struct PrimaryWindowDescriptor {
     pub screen: Option<String>,
     pub screen_index: Option<usize>,
     pub position: Option<IVec2>,
+    pub position_percent: Option<Vec2>,
     pub size: Option<Vec2>,
     pub size_percent: Option<Vec2>,
     pub fullscreen: bool,
@@ -107,6 +109,7 @@ pub struct WindowDescriptorView<'a> {
     pub size: &'a mut Option<Vec2>,
     pub size_percent: &'a mut Option<Vec2>,
     pub position: &'a mut Option<IVec2>,
+    pub position_percent: &'a mut Option<Vec2>,
     pub screen: &'a mut Option<String>,
     pub screen_index: &'a mut Option<usize>,
 }
@@ -118,6 +121,7 @@ impl SecondaryWindowDescriptor {
             size: &mut self.size,
             size_percent: &mut self.size_percent,
             position: &mut self.position,
+            position_percent: &mut self.position_percent,
             screen: &mut self.screen,
             screen_index: &mut self.screen_index,
         }
@@ -131,6 +135,7 @@ impl PrimaryWindowDescriptor {
             size: &mut self.size,
             size_percent: &mut self.size_percent,
             position: &mut self.position,
+            position_percent: &mut self.position_percent,
             screen: &mut self.screen,
             screen_index: &mut self.screen_index,
         }
@@ -140,7 +145,9 @@ impl PrimaryWindowDescriptor {
 pub trait WindowDescriptorInfo {
     fn fullscreen(&self) -> bool;
     fn size(&self) -> Option<Vec2>;
+    fn size_percent(&self) -> Option<Vec2>;
     fn position(&self) -> Option<IVec2>;
+    fn position_percent(&self) -> Option<Vec2>;
     fn screen(&self) -> Option<&String>;
     fn screen_index(&self) -> Option<usize>;
 }
@@ -154,8 +161,16 @@ impl WindowDescriptorInfo for SecondaryWindowDescriptor {
         self.size
     }
 
+    fn size_percent(&self) -> Option<Vec2> {
+        self.size_percent
+    }
+
     fn position(&self) -> Option<IVec2> {
         self.position
+    }
+
+    fn position_percent(&self) -> Option<Vec2> {
+        self.position_percent
     }
 
     fn screen(&self) -> Option<&String> {
@@ -176,8 +191,16 @@ impl WindowDescriptorInfo for PrimaryWindowDescriptor {
         self.size
     }
 
+    fn size_percent(&self) -> Option<Vec2> {
+        self.size_percent
+    }
+
     fn position(&self) -> Option<IVec2> {
         self.position
+    }
+
+    fn position_percent(&self) -> Option<Vec2> {
+        self.position_percent
     }
 
     fn screen(&self) -> Option<&String> {
@@ -315,6 +338,7 @@ impl WindowManager {
             screen: None,
             screen_index: None,
             position: None,
+            position_percent: None,
             size: None,
             size_percent: None,
             fullscreen: false,
