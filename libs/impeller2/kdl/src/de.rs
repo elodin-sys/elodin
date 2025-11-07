@@ -94,11 +94,62 @@ fn parse_window(node: &KdlNode, src: &str) -> Result<WindowSchematic, KdlSchemat
         .and_then(|value| value.as_integer())
         .map(|value| value as u32);
 
+    let mut screen_rect = None;
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "rect" {
+                screen_rect = Some(parse_window_rect(child, src)?);
+                break;
+            }
+        }
+    }
+
     Ok(WindowSchematic {
         title,
         path: path.to_string(),
         screen_index: screen_idx,
+        screen_rect,
     })
+}
+
+fn parse_window_rect(node: &KdlNode, src: &str) -> Result<WindowRect, KdlSchematicError> {
+    if node.entries().len() != 4 {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "rect".to_string(),
+            node: node.name().to_string(),
+            expected: "rect requires four numeric entries (x%, y%, width%, height%)".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        });
+    }
+
+    let mut values = [0f64; 4];
+    for (idx, entry) in node.entries().iter().enumerate() {
+        if let Some(value) = entry.value().as_float() {
+            values[idx] = value;
+        } else if let Some(value) = entry.value().as_integer() {
+            values[idx] = value as f64;
+        } else {
+            return Err(KdlSchematicError::InvalidValue {
+                property: "rect".to_string(),
+                node: node.name().to_string(),
+                expected: "rect entries must be numeric percentages".to_string(),
+                src: src.to_string(),
+                span: node.span(),
+            });
+        }
+    }
+
+    Ok(WindowRect {
+        x: clamp_percent(values[0]),
+        y: clamp_percent(values[1]),
+        width: clamp_percent(values[2]),
+        height: clamp_percent(values[3]),
+    })
+}
+
+fn clamp_percent(value: f64) -> u32 {
+    value.round().clamp(0.0, 100.0) as u32
 }
 
 fn parse_panel(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {

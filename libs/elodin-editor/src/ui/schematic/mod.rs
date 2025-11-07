@@ -269,6 +269,7 @@ pub fn tiles_to_schematic(
             title: state.descriptor.title.clone(),
             path: file_name,
             screen_index: state.descriptor.screen_index.map(|idx| idx as u32),
+            screen_rect: state.descriptor.screen_rect,
         }));
     }
 
