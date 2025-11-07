@@ -7,12 +7,12 @@ use bevy::{
         system::{SystemParam, SystemState},
     },
     input::keyboard::Key,
-    log::{error, info, warn},
+    log::{error, info},
     prelude::*,
     render::camera::{RenderTarget, Viewport},
     window::{
-        EnabledButtons, Monitor, PresentMode, PrimaryWindow, WindowCloseRequested, WindowPosition,
-        WindowRef, WindowResolution,
+        EnabledButtons, PresentMode, PrimaryWindow, WindowCloseRequested, WindowRef,
+        WindowResolution,
     },
 };
 use bevy_egui::{
@@ -20,6 +20,8 @@ use bevy_egui::{
     egui::{self, Color32, Label, Margin, RichText},
 };
 use egui_tiles::{Container, Tile};
+use winit::dpi::PhysicalPosition;
+use winit::monitor::MonitorHandle;
 
 use big_space::GridCell;
 use plot_3d::LinePlot3dPlugin;
@@ -219,6 +221,10 @@ impl Plugin for UiPlugin {
             .add_systems(Update, handle_primary_close.before(render_layout))
             .add_systems(Update, render_layout)
             .add_systems(Update, sync_secondary_windows.after(render_layout))
+            .add_systems(
+                Update,
+                apply_secondary_window_monitors.after(sync_secondary_windows),
+            )
             .add_systems(Update, handle_secondary_close.after(sync_secondary_windows))
             .add_systems(
                 Update,
@@ -635,10 +641,7 @@ fn sync_secondary_windows(
     mut windows: ResMut<tiles::WindowManager>,
     existing: Query<(Entity, &SecondaryWindowMarker)>,
     mut cameras: Query<&mut Camera>,
-    mut window_components: Query<&mut Window>,
-    monitors: Query<(Entity, &Monitor)>,
 ) {
-    let monitor_layout = gather_monitor_layout(&monitors);
     let mut existing_map: HashMap<tiles::SecondaryWindowId, Entity> = HashMap::new();
     for (entity, marker) in existing.iter() {
         existing_map.insert(marker.id, entity);
@@ -662,27 +665,6 @@ fn sync_secondary_windows(
 
         if let Some(entity) = state.window_entity {
             existing_map.insert(state.id, entity);
-            if let Some(screen_index) = state.descriptor.screen_index
-                && state.applied_screen_index != Some(screen_index)
-            {
-                if let Ok(mut window) = window_components.get_mut(entity) {
-                    info!(
-                        screen_index,
-                        path = %state.descriptor.path.display(),
-                        "Re-centering secondary window on monitor"
-                    );
-                    if let Some(position) =
-                        centered_position_for_screen(&monitor_layout, screen_index, &window)
-                    {
-                        window.position = position;
-                        state.applied_screen_index = Some(screen_index);
-                    } else {
-                        state.applied_screen_index = None;
-                    }
-                }
-            } else if state.descriptor.screen_index.is_none() {
-                state.applied_screen_index = None;
-            }
             let window_ref = WindowRef::Entity(entity);
             for (index, &graph) in state.graph_entities.iter().enumerate() {
                 if let Ok(mut camera) = cameras.get_mut(graph) {
@@ -702,7 +684,7 @@ fn sync_secondary_windows(
 
         let title = compute_secondary_window_title(state);
 
-        let mut window_component = Window {
+        let window_component = Window {
             title,
             resolution: WindowResolution::new(640.0, 480.0),
             present_mode: PresentMode::AutoVsync,
@@ -713,29 +695,13 @@ fn sync_secondary_windows(
             ..Default::default()
         };
 
-        if let Some(screen_index) = state.descriptor.screen_index {
-            let physical_size = window_component.resolution.physical_size();
-            if let Some(position) =
-                centered_position_for_rect(&monitor_layout, screen_index, physical_size)
-            {
-                window_component.position = WindowPosition::At(position);
-            }
-        }
-
         let window_entity = commands
             .spawn((window_component, SecondaryWindowMarker { id: state.id }))
             .id();
 
-        if let Some(screen_index) = state.descriptor.screen_index {
-            info!(
-                screen_index,
-                path = %state.descriptor.path.display(),
-                "Spawned secondary window on monitor"
-            );
-        }
-
         state.window_entity = Some(window_entity);
-        state.applied_screen_index = state.descriptor.screen_index;
+        state.applied_screen_index = None;
+        state.skip_metadata_capture = true;
         existing_map.insert(state.id, window_entity);
         let window_ref = WindowRef::Entity(window_entity);
         for (index, &graph) in state.graph_entities.iter().enumerate() {
@@ -745,6 +711,58 @@ fn sync_secondary_windows(
                 camera.order = 10 + index as isize;
             }
         }
+    }
+}
+
+fn apply_secondary_window_monitors(
+    mut windows: ResMut<tiles::WindowManager>,
+    winit_windows: NonSend<bevy::winit::WinitWindows>,
+) {
+    for state in windows.secondary_mut().iter_mut() {
+        let Some(entity) = state.window_entity else {
+            continue;
+        };
+        let Some(screen_index) = state.descriptor.screen_index else {
+            continue;
+        };
+        if state.applied_screen_index == Some(screen_index) {
+            continue;
+        }
+        let Some(window) = winit_windows.get_window(entity) else {
+            continue;
+        };
+
+        let mut monitors: Vec<MonitorHandle> = window.available_monitors().collect();
+        monitors.sort_by(|a, b| {
+            a.position()
+                .x
+                .cmp(&b.position().x)
+                .then(a.position().y.cmp(&b.position().y))
+        });
+
+        let Some(target_monitor) = monitors.get(screen_index) else {
+            info!(
+                screen_index,
+                path = %state.descriptor.path.display(),
+                "screen_index out of range; skipping monitor assignment"
+            );
+            continue;
+        };
+
+        let monitor_pos = target_monitor.position();
+        let monitor_size = target_monitor.size();
+        let window_size = window.outer_size();
+        let x = monitor_pos.x + (monitor_size.width as i32 - window_size.width as i32) / 2;
+        let y = monitor_pos.y + (monitor_size.height as i32 - window_size.height as i32) / 2;
+
+        window.set_outer_position(PhysicalPosition::new(x, y));
+        state.applied_screen_index = Some(screen_index);
+        state.skip_metadata_capture = true;
+        info!(
+            screen_index,
+            path = %state.descriptor.path.display(),
+            "Applied screen_index to secondary window"
+        );
     }
 }
 
@@ -940,60 +958,6 @@ pub(crate) fn compute_secondary_window_title(state: &tiles::SecondaryWindowState
         })
         .filter(|title| !title.is_empty())
         .unwrap_or_else(|| "Panel".to_string())
-}
-
-#[derive(Clone)]
-struct MonitorLayout {
-    position: IVec2,
-    size: UVec2,
-}
-
-fn gather_monitor_layout(monitors: &Query<(Entity, &Monitor)>) -> Vec<MonitorLayout> {
-    let mut layouts: Vec<_> = monitors
-        .iter()
-        .map(|(_, monitor)| MonitorLayout {
-            position: monitor.physical_position,
-            size: monitor.physical_size(),
-        })
-        .collect();
-
-    layouts.sort_by(|a, b| {
-        a.position
-            .x
-            .cmp(&b.position.x)
-            .then(a.position.y.cmp(&b.position.y))
-    });
-
-    layouts
-}
-
-fn centered_position_for_screen(
-    monitors: &[MonitorLayout],
-    screen_index: usize,
-    window: &Window,
-) -> Option<WindowPosition> {
-    centered_position_for_rect(monitors, screen_index, window.resolution.physical_size())
-        .map(WindowPosition::At)
-}
-
-fn centered_position_for_rect(
-    monitors: &[MonitorLayout],
-    screen_index: usize,
-    size: UVec2,
-) -> Option<IVec2> {
-    let Some(layout) = monitors.get(screen_index) else {
-        warn!(
-            screen_index,
-            available = monitors.len(),
-            "Requested screen index out of range"
-        );
-        return None;
-    };
-    let width = size.x as i32;
-    let height = size.y as i32;
-    let x = layout.position.x + (layout.size.x as i32 - width) / 2;
-    let y = layout.position.y + (layout.size.y as i32 - height) / 2;
-    Some(IVec2::new(x, y))
 }
 
 #[derive(QueryData)]

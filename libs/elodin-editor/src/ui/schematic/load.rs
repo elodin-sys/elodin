@@ -266,6 +266,7 @@ impl LoadSchematicParams<'_, '_> {
                             window_entity: None,
                             graph_entities,
                             applied_screen_index: None,
+                            skip_metadata_capture: true,
                         });
                     }
                     Err(err) => {
