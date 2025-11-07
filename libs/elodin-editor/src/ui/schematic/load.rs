@@ -157,7 +157,6 @@ pub fn load_schematic_file(
 ) -> Result<(), KdlSchematicError> {
     let (tx, rx) = flume::bounded(1);
     live_reload_rx.receiver = Some(rx);
-    live_reload_rx.suppress_until = None;
     let watch_path = path.to_path_buf();
     std::thread::spawn(move || {
         let cb_path = watch_path.clone();
@@ -173,7 +172,10 @@ pub fn load_schematic_file(
                     let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(&kdl) else {
                         return;
                     };
-                    let _ = tx.send(schematic);
+                    let _ = tx.send(SchematicReloadEvent {
+                        path: cb_path.clone(),
+                        schematic,
+                    });
                 }
             },
         )
@@ -619,35 +621,46 @@ pub fn graph_label(graph: &Graph) -> String {
         .unwrap_or_else(|| "Graph".to_string())
 }
 
+use std::collections::HashMap;
 use std::time::Instant;
+
+#[derive(Debug)]
+pub struct SchematicReloadEvent {
+    pub path: PathBuf,
+    pub schematic: Schematic,
+}
 
 #[derive(Default, Resource)]
 pub struct SchematicLiveReloadRx {
-    pub receiver: Option<flume::Receiver<Schematic>>,
-    pub suppress_until: Option<Instant>,
+    pub receiver: Option<flume::Receiver<SchematicReloadEvent>>,
+    pub ignored_paths: HashMap<PathBuf, Instant>,
 }
 
 impl SchematicLiveReloadRx {
-    pub fn suppress_for(&mut self, duration: Duration) {
-        let until = Instant::now() + duration;
-        self.suppress_until = Some(match self.suppress_until {
-            Some(existing) if existing > until => existing,
-            _ => until,
-        });
+    pub fn ignore_path(&mut self, path: PathBuf, ttl: Duration) {
+        let expire_at = Instant::now() + ttl;
+        if let Some(existing) = self.ignored_paths.get_mut(&path) {
+            if *existing < expire_at {
+                *existing = expire_at;
+            }
+        } else {
+            self.ignored_paths.insert(path, expire_at);
+        }
     }
 
-    fn should_suppress(&self) -> bool {
-        self.suppress_until
-            .map(|until| Instant::now() < until)
-            .unwrap_or(false)
-    }
-
-    fn clear_suppression_if_expired(&mut self) {
-        if let Some(until) = self.suppress_until {
-            if Instant::now() >= until {
-                self.suppress_until = None;
+    pub fn should_ignore(&mut self, path: &Path) -> bool {
+        self.cleanup_expired();
+        if let Some(expire_at) = self.ignored_paths.get(path) {
+            if Instant::now() <= *expire_at {
+                return true;
             }
         }
+        false
+    }
+
+    fn cleanup_expired(&mut self) {
+        let now = Instant::now();
+        self.ignored_paths.retain(|_, expire| *expire >= now);
     }
 }
 
@@ -655,15 +668,15 @@ pub fn schematic_live_reload(
     mut rx: ResMut<SchematicLiveReloadRx>,
     mut params: LoadSchematicParams,
 ) {
-    rx.clear_suppression_if_expired();
+    rx.cleanup_expired();
     let Some(receiver) = &mut rx.receiver else {
         return;
     };
-    let Ok(schematic) = receiver.try_recv() else {
+    let Ok(event) = receiver.try_recv() else {
         return;
     };
-    if rx.should_suppress() {
+    if rx.should_ignore(&event.path) {
         return;
     }
-    params.load_schematic(&schematic, None);
+    params.load_schematic(&event.schematic, event.path.parent());
 }
