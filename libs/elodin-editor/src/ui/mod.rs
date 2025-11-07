@@ -10,8 +10,8 @@ use bevy::{
     prelude::*,
     render::camera::{RenderTarget, Viewport},
     window::{
-        EnabledButtons, PresentMode, PrimaryWindow, WindowCloseRequested, WindowRef,
-        WindowResolution,
+        EnabledButtons, MonitorSelection, PresentMode, PrimaryWindow, WindowCloseRequested,
+        WindowPosition, WindowRef, WindowResolution,
     },
 };
 use bevy_egui::{
@@ -841,6 +841,7 @@ fn sync_secondary_windows(
     mut windows: ResMut<tiles::WindowManager>,
     existing: Query<(Entity, &SecondaryWindowMarker)>,
     mut cameras: Query<&mut Camera>,
+    mut window_components: Query<&mut Window>,
 ) {
     let mut existing_map: HashMap<tiles::SecondaryWindowId, Entity> = HashMap::new();
     for (entity, marker) in existing.iter() {
@@ -865,6 +866,12 @@ fn sync_secondary_windows(
 
         if let Some(entity) = state.window_entity {
             existing_map.insert(state.id, entity);
+            if let Some(screen_index) = state.descriptor.screen_index {
+                if let Ok(mut window) = window_components.get_mut(entity) {
+                    window.position =
+                        WindowPosition::Centered(MonitorSelection::Index(screen_index));
+                }
+            }
             let window_ref = WindowRef::Entity(entity);
             for (index, &graph) in state.graph_entities.iter().enumerate() {
                 if let Ok(mut camera) = cameras.get_mut(graph) {
@@ -884,20 +891,24 @@ fn sync_secondary_windows(
 
         let title = compute_secondary_window_title(state);
 
+        let mut window_component = Window {
+            title,
+            resolution: WindowResolution::new(640.0, 480.0),
+            present_mode: PresentMode::AutoVsync,
+            enabled_buttons: EnabledButtons {
+                close: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        if let Some(screen_index) = state.descriptor.screen_index {
+            window_component.position =
+                WindowPosition::Centered(MonitorSelection::Index(screen_index));
+        }
+
         let window_entity = commands
-            .spawn((
-                Window {
-                    title,
-                    resolution: WindowResolution::new(640.0, 480.0),
-                    present_mode: PresentMode::AutoVsync,
-                    enabled_buttons: EnabledButtons {
-                        close: true,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-                SecondaryWindowMarker { id: state.id },
-            ))
+            .spawn((window_component, SecondaryWindowMarker { id: state.id }))
             .id();
 
         state.window_entity = Some(window_entity);

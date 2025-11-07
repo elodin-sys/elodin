@@ -89,14 +89,15 @@ fn parse_window(node: &KdlNode, src: &str) -> Result<WindowSchematic, KdlSchemat
         .filter(|s| !s.is_empty());
 
     let screen_idx = node
-        .get("screenIdx")
+        .get("screen_index")
+        .or_else(|| node.get("screenIdx"))
         .and_then(|value| value.as_integer())
         .map(|value| value as u32);
 
     Ok(WindowSchematic {
         title,
         path: path.to_string(),
-        screen_idx,
+        screen_index: screen_idx,
     })
 }
 

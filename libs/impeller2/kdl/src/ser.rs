@@ -133,9 +133,9 @@ fn serialize_window(window: &WindowSchematic) -> KdlNode {
             .push(KdlEntry::new_prop("title", title.clone()));
     }
 
-    if let Some(idx) = window.screen_idx {
+    if let Some(idx) = window.screen_index {
         node.entries_mut()
-            .push(KdlEntry::new_prop("screenIdx", i128::from(idx)));
+            .push(KdlEntry::new_prop("screen_index", i128::from(idx)));
     }
 
     node
