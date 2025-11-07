@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use egui_material_icons::{icon_button, icons::*};
 use std::collections::HashMap;
 
-use super::state::LockGroup;
 use crate::{
     editor_cam_touch::*,
     ui::{theme::corner_radius_sm, utils::Shrink4},
@@ -869,41 +868,36 @@ pub fn track_lock_toggles(
     mut sets: ParamSet<(Query<(Entity, &GraphState)>, Query<&mut GraphState>)>,
     mut tracker: ResMut<LockTracker>,
 ) {
-    let mut newly_locked: HashMap<LockGroup, Vec<Entity>> = HashMap::new();
-    let mut sources: HashMap<LockGroup, (f32, f32, u64)> = HashMap::new();
+    let mut newly_locked: Vec<Entity> = Vec::new();
+    let mut source: Option<(f32, f32, u64)> = None;
 
     for (e, gs) in sets.p0().iter() {
         let prev = tracker.0.insert(e, gs.locked).unwrap_or(false);
         if gs.locked {
-            sources
-                .entry(gs.lock_group)
-                .and_modify(|src| {
-                    if gs.x_rev > src.2 {
-                        *src = (gs.zoom_factor.x, gs.pan_offset.x, gs.x_rev);
-                    }
-                })
-                .or_insert((gs.zoom_factor.x, gs.pan_offset.x, gs.x_rev));
+            match source {
+                Some((_, _, rev)) if gs.x_rev <= rev => {}
+                _ => source = Some((gs.zoom_factor.x, gs.pan_offset.x, gs.x_rev)),
+            }
         }
         if !prev && gs.locked {
-            newly_locked.entry(gs.lock_group).or_default().push(e);
+            newly_locked.push(e);
         }
     }
+
+    let Some((zx, px, rev)) = source else {
+        return;
+    };
 
     if newly_locked.is_empty() {
         return;
     }
 
     let mut p1 = sets.p1();
-    for (group, entities) in newly_locked {
-        let Some((zx, px, rev)) = sources.get(&group).copied() else {
-            continue;
-        };
-        for e in entities {
-            if let Ok(mut me) = p1.get_mut(e) {
-                me.zoom_factor.x = zx;
-                me.pan_offset.x = px;
-                me.x_rev = rev.saturating_sub(1);
-            }
+    for e in newly_locked {
+        if let Ok(mut me) = p1.get_mut(e) {
+            me.zoom_factor.x = zx;
+            me.pan_offset.x = px;
+            me.x_rev = rev.saturating_sub(1);
         }
     }
 }
@@ -916,35 +910,29 @@ pub fn sync_locked_graphs(
         Query<(Entity, &mut GraphState)>,
     )>,
 ) {
-    let mut sources: HashMap<LockGroup, (Entity, f32, f32, u64)> = HashMap::new();
+    let mut source: Option<(Entity, f32, f32, u64)> = None;
     for (e, gs) in sets.p0().iter() {
         if gs.locked {
-            sources
-                .entry(gs.lock_group)
-                .and_modify(|src| {
-                    if gs.x_rev > src.3 {
-                        *src = (e, gs.zoom_factor.x, gs.pan_offset.x, gs.x_rev);
-                    }
-                })
-                .or_insert((e, gs.zoom_factor.x, gs.pan_offset.x, gs.x_rev));
+            match source {
+                Some((_, _, _, rev)) if gs.x_rev <= rev => {}
+                _ => source = Some((e, gs.zoom_factor.x, gs.pan_offset.x, gs.x_rev)),
+            }
         }
     }
 
-    if sources.is_empty() {
+    let Some((src_e, zx, px, _)) = source else {
         return;
-    }
+    };
 
     for (e, mut gs) in sets.p1().iter_mut() {
         if !gs.locked {
             continue;
         }
-        if let Some((src_e, zx, px, _)) = sources.get(&gs.lock_group) {
-            if e == *src_e {
-                continue;
-            }
-            gs.zoom_factor.x = *zx;
-            gs.pan_offset.x = *px;
+        if e == src_e {
+            continue;
         }
+        gs.zoom_factor.x = zx;
+        gs.pan_offset.x = px;
     }
 }
 
