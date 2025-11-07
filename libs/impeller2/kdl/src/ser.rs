@@ -138,6 +138,26 @@ fn serialize_window(window: &WindowSchematic) -> KdlNode {
             .push(KdlEntry::new_prop("screen_index", i128::from(idx)));
     }
 
+    if let Some(rect) = window.screen_rect {
+        let mut rect_node = KdlNode::new("rect");
+        rect_node
+            .entries_mut()
+            .push(KdlEntry::new(i128::from(rect.x)));
+        rect_node
+            .entries_mut()
+            .push(KdlEntry::new(i128::from(rect.y)));
+        rect_node
+            .entries_mut()
+            .push(KdlEntry::new(i128::from(rect.width)));
+        rect_node
+            .entries_mut()
+            .push(KdlEntry::new(i128::from(rect.height)));
+
+        let mut children = node.children().cloned().unwrap_or_else(KdlDocument::new);
+        children.nodes_mut().push(rect_node);
+        node.set_children(children);
+    }
+
     node
 }
 

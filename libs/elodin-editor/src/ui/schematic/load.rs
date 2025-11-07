@@ -122,6 +122,7 @@ fn resolve_window_descriptor(
         path: resolved,
         title: window.title.clone(),
         screen_index: window.screen_index.map(|idx| idx as usize),
+        screen_rect: window.screen_rect,
     })
 }
 
@@ -271,6 +272,8 @@ impl LoadSchematicParams<'_, '_> {
                             window_entity: None,
                             graph_entities,
                             applied_screen_index: None,
+                            applied_rect: None,
+                            pending_screen_index: None,
                             skip_metadata_capture: true,
                         });
                     }

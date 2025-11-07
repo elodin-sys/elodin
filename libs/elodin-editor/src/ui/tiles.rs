@@ -19,11 +19,15 @@ use bevy_render::{
 };
 use egui::UiBuilder;
 use egui_tiles::{Container, Tile, TileId, Tiles};
-use impeller2_wkt::{Dashboard, Graph, Viewport};
+use impeller2_wkt::{Dashboard, Graph, Viewport, WindowRect};
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, HashMap};
 use std::{fmt::Write as _, path::PathBuf};
-use winit::{monitor::MonitorHandle, window::Window as WinitWindow};
+use winit::{
+    dpi::{PhysicalPosition, PhysicalSize},
+    monitor::MonitorHandle,
+    window::Window as WinitWindow,
+};
 
 use super::{
     SelectedObject, ViewportRect,
@@ -87,6 +91,7 @@ pub struct SecondaryWindowDescriptor {
     pub path: PathBuf,
     pub title: Option<String>,
     pub screen_index: Option<usize>,
+    pub screen_rect: Option<WindowRect>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -100,6 +105,8 @@ pub struct SecondaryWindowState {
     pub window_entity: Option<Entity>,
     pub graph_entities: Vec<Entity>,
     pub applied_screen_index: Option<usize>,
+    pub applied_rect: Option<WindowRect>,
+    pub pending_screen_index: Option<usize>,
     pub skip_metadata_capture: bool,
 }
 
@@ -125,22 +132,32 @@ impl SecondaryWindowState {
         );
 
         let mut best: Option<(usize, i32)> = None;
+        let mut best_bounds: Option<(IVec2, UVec2)> = None;
         for (index, (_, monitor)) in monitors.iter().enumerate() {
             let min = monitor.physical_position;
-            let max = IVec2::new(
-                monitor.physical_position.x + monitor.physical_size().x as i32,
-                monitor.physical_position.y + monitor.physical_size().y as i32,
-            );
+            let size = monitor.physical_size();
+            let max = IVec2::new(min.x + size.x as i32, min.y + size.y as i32);
             if center.x >= min.x && center.x < max.x && center.y >= min.y && center.y < max.y {
                 let distance = (center.x - min.x).abs() + (center.y - min.y).abs();
                 if best.map(|(_, d)| distance < d).unwrap_or(true) {
                     best = Some((index, distance));
+                    best_bounds = Some((min, size));
                 }
             }
         }
 
         if let Some((index, _)) = best {
             self.descriptor.screen_index = Some(index);
+            if let Some((monitor_pos, monitor_size)) = best_bounds {
+                if let Some(rect) = rect_from_bounds(
+                    (position.x, position.y),
+                    (size.x, size.y),
+                    (monitor_pos.x, monitor_pos.y),
+                    (monitor_size.x, monitor_size.y),
+                ) {
+                    self.descriptor.screen_rect = Some(rect);
+                }
+            }
         }
     }
 
@@ -154,46 +171,100 @@ impl SecondaryWindowState {
             return;
         }
 
-        let monitor_index = window
-            .current_monitor()
-            .and_then(|current| monitors.iter().position(|monitor| monitor == &current))
+        let current_monitor = window.current_monitor();
+        let outer_position = window.outer_position().ok();
+        let outer_size = window.outer_size();
+
+        let monitor_index = current_monitor
+            .as_ref()
+            .and_then(|current| monitors.iter().position(|monitor| monitor == current))
             .or_else(|| {
-                let position = window.outer_position().ok()?;
-                let size = window.outer_size();
-                let center_x = position.x + size.width as i32 / 2;
-                let center_y = position.y + size.height as i32 / 2;
-
-                monitors
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, monitor)| {
-                        let monitor_pos = monitor.position();
-                        let monitor_size = monitor.size();
-                        let min_x = monitor_pos.x;
-                        let max_x = monitor_pos.x + monitor_size.width as i32;
-                        let min_y = monitor_pos.y;
-                        let max_y = monitor_pos.y + monitor_size.height as i32;
-
-                        if center_x >= min_x
-                            && center_x < max_x
-                            && center_y >= min_y
-                            && center_y < max_y
-                        {
-                            let distance =
-                                (center_x - monitor_pos.x).abs() + (center_y - monitor_pos.y).abs();
-                            Some((index, distance))
-                        } else {
-                            None
-                        }
-                    })
-                    .min_by_key(|(_, distance)| *distance)
-                    .map(|(index, _)| index)
+                outer_position
+                    .as_ref()
+                    .and_then(|position| monitor_index_from_bounds(*position, outer_size, monitors))
             });
 
         if let Some(index) = monitor_index {
             self.descriptor.screen_index = Some(index);
         }
+
+        if let (Some(position), Some(monitor_handle)) = (
+            outer_position,
+            monitor_index
+                .and_then(|idx| monitors.get(idx).cloned())
+                .or_else(|| current_monitor.clone()),
+        ) {
+            if let Some(rect) = rect_from_bounds(
+                (position.x, position.y),
+                (outer_size.width, outer_size.height),
+                (monitor_handle.position().x, monitor_handle.position().y),
+                (monitor_handle.size().width, monitor_handle.size().height),
+            ) {
+                self.descriptor.screen_rect = Some(rect);
+            }
+        }
     }
+}
+
+fn monitor_index_from_bounds(
+    position: PhysicalPosition<i32>,
+    size: PhysicalSize<u32>,
+    monitors: &[MonitorHandle],
+) -> Option<usize> {
+    let center_x = position.x + size.width as i32 / 2;
+    let center_y = position.y + size.height as i32 / 2;
+
+    monitors
+        .iter()
+        .enumerate()
+        .filter_map(|(index, monitor)| {
+            let monitor_pos = monitor.position();
+            let monitor_size = monitor.size();
+            let min_x = monitor_pos.x;
+            let max_x = monitor_pos.x + monitor_size.width as i32;
+            let min_y = monitor_pos.y;
+            let max_y = monitor_pos.y + monitor_size.height as i32;
+
+            if center_x >= min_x && center_x < max_x && center_y >= min_y && center_y < max_y {
+                let distance = (center_x - monitor_pos.x).abs() + (center_y - monitor_pos.y).abs();
+                Some((index, distance))
+            } else {
+                None
+            }
+        })
+        .min_by_key(|(_, distance)| *distance)
+        .map(|(index, _)| index)
+}
+
+fn rect_from_bounds(
+    position: (i32, i32),
+    size: (u32, u32),
+    monitor_position: (i32, i32),
+    monitor_size: (u32, u32),
+) -> Option<WindowRect> {
+    if monitor_size.0 == 0 || monitor_size.1 == 0 {
+        return None;
+    }
+
+    let width_pct = (size.0 as f32 / monitor_size.0 as f32) * 100.0;
+    let height_pct = (size.1 as f32 / monitor_size.1 as f32) * 100.0;
+
+    let offset_x = position.0 - monitor_position.0;
+    let offset_y = position.1 - monitor_position.1;
+
+    let x_pct = (offset_x as f32 / monitor_size.0 as f32) * 100.0;
+    let y_pct = (offset_y as f32 / monitor_size.1 as f32) * 100.0;
+
+    Some(WindowRect {
+        x: clamp_percent(x_pct),
+        y: clamp_percent(y_pct),
+        width: clamp_percent(width_pct),
+        height: clamp_percent(height_pct),
+    })
+}
+
+fn clamp_percent(value: f32) -> u32 {
+    value.round().clamp(0.0, 100.0) as u32
 }
 
 #[derive(Resource)]
@@ -295,6 +366,7 @@ impl WindowManager {
             path: PathBuf::from(path),
             title: cleaned_title.or_else(|| Some(format!("Window {}", id.0 + 1))),
             screen_index: None,
+            screen_rect: None,
         };
         let tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
         info!(
@@ -310,6 +382,8 @@ impl WindowManager {
             window_entity: None,
             graph_entities: Vec::new(),
             applied_screen_index: None,
+            applied_rect: None,
+            pending_screen_index: None,
             skip_metadata_capture: false,
         });
         id
