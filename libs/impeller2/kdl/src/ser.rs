@@ -147,12 +147,13 @@ fn serialize_window(window: &WindowSchematic) -> KdlNode {
     }
     if let (Some(position), Some(size)) = (window.position, window.size) {
         let mut rect = KdlNode::new("rect");
-        rect.entries_mut()
-            .push(KdlEntry::new(i128::from(position[0])));
-        rect.entries_mut()
-            .push(KdlEntry::new(i128::from(position[1])));
-        rect.entries_mut().push(KdlEntry::new(size[0] as f64));
-        rect.entries_mut().push(KdlEntry::new(size[1] as f64));
+        {
+            let entries = rect.entries_mut();
+            push_numeric_entry(entries, f64::from(position[0]));
+            push_numeric_entry(entries, f64::from(position[1]));
+            push_numeric_entry(entries, size[0] as f64);
+            push_numeric_entry(entries, size[1] as f64);
+        }
         node.children_mut()
             .get_or_insert_with(KdlDocument::new)
             .nodes_mut()
@@ -178,12 +179,13 @@ fn serialize_main_window(window: &PrimaryWindowSchematic) -> KdlNode {
     }
     if let (Some(position), Some(size)) = (window.position, window.size) {
         let mut rect = KdlNode::new("rect");
-        rect.entries_mut()
-            .push(KdlEntry::new(i128::from(position[0])));
-        rect.entries_mut()
-            .push(KdlEntry::new(i128::from(position[1])));
-        rect.entries_mut().push(KdlEntry::new(size[0] as f64));
-        rect.entries_mut().push(KdlEntry::new(size[1] as f64));
+        {
+            let entries = rect.entries_mut();
+            push_numeric_entry(entries, f64::from(position[0]));
+            push_numeric_entry(entries, f64::from(position[1]));
+            push_numeric_entry(entries, size[0] as f64);
+            push_numeric_entry(entries, size[1] as f64);
+        }
         node.children_mut()
             .get_or_insert_with(KdlDocument::new)
             .nodes_mut()
@@ -232,6 +234,15 @@ fn serialize_graph<T>(graph: &Graph<T>) -> KdlNode {
     }
 
     node
+}
+
+fn push_numeric_entry(entries: &mut Vec<KdlEntry>, value: f64) {
+    const EPS: f64 = 1e-6;
+    if (value.fract().abs() < EPS) && value.abs() <= (i128::MAX as f64) {
+        entries.push(KdlEntry::new(value.round() as i128));
+    } else {
+        entries.push(KdlEntry::new(value));
+    }
 }
 
 fn serialize_component_monitor(monitor: &ComponentMonitor) -> KdlNode {
