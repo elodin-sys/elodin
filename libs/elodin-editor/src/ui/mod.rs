@@ -7,11 +7,12 @@ use bevy::{
         system::{SystemParam, SystemState},
     },
     input::keyboard::Key,
+    log::{error, info, warn},
     prelude::*,
     render::camera::{RenderTarget, Viewport},
     window::{
-        EnabledButtons, MonitorSelection, PresentMode, PrimaryWindow, WindowCloseRequested,
-        WindowPosition, WindowRef, WindowResolution,
+        EnabledButtons, Monitor, PresentMode, PrimaryWindow, WindowCloseRequested, WindowPosition,
+        WindowRef, WindowResolution,
     },
 };
 use bevy_egui::{
@@ -635,7 +636,9 @@ fn sync_secondary_windows(
     existing: Query<(Entity, &SecondaryWindowMarker)>,
     mut cameras: Query<&mut Camera>,
     mut window_components: Query<&mut Window>,
+    monitors: Query<(Entity, &Monitor)>,
 ) {
+    let monitor_layout = gather_monitor_layout(&monitors);
     let mut existing_map: HashMap<tiles::SecondaryWindowId, Entity> = HashMap::new();
     for (entity, marker) in existing.iter() {
         existing_map.insert(marker.id, entity);
@@ -651,6 +654,16 @@ fn sync_secondary_windows(
     for state in windows.secondary_mut().iter_mut() {
         state.graph_entities = state.tile_state.collect_graph_entities();
 
+        if let Some(applied) = state.applied_screen_index
+            && state.descriptor.screen_index != Some(applied)
+            && let Some(entity) = state.window_entity
+        {
+            commands.entity(entity).despawn();
+            existing_map.remove(&state.id);
+            state.window_entity = None;
+            state.applied_screen_index = None;
+        }
+
         if let Some(entity) = state.window_entity
             && existing_map.get(&state.id).copied() != Some(entity)
         {
@@ -661,9 +674,22 @@ fn sync_secondary_windows(
             existing_map.insert(state.id, entity);
             if let Some(screen_index) = state.descriptor.screen_index {
                 if let Ok(mut window) = window_components.get_mut(entity) {
-                    window.position =
-                        WindowPosition::Centered(MonitorSelection::Index(screen_index));
+                    info!(
+                        screen_index,
+                        path = %state.descriptor.path.display(),
+                        "Re-centering secondary window on monitor"
+                    );
+                    if let Some(position) =
+                        centered_position_for_screen(&monitor_layout, screen_index, &window)
+                    {
+                        window.position = position;
+                        state.applied_screen_index = Some(screen_index);
+                    } else {
+                        state.applied_screen_index = None;
+                    }
                 }
+            } else {
+                state.applied_screen_index = None;
             }
             let window_ref = WindowRef::Entity(entity);
             for (index, &graph) in state.graph_entities.iter().enumerate() {
@@ -696,15 +722,28 @@ fn sync_secondary_windows(
         };
 
         if let Some(screen_index) = state.descriptor.screen_index {
-            window_component.position =
-                WindowPosition::Centered(MonitorSelection::Index(screen_index));
+            let physical_size = window_component.resolution.physical_size();
+            if let Some(position) =
+                centered_position_for_rect(&monitor_layout, screen_index, physical_size)
+            {
+                window_component.position = WindowPosition::At(position);
+            }
         }
 
         let window_entity = commands
             .spawn((window_component, SecondaryWindowMarker { id: state.id }))
             .id();
 
+        if let Some(screen_index) = state.descriptor.screen_index {
+            info!(
+                screen_index,
+                path = %state.descriptor.path.display(),
+                "Spawned secondary window on monitor"
+            );
+        }
+
         state.window_entity = Some(window_entity);
+        state.applied_screen_index = state.descriptor.screen_index;
         existing_map.insert(state.id, window_entity);
         let window_ref = WindowRef::Entity(window_entity);
         for (index, &graph) in state.graph_entities.iter().enumerate() {
@@ -909,6 +948,69 @@ pub(crate) fn compute_secondary_window_title(state: &tiles::SecondaryWindowState
         })
         .filter(|title| !title.is_empty())
         .unwrap_or_else(|| "Panel".to_string())
+}
+
+#[derive(Clone)]
+struct MonitorLayout {
+    position: IVec2,
+    size: UVec2,
+}
+
+fn gather_monitor_layout(monitors: &Query<(Entity, &Monitor)>) -> Vec<MonitorLayout> {
+    let mut layouts: Vec<_> = monitors
+        .iter()
+        .map(|(_, monitor)| MonitorLayout {
+            position: monitor.physical_position,
+            size: monitor.physical_size(),
+        })
+        .collect();
+
+    layouts.sort_by(|a, b| {
+        a.position
+            .x
+            .cmp(&b.position.x)
+            .then(a.position.y.cmp(&b.position.y))
+    });
+
+    for (index, layout) in layouts.iter().enumerate() {
+        info!(
+            index,
+            position = ?layout.position,
+            size = ?layout.size,
+            "Detected monitor layout"
+        );
+    }
+
+    layouts
+}
+
+fn centered_position_for_screen(
+    monitors: &[MonitorLayout],
+    screen_index: usize,
+    window: &Window,
+) -> Option<WindowPosition> {
+    centered_position_for_rect(monitors, screen_index, window.resolution.physical_size())
+        .map(WindowPosition::At)
+}
+
+fn centered_position_for_rect(
+    monitors: &[MonitorLayout],
+    screen_index: usize,
+    size: UVec2,
+) -> Option<IVec2> {
+    let Some(layout) = monitors.get(screen_index) else {
+        warn!(
+            screen_index,
+            available = monitors.len(),
+            "Requested screen index out of range"
+        );
+        return None;
+    };
+    let width = size.x as i32;
+    let height = size.y as i32;
+    let x = layout.position.x + (layout.size.x as i32 - width) / 2;
+    let y = layout.position.y + (layout.size.y as i32 - height) / 2;
+    Some(IVec2::new(x, y))
 }
 
 #[derive(QueryData)]

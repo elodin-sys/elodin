@@ -265,6 +265,7 @@ impl LoadSchematicParams<'_, '_> {
                             tile_state,
                             window_entity: None,
                             graph_entities,
+                            applied_screen_index: None,
                         });
                     }
                     Err(err) => {
