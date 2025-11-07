@@ -21,7 +21,7 @@ use bevy_egui::{
 };
 use egui_tiles::{Container, Tile};
 use winit::{
-    dpi::PhysicalPosition,
+    dpi::{PhysicalPosition, PhysicalSize},
     monitor::MonitorHandle,
     window::{Fullscreen, Window as WinitWindow},
 };
@@ -915,6 +915,7 @@ fn sync_secondary_windows(
 
         state.window_entity = Some(window_entity);
         state.applied_screen_index = None;
+        state.applied_rect = None;
         state.skip_metadata_capture = true;
         existing_map.insert(state.id, window_entity);
         let window_ref = WindowRef::Entity(window_entity);
@@ -936,45 +937,163 @@ fn apply_secondary_window_monitors(
         let Some(entity) = state.window_entity else {
             continue;
         };
-        let Some(screen_index) = state.descriptor.screen_index else {
-            continue;
-        };
-        if state.applied_screen_index == Some(screen_index) {
-            continue;
-        }
         let Some(window) = winit_windows.get_window(entity) else {
             continue;
         };
 
         let monitors = collect_sorted_monitors(window);
 
-        let Some(target_monitor) = monitors.get(screen_index) else {
-            info!(
-                screen_index,
-                path = %state.descriptor.path.display(),
-                "screen_index out of range; skipping monitor assignment"
-            );
-            continue;
-        };
+        let screen_ready = confirm_screen_assignment(state, window, &monitors);
+        if let Some(screen_index) = state.descriptor.screen_index {
+            if !screen_ready {
+                if state.pending_screen_index != Some(screen_index) {
+                    if let Some(target_monitor) = monitors.get(screen_index) {
+                        assign_window_to_monitor(state, window, target_monitor.clone());
+                        state.pending_screen_index = Some(screen_index);
+                    } else {
+                        info!(
+                            screen_index,
+                            path = %state.descriptor.path.display(),
+                            "screen_index out of range; skipping monitor assignment"
+                        );
+                    }
+                }
+                state.applied_rect = None;
+                continue;
+            }
+        } else {
+            state.pending_screen_index = None;
+        }
 
-        let monitor_pos = target_monitor.position();
-        let monitor_size = target_monitor.size();
-        let window_size = window.outer_size();
-        let x = monitor_pos.x + (monitor_size.width as i32 - window_size.width as i32) / 2;
-        let y = monitor_pos.y + (monitor_size.height as i32 - window_size.height as i32) / 2;
+        apply_secondary_window_rect(state, window, &monitors);
+    }
+}
 
-        let monitor_handle = target_monitor.clone();
-        window.set_fullscreen(Some(Fullscreen::Borderless(Some(monitor_handle))));
-        window.set_fullscreen(None);
-        window.set_outer_position(PhysicalPosition::new(x, y));
-        state.applied_screen_index = Some(screen_index);
+fn apply_secondary_window_rect(
+    state: &mut tiles::SecondaryWindowState,
+    window: &WinitWindow,
+    monitors: &[MonitorHandle],
+) {
+    let Some(rect) = state.descriptor.screen_rect else {
+        if state.applied_rect.is_some() {
+            state.applied_rect = None;
+            window.set_minimized(false);
+        }
+        return;
+    };
+
+    if state.applied_rect == Some(rect) {
+        return;
+    }
+
+    if rect.width == 0 && rect.height == 0 {
+        window.set_minimized(true);
+        state.applied_rect = Some(rect);
         state.skip_metadata_capture = true;
+        return;
+    }
+
+    let monitor_handle = state
+        .descriptor
+        .screen_index
+        .and_then(|idx| monitors.get(idx).cloned())
+        .or_else(|| window.current_monitor());
+    let Some(monitor_handle) = monitor_handle else {
+        return;
+    };
+
+    let monitor_pos = monitor_handle.position();
+    let monitor_size = monitor_handle.size();
+    if monitor_size.width == 0 || monitor_size.height == 0 {
+        return;
+    }
+
+    window.set_minimized(false);
+
+    let monitor_width = monitor_size.width as i32;
+    let monitor_height = monitor_size.height as i32;
+
+    let mut width_px = ((rect.width as f64 / 100.0) * monitor_width as f64).round() as i32;
+    let mut height_px = ((rect.height as f64 / 100.0) * monitor_height as f64).round() as i32;
+    width_px = width_px.clamp(1, monitor_width.max(1));
+    height_px = height_px.clamp(1, monitor_height.max(1));
+
+    let mut x = monitor_pos.x + ((rect.x as f64 / 100.0) * monitor_width as f64).round() as i32;
+    let mut y = monitor_pos.y + ((rect.y as f64 / 100.0) * monitor_height as f64).round() as i32;
+
+    let max_x = monitor_pos.x + monitor_width - width_px;
+    let max_y = monitor_pos.y + monitor_height - height_px;
+    x = x.clamp(monitor_pos.x, max_x);
+    y = y.clamp(monitor_pos.y, max_y);
+
+    let _ = window.request_inner_size(PhysicalSize::new(
+        width_px.max(1) as u32,
+        height_px.max(1) as u32,
+    ));
+    window.set_outer_position(PhysicalPosition::new(x, y));
+    state.applied_rect = Some(rect);
+    state.skip_metadata_capture = true;
+}
+
+fn confirm_screen_assignment(
+    state: &mut tiles::SecondaryWindowState,
+    window: &WinitWindow,
+    monitors: &[MonitorHandle],
+) -> bool {
+    let Some(screen_index) = state.descriptor.screen_index else {
+        state.applied_screen_index = None;
+        state.pending_screen_index = None;
+        return true;
+    };
+
+    let Some(target_monitor) = monitors.get(screen_index) else {
+        state.applied_screen_index = None;
+        state.pending_screen_index = None;
         info!(
             screen_index,
             path = %state.descriptor.path.display(),
-            "Applied screen_index to secondary window"
+            "screen_index out of range; skipping monitor assignment"
         );
+        return false;
+    };
+
+    let Some(current_monitor) = window.current_monitor() else {
+        state.applied_screen_index = None;
+        return false;
+    };
+
+    if monitors_match(&current_monitor, target_monitor) {
+        if state.applied_screen_index != Some(screen_index) {
+            info!(
+                screen_index,
+                path = %state.descriptor.path.display(),
+                "Applied screen_index to secondary window"
+            );
+        }
+        state.applied_screen_index = Some(screen_index);
+        state.pending_screen_index = None;
+        true
+    } else {
+        state.applied_screen_index = None;
+        false
     }
+}
+
+fn assign_window_to_monitor(
+    state: &mut tiles::SecondaryWindowState,
+    window: &WinitWindow,
+    target_monitor: MonitorHandle,
+) {
+    let monitor_pos = target_monitor.position();
+    let monitor_size = target_monitor.size();
+    let window_size = window.outer_size();
+    let x = monitor_pos.x + (monitor_size.width as i32 - window_size.width as i32) / 2;
+    let y = monitor_pos.y + (monitor_size.height as i32 - window_size.height as i32) / 2;
+
+    window.set_fullscreen(Some(Fullscreen::Borderless(Some(target_monitor))));
+    window.set_fullscreen(None);
+    window.set_outer_position(PhysicalPosition::new(x, y));
+    state.skip_metadata_capture = true;
 }
 
 fn capture_secondary_window_screens(
@@ -1003,6 +1122,10 @@ fn collect_sorted_monitors(window: &WinitWindow) -> Vec<MonitorHandle> {
             .then(a.position().y.cmp(&b.position().y))
     });
     monitors
+}
+
+fn monitors_match(a: &MonitorHandle, b: &MonitorHandle) -> bool {
+    a.position() == b.position() && a.size() == b.size()
 }
 
 fn handle_secondary_close(
