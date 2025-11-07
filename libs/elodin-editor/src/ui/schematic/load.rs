@@ -6,7 +6,8 @@ use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
 use impeller2_kdl::FromKdl;
 use impeller2_kdl::KdlSchematicError;
 use impeller2_wkt::{
-    DbConfig, Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowSchematic,
+    DbConfig, Graph, Line3d, Object3D, Panel, PrimaryWindowSchematic, Schematic, VectorArrow3d,
+    Viewport, WindowSchematic,
 };
 use miette::{Diagnostic, miette};
 use std::time::Duration;
@@ -29,8 +30,9 @@ use crate::{
         query_plot::QueryPlotData,
         schematic::EqlExt,
         tiles::{
-            DashboardPane, GraphPane, Pane, SecondaryWindowDescriptor, SecondaryWindowId,
-            SecondaryWindowState, TileState, TreePane, ViewportPane, WindowManager,
+            DashboardPane, GraphPane, Pane, PrimaryWindowDescriptor, SecondaryWindowDescriptor,
+            SecondaryWindowId, SecondaryWindowState, TileState, TreePane, ViewportPane,
+            WindowManager,
         },
     },
     vector_arrow::VectorArrowState,
@@ -223,6 +225,9 @@ impl LoadSchematicParams<'_, '_> {
             self.commands.entity(entity).despawn();
         }
         let mut secondary_descriptors: Vec<SecondaryWindowDescriptor> = Vec::new();
+        let mut primary_window_specified = false;
+        *self.windows.primary_descriptor_mut() = PrimaryWindowDescriptor::default();
+        self.windows.primary_descriptor_applied = true;
 
         for elem in &schematic.elems {
             match elem {
@@ -242,6 +247,21 @@ impl LoadSchematicParams<'_, '_> {
                     if let Some(descriptor) = resolve_window_descriptor(window, base_dir) {
                         secondary_descriptors.push(descriptor);
                     }
+                }
+                impeller2_wkt::SchematicElem::MainWindow(window) => {
+                    let mut descriptor = PrimaryWindowDescriptor::default();
+                    descriptor.screen = window.screen.clone();
+                    descriptor.screen_index = window.screen_idx.map(|index| index as usize);
+                    descriptor.position = window
+                        .position
+                        .map(|coords| IVec2::new(coords[0], coords[1]));
+                    descriptor.size = window
+                        .size
+                        .map(|dimensions| Vec2::new(dimensions[0], dimensions[1]));
+                    descriptor.fullscreen = window.fullscreen.unwrap_or(false);
+                    *self.windows.primary_descriptor_mut() = descriptor;
+                    self.windows.primary_descriptor_applied = false;
+                    primary_window_specified = true;
                 }
             }
         }
@@ -309,6 +329,9 @@ impl LoadSchematicParams<'_, '_> {
         }
 
         self.windows.replace_secondary(secondary_states);
+        if !primary_window_specified {
+            self.windows.primary_descriptor_applied = true;
+        }
     }
 
     pub fn spawn_object_3d(&mut self, object_3d: Object3D) {

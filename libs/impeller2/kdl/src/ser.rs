@@ -22,6 +22,7 @@ fn serialize_schematic_elem<T>(elem: &SchematicElem<T>) -> KdlNode {
         SchematicElem::Line3d(line) => serialize_line_3d(line),
         SchematicElem::VectorArrow(arrow) => serialize_vector_arrow(arrow),
         SchematicElem::Window(window) => serialize_window(window),
+        SchematicElem::MainWindow(window) => serialize_main_window(window),
     }
 }
 
@@ -132,6 +133,37 @@ fn serialize_window(window: &WindowSchematic) -> KdlNode {
         node.entries_mut()
             .push(KdlEntry::new_prop("title", title.clone()));
     }
+    if let Some(screen) = &window.screen {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("screen", screen.clone()));
+    }
+    if let Some(index) = window.screen_idx {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("screenIdx", i128::from(index)));
+    }
+    if let Some(true) = window.fullscreen {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("fullscreen", true));
+    }
+    if let (Some(position), Some(size)) = (window.position, window.size) {
+        let mut rect = KdlNode::new("rect");
+        rect.entries_mut()
+            .push(KdlEntry::new(i128::from(position[0])));
+        rect.entries_mut()
+            .push(KdlEntry::new(i128::from(position[1])));
+        rect.entries_mut().push(KdlEntry::new(size[0] as f64));
+        rect.entries_mut().push(KdlEntry::new(size[1] as f64));
+        node.children_mut()
+            .get_or_insert_with(KdlDocument::new)
+            .nodes_mut()
+            .push(rect);
+    }
+
+    node
+}
+
+fn serialize_main_window(window: &PrimaryWindowSchematic) -> KdlNode {
+    let mut node = KdlNode::new("main_window");
     if let Some(screen) = &window.screen {
         node.entries_mut()
             .push(KdlEntry::new_prop("screen", screen.clone()));

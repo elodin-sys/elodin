@@ -14,8 +14,8 @@ use bevy::{ecs::system::SystemParam, prelude::*};
 use egui_tiles::{Tile, TileId};
 use impeller2_bevy::ComponentMetadataRegistry;
 use impeller2_wkt::{
-    ActionPane, ComponentMonitor, ComponentPath, Dashboard, Line3d, Panel, Schematic,
-    SchematicElem, Split, VectorArrow3d, Viewport, WindowSchematic,
+    ActionPane, ComponentMonitor, ComponentPath, Dashboard, Line3d, Panel, PrimaryWindowSchematic,
+    Schematic, SchematicElem, Split, VectorArrow3d, Viewport, WindowSchematic,
 };
 
 pub mod tree;
@@ -276,7 +276,32 @@ pub fn tiles_to_schematic(
         }));
     }
 
+    if let Some(primary_window_elem) = primary_window_schematic(param.windows.primary_descriptor())
+    {
+        window_elems.push(primary_window_elem);
+    }
+
     schematic.elems.extend(window_elems);
+}
+
+fn primary_window_schematic(descriptor: &tiles::PrimaryWindowDescriptor) -> Option<SchematicElem> {
+    let has_metadata = descriptor.screen.is_some()
+        || descriptor.screen_index.is_some()
+        || descriptor.position.is_some()
+        || descriptor.size.is_some()
+        || descriptor.fullscreen;
+
+    if !has_metadata {
+        return None;
+    }
+
+    Some(SchematicElem::MainWindow(PrimaryWindowSchematic {
+        screen: descriptor.screen.clone(),
+        screen_idx: descriptor.screen_index.map(|index| index as u32),
+        position: descriptor.position.map(|p| [p.x, p.y]),
+        size: descriptor.size.map(|s| [s.x, s.y]),
+        fullscreen: descriptor.fullscreen.then_some(true),
+    }))
 }
 
 pub struct SchematicPlugin;

@@ -91,6 +91,99 @@ pub struct SecondaryWindowDescriptor {
     pub fullscreen: bool,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct PrimaryWindowDescriptor {
+    pub screen: Option<String>,
+    pub screen_index: Option<usize>,
+    pub position: Option<IVec2>,
+    pub size: Option<Vec2>,
+    pub fullscreen: bool,
+}
+
+pub struct WindowDescriptorView<'a> {
+    pub fullscreen: &'a mut bool,
+    pub size: &'a mut Option<Vec2>,
+    pub position: &'a mut Option<IVec2>,
+    pub screen: &'a mut Option<String>,
+    pub screen_index: &'a mut Option<usize>,
+}
+
+impl SecondaryWindowDescriptor {
+    pub fn view(&mut self) -> WindowDescriptorView<'_> {
+        WindowDescriptorView {
+            fullscreen: &mut self.fullscreen,
+            size: &mut self.size,
+            position: &mut self.position,
+            screen: &mut self.screen,
+            screen_index: &mut self.screen_index,
+        }
+    }
+}
+
+impl PrimaryWindowDescriptor {
+    pub fn view(&mut self) -> WindowDescriptorView<'_> {
+        WindowDescriptorView {
+            fullscreen: &mut self.fullscreen,
+            size: &mut self.size,
+            position: &mut self.position,
+            screen: &mut self.screen,
+            screen_index: &mut self.screen_index,
+        }
+    }
+}
+
+pub trait WindowDescriptorInfo {
+    fn fullscreen(&self) -> bool;
+    fn size(&self) -> Option<Vec2>;
+    fn position(&self) -> Option<IVec2>;
+    fn screen(&self) -> Option<&String>;
+    fn screen_index(&self) -> Option<usize>;
+}
+
+impl WindowDescriptorInfo for SecondaryWindowDescriptor {
+    fn fullscreen(&self) -> bool {
+        self.fullscreen
+    }
+
+    fn size(&self) -> Option<Vec2> {
+        self.size
+    }
+
+    fn position(&self) -> Option<IVec2> {
+        self.position
+    }
+
+    fn screen(&self) -> Option<&String> {
+        self.screen.as_ref()
+    }
+
+    fn screen_index(&self) -> Option<usize> {
+        self.screen_index
+    }
+}
+
+impl WindowDescriptorInfo for PrimaryWindowDescriptor {
+    fn fullscreen(&self) -> bool {
+        self.fullscreen
+    }
+
+    fn size(&self) -> Option<Vec2> {
+        self.size
+    }
+
+    fn position(&self) -> Option<IVec2> {
+        self.position
+    }
+
+    fn screen(&self) -> Option<&String> {
+        self.screen.as_ref()
+    }
+
+    fn screen_index(&self) -> Option<usize> {
+        self.screen_index
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SecondaryWindowId(pub u32);
 
@@ -109,6 +202,8 @@ pub struct WindowManager {
     main: TileState,
     secondary: Vec<SecondaryWindowState>,
     next_id: u32,
+    primary_descriptor: PrimaryWindowDescriptor,
+    pub primary_descriptor_applied: bool,
 }
 
 impl Default for WindowManager {
@@ -117,6 +212,8 @@ impl Default for WindowManager {
             main: TileState::new(Id::new("main_tab_tree")),
             secondary: Vec::new(),
             next_id: 0,
+            primary_descriptor: PrimaryWindowDescriptor::default(),
+            primary_descriptor_applied: true,
         }
     }
 }
@@ -136,6 +233,14 @@ impl WindowManager {
 
     pub fn replace_main(&mut self, state: TileState) {
         self.main = state;
+    }
+
+    pub fn primary_descriptor(&self) -> &PrimaryWindowDescriptor {
+        &self.primary_descriptor
+    }
+
+    pub fn primary_descriptor_mut(&mut self) -> &mut PrimaryWindowDescriptor {
+        &mut self.primary_descriptor
     }
 
     pub fn secondary(&self) -> &[SecondaryWindowState] {

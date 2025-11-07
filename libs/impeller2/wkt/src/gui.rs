@@ -39,6 +39,7 @@ pub enum SchematicElem<T = ()> {
     Line3d(Line3d<T>),
     VectorArrow(VectorArrow3d<T>),
     Window(WindowSchematic),
+    MainWindow(PrimaryWindowSchematic),
 }
 
 impl<T> SchematicElem<T> {
@@ -49,6 +50,7 @@ impl<T> SchematicElem<T> {
             SchematicElem::Line3d(line) => SchematicElem::Line3d(line.map_aux(|_| ())),
             SchematicElem::VectorArrow(arrow) => SchematicElem::VectorArrow(arrow.map_aux(|_| ())),
             SchematicElem::Window(window) => SchematicElem::Window(window),
+            SchematicElem::MainWindow(window) => SchematicElem::MainWindow(window),
         }
     }
 }
@@ -57,6 +59,22 @@ impl<T> SchematicElem<T> {
 pub struct WindowSchematic {
     pub title: Option<String>,
     pub path: String,
+    #[serde(rename = "screen", alias = "physical_screen", alias = "monitor")]
+    pub screen: Option<String>,
+    #[serde(
+        rename = "screenIdx",
+        alias = "screen_idx",
+        alias = "physical_screen_index",
+        alias = "monitor_index"
+    )]
+    pub screen_idx: Option<u32>,
+    pub position: Option<[i32; 2]>,
+    pub size: Option<[f32; 2]>,
+    pub fullscreen: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct PrimaryWindowSchematic {
     #[serde(rename = "screen", alias = "physical_screen", alias = "monitor")]
     pub screen: Option<String>,
     #[serde(

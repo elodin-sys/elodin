@@ -1,4 +1,6 @@
-use impeller2_wkt::{Color, Schematic, SchematicElem, VectorArrow3d, WindowSchematic};
+use impeller2_wkt::{
+    Color, PrimaryWindowSchematic, Schematic, SchematicElem, VectorArrow3d, WindowSchematic,
+};
 use kdl::{KdlDocument, KdlNode};
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -34,6 +36,7 @@ fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlS
         | "action_pane" | "query_table" | "query_plot" | "inspector" | "hierarchy"
         | "schematic_tree" | "dashboard" => Ok(SchematicElem::Panel(parse_panel(node, src)?)),
         "window" => Ok(SchematicElem::Window(parse_window(node, src)?)),
+        "main_window" => Ok(SchematicElem::MainWindow(parse_primary_window(node, src)?)),
         "object_3d" => Ok(SchematicElem::Object3d(parse_object_3d(node, src)?)),
         "line_3d" => Ok(SchematicElem::Line3d(parse_line_3d(node, src)?)),
         "vector_arrow" => Ok(SchematicElem::VectorArrow(parse_vector_arrow(node, src)?)),
@@ -155,6 +158,85 @@ fn parse_window(node: &KdlNode, src: &str) -> Result<WindowSchematic, KdlSchemat
     Ok(WindowSchematic {
         title,
         path: path.to_string(),
+        screen,
+        screen_idx: screen_index,
+        position,
+        size,
+        fullscreen: if fullscreen { Some(true) } else { None },
+    })
+}
+
+fn parse_primary_window(
+    node: &KdlNode,
+    src: &str,
+) -> Result<PrimaryWindowSchematic, KdlSchematicError> {
+    let screen = node
+        .get("screen")
+        .or_else(|| node.get("physical_screen"))
+        .or_else(|| node.get("monitor"))
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty());
+
+    let screen_index = node
+        .get("screenIdx")
+        .or_else(|| node.get("screen_idx"))
+        .or_else(|| node.get("physical_screen_index"))
+        .or_else(|| node.get("monitor_index"))
+        .and_then(|v| v.as_integer())
+        .map(|v| v.max(0) as u32);
+
+    let fullscreen = node
+        .get("fullscreen")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let mut position = None;
+    let mut size = None;
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "rect" {
+                let mut entries = child.entries().iter();
+                let Some(x_entry) = entries.next() else {
+                    continue;
+                };
+                let Some(y_entry) = entries.next() else {
+                    continue;
+                };
+                let Some(w_entry) = entries.next() else {
+                    continue;
+                };
+                let Some(h_entry) = entries.next() else {
+                    continue;
+                };
+
+                let w_value = w_entry.value();
+                let h_value = h_entry.value();
+
+                if let (Some(x), Some(y), Some(w), Some(h)) = (
+                    x_entry
+                        .value()
+                        .as_integer()
+                        .and_then(|value| i32::try_from(value).ok()),
+                    y_entry
+                        .value()
+                        .as_integer()
+                        .and_then(|value| i32::try_from(value).ok()),
+                    w_value
+                        .as_float()
+                        .or_else(|| w_value.as_integer().map(|value| value as f64)),
+                    h_value
+                        .as_float()
+                        .or_else(|| h_value.as_integer().map(|value| value as f64)),
+                ) {
+                    position = Some([x, y]);
+                    size = Some([w as f32, h as f32]);
+                }
+            }
+        }
+    }
+
+    Ok(PrimaryWindowSchematic {
         screen,
         screen_idx: screen_index,
         position,
