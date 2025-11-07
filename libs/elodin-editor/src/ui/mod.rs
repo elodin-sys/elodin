@@ -1076,7 +1076,7 @@ fn monitor_selection_from_descriptor(
             .iter()
             .find(|monitor| monitor.name.as_ref() == Some(name))
     {
-        return MonitorSelection::Index(snapshot.index);
+        return MonitorSelection::Entity(snapshot.entity);
     }
 
     if let Some(snapshot) = monitors.iter().find(|monitor| monitor.is_primary) {
