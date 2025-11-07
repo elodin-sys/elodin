@@ -1,4 +1,4 @@
-use nox::{ArrayRepr, OwnedRepr, Quaternion, Repr, Vector};
+use nalgebra::{UnitQuaternion, Vector3};
 
 /// Calculates the LQR control matrices for a yang LQR controller.
 ///
@@ -12,14 +12,14 @@ use nox::{ArrayRepr, OwnedRepr, Quaternion, Repr, Vector};
 ///
 /// # Returns
 /// * `(d, k)` - Diagonal elements of the D and K gain matrices
-pub fn lqr_control_mats<R: Repr + OwnedRepr>(
-    j: Vector<f64, 3, R>,
-    q_ang_vel: Vector<f64, 3, R>,
-    q_pos: Vector<f64, 3, R>,
-    r: Vector<f64, 3, R>,
-) -> (Vector<f64, 3, R>, Vector<f64, 3, R>) {
-    let k_diag = (q_pos / &r).sqrt();
-    let d_diag = (q_ang_vel / r + j * &k_diag).sqrt();
+pub fn lqr_control_mats(
+    j: Vector3<f64>,
+    q_ang_vel: Vector3<f64>,
+    q_pos: Vector3<f64>,
+    r: Vector3<f64>,
+) -> (Vector3<f64>, Vector3<f64>) {
+    let k_diag = q_pos.component_div(&r).map(|x| x.sqrt());
+    let d_diag = (q_ang_vel.component_div(&r) + j.component_mul(&k_diag)).map(|x| x.sqrt());
 
     (d_diag, k_diag)
 }
@@ -36,18 +36,18 @@ pub fn lqr_control_mats<R: Repr + OwnedRepr>(
 /// # Returns
 /// * Control torque to apply in body frame
 pub fn control(
-    att_est: Quaternion<f64, ArrayRepr>,
-    ang_vel: Vector<f64, 3, ArrayRepr>,
-    goal: Quaternion<f64, ArrayRepr>,
-    d: Vector<f64, 3, ArrayRepr>,
-    k: Vector<f64, 3, ArrayRepr>,
-) -> Vector<f64, 3, ArrayRepr> {
-    let error = (att_est.inverse() * goal).0;
-    let sign = error.get(3);
-    let error_vector: Vector<f64, 3, _> = error.fixed_slice(&[0]);
+    att_est: UnitQuaternion<f64>,
+    ang_vel: Vector3<f64>,
+    goal: UnitQuaternion<f64>,
+    d: Vector3<f64>,
+    k: Vector3<f64>,
+) -> Vector3<f64> {
+    let error = att_est.inverse() * goal;
+    let sign = error.w;
+    let error_vector = error.vector();
 
-    let ang_vel_term = -1.0 * (ang_vel * d);
-    let error_term = sign * (error_vector * k);
+    let ang_vel_term = -ang_vel.component_mul(&d);
+    let error_term = sign * error_vector.component_mul(&k);
 
     ang_vel_term + error_term
 }
@@ -57,8 +57,8 @@ pub fn control(
 /// Based on the paper: "Analytic LQR Design for Spacecraft Control System Based on Quaternion Model"
 /// by Yang et al.
 pub struct YangLQR {
-    d: Vector<f64, 3, ArrayRepr>,
-    k: Vector<f64, 3, ArrayRepr>,
+    d: Vector3<f64>,
+    k: Vector3<f64>,
 }
 
 impl YangLQR {
@@ -69,10 +69,10 @@ impl YangLQR {
     /// * `q` - Weights for the state variables (first 3 for angular velocity, last 3 for position)
     /// * `r` - Weights for the control inputs
     pub fn new(
-        j: Vector<f64, 3, ArrayRepr>,
-        q_ang_vel: Vector<f64, 3, ArrayRepr>,
-        q_pos: Vector<f64, 3, ArrayRepr>,
-        r: Vector<f64, 3, ArrayRepr>,
+        j: Vector3<f64>,
+        q_ang_vel: Vector3<f64>,
+        q_pos: Vector3<f64>,
+        r: Vector3<f64>,
     ) -> YangLQR {
         let (d, k) = lqr_control_mats(j, q_ang_vel, q_pos, r);
         YangLQR { d, k }
@@ -89,10 +89,10 @@ impl YangLQR {
     /// * Control torque to apply in body frame
     pub fn control(
         &self,
-        att_est: Quaternion<f64, ArrayRepr>,
-        ang_vel: Vector<f64, 3, ArrayRepr>,
-        target: Quaternion<f64, ArrayRepr>,
-    ) -> Vector<f64, 3, ArrayRepr> {
+        att_est: UnitQuaternion<f64>,
+        ang_vel: Vector3<f64>,
+        target: UnitQuaternion<f64>,
+    ) -> Vector3<f64> {
         control(att_est, ang_vel, target, self.d, self.k)
     }
 }
@@ -101,27 +101,27 @@ impl YangLQR {
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
-    use nox::tensor;
+    use nalgebra::{vector, Vector3};
 
-    pub fn test_cubesat_gains() -> (Vector<f64, 3, ArrayRepr>, Vector<f64, 3, ArrayRepr>) {
-        let j = tensor![15204079.70002, 14621352.61765, 6237758.3131] * 1e-9;
-        let q = tensor![5.0, 5.0, 5.0];
-        let r = tensor![8.0, 8.0, 8.0];
+    pub fn test_cubesat_gains() -> (Vector3<f64>, Vector3<f64>) {
+        let j = vector![15204079.70002, 14621352.61765, 6237758.3131] * 1e-9;
+        let q = vector![5.0, 5.0, 5.0];
+        let r = vector![8.0, 8.0, 8.0];
 
         lqr_control_mats(j, q, q, r)
     }
 
     #[test]
     fn test_lqr_control_mat() {
-        let j = tensor![15204079.70002, 14621352.61765, 6237758.3131] * 1e-9;
-        let q = tensor![5.0, 5.0, 5.0];
-        let r = tensor![8.0, 8.0, 8.0];
+        let j = vector![15204079.70002, 14621352.61765, 6237758.3131] * 1e-9;
+        let q = vector![5.0, 5.0, 5.0];
+        let r = vector![8.0, 8.0, 8.0];
 
         let (d, k) = lqr_control_mats(j, q, q, r);
 
         // values from python impl
-        let expected_d = tensor![0.79813525, 0.7978466, 0.79368217];
-        let expected_k = tensor![0.79056942, 0.79056942, 0.79056942];
+        let expected_d = vector![0.79813525, 0.7978466, 0.79368217];
+        let expected_k = vector![0.79056942, 0.79056942, 0.79056942];
 
         assert_relative_eq!(d, expected_d, epsilon = 1e-4);
         assert_relative_eq!(k, expected_k, epsilon = 1e-4);
@@ -129,20 +129,21 @@ mod tests {
 
     #[test]
     fn test_control() {
-        let att_est = Quaternion::identity();
-        let ang_vel = tensor![0.1, -0.2, 0.3];
-        let goal = Quaternion::from_axis_angle(tensor![0.0, 0.0, 1.0], 0.1);
+        let att_est = UnitQuaternion::identity();
+        let ang_vel = vector![0.1, -0.2, 0.3];
+        let goal = UnitQuaternion::from_axis_angle(&Vector3::z_axis(), 0.1);
 
         let (d, k) = test_cubesat_gains();
 
         let torque = control(att_est, ang_vel, goal, d, k);
         assert_relative_eq!(
             torque,
-            tensor![
+            vector![
                 -0.07981352519433647,
                 0.15956931963081875,
                 -0.19864202695933386
-            ]
+            ],
+            epsilon = 1e-10
         )
     }
 }

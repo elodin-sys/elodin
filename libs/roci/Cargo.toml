@@ -47,8 +47,7 @@ tracing = "0.1.40"
 tracing-subscriber = "0.3"
 
 # math
-nox.workspace = true
-nox.default-features = false
+nalgebra = "0.33"
 
 # macros
 roci-macros.workspace = true

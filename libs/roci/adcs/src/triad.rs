@@ -1,65 +1,67 @@
-use nox::{ArrayRepr, Matrix, Tensor, Vector};
+use nalgebra::{Matrix3, Vector3};
 
 pub fn triad(
-    body_1: Vector<f64, 3, ArrayRepr>,
-    body_2: Vector<f64, 3, ArrayRepr>,
-    ref_1: Vector<f64, 3, ArrayRepr>,
-    ref_2: Vector<f64, 3, ArrayRepr>,
-) -> Matrix<f64, 3, 3, ArrayRepr> {
+    body_1: Vector3<f64>,
+    body_2: Vector3<f64>,
+    ref_1: Vector3<f64>,
+    ref_2: Vector3<f64>,
+) -> Matrix3<f64> {
     let r_r = ref_1.cross(&ref_2).normalize();
     let q_r = ref_1;
     let s_r = q_r.cross(&r_r);
-    let m_r_t = Matrix::from_buf([q_r, r_r, s_r].map(Tensor::into_buf));
+    // nox's from_buf created rows, so use from_rows in nalgebra
+    let m_r_t = Matrix3::from_rows(&[q_r.transpose(), r_r.transpose(), s_r.transpose()]);
     let r_b = body_1.cross(&body_2).normalize();
     let q_b = body_1;
     let s_b = q_b.cross(&r_b);
-    let m_b = Matrix::from_buf([q_b, r_b, s_b].map(Tensor::into_buf)).transpose();
-    m_b.dot(&m_r_t)
+    let m_b = Matrix3::from_rows(&[q_b.transpose(), r_b.transpose(), s_b.transpose()]).transpose();
+    m_b * m_r_t
 }
 
 #[cfg(test)]
 mod tests {
-    use nox::tensor;
-    use nox::{ArrayRepr, Matrix, Quaternion, Vector};
+    use nalgebra::{matrix, vector, Matrix3, UnitQuaternion, Vector3};
 
     use super::*;
 
     #[test]
     fn test_triad() {
-        fn test_triad_inner(q: Quaternion<f64, ArrayRepr>) -> Matrix<f64, 3, 3, ArrayRepr> {
-            let ref_a = tensor![0.0, 1.0, 0.0].normalize();
-            let ref_b = tensor![1.0, 0.0, 0.0].normalize();
-            let body_a = (q.inverse() * ref_a).normalize();
-            let body_b = (q.inverse() * ref_b).normalize();
+        fn test_triad_inner(q: UnitQuaternion<f64>) -> Matrix3<f64> {
+            let ref_a = vector![0.0, 1.0, 0.0].normalize();
+            let ref_b = vector![1.0, 0.0, 0.0].normalize();
+            // Nalgebra: q * vector rotates by q, so we use q (not q.inverse()) to go from inertial to body
+            let body_a = (q * ref_a).normalize();
+            let body_b = (q * ref_b).normalize();
             let dcm = triad(body_a, body_b, ref_a, ref_b);
-            let a = dcm.dot(&tensor![1.0, 0.0, 0.0]);
-            let b = q.inverse() * tensor![1.0, 0.0, 0.0];
+            let a = dcm * vector![1.0, 0.0, 0.0];
+            let b = q * vector![1.0, 0.0, 0.0];
             approx::assert_relative_eq!(&a, &b, epsilon = 1e-5);
 
-            let a = dcm.dot(&tensor![0.0, 1.0, 0.0]);
-            let b = q.inverse() * tensor![0.0, 1.0, 0.0];
+            let a = dcm * vector![0.0, 1.0, 0.0];
+            let b = q * vector![0.0, 1.0, 0.0];
             approx::assert_relative_eq!(&a, &b, epsilon = 1e-5);
 
-            let a = dcm.dot(&tensor![0.0, 0.0, 1.0]);
-            let b = q.inverse() * tensor![0.0, 0.0, 1.0];
+            let a = dcm * vector![0.0, 0.0, 1.0];
+            let b = q * vector![0.0, 0.0, 1.0];
             approx::assert_relative_eq!(&a, &b, epsilon = 1e-5);
 
-            let a = dcm.dot(&tensor![1.0, 0.0, 1.0]);
-            let b = q.inverse() * tensor![1.0, 0.0, 1.0];
+            let a = dcm * vector![1.0, 0.0, 1.0];
+            let b = q * vector![1.0, 0.0, 1.0];
             approx::assert_relative_eq!(&a, &b, epsilon = 1e-5);
             dcm
         }
 
-        let q: Quaternion<f64, ArrayRepr> =
-            Quaternion::from_axis_angle(Vector::z_axis(), core::f64::consts::PI / 4.0);
+        let q: UnitQuaternion<f64> =
+            UnitQuaternion::from_axis_angle(&Vector3::z_axis(), core::f64::consts::PI / 4.0);
         let dcm = test_triad_inner(q);
         // cos(45°) = sin(45°) = √2/2 ≈ 0.7071067811865476
+        // Rotation matrix for 45° rotation around z-axis
         let sqrt2_over_2 = core::f64::consts::SQRT_2 / 2.0;
         approx::assert_relative_eq!(
-            tensor![
-                [sqrt2_over_2, sqrt2_over_2, 0.],
-                [-sqrt2_over_2, sqrt2_over_2, 0.],
-                [0., 0., 1.]
+            matrix![
+                sqrt2_over_2, -sqrt2_over_2, 0.;
+                sqrt2_over_2, sqrt2_over_2, 0.;
+                0., 0., 1.;
             ],
             dcm,
             epsilon = 1.0e-10
@@ -67,9 +69,9 @@ mod tests {
 
         for i in -124..124 {
             let ang = i as f64 * 0.05;
-            let x = Quaternion::from_axis_angle(Vector::x_axis(), ang);
-            let y = Quaternion::from_axis_angle(Vector::y_axis(), ang);
-            let z = Quaternion::from_axis_angle(Vector::z_axis(), ang);
+            let x = UnitQuaternion::from_axis_angle(&Vector3::x_axis(), ang);
+            let y = UnitQuaternion::from_axis_angle(&Vector3::y_axis(), ang);
+            let z = UnitQuaternion::from_axis_angle(&Vector3::z_axis(), ang);
             test_triad_inner(x);
             test_triad_inner(y);
             test_triad_inner(z);

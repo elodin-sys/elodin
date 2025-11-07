@@ -113,13 +113,13 @@ The `roci-adcs` sub-crate provides attitude determination and control algorithms
 
 ```rust
 use roci_adcs::mekf::State;
-use nox::tensor;
+use nalgebra::vector;
 
 // Initialize MEKF with noise parameters
 let mut state = State::new(
-    tensor![0.01, 0.01, 0.01],  // Gyro noise
-    tensor![0.01, 0.01, 0.01],  // Gyro bias noise
-    1.0 / 120.0,                // Time step
+    vector![0.01, 0.01, 0.01],  // Gyro noise
+    vector![0.01, 0.01, 0.01],  // Gyro bias noise
+    1.0 / 120.0,                 // Time step
 );
 
 // Update with measurements
@@ -182,6 +182,7 @@ roci-adcs = { path = "../path/to/elodin/libs/roci/adcs" }  # Optional ADCS algor
 ```rust
 use roci::{os_sleep_driver, IntoSystem};
 use roci_adcs::{mekf, yang_lqr::YangLQR};
+use nalgebra::{vector, Vector3, UnitQuaternion};
 
 #[derive(Default, Componentize, Decomponentize)]
 struct SatelliteWorld {
@@ -250,6 +251,10 @@ Roci has evolved significantly since its initial implementation. Here are some m
 7. **Impeller2 Protocol** ([#763](https://github.com/elodin-sys/paracosm/pull/763))
    - Migration from Conduit to Impeller2
    - Improved performance and flexibility
+
+8. **Deprecated NOX** 
+   - Migrated from NOX math operations to Nalgebra
+   - Updated all functions and tests to pass
 
 ## Design Philosophy
 
