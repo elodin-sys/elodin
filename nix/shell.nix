@@ -168,9 +168,9 @@ in {
           echo ""
           echo "SDK Development (if needed):"
           echo "  "
-          echo "cd libs/nox-py && uv venv --python 3.12"
+          echo "uv venv --python 3.12"
           echo "source .venv/bin/activate"
-          echo "uvx maturin develop --uv"
+          echo "uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml"
           echo ""
 
           export RUSTC_WRAPPER="''${SCCACHE_BIN}"
