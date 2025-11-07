@@ -268,6 +268,7 @@ pub fn tiles_to_schematic(
         window_elems.push(SchematicElem::Window(WindowSchematic {
             title: state.descriptor.title.clone(),
             path: file_name,
+            screen_idx: state.descriptor.screen_index.map(|idx| idx as u32),
         }));
     }
 
