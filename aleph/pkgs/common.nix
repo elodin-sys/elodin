@@ -23,7 +23,7 @@
         ".jinja"
       ];
     in
-      (type == "directory" && matchesPrefix && !matchesExclude) || matchesSuffix;
+      (type == "directory" && matchesPrefix) || matchesSuffix;
   in
     lib.cleanSourceWith {
       src = ../..;
