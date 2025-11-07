@@ -1,5 +1,8 @@
 use std::collections::HashMap;
 
+use super::{
+    MonitorSnapshot, collect_monitor_snapshots, resolve_monitor_for_descriptor, round_percent,
+};
 use crate::{
     GridHandle,
     object_3d::Object3DState,
@@ -10,7 +13,11 @@ use crate::{
         tiles::{self, Pane},
     },
 };
-use bevy::{ecs::system::SystemParam, prelude::*};
+use bevy::{
+    ecs::system::SystemParam,
+    prelude::*,
+    window::{Monitor, PrimaryMonitor},
+};
 use egui_tiles::{Tile, TileId};
 use impeller2_bevy::ComponentMetadataRegistry;
 use impeller2_wkt::{
@@ -52,6 +59,8 @@ pub struct SchematicParam<'w, 's> {
     pub dashboards: Query<'w, 's, &'static Dashboard<Entity>>,
     pub hdr_enabled: Res<'w, HdrEnabled>,
     pub metadata: Res<'w, ComponentMetadataRegistry>,
+    pub monitors: Query<'w, 's, (Entity, &'static Monitor)>,
+    pub primary_monitor: Query<'w, 's, Entity, With<PrimaryMonitor>>,
 }
 
 impl SchematicParam<'_, '_> {
@@ -221,6 +230,8 @@ pub fn tiles_to_schematic(
     mut secondary: ResMut<CurrentSecondarySchematics>,
 ) {
     schematic.elems.clear();
+    let primary_monitor = param.primary_monitor.iter().next();
+    let monitor_snapshots = collect_monitor_snapshots(&param.monitors, primary_monitor);
     if let Some(tile_id) = param.windows.main().tree.root() {
         schematic
             .elems
@@ -265,18 +276,25 @@ pub fn tiles_to_schematic(
             title: state.descriptor.title.clone(),
             schematic: window_schematic,
         });
+        let size_percent = window_size_percent_for_serialization(
+            &state.descriptor,
+            state.descriptor.size_percent,
+            state.descriptor.size,
+            &monitor_snapshots,
+        );
         window_elems.push(SchematicElem::Window(WindowSchematic {
             title: state.descriptor.title.clone(),
             path: file_name,
             screen: state.descriptor.screen.clone(),
             screen_idx: state.descriptor.screen_index.map(|index| index as u32),
             position: state.descriptor.position.map(|p| [p.x, p.y]),
-            size: state.descriptor.size.map(|s| [s.x, s.y]),
+            size: size_percent,
             fullscreen: state.descriptor.fullscreen.then_some(true),
         }));
     }
 
-    if let Some(primary_window_elem) = primary_window_schematic(param.windows.primary_descriptor())
+    if let Some(primary_window_elem) =
+        primary_window_schematic(param.windows.primary_descriptor(), &monitor_snapshots)
     {
         window_elems.push(primary_window_elem);
     }
@@ -286,6 +304,7 @@ pub fn tiles_to_schematic(
 
 fn primary_window_schematic(
     descriptor: &tiles::PrimaryWindowDescriptor,
+    monitors: &[MonitorSnapshot],
 ) -> Option<SchematicElem<Entity>> {
     let has_metadata = descriptor.screen.is_some()
         || descriptor.screen_index.is_some()
@@ -297,13 +316,46 @@ fn primary_window_schematic(
         return None;
     }
 
+    let size_percent = window_size_percent_for_serialization(
+        descriptor,
+        descriptor.size_percent,
+        descriptor.size,
+        monitors,
+    );
+
     Some(SchematicElem::MainWindow(PrimaryWindowSchematic {
         screen: descriptor.screen.clone(),
         screen_idx: descriptor.screen_index.map(|index| index as u32),
         position: descriptor.position.map(|p| [p.x, p.y]),
-        size: descriptor.size.map(|s| [s.x, s.y]),
+        size: size_percent,
         fullscreen: descriptor.fullscreen.then_some(true),
     }))
+}
+
+fn window_size_percent_for_serialization(
+    descriptor: &impl tiles::WindowDescriptorInfo,
+    stored_percent: Option<Vec2>,
+    size_pixels: Option<Vec2>,
+    monitors: &[MonitorSnapshot],
+) -> Option<[f32; 2]> {
+    if let Some(percent) = stored_percent {
+        return Some([round_percent(percent.x), round_percent(percent.y)]);
+    }
+
+    let size = size_pixels?;
+    let monitor = resolve_monitor_for_descriptor(
+        descriptor.screen_index(),
+        descriptor.screen().map(|s| s.as_str()),
+        monitors,
+    )?;
+    if monitor.physical_size.x == 0 || monitor.physical_size.y == 0 {
+        return None;
+    }
+
+    Some([
+        round_percent(size.x / monitor.physical_size.x as f32 * 100.0),
+        round_percent(size.y / monitor.physical_size.y as f32 * 100.0),
+    ])
 }
 
 pub struct SchematicPlugin;

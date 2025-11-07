@@ -88,6 +88,7 @@ pub struct SecondaryWindowDescriptor {
     pub screen_index: Option<usize>,
     pub position: Option<IVec2>,
     pub size: Option<Vec2>,
+    pub size_percent: Option<Vec2>,
     pub fullscreen: bool,
 }
 
@@ -97,12 +98,14 @@ pub struct PrimaryWindowDescriptor {
     pub screen_index: Option<usize>,
     pub position: Option<IVec2>,
     pub size: Option<Vec2>,
+    pub size_percent: Option<Vec2>,
     pub fullscreen: bool,
 }
 
 pub struct WindowDescriptorView<'a> {
     pub fullscreen: &'a mut bool,
     pub size: &'a mut Option<Vec2>,
+    pub size_percent: &'a mut Option<Vec2>,
     pub position: &'a mut Option<IVec2>,
     pub screen: &'a mut Option<String>,
     pub screen_index: &'a mut Option<usize>,
@@ -113,6 +116,7 @@ impl SecondaryWindowDescriptor {
         WindowDescriptorView {
             fullscreen: &mut self.fullscreen,
             size: &mut self.size,
+            size_percent: &mut self.size_percent,
             position: &mut self.position,
             screen: &mut self.screen,
             screen_index: &mut self.screen_index,
@@ -125,6 +129,7 @@ impl PrimaryWindowDescriptor {
         WindowDescriptorView {
             fullscreen: &mut self.fullscreen,
             size: &mut self.size,
+            size_percent: &mut self.size_percent,
             position: &mut self.position,
             screen: &mut self.screen,
             screen_index: &mut self.screen_index,
@@ -311,6 +316,7 @@ impl WindowManager {
             screen_index: None,
             position: None,
             size: None,
+            size_percent: None,
             fullscreen: false,
         };
         let tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));

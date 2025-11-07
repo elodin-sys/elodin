@@ -128,6 +128,8 @@ fn resolve_window_descriptor(
         }
     }
 
+    let (size_pixels, size_percent) = interpret_rect_size(window.size);
+
     Some(SecondaryWindowDescriptor {
         path: resolved,
         title: window.title.clone(),
@@ -136,11 +138,22 @@ fn resolve_window_descriptor(
         position: window
             .position
             .map(|coords| IVec2::new(coords[0], coords[1])),
-        size: window
-            .size
-            .map(|dimensions| Vec2::new(dimensions[0], dimensions[1])),
+        size: size_pixels,
+        size_percent,
         fullscreen: window.fullscreen.unwrap_or(false),
     })
+}
+
+fn interpret_rect_size(size: Option<[f32; 2]>) -> (Option<Vec2>, Option<Vec2>) {
+    let Some([width, height]) = size else {
+        return (None, None);
+    };
+    let size_vec = Vec2::new(width, height);
+    if width <= 100.0 && height <= 100.0 {
+        (None, Some(size_vec))
+    } else {
+        (Some(size_vec), None)
+    }
 }
 
 pub fn render_diag(diagnostic: &dyn Diagnostic) -> String {
@@ -248,15 +261,15 @@ impl LoadSchematicParams<'_, '_> {
                     }
                 }
                 impeller2_wkt::SchematicElem::MainWindow(window) => {
+                    let (size_pixels, size_percent) = interpret_rect_size(window.size);
                     *self.windows.primary_descriptor_mut() = PrimaryWindowDescriptor {
                         screen: window.screen.clone(),
                         screen_index: window.screen_idx.map(|index| index as usize),
                         position: window
                             .position
                             .map(|coords| IVec2::new(coords[0], coords[1])),
-                        size: window
-                            .size
-                            .map(|dimensions| Vec2::new(dimensions[0], dimensions[1])),
+                        size: size_pixels,
+                        size_percent,
                         fullscreen: window.fullscreen.unwrap_or(false),
                     };
                     self.windows.primary_descriptor_applied = false;
