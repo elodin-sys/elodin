@@ -659,6 +659,7 @@ fn sync_secondary_windows(
     primary_monitor: Query<Entity, With<PrimaryMonitor>>,
 ) {
     let monitor_snapshots = collect_monitor_snapshots(&monitors, primary_monitor.iter().next());
+    log_monitor_snapshots("sync_secondary_windows", &monitor_snapshots);
     let mut existing_map: HashMap<tiles::SecondaryWindowId, Entity> = HashMap::new();
     for (entity, marker) in existing.iter() {
         existing_map.insert(marker.id, entity);
@@ -701,6 +702,11 @@ fn sync_secondary_windows(
         }
 
         let title = compute_secondary_window_title(state);
+        let window_context = format!(
+            "secondary window {:?} ({})",
+            state.id,
+            state.descriptor.path.display()
+        );
         {
             let view = state.descriptor.view();
             resolve_descriptor_size_from_percent(view, &monitor_snapshots);
@@ -711,7 +717,7 @@ fn sync_secondary_windows(
         }
         {
             let view = state.descriptor.view();
-            ensure_descriptor_position_on_screen(view, &monitor_snapshots);
+            ensure_descriptor_position_on_screen(view, &monitor_snapshots, &window_context);
         }
 
         let window = build_window_from_descriptor(title, &state.descriptor, &monitor_snapshots);
@@ -800,6 +806,10 @@ fn apply_secondary_window_descriptor_to_window(
     }
 
     let monitor_snapshots = collect_monitor_snapshots(&monitors, primary_monitor.iter().next());
+    log_monitor_snapshots(
+        "apply_secondary_window_descriptor_to_window",
+        &monitor_snapshots,
+    );
 
     for state in manager.secondary_mut().iter_mut() {
         if state.descriptor_applied {
@@ -814,6 +824,11 @@ fn apply_secondary_window_descriptor_to_window(
             continue;
         };
 
+        let window_context = format!(
+            "secondary window {:?} ({})",
+            state.id,
+            state.descriptor.path.display()
+        );
         {
             let view = state.descriptor.view();
             resolve_descriptor_size_from_percent(view, &monitor_snapshots);
@@ -822,6 +837,11 @@ fn apply_secondary_window_descriptor_to_window(
             let view = state.descriptor.view();
             resolve_descriptor_position_from_percent(view, &monitor_snapshots);
         }
+        {
+            let view = state.descriptor.view();
+            ensure_descriptor_position_on_screen(view, &monitor_snapshots, &window_context);
+        }
+
         apply_descriptor_to_window_component(&mut window, &state.descriptor, &monitor_snapshots);
 
         let mut applied_to_winit = false;
@@ -852,6 +872,10 @@ fn apply_primary_window_descriptor_to_window(
     };
 
     let monitor_snapshots = collect_monitor_snapshots(&monitors, primary_monitor.iter().next());
+    log_monitor_snapshots(
+        "apply_primary_window_descriptor_to_window",
+        &monitor_snapshots,
+    );
     {
         let view = manager.primary_descriptor_mut().view();
         resolve_descriptor_size_from_percent(view, &monitor_snapshots);
@@ -862,7 +886,7 @@ fn apply_primary_window_descriptor_to_window(
     }
     {
         let view = manager.primary_descriptor_mut().view();
-        ensure_descriptor_position_on_screen(view, &monitor_snapshots);
+        ensure_descriptor_position_on_screen(view, &monitor_snapshots, "primary window");
     }
     apply_descriptor_to_window_component(
         &mut window,
@@ -1001,6 +1025,7 @@ fn friendly_title_from_stem(stem: &str) -> Option<String> {
 pub(super) struct MonitorSnapshot {
     index: usize,
     entity: Entity,
+    label: Option<String>,
     physical_position: IVec2,
     physical_size: UVec2,
     is_primary: bool,
@@ -1015,6 +1040,7 @@ pub(super) fn collect_monitor_snapshots(
         .map(|(entity, monitor)| MonitorSnapshot {
             index: 0,
             entity,
+            label: monitor.name.as_deref().and_then(sanitize_monitor_label),
             physical_position: monitor.physical_position,
             physical_size: monitor.physical_size(),
             is_primary: false,
@@ -1040,6 +1066,47 @@ pub(super) fn collect_monitor_snapshots(
     }
 
     snapshots
+}
+
+fn sanitize_monitor_label(input: &str) -> Option<String> {
+    let filtered: String = input.chars().filter(|ch| *ch != '#').collect();
+    let collapsed = filtered
+        .split_whitespace()
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let result = if collapsed.is_empty() {
+        filtered.trim().to_string()
+    } else {
+        collapsed
+    };
+    if result.is_empty() {
+        None
+    } else {
+        Some(result)
+    }
+}
+
+fn log_monitor_snapshots(context: &str, monitors: &[MonitorSnapshot]) {
+    if monitors.is_empty() {
+        info!(target: "monitor", "{context}: no monitors detected");
+        return;
+    }
+
+    for snapshot in monitors {
+        let label = snapshot.label.as_deref().unwrap_or("unnamed");
+        info!(
+            target: "monitor",
+            "{context}: screenIdx={} label=\"{}\" pos=({}, {}) size={}x{} primary={}",
+            snapshot.index,
+            label,
+            snapshot.physical_position.x,
+            snapshot.physical_position.y,
+            snapshot.physical_size.x,
+            snapshot.physical_size.y,
+            snapshot.is_primary
+        );
+    }
 }
 
 fn build_window_from_descriptor(
@@ -1388,6 +1455,7 @@ fn resolve_descriptor_position_from_percent(
 fn ensure_descriptor_position_on_screen(
     descriptor: tiles::WindowDescriptorView<'_>,
     monitors: &[MonitorSnapshot],
+    context: &str,
 ) {
     let tiles::WindowDescriptorView {
         position,
@@ -1400,7 +1468,31 @@ fn ensure_descriptor_position_on_screen(
         return;
     };
 
-    let Some(snapshot) = resolve_monitor_for_descriptor(*screen_index, monitors) else {
+    let Some(mut index) = *screen_index else {
+        warn!(
+            target: "monitor",
+            "{context}: missing screenIdx; cannot validate rect placement"
+        );
+        return;
+    };
+
+    if index >= monitors.len() && !monitors.is_empty() {
+        warn!(
+            target: "monitor",
+            "{context}: screenIdx {} out of bounds (monitors={}), clamping to 0",
+            index,
+            monitors.len()
+        );
+        index = 0;
+        *screen_index = Some(index);
+    }
+
+    let Some(snapshot) = resolve_monitor_for_descriptor(Some(index), monitors) else {
+        warn!(
+            target: "monitor",
+            "{context}: unable to resolve monitor for screenIdx {}",
+            index
+        );
         return;
     };
 
@@ -1412,6 +1504,14 @@ fn ensure_descriptor_position_on_screen(
         return;
     }
 
+    warn!(
+        target: "monitor",
+        "{context}: rect {:?} lies outside monitor {}, clamping to {}, {}",
+        pos,
+        snapshot.index,
+        min.x,
+        min.y
+    );
     *position = Some(min);
     *position_percent = Some(Vec2::new(0.0, 0.0));
 }
