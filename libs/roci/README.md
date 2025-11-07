@@ -252,9 +252,9 @@ Roci has evolved significantly since its initial implementation. Here are some m
    - Migration from Conduit to Impeller2
    - Improved performance and flexibility
 
-8. **Deprecated NOX** 
-   - Migrated from NOX math operations to Nalgebra
-   - Updated all functions and tests to pass
+8. **Nalgebra Migration** (2025)
+   - Migrated ADCS algorithms from internal tensor library to Nalgebra
+   - Simplified dependencies and improved maintainability
 
 ## Design Philosophy
 
@@ -297,7 +297,7 @@ See the `examples/` directory for complete examples:
 ## Related Projects
 
 - **Impeller2** - High-performance telemetry protocol
-- **Nox** - Tensor and linear algebra library
+- **Nalgebra** - Linear algebra library for Rust
 
 ## Contributing
 

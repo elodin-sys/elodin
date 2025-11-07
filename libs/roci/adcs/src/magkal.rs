@@ -7,14 +7,11 @@
 //!
 //! It estimates scale factors, bias, and nonorthogonality corrections
 
-use nalgebra::{matrix, vector, Matrix3, SMatrix, SVector, Vector3};
+use nalgebra::{Matrix3, SMatrix, SVector, Vector3, matrix, vector};
 
 use crate::ukf::{self, MerweConfig};
 
-pub fn measure(
-    state: SVector<f64, 9>,
-    z: Vector3<f64>,
-) -> SVector<f64, 1> {
+pub fn measure(state: SVector<f64, 9>, z: Vector3<f64>) -> SVector<f64, 1> {
     let b: Vector3<f64> = state.fixed_rows::<3>(0).into_owned();
     let d_vec: SVector<f64, 6> = state.fixed_rows::<6>(3).into_owned();
     let d = matrix![
@@ -50,19 +47,11 @@ impl State {
 }
 
 impl State {
-    pub fn update(
-        self,
-        z: Vector3<f64>,
-        b: Vector3<f64>,
-    ) -> Result<Self, String> {
+    pub fn update(self, z: Vector3<f64>, b: Vector3<f64>) -> Result<Self, String> {
         let Self(state) = self;
         // Debug: verify state before update
         let measurement = vector![z.norm_squared() - b.norm_squared()];
-        let state = state.update(
-            measurement,
-            |x| x,
-            move |x, _| measure(x, z),
-        )?;
+        let state = state.update(measurement, |x| x, move |x, _| measure(x, z))?;
         Ok(Self(state))
     }
 
@@ -109,8 +98,8 @@ mod tests {
         // that can be sensitive to numerical precision and implementation details.
         // The algorithm has converged but may not match the exact reference values
         // from the Matlab implementation due to:
-        // 1. Different matrix libraries (nalgebra vs nox)  
-        // 2. Numerical precision differences
+        // 1. Numerical precision differences in matrix operations
+        // 2. Floating point rounding differences
         // 3. UKF sigma point generation differences
         //
         // Since the iterative MAG.I.CAL algorithm passes its test, we know the basic
@@ -119,9 +108,15 @@ mod tests {
         // For now, just verify the algorithm doesn't crash and produces some calibration.
         let h_hat = state.h_hat();
         let d_hat = state.d_hat();
-        
+
         // Basic sanity checks
-        assert!(h_hat.iter().all(|x| x.is_finite()), "Bias has non-finite values");
-        assert!(d_hat.iter().all(|x| x.is_finite()), "Scale matrix has non-finite values");
+        assert!(
+            h_hat.iter().all(|x| x.is_finite()),
+            "Bias has non-finite values"
+        );
+        assert!(
+            d_hat.iter().all(|x| x.is_finite()),
+            "Scale matrix has non-finite values"
+        );
     }
 }

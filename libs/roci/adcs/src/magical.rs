@@ -8,13 +8,7 @@ fn calibration_step<const N: usize>(
     y: SMatrix<f64, 3, N>,
     m: SMatrix<f64, 3, N>,
 ) -> Option<(Matrix3<f64>, Vector3<f64>)> {
-    let g = DMatrix::from_fn(4, N, |i, j| {
-        if i < 3 {
-            m[(i, j)]
-        } else {
-            1.0
-        }
-    });
+    let g = DMatrix::from_fn(4, N, |i, j| if i < 3 { m[(i, j)] } else { 1.0 });
     let g_t = g.transpose();
     let g_g_t_inv = (g * g_t.clone()).try_inverse()?;
     let y_g_t = DMatrix::from_fn(3, N, |i, j| y[(i, j)]) * g_t;
@@ -34,7 +28,7 @@ pub fn calibrate<const N: usize>(y: [Vector3<f64>; N]) -> Option<Result<N>> {
     let m: [Vector3<f64>; N] = y.map(|y| y.normalize());
     let mut m_mat = SMatrix::<f64, 3, N>::from_fn(|i, j| m[j][i]);
     let y_mat = SMatrix::<f64, 3, N>::from_fn(|i, j| y[j][i]);
-    
+
     for _ in 0..32 {
         let (t, h) = calibration_step(y_mat, m_mat)?;
         let t_inv = t.try_inverse()?;
@@ -72,15 +66,18 @@ mod tests {
         };
         // The matlab value was in column-major format, so we transpose it
         let expected_t = Matrix3::from_row_slice(&[
-            0.9738617339145248, 0.11686340806974296, 0.19477234678290495,
-            0.14762034939153687, 0.9841356626102459, 0.0984135662610246,
-            0.16404467873119666, 0.06561787149247868, 0.9842680723871801
-        ]).transpose();
-        assert_relative_eq!(
-            t_normalized,
-            expected_t,
-            epsilon = 1e-2
-        ); // value normalized from matlab
+            0.9738617339145248,
+            0.11686340806974296,
+            0.19477234678290495,
+            0.14762034939153687,
+            0.9841356626102459,
+            0.0984135662610246,
+            0.16404467873119666,
+            0.06561787149247868,
+            0.9842680723871801,
+        ])
+        .transpose();
+        assert_relative_eq!(t_normalized, expected_t, epsilon = 1e-2); // value normalized from matlab
 
         let expected_mat = SMatrix::<f64, 3, 500>::from_fn(|i, j| {
             crate::tests::normalized_cal_mag_readings()[j][i]

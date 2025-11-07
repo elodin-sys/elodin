@@ -1,4 +1,4 @@
-use nalgebra::{vector, Vector3};
+use nalgebra::{Vector3, vector};
 
 pub fn test_mag_readings() -> [Vector3<f64>; 500] {
     // values generated using matlab tutorial:

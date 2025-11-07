@@ -1,17 +1,13 @@
 use nalgebra::{Matrix3, Matrix6, SMatrix, SVector, UnitQuaternion, Vector3, Vector6, vector};
 
-pub fn calculate_covariance(
-    sigma_g: Vector3<f64>,
-    sigma_b: Vector3<f64>,
-    dt: f64,
-) -> Matrix6<f64> {
+pub fn calculate_covariance(sigma_g: Vector3<f64>, sigma_b: Vector3<f64>, dt: f64) -> Matrix6<f64> {
     let variance_g: Matrix3<f64> = Matrix3::from_diagonal(&(sigma_g.component_mul(&sigma_g) * dt));
     let variance_b = Matrix3::from_diagonal(&(sigma_b.component_mul(&sigma_b) * dt));
     let q_00 = variance_g + variance_b * dt * (dt / 3.0);
     let q_01 = variance_b * (dt / 2.0);
     let q_10 = q_01;
     let q_11 = variance_b;
-    
+
     let mut q = Matrix6::zeros();
     q.fixed_view_mut::<3, 3>(0, 0).copy_from(&q_00);
     q.fixed_view_mut::<3, 3>(0, 3).copy_from(&q_01);
@@ -33,17 +29,17 @@ fn propagate_quaternion(
     let y = omega_s[1];
     let z = omega_s[2];
     let big_omega = SMatrix::<f64, 4, 4>::from_row_slice(&[
-        c, z, -y, x, 
-        -z, c, x, y, 
-        y, -x, c, z, 
-        -x, -y, -z, c
+        c, z, -y, x, -z, c, x, y, y, -x, c, z, -x, -y, -z, c,
     ]);
-    
+
     if omega_norm > 1e-5 {
         let q_vec = SVector::<f64, 4>::from_row_slice(&[q.i, q.j, q.k, q.w]);
         let new_q_vec = big_omega * q_vec;
         UnitQuaternion::from_quaternion(nalgebra::Quaternion::new(
-            new_q_vec[3], new_q_vec[0], new_q_vec[1], new_q_vec[2]
+            new_q_vec[3],
+            new_q_vec[0],
+            new_q_vec[1],
+            new_q_vec[2],
         ))
     } else {
         q
@@ -63,15 +59,13 @@ fn propagate_state_covariance(
     let p = s / omega_norm;
     let q = (1.0 - c) / omega_norm_squared;
     let r = (omega_norm * dt - s) / (omega_norm_squared * omega_norm);
-    
+
     let omega_cross = Matrix3::new(
-        0.0, -omega[2], omega[1],
-        omega[2], 0.0, -omega[0],
-        -omega[1], omega[0], 0.0
+        0.0, -omega[2], omega[1], omega[2], 0.0, -omega[0], -omega[1], omega[0], 0.0,
     );
     let omega_cross_square = omega_cross * omega_cross;
     let eye = Matrix3::identity();
-    
+
     let phi_00: Matrix3<f64> = if omega_norm > 1e-5 {
         eye - omega_cross * p + omega_cross_square * q
     } else {
@@ -105,11 +99,7 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(
-        sigma_g: Vector3<f64>,
-        sigma_b: Vector3<f64>,
-        dt: f64,
-    ) -> Self {
+    pub fn new(sigma_g: Vector3<f64>, sigma_b: Vector3<f64>, dt: f64) -> Self {
         let y: Matrix6<f64> = Matrix6::from_diagonal(&vector![-1.0, -1.0, -1.0, 1.0, 1.0, 1.0]);
         let q = calculate_covariance(sigma_g, sigma_b, dt);
         let yqy = y * q * y.transpose();
@@ -141,7 +131,7 @@ impl State {
         let q_hat = propagate_quaternion(q_hat, omega, dt);
         let mut p = propagate_state_covariance(p, omega, yqy, dt);
         let mut delta_x_hat: Vector6<f64> = Vector6::zeros();
-        
+
         for ((reference, measured_body), sigma) in references
             .into_iter()
             .zip(measured_bodys.into_iter())
@@ -151,33 +141,31 @@ impl State {
             let body_r = q_hat.inverse() * reference;
             let e = measured_body - body_r;
             let skew_sym = Matrix3::new(
-                0.0, -body_r[2], body_r[1],
-                body_r[2], 0.0, -body_r[0],
-                -body_r[1], body_r[0], 0.0
+                0.0, -body_r[2], body_r[1], body_r[2], 0.0, -body_r[0], -body_r[1], body_r[0], 0.0,
             );
-            
+
             let mut h = SMatrix::<f64, 3, 6>::zeros();
             h.fixed_view_mut::<3, 3>(0, 0).copy_from(&skew_sym);
             // h.fixed_view_mut::<3, 3>(0, 3) is already zeros
-            
+
             let h_trans = h.transpose();
             let s = (h * p * h_trans + var_r)
                 .try_inverse()
-                .unwrap_or_else(|| Matrix3::identity());
+                .unwrap_or_else(Matrix3::identity);
             let k = p * h_trans * s;
             p = (Matrix6::<f64>::identity() - k * h) * p;
             let d: Vector3<f64> = h * delta_x_hat;
-            delta_x_hat = delta_x_hat + k * (e - d);
+            delta_x_hat += k * (e - d);
         }
-        
+
         let delta_alpha: Vector3<f64> = delta_x_hat.fixed_rows::<3>(0).into_owned();
         let delta_beta: Vector3<f64> = delta_x_hat.fixed_rows::<3>(3).into_owned();
-        
+
         // Integrate the quaternion update
         let delta_q = UnitQuaternion::from_scaled_axis(delta_alpha);
         let q_hat = q_hat * delta_q;
         let b_hat = b_hat + delta_beta;
-        
+
         Self {
             q_hat,
             b_hat,
@@ -246,8 +234,12 @@ mod tests {
             0.0, -3.4722e-09, 0.0, 0.0, 8.3333e-07, 0.0;
             0.0, 0.0, -3.4722e-09, 0.0, 0.0, 8.3333e-07;
         ];
-        let out =
-            propagate_state_covariance(Matrix6::identity(), vector![1.0, 0.0, 0.0], yqy, 1.0 / 120.0);
+        let out = propagate_state_covariance(
+            Matrix6::identity(),
+            vector![1.0, 0.0, 0.0],
+            yqy,
+            1.0 / 120.0,
+        );
         #[rustfmt::skip]
         let expected = matrix![
             1.00007028e+00,  0.00000000e+00,  0.00000000e+00, -8.33333681e-03,  0.00000000e+00,  0.00000000e+00;
@@ -262,13 +254,13 @@ mod tests {
 
     #[test]
     fn test_propagate_quaternion() {
-        let q = propagate_quaternion(UnitQuaternion::identity(), vector![1.0, 0.0, 0.0], 1.0 / 60.0);
-        let expected = nalgebra::Quaternion::new(0.99996528, 0.00833324, 0., 0.);
-        assert_relative_eq!(
-            q.coords,
-            expected.coords,
-            epsilon = 1e-5
+        let q = propagate_quaternion(
+            UnitQuaternion::identity(),
+            vector![1.0, 0.0, 0.0],
+            1.0 / 60.0,
         );
+        let expected = nalgebra::Quaternion::new(0.99996528, 0.00833324, 0., 0.);
+        assert_relative_eq!(q.coords, expected.coords, epsilon = 1e-5);
     }
 
     #[test]
@@ -297,7 +289,11 @@ mod tests {
             state = state.estimate_attitude([body_a, body_b], [ref_a, ref_b], [0.03, 0.03]);
         }
         // Use angle_to for quaternion comparison to handle q and -q representing the same rotation
-        assert!(state.q_hat.angle_to(&q) < 1e-3, "Quaternion angle difference: {}", state.q_hat.angle_to(&q));
+        assert!(
+            state.q_hat.angle_to(&q) < 1e-3,
+            "Quaternion angle difference: {}",
+            state.q_hat.angle_to(&q)
+        );
         for _ in 0..120 {
             q = q * UnitQuaternion::from_scaled_axis(vector![1.0 / 120.0, 0.0, 0.0]);
             let body_a = (q.inverse() * ref_a).normalize();
@@ -305,12 +301,12 @@ mod tests {
             state.omega = vector![1.0, 0.0, 0.0];
             state = state.estimate_attitude([body_a, body_b], [ref_a, ref_b], [0.03, 0.03]);
         }
-        assert_relative_eq!(
-            state.b_hat,
-            vector![0.0, 0.0, 0.0],
-            epsilon = 1e-2
-        );
+        assert_relative_eq!(state.b_hat, vector![0.0, 0.0, 0.0], epsilon = 1e-2);
         // Use angle_to for quaternion comparison
-        assert!(state.q_hat.angle_to(&q) < 1e-3, "Quaternion angle difference: {}", state.q_hat.angle_to(&q));
+        assert!(
+            state.q_hat.angle_to(&q) < 1e-3,
+            "Quaternion angle difference: {}",
+            state.q_hat.angle_to(&q)
+        );
     }
 }

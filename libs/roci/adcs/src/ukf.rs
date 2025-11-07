@@ -24,7 +24,7 @@ pub fn cross_covar<const N: usize, const Z: usize, const S: usize>(
 ) -> SMatrix<f64, N, Z> {
     let delta_x = points_x - SMatrix::from_fn(|_i, j| x_hat[j]);
     let delta_z = points_z - SMatrix::from_fn(|_i, j| z_hat[j]);
-    
+
     let mut result = SMatrix::<f64, N, Z>::zeros();
     for i in 0..S {
         let dx = delta_x.row(i).transpose();
@@ -40,11 +40,7 @@ pub fn predict<const S: usize, const N: usize>(
     mean_weights: &SVector<f64, S>,
     covar_weights: &SVector<f64, S>,
     prop_covar: &SMatrix<f64, N, N>,
-) -> (
-    SMatrix<f64, S, N>,
-    SVector<f64, N>,
-    SMatrix<f64, N, N>,
-) {
+) -> (SMatrix<f64, S, N>, SVector<f64, N>, SMatrix<f64, N, N>) {
     let points = SMatrix::<f64, S, N>::from_fn(|i, j| {
         let row = sigma_points.row(i);
         let vec = SVector::<f64, N>::from_fn(|k, _| row[k]);
@@ -63,11 +59,7 @@ pub fn innovate<const S: usize, const N: usize, const Z: usize>(
     mean_weights: &SVector<f64, S>,
     covar_weights: &SVector<f64, S>,
     noise_covar: &SMatrix<f64, Z, Z>,
-) -> (
-    SMatrix<f64, S, Z>,
-    SVector<f64, Z>,
-    SMatrix<f64, Z, Z>,
-) {
+) -> (SMatrix<f64, S, Z>, SVector<f64, Z>, SMatrix<f64, Z, Z>) {
     let points = SMatrix::<f64, S, Z>::from_fn(|i, j| {
         let row = x_points.row(i);
         let vec = SVector::<f64, N>::from_fn(|k, _| row[k]);
@@ -119,13 +111,11 @@ impl UncheckedMerweConfig {
             .ok_or("Cholesky decomposition failed")?
             .l()
             .transpose();
-        
-        Ok(SMatrix::<f64, S, N>::from_fn(|i, j| {
-            match i {
-                0 => x[j],
-                i if (1..=self.n).contains(&i) => x[j] + u[(i - 1, j)],
-                _ => x[j] - u[(i - self.n - 1, j)],
-            }
+
+        Ok(SMatrix::<f64, S, N>::from_fn(|i, j| match i {
+            0 => x[j],
+            i if (1..=self.n).contains(&i) => x[j] + u[(i - 1, j)],
+            _ => x[j] - u[(i - self.n - 1, j)],
         }))
     }
 
@@ -209,8 +199,7 @@ impl<const N: usize, const Z: usize> UncheckedState<N, Z> {
         prop_fn: impl Fn(SVector<f64, N>) -> SVector<f64, N>,
         measure_fn: impl Fn(SVector<f64, N>, SVector<f64, Z>) -> SVector<f64, Z>,
     ) -> Result<Self, String> {
-        let sigma_points =
-            config.sigma_points::<S, N>(self.x_hat, self.covar)?;
+        let sigma_points = config.sigma_points::<S, N>(self.x_hat, self.covar)?;
         let mean_weights = config.mean_weights::<S>();
         let covar_weights = config.covariance_weights::<S>();
         let (points_x, x_hat, covar) = predict(
@@ -286,7 +275,7 @@ impl<const N: usize, const Z: usize, const S: usize> State<N, Z, S> {
 #[cfg(test)]
 mod tests {
     use approx::assert_relative_eq;
-    use nalgebra::{matrix, vector, Matrix4, SMatrix};
+    use nalgebra::{Matrix4, SMatrix, matrix, vector};
 
     use super::*;
 
@@ -359,7 +348,10 @@ mod tests {
                 0.0e+00, 0.0e+00, 2.5e-09, 5.0e-08;
                 0.0e+00, 0.0e+00, 5.0e-08, 1.0e-06;
             ],
-            noise_covar: SMatrix::<f64, 2, 2>::from_diagonal(&vector![z_std.powi(2), z_std.powi(2)]),
+            noise_covar: SMatrix::<f64, 2, 2>::from_diagonal(&vector![
+                z_std.powi(2),
+                z_std.powi(2)
+            ]),
             config: MerweConfig::new(0.1, 2.0, -1.0),
         };
         let zs = [

@@ -9,7 +9,7 @@ pub fn triad(
     let r_r = ref_1.cross(&ref_2).normalize();
     let q_r = ref_1;
     let s_r = q_r.cross(&r_r);
-    // nox's from_buf created rows, so use from_rows in nalgebra
+    // Create matrix from row vectors
     let m_r_t = Matrix3::from_rows(&[q_r.transpose(), r_r.transpose(), s_r.transpose()]);
     let r_b = body_1.cross(&body_2).normalize();
     let q_b = body_1;
@@ -20,7 +20,7 @@ pub fn triad(
 
 #[cfg(test)]
 mod tests {
-    use nalgebra::{matrix, vector, Matrix3, UnitQuaternion, Vector3};
+    use nalgebra::{Matrix3, UnitQuaternion, Vector3, matrix, vector};
 
     use super::*;
 

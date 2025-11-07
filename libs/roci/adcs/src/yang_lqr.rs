@@ -101,7 +101,7 @@ impl YangLQR {
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
-    use nalgebra::{vector, Vector3};
+    use nalgebra::{Vector3, vector};
 
     pub fn test_cubesat_gains() -> (Vector3<f64>, Vector3<f64>) {
         let j = vector![15204079.70002, 14621352.61765, 6237758.3131] * 1e-9;
