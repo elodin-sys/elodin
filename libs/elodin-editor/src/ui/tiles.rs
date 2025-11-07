@@ -1,9 +1,10 @@
-use bevy::log::info;
 use bevy::{
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     ecs::system::{SystemParam, SystemState},
     input::keyboard::Key,
+    log::info,
     prelude::*,
+    window::{Monitor, Window, WindowPosition},
 };
 use bevy_editor_cam::prelude::{EditorCam, EnabledMotion, OrbitConstraint};
 use bevy_egui::{
@@ -22,6 +23,7 @@ use impeller2_wkt::{Dashboard, Graph, Viewport};
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, HashMap};
 use std::{fmt::Write as _, path::PathBuf};
+use winit::{monitor::MonitorHandle, window::Window as WinitWindow};
 
 use super::{
     SelectedObject, ViewportRect,
@@ -99,6 +101,99 @@ pub struct SecondaryWindowState {
     pub graph_entities: Vec<Entity>,
     pub applied_screen_index: Option<usize>,
     pub skip_metadata_capture: bool,
+}
+
+impl SecondaryWindowState {
+    pub fn update_descriptor_from_window(
+        &mut self,
+        window: &Window,
+        monitors: &Query<(Entity, &Monitor)>,
+    ) {
+        if self.skip_metadata_capture {
+            self.skip_metadata_capture = false;
+            return;
+        }
+
+        let position = match window.position {
+            WindowPosition::At(pos) => pos,
+            WindowPosition::Centered(_) | WindowPosition::Automatic => IVec2::ZERO,
+        };
+        let size = window.resolution.physical_size();
+        let center = IVec2::new(
+            position.x + size.x as i32 / 2,
+            position.y + size.y as i32 / 2,
+        );
+
+        let mut best: Option<(usize, i32)> = None;
+        for (index, (_, monitor)) in monitors.iter().enumerate() {
+            let min = monitor.physical_position;
+            let max = IVec2::new(
+                monitor.physical_position.x + monitor.physical_size().x as i32,
+                monitor.physical_position.y + monitor.physical_size().y as i32,
+            );
+            if center.x >= min.x && center.x < max.x && center.y >= min.y && center.y < max.y {
+                let distance = (center.x - min.x).abs() + (center.y - min.y).abs();
+                if best.map(|(_, d)| distance < d).unwrap_or(true) {
+                    best = Some((index, distance));
+                }
+            }
+        }
+
+        if let Some((index, _)) = best {
+            self.descriptor.screen_index = Some(index);
+        }
+    }
+
+    pub fn update_descriptor_from_winit_window(
+        &mut self,
+        window: &WinitWindow,
+        monitors: &[MonitorHandle],
+    ) {
+        if self.skip_metadata_capture {
+            self.skip_metadata_capture = false;
+            return;
+        }
+
+        let monitor_index = window
+            .current_monitor()
+            .and_then(|current| monitors.iter().position(|monitor| monitor == &current))
+            .or_else(|| {
+                let position = window.outer_position().ok()?;
+                let size = window.outer_size();
+                let center_x = position.x + size.width as i32 / 2;
+                let center_y = position.y + size.height as i32 / 2;
+
+                monitors
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, monitor)| {
+                        let monitor_pos = monitor.position();
+                        let monitor_size = monitor.size();
+                        let min_x = monitor_pos.x;
+                        let max_x = monitor_pos.x + monitor_size.width as i32;
+                        let min_y = monitor_pos.y;
+                        let max_y = monitor_pos.y + monitor_size.height as i32;
+
+                        if center_x >= min_x
+                            && center_x < max_x
+                            && center_y >= min_y
+                            && center_y < max_y
+                        {
+                            let distance =
+                                (center_x - monitor_pos.x).abs() + (center_y - monitor_pos.y).abs();
+                            Some((index, distance))
+                        } else {
+                            None
+                        }
+                    })
+                    .min_by_key(|(_, distance)| *distance)
+                    .map(|(index, _)| index)
+            });
+
+        if let Some(index) = monitor_index {
+            self.descriptor.screen_index = Some(index);
+        }
+    }
 }
 
 #[derive(Resource)]
