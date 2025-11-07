@@ -747,7 +747,8 @@ fn capture_secondary_window_metadata(
         apply_window_to_descriptor(&mut state.descriptor, window, &monitor_snapshots);
 
         if let Some(winit_window) = winit_windows.get_window(entity) {
-            extract_screen_metadata(&mut state.descriptor, &monitor_snapshots, &**winit_window);
+            let view = state.descriptor.view();
+            extract_screen_metadata_from_winit(view, &monitor_snapshots, winit_window);
         }
     }
 }
@@ -759,7 +760,7 @@ fn capture_primary_window_metadata(
     primary_monitor: Query<Entity, With<PrimaryMonitor>>,
     winit_windows: NonSend<bevy::winit::WinitWindows>,
 ) {
-    let Ok((entity, window)) = window_query.get_single() else {
+    let Ok((entity, window)) = window_query.single() else {
         return;
     };
 
@@ -771,7 +772,7 @@ fn capture_primary_window_metadata(
 
     if let Some(winit_window) = winit_windows.get_window(entity) {
         let view = manager.primary_descriptor_mut().view();
-        extract_screen_metadata_from_winit(view, &monitor_snapshots, &**winit_window);
+        extract_screen_metadata_from_winit(view, &monitor_snapshots, winit_window);
     }
 }
 
@@ -805,7 +806,7 @@ fn apply_secondary_window_descriptor_to_window(
 
         let mut applied_to_winit = false;
         if let Some(winit_window) = winit_windows.get_window(window_entity) {
-            enforce_descriptor_on_winit_window(&state.descriptor, &**winit_window);
+            enforce_descriptor_on_winit_window(&state.descriptor, winit_window);
             applied_to_winit = true;
         }
 
@@ -826,7 +827,7 @@ fn apply_primary_window_descriptor_to_window(
         return;
     }
 
-    let Ok((entity, mut window)) = window_query.get_single_mut() else {
+    let Ok((entity, mut window)) = window_query.single_mut() else {
         return;
     };
 
@@ -838,7 +839,7 @@ fn apply_primary_window_descriptor_to_window(
     );
 
     if let Some(winit_window) = winit_windows.get_window(entity) {
-        enforce_descriptor_on_winit_window(manager.primary_descriptor(), &**winit_window);
+        enforce_descriptor_on_winit_window(manager.primary_descriptor(), winit_window);
         manager.primary_descriptor_applied = true;
     }
 }
@@ -1041,14 +1042,12 @@ fn build_window_from_descriptor(
             MonitorSelection::Primary | MonitorSelection::Current
         ) {
             window.position = WindowPosition::Centered(selection);
-        } else if let Some(name) = descriptor.screen.as_ref() {
-            if let Some(snapshot) = monitors
+        } else if let Some(name) = descriptor.screen.as_ref()
+            && let Some(snapshot) = monitors
                 .iter()
                 .find(|monitor| monitor.name.as_ref() == Some(name))
-            {
-                window.position =
-                    WindowPosition::Centered(MonitorSelection::Entity(snapshot.entity));
-            }
+        {
+            window.position = WindowPosition::Centered(MonitorSelection::Entity(snapshot.entity));
         }
     }
 
@@ -1066,19 +1065,18 @@ fn monitor_selection_from_descriptor(
     descriptor: &impl tiles::WindowDescriptorInfo,
     monitors: &[MonitorSnapshot],
 ) -> MonitorSelection {
-    if let Some(index) = descriptor.screen_index() {
-        if index < monitors.len() {
-            return MonitorSelection::Entity(monitors[index].entity);
-        }
+    if let Some(index) = descriptor.screen_index()
+        && index < monitors.len()
+    {
+        return MonitorSelection::Entity(monitors[index].entity);
     }
 
-    if let Some(name) = descriptor.screen() {
-        if let Some(snapshot) = monitors
+    if let Some(name) = descriptor.screen()
+        && let Some(snapshot) = monitors
             .iter()
             .find(|monitor| monitor.name.as_ref() == Some(name))
-        {
-            return MonitorSelection::Index(snapshot.index);
-        }
+    {
+        return MonitorSelection::Index(snapshot.index);
     }
 
     if let Some(snapshot) = monitors.iter().find(|monitor| monitor.is_primary) {
@@ -1134,32 +1132,31 @@ fn apply_window_to_descriptor(
     apply_window_to_descriptor_view(view, window, monitors);
 }
 
-fn extract_screen_metadata(
-    descriptor: &mut tiles::SecondaryWindowDescriptor,
-    monitors: &[MonitorSnapshot],
-    window: &WinitWindow,
-) {
-    let view = descriptor.view();
-    extract_screen_metadata_from_winit(view, monitors, window);
-}
-
 fn apply_window_to_descriptor_view(
-    mut descriptor: tiles::WindowDescriptorView<'_>,
+    descriptor: tiles::WindowDescriptorView<'_>,
     window: &Window,
     monitors: &[MonitorSnapshot],
 ) {
-    *descriptor.fullscreen = matches!(
+    let tiles::WindowDescriptorView {
+        fullscreen,
+        size,
+        position,
+        screen,
+        screen_index,
+    } = descriptor;
+
+    *fullscreen = matches!(
         window.mode,
         WindowMode::BorderlessFullscreen(_) | WindowMode::Fullscreen(_, _)
     );
-    *descriptor.size = Some(window.size());
-    *descriptor.position = match window.position {
+    *size = Some(window.size());
+    *position = match window.position {
         WindowPosition::At(position) => Some(position),
         _ => None,
     };
     let monitor_index = determine_monitor_index(window, monitors);
-    *descriptor.screen_index = monitor_index;
-    *descriptor.screen = monitor_index
+    *screen_index = monitor_index;
+    *screen = monitor_index
         .and_then(|index| monitors.iter().find(|monitor| monitor.index == index))
         .and_then(|monitor| monitor.name.clone());
 }
@@ -1223,68 +1220,12 @@ fn extract_position_from_winit_fields(
         return;
     }
 
-    if let Some(new_pos) = window.outer_position().ok() {
-        *position = Some(IVec2::new(new_pos.x, new_pos.y));
+    if let Ok(pos) = window.outer_position() {
+        *position = Some(IVec2::new(pos.x, pos.y));
     }
 
     let inner = window.inner_size();
     *size = Some(Vec2::new(inner.width as f32, inner.height as f32));
-}
-
-fn extract_screen_metadata(
-    descriptor: &mut tiles::SecondaryWindowDescriptor,
-    monitors: &[MonitorSnapshot],
-    window: &WinitWindow,
-) {
-    extract_monitor_from_winit(descriptor, monitors, window.current_monitor());
-    extract_position_from_winit(descriptor, window);
-}
-
-fn extract_monitor_from_winit(
-    descriptor: &mut tiles::SecondaryWindowDescriptor,
-    monitors: &[MonitorSnapshot],
-    handle: Option<MonitorHandle>,
-) {
-    let Some(handle) = handle else {
-        return;
-    };
-
-    let monitor_position = handle.position();
-    let monitor_size = handle.size();
-    let handle_name = handle.name();
-
-    let matched_snapshot = monitors.iter().find(|snapshot| {
-        snapshot.physical_position.x == monitor_position.x
-            && snapshot.physical_position.y == monitor_position.y
-            && snapshot.physical_size.x == monitor_size.width
-            && snapshot.physical_size.y == monitor_size.height
-    });
-
-    if let Some(snapshot) = matched_snapshot {
-        descriptor.screen_index = Some(snapshot.index);
-        if let Some(name) = snapshot.name.clone().or_else(|| handle_name.clone()) {
-            descriptor.screen = Some(name);
-        }
-    } else if let Some(name) = handle_name {
-        descriptor.screen = Some(name);
-    }
-}
-
-fn extract_position_from_winit(
-    descriptor: &mut tiles::SecondaryWindowDescriptor,
-    window: &WinitWindow,
-) {
-    if descriptor.fullscreen {
-        descriptor.position = None;
-        return;
-    }
-
-    if let Ok(position) = window.outer_position() {
-        descriptor.position = Some(IVec2::new(position.x, position.y));
-    }
-
-    let size = window.inner_size();
-    descriptor.size = Some(Vec2::new(size.width as f32, size.height as f32));
 }
 
 fn enforce_descriptor_on_winit_window(

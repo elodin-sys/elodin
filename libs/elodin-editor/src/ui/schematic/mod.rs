@@ -284,7 +284,9 @@ pub fn tiles_to_schematic(
     schematic.elems.extend(window_elems);
 }
 
-fn primary_window_schematic(descriptor: &tiles::PrimaryWindowDescriptor) -> Option<SchematicElem> {
+fn primary_window_schematic(
+    descriptor: &tiles::PrimaryWindowDescriptor,
+) -> Option<SchematicElem<Entity>> {
     let has_metadata = descriptor.screen.is_some()
         || descriptor.screen_index.is_some()
         || descriptor.position.is_some()

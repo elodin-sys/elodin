@@ -6,8 +6,7 @@ use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
 use impeller2_kdl::FromKdl;
 use impeller2_kdl::KdlSchematicError;
 use impeller2_wkt::{
-    DbConfig, Graph, Line3d, Object3D, Panel, PrimaryWindowSchematic, Schematic, VectorArrow3d,
-    Viewport, WindowSchematic,
+    DbConfig, Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowSchematic,
 };
 use miette::{Diagnostic, miette};
 use std::time::Duration;
@@ -249,17 +248,17 @@ impl LoadSchematicParams<'_, '_> {
                     }
                 }
                 impeller2_wkt::SchematicElem::MainWindow(window) => {
-                    let mut descriptor = PrimaryWindowDescriptor::default();
-                    descriptor.screen = window.screen.clone();
-                    descriptor.screen_index = window.screen_idx.map(|index| index as usize);
-                    descriptor.position = window
-                        .position
-                        .map(|coords| IVec2::new(coords[0], coords[1]));
-                    descriptor.size = window
-                        .size
-                        .map(|dimensions| Vec2::new(dimensions[0], dimensions[1]));
-                    descriptor.fullscreen = window.fullscreen.unwrap_or(false);
-                    *self.windows.primary_descriptor_mut() = descriptor;
+                    *self.windows.primary_descriptor_mut() = PrimaryWindowDescriptor {
+                        screen: window.screen.clone(),
+                        screen_index: window.screen_idx.map(|index| index as usize),
+                        position: window
+                            .position
+                            .map(|coords| IVec2::new(coords[0], coords[1])),
+                        size: window
+                            .size
+                            .map(|dimensions| Vec2::new(dimensions[0], dimensions[1])),
+                        fullscreen: window.fullscreen.unwrap_or(false),
+                    };
                     self.windows.primary_descriptor_applied = false;
                     primary_window_specified = true;
                 }
@@ -673,10 +672,10 @@ impl SchematicLiveReloadRx {
 
     pub fn should_ignore(&mut self, path: &Path) -> bool {
         self.cleanup_expired();
-        if let Some(expire_at) = self.ignored_paths.get(path) {
-            if Instant::now() <= *expire_at {
-                return true;
-            }
+        if let Some(expire_at) = self.ignored_paths.get(path)
+            && Instant::now() <= *expire_at
+        {
+            return true;
         }
         false
     }
