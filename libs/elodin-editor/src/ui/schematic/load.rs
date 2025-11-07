@@ -156,7 +156,8 @@ pub fn load_schematic_file(
     mut live_reload_rx: ResMut<SchematicLiveReloadRx>,
 ) -> Result<(), KdlSchematicError> {
     let (tx, rx) = flume::bounded(1);
-    live_reload_rx.0 = Some(rx);
+    live_reload_rx.receiver = Some(rx);
+    live_reload_rx.suppress_until = None;
     let watch_path = path.to_path_buf();
     std::thread::spawn(move || {
         let cb_path = watch_path.clone();
@@ -618,14 +619,51 @@ pub fn graph_label(graph: &Graph) -> String {
         .unwrap_or_else(|| "Graph".to_string())
 }
 
-#[derive(Default, Deref, DerefMut, Resource)]
-pub struct SchematicLiveReloadRx(pub Option<flume::Receiver<Schematic>>);
+use std::time::Instant;
+
+#[derive(Default, Resource)]
+pub struct SchematicLiveReloadRx {
+    pub receiver: Option<flume::Receiver<Schematic>>,
+    pub suppress_until: Option<Instant>,
+}
+
+impl SchematicLiveReloadRx {
+    pub fn suppress_for(&mut self, duration: Duration) {
+        let until = Instant::now() + duration;
+        self.suppress_until = Some(match self.suppress_until {
+            Some(existing) if existing > until => existing,
+            _ => until,
+        });
+    }
+
+    fn should_suppress(&self) -> bool {
+        self.suppress_until
+            .map(|until| Instant::now() < until)
+            .unwrap_or(false)
+    }
+
+    fn clear_suppression_if_expired(&mut self) {
+        if let Some(until) = self.suppress_until {
+            if Instant::now() >= until {
+                self.suppress_until = None;
+            }
+        }
+    }
+}
 
 pub fn schematic_live_reload(
     mut rx: ResMut<SchematicLiveReloadRx>,
     mut params: LoadSchematicParams,
 ) {
-    let Some(rx) = &mut rx.0 else { return };
-    let Ok(schematic) = rx.try_recv() else { return };
+    rx.clear_suppression_if_expired();
+    let Some(receiver) = &mut rx.receiver else {
+        return;
+    };
+    let Ok(schematic) = receiver.try_recv() else {
+        return;
+    };
+    if rx.should_suppress() {
+        return;
+    }
     params.load_schematic(&schematic, None);
 }

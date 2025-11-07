@@ -19,7 +19,11 @@ use bevy_egui::{
     egui::{self, Color32, Label, Margin, RichText},
 };
 use egui_tiles::{Container, Tile};
-use winit::{monitor::MonitorHandle, window::Window as WinitWindow};
+use winit::{
+    dpi::{PhysicalPosition, PhysicalSize},
+    monitor::MonitorHandle,
+    window::Window as WinitWindow,
+};
 
 use big_space::GridCell;
 use plot_3d::LinePlot3dPlugin;
@@ -744,6 +748,7 @@ fn apply_secondary_window_descriptor_to_window(
     mut window_query: Query<&mut Window>,
     monitors: Query<(Entity, &Monitor)>,
     primary_monitor: Query<Entity, With<PrimaryMonitor>>,
+    winit_windows: NonSend<bevy::winit::WinitWindows>,
 ) {
     if manager.secondary().is_empty() {
         return;
@@ -760,12 +765,19 @@ fn apply_secondary_window_descriptor_to_window(
             continue;
         };
 
-        if let Ok(mut window) = window_query.get_mut(window_entity) {
-            apply_descriptor_to_window_component(
-                &mut window,
-                &state.descriptor,
-                &monitor_snapshots,
-            );
+        let Ok(mut window) = window_query.get_mut(window_entity) else {
+            continue;
+        };
+
+        apply_descriptor_to_window_component(&mut window, &state.descriptor, &monitor_snapshots);
+
+        let mut applied_to_winit = false;
+        if let Some(winit_window) = winit_windows.get_window(window_entity) {
+            enforce_descriptor_on_winit_window(&state.descriptor, &**winit_window);
+            applied_to_winit = true;
+        }
+
+        if applied_to_winit {
             state.descriptor_applied = true;
         }
     }
@@ -962,14 +974,21 @@ fn build_window_from_descriptor(
 
     if let Some(position) = descriptor.position {
         window.position = WindowPosition::At(position);
-    } else if let Some(index) = descriptor.screen_index {
-        window.position = WindowPosition::Centered(MonitorSelection::Index(index));
-    } else if let Some(name) = descriptor.screen.as_ref() {
-        if let Some(snapshot) = monitors
-            .iter()
-            .find(|monitor| monitor.name.as_ref() == Some(name))
-        {
-            window.position = WindowPosition::Centered(MonitorSelection::Index(snapshot.index));
+    } else {
+        let selection = monitor_selection_from_descriptor(descriptor, monitors);
+        if !matches!(
+            selection,
+            MonitorSelection::Primary | MonitorSelection::Current
+        ) {
+            window.position = WindowPosition::Centered(selection);
+        } else if let Some(name) = descriptor.screen.as_ref() {
+            if let Some(snapshot) = monitors
+                .iter()
+                .find(|monitor| monitor.name.as_ref() == Some(name))
+            {
+                window.position =
+                    WindowPosition::Centered(MonitorSelection::Entity(snapshot.entity));
+            }
         }
     }
 
@@ -989,7 +1008,7 @@ fn monitor_selection_from_descriptor(
 ) -> MonitorSelection {
     if let Some(index) = descriptor.screen_index {
         if index < monitors.len() {
-            return MonitorSelection::Index(index);
+            return MonitorSelection::Entity(monitors[index].entity);
         }
     }
 
@@ -1121,6 +1140,33 @@ fn extract_position_from_winit(
 
     let size = window.inner_size();
     descriptor.size = Some(Vec2::new(size.width as f32, size.height as f32));
+}
+
+fn enforce_descriptor_on_winit_window(
+    descriptor: &tiles::SecondaryWindowDescriptor,
+    window: &WinitWindow,
+) {
+    if descriptor.fullscreen {
+        return;
+    }
+
+    if let Some(position) = descriptor.position {
+        let desired = PhysicalPosition::new(position.x, position.y);
+        let needs_move = window
+            .outer_position()
+            .map(|current| current != desired)
+            .unwrap_or(true);
+        if needs_move {
+            window.set_outer_position(desired);
+        }
+    }
+
+    if let Some(size) = descriptor.size {
+        let desired = PhysicalSize::new(size.x.max(1.0) as u32, size.y.max(1.0) as u32);
+        if window.outer_size() != desired {
+            let _ = window.request_inner_size(desired);
+        }
+    }
 }
 
 fn determine_monitor_index(window: &Window, monitors: &[MonitorSnapshot]) -> Option<usize> {
