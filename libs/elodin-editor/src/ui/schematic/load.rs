@@ -9,10 +9,10 @@ use impeller2_wkt::{
     DbConfig, Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowSchematic,
 };
 use miette::{Diagnostic, miette};
-use std::time::Duration;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use crate::{
@@ -138,9 +138,10 @@ pub fn load_schematic_file(
     params: &mut LoadSchematicParams,
     mut live_reload_rx: ResMut<SchematicLiveReloadRx>,
 ) -> Result<(), KdlSchematicError> {
+    let resolved_path = impeller2_kdl::env::schematic_file(path);
+    let watch_path = resolved_path.clone();
     let (tx, rx) = flume::bounded(1);
-    live_reload_rx.0 = Some(rx);
-    let watch_path = path.to_path_buf();
+    live_reload_rx.set_receiver(rx);
     std::thread::spawn(move || {
         let cb_path = watch_path.clone();
         let mut debouncer = notify_debouncer_mini::new_debouncer(
@@ -155,7 +156,10 @@ pub fn load_schematic_file(
                     let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(&kdl) else {
                         return;
                     };
-                    let _ = tx.send(schematic);
+                    let _ = tx.send(SchematicReloadEvent {
+                        path: cb_path.clone(),
+                        schematic,
+                    });
                 }
             },
         )
@@ -171,9 +175,10 @@ pub fn load_schematic_file(
             std::thread::park();
         }
     });
-    if let Ok(kdl) = std::fs::read_to_string(path) {
+    if let Ok(kdl) = std::fs::read_to_string(&resolved_path) {
         let schematic = impeller2_wkt::Schematic::from_kdl(&kdl)?;
-        params.load_schematic(&schematic, path.parent());
+        let base_dir_owned = resolved_path.parent().map(|p| p.to_path_buf());
+        params.load_schematic(&schematic, base_dir_owned.as_deref());
     }
     Ok(())
 }
@@ -598,14 +603,64 @@ pub fn graph_label(graph: &Graph) -> String {
         .unwrap_or_else(|| "Graph".to_string())
 }
 
-#[derive(Default, Deref, DerefMut, Resource)]
-pub struct SchematicLiveReloadRx(pub Option<flume::Receiver<Schematic>>);
+#[derive(Debug)]
+pub struct SchematicReloadEvent {
+    pub path: PathBuf,
+    pub schematic: Schematic,
+}
+
+#[derive(Default, Resource)]
+pub struct SchematicLiveReloadRx {
+    receiver: Option<flume::Receiver<SchematicReloadEvent>>,
+    ignored_paths: HashMap<PathBuf, usize>,
+}
+
+impl SchematicLiveReloadRx {
+    pub fn set_receiver(&mut self, receiver: flume::Receiver<SchematicReloadEvent>) {
+        self.receiver = Some(receiver);
+    }
+
+    pub fn clear(&mut self) {
+        self.receiver = None;
+        self.ignored_paths.clear();
+    }
+
+    pub fn ignore_path(&mut self, path: PathBuf) {
+        let canonical = canonicalize_for_ignore(path);
+        *self.ignored_paths.entry(canonical).or_insert(0) += 1;
+    }
+
+    fn should_ignore(&mut self, path: &Path) -> bool {
+        let canonical = canonicalize_for_ignore(path.to_path_buf());
+        if let Some(count) = self.ignored_paths.get_mut(&canonical) {
+            if *count > 1 {
+                *count -= 1;
+            } else {
+                self.ignored_paths.remove(&canonical);
+            }
+            return true;
+        }
+        false
+    }
+}
+
+fn canonicalize_for_ignore(path: PathBuf) -> PathBuf {
+    std::fs::canonicalize(&path).unwrap_or(path)
+}
 
 pub fn schematic_live_reload(
     mut rx: ResMut<SchematicLiveReloadRx>,
     mut params: LoadSchematicParams,
 ) {
-    let Some(rx) = &mut rx.0 else { return };
-    let Ok(schematic) = rx.try_recv() else { return };
-    params.load_schematic(&schematic, None);
+    let Some(receiver) = &mut rx.receiver else {
+        return;
+    };
+    let Ok(event) = receiver.try_recv() else {
+        return;
+    };
+    if rx.should_ignore(&event.path) {
+        return;
+    }
+    let base_dir = event.path.parent().map(|p| p.to_path_buf());
+    params.load_schematic(&event.schematic, base_dir.as_deref());
 }
