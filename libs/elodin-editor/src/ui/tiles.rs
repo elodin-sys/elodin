@@ -98,6 +98,7 @@ pub struct SecondaryWindowState {
     pub window_entity: Option<Entity>,
     pub graph_entities: Vec<Entity>,
     pub applied_screen_index: Option<usize>,
+    pub skip_metadata_capture: bool,
 }
 
 #[derive(Resource)]
@@ -214,6 +215,7 @@ impl WindowManager {
             window_entity: None,
             graph_entities: Vec::new(),
             applied_screen_index: None,
+            skip_metadata_capture: false,
         });
         id
     }
