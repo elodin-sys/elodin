@@ -861,16 +861,6 @@ fn sync_secondary_windows(
     for state in windows.secondary_mut().iter_mut() {
         state.graph_entities = state.tile_state.collect_graph_entities();
 
-        if let Some(applied) = state.applied_screen_index
-            && state.descriptor.screen_index != Some(applied)
-            && let Some(entity) = state.window_entity
-        {
-            commands.entity(entity).despawn();
-            existing_map.remove(&state.id);
-            state.window_entity = None;
-            state.applied_screen_index = None;
-        }
-
         if let Some(entity) = state.window_entity
             && existing_map.get(&state.id).copied() != Some(entity)
         {
@@ -879,7 +869,9 @@ fn sync_secondary_windows(
 
         if let Some(entity) = state.window_entity {
             existing_map.insert(state.id, entity);
-            if let Some(screen_index) = state.descriptor.screen_index {
+            if let Some(screen_index) = state.descriptor.screen_index
+                && state.applied_screen_index != Some(screen_index)
+            {
                 if let Ok(mut window) = window_components.get_mut(entity) {
                     info!(
                         screen_index,
@@ -895,7 +887,7 @@ fn sync_secondary_windows(
                         state.applied_screen_index = None;
                     }
                 }
-            } else {
+            } else if state.descriptor.screen_index.is_none() {
                 state.applied_screen_index = None;
             }
             let window_ref = WindowRef::Entity(entity);
@@ -1178,15 +1170,6 @@ fn gather_monitor_layout(monitors: &Query<(Entity, &Monitor)>) -> Vec<MonitorLay
             .cmp(&b.position.x)
             .then(a.position.y.cmp(&b.position.y))
     });
-
-    for (index, layout) in layouts.iter().enumerate() {
-        info!(
-            index,
-            position = ?layout.position,
-            size = ?layout.size,
-            "Detected monitor layout"
-        );
-    }
 
     layouts
 }
