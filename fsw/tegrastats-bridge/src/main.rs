@@ -1,14 +1,12 @@
 use futures_concurrency::future::Join;
 use impeller2::types::{LenPacket, PacketId};
 use impeller2_stellar::Client;
-use roci::{AsVTable, Metadatatize, tcp::SinkExt};
 use std::{mem, net::SocketAddr, time::Duration};
 use stellarator::{fs::File, rent};
 use sysinfo::CpuRefreshKind;
 use zerocopy::{Immutable, IntoBytes};
 
-#[derive(AsVTable, Metadatatize, IntoBytes, Immutable, Debug)]
-#[roci(parent = "aleph")]
+#[derive(IntoBytes, Immutable, Debug)]
 pub struct Output {
     pub cpu_usage: [f32; 8],
     pub cpu_freq: [f32; 8],
@@ -21,7 +19,6 @@ async fn connect() -> anyhow::Result<()> {
         .await
         .map_err(anyhow::Error::from)?;
     let id: PacketId = fastrand::u16(..).to_le_bytes();
-    client.init_world::<Output>(id).await?;
     let mut table = LenPacket::table(id, mem::size_of::<Output>());
     let thermal_zone = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
         .map(|i| File::open(format!("/sys/devices/virtual/thermal/thermal_zone{i}/temp")))

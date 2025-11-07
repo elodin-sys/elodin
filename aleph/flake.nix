@@ -59,7 +59,6 @@
       elodin-db = ./modules/elodin-db.nix;
       aleph-serial-bridge = ./modules/aleph-serial-bridge.nix;
       tegrastats-bridge = ./modules/tegrastats-bridge.nix;
-      mekf = ./modules/mekf.nix;
     };
     devModules = {
       # Temporarily disabled for nixpkgs 25.05 compatibility (CUDA issues)

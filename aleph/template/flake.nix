@@ -41,9 +41,6 @@
         aleph-setup # a setup tool that guides you through setting up wifi and a user on first login
         aleph-base # a set of default configuration options that make developing on aleph easier
         aleph-dev # a default set of packages like cuda, opencv, and git that make developing on aleph easier
-
-        # default fsw
-        mekf # a basic attitude mekf that runs on the sensor data from the expansion board
       ];
 
       # overlays required to get elodin and nvidia packages

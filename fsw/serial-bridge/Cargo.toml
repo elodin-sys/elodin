@@ -23,13 +23,10 @@ impeller2-wkt.features = ["std"]
 impeller2-frame.path = "../../libs/impeller2/frame"
 cobs = "0.2"
 zerocopy.version = "0.8.2"
-roci.path = "../../libs/roci"
 serde.version = "1.0"
 serde.features = ["derive"]
 postcard-schema.version = "0.2"
 postcard-schema.features = ["derive"]
-blackbox.path = "../../fsw/blackbox"
-blackbox.features = ["roci"]
 
 # rand
 fastrand = "2.2.0"

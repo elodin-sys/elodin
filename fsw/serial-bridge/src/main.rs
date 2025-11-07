@@ -1,15 +1,31 @@
 use impeller2::types::{LenPacket, Msg, PacketId};
 use impeller2_wkt::{MsgStream, SetComponentMetadata};
-use roci::tcp::SinkExt;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use stellarator::io::{AsyncRead, AsyncWrite};
 use stellarator::net::TcpStream;
 use stellarator::rent;
 use stellarator::{io::SplitExt, struc_con::Joinable};
-use zerocopy::{FromBytes, Immutable, IntoBytes};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
-use blackbox::Record;
+/// Sensor data record structure
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Clone)]
+#[repr(C)]
+pub struct Record {
+    pub ts: u32, // in milliseconds
+    pub mag: [f32; 3],
+    pub gyro: [f32; 3],
+    pub accel: [f32; 3],
+    pub mag_temp: f32,
+    pub mag_sample: u32,
+    pub baro: f32,
+    pub baro_temp: f32,
+    pub vin: f32,
+    pub vbat: f32,
+    pub aux_current: f32,
+    pub rtc_vbat: f32,
+    pub cpu_temp: f32,
+}
 
 fn main() -> anyhow::Result<()> {
     stellarator::run(run)
@@ -40,8 +56,6 @@ pub async fn connect() -> anyhow::Result<()> {
     tx.send(&SetComponentMetadata::new("aleph", "aleph"))
         .await
         .0?;
-    tx.init_world::<Record>(id).await?;
-    tx.init_msg::<Command>().await?;
     tx.send(&MsgStream {
         msg_id: Command::ID,
     })
