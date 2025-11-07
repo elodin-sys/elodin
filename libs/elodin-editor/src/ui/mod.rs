@@ -11,7 +11,7 @@ use bevy::{
     prelude::*,
     render::camera::{RenderTarget, Viewport},
     window::{
-        EnabledButtons, PresentMode, PrimaryWindow, WindowCloseRequested, WindowRef,
+        EnabledButtons, Monitor, PresentMode, PrimaryWindow, WindowCloseRequested, WindowRef,
         WindowResolution,
     },
 };
@@ -20,7 +20,11 @@ use bevy_egui::{
     egui::{self, Align2, Color32, Label, Margin, RichText},
 };
 use egui_tiles::{Container, Tile};
-use winit::{dpi::PhysicalPosition, monitor::MonitorHandle, window::Fullscreen};
+use winit::{
+    dpi::PhysicalPosition,
+    monitor::MonitorHandle,
+    window::{Fullscreen, Window as WinitWindow},
+};
 
 use big_space::{GridCell, precision::GridPrecision};
 use plot_3d::LinePlot3dPlugin;
@@ -239,6 +243,10 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 apply_secondary_window_monitors.after(sync_secondary_windows),
+            )
+            .add_systems(
+                Update,
+                capture_secondary_window_screens.after(apply_secondary_window_monitors),
             )
             .add_systems(Update, handle_secondary_close.after(sync_secondary_windows))
             .add_systems(
@@ -938,13 +946,7 @@ fn apply_secondary_window_monitors(
             continue;
         };
 
-        let mut monitors: Vec<MonitorHandle> = window.available_monitors().collect();
-        monitors.sort_by(|a, b| {
-            a.position()
-                .x
-                .cmp(&b.position().x)
-                .then(a.position().y.cmp(&b.position().y))
-        });
+        let monitors = collect_sorted_monitors(window);
 
         let Some(target_monitor) = monitors.get(screen_index) else {
             info!(
@@ -975,9 +977,39 @@ fn apply_secondary_window_monitors(
     }
 }
 
+fn capture_secondary_window_screens(
+    mut windows: ResMut<tiles::WindowManager>,
+    winit_windows: NonSend<bevy::winit::WinitWindows>,
+) {
+    for state in windows.secondary_mut().iter_mut() {
+        let Some(entity) = state.window_entity else {
+            continue;
+        };
+        let Some(window) = winit_windows.get_window(entity) else {
+            continue;
+        };
+
+        let monitors = collect_sorted_monitors(window);
+        state.update_descriptor_from_winit_window(window, &monitors);
+    }
+}
+
+fn collect_sorted_monitors(window: &WinitWindow) -> Vec<MonitorHandle> {
+    let mut monitors: Vec<MonitorHandle> = window.available_monitors().collect();
+    monitors.sort_by(|a, b| {
+        a.position()
+            .x
+            .cmp(&b.position().x)
+            .then(a.position().y.cmp(&b.position().y))
+    });
+    monitors
+}
+
 fn handle_secondary_close(
     mut events: EventReader<WindowCloseRequested>,
     mut windows: ResMut<tiles::WindowManager>,
+    window_query: Query<(Entity, &Window)>,
+    monitors: Query<(Entity, &Monitor)>,
 ) {
     let mut to_remove = Vec::new();
     for evt in events.read() {
@@ -988,9 +1020,18 @@ fn handle_secondary_close(
     }
 
     if !to_remove.is_empty() {
-        windows
-            .secondary_mut()
-            .retain(|state| !to_remove.contains(&state.id));
+        windows.secondary_mut().retain_mut(|state| {
+            let keep = !to_remove.contains(&state.id);
+            if !keep {
+                if let Some((_, window)) = state
+                    .window_entity
+                    .and_then(|entity| window_query.get(entity).ok())
+                {
+                    state.update_descriptor_from_window(window, &monitors);
+                }
+            }
+            keep
+        });
     }
 }
 
