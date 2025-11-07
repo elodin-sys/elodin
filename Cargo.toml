@@ -1,6 +1,13 @@
 [workspace]
 resolver = "2"
-default-members = ["apps/elodin"]
+# This "default-members" is tempting to set because it would make `cargo run`
+# run the `elodin` binary; however it also makes every other cargo command only
+# apply to "apps/elodin"--meaning `cargo test` would only run the apps' tests
+# and ignore the other tests unless `cargo test --workspace` was given as a
+# command. So this comment is left here as a warning to not do that. Instead
+# consider adding an alias to `.cargo/config.toml`.
+#
+# default-members = ["apps/elodin"]
 members = [
     "libs/elodin-editor",
     "libs/nox",
