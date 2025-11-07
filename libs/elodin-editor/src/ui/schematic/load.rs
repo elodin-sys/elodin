@@ -121,7 +121,7 @@ fn resolve_window_descriptor(
     Some(SecondaryWindowDescriptor {
         path: resolved,
         title: window.title.clone(),
-        screen_index: window.screen_idx.map(|idx| idx as usize),
+        screen_index: window.screen_index.map(|idx| idx as usize),
     })
 }
 

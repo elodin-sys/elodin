@@ -57,7 +57,7 @@ impl<T> SchematicElem<T> {
 pub struct WindowSchematic {
     pub title: Option<String>,
     pub path: String,
-    pub screen_idx: Option<u32>,
+    pub screen_index: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
