@@ -78,12 +78,11 @@ Open the Elodin editor in a new nix develop shell and connect to the local serve
 # In a new terminal
 nix develop
 # build the SDK python wheel
-cd libs/nox-py && \
 uv venv --python 3.12 && \
 source .venv/bin/activate && \
-uvx maturin develop --uv
+uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
 # use the newly built wheel
-python3 ../../examples/rocket/main.py run
+python3 examples/rocket/main.py run
 ```
 
 Open the Elodin editor and connect to the local server
@@ -122,7 +121,9 @@ uv venv --python 3.12
 source .venv/bin/activate
 uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
 
-cargo run --manifest-path=apps/elodin/Cargo.toml editor examples/three-body/main.py
+cargo run --bin elodin editor examples/three-body/main.py
+# Or equivalently use the 'elodin' cargo alias:
+cargo elodin editor examples/three-body/main.py
 ```
 
 > [!NOTE]

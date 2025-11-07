@@ -22,7 +22,7 @@ use crate::{
         colors::get_scheme,
         inspector::search,
         label,
-        plot::{GraphBundle, LockGroup, default_component_values},
+        plot::{GraphBundle, default_component_values},
         tiles::TreeAction,
         utils::{MarginSides, format_num},
         widgets::WidgetSystem,
@@ -145,12 +145,8 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                     .unwrap_or_else(|| ComponentPath::from_name(&metadata.name));
                 let components =
                     BTreeMap::from_iter(std::iter::once((component_path, values.clone())));
-                let bundle = GraphBundle::new(
-                    &mut render_layer_alloc,
-                    components,
-                    metadata.name.clone(),
-                    LockGroup::Global,
-                );
+                let bundle =
+                    GraphBundle::new(&mut render_layer_alloc, components, metadata.name.clone());
                 tree_actions.push(TreeAction::AddGraph(None, Box::new(Some(bundle))));
             }
         }

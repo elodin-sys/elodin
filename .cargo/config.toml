@@ -1,2 +1,6 @@
 [build]
 rustflags = ["--cfg=web_sys_unstable_apis"]
+
+[alias]
+elodin = "run --bin elodin"
+elodin-db = "run --bin elodin-db"

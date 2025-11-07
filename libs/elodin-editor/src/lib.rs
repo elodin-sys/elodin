@@ -224,6 +224,8 @@ impl Plugin for EditorPlugin {
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
         }
+        #[cfg(feature = "debug")]
+        app.add_plugins(big_space::debug::FloatingOriginDebugPlugin::<i128>::default());
 
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(crate::ui::startup_window::StartupPlugin);

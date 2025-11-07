@@ -9,6 +9,7 @@ publish = false
 [features]
 cargo-clippy = []
 inspector = ["dep:bevy-inspector-egui"]
+debug = ["big_space/debug"]
 
 [dependencies]
 # math

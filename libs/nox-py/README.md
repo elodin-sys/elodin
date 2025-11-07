@@ -45,14 +45,14 @@ nox-py provides a high-performance Python API for building aerospace simulations
 ```bash
 # Clone the repository
 git clone https://github.com/elodin-sys/elodin
-cd elodin/libs/nox-py
+cd elodin
 
 # Create virtual environment
 uv venv
 source .venv/bin/activate  # or activate.fish for fish shell
 
 # Install with maturin
-uvx maturin develop --uv
+uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
 ```
 
 ### Quick Start Examples

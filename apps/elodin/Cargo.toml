@@ -6,6 +6,11 @@ repository.workspace = true
 edition = "2024"
 authors = ["sascha@elodin.systems", "akhil@elodin.systems", "van@elodin.systems"]
 
+[features]
+cargo-clippy = []
+inspector = ["elodin-editor/inspector"]
+debug = ["elodin-editor/debug"]
+
 [dependencies]
 thiserror = "2.0"
 miette.version = "7.2"
