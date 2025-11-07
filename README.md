@@ -122,7 +122,9 @@ uv venv --python 3.12
 source .venv/bin/activate
 uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
 
-cargo run --manifest-path=apps/elodin/Cargo.toml editor examples/three-body/main.py
+cargo run --bin elodin editor examples/three-body/main.py
+# Or equivalently use the 'elodin' cargo alias:
+cargo elodin editor examples/three-body/main.py
 ```
 
 > [!NOTE]
