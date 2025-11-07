@@ -666,8 +666,7 @@ pub fn graph_label(graph: &Graph) -> String {
         .unwrap_or_else(|| "Graph".to_string())
 }
 
-use std::collections::HashMap;
-use std::time::Instant;
+use std::collections::HashSet;
 
 #[derive(Debug)]
 pub struct SchematicReloadEvent {
@@ -678,34 +677,16 @@ pub struct SchematicReloadEvent {
 #[derive(Default, Resource)]
 pub struct SchematicLiveReloadRx {
     pub receiver: Option<flume::Receiver<SchematicReloadEvent>>,
-    pub ignored_paths: HashMap<PathBuf, Instant>,
+    pub ignored_paths: HashSet<PathBuf>,
 }
 
 impl SchematicLiveReloadRx {
-    pub fn ignore_path(&mut self, path: PathBuf, ttl: Duration) {
-        let expire_at = Instant::now() + ttl;
-        if let Some(existing) = self.ignored_paths.get_mut(&path) {
-            if *existing < expire_at {
-                *existing = expire_at;
-            }
-        } else {
-            self.ignored_paths.insert(path, expire_at);
-        }
+    pub fn ignore_path(&mut self, path: PathBuf) {
+        self.ignored_paths.insert(path);
     }
 
     pub fn should_ignore(&mut self, path: &Path) -> bool {
-        self.cleanup_expired();
-        if let Some(expire_at) = self.ignored_paths.get(path)
-            && Instant::now() <= *expire_at
-        {
-            return true;
-        }
-        false
-    }
-
-    fn cleanup_expired(&mut self) {
-        let now = Instant::now();
-        self.ignored_paths.retain(|_, expire| *expire >= now);
+        self.ignored_paths.remove(path)
     }
 }
 
@@ -713,7 +694,6 @@ pub fn schematic_live_reload(
     mut rx: ResMut<SchematicLiveReloadRx>,
     mut params: LoadSchematicParams,
 ) {
-    rx.cleanup_expired();
     let Some(receiver) = &mut rx.receiver else {
         return;
     };
