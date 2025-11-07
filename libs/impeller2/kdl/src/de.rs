@@ -168,7 +168,7 @@ fn parse_window(node: &KdlNode, src: &str) -> Result<WindowSchematic, KdlSchemat
 
 fn parse_primary_window(
     node: &KdlNode,
-    src: &str,
+    _src: &str,
 ) -> Result<PrimaryWindowSchematic, KdlSchematicError> {
     let screen = node
         .get("screen")
