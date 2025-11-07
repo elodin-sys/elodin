@@ -1099,10 +1099,6 @@ fn apply_descriptor_to_window_component(
 
     window.mode = WindowMode::Windowed;
 
-    if let Some(size) = descriptor.size() {
-        window.resolution.set(size.x, size.y);
-    }
-
     let monitor_selection = (descriptor.screen().is_some() || descriptor.screen_index().is_some())
         .then(|| monitor_selection_from_descriptor(descriptor, monitors));
 
