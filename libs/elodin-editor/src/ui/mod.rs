@@ -709,6 +709,10 @@ fn sync_secondary_windows(
             let view = state.descriptor.view();
             resolve_descriptor_position_from_percent(view, &monitor_snapshots);
         }
+        {
+            let view = state.descriptor.view();
+            ensure_descriptor_position_on_screen(view, &monitor_snapshots);
+        }
 
         let window = build_window_from_descriptor(title, &state.descriptor, &monitor_snapshots);
 
@@ -855,6 +859,10 @@ fn apply_primary_window_descriptor_to_window(
     {
         let view = manager.primary_descriptor_mut().view();
         resolve_descriptor_position_from_percent(view, &monitor_snapshots);
+    }
+    {
+        let view = manager.primary_descriptor_mut().view();
+        ensure_descriptor_position_on_screen(view, &monitor_snapshots);
     }
     apply_descriptor_to_window_component(
         &mut window,
@@ -1434,6 +1442,40 @@ fn resolve_descriptor_position_from_percent(
     let x = snapshot.physical_position.x + offset_x;
     let y = snapshot.physical_position.y + offset_y;
     *position = Some(IVec2::new(x, y));
+}
+
+fn ensure_descriptor_position_on_screen(
+    descriptor: tiles::WindowDescriptorView<'_>,
+    monitors: &[MonitorSnapshot],
+) {
+    let tiles::WindowDescriptorView {
+        position,
+        position_percent,
+        screen,
+        screen_index,
+        ..
+    } = descriptor;
+
+    let Some(pos) = *position else {
+        return;
+    };
+
+    let screen_name = screen.as_ref().map(|s| s.as_str());
+    let Some(snapshot) = resolve_monitor_for_descriptor(*screen_index, screen_name, monitors)
+    else {
+        return;
+    };
+
+    let min = snapshot.physical_position;
+    let max_x = min.x + snapshot.physical_size.x as i32;
+    let max_y = min.y + snapshot.physical_size.y as i32;
+    let inside = pos.x >= min.x && pos.x < max_x && pos.y >= min.y && pos.y < max_y;
+    if inside {
+        return;
+    }
+
+    *position = Some(min);
+    *position_percent = Some(Vec2::new(0.0, 0.0));
 }
 
 pub(super) fn round_percent(value: f32) -> f32 {
