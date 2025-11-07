@@ -84,7 +84,6 @@ pub struct TileState {
 pub struct SecondaryWindowDescriptor {
     pub path: PathBuf,
     pub title: Option<String>,
-    pub screen: Option<String>,
     pub screen_index: Option<usize>,
     pub position: Option<IVec2>,
     pub position_percent: Option<Vec2>,
@@ -95,7 +94,6 @@ pub struct SecondaryWindowDescriptor {
 
 #[derive(Clone, Debug, Default)]
 pub struct PrimaryWindowDescriptor {
-    pub screen: Option<String>,
     pub screen_index: Option<usize>,
     pub position: Option<IVec2>,
     pub position_percent: Option<Vec2>,
@@ -110,7 +108,6 @@ pub struct WindowDescriptorView<'a> {
     pub size_percent: &'a mut Option<Vec2>,
     pub position: &'a mut Option<IVec2>,
     pub position_percent: &'a mut Option<Vec2>,
-    pub screen: &'a mut Option<String>,
     pub screen_index: &'a mut Option<usize>,
 }
 
@@ -122,7 +119,6 @@ impl SecondaryWindowDescriptor {
             size_percent: &mut self.size_percent,
             position: &mut self.position,
             position_percent: &mut self.position_percent,
-            screen: &mut self.screen,
             screen_index: &mut self.screen_index,
         }
     }
@@ -136,7 +132,6 @@ impl PrimaryWindowDescriptor {
             size_percent: &mut self.size_percent,
             position: &mut self.position,
             position_percent: &mut self.position_percent,
-            screen: &mut self.screen,
             screen_index: &mut self.screen_index,
         }
     }
@@ -148,7 +143,6 @@ pub trait WindowDescriptorInfo {
     fn size_percent(&self) -> Option<Vec2>;
     fn position(&self) -> Option<IVec2>;
     fn position_percent(&self) -> Option<Vec2>;
-    fn screen(&self) -> Option<&String>;
     fn screen_index(&self) -> Option<usize>;
 }
 
@@ -171,10 +165,6 @@ impl WindowDescriptorInfo for SecondaryWindowDescriptor {
 
     fn position_percent(&self) -> Option<Vec2> {
         self.position_percent
-    }
-
-    fn screen(&self) -> Option<&String> {
-        self.screen.as_ref()
     }
 
     fn screen_index(&self) -> Option<usize> {
@@ -201,10 +191,6 @@ impl WindowDescriptorInfo for PrimaryWindowDescriptor {
 
     fn position_percent(&self) -> Option<Vec2> {
         self.position_percent
-    }
-
-    fn screen(&self) -> Option<&String> {
-        self.screen.as_ref()
     }
 
     fn screen_index(&self) -> Option<usize> {
@@ -335,7 +321,6 @@ impl WindowManager {
         let descriptor = SecondaryWindowDescriptor {
             path: PathBuf::from(path),
             title: cleaned_title.or_else(|| Some(format!("Window {}", id.0 + 1))),
-            screen: None,
             screen_index: None,
             position: None,
             position_percent: None,

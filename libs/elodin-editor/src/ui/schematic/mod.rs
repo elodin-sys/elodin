@@ -291,7 +291,7 @@ pub fn tiles_to_schematic(
         window_elems.push(SchematicElem::Window(WindowSchematic {
             title: state.descriptor.title.clone(),
             path: file_name,
-            screen: state.descriptor.screen.clone(),
+            screen: None,
             screen_idx: state.descriptor.screen_index.map(|index| index as u32),
             position: position_entry,
             size: size_entry,
@@ -312,8 +312,7 @@ fn primary_window_schematic(
     descriptor: &tiles::PrimaryWindowDescriptor,
     monitors: &[MonitorSnapshot],
 ) -> Option<SchematicElem<Entity>> {
-    let has_metadata = descriptor.screen.is_some()
-        || descriptor.screen_index.is_some()
+    let has_metadata = descriptor.screen_index.is_some()
         || descriptor.position.is_some()
         || descriptor.size.is_some()
         || descriptor.fullscreen;
@@ -336,7 +335,7 @@ fn primary_window_schematic(
     );
 
     Some(SchematicElem::MainWindow(PrimaryWindowSchematic {
-        screen: descriptor.screen.clone(),
+        screen: None,
         screen_idx: descriptor.screen_index.map(|index| index as u32),
         position: position_percent,
         size: size_percent,
@@ -355,12 +354,8 @@ fn window_size_percent_for_serialization(
     }
 
     let size = size_pixels?;
-    if let Some(monitor) = resolve_monitor_for_descriptor(
-        descriptor.screen_index(),
-        descriptor.screen().map(|s| s.as_str()),
-        monitors,
-    )
-    .filter(|monitor| monitor.physical_size.x > 0 && monitor.physical_size.y > 0)
+    if let Some(monitor) = resolve_monitor_for_descriptor(descriptor.screen_index(), monitors)
+        .filter(|monitor| monitor.physical_size.x > 0 && monitor.physical_size.y > 0)
     {
         return Some([
             round_percent(size.x / monitor.physical_size.x as f32 * 100.0),
@@ -385,12 +380,8 @@ fn window_position_percent_for_serialization(
     }
 
     let position = position_pixels?;
-    if let Some(monitor) = resolve_monitor_for_descriptor(
-        descriptor.screen_index(),
-        descriptor.screen().map(|s| s.as_str()),
-        monitors,
-    )
-    .filter(|monitor| monitor.physical_size.x > 0 && monitor.physical_size.y > 0)
+    if let Some(monitor) = resolve_monitor_for_descriptor(descriptor.screen_index(), monitors)
+        .filter(|monitor| monitor.physical_size.x > 0 && monitor.physical_size.y > 0)
     {
         let rel_x = position.x - monitor.physical_position.x;
         let rel_y = position.y - monitor.physical_position.y;

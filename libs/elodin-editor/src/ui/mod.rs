@@ -1001,7 +1001,6 @@ fn friendly_title_from_stem(stem: &str) -> Option<String> {
 pub(super) struct MonitorSnapshot {
     index: usize,
     entity: Entity,
-    name: Option<String>,
     physical_position: IVec2,
     physical_size: UVec2,
     is_primary: bool,
@@ -1016,11 +1015,6 @@ pub(super) fn collect_monitor_snapshots(
         .map(|(entity, monitor)| MonitorSnapshot {
             index: 0,
             entity,
-            name: monitor
-                .name
-                .as_deref()
-                .map(sanitize_screen_label)
-                .filter(|s| !s.is_empty()),
             physical_position: monitor.physical_position,
             physical_size: monitor.physical_size(),
             is_primary: false,
@@ -1046,22 +1040,6 @@ pub(super) fn collect_monitor_snapshots(
     }
 
     snapshots
-}
-
-pub(crate) fn sanitize_screen_label(input: &str) -> String {
-    let without_hash: String = input.chars().filter(|&ch| ch != '#').collect();
-
-    let collapsed = without_hash
-        .split_whitespace()
-        .filter(|segment| !segment.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    if collapsed.is_empty() {
-        without_hash.trim().to_string()
-    } else {
-        collapsed
-    }
 }
 
 fn build_window_from_descriptor(
@@ -1094,12 +1072,6 @@ fn build_window_from_descriptor(
             MonitorSelection::Primary | MonitorSelection::Current
         ) {
             window.position = WindowPosition::Centered(selection);
-        } else if let Some(name) = descriptor.screen.as_ref()
-            && let Some(snapshot) = monitors
-                .iter()
-                .find(|monitor| monitor.name.as_ref() == Some(name))
-        {
-            window.position = WindowPosition::Centered(MonitorSelection::Entity(snapshot.entity));
         }
     }
 
@@ -1143,7 +1115,9 @@ fn apply_descriptor_to_window_component(
 
     window.mode = WindowMode::Windowed;
 
-    let monitor_selection = (descriptor.screen().is_some() || descriptor.screen_index().is_some())
+    let monitor_selection = descriptor
+        .screen_index()
+        .is_some()
         .then(|| monitor_selection_from_descriptor(descriptor, monitors));
 
     match (descriptor.position(), monitor_selection) {
@@ -1183,7 +1157,6 @@ fn apply_window_to_descriptor_view(
         size_percent,
         position,
         position_percent,
-        screen,
         screen_index,
     } = descriptor;
 
@@ -1204,9 +1177,6 @@ fn apply_window_to_descriptor_view(
     };
     let monitor_index = determine_monitor_index(window, monitors);
     *screen_index = monitor_index;
-    *screen = monitor_index
-        .and_then(|index| monitors.iter().find(|monitor| monitor.index == index))
-        .and_then(|monitor| monitor.name.clone());
     let monitor_snapshot = monitor_index.and_then(|index| monitors.get(index));
     update_position_percent_from_pixels(position_percent, *position, monitor_snapshot);
     update_size_percent_from_pixels(size_percent, *size, monitor_snapshot);
@@ -1223,17 +1193,15 @@ fn extract_screen_metadata_from_winit(
         size_percent,
         position,
         position_percent,
-        screen,
         screen_index,
     } = descriptor;
 
-    extract_monitor_from_winit_fields(screen, screen_index, monitors, window.current_monitor());
+    extract_monitor_from_winit_fields(screen_index, monitors, window.current_monitor());
     let ctx = PositionExtractionContext {
         position,
         position_percent,
         size,
         size_percent,
-        screen,
         screen_index,
         fullscreen: *fullscreen,
     };
@@ -1241,7 +1209,6 @@ fn extract_screen_metadata_from_winit(
 }
 
 fn extract_monitor_from_winit_fields(
-    screen: &mut Option<String>,
     screen_index: &mut Option<usize>,
     monitors: &[MonitorSnapshot],
     handle: Option<MonitorHandle>,
@@ -1252,10 +1219,6 @@ fn extract_monitor_from_winit_fields(
 
     let monitor_position = handle.position();
     let monitor_size = handle.size();
-    let handle_name = handle
-        .name()
-        .map(|name| sanitize_screen_label(&name))
-        .filter(|s| !s.is_empty());
 
     let matched_snapshot = monitors.iter().find(|snapshot| {
         snapshot.physical_position.x == monitor_position.x
@@ -1266,11 +1229,6 @@ fn extract_monitor_from_winit_fields(
 
     if let Some(snapshot) = matched_snapshot {
         *screen_index = Some(snapshot.index);
-        if let Some(name) = snapshot.name.clone().or_else(|| handle_name.clone()) {
-            *screen = Some(name);
-        }
-    } else if let Some(name) = handle_name {
-        *screen = Some(name);
     }
 }
 
@@ -1279,7 +1237,6 @@ struct PositionExtractionContext<'a> {
     position_percent: &'a mut Option<Vec2>,
     size: &'a mut Option<Vec2>,
     size_percent: &'a mut Option<Vec2>,
-    screen: &'a Option<String>,
     screen_index: &'a mut Option<usize>,
     fullscreen: bool,
 }
@@ -1300,8 +1257,7 @@ fn extract_position_from_winit_fields(
     let current_size = Vec2::new(inner.width.max(1) as f32, inner.height.max(1) as f32);
     *ctx.size = Some(current_size);
 
-    let monitor_snapshot =
-        resolve_monitor_for_descriptor(*ctx.screen_index, ctx.screen.as_deref(), monitors);
+    let monitor_snapshot = resolve_monitor_for_descriptor(*ctx.screen_index, monitors);
     update_position_percent_from_pixels(ctx.position_percent, *ctx.position, monitor_snapshot);
     update_size_percent_from_pixels(ctx.size_percent, Some(current_size), monitor_snapshot);
 }
@@ -1359,20 +1315,11 @@ fn update_position_percent_from_pixels(
     ));
 }
 
-pub(super) fn resolve_monitor_for_descriptor<'a>(
+pub(super) fn resolve_monitor_for_descriptor(
     screen_index: Option<usize>,
-    screen_name: Option<&str>,
-    monitors: &'a [MonitorSnapshot],
-) -> Option<&'a MonitorSnapshot> {
-    screen_index
-        .and_then(|index| monitors.get(index))
-        .or_else(|| {
-            screen_name.and_then(|name| {
-                monitors
-                    .iter()
-                    .find(|monitor| monitor.name.as_deref() == Some(name))
-            })
-        })
+    monitors: &[MonitorSnapshot],
+) -> Option<&MonitorSnapshot> {
+    screen_index.and_then(|index| monitors.get(index))
 }
 
 fn resolve_descriptor_size_from_percent(
@@ -1382,7 +1329,6 @@ fn resolve_descriptor_size_from_percent(
     let tiles::WindowDescriptorView {
         size,
         size_percent,
-        screen,
         screen_index,
         ..
     } = descriptor;
@@ -1395,9 +1341,7 @@ fn resolve_descriptor_size_from_percent(
         return;
     };
 
-    let screen_name = screen.as_ref().map(|s| s.as_str());
-    let Some(snapshot) = resolve_monitor_for_descriptor(*screen_index, screen_name, monitors)
-    else {
+    let Some(snapshot) = resolve_monitor_for_descriptor(*screen_index, monitors) else {
         return;
     };
 
@@ -1413,7 +1357,6 @@ fn resolve_descriptor_position_from_percent(
     let tiles::WindowDescriptorView {
         position,
         position_percent,
-        screen,
         screen_index,
         ..
     } = descriptor;
@@ -1426,9 +1369,7 @@ fn resolve_descriptor_position_from_percent(
         return;
     };
 
-    let screen_name = screen.as_ref().map(|s| s.as_str());
-    let Some(snapshot) = resolve_monitor_for_descriptor(*screen_index, screen_name, monitors)
-    else {
+    let Some(snapshot) = resolve_monitor_for_descriptor(*screen_index, monitors) else {
         return;
     };
 
@@ -1451,7 +1392,6 @@ fn ensure_descriptor_position_on_screen(
     let tiles::WindowDescriptorView {
         position,
         position_percent,
-        screen,
         screen_index,
         ..
     } = descriptor;
@@ -1460,9 +1400,7 @@ fn ensure_descriptor_position_on_screen(
         return;
     };
 
-    let screen_name = screen.as_ref().map(|s| s.as_str());
-    let Some(snapshot) = resolve_monitor_for_descriptor(*screen_index, screen_name, monitors)
-    else {
+    let Some(snapshot) = resolve_monitor_for_descriptor(*screen_index, monitors) else {
         return;
     };
 

@@ -27,7 +27,6 @@ use crate::{
         monitor::MonitorPane,
         plot::{GraphBundle, LockGroup},
         query_plot::QueryPlotData,
-        sanitize_screen_label,
         schematic::EqlExt,
         tiles::{
             DashboardPane, GraphPane, Pane, PrimaryWindowDescriptor, SecondaryWindowDescriptor,
@@ -131,16 +130,10 @@ fn resolve_window_descriptor(
 
     let (position_pixels, position_percent) = interpret_rect_position(window.position);
     let (size_pixels, size_percent) = interpret_rect_size(window.size);
-    let screen = window
-        .screen
-        .as_deref()
-        .map(sanitize_screen_label)
-        .filter(|s| !s.is_empty());
 
     Some(SecondaryWindowDescriptor {
         path: resolved,
         title: window.title.clone(),
-        screen,
         screen_index: window.screen_idx.map(|index| index as usize),
         position: position_pixels,
         position_percent,
@@ -281,13 +274,7 @@ impl LoadSchematicParams<'_, '_> {
                     let (position_pixels, position_percent) =
                         interpret_rect_position(window.position);
                     let (size_pixels, size_percent) = interpret_rect_size(window.size);
-                    let screen = window
-                        .screen
-                        .as_deref()
-                        .map(sanitize_screen_label)
-                        .filter(|s| !s.is_empty());
                     *self.windows.primary_descriptor_mut() = PrimaryWindowDescriptor {
-                        screen,
                         screen_index: window.screen_idx.map(|index| index as usize),
                         position: position_pixels,
                         position_percent,
