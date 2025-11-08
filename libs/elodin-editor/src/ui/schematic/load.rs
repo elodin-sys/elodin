@@ -265,6 +265,7 @@ impl LoadSchematicParams<'_, '_> {
                             }
                         }
 
+                        let pending_screen_index = descriptor.screen_index;
                         secondary_states.push(SecondaryWindowState {
                             id,
                             descriptor,
@@ -273,7 +274,8 @@ impl LoadSchematicParams<'_, '_> {
                             graph_entities,
                             applied_screen_index: None,
                             applied_rect: None,
-                            pending_screen_index: None,
+                            pending_screen_index,
+                            needs_relayout: true,
                             skip_metadata_capture: true,
                         });
                     }
