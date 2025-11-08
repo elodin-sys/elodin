@@ -952,12 +952,22 @@ fn apply_secondary_window_screens(
 
         match state.relayout_phase {
             tiles::SecondaryWindowRelayoutPhase::NeedScreen => {
-                if ensure_screen_assignment(state, window, &monitors) {
-                    if state.descriptor.screen_rect.is_some() {
-                        state.relayout_phase = tiles::SecondaryWindowRelayoutPhase::NeedRect;
+                if let Some(screen_index) = state.descriptor.screen_index {
+                    if let Some(target_monitor) = monitors.get(screen_index) {
+                        assign_window_to_screen(state, window, target_monitor.clone());
+                        state.applied_screen_index = Some(screen_index);
                     } else {
-                        state.relayout_phase = tiles::SecondaryWindowRelayoutPhase::Idle;
+                        info!(
+                            screen_index,
+                            path = %state.descriptor.path.display(),
+                            "screen_index out of range; skipping screen assignment"
+                        );
                     }
+                }
+                if state.descriptor.screen_rect.is_some() {
+                    state.relayout_phase = tiles::SecondaryWindowRelayoutPhase::NeedRect;
+                } else {
+                    state.relayout_phase = tiles::SecondaryWindowRelayoutPhase::Idle;
                 }
             }
             tiles::SecondaryWindowRelayoutPhase::NeedRect => {
@@ -1037,53 +1047,7 @@ fn apply_secondary_window_rect(
     true
 }
 
-fn ensure_screen_assignment(
-    state: &mut tiles::SecondaryWindowState,
-    window: &WinitWindow,
-    monitors: &[MonitorHandle],
-) -> bool {
-    let Some(screen_index) = state.descriptor.screen_index else {
-        state.applied_screen_index = None;
-        return true;
-    };
-
-    let Some(target_monitor) = monitors.get(screen_index) else {
-        state.applied_screen_index = None;
-        info!(
-            screen_index,
-            path = %state.descriptor.path.display(),
-            "screen_index out of range; skipping monitor assignment"
-        );
-        return false;
-    };
-
-    let mut matched = window
-        .current_monitor()
-        .is_some_and(|current| monitors_match(&current, target_monitor));
-
-    if !matched && let Ok(position) = window.outer_position() {
-        let size = window.outer_size();
-        matched = monitor_contains_window(target_monitor, position, size);
-    }
-
-    if matched {
-        if state.applied_screen_index != Some(screen_index) {
-            info!(
-                screen_index,
-                path = %state.descriptor.path.display(),
-                "Applied screen_index to secondary window"
-            );
-        }
-        state.applied_screen_index = Some(screen_index);
-        true
-    } else {
-        state.applied_screen_index = None;
-        assign_window_to_monitor(state, window, target_monitor.clone());
-        false
-    }
-}
-
-fn assign_window_to_monitor(
+fn assign_window_to_screen(
     state: &mut tiles::SecondaryWindowState,
     window: &WinitWindow,
     target_monitor: MonitorHandle,
@@ -1105,6 +1069,13 @@ fn capture_secondary_window_screens(
     winit_windows: NonSend<bevy::winit::WinitWindows>,
 ) {
     for state in windows.secondary_mut().iter_mut() {
+        if !matches!(
+            state.relayout_phase,
+            tiles::SecondaryWindowRelayoutPhase::Idle
+        ) {
+            continue;
+        }
+
         let Some(entity) = state.window_entity else {
             continue;
         };
@@ -1126,27 +1097,6 @@ fn collect_sorted_monitors(window: &WinitWindow) -> Vec<MonitorHandle> {
             .then(a.position().y.cmp(&b.position().y))
     });
     monitors
-}
-
-fn monitors_match(a: &MonitorHandle, b: &MonitorHandle) -> bool {
-    a.position() == b.position() && a.size() == b.size()
-}
-
-fn monitor_contains_window(
-    monitor: &MonitorHandle,
-    position: PhysicalPosition<i32>,
-    size: PhysicalSize<u32>,
-) -> bool {
-    let center_x = position.x + size.width as i32 / 2;
-    let center_y = position.y + size.height as i32 / 2;
-    let monitor_pos = monitor.position();
-    let monitor_size = monitor.size();
-    let min_x = monitor_pos.x;
-    let max_x = monitor_pos.x + monitor_size.width as i32;
-    let min_y = monitor_pos.y;
-    let max_y = monitor_pos.y + monitor_size.height as i32;
-
-    center_x >= min_x && center_x < max_x && center_y >= min_y && center_y < max_y
 }
 
 fn handle_secondary_close(
