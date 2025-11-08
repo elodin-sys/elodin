@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 use bevy::{
     app::AppExit,
@@ -7,12 +8,12 @@ use bevy::{
         system::{SystemParam, SystemState},
     },
     input::keyboard::Key,
-    log::{error, info},
+    log::{error, info, warn},
     prelude::*,
     render::camera::{RenderTarget, Viewport},
     window::{
-        EnabledButtons, Monitor, PresentMode, PrimaryWindow, WindowCloseRequested, WindowRef,
-        WindowResolution,
+        EnabledButtons, Monitor, PresentMode, PrimaryWindow, WindowCloseRequested, WindowMoved,
+        WindowRef, WindowResized, WindowResolution,
     },
 };
 use bevy_egui::{
@@ -26,7 +27,10 @@ use winit::{
     window::{Fullscreen, Window as WinitWindow},
 };
 
-use big_space::{GridCell, precision::GridPrecision};
+const SCREEN_RELAYOUT_MAX_ATTEMPTS: u8 = 5;
+const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(750);
+
+use big_space::GridCell;
 use plot_3d::LinePlot3dPlugin;
 use schematic::SchematicPlugin;
 
@@ -243,6 +247,12 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 apply_secondary_window_screens.after(sync_secondary_windows),
+            )
+            .add_systems(
+                Update,
+                confirm_secondary_screen_assignment
+                    .after(apply_secondary_window_screens)
+                    .before(capture_secondary_window_screens),
             )
             .add_systems(
                 Update,
@@ -952,22 +962,45 @@ fn apply_secondary_window_screens(
 
         match state.relayout_phase {
             tiles::SecondaryWindowRelayoutPhase::NeedScreen => {
-                if let Some(screen_index) = state.descriptor.screen_index {
-                    if let Some(target_monitor) = monitors.get(screen_index) {
-                        assign_window_to_screen(state, window, target_monitor.clone());
-                        state.applied_screen_index = Some(screen_index);
-                    } else {
-                        info!(
-                            screen_index,
-                            path = %state.descriptor.path.display(),
-                            "screen_index out of range; skipping screen assignment"
-                        );
-                    }
+                if window_on_target_screen(state, window, &monitors) {
+                    complete_screen_assignment(state, window, "Confirmed screen assignment (sync)");
+                    continue;
                 }
-                if state.descriptor.screen_rect.is_some() {
-                    state.relayout_phase = tiles::SecondaryWindowRelayoutPhase::NeedRect;
+
+                let Some(screen_index) = state.descriptor.screen_index else {
+                    complete_screen_assignment(
+                        state,
+                        window,
+                        "No screen_index provided; skipping screen alignment",
+                    );
+                    continue;
+                };
+
+                if let Some(target_monitor) = monitors.get(screen_index) {
+                    assign_window_to_screen(state, window, target_monitor.clone());
+                    state.relayout_attempts = state.relayout_attempts.saturating_add(1);
+                    if state.relayout_started_at.is_none() {
+                        state.relayout_started_at = Some(Instant::now());
+                    }
+                    if let Some(started) = state.relayout_started_at
+                        && started.elapsed() > SCREEN_RELAYOUT_TIMEOUT
+                        && state.relayout_attempts >= SCREEN_RELAYOUT_MAX_ATTEMPTS
+                    {
+                        warn!(
+                            attempts = state.relayout_attempts,
+                            elapsed_ms = started.elapsed().as_millis(),
+                            path = %state.descriptor.path.display(),
+                            "Timed out while assigning screen_index; continuing with current monitor"
+                        );
+                        complete_screen_assignment(state, window, "Screen assignment timed out");
+                    }
                 } else {
-                    state.relayout_phase = tiles::SecondaryWindowRelayoutPhase::Idle;
+                    warn!(
+                        screen_index,
+                        path = %state.descriptor.path.display(),
+                        "screen_index out of range; skipping screen assignment"
+                    );
+                    complete_screen_assignment(state, window, "screen_index out of range");
                 }
             }
             tiles::SecondaryWindowRelayoutPhase::NeedRect => {
@@ -1059,9 +1092,40 @@ fn assign_window_to_screen(
     let y = monitor_pos.y + (monitor_size.height as i32 - window_size.height as i32) / 2;
 
     window.set_fullscreen(Some(Fullscreen::Borderless(Some(target_monitor))));
-    window.set_fullscreen(None);
+    state.pending_fullscreen_exit = true;
     window.set_outer_position(PhysicalPosition::new(x, y));
     state.skip_metadata_capture = true;
+}
+
+fn complete_screen_assignment(
+    state: &mut tiles::SecondaryWindowState,
+    window: &WinitWindow,
+    reason: &'static str,
+) {
+    state.applied_screen_index = state.descriptor.screen_index;
+    state.relayout_attempts = 0;
+    state.relayout_started_at = None;
+    state.relayout_phase = if state.descriptor.screen_rect.is_some() {
+        tiles::SecondaryWindowRelayoutPhase::NeedRect
+    } else {
+        tiles::SecondaryWindowRelayoutPhase::Idle
+    };
+    if state.pending_fullscreen_exit {
+        if window.fullscreen().is_some() {
+            window.set_fullscreen(None);
+        }
+        state.pending_fullscreen_exit = false;
+    }
+
+    info!(
+        screen_index = state
+            .descriptor
+            .screen_index
+            .map(|idx| idx as i32)
+            .unwrap_or(-1),
+        path = %state.descriptor.path.display(),
+        "{reason}"
+    );
 }
 
 fn capture_secondary_window_screens(
@@ -1088,6 +1152,45 @@ fn capture_secondary_window_screens(
     }
 }
 
+fn confirm_secondary_screen_assignment(
+    mut moved_events: EventReader<WindowMoved>,
+    mut resized_events: EventReader<WindowResized>,
+    mut windows: ResMut<tiles::WindowManager>,
+    winit_windows: NonSend<bevy::winit::WinitWindows>,
+) {
+    let mut touched: Vec<Entity> = Vec::new();
+    touched.extend(moved_events.read().map(|evt| evt.window));
+    touched.extend(resized_events.read().map(|evt| evt.window));
+    touched.sort_unstable();
+    touched.dedup();
+
+    for entity in touched {
+        let Some(id) = windows.find_secondary_by_entity(entity) else {
+            continue;
+        };
+        let Some(state) = windows.get_secondary_mut(id) else {
+            continue;
+        };
+        if !matches!(
+            state.relayout_phase,
+            tiles::SecondaryWindowRelayoutPhase::NeedScreen
+        ) {
+            continue;
+        }
+        let Some(window) = winit_windows.get_window(entity) else {
+            continue;
+        };
+        let monitors = collect_sorted_monitors(window);
+        if window_on_target_screen(state, window, &monitors) {
+            complete_screen_assignment(
+                state,
+                window,
+                "Confirmed screen assignment for secondary window",
+            );
+        }
+    }
+}
+
 fn collect_sorted_monitors(window: &WinitWindow) -> Vec<MonitorHandle> {
     let mut monitors: Vec<MonitorHandle> = window.available_monitors().collect();
     monitors.sort_by(|a, b| {
@@ -1097,6 +1200,28 @@ fn collect_sorted_monitors(window: &WinitWindow) -> Vec<MonitorHandle> {
             .then(a.position().y.cmp(&b.position().y))
     });
     monitors
+}
+
+fn monitors_match(a: &MonitorHandle, b: &MonitorHandle) -> bool {
+    a.position() == b.position() && a.size() == b.size()
+}
+
+fn window_on_target_screen(
+    state: &tiles::SecondaryWindowState,
+    window: &WinitWindow,
+    monitors: &[MonitorHandle],
+) -> bool {
+    let Some(screen_index) = state.descriptor.screen_index else {
+        return true;
+    };
+
+    let Some(target_monitor) = monitors.get(screen_index) else {
+        return false;
+    };
+
+    window
+        .current_monitor()
+        .is_some_and(|current| monitors_match(&current, target_monitor))
 }
 
 fn handle_secondary_close(
