@@ -90,13 +90,13 @@ pub struct TileState {
 pub struct SecondaryWindowDescriptor {
     pub path: PathBuf,
     pub title: Option<String>,
-    pub screen_index: Option<usize>,
+    pub screen: Option<usize>,
     pub screen_rect: Option<WindowRect>,
 }
 
 impl SecondaryWindowDescriptor {
     pub fn wants_explicit_layout(&self) -> bool {
-        self.screen_index.is_some() || self.screen_rect.is_some()
+        self.screen.is_some() || self.screen_rect.is_some()
     }
 }
 
@@ -118,7 +118,7 @@ pub struct SecondaryWindowState {
     pub tile_state: TileState,
     pub window_entity: Option<Entity>,
     pub graph_entities: Vec<Entity>,
-    pub applied_screen_index: Option<usize>,
+    pub applied_screen: Option<usize>,
     pub applied_rect: Option<WindowRect>,
     pub relayout_phase: SecondaryWindowRelayoutPhase,
     pub pending_fullscreen_exit: bool,
@@ -181,7 +181,7 @@ impl SecondaryWindowState {
         }
 
         if let Some((index, _)) = best {
-            self.descriptor.screen_index = Some(index);
+            self.descriptor.screen = Some(index);
             if let Some((monitor_pos, monitor_size)) = best_bounds
                 && let Some(rect) = rect_from_bounds(
                     (position.x, position.y),
@@ -219,7 +219,7 @@ impl SecondaryWindowState {
             });
 
         if let Some(index) = monitor_index {
-            self.descriptor.screen_index = Some(index);
+            self.descriptor.screen = Some(index);
         }
 
         if let (Some(position), Some(monitor_handle)) = (
@@ -397,7 +397,7 @@ impl WindowManager {
         let descriptor = SecondaryWindowDescriptor {
             path: PathBuf::from(path),
             title: cleaned_title.or_else(|| Some(format!("Window {}", id.0 + 1))),
-            screen_index: None,
+            screen: None,
             screen_rect: None,
         };
         let relayout_phase = SecondaryWindowState::relayout_phase_from_descriptor(&descriptor);
@@ -414,7 +414,7 @@ impl WindowManager {
             tile_state,
             window_entity: None,
             graph_entities: Vec::new(),
-            applied_screen_index: None,
+            applied_screen: None,
             applied_rect: None,
             relayout_phase,
             pending_fullscreen_exit: false,
