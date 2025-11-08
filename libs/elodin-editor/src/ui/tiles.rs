@@ -22,7 +22,7 @@ use egui_tiles::{Container, Tile, TileId, Tiles};
 use impeller2_wkt::{Dashboard, Graph, Viewport, WindowRect};
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, HashMap};
-use std::{fmt::Write as _, path::PathBuf};
+use std::{fmt::Write as _, path::PathBuf, time::Instant};
 use winit::{
     dpi::{PhysicalPosition, PhysicalSize},
     monitor::MonitorHandle,
@@ -121,6 +121,9 @@ pub struct SecondaryWindowState {
     pub applied_screen_index: Option<usize>,
     pub applied_rect: Option<WindowRect>,
     pub relayout_phase: SecondaryWindowRelayoutPhase,
+    pub pending_fullscreen_exit: bool,
+    pub relayout_attempts: u8,
+    pub relayout_started_at: Option<Instant>,
     pub skip_metadata_capture: bool,
 }
 
@@ -137,6 +140,9 @@ impl SecondaryWindowState {
 
     pub fn refresh_relayout_phase(&mut self) {
         self.relayout_phase = Self::relayout_phase_from_descriptor(&self.descriptor);
+        self.relayout_attempts = 0;
+        self.relayout_started_at = None;
+        self.pending_fullscreen_exit = false;
     }
 
     pub fn update_descriptor_from_window(
@@ -411,6 +417,9 @@ impl WindowManager {
             applied_screen_index: None,
             applied_rect: None,
             relayout_phase,
+            pending_fullscreen_exit: false,
+            relayout_attempts: 0,
+            relayout_started_at: None,
             skip_metadata_capture: false,
         });
         id
