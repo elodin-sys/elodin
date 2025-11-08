@@ -94,8 +94,22 @@ pub struct SecondaryWindowDescriptor {
     pub screen_rect: Option<WindowRect>,
 }
 
+impl SecondaryWindowDescriptor {
+    pub fn wants_explicit_layout(&self) -> bool {
+        self.screen_index.is_some() || self.screen_rect.is_some()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SecondaryWindowId(pub u32);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SecondaryWindowRelayoutPhase {
+    #[default]
+    Idle,
+    NeedScreen,
+    NeedRect,
+}
 
 #[derive(Clone)]
 pub struct SecondaryWindowState {
@@ -106,12 +120,25 @@ pub struct SecondaryWindowState {
     pub graph_entities: Vec<Entity>,
     pub applied_screen_index: Option<usize>,
     pub applied_rect: Option<WindowRect>,
-    pub pending_screen_index: Option<usize>,
-    pub needs_relayout: bool,
+    pub relayout_phase: SecondaryWindowRelayoutPhase,
     pub skip_metadata_capture: bool,
 }
 
 impl SecondaryWindowState {
+    pub fn relayout_phase_from_descriptor(
+        descriptor: &SecondaryWindowDescriptor,
+    ) -> SecondaryWindowRelayoutPhase {
+        if descriptor.wants_explicit_layout() {
+            SecondaryWindowRelayoutPhase::NeedScreen
+        } else {
+            SecondaryWindowRelayoutPhase::Idle
+        }
+    }
+
+    pub fn refresh_relayout_phase(&mut self) {
+        self.relayout_phase = Self::relayout_phase_from_descriptor(&self.descriptor);
+    }
+
     pub fn update_descriptor_from_window(
         &mut self,
         window: &Window,
@@ -367,6 +394,7 @@ impl WindowManager {
             screen_index: None,
             screen_rect: None,
         };
+        let relayout_phase = SecondaryWindowState::relayout_phase_from_descriptor(&descriptor);
         let tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
         info!(
             id = id.0,
@@ -382,8 +410,7 @@ impl WindowManager {
             graph_entities: Vec::new(),
             applied_screen_index: None,
             applied_rect: None,
-            pending_screen_index: None,
-            needs_relayout: true,
+            relayout_phase,
             skip_metadata_capture: false,
         });
         id
