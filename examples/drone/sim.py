@@ -150,8 +150,19 @@ def world() -> tuple[el.World, el.EntityId]:
             }
         }
         
-        window path="examples/drone/motor-panel.kdl"
-        window path="examples/drone/rate-control-panel.kdl"
+        window path="examples/drone/motor-panel.kdl" screen_index=0
+        {
+           rect 0 0 100 100
+        }
+        window path="examples/drone/rate-control-panel.kdl" screen_index=2
+        {
+            
+            rect 37 26 33 44
+        }
+        main_window screen_index=1
+        {
+            rect 37 26 33 44
+        }
 
         vector_arrow "(1, 0, 0)" origin="drone.world_pos" scale=1.0 name="Drone Velocity X" body_frame=#true
         vector_arrow "(0, 1, 0)" origin="drone.world_pos" scale=1.0 name="Drone Velocity Y" body_frame=#true
