@@ -145,6 +145,8 @@ pub struct PrimaryWindowLayout {
     pub relayout_attempts: u8,
     pub relayout_started_at: Option<Instant>,
     pub pending_fullscreen_exit: bool,
+    pub captured_screen: Option<usize>,
+    pub captured_rect: Option<WindowRect>,
 }
 
 impl PrimaryWindowLayout {
@@ -156,6 +158,8 @@ impl PrimaryWindowLayout {
         self.relayout_attempts = 0;
         self.relayout_started_at = None;
         self.pending_fullscreen_exit = false;
+        self.captured_screen = screen;
+        self.captured_rect = rect;
         self.relayout_phase = if self.screen.is_some() {
             PrimaryWindowRelayoutPhase::NeedScreen
         } else if self.screen_rect.is_some() {
@@ -277,7 +281,7 @@ impl SecondaryWindowState {
     }
 }
 
-fn monitor_index_from_bounds(
+pub(crate) fn monitor_index_from_bounds(
     position: PhysicalPosition<i32>,
     size: PhysicalSize<u32>,
     monitors: &[MonitorHandle],
@@ -307,7 +311,7 @@ fn monitor_index_from_bounds(
         .map(|(index, _)| index)
 }
 
-fn rect_from_bounds(
+pub(crate) fn rect_from_bounds(
     position: (i32, i32),
     size: (u32, u32),
     monitor_position: (i32, i32),
@@ -334,7 +338,7 @@ fn rect_from_bounds(
     })
 }
 
-fn clamp_percent(value: f32) -> u32 {
+pub(crate) fn clamp_percent(value: f32) -> u32 {
     value.round().clamp(0.0, 100.0) as u32
 }
 

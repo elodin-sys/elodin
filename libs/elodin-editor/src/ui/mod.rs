@@ -29,13 +29,17 @@ use winit::{
 
 const SCREEN_RELAYOUT_MAX_ATTEMPTS: u8 = 5;
 const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(750);
+const PRIMARY_VIEWPORT_ORDER_BASE: isize = 0;
+const PRIMARY_GRAPH_ORDER_BASE: isize = 100;
+const SECONDARY_GRAPH_ORDER_BASE: isize = 10;
+const SECONDARY_GRAPH_ORDER_STRIDE: isize = 50;
 
 use big_space::GridCell;
 use plot_3d::LinePlot3dPlugin;
 use schematic::SchematicPlugin;
 
 use self::colors::{ColorExt, get_scheme};
-use self::{command_palette::CommandPaletteState, timeline::timeline_slider};
+use self::{command_palette::CommandPaletteState, plot::GraphState, timeline::timeline_slider};
 use egui::CornerRadius;
 use impeller2::types::ComponentId;
 use impeller2_bevy::ComponentValueMap;
@@ -263,6 +267,10 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 capture_secondary_window_screens.after(apply_secondary_window_screens),
+            )
+            .add_systems(
+                Update,
+                capture_primary_window_layout.after(capture_secondary_window_screens),
             )
             .add_systems(Update, handle_secondary_close.after(sync_secondary_windows))
             .add_systems(
@@ -900,7 +908,8 @@ fn sync_secondary_windows(
                 if let Ok(mut camera) = cameras.get_mut(graph) {
                     camera.target = RenderTarget::Window(window_ref);
                     camera.is_active = true;
-                    camera.order = 10 + index as isize;
+                    let base_order = secondary_graph_order_base(state.id);
+                    camera.order = base_order + index as isize;
                 }
             }
             continue;
@@ -940,7 +949,8 @@ fn sync_secondary_windows(
             if let Ok(mut camera) = cameras.get_mut(graph) {
                 camera.target = RenderTarget::Window(window_ref);
                 camera.is_active = true;
-                camera.order = 10 + index as isize;
+                let base_order = secondary_graph_order_base(state.id);
+                camera.order = base_order + index as isize;
             }
         }
     }
@@ -1006,6 +1016,7 @@ fn apply_secondary_window_screens(
                         path = %state.descriptor.path.display(),
                         "screen out of range; skipping screen assignment"
                     );
+                    state.descriptor.screen = None;
                     complete_screen_assignment(state, window, "screen out of range");
                 }
             }
@@ -1101,6 +1112,7 @@ fn apply_primary_window_layout(
                     screen = screen as i32,
                     "Primary window screen index out of range; skipping"
                 );
+                layout.screen = None;
                 layout.relayout_phase = if layout.screen_rect.is_some() {
                     tiles::PrimaryWindowRelayoutPhase::NeedRect
                 } else {
@@ -1170,18 +1182,34 @@ fn apply_secondary_window_rect(
     let monitor_width = monitor_size.width as i32;
     let monitor_height = monitor_size.height as i32;
 
-    let mut width_px = ((rect.width as f64 / 100.0) * monitor_width as f64).round() as i32;
-    let mut height_px = ((rect.height as f64 / 100.0) * monitor_height as f64).round() as i32;
-    width_px = width_px.clamp(1, monitor_width.max(1));
-    height_px = height_px.clamp(1, monitor_height.max(1));
+    let requested_width_px = ((rect.width as f64 / 100.0) * monitor_width as f64).round() as i32;
+    let requested_height_px = ((rect.height as f64 / 100.0) * monitor_height as f64).round() as i32;
+    let width_px = requested_width_px.clamp(1, monitor_width.max(1));
+    let height_px = requested_height_px.clamp(1, monitor_height.max(1));
+    if width_px != requested_width_px || height_px != requested_height_px {
+        warn!(
+            path = %state.descriptor.path.display(),
+            rect = ?rect,
+            "Window rect exceeds screen bounds; clamping size"
+        );
+    }
 
-    let mut x = monitor_pos.x + ((rect.x as f64 / 100.0) * monitor_width as f64).round() as i32;
-    let mut y = monitor_pos.y + ((rect.y as f64 / 100.0) * monitor_height as f64).round() as i32;
+    let requested_x =
+        monitor_pos.x + ((rect.x as f64 / 100.0) * monitor_width as f64).round() as i32;
+    let requested_y =
+        monitor_pos.y + ((rect.y as f64 / 100.0) * monitor_height as f64).round() as i32;
 
     let max_x = monitor_pos.x + monitor_width - width_px;
     let max_y = monitor_pos.y + monitor_height - height_px;
-    x = x.clamp(monitor_pos.x, max_x);
-    y = y.clamp(monitor_pos.y, max_y);
+    let x = requested_x.clamp(monitor_pos.x, max_x);
+    let y = requested_y.clamp(monitor_pos.y, max_y);
+    if x != requested_x || y != requested_y {
+        warn!(
+            path = %state.descriptor.path.display(),
+            rect = ?rect,
+            "Window rect origin exceeds screen bounds; clamping position"
+        );
+    }
 
     let _ = window.request_inner_size(PhysicalSize::new(
         width_px.max(1) as u32,
@@ -1301,18 +1329,28 @@ fn apply_primary_window_rect(
     let monitor_width = monitor_size.width as i32;
     let monitor_height = monitor_size.height as i32;
 
-    let mut width_px = ((rect.width as f64 / 100.0) * monitor_width as f64).round() as i32;
-    let mut height_px = ((rect.height as f64 / 100.0) * monitor_height as f64).round() as i32;
-    width_px = width_px.clamp(1, monitor_width.max(1));
-    height_px = height_px.clamp(1, monitor_height.max(1));
+    let requested_width_px = ((rect.width as f64 / 100.0) * monitor_width as f64).round() as i32;
+    let requested_height_px = ((rect.height as f64 / 100.0) * monitor_height as f64).round() as i32;
+    let width_px = requested_width_px.clamp(1, monitor_width.max(1));
+    let height_px = requested_height_px.clamp(1, monitor_height.max(1));
+    if width_px != requested_width_px || height_px != requested_height_px {
+        warn!("Primary window rect exceeds screen bounds; clamping size (rect={rect:?})");
+    }
 
-    let mut x = monitor_pos.x + ((rect.x as f64 / 100.0) * monitor_width as f64).round() as i32;
-    let mut y = monitor_pos.y + ((rect.y as f64 / 100.0) * monitor_height as f64).round() as i32;
+    let requested_x =
+        monitor_pos.x + ((rect.x as f64 / 100.0) * monitor_width as f64).round() as i32;
+    let requested_y =
+        monitor_pos.y + ((rect.y as f64 / 100.0) * monitor_height as f64).round() as i32;
 
     let max_x = monitor_pos.x + monitor_width - width_px;
     let max_y = monitor_pos.y + monitor_height - height_px;
-    x = x.clamp(monitor_pos.x, max_x);
-    y = y.clamp(monitor_pos.y, max_y);
+    let x = requested_x.clamp(monitor_pos.x, max_x);
+    let y = requested_y.clamp(monitor_pos.y, max_y);
+    if x != requested_x || y != requested_y {
+        warn!(
+            "Primary window rect origin exceeds screen bounds; clamping position (rect={rect:?})"
+        );
+    }
 
     info!(
         rect = ?rect,
@@ -1433,6 +1471,63 @@ fn window_on_screen(
     window
         .current_monitor()
         .is_some_and(|current| monitors_match(&current, target_monitor))
+}
+
+fn secondary_graph_order_base(id: tiles::SecondaryWindowId) -> isize {
+    SECONDARY_GRAPH_ORDER_BASE + SECONDARY_GRAPH_ORDER_STRIDE * id.0 as isize
+}
+
+fn capture_primary_window_layout(
+    mut windows: ResMut<tiles::WindowManager>,
+    primary_query: Query<Entity, With<PrimaryWindow>>,
+    winit_windows: NonSend<bevy::winit::WinitWindows>,
+) {
+    #[allow(deprecated)]
+    let Ok(primary_entity) = primary_query.get_single() else {
+        return;
+    };
+    let Some(window) = winit_windows.get_window(primary_entity) else {
+        return;
+    };
+    let layout = windows.primary_layout_mut();
+    if !matches!(
+        layout.relayout_phase,
+        tiles::PrimaryWindowRelayoutPhase::Idle
+    ) {
+        return;
+    }
+
+    let monitors = collect_sorted_monitors(window);
+    let outer_pos = match window.outer_position() {
+        Ok(pos) => pos,
+        Err(_) => return,
+    };
+    let outer_size = window.outer_size();
+    let monitor_index = window
+        .current_monitor()
+        .as_ref()
+        .and_then(|current| {
+            monitors
+                .iter()
+                .position(|monitor| monitors_match(monitor, current))
+        })
+        .or_else(|| tiles::monitor_index_from_bounds(outer_pos, outer_size, &monitors));
+    layout.captured_screen = monitor_index;
+
+    if let Some(idx) = monitor_index
+        && let Some(monitor) = monitors.get(idx)
+    {
+        let monitor_pos = monitor.position();
+        let monitor_size = monitor.size();
+        if let Some(rect) = tiles::rect_from_bounds(
+            (outer_pos.x, outer_pos.y),
+            (outer_size.width, outer_size.height),
+            (monitor_pos.x, monitor_pos.y),
+            (monitor_size.width, monitor_size.height),
+        ) {
+            layout.captured_rect = Some(rect);
+        }
+    }
 }
 
 fn handle_secondary_close(
@@ -1644,19 +1739,32 @@ pub(crate) fn compute_secondary_window_title(state: &tiles::SecondaryWindowState
 struct CameraViewportQuery {
     camera: &'static mut Camera,
     viewport_rect: &'static ViewportRect,
+    graph_state: Option<&'static GraphState>,
 }
 
 fn set_camera_viewport(
     window: Query<(&Window, &bevy_egui::EguiContextSettings), With<PrimaryWindow>>,
     mut main_camera_query: Query<CameraViewportQuery, With<MainCamera>>,
 ) {
+    let mut next_viewport_order = PRIMARY_VIEWPORT_ORDER_BASE;
+    let mut next_graph_order = PRIMARY_GRAPH_ORDER_BASE;
     for CameraViewportQueryItem {
         mut camera,
         viewport_rect,
+        graph_state,
     } in main_camera_query.iter_mut()
     {
+        let order = if graph_state.is_some() {
+            let order = next_graph_order;
+            next_graph_order += 1;
+            order
+        } else {
+            let order = next_viewport_order;
+            next_viewport_order += 1;
+            order
+        };
+        camera.order = order;
         let Some(available_rect) = viewport_rect.0 else {
-            camera.order = 0;
             camera.is_active = false;
             camera.viewport = Some(Viewport {
                 physical_position: UVec2::new(0, 0),
@@ -1738,7 +1846,8 @@ fn set_secondary_camera_viewport(
             }
 
             camera.is_active = true;
-            camera.order = 10 + index as isize;
+            let base_order = secondary_graph_order_base(state.id);
+            camera.order = base_order + index as isize;
             camera.viewport = Some(Viewport {
                 physical_position: UVec2::new(viewport_pos.x as u32, viewport_pos.y as u32),
                 physical_size: UVec2::new(viewport_size.x as u32, viewport_size.y as u32),
