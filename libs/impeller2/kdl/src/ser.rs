@@ -125,8 +125,10 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
 
 fn serialize_window(window: &WindowSchematic) -> KdlNode {
     let mut node = KdlNode::new("window");
-    node.entries_mut()
-        .push(KdlEntry::new_prop("path", window.path.clone()));
+    if let Some(path) = &window.path {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("path", path.clone()));
+    }
 
     if let Some(title) = &window.title {
         node.entries_mut()

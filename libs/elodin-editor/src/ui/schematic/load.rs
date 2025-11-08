@@ -104,11 +104,8 @@ fn resolve_window_descriptor(
     window: &WindowSchematic,
     base_dir: Option<&Path>,
 ) -> Option<SecondaryWindowDescriptor> {
-    let mut resolved = PathBuf::from(&window.path);
-
-    if resolved.as_os_str().is_empty() {
-        return None;
-    }
+    let path_str = window.path.as_ref()?;
+    let mut resolved = PathBuf::from(path_str);
 
     if resolved.is_relative() {
         if let Some(base) = base_dir {
@@ -208,6 +205,7 @@ impl LoadSchematicParams<'_, '_> {
         for entity in self.grid_lines.iter() {
             self.commands.entity(entity).despawn();
         }
+        self.windows.clear_primary_layout();
         let mut secondary_descriptors: Vec<SecondaryWindowDescriptor> = Vec::new();
 
         for elem in &schematic.elems {
@@ -227,6 +225,9 @@ impl LoadSchematicParams<'_, '_> {
                 impeller2_wkt::SchematicElem::Window(window) => {
                     if let Some(descriptor) = resolve_window_descriptor(window, base_dir) {
                         secondary_descriptors.push(descriptor);
+                    } else {
+                        let layout = self.windows.primary_layout_mut();
+                        layout.set(window.screen.map(|idx| idx as usize), window.screen_rect);
                     }
                 }
             }
