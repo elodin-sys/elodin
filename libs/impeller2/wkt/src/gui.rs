@@ -66,7 +66,7 @@ pub struct WindowRect {
 pub struct WindowSchematic {
     pub title: Option<String>,
     pub path: String,
-    pub screen_index: Option<u32>,
+    pub screen: Option<u32>,
     #[serde(default)]
     pub screen_rect: Option<WindowRect>,
 }

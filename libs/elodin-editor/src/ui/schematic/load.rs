@@ -121,7 +121,7 @@ fn resolve_window_descriptor(
     Some(SecondaryWindowDescriptor {
         path: resolved,
         title: window.title.clone(),
-        screen_index: window.screen_index.map(|idx| idx as usize),
+        screen: window.screen.map(|idx| idx as usize),
         screen_rect: window.screen_rect,
     })
 }
@@ -273,7 +273,7 @@ impl LoadSchematicParams<'_, '_> {
                             tile_state,
                             window_entity: None,
                             graph_entities,
-                            applied_screen_index: None,
+                            applied_screen: None,
                             applied_rect: None,
                             relayout_phase,
                             pending_fullscreen_exit: false,
