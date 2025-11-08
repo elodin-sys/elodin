@@ -23,9 +23,7 @@ The wmm library was developed to support spacecraft attitude determination and c
 
 ## Current Usage in Elodin
 
-The wmm library is currently integrated into:
-
-- **MEKF Flight Software** (`fsw/mekf/`) - Provides reference magnetic field vectors for the Multiplicative Extended Kalman Filter on Aleph. Exposed via Lua scripting interface to calculate expected field values at spacecraft position for attitude determination.
+The wmm library is available for integration into custom attitude determination and control systems (ADCS).
 
 - **Related ADCS Components** - Works alongside:
   - `roci/adcs` algorithms (TRIAD, MAG.I.CAL) that compare measured vs. expected fields

@@ -59,13 +59,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f68f53c83ab957f72c32642f3868eec03eb974d1fb82e453128456482613d36"
 
 [[package]]
-name = "blackbox"
-version = "0.15.1"
-dependencies = [
- "zerocopy",
-]
-
-[[package]]
 name = "byteorder"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -508,7 +501,6 @@ name = "sensor-fw"
 version = "0.1.0"
 dependencies = [
  "bitfield-struct",
- "blackbox",
  "cobs",
  "cortex-m",
  "cortex-m-rt",

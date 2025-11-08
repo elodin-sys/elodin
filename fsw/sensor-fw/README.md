@@ -45,19 +45,6 @@ cargo build --release --bin fw
 ```
 
 
-## Convert binary telemetry data to CSV
-
-1. Connect SD card to your computer.
-2. Find the path to the binary file on the SD card (should be something like `/Volumes/<sd_card>/DATA.BIN`).
-3. Run the `blackbox` CLI from the `fsw/blackbox` directory:
-```sh
-cargo run --release -- <path_to_binary_file>
-```
-4. The CSV output will printed to stdout. You can redirect it to a file by running:
-```sh
-cargo run --release -- <path_to_binary_file> > <output_file>.csv
-```
-
 <details>
 
 <summary>Appendix</summary>
