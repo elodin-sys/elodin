@@ -17,6 +17,7 @@
 "ot" = "ot"
 "fram" = "fram"
 "FRAM" = "FRAM"
+"tio" = "tio"
 
 [files]
 extend-exclude = [
