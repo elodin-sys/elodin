@@ -276,6 +276,9 @@ impl LoadSchematicParams<'_, '_> {
                             applied_screen_index: None,
                             applied_rect: None,
                             relayout_phase,
+                            pending_fullscreen_exit: false,
+                            relayout_attempts: 0,
+                            relayout_started_at: None,
                             skip_metadata_capture: true,
                         });
                     }
