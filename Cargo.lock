@@ -8633,7 +8633,6 @@ dependencies = [
  "numpy",
  "postcard",
  "pyo3",
- "roci-adcs",
  "s10",
  "serde_json",
  "stellarator",
