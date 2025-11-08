@@ -65,7 +65,7 @@ pub struct WindowRect {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct WindowSchematic {
     pub title: Option<String>,
-    pub path: String,
+    pub path: Option<String>,
     pub screen: Option<u32>,
     #[serde(default)]
     pub screen_rect: Option<WindowRect>,

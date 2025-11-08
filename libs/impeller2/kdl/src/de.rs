@@ -45,38 +45,34 @@ fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlS
 }
 
 fn parse_window(node: &KdlNode, src: &str) -> Result<WindowSchematic, KdlSchematicError> {
-    let raw_path = node
+    let path = node
         .get("path")
         .or_else(|| node.get("file"))
         .or_else(|| node.get("name"))
         .and_then(|v| v.as_string())
-        .ok_or_else(|| KdlSchematicError::MissingProperty {
-            property: "path".to_string(),
-            node: node.name().to_string(),
-            src: src.to_string(),
-            span: node.span(),
-        })?;
-
-    let path = raw_path.trim();
-    if path.is_empty() {
-        return Err(KdlSchematicError::InvalidValue {
-            property: "path".to_string(),
-            node: node.name().to_string(),
-            expected: "a non-empty relative path".to_string(),
-            src: src.to_string(),
-            span: node.span(),
-        });
-    }
-
-    if path.contains('{') || path.contains('}') {
-        return Err(KdlSchematicError::InvalidValue {
-            property: "path".to_string(),
-            node: node.name().to_string(),
-            expected: "a path without braces".to_string(),
-            src: src.to_string(),
-            span: node.span(),
-        });
-    }
+        .map(|raw| {
+            let path = raw.trim();
+            if path.is_empty() {
+                return Err(KdlSchematicError::InvalidValue {
+                    property: "path".to_string(),
+                    node: node.name().to_string(),
+                    expected: "a non-empty relative path".to_string(),
+                    src: src.to_string(),
+                    span: node.span(),
+                });
+            }
+            if path.contains('{') || path.contains('}') {
+                return Err(KdlSchematicError::InvalidValue {
+                    property: "path".to_string(),
+                    node: node.name().to_string(),
+                    expected: "a path without braces".to_string(),
+                    src: src.to_string(),
+                    span: node.span(),
+                });
+            }
+            Ok(path.to_string())
+        })
+        .transpose()?;
 
     let title = node
         .get("title")
@@ -102,7 +98,7 @@ fn parse_window(node: &KdlNode, src: &str) -> Result<WindowSchematic, KdlSchemat
 
     Ok(WindowSchematic {
         title,
-        path: path.to_string(),
+        path,
         screen: screen_idx,
         screen_rect,
     })

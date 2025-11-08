@@ -227,6 +227,12 @@ impl Plugin for UiPlugin {
             .add_systems(Update, shortcuts)
             .add_systems(Update, handle_primary_close.before(render_layout))
             .add_systems(Update, render_layout)
+            .add_systems(
+                Update,
+                apply_primary_window_layout
+                    .after(render_layout)
+                    .before(sync_secondary_windows),
+            )
             .add_systems(Update, sync_secondary_windows.after(render_layout))
             .add_systems(
                 Update,
@@ -806,6 +812,103 @@ fn apply_secondary_window_screens(
     }
 }
 
+fn apply_primary_window_layout(
+    mut windows: ResMut<tiles::WindowManager>,
+    primary_query: Query<Entity, With<PrimaryWindow>>,
+    winit_windows: NonSend<bevy::winit::WinitWindows>,
+) {
+    #[allow(deprecated)]
+    let Ok(primary_entity) = primary_query.get_single() else {
+        return;
+    };
+    let Some(window) = winit_windows.get_window(primary_entity) else {
+        return;
+    };
+    let monitors = collect_sorted_monitors(window);
+    let layout = windows.primary_layout_mut();
+    let phase = layout.relayout_phase;
+    match phase {
+        tiles::PrimaryWindowRelayoutPhase::Idle => {}
+        tiles::PrimaryWindowRelayoutPhase::NeedScreen => {
+            if window_on_screen(layout.screen, window, &monitors) {
+                if layout.pending_fullscreen_exit {
+                    if window.fullscreen().is_some() {
+                        window.set_fullscreen(None);
+                    }
+                    window.set_maximized(false);
+                    window.set_minimized(false);
+                    layout.pending_fullscreen_exit = false;
+                }
+                layout.applied_screen = layout.screen;
+                layout.relayout_phase = if layout.screen_rect.is_some() {
+                    tiles::PrimaryWindowRelayoutPhase::NeedRect
+                } else {
+                    tiles::PrimaryWindowRelayoutPhase::Idle
+                };
+                layout.relayout_attempts = 0;
+                layout.relayout_started_at = None;
+                layout.pending_fullscreen_exit = false;
+                info!(
+                    screen = layout.screen.map(|idx| idx as i32).unwrap_or(-1),
+                    "Primary window confirmed on target screen"
+                );
+                return;
+            }
+            let Some(screen) = layout.screen else {
+                layout.relayout_phase = if layout.screen_rect.is_some() {
+                    tiles::PrimaryWindowRelayoutPhase::NeedRect
+                } else {
+                    tiles::PrimaryWindowRelayoutPhase::Idle
+                };
+                return;
+            };
+            if let Some(target_monitor) = monitors.get(screen).cloned() {
+                info!(
+                    screen = screen as i32,
+                    "Moving primary window to target screen"
+                );
+                assign_primary_window_to_screen(layout, window, target_monitor);
+                layout.relayout_attempts = layout.relayout_attempts.saturating_add(1);
+                if layout.relayout_started_at.is_none() {
+                    layout.relayout_started_at = Some(Instant::now());
+                }
+                if let Some(started) = layout.relayout_started_at
+                    && started.elapsed() > SCREEN_RELAYOUT_TIMEOUT
+                    && layout.relayout_attempts >= SCREEN_RELAYOUT_MAX_ATTEMPTS
+                {
+                    warn!(
+                        screen = screen as i32,
+                        attempts = layout.relayout_attempts,
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "Primary window screen assignment timed out"
+                    );
+                    layout.relayout_phase = if layout.screen_rect.is_some() {
+                        tiles::PrimaryWindowRelayoutPhase::NeedRect
+                    } else {
+                        tiles::PrimaryWindowRelayoutPhase::Idle
+                    };
+                    layout.pending_fullscreen_exit = false;
+                }
+            } else {
+                warn!(
+                    screen = screen as i32,
+                    "Primary window screen index out of range; skipping"
+                );
+                layout.relayout_phase = if layout.screen_rect.is_some() {
+                    tiles::PrimaryWindowRelayoutPhase::NeedRect
+                } else {
+                    tiles::PrimaryWindowRelayoutPhase::Idle
+                };
+            }
+        }
+        tiles::PrimaryWindowRelayoutPhase::NeedRect => {
+            if apply_primary_window_rect(layout, window, &monitors) {
+                layout.relayout_phase = tiles::PrimaryWindowRelayoutPhase::Idle;
+            }
+        }
+    }
+}
+
 fn apply_secondary_window_rect(
     state: &mut tiles::SecondaryWindowState,
     window: &WinitWindow,
@@ -925,6 +1028,103 @@ fn complete_screen_assignment(
     );
 }
 
+fn assign_primary_window_to_screen(
+    layout: &mut tiles::PrimaryWindowLayout,
+    window: &WinitWindow,
+    target_monitor: MonitorHandle,
+) {
+    let monitor_pos = target_monitor.position();
+    let monitor_size = target_monitor.size();
+    let window_size = window.outer_size();
+    let x = monitor_pos.x + (monitor_size.width as i32 - window_size.width as i32) / 2;
+    let y = monitor_pos.y + (monitor_size.height as i32 - window_size.height as i32) / 2;
+
+    window.set_fullscreen(Some(Fullscreen::Borderless(Some(target_monitor))));
+    layout.pending_fullscreen_exit = true;
+    window.set_outer_position(PhysicalPosition::new(x, y));
+}
+
+fn apply_primary_window_rect(
+    layout: &mut tiles::PrimaryWindowLayout,
+    window: &WinitWindow,
+    monitors: &[MonitorHandle],
+) -> bool {
+    if layout.pending_fullscreen_exit {
+        if window.fullscreen().is_some() {
+            window.set_fullscreen(None);
+            window.set_maximized(false);
+            window.set_minimized(false);
+            return false;
+        }
+        layout.pending_fullscreen_exit = false;
+    }
+
+    let Some(rect) = layout.screen_rect else {
+        layout.applied_rect = None;
+        window.set_minimized(false);
+        return true;
+    };
+
+    if layout.applied_rect == Some(rect) {
+        return true;
+    }
+
+    if rect.width == 0 && rect.height == 0 {
+        window.set_minimized(true);
+        layout.applied_rect = Some(rect);
+        return true;
+    }
+
+    let monitor_handle = layout
+        .screen
+        .and_then(|idx| monitors.get(idx).cloned())
+        .or_else(|| window.current_monitor());
+    let Some(monitor_handle) = monitor_handle else {
+        return false;
+    };
+
+    let monitor_pos = monitor_handle.position();
+    let monitor_size = monitor_handle.size();
+    if monitor_size.width == 0 || monitor_size.height == 0 {
+        return false;
+    }
+
+    window.set_minimized(false);
+
+    let monitor_width = monitor_size.width as i32;
+    let monitor_height = monitor_size.height as i32;
+
+    let mut width_px = ((rect.width as f64 / 100.0) * monitor_width as f64).round() as i32;
+    let mut height_px = ((rect.height as f64 / 100.0) * monitor_height as f64).round() as i32;
+    width_px = width_px.clamp(1, monitor_width.max(1));
+    height_px = height_px.clamp(1, monitor_height.max(1));
+
+    let mut x = monitor_pos.x + ((rect.x as f64 / 100.0) * monitor_width as f64).round() as i32;
+    let mut y = monitor_pos.y + ((rect.y as f64 / 100.0) * monitor_height as f64).round() as i32;
+
+    let max_x = monitor_pos.x + monitor_width - width_px;
+    let max_y = monitor_pos.y + monitor_height - height_px;
+    x = x.clamp(monitor_pos.x, max_x);
+    y = y.clamp(monitor_pos.y, max_y);
+
+    info!(
+        rect = ?rect,
+        width_px,
+        height_px,
+        x,
+        y,
+        "Applying primary window rect"
+    );
+
+    let _ = window.request_inner_size(PhysicalSize::new(
+        width_px.max(1) as u32,
+        height_px.max(1) as u32,
+    ));
+    window.set_outer_position(PhysicalPosition::new(x, y));
+    layout.applied_rect = Some(rect);
+    true
+}
+
 fn capture_secondary_window_screens(
     mut windows: ResMut<tiles::WindowManager>,
     winit_windows: NonSend<bevy::winit::WinitWindows>,
@@ -1008,10 +1208,17 @@ fn window_on_target_screen(
     window: &WinitWindow,
     monitors: &[MonitorHandle],
 ) -> bool {
-    let Some(screen) = state.descriptor.screen else {
+    window_on_screen(state.descriptor.screen, window, monitors)
+}
+
+fn window_on_screen(
+    screen: Option<usize>,
+    window: &WinitWindow,
+    monitors: &[MonitorHandle],
+) -> bool {
+    let Some(screen) = screen else {
         return true;
     };
-
     let Some(target_monitor) = monitors.get(screen) else {
         return false;
     };
