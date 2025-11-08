@@ -107,6 +107,7 @@ pub struct SecondaryWindowState {
     pub applied_screen_index: Option<usize>,
     pub applied_rect: Option<WindowRect>,
     pub pending_screen_index: Option<usize>,
+    pub needs_relayout: bool,
     pub skip_metadata_capture: bool,
 }
 
@@ -148,15 +149,15 @@ impl SecondaryWindowState {
 
         if let Some((index, _)) = best {
             self.descriptor.screen_index = Some(index);
-            if let Some((monitor_pos, monitor_size)) = best_bounds {
-                if let Some(rect) = rect_from_bounds(
+            if let Some((monitor_pos, monitor_size)) = best_bounds
+                && let Some(rect) = rect_from_bounds(
                     (position.x, position.y),
                     (size.x, size.y),
                     (monitor_pos.x, monitor_pos.y),
                     (monitor_size.x, monitor_size.y),
-                ) {
-                    self.descriptor.screen_rect = Some(rect);
-                }
+                )
+            {
+                self.descriptor.screen_rect = Some(rect);
             }
         }
     }
@@ -193,15 +194,13 @@ impl SecondaryWindowState {
             monitor_index
                 .and_then(|idx| monitors.get(idx).cloned())
                 .or_else(|| current_monitor.clone()),
+        ) && let Some(rect) = rect_from_bounds(
+            (position.x, position.y),
+            (outer_size.width, outer_size.height),
+            (monitor_handle.position().x, monitor_handle.position().y),
+            (monitor_handle.size().width, monitor_handle.size().height),
         ) {
-            if let Some(rect) = rect_from_bounds(
-                (position.x, position.y),
-                (outer_size.width, outer_size.height),
-                (monitor_handle.position().x, monitor_handle.position().y),
-                (monitor_handle.size().width, monitor_handle.size().height),
-            ) {
-                self.descriptor.screen_rect = Some(rect);
-            }
+            self.descriptor.screen_rect = Some(rect);
         }
     }
 }
@@ -384,6 +383,7 @@ impl WindowManager {
             applied_screen_index: None,
             applied_rect: None,
             pending_screen_index: None,
+            needs_relayout: true,
             skip_metadata_capture: false,
         });
         id
