@@ -924,7 +924,7 @@ fn sync_secondary_windows(
             .id();
 
         state.window_entity = Some(window_entity);
-        state.applied_screen_index = None;
+        state.applied_screen = None;
         state.applied_rect = None;
         state.refresh_relayout_phase();
         state.skip_metadata_capture = true;
@@ -967,16 +967,16 @@ fn apply_secondary_window_screens(
                     continue;
                 }
 
-                let Some(screen_index) = state.descriptor.screen_index else {
+                let Some(screen) = state.descriptor.screen else {
                     complete_screen_assignment(
                         state,
                         window,
-                        "No screen_index provided; skipping screen alignment",
+                        "No screen provided; skipping screen alignment",
                     );
                     continue;
                 };
 
-                if let Some(target_monitor) = monitors.get(screen_index) {
+                if let Some(target_monitor) = monitors.get(screen) {
                     assign_window_to_screen(state, window, target_monitor.clone());
                     state.relayout_attempts = state.relayout_attempts.saturating_add(1);
                     if state.relayout_started_at.is_none() {
@@ -990,17 +990,17 @@ fn apply_secondary_window_screens(
                             attempts = state.relayout_attempts,
                             elapsed_ms = started.elapsed().as_millis(),
                             path = %state.descriptor.path.display(),
-                            "Timed out while assigning screen_index; continuing with current monitor"
+                            "Timed out while assigning screen; continuing with current monitor"
                         );
                         complete_screen_assignment(state, window, "Screen assignment timed out");
                     }
                 } else {
                     warn!(
-                        screen_index,
+                        screen,
                         path = %state.descriptor.path.display(),
-                        "screen_index out of range; skipping screen assignment"
+                        "screen out of range; skipping screen assignment"
                     );
-                    complete_screen_assignment(state, window, "screen_index out of range");
+                    complete_screen_assignment(state, window, "screen out of range");
                 }
             }
             tiles::SecondaryWindowRelayoutPhase::NeedRect => {
@@ -1039,7 +1039,7 @@ fn apply_secondary_window_rect(
 
     let monitor_handle = state
         .descriptor
-        .screen_index
+        .screen
         .and_then(|idx| monitors.get(idx).cloned())
         .or_else(|| window.current_monitor());
     let Some(monitor_handle) = monitor_handle else {
@@ -1102,7 +1102,7 @@ fn complete_screen_assignment(
     window: &WinitWindow,
     reason: &'static str,
 ) {
-    state.applied_screen_index = state.descriptor.screen_index;
+    state.applied_screen = state.descriptor.screen;
     state.relayout_attempts = 0;
     state.relayout_started_at = None;
     state.relayout_phase = if state.descriptor.screen_rect.is_some() {
@@ -1118,9 +1118,9 @@ fn complete_screen_assignment(
     }
 
     info!(
-        screen_index = state
+        screen = state
             .descriptor
-            .screen_index
+            .screen
             .map(|idx| idx as i32)
             .unwrap_or(-1),
         path = %state.descriptor.path.display(),
@@ -1211,11 +1211,11 @@ fn window_on_target_screen(
     window: &WinitWindow,
     monitors: &[MonitorHandle],
 ) -> bool {
-    let Some(screen_index) = state.descriptor.screen_index else {
+    let Some(screen) = state.descriptor.screen else {
         return true;
     };
 
-    let Some(target_monitor) = monitors.get(screen_index) else {
+    let Some(target_monitor) = monitors.get(screen) else {
         return false;
     };
 
