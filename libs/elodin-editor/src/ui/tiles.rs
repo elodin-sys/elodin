@@ -100,6 +100,14 @@ impl SecondaryWindowDescriptor {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PrimaryWindowRelayoutPhase {
+    #[default]
+    Idle,
+    NeedScreen,
+    NeedRect,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SecondaryWindowId(pub u32);
 
@@ -125,6 +133,37 @@ pub struct SecondaryWindowState {
     pub relayout_attempts: u8,
     pub relayout_started_at: Option<Instant>,
     pub skip_metadata_capture: bool,
+}
+
+#[derive(Clone, Default)]
+pub struct PrimaryWindowLayout {
+    pub screen: Option<usize>,
+    pub screen_rect: Option<WindowRect>,
+    pub relayout_phase: PrimaryWindowRelayoutPhase,
+    pub applied_screen: Option<usize>,
+    pub applied_rect: Option<WindowRect>,
+    pub relayout_attempts: u8,
+    pub relayout_started_at: Option<Instant>,
+    pub pending_fullscreen_exit: bool,
+}
+
+impl PrimaryWindowLayout {
+    pub fn set(&mut self, screen: Option<usize>, rect: Option<WindowRect>) {
+        self.screen = screen;
+        self.screen_rect = rect;
+        self.applied_screen = None;
+        self.applied_rect = None;
+        self.relayout_attempts = 0;
+        self.relayout_started_at = None;
+        self.pending_fullscreen_exit = false;
+        self.relayout_phase = if self.screen.is_some() {
+            PrimaryWindowRelayoutPhase::NeedScreen
+        } else if self.screen_rect.is_some() {
+            PrimaryWindowRelayoutPhase::NeedRect
+        } else {
+            PrimaryWindowRelayoutPhase::Idle
+        };
+    }
 }
 
 impl SecondaryWindowState {
@@ -302,6 +341,7 @@ fn clamp_percent(value: f32) -> u32 {
 #[derive(Resource)]
 pub struct WindowManager {
     main: TileState,
+    primary: PrimaryWindowLayout,
     secondary: Vec<SecondaryWindowState>,
     next_id: u32,
 }
@@ -310,6 +350,7 @@ impl Default for WindowManager {
     fn default() -> Self {
         Self {
             main: TileState::new(Id::new("main_tab_tree")),
+            primary: PrimaryWindowLayout::default(),
             secondary: Vec::new(),
             next_id: 0,
         }
@@ -323,6 +364,18 @@ impl WindowManager {
 
     pub fn main_mut(&mut self) -> &mut TileState {
         &mut self.main
+    }
+
+    pub fn primary_layout(&self) -> &PrimaryWindowLayout {
+        &self.primary
+    }
+
+    pub fn primary_layout_mut(&mut self) -> &mut PrimaryWindowLayout {
+        &mut self.primary
+    }
+
+    pub fn clear_primary_layout(&mut self) {
+        self.primary = PrimaryWindowLayout::default();
     }
 
     pub fn take_main(&mut self) -> TileState {
