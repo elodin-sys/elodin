@@ -226,11 +226,11 @@ impl Plugin for UiPlugin {
             .add_systems(Update, sync_secondary_windows.after(render_layout))
             .add_systems(
                 Update,
-                apply_secondary_window_monitors.after(sync_secondary_windows),
+                apply_secondary_window_screens.after(sync_secondary_windows),
             )
             .add_systems(
                 Update,
-                capture_secondary_window_screens.after(apply_secondary_window_monitors),
+                capture_secondary_window_screens.after(apply_secondary_window_screens),
             )
             .add_systems(Update, handle_secondary_close.after(sync_secondary_windows))
             .add_systems(
@@ -709,8 +709,7 @@ fn sync_secondary_windows(
         state.window_entity = Some(window_entity);
         state.applied_screen_index = None;
         state.applied_rect = None;
-        state.pending_screen_index = state.descriptor.screen_index;
-        state.needs_relayout = true;
+        state.refresh_relayout_phase();
         state.skip_metadata_capture = true;
         existing_map.insert(state.id, window_entity);
         let window_ref = WindowRef::Entity(window_entity);
@@ -724,12 +723,15 @@ fn sync_secondary_windows(
     }
 }
 
-fn apply_secondary_window_monitors(
+fn apply_secondary_window_screens(
     mut windows: ResMut<tiles::WindowManager>,
     winit_windows: NonSend<bevy::winit::WinitWindows>,
 ) {
     for state in windows.secondary_mut().iter_mut() {
-        if !state.needs_relayout {
+        if matches!(
+            state.relayout_phase,
+            tiles::SecondaryWindowRelayoutPhase::Idle
+        ) {
             continue;
         }
         let Some(entity) = state.window_entity else {
@@ -741,44 +743,22 @@ fn apply_secondary_window_monitors(
 
         let monitors = collect_sorted_monitors(window);
 
-        let mut screen_ready = state.descriptor.screen_index.is_none();
-        if let Some(screen_index) = state.descriptor.screen_index {
-            if confirm_screen_assignment(state, window, &monitors) {
-                screen_ready = true;
-            } else {
-                if state.pending_screen_index != Some(screen_index) {
-                    if let Some(target_monitor) = monitors.get(screen_index) {
-                        assign_window_to_monitor(state, window, target_monitor.clone());
-                        state.pending_screen_index = Some(screen_index);
+        match state.relayout_phase {
+            tiles::SecondaryWindowRelayoutPhase::NeedScreen => {
+                if ensure_screen_assignment(state, window, &monitors) {
+                    if state.descriptor.screen_rect.is_some() {
+                        state.relayout_phase = tiles::SecondaryWindowRelayoutPhase::NeedRect;
                     } else {
-                        info!(
-                            screen_index,
-                            path = %state.descriptor.path.display(),
-                            "screen_index out of range; skipping monitor assignment"
-                        );
-                        state.needs_relayout = false;
+                        state.relayout_phase = tiles::SecondaryWindowRelayoutPhase::Idle;
                     }
                 }
-                state.applied_rect = None;
-                continue;
             }
-        } else {
-            state.pending_screen_index = None;
-        }
-
-        let rect_applied = if state.descriptor.screen_rect.is_some() {
-            apply_secondary_window_rect(state, window, &monitors)
-        } else {
-            if state.applied_rect.is_some() {
-                state.applied_rect = None;
-                window.set_minimized(false);
+            tiles::SecondaryWindowRelayoutPhase::NeedRect => {
+                if apply_secondary_window_rect(state, window, &monitors) {
+                    state.relayout_phase = tiles::SecondaryWindowRelayoutPhase::Idle;
+                }
             }
-            true
-        };
-
-        if rect_applied && screen_ready {
-            state.needs_relayout = false;
-            state.pending_screen_index = None;
+            tiles::SecondaryWindowRelayoutPhase::Idle => {}
         }
     }
 }
@@ -850,20 +830,18 @@ fn apply_secondary_window_rect(
     true
 }
 
-fn confirm_screen_assignment(
+fn ensure_screen_assignment(
     state: &mut tiles::SecondaryWindowState,
     window: &WinitWindow,
     monitors: &[MonitorHandle],
 ) -> bool {
     let Some(screen_index) = state.descriptor.screen_index else {
         state.applied_screen_index = None;
-        state.pending_screen_index = None;
         return true;
     };
 
     let Some(target_monitor) = monitors.get(screen_index) else {
         state.applied_screen_index = None;
-        state.pending_screen_index = None;
         info!(
             screen_index,
             path = %state.descriptor.path.display(),
@@ -890,10 +868,10 @@ fn confirm_screen_assignment(
             );
         }
         state.applied_screen_index = Some(screen_index);
-        state.pending_screen_index = None;
         true
     } else {
         state.applied_screen_index = None;
+        assign_window_to_monitor(state, window, target_monitor.clone());
         false
     }
 }
