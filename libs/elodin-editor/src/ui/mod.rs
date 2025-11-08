@@ -916,6 +916,8 @@ fn sync_secondary_windows(
         state.window_entity = Some(window_entity);
         state.applied_screen_index = None;
         state.applied_rect = None;
+        state.pending_screen_index = state.descriptor.screen_index;
+        state.needs_relayout = true;
         state.skip_metadata_capture = true;
         existing_map.insert(state.id, window_entity);
         let window_ref = WindowRef::Entity(window_entity);
@@ -934,6 +936,9 @@ fn apply_secondary_window_monitors(
     winit_windows: NonSend<bevy::winit::WinitWindows>,
 ) {
     for state in windows.secondary_mut().iter_mut() {
+        if !state.needs_relayout {
+            continue;
+        }
         let Some(entity) = state.window_entity else {
             continue;
         };
@@ -943,9 +948,11 @@ fn apply_secondary_window_monitors(
 
         let monitors = collect_sorted_monitors(window);
 
-        let screen_ready = confirm_screen_assignment(state, window, &monitors);
+        let mut screen_ready = state.descriptor.screen_index.is_none();
         if let Some(screen_index) = state.descriptor.screen_index {
-            if !screen_ready {
+            if confirm_screen_assignment(state, window, &monitors) {
+                screen_ready = true;
+            } else {
                 if state.pending_screen_index != Some(screen_index) {
                     if let Some(target_monitor) = monitors.get(screen_index) {
                         assign_window_to_monitor(state, window, target_monitor.clone());
@@ -956,6 +963,7 @@ fn apply_secondary_window_monitors(
                             path = %state.descriptor.path.display(),
                             "screen_index out of range; skipping monitor assignment"
                         );
+                        state.needs_relayout = false;
                     }
                 }
                 state.applied_rect = None;
@@ -965,7 +973,20 @@ fn apply_secondary_window_monitors(
             state.pending_screen_index = None;
         }
 
-        apply_secondary_window_rect(state, window, &monitors);
+        let rect_applied = if state.descriptor.screen_rect.is_some() {
+            apply_secondary_window_rect(state, window, &monitors)
+        } else {
+            if state.applied_rect.is_some() {
+                state.applied_rect = None;
+                window.set_minimized(false);
+            }
+            true
+        };
+
+        if rect_applied && screen_ready {
+            state.needs_relayout = false;
+            state.pending_screen_index = None;
+        }
     }
 }
 
@@ -973,24 +994,24 @@ fn apply_secondary_window_rect(
     state: &mut tiles::SecondaryWindowState,
     window: &WinitWindow,
     monitors: &[MonitorHandle],
-) {
+) -> bool {
     let Some(rect) = state.descriptor.screen_rect else {
         if state.applied_rect.is_some() {
             state.applied_rect = None;
             window.set_minimized(false);
         }
-        return;
+        return true;
     };
 
     if state.applied_rect == Some(rect) {
-        return;
+        return true;
     }
 
     if rect.width == 0 && rect.height == 0 {
         window.set_minimized(true);
         state.applied_rect = Some(rect);
         state.skip_metadata_capture = true;
-        return;
+        return true;
     }
 
     let monitor_handle = state
@@ -999,13 +1020,13 @@ fn apply_secondary_window_rect(
         .and_then(|idx| monitors.get(idx).cloned())
         .or_else(|| window.current_monitor());
     let Some(monitor_handle) = monitor_handle else {
-        return;
+        return false;
     };
 
     let monitor_pos = monitor_handle.position();
     let monitor_size = monitor_handle.size();
     if monitor_size.width == 0 || monitor_size.height == 0 {
-        return;
+        return false;
     }
 
     window.set_minimized(false);
@@ -1033,6 +1054,7 @@ fn apply_secondary_window_rect(
     window.set_outer_position(PhysicalPosition::new(x, y));
     state.applied_rect = Some(rect);
     state.skip_metadata_capture = true;
+    true
 }
 
 fn confirm_screen_assignment(
@@ -1057,12 +1079,16 @@ fn confirm_screen_assignment(
         return false;
     };
 
-    let Some(current_monitor) = window.current_monitor() else {
-        state.applied_screen_index = None;
-        return false;
-    };
+    let mut matched = window
+        .current_monitor()
+        .is_some_and(|current| monitors_match(&current, target_monitor));
 
-    if monitors_match(&current_monitor, target_monitor) {
+    if !matched && let Ok(position) = window.outer_position() {
+        let size = window.outer_size();
+        matched = monitor_contains_window(target_monitor, position, size);
+    }
+
+    if matched {
         if state.applied_screen_index != Some(screen_index) {
             info!(
                 screen_index,
@@ -1128,6 +1154,23 @@ fn monitors_match(a: &MonitorHandle, b: &MonitorHandle) -> bool {
     a.position() == b.position() && a.size() == b.size()
 }
 
+fn monitor_contains_window(
+    monitor: &MonitorHandle,
+    position: PhysicalPosition<i32>,
+    size: PhysicalSize<u32>,
+) -> bool {
+    let center_x = position.x + size.width as i32 / 2;
+    let center_y = position.y + size.height as i32 / 2;
+    let monitor_pos = monitor.position();
+    let monitor_size = monitor.size();
+    let min_x = monitor_pos.x;
+    let max_x = monitor_pos.x + monitor_size.width as i32;
+    let min_y = monitor_pos.y;
+    let max_y = monitor_pos.y + monitor_size.height as i32;
+
+    center_x >= min_x && center_x < max_x && center_y >= min_y && center_y < max_y
+}
+
 fn handle_secondary_close(
     mut events: EventReader<WindowCloseRequested>,
     mut windows: ResMut<tiles::WindowManager>,
@@ -1145,13 +1188,12 @@ fn handle_secondary_close(
     if !to_remove.is_empty() {
         windows.secondary_mut().retain_mut(|state| {
             let keep = !to_remove.contains(&state.id);
-            if !keep {
-                if let Some((_, window)) = state
+            if !keep
+                && let Some((_, window)) = state
                     .window_entity
                     .and_then(|entity| window_query.get(entity).ok())
-                {
-                    state.update_descriptor_from_window(window, &monitors);
-                }
+            {
+                state.update_descriptor_from_window(window, &monitors);
             }
             keep
         });
