@@ -1018,6 +1018,16 @@ fn apply_secondary_window_rect(
     window: &WinitWindow,
     monitors: &[MonitorHandle],
 ) -> bool {
+    if state.pending_fullscreen_exit {
+        if window.fullscreen().is_some() {
+            window.set_fullscreen(None);
+            window.set_maximized(false);
+            window.set_minimized(false);
+            return false;
+        }
+        state.pending_fullscreen_exit = false;
+    }
+
     let Some(rect) = state.descriptor.screen_rect else {
         if state.applied_rect.is_some() {
             state.applied_rect = None;
@@ -1099,7 +1109,7 @@ fn assign_window_to_screen(
 
 fn complete_screen_assignment(
     state: &mut tiles::SecondaryWindowState,
-    window: &WinitWindow,
+    _window: &WinitWindow,
     reason: &'static str,
 ) {
     state.applied_screen = state.descriptor.screen;
@@ -1110,12 +1120,6 @@ fn complete_screen_assignment(
     } else {
         tiles::SecondaryWindowRelayoutPhase::Idle
     };
-    if state.pending_fullscreen_exit {
-        if window.fullscreen().is_some() {
-            window.set_fullscreen(None);
-        }
-        state.pending_fullscreen_exit = false;
-    }
 
     info!(
         screen = state
