@@ -5,7 +5,10 @@ use convert_case::Casing;
 use impeller2::types::{PrimType, Timestamp};
 use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 use miette::miette;
-use nox_ecs::{ComponentSchema, IntoSystem, System as _, TimeStep, World, increment_sim_tick, nox};
+use elodin_db::ComponentSchema;
+use crate::ecs::{World, system::IntoSystem, system::System as _};
+use crate::ecs::world::TimeStep;
+use crate::physics::globals::increment_sim_tick;
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
 use pyo3::{
     IntoPyObjectExt,
@@ -110,7 +113,6 @@ impl WorldBuilder {
                 let new_id = name
                     .without_boundaries(&convert_case::Boundary::digits())
                     .to_case(convert_case::Case::Snake);
-                eprintln!("convert name {:?} to ID {:?}", &name, &new_id);
                 info!("convert name {:?} to ID {:?}", &name, &new_id);
                 Some(new_id)
             }
@@ -260,7 +262,7 @@ impl WorldBuilder {
                 py.allow_threads(|| {
                     stellarator::run(|| {
                         let tmpfile = tempfile::tempdir().unwrap().keep();
-                        nox_ecs::impeller2_server::Server::new(
+                        crate::server::Server::new(
                             elodin_db::Server::new(tmpfile.join("db"), addr).unwrap(),
                             exec,
                         )
@@ -436,7 +438,7 @@ impl WorldBuilder {
                         .computation()
                         .to_hlo_text()
                         .map_err(|e| {
-                            Error::NoxEcs(nox_ecs::Error::Nox(nox_ecs::nox::Error::Xla(e)))
+                            Error::Nox(nox::Error::Xla(e))
                         })?;
 
                     // Save HLO dump to output directory
@@ -801,7 +803,7 @@ impl WorldBuilder {
                     let db_dir = tempfile::tempdir()?;
                     let db_dir_path = db_dir.keep();
                     let db = elodin_db::DB::create(db_dir_path.join("db"))?;
-                    nox_ecs::impeller2_server::init_db(
+                    crate::server::init_db(
                         &db,
                         &mut compiled_exec.world,
                         impeller2::types::Timestamp::now(),
@@ -874,7 +876,7 @@ impl WorldBuilder {
         let db_dir = tempfile::tempdir()?;
         let db_dir = db_dir.keep();
         let db = elodin_db::DB::create(db_dir.join("db"))?;
-        nox_ecs::impeller2_server::init_db(&db, &mut exec.world, Timestamp::now())?;
+        crate::server::init_db(&db, &mut exec.world, Timestamp::now())?;
         Ok(Exec { exec, db })
     }
 
@@ -1122,7 +1124,7 @@ impl WorldBuilder {
         run_time_step: Option<f64>,
         default_playback_speed: f64,
         max_ticks: Option<u64>,
-    ) -> Result<nox_ecs::WorldExec, Error> {
+    ) -> Result<crate::core::WorldExec, Error> {
         let mut start = time::Instant::now();
         let ts = time::Duration::from_secs_f64(sim_time_step);
         self.world.metadata.sim_time_step = TimeStep(ts);
@@ -1141,7 +1143,7 @@ impl WorldBuilder {
         let xla_exec = increment_sim_tick.pipe(sys).compile(&world)?;
         let tick_exec = xla_exec.compile_hlo_module(py, &world)?;
 
-        let mut exec = nox_ecs::WorldExec::new(world, tick_exec, None);
+        let mut exec = crate::core::WorldExec::new(world, tick_exec, None);
         exec.profiler.build.observe(&mut start);
         Ok(exec)
     }

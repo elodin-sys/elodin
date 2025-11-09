@@ -1,6 +1,6 @@
 use core::ops::{Add, Mul};
 
-use nox_ecs::nox::{self, Noxpr, Op, ReprMonad, Scalar, Tensor, Vector};
+use nox::{self, Noxpr, Op, ReprMonad, Scalar, Tensor, Vector};
 use pyo3::IntoPyObjectExt;
 use pyo3::{prelude::*, types::PyTuple};
 

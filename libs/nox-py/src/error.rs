@@ -1,4 +1,3 @@
-use nox_ecs::nox;
 use pyo3::{
     PyErr,
     exceptions::{PyRuntimeError, PyValueError},
@@ -8,8 +7,6 @@ use pyo3::{
 pub enum Error {
     #[error("{0}")]
     Nox(#[from] nox::Error),
-    #[error("{0}")]
-    NoxEcs(#[from] nox_ecs::Error),
     #[error("{0}")]
     PyErr(#[from] PyErr),
     #[error("hlo module was not PyBytes")]
@@ -28,18 +25,36 @@ pub enum Error {
     Impeller(#[from] impeller2::error::Error),
     #[error("elodin db error {0}")]
     DB(#[from] elodin_db::Error),
+    #[error("component not found")]
+    ComponentNotFound,
+    #[error("component value had wrong size")]
+    ValueSizeMismatch,
+    #[error("channel closed")]
+    ChannelClosed,
+    #[error("serde_json {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("stellarator error {0}")]
+    Stellar(#[from] stellarator::Error),
+    #[error("arrow error {0}")]
+    Arrow(#[from] ::arrow::error::ArrowError),
+}
+
+impl From<nox::xla::Error> for Error {
+    fn from(value: nox::xla::Error) -> Self {
+        Error::Nox(nox::Error::Xla(value))
+    }
 }
 
 impl From<Error> for PyErr {
     fn from(value: Error) -> Self {
         match value {
-            Error::NoxEcs(nox_ecs::Error::ComponentNotFound) => {
+            Error::ComponentNotFound => {
                 PyValueError::new_err("component not found")
             }
-            Error::NoxEcs(nox_ecs::Error::ValueSizeMismatch) => {
+            Error::ValueSizeMismatch => {
                 PyValueError::new_err("value size mismatch")
             }
-            Error::NoxEcs(nox_ecs::Error::PyO3(err)) | Error::PyErr(err) => err,
+            Error::PyErr(err) => err,
             err => PyRuntimeError::new_err(err.to_string()),
         }
     }

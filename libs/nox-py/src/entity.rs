@@ -1,5 +1,5 @@
 use crate::*;
-use core::fmt;
+use std::fmt;
 
 #[derive(Clone, Copy)]
 #[pyclass]
@@ -16,6 +16,14 @@ impl EntityId {
 
     fn __str__(&self) -> String {
         self.to_string()
+    }
+    
+    fn __int__(&self) -> u64 {
+        self.inner.0
+    }
+    
+    fn id(&self) -> u64 {
+        self.inner.0
     }
 }
 

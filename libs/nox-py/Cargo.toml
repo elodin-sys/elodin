@@ -8,8 +8,8 @@ publish = false
 
 [features]
 publish = ["pyo3/extension-module", "pyo3/abi3-py310"]
-cuda = ["nox-ecs/cuda"]
-shared = ["nox-ecs/shared"]
+cuda = ["nox/cuda"]
+shared = ["nox/shared"]
 
 [package.metadata.maturin]
 name = "elodin"
@@ -24,9 +24,8 @@ pyo3 = "0.23.0"
 numpy.version = "0.23"
 
 # nox
-nox-ecs.path = "../nox-ecs"
-nox-ecs.features = ["pyo3"]
-nox-ecs-macros.path = "../nox-ecs-macros"
+nox.path = "../nox"
+nox.features = ["xla", "noxpr", "jax"]
 
 # types
 postcard.version = "1.0"
@@ -34,6 +33,20 @@ postcard.features = ["alloc"]
 bytes = "1.10"
 serde_json = "1.0"
 toml = "0.8"
+
+# data structures (from nox-ecs)
+smallvec.version = "1.11.2"
+smallvec.features = ["const_generics", "union"]
+bytemuck.version = "1.21"
+bytemuck.features = ["derive"]
+ndarray = "0.16.1"
+byteorder = "1.5.0"
+
+# serialize (from nox-ecs)
+arrow = { version = "55", default-features = false, features = ["ipc"] }
+serde.version = "1.0"
+thingbuf = "0.1.6"
+futures-lite = "2.5.0"
 
 # impeller
 impeller2.path = "../impeller2"

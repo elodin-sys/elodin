@@ -1,21 +1,27 @@
 use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::{collections::BTreeMap, marker::PhantomData};
+use std::collections::BTreeMap;
 
 use impeller2::types::ComponentId;
-use nox_ecs::{
-    ErasedSystem,
-    nox::{self, Noxpr},
-};
 use numpy::PyUntypedArray;
 use pyo3::exceptions::PyOSError;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyAnyMethods;
 
+// Migrated modules from nox-ecs
+pub mod ecs;
+pub mod physics;
+pub mod server;
+
+// Make core available for re-export
+
+// Python binding modules
 mod archetype;
+mod asset;
 mod component;
+mod core;
 mod entity;
 mod error;
 mod exec;
@@ -28,16 +34,29 @@ mod system;
 mod world_builder;
 
 pub use archetype::*;
+pub use asset::*;
 pub use component::*;
 pub use entity::*;
 pub use error::*;
-pub use exec::*;
-pub use graph::*;
+pub use exec::*;  // Python Exec wrapper
+pub use graph::{GraphQueryInner, Edge};  // Python graph bindings
 pub use linalg::*;
 pub use query::*;
 pub use spatial::*;
 pub use system::*;
-pub use world_builder::*;
+pub use world_builder::*;  // Python WorldBuilder wrapper
+
+// Selective re-exports from core to avoid conflicts
+pub use core::{
+    ExecMetadata, ExecState, Uncompiled, Compiled,
+    WorldExec, ErasedSystem, Profiler, RollingMean,
+    WorldExt, IntoSystemExt, SystemExt,
+};
+// Note: Not re-exporting Exec and WorldBuilder from core
+// to avoid conflicts with Python wrappers
+
+// Re-export nox for compatibility
+pub use nox;
 
 trait PyUntypedArrayExt {
     unsafe fn buf(&self, elem_size: usize) -> &[u8];
@@ -76,11 +95,11 @@ impl FromStr for Integrator {
     }
 }
 
-impl From<Integrator> for nox_ecs::Integrator {
+impl From<Integrator> for physics::integrator::Integrator {
     fn from(integrator: Integrator) -> Self {
         match integrator {
-            Integrator::Rk4 => nox_ecs::Integrator::Rk4,
-            Integrator::SemiImplicit => nox_ecs::Integrator::SemiImplicit,
+            Integrator::Rk4 => physics::integrator::Integrator::Rk4,
+            Integrator::SemiImplicit => physics::integrator::Integrator::SemiImplicit,
         }
     }
 }
@@ -89,17 +108,17 @@ impl From<Integrator> for nox_ecs::Integrator {
 #[pyo3(signature = (time_step = None, sys = None, integrator = Integrator::Rk4))]
 pub fn six_dof(time_step: Option<f64>, sys: Option<System>, integrator: Integrator) -> System {
     let integrator = integrator.into();
-    let sys: Arc<dyn nox_ecs::System<Arg = (), Ret = ()> + Send + Sync> =
+    let sys: Arc<dyn ecs::system::System<Arg = (), Ret = ()> + Send + Sync> =
         if let Some(dt) = time_step {
             if let Some(sys) = sys {
-                nox_ecs::six_dof::six_dof_with_dt(|| sys, dt, integrator)
+                physics::six_dof::six_dof_with_dt(|| sys, dt, integrator)
             } else {
-                nox_ecs::six_dof::six_dof_with_dt(|| (), dt, integrator)
+                physics::six_dof::six_dof_with_dt(|| (), dt, integrator)
             }
         } else if let Some(sys) = sys {
-            nox_ecs::six_dof::six_dof(|| sys, integrator)
+            physics::six_dof::six_dof(|| sys, integrator)
         } else {
-            nox_ecs::six_dof::six_dof(|| (), integrator)
+            physics::six_dof::six_dof(|| (), integrator)
         };
     System { inner: sys }
 }
@@ -134,6 +153,7 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<QueryInner>()?;
     m.add_class::<GraphQueryInner>()?;
     m.add_class::<Edge>()?;
+    m.add_class::<Handle>()?;
     m.add_class::<Component>()?;
     m.add_class::<Integrator>()?;
     m.add_class::<PyFnSystem>()?;

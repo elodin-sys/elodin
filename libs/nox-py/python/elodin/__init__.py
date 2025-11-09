@@ -293,11 +293,16 @@ class Archetype(Protocol):
         return [Component.of(v) for v in typing.get_type_hints(self, include_extras=True).values()]
 
     def arrays(self) -> list[numpy.ndarray]:
-        return [
-            numpy.asarray(tree_flatten(v)[0][0])
-            for (a, v) in self.__dict__.items()
-            if not a.startswith("__") and not callable(getattr(self, a))
-        ]
+        arrays = []
+        for (a, v) in self.__dict__.items():
+            if not a.startswith("__") and not callable(getattr(self, a)):
+                flat_vals, _ = tree_flatten(v)
+                # If multiple values from flattening (like Edge with (from, to)), stack them
+                if len(flat_vals) > 1:
+                    arrays.append(numpy.asarray(flat_vals))
+                else:
+                    arrays.append(numpy.asarray(flat_vals[0]))
+        return arrays
 
 
 jax.tree_util.register_pytree_node(

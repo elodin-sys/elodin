@@ -34,10 +34,17 @@ impl PyAsset {
     }
 }
 
+// Simple Handle type for asset management
+#[derive(Clone)]
+pub struct SimpleHandle<T> {
+    pub id: u64,
+    _phantom: std::marker::PhantomData<T>,
+}
+
 #[derive(Clone)]
 #[pyclass]
 pub struct Handle {
-    pub inner: nox_ecs::Handle<()>,
+    pub inner: SimpleHandle<()>,
 }
 
 #[pymethods]
@@ -52,13 +59,33 @@ impl Handle {
     }
 
     #[staticmethod]
-    fn unflatten(_aux: PyObject, _jax: PyObject) -> Self {
-        todo!()
+    fn unflatten(_aux: PyObject, jax: PyObject) -> Self {
+        // Extract the u64 id from the JAX array
+        Python::with_gil(|py| {
+            // The jax object should be a scalar u64
+            let id = jax.extract::<u64>(py).unwrap_or(0);
+            Handle {
+                inner: SimpleHandle {
+                    id,
+                    _phantom: std::marker::PhantomData,
+                },
+            }
+        })
     }
 
     #[staticmethod]
-    fn from_array(_arr: PyObject) -> Self {
-        todo!()
+    fn from_array(arr: PyObject) -> Self {
+        // Extract the u64 id from a numpy/JAX array
+        Python::with_gil(|py| {
+            // The array should contain a single u64 value
+            let id = arr.extract::<u64>(py).unwrap_or(0);
+            Handle {
+                inner: SimpleHandle {
+                    id,
+                    _phantom: std::marker::PhantomData,
+                },
+            }
+        })
     }
 
     #[classattr]

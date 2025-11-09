@@ -1,15 +1,16 @@
 use crate::*;
 
-use core::marker::PhantomData;
+use std::marker::PhantomData;
 
 use impeller2::types::ComponentId;
-use nox_ecs::{ComponentArray, join_query, update_var};
-use nox_ecs::{join_many, nox::Noxpr};
+use crate::ecs::component_array::{ComponentArray, update_var};
+use crate::ecs::query::{join_query, join_many};
+use nox::Noxpr;
 
 #[pyclass]
 #[derive(Clone)]
 pub struct QueryInner {
-    pub query: nox_ecs::Query<()>,
+    pub query: crate::ecs::Query<()>,
     pub metadata: Vec<Component>,
 }
 
@@ -22,7 +23,7 @@ impl QueryInner {
         metadata: QueryMetadata,
     ) -> Result<QueryInner, Error> {
         Ok(QueryInner {
-            query: nox_ecs::Query {
+            query: crate::ecs::Query {
                 exprs: arrays.into_iter().map(Noxpr::jax).collect(),
                 entity_map: metadata.entity_map,
                 len: metadata.len,
@@ -44,8 +45,8 @@ impl QueryInner {
                 let id = ComponentId::new(id);
                 let (meta, i) = builder
                     .get_var(id)
-                    .ok_or(nox_ecs::Error::ComponentNotFound)?;
-                let buffer = args.get(i).ok_or(nox_ecs::Error::ComponentNotFound)?;
+                    .ok_or(crate::Error::ComponentNotFound)?;
+                let buffer = args.get(i).ok_or(crate::Error::ComponentNotFound)?;
                 Ok::<_, Error>((
                     ComponentArray {
                         buffer: Noxpr::jax(Python::with_gil(|py| buffer.clone_ref(py))),
@@ -63,19 +64,19 @@ impl QueryInner {
                 if query.is_some() {
                     query = Some(join_many(query.take().unwrap(), &a));
                 } else {
-                    let q: nox_ecs::Query<()> = a.into();
+                    let q: crate::ecs::Query<()> = a.into();
                     query = Some(q);
                 }
                 Ok::<_, Error>((query, metadata))
             })?;
-        let query = query.ok_or(nox_ecs::Error::ComponentNotFound)?;
+        let query = query.ok_or(crate::Error::ComponentNotFound)?;
         Ok(Self { query, metadata })
     }
 
     pub fn map(&self, new_buf: PyObject, metadata: Component) -> QueryInner {
         let expr = Noxpr::jax(new_buf);
         QueryInner {
-            query: nox_ecs::Query {
+            query: crate::ecs::Query {
                 exprs: vec![expr],
                 entity_map: self.query.entity_map.clone(),
                 len: self.query.len,
@@ -94,9 +95,9 @@ impl QueryInner {
             .zip(self.metadata.iter().map(|m| m.component_id()))
         {
             let Some((meta, index)) = builder.get_var(id) else {
-                return Err(nox_ecs::Error::ComponentNotFound.into());
+                return Err(crate::Error::ComponentNotFound.into());
             };
-            let buffer = args.get(index).ok_or(nox_ecs::Error::ComponentNotFound)?;
+            let buffer = args.get(index).ok_or(crate::Error::ComponentNotFound)?;
 
             if meta.entity_map == self.query.entity_map {
                 outputs.push(expr.clone());
