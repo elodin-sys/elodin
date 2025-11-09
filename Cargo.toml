@@ -11,10 +11,11 @@ resolver = "2"
 members = [
     "libs/elodin-editor",
     "libs/nox",
+    "libs/elodin-types",
+    "libs/elodin-types/array",
     "libs/nox-ecs",
     "libs/nox-ecs-macros",
     "libs/nox-py",
-    "libs/nox-frames",
     "libs/noxla",
     "apps/elodin",
     "libs/roci",
@@ -84,7 +85,6 @@ roci-adcs.path = "libs/roci/adcs"
 nox.path = "libs/nox"
 nox.default-features = false
 nox-ecs.path = "libs/nox-ecs"
-nox-frames.path = "libs/nox-frames"
 wmm.path = "libs/wmm"
 
 [profile.release-with-debug]

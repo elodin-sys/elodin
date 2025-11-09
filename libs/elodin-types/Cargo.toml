@@ -1,0 +1,45 @@
+[package]
+name = "elodin-types"
+license = "MIT OR Apache-2.0"
+version.workspace = true
+edition = "2024"
+description = "Math types for Elodin (extracted from nox without XLA dependencies)"
+repository = "https://github.com/elodin-sys/elodin"
+
+[features]
+default = ["std"]
+std = ["thiserror/std", "faer/std", "num-traits/std", "elodin-types-array/std"]
+serde = ["dep:serde", "smallvec/serde"]
+
+[dependencies]
+typenum = "1.17.0"
+num-traits = { version = "0.2.15", default-features = false }
+thiserror = { version = "2.0", default-features = false }
+seq-macro = "0.3.5"
+fn-traits = "0.2"
+faer = { version = "0.20", default-features = false, features = ["cholesky", "lu"] }
+libm = "0.2.8"
+inplace_it = "0.3.6"
+smallvec.version = "1.11.2"
+smallvec.features = ["const_generics", "union"]
+elodin-types-array.path = "./array"
+
+zerocopy.version = "0.8.2"
+zerocopy.features = ["derive"]
+
+# debug
+approx = "0.5"
+
+# serialize
+serde.version = "1"
+serde.optional = true
+traversal = "0.1.2"
+
+tracing = "0.1"
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+lapack-src = { version = "0.10", features = ["netlib"] }
+netlib-src = { version = "0.8", features = ["static"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+lapack-src = { version = "0.10", features = ["accelerate"] }

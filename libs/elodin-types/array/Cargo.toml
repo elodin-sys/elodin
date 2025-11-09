@@ -1,0 +1,14 @@
+[package]
+name = "elodin-types-array"
+version.workspace = true
+edition = "2024"
+readme = "README.md"
+
+[features]
+std = []
+
+[dependencies]
+zerocopy = "0.8"
+
+[dev-dependencies]
+zerocopy = "0.8"
