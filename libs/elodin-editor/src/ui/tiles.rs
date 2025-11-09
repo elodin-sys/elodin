@@ -133,6 +133,14 @@ pub struct SecondaryWindowState {
     pub relayout_attempts: u8,
     pub relayout_started_at: Option<Instant>,
     pub skip_metadata_capture: bool,
+    pub pending_exit_state: PendingFullscreenExit,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PendingFullscreenExit {
+    #[default]
+    None,
+    Requested,
 }
 
 #[derive(Clone, Default)]
@@ -147,6 +155,8 @@ pub struct PrimaryWindowLayout {
     pub pending_fullscreen_exit: bool,
     pub captured_screen: Option<usize>,
     pub captured_rect: Option<WindowRect>,
+    pub requested_screen: Option<usize>,
+    pub requested_rect: Option<WindowRect>,
 }
 
 impl PrimaryWindowLayout {
@@ -158,8 +168,8 @@ impl PrimaryWindowLayout {
         self.relayout_attempts = 0;
         self.relayout_started_at = None;
         self.pending_fullscreen_exit = false;
-        self.captured_screen = screen;
-        self.captured_rect = rect;
+        self.requested_screen = screen;
+        self.requested_rect = rect;
         self.relayout_phase = if self.screen.is_some() {
             PrimaryWindowRelayoutPhase::NeedScreen
         } else if self.screen_rect.is_some() {
@@ -186,12 +196,13 @@ impl SecondaryWindowState {
         self.relayout_attempts = 0;
         self.relayout_started_at = None;
         self.pending_fullscreen_exit = false;
+        self.pending_exit_state = PendingFullscreenExit::None;
     }
 
     pub fn update_descriptor_from_window(
         &mut self,
         window: &Window,
-        monitors: &Query<(Entity, &Monitor)>,
+        screens: &Query<(Entity, &Monitor)>,
     ) {
         if self.skip_metadata_capture {
             self.skip_metadata_capture = false;
@@ -210,9 +221,9 @@ impl SecondaryWindowState {
 
         let mut best: Option<(usize, i32)> = None;
         let mut best_bounds: Option<(IVec2, UVec2)> = None;
-        for (index, (_, monitor)) in monitors.iter().enumerate() {
-            let min = monitor.physical_position;
-            let size = monitor.physical_size();
+        for (index, (_, screen)) in screens.iter().enumerate() {
+            let min = screen.physical_position;
+            let size = screen.physical_size();
             let max = IVec2::new(min.x + size.x as i32, min.y + size.y as i32);
             if center.x >= min.x && center.x < max.x && center.y >= min.y && center.y < max.y {
                 let distance = (center.x - min.x).abs() + (center.y - min.y).abs();
@@ -475,6 +486,7 @@ impl WindowManager {
             applied_rect: None,
             relayout_phase,
             pending_fullscreen_exit: false,
+            pending_exit_state: PendingFullscreenExit::None,
             relayout_attempts: 0,
             relayout_started_at: None,
             skip_metadata_capture: false,

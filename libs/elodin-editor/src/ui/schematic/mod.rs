@@ -274,12 +274,12 @@ pub fn tiles_to_schematic(
     }
 
     let primary_layout = param.windows.primary_layout();
-    if primary_layout.captured_screen.is_some() || primary_layout.captured_rect.is_some() {
+    if primary_layout.requested_screen.is_some() || primary_layout.requested_rect.is_some() {
         window_elems.push(SchematicElem::Window(WindowSchematic {
             title: None,
             path: None,
-            screen: primary_layout.captured_screen.map(|idx| idx as u32),
-            screen_rect: primary_layout.captured_rect,
+            screen: primary_layout.requested_screen.map(|idx| idx as u32),
+            screen_rect: primary_layout.requested_rect,
         }));
     }
 

@@ -151,10 +151,10 @@ def world() -> tuple[el.World, el.EntityId]:
         }
         
         window path="examples/drone/motor-panel.kdl" screen=2 {
-           rect 1 1 99 99
+           rect 1 1 50 40
         }
         window path="examples/drone/rate-control-panel.kdl" screen=0 {
-            rect 50 0 50 50
+            rect 50 0 50 25
         }
         window screen=1 {
             rect 9 15 76 60
