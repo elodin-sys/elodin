@@ -1,7 +1,7 @@
 use impeller2::component::Component;
+use impeller2::schema::Schema;
 use impeller2_wkt::ComponentMetadata;
 use nox::NoxprNode;
-use impeller2::schema::Schema;
 
 use crate::ecs::world::World;
 
@@ -37,4 +37,3 @@ pub trait ComponentExt: Component {
 }
 
 impl<C: Component> ComponentExt for C {}
-

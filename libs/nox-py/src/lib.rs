@@ -1,7 +1,7 @@
+use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::collections::BTreeMap;
 
 use impeller2::types::ComponentId;
 use numpy::PyUntypedArray;
@@ -38,19 +38,18 @@ pub use asset::*;
 pub use component::*;
 pub use entity::*;
 pub use error::*;
-pub use exec::*;  // Python Exec wrapper
-pub use graph::{GraphQueryInner, Edge};  // Python graph bindings
+pub use exec::*; // Python Exec wrapper
+pub use graph::{Edge, GraphQueryInner}; // Python graph bindings
 pub use linalg::*;
 pub use query::*;
 pub use spatial::*;
 pub use system::*;
-pub use world_builder::*;  // Python WorldBuilder wrapper
+pub use world_builder::*; // Python WorldBuilder wrapper
 
 // Selective re-exports from core to avoid conflicts
 pub use core::{
-    ExecMetadata, ExecState, Uncompiled, Compiled,
-    WorldExec, ErasedSystem, Profiler, RollingMean,
-    WorldExt, IntoSystemExt, SystemExt,
+    Compiled, ErasedSystem, ExecMetadata, ExecState, IntoSystemExt, Profiler, RollingMean,
+    SystemExt, Uncompiled, WorldExec, WorldExt,
 };
 // Note: Not re-exporting Exec and WorldBuilder from core
 // to avoid conflicts with Python wrappers

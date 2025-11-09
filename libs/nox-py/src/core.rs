@@ -2,18 +2,18 @@
 
 use crate::ecs::World;
 use crate::ecs::system::{CompiledSystem, IntoSystem, System, SystemBuilder};
-use crate::physics::globals::increment_sim_tick;
 use crate::ecs::world::{Buffers, TimeStep};
+use crate::physics::globals::increment_sim_tick;
 use impeller2::types::{ComponentId, EntityId};
-use nox::xla::{BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
 use nox::Client;
+use nox::xla::{BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs::File;
+use std::marker::PhantomData;
 use std::path::Path;
 use std::time::{Duration, Instant};
-use std::collections::BTreeMap;
-use std::marker::PhantomData;
 
 // Core types are re-exported from lib.rs
 
@@ -80,11 +80,18 @@ where
         self
     }
 
-    pub fn spawn(&mut self, archetype: impl crate::ecs::Archetype + 'static) -> crate::ecs::world::Entity<'_> {
+    pub fn spawn(
+        &mut self,
+        archetype: impl crate::ecs::Archetype + 'static,
+    ) -> crate::ecs::world::Entity<'_> {
         self.world.spawn(archetype)
     }
 
-    pub fn insert_with_id(&mut self, archetype: impl crate::ecs::Archetype + 'static, entity_id: EntityId) {
+    pub fn insert_with_id(
+        &mut self,
+        archetype: impl crate::ecs::Archetype + 'static,
+        entity_id: EntityId,
+    ) {
         self.world.insert_with_id(archetype, entity_id);
     }
 
@@ -435,4 +442,3 @@ impl std::fmt::Display for RollingMean {
         write!(f, "{:?}", self.mean_duration())
     }
 }
-

@@ -2,9 +2,9 @@ use crate::*;
 
 use std::marker::PhantomData;
 
-use impeller2::types::ComponentId;
 use crate::ecs::component_array::{ComponentArray, update_var};
-use crate::ecs::query::{join_query, join_many};
+use crate::ecs::query::{join_many, join_query};
+use impeller2::types::ComponentId;
 use nox::Noxpr;
 
 #[pyclass]
@@ -43,9 +43,7 @@ impl QueryInner {
             .iter()
             .map(|id| {
                 let id = ComponentId::new(id);
-                let (meta, i) = builder
-                    .get_var(id)
-                    .ok_or(crate::Error::ComponentNotFound)?;
+                let (meta, i) = builder.get_var(id).ok_or(crate::Error::ComponentNotFound)?;
                 let buffer = args.get(i).ok_or(crate::Error::ComponentNotFound)?;
                 Ok::<_, Error>((
                     ComponentArray {
@@ -95,7 +93,7 @@ impl QueryInner {
             .zip(self.metadata.iter().map(|m| m.component_id()))
         {
             let Some((meta, index)) = builder.get_var(id) else {
-                return Err(crate::Error::ComponentNotFound.into());
+                return Err(crate::Error::ComponentNotFound);
             };
             let buffer = args.get(index).ok_or(crate::Error::ComponentNotFound)?;
 

@@ -1,8 +1,7 @@
 //! Contains vector operations for fixed-size vectors, supporting basic arithmetic, dot products, and cross products.
 
 use crate::{
-    Const, DefaultRepr, Dim, DimMul, Field, Matrix, OwnedRepr, RealField,
-    Scalar, Tensor, ToTypenum,
+    Const, DefaultRepr, Dim, DimMul, Field, Matrix, OwnedRepr, RealField, Scalar, Tensor, ToTypenum,
 };
 
 // The array macro is exported at crate root
@@ -88,10 +87,10 @@ impl<T: RealField, R: OwnedRepr> Vector<T, 3, R> {
     pub fn skew(&self) -> Matrix<T, 3, 3, R> {
         let v = self.parts();
         let zero = T::zero::<R>();
-        
+
         // Build skew-symmetric matrix directly from scalars
         // [  0  -z   y ]
-        // [  z   0  -x ]  
+        // [  z   0  -x ]
         // [ -y   x   0 ]
         Tensor::from_inner(R::from_scalars(
             [
@@ -131,8 +130,8 @@ impl<T: Field + RealField, const N: usize, R: OwnedRepr> Vector<T, N, R> {
 
 #[cfg(test)]
 mod tests {
-    use core::f64::consts::FRAC_PI_4;
     use super::*;
+    use core::f64::consts::FRAC_PI_4;
     // Import specific items to avoid ambiguity
     use crate::{Scalar, Vector3};
 
@@ -220,6 +219,9 @@ mod tests {
         let a: Vector<f64, 3> = tensor![1.0, 2.0, 3.0].into();
         let b: Vector<f64, 2> = tensor![4.0, 5.0].into();
         let result = a.outer(&b);
-        assert_eq!(result, tensor![[4.0, 5.0], [8.0, 10.0], [12.0, 15.0]].into());
+        assert_eq!(
+            result,
+            tensor![[4.0, 5.0], [8.0, 10.0], [12.0, 15.0]].into()
+        );
     }
 }

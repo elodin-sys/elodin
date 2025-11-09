@@ -26,7 +26,9 @@ pub struct Column<B> {
     pub entity_ids: Vec<u8>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct TimeStep(pub Duration);
 
 impl Default for TimeStep {
@@ -360,4 +362,3 @@ impl<'a, B: 'a + AsRef<[u8]>> ColumnRef<'a, B> {
         client.copy_raw_host_buffer(self.schema.element_type(), self.column.as_ref(), &dims[..])
     }
 }
-

@@ -4,7 +4,7 @@ use crate::{
     Const, DefaultRepr, Dim, Error, OwnedRepr, RealField, SquareDim, Tensor, TensorDim, Vector,
 };
 
-// The array macro is exported at crate root  
+// The array macro is exported at crate root
 // Used in tests
 #[allow(unused_imports)]
 use crate::array as tensor;
@@ -111,8 +111,8 @@ impl<T: RealField> Matrix3<T, crate::array::ArrayRepr> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Vector3};
     use super::*;
+    use crate::Vector3;
 
     #[test]
     fn test_add() {
@@ -188,8 +188,9 @@ mod tests {
             ],
             [0.0, 0.5345224838248488, 0.8451542547285167],
             [0.31622776601683794, 0.8017837257372732, -0.50709255283711]
-        ].into();
-        
+        ]
+        .into();
+
         let v: Vector3<f64, crate::array::ArrayRepr> = Vector3::new(1.0, 2.0, 3.0);
         assert_eq!(
             Matrix3::look_at_rh(v.normalize(), Vector3::y_axis()),

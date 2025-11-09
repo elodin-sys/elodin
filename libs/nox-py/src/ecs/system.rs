@@ -519,4 +519,3 @@ impl<S: System> System for &S {
         (*self).compile(world)
     }
 }
-

@@ -30,16 +30,16 @@ impl Time {
 // Manual Component implementations (without macros)
 impl<R: OwnedRepr> impeller2::component::Component for WorldPos<R> {
     const NAME: &'static str = "world_pos";
-    
+
     fn schema() -> impeller2::schema::Schema<Vec<u64>> {
         nox::SpatialTransform::<f64, R>::schema()
     }
 }
 
-impl<R: OwnedRepr> Component for WorldPos<R> 
-where
+impl<R: OwnedRepr> Component for WorldPos<R> where
     Self: ReprMonad<Op> + for<'a> nox::FromBuilder<Item<'a> = Self>
-{}
+{
+}
 
 impl<R: OwnedRepr> ReprMonad<R> for WorldPos<R> {
     type Elem = <nox::SpatialTransform<f64, R> as ReprMonad<R>>::Elem;
@@ -69,16 +69,16 @@ impl<R: OwnedRepr> ReprMonad<R> for WorldPos<R> {
 // Seed implementations
 impl<R: OwnedRepr> impeller2::component::Component for Seed<R> {
     const NAME: &'static str = "seed";
-    
+
     fn schema() -> impeller2::schema::Schema<Vec<u64>> {
         Scalar::<u64, R>::schema()
     }
 }
 
-impl<R: OwnedRepr> Component for Seed<R> 
-where
+impl<R: OwnedRepr> Component for Seed<R> where
     Self: ReprMonad<Op> + for<'a> nox::FromBuilder<Item<'a> = Self>
-{}
+{
+}
 
 impl<R: OwnedRepr> ReprMonad<R> for Seed<R> {
     type Elem = <Scalar<u64, R> as ReprMonad<R>>::Elem;
@@ -105,19 +105,19 @@ impl<R: OwnedRepr> ReprMonad<R> for Seed<R> {
     }
 }
 
-// Time implementations  
+// Time implementations
 impl<R: OwnedRepr> impeller2::component::Component for Time<R> {
     const NAME: &'static str = "time";
-    
+
     fn schema() -> impeller2::schema::Schema<Vec<u64>> {
         Scalar::<f64, R>::schema()
     }
 }
 
-impl<R: OwnedRepr> Component for Time<R> 
-where
+impl<R: OwnedRepr> Component for Time<R> where
     Self: ReprMonad<Op> + for<'a> nox::FromBuilder<Item<'a> = Self>
-{}
+{
+}
 
 impl<R: OwnedRepr> ReprMonad<R> for Time<R> {
     type Elem = <Scalar<f64, R> as ReprMonad<R>>::Elem;
@@ -143,5 +143,3 @@ impl<R: OwnedRepr> ReprMonad<R> for Time<R> {
         Time(Scalar::from_inner(inner))
     }
 }
-
-

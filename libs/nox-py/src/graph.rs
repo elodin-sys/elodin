@@ -1,11 +1,14 @@
 // Python bindings for graph functionality
 use super::*;
 
-use impeller2::types::ComponentId;
 use crate::ecs::graph as graph_mod;
+use impeller2::types::ComponentId;
 use nox::Noxpr;
-use std::marker::PhantomData;
 use std::collections::HashMap;
+use std::marker::PhantomData;
+
+// Type alias to reduce complexity
+type ArraysResult = HashMap<usize, (Vec<PyObject>, Vec<PyObject>)>;
 
 #[pyclass]
 #[derive(Clone)]
@@ -53,24 +56,28 @@ impl GraphQueryInner {
         _py: Python<'_>,
         from_query: &QueryInner,
         to_query: &QueryInner,
-    ) -> Result<HashMap<usize, (Vec<PyObject>, Vec<PyObject>)>, Error> {
+    ) -> Result<ArraysResult, Error> {
         let from = from_query.query.clone();
         let to = to_query.query.clone();
         let exprs = graph_mod::exprs_from_edges_queries(&self.query.edges, from, to);
-        
+
         let mut result = HashMap::new();
         for (key, (from_q, to_q)) in exprs.iter() {
-            let from_arrays = from_q.exprs.iter()
+            let from_arrays = from_q
+                .exprs
+                .iter()
                 .map(|expr| expr.to_jax())
                 .collect::<Result<Vec<_>, _>>()?;
-            let to_arrays = to_q.exprs.iter()
+            let to_arrays = to_q
+                .exprs
+                .iter()
                 .map(|expr| expr.to_jax())
                 .collect::<Result<Vec<_>, _>>()?;
             result.insert(*key, (from_arrays, to_arrays));
         }
         Ok(result)
     }
-    
+
     fn map(
         &self,
         from_query: &QueryInner,
@@ -142,7 +149,7 @@ impl Edge {
             inner: graph_mod::Edge {
                 from: impeller2::types::EntityId(data.0),
                 to: impeller2::types::EntityId(data.1),
-            }
+            },
         }
     }
 
@@ -156,4 +163,3 @@ impl Edge {
         (Self::metadata(),)
     }
 }
-

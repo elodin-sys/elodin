@@ -1,4 +1,6 @@
-use crate::ecs::{Component, component_array::ComponentArray, system::SystemBuilder, system::SystemParam};
+use crate::ecs::{
+    Component, component_array::ComponentArray, system::SystemBuilder, system::SystemParam,
+};
 use elodin_db::ComponentSchema;
 use impeller2::types::{ComponentId, EntityId};
 use nox::{ArrayTy, Builder, CompFn, Noxpr, NoxprFn, ReprMonad, xla};
@@ -488,4 +490,3 @@ impl<A> From<ComponentArray<A>> for Query<A> {
         }
     }
 }
-

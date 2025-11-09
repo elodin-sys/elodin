@@ -1,10 +1,10 @@
 use crate::*;
 
-use crate::ecs::utils::PrimTypeExt;
-use crate::ecs::system::{CompiledSystem, SystemParam};
+use crate::core::ExecMetadata;
 use crate::ecs::World;
-use crate::core::{ExecMetadata};
 use crate::ecs::graph::{EdgeComponent, GraphQuery, TotalEdge};
+use crate::ecs::system::{CompiledSystem, SystemParam};
+use crate::ecs::utils::PrimTypeExt;
 use elodin_db::ComponentSchema;
 use nox::{NoxprComp, NoxprFn, NoxprNode, NoxprTy, jax::JaxNoxprFn};
 use pyo3::IntoPyObjectExt;
@@ -146,7 +146,8 @@ impl crate::ecs::system::System for PyFnSystem {
 
 pub trait CompiledSystemExt {
     fn arg_arrays(&self, py: Python<'_>, world: &World) -> Result<Vec<Py<PyAny>>, Error>;
-    fn compile_hlo_module(&self, py: Python<'_>, world: &World) -> Result<crate::core::Exec, Error>;
+    fn compile_hlo_module(&self, py: Python<'_>, world: &World)
+    -> Result<crate::core::Exec, Error>;
     fn compile_jax_module(&self, py: Python<'_>) -> Result<Py<PyAny>, Error>;
 }
 
@@ -176,7 +177,11 @@ impl CompiledSystemExt for CompiledSystem {
         Ok(res)
     }
 
-    fn compile_hlo_module(&self, py: Python<'_>, world: &World) -> Result<crate::core::Exec, Error> {
+    fn compile_hlo_module(
+        &self,
+        py: Python<'_>,
+        world: &World,
+    ) -> Result<crate::core::Exec, Error> {
         let func = noxpr_to_callable(self.computation.func.clone());
         let input_arrays = self.arg_arrays(py, world)?;
         let py_code = "import jax

@@ -1,5 +1,5 @@
-use crate::ecs::{component_array::ComponentArray, query::ComponentGroup, Query, World};
 use crate::ecs::system::{CompiledSystem, IntoSystem, System, SystemBuilder, SystemParam};
+use crate::ecs::{Query, World, component_array::ComponentArray, query::ComponentGroup};
 use crate::physics::globals::SimulationTimeStep;
 use nox::Scalar;
 use std::ops::Add;
@@ -88,24 +88,25 @@ where
         let sim_dt = ComponentArray::<SimulationTimeStep>::param(&builder)?;
         let dt = self.dt.map(Scalar::from).unwrap_or_else(|| sim_dt.get(0).0);
 
-        let step = |dt_factor: f64, builder: &mut SystemBuilder| -> Result<Query<DU>, crate::Error> {
-            let f = |dt: ComponentArray<SimulationTimeStep>,
-                     init_u: Query<U>,
-                     du: Query<DU>|
-             -> Query<U> {
-                let dt = &dt.get(0).0 * dt_factor;
-                init_u
-                    .clone()
-                    .join_query(du.clone())
-                    .map(|u, du| u + dt.clone() * du)
-                    .unwrap()
+        let step =
+            |dt_factor: f64, builder: &mut SystemBuilder| -> Result<Query<DU>, crate::Error> {
+                let f = |dt: ComponentArray<SimulationTimeStep>,
+                         init_u: Query<U>,
+                         du: Query<DU>|
+                 -> Query<U> {
+                    let dt = &dt.get(0).0 * dt_factor;
+                    init_u
+                        .clone()
+                        .join_query(du.clone())
+                        .map(|u, du| u + dt.clone() * du)
+                        .unwrap()
+                };
+                f.into_system()
+                    .compile(world)?
+                    .insert_into_builder(builder)?;
+                compiled_pipe.clone().insert_into_builder(builder)?;
+                Query::<DU>::param(builder)
             };
-            f.into_system()
-                .compile(world)?
-                .insert_into_builder(builder)?;
-            compiled_pipe.clone().insert_into_builder(builder)?;
-            Query::<DU>::param(builder)
-        };
 
         let k1 = step(0.0, &mut builder)?;
         init_u.insert_into_builder(&mut builder);
@@ -169,4 +170,3 @@ where
     };
     crate::ErasedSystem::new(step_v.pipe(step_x))
 }
-

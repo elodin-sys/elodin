@@ -2,9 +2,15 @@ use core::ops::{Add, Mul};
 use nox::{Op, OwnedRepr, Scalar, SpatialForce, SpatialInertia, SpatialMotion};
 use std::sync::Arc;
 
-use crate::ecs::{Archetype, Component, component_array::ComponentArray, Query, system::IntoSystem, system::System};
 use crate::ecs::component::WorldPos;
-use crate::{ErasedSystem, physics::integrator::{Integrator, Rk4Ext, semi_implicit_euler, semi_implicit_euler_with_dt}};
+use crate::ecs::{
+    Archetype, Component, Query, component_array::ComponentArray, system::IntoSystem,
+    system::System,
+};
+use crate::{
+    ErasedSystem,
+    physics::integrator::{Integrator, Rk4Ext, semi_implicit_euler, semi_implicit_euler_with_dt},
+};
 
 #[derive(Clone)]
 pub struct WorldVel<R: OwnedRepr = Op>(pub SpatialMotion<f64, R>);
@@ -15,16 +21,16 @@ pub struct WorldAccel<R: OwnedRepr = Op>(pub SpatialMotion<f64, R>);
 // Manual Component implementations for WorldVel
 impl<R: OwnedRepr> impeller2::component::Component for WorldVel<R> {
     const NAME: &'static str = "world_vel";
-    
+
     fn schema() -> impeller2::schema::Schema<Vec<u64>> {
         SpatialMotion::<f64, R>::schema()
     }
 }
 
-impl<R: OwnedRepr> Component for WorldVel<R> 
-where
+impl<R: OwnedRepr> Component for WorldVel<R> where
     Self: nox::ReprMonad<Op> + for<'a> nox::FromBuilder<Item<'a> = Self>
-{}
+{
+}
 
 impl<R: OwnedRepr> nox::ReprMonad<R> for WorldVel<R> {
     type Elem = <SpatialMotion<f64, R> as nox::ReprMonad<R>>::Elem;
@@ -54,16 +60,16 @@ impl<R: OwnedRepr> nox::ReprMonad<R> for WorldVel<R> {
 // Manual Component implementations for WorldAccel
 impl<R: OwnedRepr> impeller2::component::Component for WorldAccel<R> {
     const NAME: &'static str = "world_accel";
-    
+
     fn schema() -> impeller2::schema::Schema<Vec<u64>> {
         SpatialMotion::<f64, R>::schema()
     }
 }
 
-impl<R: OwnedRepr> Component for WorldAccel<R> 
-where
+impl<R: OwnedRepr> Component for WorldAccel<R> where
     Self: nox::ReprMonad<Op> + for<'a> nox::FromBuilder<Item<'a> = Self>
-{}
+{
+}
 
 impl<R: OwnedRepr> nox::ReprMonad<R> for WorldAccel<R> {
     type Elem = <SpatialMotion<f64, R> as nox::ReprMonad<R>>::Elem;
@@ -100,16 +106,16 @@ pub struct Inertia<R: OwnedRepr = Op>(pub SpatialInertia<f64, R>);
 // Manual Component implementations for Force
 impl<R: OwnedRepr> impeller2::component::Component for Force<R> {
     const NAME: &'static str = "force";
-    
+
     fn schema() -> impeller2::schema::Schema<Vec<u64>> {
         SpatialForce::<f64, R>::schema()
     }
 }
 
-impl<R: OwnedRepr> Component for Force<R> 
-where
+impl<R: OwnedRepr> Component for Force<R> where
     Self: nox::ReprMonad<Op> + for<'a> nox::FromBuilder<Item<'a> = Self>
-{}
+{
+}
 
 impl<R: OwnedRepr> nox::ReprMonad<R> for Force<R> {
     type Elem = <SpatialForce<f64, R> as nox::ReprMonad<R>>::Elem;
@@ -139,16 +145,16 @@ impl<R: OwnedRepr> nox::ReprMonad<R> for Force<R> {
 // Manual Component implementations for Inertia
 impl<R: OwnedRepr> impeller2::component::Component for Inertia<R> {
     const NAME: &'static str = "inertia";
-    
+
     fn schema() -> impeller2::schema::Schema<Vec<u64>> {
         SpatialInertia::<f64, R>::schema()
     }
 }
 
-impl<R: OwnedRepr> Component for Inertia<R> 
-where
+impl<R: OwnedRepr> Component for Inertia<R> where
     Self: nox::ReprMonad<Op> + for<'a> nox::FromBuilder<Item<'a> = Self>
-{}
+{
+}
 
 impl<R: OwnedRepr> nox::ReprMonad<R> for Inertia<R> {
     type Elem = <SpatialInertia<f64, R> as nox::ReprMonad<R>>::Elem;
@@ -218,10 +224,7 @@ impl crate::ecs::query::ComponentGroup for U {
     }
 
     fn into_noxpr(self) -> nox::Noxpr {
-        nox::Noxpr::tuple(vec![
-            self.x.into_noxpr(),
-            self.v.into_noxpr(),
-        ])
+        nox::Noxpr::tuple(vec![self.x.into_noxpr(), self.v.into_noxpr()])
     }
 }
 
@@ -257,10 +260,7 @@ impl crate::ecs::query::ComponentGroup for DU {
     }
 
     fn into_noxpr(self) -> nox::Noxpr {
-        nox::Noxpr::tuple(vec![
-            self.v.into_noxpr(),
-            self.a.into_noxpr(),
-        ])
+        nox::Noxpr::tuple(vec![self.v.into_noxpr(), self.a.into_noxpr()])
     }
 }
 
@@ -405,9 +405,12 @@ pub struct Body {
 
 // Manual Archetype implementation for Body
 impl Archetype for Body {
-    fn components() -> Vec<(impeller2::schema::Schema<Vec<u64>>, impeller2_wkt::ComponentMetadata)> {
-        use impeller2::component::Component as ImpellerComponent;
+    fn components() -> Vec<(
+        impeller2::schema::Schema<Vec<u64>>,
+        impeller2_wkt::ComponentMetadata,
+    )> {
         use crate::ecs::archetype::ComponentExt;
+        use impeller2::component::Component as ImpellerComponent;
         vec![
             (<WorldPos>::schema(), <WorldPos>::metadata()),
             (<WorldVel>::schema(), <WorldVel>::metadata()),
@@ -469,4 +472,3 @@ where
         }
     }
 }
-

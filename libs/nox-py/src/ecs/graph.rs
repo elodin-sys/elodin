@@ -4,13 +4,10 @@ use impeller2::{
 };
 
 use bytes::Buf;
-use nox::{
-    ArrayTy, Builder, CompFn, Const, Noxpr, NoxprFn, NoxprTy, Op, ReprMonad,
-    xla::Literal,
-};
+use nox::{ArrayTy, Builder, CompFn, Const, Noxpr, NoxprFn, NoxprTy, Op, ReprMonad, xla::Literal};
 use std::{collections::BTreeMap, marker::PhantomData};
 
-use crate::ecs::{component_array::ComponentArray, query::ComponentGroup, Query};
+use crate::ecs::{Query, component_array::ComponentArray, query::ComponentGroup};
 
 #[derive(Clone)]
 pub struct GraphQuery<E> {
@@ -115,7 +112,9 @@ impl EdgeComponent for Edge {
 
 pub struct TotalEdge;
 
-impl<E: EdgeComponent + crate::ecs::Component + 'static> crate::ecs::system::SystemParam for GraphQuery<E> {
+impl<E: EdgeComponent + crate::ecs::Component + 'static> crate::ecs::system::SystemParam
+    for GraphQuery<E>
+{
     type Item = Self;
 
     fn init(_builder: &mut crate::ecs::system::SystemBuilder) -> Result<(), crate::Error> {
@@ -144,7 +143,10 @@ impl<E: EdgeComponent + crate::ecs::Component + 'static> crate::ecs::system::Sys
         std::iter::empty()
     }
 
-    fn output(&self, _builder: &mut crate::ecs::system::SystemBuilder) -> Result<Noxpr, crate::Error> {
+    fn output(
+        &self,
+        _builder: &mut crate::ecs::system::SystemBuilder,
+    ) -> Result<Noxpr, crate::Error> {
         unimplemented!()
     }
 }
@@ -174,7 +176,10 @@ impl crate::ecs::system::SystemParam for GraphQuery<TotalEdge> {
         std::iter::empty()
     }
 
-    fn output(&self, _builder: &mut crate::ecs::system::SystemBuilder) -> Result<Noxpr, crate::Error> {
+    fn output(
+        &self,
+        _builder: &mut crate::ecs::system::SystemBuilder,
+    ) -> Result<Noxpr, crate::Error> {
         unimplemented!()
     }
 }
@@ -311,11 +316,12 @@ impl<E> GraphQuery<E> {
                     entity_map: from.entity_map.clone(),
                     len: from.len,
                     phantom_data: PhantomData,
-                    component_id: I::component_ids().next().expect("ComponentGroup must have at least one component"),
+                    component_id: I::component_ids()
+                        .next()
+                        .expect("ComponentGroup must have at least one component"),
                 });
             }
         }
         output_array.unwrap()
     }
 }
-

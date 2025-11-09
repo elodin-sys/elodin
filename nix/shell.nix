@@ -139,7 +139,7 @@ in {
       XLA_EXTENSION_DIR = "${xla_ext}";
 
       # Enable sccache for local nix develop shell only for faster Rust builds
-      SCCACHE_BIN = "${pkgs.sccache}/bin/sccache";
+      # SCCACHE_BIN = "${pkgs.sccache}/bin/sccache";
 
       # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
       # GCC 14 treats -Wincompatible-pointer-types as error by default
@@ -173,9 +173,10 @@ in {
           echo "uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml"
           echo ""
 
-          export RUSTC_WRAPPER="''${SCCACHE_BIN}"
-          export SCCACHE_DIR="''${HOME}/.cache/sccache"
-          mkdir -p "''${SCCACHE_DIR}"
+          export RUSTC_WRAPPER=""
+          # export RUSTC_WRAPPER="''${SCCACHE_BIN}"
+          # export SCCACHE_SERVER_PORT=4226
+          # export SCCACHE_DIR="/tmp/sc"
           exec ${pkgs.zsh}/bin/zsh
         fi
       '';

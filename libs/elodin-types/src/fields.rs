@@ -110,11 +110,11 @@ macro_rules! impl_real_field {
             fn asin(self) -> Self {
                 self.asin()
             }
-            
+
             fn log(self) -> Self {
                 self.ln()
             }
-            
+
             fn exp(self) -> Self {
                 self.exp()
             }
@@ -165,11 +165,11 @@ macro_rules! impl_real_field {
             fn asin(self) -> Self {
                 libm::Libm::<$t>::asin(self)
             }
-            
+
             fn log(self) -> Self {
                 libm::Libm::<$t>::log(self)
             }
-            
+
             fn exp(self) -> Self {
                 libm::Libm::<$t>::exp(self)
             }

@@ -10,8 +10,8 @@ use std::{
 use stellarator::struc_con::{Joinable, Thread};
 use tracing::warn;
 
-use crate::{Compiled, WorldExec};
 use crate::ecs::World;
+use crate::{Compiled, WorldExec};
 
 pub struct Server {
     db: elodin_db::Server,
@@ -370,4 +370,3 @@ pub fn timestamps_changed(db: &DB, components: &mut [(PairId, Timestamp)]) -> Op
         changed
     })
 }
-

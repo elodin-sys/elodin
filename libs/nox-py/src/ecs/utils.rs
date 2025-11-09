@@ -65,4 +65,3 @@ impl SchemaExt for Schema<Vec<u64>> {
         }
     }
 }
-

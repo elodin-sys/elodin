@@ -48,12 +48,8 @@ impl From<nox::xla::Error> for Error {
 impl From<Error> for PyErr {
     fn from(value: Error) -> Self {
         match value {
-            Error::ComponentNotFound => {
-                PyValueError::new_err("component not found")
-            }
-            Error::ValueSizeMismatch => {
-                PyValueError::new_err("value size mismatch")
-            }
+            Error::ComponentNotFound => PyValueError::new_err("component not found"),
+            Error::ValueSizeMismatch => PyValueError::new_err("value size mismatch"),
             Error::PyErr(err) => err,
             err => PyRuntimeError::new_err(err.to_string()),
         }

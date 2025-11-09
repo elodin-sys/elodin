@@ -2,10 +2,10 @@ use std::collections::HashMap;
 
 use crate::*;
 
+use crate::core::Compiled;
 use impeller2::types::Timestamp;
 use impeller2_wkt::ArchiveFormat;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
-use crate::core::Compiled;
 use pyo3::exceptions::PyTypeError;
 use pyo3::types::IntoPyDict;
 

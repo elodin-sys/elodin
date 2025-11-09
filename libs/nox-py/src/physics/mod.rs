@@ -6,4 +6,3 @@ pub mod six_dof;
 pub use globals::*;
 pub use integrator::*;
 pub use six_dof::*;
-

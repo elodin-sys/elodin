@@ -151,4 +151,3 @@ impl<C: Component> ComponentArray<C> {
         })
     }
 }
-

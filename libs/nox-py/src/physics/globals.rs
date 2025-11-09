@@ -13,16 +13,16 @@ pub struct Tick<R: OwnedRepr = Op>(pub Scalar<u64, R>);
 // Manual Component implementation for SimulationTimeStep
 impl<R: OwnedRepr> impeller2::component::Component for SimulationTimeStep<R> {
     const NAME: &'static str = "simulation_time_step";
-    
+
     fn schema() -> impeller2::schema::Schema<Vec<u64>> {
         Scalar::<f64, R>::schema()
     }
 }
 
-impl<R: OwnedRepr> Component for SimulationTimeStep<R> 
-where
+impl<R: OwnedRepr> Component for SimulationTimeStep<R> where
     Self: nox::ReprMonad<Op> + for<'a> nox::FromBuilder<Item<'a> = Self>
-{}
+{
+}
 
 impl<R: OwnedRepr> nox::ReprMonad<R> for SimulationTimeStep<R> {
     type Elem = <Scalar<f64, R> as nox::ReprMonad<R>>::Elem;
@@ -52,16 +52,16 @@ impl<R: OwnedRepr> nox::ReprMonad<R> for SimulationTimeStep<R> {
 // Manual Component implementation for Tick
 impl<R: OwnedRepr> impeller2::component::Component for Tick<R> {
     const NAME: &'static str = "tick";
-    
+
     fn schema() -> impeller2::schema::Schema<Vec<u64>> {
         Scalar::<u64, R>::schema()
     }
 }
 
-impl<R: OwnedRepr> Component for Tick<R> 
-where
+impl<R: OwnedRepr> Component for Tick<R> where
     Self: nox::ReprMonad<Op> + for<'a> nox::FromBuilder<Item<'a> = Self>
-{}
+{
+}
 
 impl<R: OwnedRepr> nox::ReprMonad<R> for Tick<R> {
     type Elem = <Scalar<u64, R> as nox::ReprMonad<R>>::Elem;
@@ -107,12 +107,18 @@ pub struct SystemGlobals {
 
 // Manual Archetype implementation for SystemGlobals
 impl Archetype for SystemGlobals {
-    fn components() -> Vec<(impeller2::schema::Schema<Vec<u64>>, impeller2_wkt::ComponentMetadata)> {
-        use impeller2::component::Component;
+    fn components() -> Vec<(
+        impeller2::schema::Schema<Vec<u64>>,
+        impeller2_wkt::ComponentMetadata,
+    )> {
         use crate::ecs::archetype::ComponentExt;
+        use impeller2::component::Component;
         vec![
             (<Tick>::schema(), <Tick>::metadata()),
-            (<SimulationTimeStep>::schema(), <SimulationTimeStep>::metadata()),
+            (
+                <SimulationTimeStep>::schema(),
+                <SimulationTimeStep>::metadata(),
+            ),
         ]
     }
 
@@ -134,4 +140,3 @@ impl SystemGlobals {
 pub fn increment_sim_tick(query: ComponentArray<Tick>) -> ComponentArray<Tick> {
     query.map(|tick: Tick| Tick(tick.0 + 1)).unwrap()
 }
-

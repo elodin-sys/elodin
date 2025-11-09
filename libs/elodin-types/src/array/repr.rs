@@ -230,11 +230,11 @@ impl OwnedRepr for ArrayRepr {
     fn asin<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         arg.asin()
     }
-    
+
     fn log<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         arg.log()
     }
-    
+
     fn exp<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         arg.exp()
     }

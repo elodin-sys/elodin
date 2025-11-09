@@ -116,11 +116,11 @@ impl<T: RealField, D: Dim, R: OwnedRepr> Tensor<T, D, R> {
     pub fn atan2(&self, other: &Self) -> Self {
         Self::from_inner(R::atan2(&self.inner, &other.inner))
     }
-    
+
     pub fn log(&self) -> Self {
         Self::from_inner(R::log(&self.inner))
     }
-    
+
     pub fn exp(&self) -> Self {
         Self::from_inner(R::exp(&self.inner))
     }
@@ -186,7 +186,6 @@ pub trait ConstDim {
 
     type DimArr: AsRef<[usize]> + AsMut<[usize]> + Clone;
     fn const_dim() -> Self::DimArr;
-
 }
 
 /// Represents a scalar dimension, which is essentially dimensionless.

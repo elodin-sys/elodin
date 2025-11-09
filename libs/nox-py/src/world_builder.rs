@@ -1,14 +1,14 @@
+use crate::ecs::world::TimeStep;
+use crate::ecs::{World, system::IntoSystem, system::System as _};
+use crate::physics::globals::increment_sim_tick;
 use crate::*;
 use ::s10::{GroupRecipe, SimRecipe, cli::run_recipe};
 use clap::Parser;
 use convert_case::Casing;
+use elodin_db::ComponentSchema;
 use impeller2::types::{PrimType, Timestamp};
 use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 use miette::miette;
-use elodin_db::ComponentSchema;
-use crate::ecs::{World, system::IntoSystem, system::System as _};
-use crate::ecs::world::TimeStep;
-use crate::physics::globals::increment_sim_tick;
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
 use pyo3::{
     IntoPyObjectExt,
@@ -437,9 +437,7 @@ impl WorldBuilder {
                         .hlo_module()
                         .computation()
                         .to_hlo_text()
-                        .map_err(|e| {
-                            Error::Nox(nox::Error::Xla(e))
-                        })?;
+                        .map_err(|e| Error::Nox(nox::Error::Xla(e)))?;
 
                     // Save HLO dump to output directory
                     let hlo_dump_path = output_dir.join("hlo_dump.txt");
