@@ -1067,7 +1067,7 @@ impl<T1: Elem, D1: Dim> Array<T1, D1> {
     {
         let dim = D1::array_shape(&self.buf);
         let elem_dim = &dim.as_ref()[1..];
-        let elem_size: usize = elem_dim.as_ref().iter().sum();
+        let elem_size: usize = elem_dim.as_ref().iter().product();
         let mut out: Option<(<D2 as ArrayDim>::Shape, _)> = None;
         let len = dim.as_ref()[1];
         for (i, chunk) in self.buf.as_buf().chunks_exact(elem_size).enumerate() {
@@ -1089,7 +1089,7 @@ impl<T1: Elem, D1: Dim> Array<T1, D1> {
             if out_elem_dim.as_ref() != new_elem_dim.as_ref() {
                 panic!("map must return the same dimension elements")
             }
-            let out_elem_size: usize = out_elem_dim.as_ref().iter().sum();
+            let out_elem_size: usize = out_elem_dim.as_ref().iter().product();
             arr.buf.as_mut_buf()[i * out_elem_size..((i + 1) * out_elem_size)]
                 .copy_from_slice(new_elem.buf.as_buf());
         }
@@ -1957,6 +1957,62 @@ mod tests {
         let out: Array<f64, (Const<3>, Const<1>)> =
             a.map(|x: Array<f64, Const<2>>| x.copy_fixed_slice::<Const<1>>(&[0]));
         assert_eq!(out, array![[1.0,], [5.0,], [9.0,]]);
+    }
+
+    #[test]
+    fn test_map_elem_size_calculation() {
+        // This test validates that elem_size in the map function is correctly calculated
+        // using .product() rather than .sum() on dimension sizes.
+        //
+        // For arrays with rank > 1, the total number of elements is the PRODUCT of dimensions.
+        // For example, a 3x4 array has 3*4=12 elements, not 3+4=7.
+        //
+        // LIMITATION: With current MappableDim and ArrayDim implementations, elem_dim is
+        // always 1D, so .sum() and .product() give the same result. This is because:
+        // - MappableDim is only implemented for 2-tuples: (D1, D2) where ElemDim = D2
+        // - ArrayDim only supports flat tuples: Const<N>, (Const, Const), (Const, Const, Const)
+        // - ArrayDim does NOT support nested tuples like (Const<2>, (Const<3>, Const<4>))
+        //
+        // Therefore, it's currently impossible to create an array where ElemDim is multi-dimensional.
+        // For example, this would NOT compile:
+        //   let a: Array<f64, (Const<2>, (Const<3>, Const<4>))> = ...;
+        //   a.map(|x: Array<f64, (Const<3>, Const<4>)>| ...)  // elem_dim would be 2D [3, 4]
+        //
+        // Despite this limitation, using .product() is:
+        // 1. Semantically correct (element count = product of dimensions)
+        // 2. Future-proof if nested dimensions or 3-tuple mappings are added
+        // 3. Consistent with how array sizes are calculated elsewhere in the codebase
+
+        // Test mapping over a 2D array (rows of size 6)
+        // elem_dim = [6], elem_size = product([6]) = 6 (same as sum([6]) = 6)
+        let a = array![
+            [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            [7.0, 8.0, 9.0, 10.0, 11.0, 12.0],
+            [13.0, 14.0, 15.0, 16.0, 17.0, 18.0]
+        ];
+
+        // Map each row by doubling all elements
+        let out: Array<f64, (Const<3>, Const<6>)> = a.map(|x: Array<f64, Const<6>>| {
+            let two = array![2.0, 2.0, 2.0, 2.0, 2.0, 2.0];
+            x.mul(&two)
+        });
+
+        assert_eq!(
+            out,
+            array![
+                [2.0, 4.0, 6.0, 8.0, 10.0, 12.0],
+                [14.0, 16.0, 18.0, 20.0, 22.0, 24.0],
+                [26.0, 28.0, 30.0, 32.0, 34.0, 36.0]
+            ]
+        );
+
+        // Verify all values are correctly mapped (would fail if chunking was incorrect)
+        for (i, row) in out.rows_iter().enumerate() {
+            for (j, val) in row.buf.iter().enumerate() {
+                let expected = (i * 6 + j + 1) as f64 * 2.0;
+                assert_eq!(*val, expected, "Mismatch at row {}, col {}", i, j);
+            }
+        }
     }
 
     #[test]

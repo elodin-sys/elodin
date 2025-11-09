@@ -1,12 +1,12 @@
-# nox_array
+# elodin-types-array
 
 ## Description
-A small building block of the `nox` crate for representing n‑dimensional arrays (tensors) in a zero‑copy friendly way thanks to `ArrayView`.
+A small building block for representing n‑dimensional arrays (tensors) in a zero‑copy friendly way thanks to `ArrayView`.
 `ArrayView` does not own data: it borrows a buffer (`&[T]` or `&[u8]`) and associates it with a shape (`&[usize]`). This is enough to describe and manipulate multi‑dimensional arrays even in constrained environments (embedded, GPU, WASM), without allocation and without heavy dependencies like ndarray.
 
 ## Simple example
 ```rust
-use nox_array::ArrayView;
+use elodin_types_array::ArrayView;
 
 let data = [1, 2, 3, 4, 5, 6];
 let shape = [2, 3];
@@ -28,7 +28,7 @@ assert_eq!(view.shape(), &shape);
 
 ### From raw bytes
 ```rust
-use nox_array::ArrayView;
+use elodin_types_array::ArrayView;
 use zerocopy::byteorder::{LE, U32};
 
 // [1u32, 2u32] as little-endian bytes
@@ -45,7 +45,7 @@ assert_eq!(view.len(), 2);
 ```rust
 #[cfg(feature = "std")]
 {
-    use nox_array::ArrayView;
+    use elodin_types_array::ArrayView;
 
     let data: Vec<i32> = (0..20).collect();
     let v = ArrayView::from_buf_shape_unchecked(&data, &[4, 5]);
