@@ -279,6 +279,7 @@ impl LoadSchematicParams<'_, '_> {
                             applied_rect: None,
                             relayout_phase,
                             pending_fullscreen_exit: false,
+                            pending_exit_started_at: None,
                             pending_exit_state: PendingFullscreenExit::None,
                             relayout_attempts: 0,
                             relayout_started_at: None,
