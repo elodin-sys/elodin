@@ -28,5 +28,10 @@ dynamic = []
 python-source = "python"
 features = ["publish"]
 
+[tool.pytest.ini_options]
+pythonpath = [
+  "python",
+]
+
 [project.entry-points.pytest11]
 elodin = "elodin"
