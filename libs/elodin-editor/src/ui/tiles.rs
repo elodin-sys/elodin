@@ -130,6 +130,7 @@ pub struct SecondaryWindowState {
     pub applied_rect: Option<WindowRect>,
     pub relayout_phase: SecondaryWindowRelayoutPhase,
     pub pending_fullscreen_exit: bool,
+    pub pending_exit_started_at: Option<Instant>,
     pub relayout_attempts: u8,
     pub relayout_started_at: Option<Instant>,
     pub skip_metadata_capture: bool,
@@ -153,6 +154,7 @@ pub struct PrimaryWindowLayout {
     pub relayout_attempts: u8,
     pub relayout_started_at: Option<Instant>,
     pub pending_fullscreen_exit: bool,
+    pub pending_fullscreen_exit_started_at: Option<Instant>,
     pub captured_screen: Option<usize>,
     pub captured_rect: Option<WindowRect>,
     pub requested_screen: Option<usize>,
@@ -168,6 +170,7 @@ impl PrimaryWindowLayout {
         self.relayout_attempts = 0;
         self.relayout_started_at = None;
         self.pending_fullscreen_exit = false;
+        self.pending_fullscreen_exit_started_at = None;
         self.requested_screen = screen;
         self.requested_rect = rect;
         self.relayout_phase = if self.screen.is_some() {
@@ -196,6 +199,7 @@ impl SecondaryWindowState {
         self.relayout_attempts = 0;
         self.relayout_started_at = None;
         self.pending_fullscreen_exit = false;
+        self.pending_exit_started_at = None;
         self.pending_exit_state = PendingFullscreenExit::None;
     }
 
@@ -486,6 +490,7 @@ impl WindowManager {
             applied_rect: None,
             relayout_phase,
             pending_fullscreen_exit: false,
+            pending_exit_started_at: None,
             pending_exit_state: PendingFullscreenExit::None,
             relayout_attempts: 0,
             relayout_started_at: None,

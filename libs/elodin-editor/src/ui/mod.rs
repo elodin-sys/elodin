@@ -29,6 +29,7 @@ use winit::{
 
 const SCREEN_RELAYOUT_MAX_ATTEMPTS: u8 = 5;
 const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(750);
+const FULLSCREEN_EXIT_CONFIRMATION_TIMEOUT: Duration = Duration::from_millis(500);
 const PRIMARY_VIEWPORT_ORDER_BASE: isize = 0;
 const PRIMARY_GRAPH_ORDER_BASE: isize = 100;
 const SECONDARY_GRAPH_ORDER_BASE: isize = 10;
@@ -773,10 +774,19 @@ fn apply_secondary_window_screens(
             tiles::SecondaryWindowRelayoutPhase::NeedScreen => {
                 if state.pending_exit_state == tiles::PendingFullscreenExit::Requested {
                     if window.fullscreen().is_some() {
-                        continue;
+                        exit_fullscreen(window);
+                        if fullscreen_exit_timed_out(state.pending_exit_started_at) {
+                            info!(
+                                path = %state.descriptor.path.display(),
+                                "Timed out while waiting for fullscreen exit; continuing screen assignment"
+                            );
+                        }
                     }
+                    window.set_decorations(true);
                     window.set_maximized(false);
                     window.set_minimized(false);
+                    state.pending_fullscreen_exit = false;
+                    state.pending_exit_started_at = None;
                     state.pending_exit_state = tiles::PendingFullscreenExit::None;
                 }
 
@@ -854,15 +864,24 @@ fn apply_primary_window_layout(
             if window_on_screen(layout.screen, window, &monitors) {
                 if layout.pending_fullscreen_exit {
                     if window.fullscreen().is_some() {
-                        window.set_fullscreen(None);
+                        exit_fullscreen(window);
+                        if fullscreen_exit_timed_out(layout.pending_fullscreen_exit_started_at) {
+                            info!(
+                                screen = layout.screen.map(|idx| idx as i32).unwrap_or(-1),
+                                "Timed out while waiting for primary window fullscreen exit; continuing"
+                            );
+                        }
+                    } else {
+                        window.set_decorations(true);
+                        window.set_maximized(false);
+                        window.set_minimized(false);
                     }
-                    window.set_maximized(false);
-                    window.set_minimized(false);
                     layout.pending_fullscreen_exit = false;
+                    layout.pending_fullscreen_exit_started_at = None;
+                } else if window.fullscreen().is_some() {
+                    exit_fullscreen(window);
                 } else {
-                    if window.fullscreen().is_some() {
-                        window.set_fullscreen(None);
-                    }
+                    window.set_decorations(true);
                     window.set_maximized(false);
                     window.set_minimized(false);
                 }
@@ -875,6 +894,7 @@ fn apply_primary_window_layout(
                 layout.relayout_attempts = 0;
                 layout.relayout_started_at = None;
                 layout.pending_fullscreen_exit = false;
+                layout.pending_fullscreen_exit_started_at = None;
                 info!(
                     screen = layout.screen.map(|idx| idx as i32).unwrap_or(-1),
                     "Primary window confirmed on target screen"
@@ -915,6 +935,7 @@ fn apply_primary_window_layout(
                         tiles::PrimaryWindowRelayoutPhase::Idle
                     };
                     layout.pending_fullscreen_exit = false;
+                    layout.pending_fullscreen_exit_started_at = None;
                 }
             } else {
                 warn!(
@@ -944,12 +965,19 @@ fn apply_secondary_window_rect(
 ) -> bool {
     if state.pending_fullscreen_exit {
         if window.fullscreen().is_some() {
-            window.set_fullscreen(None);
-            window.set_maximized(false);
-            window.set_minimized(false);
-            return false;
+            exit_fullscreen(window);
+            if fullscreen_exit_timed_out(state.pending_exit_started_at) {
+                info!(
+                    path = %state.descriptor.path.display(),
+                    "Timed out while exiting fullscreen; applying rect anyway"
+                );
+            }
         }
         state.pending_fullscreen_exit = false;
+        state.pending_exit_started_at = None;
+        window.set_decorations(true);
+        window.set_maximized(false);
+        window.set_minimized(false);
     }
 
     let Some(rect) = state.descriptor.screen_rect else {
@@ -987,10 +1015,12 @@ fn apply_secondary_window_rect(
     }
 
     if window.fullscreen().is_some() {
-        window.set_fullscreen(None);
+        exit_fullscreen(window);
+    } else {
+        window.set_decorations(true);
+        window.set_maximized(false);
+        window.set_minimized(false);
     }
-    window.set_maximized(false);
-    window.set_minimized(false);
 
     let monitor_width = monitor_size.width as i32;
     let monitor_height = monitor_size.height as i32;
@@ -1047,6 +1077,7 @@ fn assign_window_to_screen(
 
     window.set_fullscreen(Some(Fullscreen::Borderless(Some(target_monitor))));
     state.pending_fullscreen_exit = true;
+    state.pending_exit_started_at = Some(Instant::now());
     window.set_outer_position(PhysicalPosition::new(x, y));
     state.skip_metadata_capture = true;
 }
@@ -1089,6 +1120,7 @@ fn assign_primary_window_to_screen(
 
     window.set_fullscreen(Some(Fullscreen::Borderless(Some(target_monitor))));
     layout.pending_fullscreen_exit = true;
+    layout.pending_fullscreen_exit_started_at = Some(Instant::now());
     window.set_outer_position(PhysicalPosition::new(x, y));
 }
 
@@ -1099,12 +1131,20 @@ fn apply_primary_window_rect(
 ) -> bool {
     if layout.pending_fullscreen_exit {
         if window.fullscreen().is_some() {
-            window.set_fullscreen(None);
+            exit_fullscreen(window);
+            if fullscreen_exit_timed_out(layout.pending_fullscreen_exit_started_at) {
+                info!(
+                    screen = layout.screen.map(|idx| idx as i32).unwrap_or(-1),
+                    "Timed out while exiting fullscreen for primary window; applying rect anyway"
+                );
+            }
+        } else {
+            window.set_decorations(true);
             window.set_maximized(false);
             window.set_minimized(false);
-            return false;
         }
         layout.pending_fullscreen_exit = false;
+        layout.pending_fullscreen_exit_started_at = None;
     }
 
     let Some(rect) = layout.screen_rect else {
@@ -1138,10 +1178,12 @@ fn apply_primary_window_rect(
     }
 
     if window.fullscreen().is_some() {
-        window.set_fullscreen(None);
+        exit_fullscreen(window);
+    } else {
+        window.set_decorations(true);
+        window.set_maximized(false);
+        window.set_minimized(false);
     }
-    window.set_maximized(false);
-    window.set_minimized(false);
 
     let monitor_width = monitor_size.width as i32;
     let monitor_height = monitor_size.height as i32;
@@ -1288,6 +1330,19 @@ fn window_on_screen(
     window
         .current_monitor()
         .is_some_and(|current| monitors_match(&current, target_monitor))
+}
+
+fn exit_fullscreen(window: &WinitWindow) {
+    window.set_fullscreen(None);
+    window.set_maximized(false);
+    window.set_minimized(false);
+    window.set_decorations(true);
+}
+
+fn fullscreen_exit_timed_out(started_at: Option<Instant>) -> bool {
+    started_at
+        .map(|instant| instant.elapsed() > FULLSCREEN_EXIT_CONFIRMATION_TIMEOUT)
+        .unwrap_or(false)
 }
 
 fn secondary_graph_order_base(id: tiles::SecondaryWindowId) -> isize {
