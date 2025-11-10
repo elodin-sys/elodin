@@ -43,7 +43,9 @@ impl QueryInner {
             .iter()
             .map(|id| {
                 let id = ComponentId::new(id);
-                let (meta, i) = builder.get_var(id).ok_or(crate::Error::ComponentNotFound)?;
+                let (meta, i) = builder
+                    .get_var(id)
+                    .ok_or(crate::Error::ComponentNotFound)?;
                 let buffer = args.get(i).ok_or(crate::Error::ComponentNotFound)?;
                 Ok::<_, Error>((
                     ComponentArray {
