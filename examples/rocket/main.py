@@ -499,7 +499,7 @@ w.schematic(
         glb path="compass.glb"
     }
     object_3d rocket.world_pos {
-        glb path="https://storage.googleapis.com/elodin-assets/rocket.glb"
+        glb path="rocket.glb"
     }
     line_3d rocket.world_pos line_width=11.0 perspective=#false {
         color yolk
