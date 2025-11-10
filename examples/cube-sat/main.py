@@ -644,11 +644,11 @@ w.schematic(
         graph "ore_sat.att_est" Name=Att
     }
     object_3d earth.world_pos {
-        glb path="https://storage.googleapis.com/elodin-assets/earth.glb"
+        glb path="earth.glb"
     }
 
     object_3d ore_sat.world_pos {
-        glb path="https://storage.googleapis.com/elodin-assets/oresat-low.glb"
+        glb path="oresat-low.glb"
     }
     line_3d ore_sat.world_pos line_width=10.0 perspective=#false
 """,
