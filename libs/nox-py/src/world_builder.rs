@@ -10,12 +10,14 @@ use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
 use pyo3::{
     IntoPyObjectExt,
     types::{PyDict, PyList},
+    Py, PyAny,
 };
 use std::{
     collections::{HashMap, HashSet},
     iter,
     net::SocketAddr,
     path::{Path, PathBuf},
+    sync::Arc,
     time,
 };
 use tracing::{error, info};
@@ -190,6 +192,7 @@ impl WorldBuilder {
         default_playback_speed = 1.0,
         max_ticks = None,
         optimize = false,
+        is_canceled = None,
     ))]
     pub fn run(
         &mut self,
@@ -200,6 +203,7 @@ impl WorldBuilder {
         default_playback_speed: f64,
         max_ticks: Option<u64>,
         optimize: bool,
+        is_canceled: Option<PyObject>,
     ) -> Result<Option<String>, Error> {
         let _ = tracing_subscriber::fmt::fmt()
             .with_env_filter(
@@ -257,6 +261,12 @@ impl WorldBuilder {
                 if let Some(port) = liveness_port {
                     stellarator::struc_con::stellar(move || ::s10::liveness::monitor(port));
                 }
+                let is_canceled_arc: Option<Arc<Py<PyAny>>> = is_canceled.as_ref().map(|obj| {
+                    Python::with_gil(|py| {
+                        // PyObject is Py<PyAny>, so we can clone it using clone_ref
+                        Arc::new(obj.clone_ref(py))
+                    })
+                });
                 py.allow_threads(|| {
                     stellarator::run(|| {
                         let tmpfile = tempfile::tempdir().unwrap().keep();
@@ -264,8 +274,22 @@ impl WorldBuilder {
                             elodin_db::Server::new(tmpfile.join("db"), addr).unwrap(),
                             exec,
                         )
-                        .run_with_cancellation(|| {
-                            Python::with_gil(|py| py.check_signals().is_err())
+                        .run_with_cancellation({
+                            let is_canceled_fn = is_canceled_arc.clone();
+                            move || {
+                                if let Some(ref func) = is_canceled_fn {
+                                    Python::with_gil(|py| {
+                                        func.call0(py)
+                                            .and_then(|result| result.extract::<bool>(py))
+                                            .unwrap_or_else(|_| {
+                                                // If the function raises an exception or returns non-bool, treat as cancel
+                                                py.check_signals().is_err()
+                                            })
+                                    })
+                                } else {
+                                    Python::with_gil(|py| py.check_signals().is_err())
+                                }
+                            }
                         })
                     })?;
 
