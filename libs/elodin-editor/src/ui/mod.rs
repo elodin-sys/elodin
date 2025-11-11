@@ -984,16 +984,19 @@ fn apply_secondary_window_screens(
                     if LINUX_MULTI_WINDOW {
                         if window.fullscreen().is_some() {
                             exit_fullscreen(window);
-                            if fullscreen_exit_timed_out(state.pending_exit_started_at) {
+                            if !fullscreen_exit_timed_out(state.pending_exit_started_at) {
                                 info!(
                                     path = %state.descriptor.path.display(),
-                                    "Timed out while waiting for fullscreen exit; continuing screen assignment"
+                                    "Waiting for Linux fullscreen exit before reassigning screen"
                                 );
+                                continue;
                             }
+                            info!(
+                                path = %state.descriptor.path.display(),
+                                "Timed out while waiting for fullscreen exit; forcing screen assignment"
+                            );
                         }
-                        window.set_decorations(true);
-                        window.set_maximized(false);
-                        window.set_minimized(false);
+                        linux_force_windowed(window);
                         state.pending_fullscreen_exit = false;
                         state.pending_exit_started_at = None;
                     } else {
@@ -1007,7 +1010,9 @@ fn apply_secondary_window_screens(
                 }
 
                 if window_on_target_screen(state, window, &monitors) {
-                    if !LINUX_MULTI_WINDOW && window.fullscreen().is_some() {
+                    if LINUX_MULTI_WINDOW {
+                        linux_force_windowed(window);
+                    } else if window.fullscreen().is_some() {
                         exit_fullscreen(window);
                         state.pending_fullscreen_exit = false;
                         state.pending_exit_state = tiles::PendingFullscreenExit::None;
@@ -1092,14 +1097,13 @@ fn apply_primary_window_layout(
                             {
                                 info!(
                                     screen = layout.screen.map(|idx| idx as i32).unwrap_or(-1),
-                                    "Timed out while waiting for primary window fullscreen exit; continuing"
+                                    "Timed out while waiting for primary window fullscreen exit; forcing apply"
                                 );
+                            } else {
+                                return;
                             }
-                        } else {
-                            window.set_decorations(true);
-                            window.set_maximized(false);
-                            window.set_minimized(false);
                         }
+                        linux_force_windowed(window);
                         layout.pending_fullscreen_exit_started_at = None;
                     } else {
                         if window.fullscreen().is_some() {
@@ -1112,11 +1116,9 @@ fn apply_primary_window_layout(
                 } else if LINUX_MULTI_WINDOW {
                     if window.fullscreen().is_some() {
                         exit_fullscreen(window);
-                    } else {
-                        window.set_decorations(true);
-                        window.set_maximized(false);
-                        window.set_minimized(false);
+                        return;
                     }
+                    linux_force_windowed(window);
                 } else {
                     if window.fullscreen().is_some() {
                         window.set_fullscreen(None);
@@ -1218,11 +1220,8 @@ fn apply_secondary_window_rect(
                 } else {
                     return false;
                 }
-            } else {
-                window.set_decorations(true);
-                window.set_maximized(false);
-                window.set_minimized(false);
             }
+            linux_force_windowed(window);
             state.pending_fullscreen_exit = false;
             state.pending_exit_started_at = None;
         } else {
@@ -1273,6 +1272,7 @@ fn apply_secondary_window_rect(
     if window.fullscreen().is_some() {
         if LINUX_MULTI_WINDOW {
             exit_fullscreen(window);
+            linux_force_windowed(window);
         } else {
             window.set_fullscreen(None);
             window.set_maximized(false);
@@ -1280,7 +1280,7 @@ fn apply_secondary_window_rect(
         }
     } else {
         if LINUX_MULTI_WINDOW {
-            window.set_decorations(true);
+            linux_force_windowed(window);
         }
         window.set_maximized(false);
         window.set_minimized(false);
@@ -1340,6 +1340,9 @@ fn assign_window_to_screen(
     let y = monitor_pos.y + (monitor_size.height as i32 - window_size.height as i32) / 2;
 
     window.set_fullscreen(Some(Fullscreen::Borderless(Some(target_monitor))));
+    if LINUX_MULTI_WINDOW {
+        window.set_visible(true);
+    }
     state.pending_fullscreen_exit = true;
     if LINUX_MULTI_WINDOW {
         state.pending_exit_started_at = Some(Instant::now());
@@ -1388,6 +1391,9 @@ fn assign_primary_window_to_screen(
     let y = monitor_pos.y + (monitor_size.height as i32 - window_size.height as i32) / 2;
 
     window.set_fullscreen(Some(Fullscreen::Borderless(Some(target_monitor))));
+    if LINUX_MULTI_WINDOW {
+        window.set_visible(true);
+    }
     layout.pending_fullscreen_exit = true;
     if LINUX_MULTI_WINDOW {
         layout.pending_fullscreen_exit_started_at = Some(Instant::now());
@@ -1411,12 +1417,11 @@ fn apply_primary_window_rect(
                         screen = layout.screen.map(|idx| idx as i32).unwrap_or(-1),
                         "Timed out while exiting fullscreen for primary window; applying rect anyway"
                     );
+                } else {
+                    return false;
                 }
-            } else {
-                window.set_decorations(true);
-                window.set_maximized(false);
-                window.set_minimized(false);
             }
+            linux_force_windowed(window);
             layout.pending_fullscreen_exit = false;
             layout.pending_fullscreen_exit_started_at = None;
         } else {
@@ -1463,6 +1468,7 @@ fn apply_primary_window_rect(
     if window.fullscreen().is_some() {
         if LINUX_MULTI_WINDOW {
             exit_fullscreen(window);
+            linux_force_windowed(window);
         } else {
             window.set_fullscreen(None);
             window.set_maximized(false);
@@ -1470,7 +1476,7 @@ fn apply_primary_window_rect(
         }
     } else {
         if LINUX_MULTI_WINDOW {
-            window.set_decorations(true);
+            linux_force_windowed(window);
         }
         window.set_maximized(false);
         window.set_minimized(false);
@@ -1634,6 +1640,16 @@ fn fullscreen_exit_timed_out(started_at: Option<Instant>) -> bool {
     started_at
         .map(|instant| instant.elapsed() > FULLSCREEN_EXIT_CONFIRMATION_TIMEOUT)
         .unwrap_or(false)
+}
+
+fn linux_force_windowed(window: &WinitWindow) {
+    if !LINUX_MULTI_WINDOW {
+        return;
+    }
+    window.set_visible(true);
+    window.set_decorations(true);
+    window.set_maximized(false);
+    window.set_minimized(false);
 }
 
 fn secondary_graph_order_base(id: tiles::SecondaryWindowId) -> isize {
