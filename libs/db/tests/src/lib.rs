@@ -10,13 +10,13 @@ mod tests {
     };
     use impeller2_stellar::Client;
     use postcard_schema::{Schema, schema::owned::OwnedNamedType};
-use std::{
-    fs::File,
-    io::Write,
-    net::SocketAddr,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+    use std::{
+        fs::File,
+        io::Write,
+        net::SocketAddr,
+        sync::Arc,
+        time::{Duration, Instant},
+    };
     use stellarator::{net::TcpListener, sleep, spawn, struc_con::stellar, test};
     use zerocopy::FromBytes;
     use zerocopy::IntoBytes;
