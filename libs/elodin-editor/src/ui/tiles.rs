@@ -257,15 +257,16 @@ impl SecondaryWindowState {
         &mut self,
         window: &WinitWindow,
         monitors: &[MonitorHandle],
-    ) {
+    ) -> bool {
         if self.skip_metadata_capture {
             self.skip_metadata_capture = false;
-            return;
+            return false;
         }
 
         let current_monitor = window.current_monitor();
         let outer_position = window.outer_position().ok();
         let outer_size = window.outer_size();
+        let mut updated = false;
 
         let monitor_index = current_monitor
             .as_ref()
@@ -278,6 +279,7 @@ impl SecondaryWindowState {
 
         if let Some(index) = monitor_index {
             self.descriptor.screen = Some(index);
+            updated = true;
         }
 
         if let (Some(position), Some(monitor_handle)) = (
@@ -292,7 +294,10 @@ impl SecondaryWindowState {
             (monitor_handle.size().width, monitor_handle.size().height),
         ) {
             self.descriptor.screen_rect = Some(rect);
+            updated = true;
         }
+
+        updated
     }
 }
 
