@@ -1011,6 +1011,7 @@ fn apply_secondary_window_screens(
 
                 if window_on_target_screen(state, window, &monitors) {
                     if LINUX_MULTI_WINDOW {
+                        exit_fullscreen(window);
                         linux_force_windowed(window);
                     } else if window.fullscreen().is_some() {
                         exit_fullscreen(window);
