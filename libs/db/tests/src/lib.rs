@@ -10,7 +10,13 @@ mod tests {
     };
     use impeller2_stellar::Client;
     use postcard_schema::{Schema, schema::owned::OwnedNamedType};
-    use std::{fs::File, io::Write, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    fs::File,
+    io::Write,
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
     use stellarator::{net::TcpListener, sleep, spawn, struc_con::stellar, test};
     use zerocopy::FromBytes;
     use zerocopy::IntoBytes;
@@ -26,7 +32,7 @@ mod tests {
 
         let temp_dir = std::env::temp_dir().join(format!("elodin_db_test_{}", fastrand::u64(..)));
         if temp_dir.exists() {
-            std::fs::remove_dir_all(&temp_dir).unwrap();
+            let _ = std::fs::remove_dir_all(&temp_dir);
         }
 
         let server = Server::from_listener(listener, temp_dir)?;
@@ -595,6 +601,28 @@ mod tests {
             filler.write_all(&vec![0xAAu8; 4 * 1024 * 1024]).unwrap();
             filler.sync_all().unwrap();
         }
+
+        // Ensure the server has ingested the component metadata + initial samples
+        // before triggering the snapshot; otherwise the copy might race ahead of
+        // the write pipeline and miss the component entirely.
+        let ready_deadline = Instant::now() + Duration::from_secs(1);
+        let mut component_ready = false;
+        while Instant::now() < ready_deadline {
+            component_ready = db.with_state(|state| {
+                state
+                    .get_component(component_id)
+                    .and_then(|component| component.time_series.latest())
+                    .is_some()
+            });
+            if component_ready {
+                break;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            component_ready,
+            "component metadata/data must exist before snapshot"
+        );
 
         let native_root =
             std::env::temp_dir().join(format!("test_native_archive_{}", fastrand::u64(..)));
