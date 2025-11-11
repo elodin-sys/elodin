@@ -30,6 +30,7 @@ use winit::{
 const SCREEN_RELAYOUT_MAX_ATTEMPTS: u8 = 5;
 const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(750);
 const FULLSCREEN_EXIT_CONFIRMATION_TIMEOUT: Duration = Duration::from_millis(500);
+const LINUX_FULLSCREEN_SPIN_DELAY: Duration = Duration::from_millis(10);
 const LINUX_MULTI_WINDOW: bool = cfg!(target_os = "linux");
 const PRIMARY_VIEWPORT_ORDER_BASE: isize = 0;
 const PRIMARY_GRAPH_ORDER_BASE: isize = 100;
@@ -782,6 +783,7 @@ fn apply_secondary_window_screens(
                                     path = %state.descriptor.path.display(),
                                     "Waiting for Linux fullscreen exit before reassigning screen"
                                 );
+                                std::thread::sleep(LINUX_FULLSCREEN_SPIN_DELAY);
                                 continue;
                             }
                             info!(
@@ -894,6 +896,7 @@ fn apply_primary_window_layout(
                                     "Timed out while waiting for primary window fullscreen exit; forcing apply"
                                 );
                             } else {
+                                std::thread::sleep(LINUX_FULLSCREEN_SPIN_DELAY);
                                 return;
                             }
                         }
@@ -910,6 +913,7 @@ fn apply_primary_window_layout(
                 } else if LINUX_MULTI_WINDOW {
                     if window.fullscreen().is_some() {
                         exit_fullscreen(window);
+                        std::thread::sleep(LINUX_FULLSCREEN_SPIN_DELAY);
                         return;
                     }
                     linux_force_windowed(window);
