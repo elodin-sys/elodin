@@ -53,6 +53,7 @@ class WorldBuilder:
         default_playback_speed: float = 1.0,
         max_ticks: Optional[int] = None,
         optimize: bool = False,
+        is_canceled: Optional[callable] = None,
     ): ...
     def serve(
         self,
