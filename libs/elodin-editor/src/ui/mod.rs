@@ -1534,6 +1534,8 @@ fn apply_primary_window_rect(
 fn capture_secondary_window_screens(
     mut windows: ResMut<tiles::WindowManager>,
     winit_windows: NonSend<bevy::winit::WinitWindows>,
+    window_query: Query<(Entity, &Window)>,
+    screens: Query<(Entity, &Monitor)>,
 ) {
     for state in windows.secondary_mut().iter_mut() {
         if !matches!(
@@ -1546,12 +1548,16 @@ fn capture_secondary_window_screens(
         let Some(entity) = state.window_entity else {
             continue;
         };
-        let Some(window) = winit_windows.get_window(entity) else {
-            continue;
-        };
+        let winit_window = winit_windows.get_window(entity);
+        let mut updated = false;
+        if let Some(window) = winit_window {
+            let monitors = collect_sorted_monitors(window);
+            updated = state.update_descriptor_from_winit_window(window, &monitors);
+        }
 
-        let monitors = collect_sorted_monitors(window);
-        state.update_descriptor_from_winit_window(window, &monitors);
+        if !updated && let Ok((_, window_component)) = window_query.get(entity) {
+            state.update_descriptor_from_window(window_component, &screens);
+        }
     }
 }
 
