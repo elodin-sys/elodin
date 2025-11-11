@@ -248,8 +248,10 @@ impl Plugin for EditorPlugin {
         if cfg!(not(target_arch = "wasm32")) {
             app.insert_resource(DirectionalLightShadowMap { size: 8192 });
         }
-        app.configure_sets(PreUpdate,
-                           PositionSync.before(bevy_editor_cam::SyncCameraPosition));
+        app.configure_sets(
+            PreUpdate,
+            PositionSync.before(bevy_editor_cam::SyncCameraPosition),
+        );
     }
 }
 
