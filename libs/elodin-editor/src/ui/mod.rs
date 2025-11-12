@@ -277,11 +277,15 @@ impl Plugin for UiPlugin {
                 Update,
                 confirm_secondary_screen_assignment
                     .after(apply_secondary_window_screens)
-                    .before(capture_secondary_window_screens),
+                    .before(track_secondary_window_geometry),
             )
             .add_systems(
                 Update,
-                capture_secondary_window_screens.after(apply_secondary_window_screens),
+                track_secondary_window_geometry.after(confirm_secondary_screen_assignment),
+            )
+            .add_systems(
+                Update,
+                capture_secondary_window_screens.after(track_secondary_window_geometry),
             )
             .add_systems(
                 Update,
@@ -996,10 +1000,6 @@ fn apply_secondary_window_screens(
                         if window.fullscreen().is_some() {
                             exit_fullscreen(window);
                             if !fullscreen_exit_timed_out(state.pending_exit_started_at) {
-                                info!(
-                                    path = %state.descriptor.path.display(),
-                                    "Waiting for Linux fullscreen exit before reassigning screen"
-                                );
                                 continue;
                             }
                             info!(
@@ -1650,6 +1650,38 @@ fn confirm_secondary_screen_assignment(
     }
 }
 
+fn track_secondary_window_geometry(
+    mut moved_events: EventReader<WindowMoved>,
+    mut resized_events: EventReader<WindowResized>,
+    mut windows: ResMut<tiles::WindowManager>,
+    winit_windows: NonSend<bevy::winit::WinitWindows>,
+) {
+    use std::collections::HashMap;
+
+    let mut touched: HashMap<Entity, Option<PhysicalPosition<i32>>> = HashMap::new();
+    for evt in moved_events.read() {
+        let position = PhysicalPosition::new(evt.position.x, evt.position.y);
+        touched.insert(evt.window, Some(position));
+    }
+    for evt in resized_events.read() {
+        touched.entry(evt.window).or_insert(None);
+    }
+
+    for (entity, forced_position) in touched {
+        let Some(id) = windows.find_secondary_by_entity(entity) else {
+            continue;
+        };
+        let Some(state) = windows.get_secondary_mut(id) else {
+            continue;
+        };
+        let Some(window) = winit_windows.get_window(entity) else {
+            continue;
+        };
+        let monitors = collect_sorted_monitors(window);
+        record_window_rect_from_window(state, window, &monitors, forced_position);
+    }
+}
+
 fn confirm_primary_screen_assignment(
     mut moved_events: EventReader<WindowMoved>,
     mut resized_events: EventReader<WindowResized>,
@@ -1710,6 +1742,61 @@ fn monitors_match(a: &MonitorHandle, b: &MonitorHandle) -> bool {
     match (a.name(), b.name()) {
         (Some(an), Some(bn)) => an == bn && a.size() == b.size(),
         _ => false,
+    }
+}
+
+fn record_window_rect_from_window(
+    state: &mut tiles::SecondaryWindowState,
+    window: &WinitWindow,
+    monitors: &[MonitorHandle],
+    forced_position: Option<PhysicalPosition<i32>>,
+) {
+    let size = window.outer_size();
+    if size.width == 0 || size.height == 0 {
+        return;
+    }
+    let position = forced_position.or_else(|| window.outer_position().ok());
+    let Some(position) = position else {
+        return;
+    };
+
+    let monitor_index = state
+        .descriptor
+        .screen
+        .or_else(|| tiles::monitor_index_from_bounds(position, size, monitors));
+    let Some(idx) = monitor_index else {
+        return;
+    };
+    let Some(monitor_handle) = monitors.get(idx).cloned() else {
+        return;
+    };
+    let monitor_pos = monitor_handle.position();
+    if !event_position_is_reliable(position, monitor_pos) {
+        return;
+    }
+
+    if let Some(rect) = tiles::rect_from_bounds(
+        (position.x, position.y),
+        (size.width, size.height),
+        (monitor_pos.x, monitor_pos.y),
+        (monitor_handle.size().width, monitor_handle.size().height),
+    ) {
+        state.descriptor.screen = Some(idx);
+        state.descriptor.screen_rect = Some(rect);
+    }
+}
+
+fn event_position_is_reliable(
+    position: PhysicalPosition<i32>,
+    monitor_position: PhysicalPosition<i32>,
+) -> bool {
+    if !LINUX_MULTI_WINDOW {
+        return true;
+    }
+    if position.x == 0 && position.y == 0 {
+        monitor_position.x == 0 && monitor_position.y == 0
+    } else {
+        true
     }
 }
 
