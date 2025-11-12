@@ -96,6 +96,10 @@ pub struct EditorPlugin {
     window_resolution: WindowResolution,
 }
 
+/// The positions of camera of object_3d are sync'd in `PreUpdate`.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PositionSync;
+
 impl EditorPlugin {
     pub fn new(width: f32, height: f32) -> Self {
         Self {
@@ -170,8 +174,8 @@ impl Plugin for EditorPlugin {
             .init_resource::<tiles::ViewportContainsPointer>()
             .add_plugins(bevy_framepace::FramepacePlugin)
             //.add_plugins(DefaultPickingPlugins)
-            .add_plugins(big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
             .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
+            .add_plugins(big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
             .add_plugins(EmbeddedAssetPlugin)
             .add_plugins(EguiPlugin {
                 enable_multipass_for_primary_context: false,
@@ -201,7 +205,8 @@ impl Plugin for EditorPlugin {
                     set_floating_origin,
                     (sync_pos, sync_object_3d, set_viewport_pos),
                 )
-                    .chain(),
+                    .chain()
+                    .in_set(PositionSync),
             )
             .add_systems(Update, sync_paused)
             .add_systems(PreUpdate, set_selected_range)
@@ -224,6 +229,7 @@ impl Plugin for EditorPlugin {
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
         }
+
         #[cfg(feature = "debug")]
         app.add_plugins(big_space::debug::FloatingOriginDebugPlugin::<i128>::default());
 
@@ -242,6 +248,10 @@ impl Plugin for EditorPlugin {
         if cfg!(not(target_arch = "wasm32")) {
             app.insert_resource(DirectionalLightShadowMap { size: 8192 });
         }
+        app.configure_sets(
+            PreUpdate,
+            PositionSync.before(bevy_editor_cam::SyncCameraPosition),
+        );
     }
 }
 

@@ -31,8 +31,7 @@ winit.version = "0.30.12"
 winit.features = ["rwh_05"]
 raw-window-handle = "0.5"
 bevy_infinite_grid = "0.15"
-big_space.git = "https://github.com/elodin-sys/big_space.git"
-big_space.branch = "no_prop_rot_v0.16"
+big_space.version = "0.5"
 bevy_editor_cam = "0.6"
 bevy_framepace = "0.19"
 
