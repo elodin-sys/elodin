@@ -1532,16 +1532,16 @@ fn capture_primary_window_layout(
         if let Some((index, _)) = best {
             layout.captured_screen = Some(index);
             layout.requested_screen = Some(index);
-            if let Some((monitor_pos, monitor_size)) = best_bounds {
-                if let Some(rect) = tiles::rect_from_bounds(
+            if let Some((monitor_pos, monitor_size)) = best_bounds
+                && let Some(rect) = tiles::rect_from_bounds(
                     (fallback_pos.x, fallback_pos.y),
                     (fallback_size.x, fallback_size.y),
                     (monitor_pos.x, monitor_pos.y),
                     (monitor_size.x, monitor_size.y),
-                ) {
-                    layout.captured_rect = Some(rect);
-                    layout.requested_rect = Some(rect);
-                }
+                )
+            {
+                layout.captured_rect = Some(rect);
+                layout.requested_rect = Some(rect);
             }
         }
     }
