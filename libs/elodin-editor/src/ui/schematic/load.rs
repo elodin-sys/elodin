@@ -20,6 +20,7 @@ use crate::{
     object_3d::Object3DState,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
+        DEFAULT_SECONDARY_RECT,
         HdrEnabled, SelectedObject,
         colors::{self, EColor},
         dashboard::{NodeUpdaterParams, spawn_dashboard},
@@ -120,7 +121,7 @@ fn resolve_window_descriptor(
         path: resolved,
         title: window.title.clone(),
         screen: window.screen.map(|idx| idx as usize),
-        screen_rect: window.screen_rect,
+        screen_rect: window.screen_rect.or(Some(DEFAULT_SECONDARY_RECT)),
     })
 }
 
