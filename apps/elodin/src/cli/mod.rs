@@ -132,7 +132,9 @@ impl Cli {
 
         let display_set = env::var_os("DISPLAY").is_some();
         if !display_set {
-            warn!("Wayland session detected but DISPLAY is unset; continuing under Wayland");
+            eprintln!(
+                "Warning: Wayland session detected but DISPLAY is unset; continuing under Wayland"
+            );
             return Ok(());
         }
 
