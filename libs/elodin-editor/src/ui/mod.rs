@@ -1287,7 +1287,10 @@ fn apply_secondary_window_rect(
 
     let monitor_handle = if let Some(idx) = state.descriptor.screen {
         let monitors = collect_sorted_monitors(window);
-        monitors.get(idx).cloned().or_else(|| window.current_monitor())
+        monitors
+            .get(idx)
+            .cloned()
+            .or_else(|| window.current_monitor())
     } else {
         window.current_monitor()
     };
@@ -1508,7 +1511,10 @@ fn apply_primary_window_rect(
 
     let monitor_handle = if let Some(idx) = layout.screen {
         let monitors = collect_sorted_monitors(window);
-        monitors.get(idx).cloned().or_else(|| window.current_monitor())
+        monitors
+            .get(idx)
+            .cloned()
+            .or_else(|| window.current_monitor())
     } else {
         window.current_monitor()
     };
@@ -1716,11 +1722,11 @@ fn window_on_target_screen(
         return true;
     }
 
-    if state.descriptor.screen.is_none() {
-        if let Some(idx) = detect_window_screen(window, monitors) {
-            state.descriptor.screen = Some(idx);
-            return true;
-        }
+    if state.descriptor.screen.is_none()
+        && let Some(idx) = detect_window_screen(window, monitors)
+    {
+        state.descriptor.screen = Some(idx);
+        return true;
     }
 
     false
@@ -1781,10 +1787,9 @@ fn detect_window_screen(window: &WinitWindow, monitors: &[MonitorHandle]) -> Opt
                 .position(|monitor| monitors_match(current, monitor))
         })
         .or_else(|| {
-            window
-                .outer_position()
-                .ok()
-                .and_then(|pos| tiles::monitor_index_from_bounds(pos, window.outer_size(), monitors))
+            window.outer_position().ok().and_then(|pos| {
+                tiles::monitor_index_from_bounds(pos, window.outer_size(), monitors)
+            })
         })
 }
 
