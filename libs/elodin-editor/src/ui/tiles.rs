@@ -245,6 +245,7 @@ impl SecondaryWindowState {
         if let Some((index, _)) = best {
             self.descriptor.screen = Some(index);
             if let Some((monitor_pos, monitor_size)) = best_bounds
+                && position_is_reliable_linux(position, (monitor_pos.x, monitor_pos.y))
                 && let Some(rect) = rect_from_bounds(
                     (position.x, position.y),
                     (size.x, size.y),
@@ -291,14 +292,20 @@ impl SecondaryWindowState {
             monitor_index
                 .and_then(|idx| monitors.get(idx).cloned())
                 .or_else(|| current_monitor.clone()),
-        ) && let Some(rect) = rect_from_bounds(
-            (position.x, position.y),
-            (outer_size.width, outer_size.height),
-            (monitor_handle.position().x, monitor_handle.position().y),
-            (monitor_handle.size().width, monitor_handle.size().height),
         ) {
-            self.descriptor.screen_rect = Some(rect);
-            updated = true;
+            let monitor_pos = monitor_handle.position();
+            if position_is_reliable_linux(
+                IVec2::new(position.x, position.y),
+                (monitor_pos.x, monitor_pos.y),
+            ) && let Some(rect) = rect_from_bounds(
+                (position.x, position.y),
+                (outer_size.width, outer_size.height),
+                (monitor_pos.x, monitor_pos.y),
+                (monitor_handle.size().width, monitor_handle.size().height),
+            ) {
+                self.descriptor.screen_rect = Some(rect);
+                updated = true;
+            }
         }
 
         updated
@@ -360,6 +367,17 @@ pub(crate) fn rect_from_bounds(
         width: clamp_percent(width_pct),
         height: clamp_percent(height_pct),
     })
+}
+
+fn position_is_reliable_linux(position: IVec2, monitor_position: (i32, i32)) -> bool {
+    if !cfg!(target_os = "linux") {
+        return true;
+    }
+    if position.x == 0 && position.y == 0 {
+        monitor_position.0 == 0 && monitor_position.1 == 0
+    } else {
+        true
+    }
 }
 
 pub(crate) fn clamp_percent(value: f32) -> u32 {
