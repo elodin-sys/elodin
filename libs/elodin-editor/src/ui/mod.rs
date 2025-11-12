@@ -27,6 +27,12 @@ use winit::{
     window::{Fullscreen, Window as WinitWindow},
 };
 
+pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
+    x: 10,
+    y: 10,
+    width: 80,
+    height: 80,
+};
 const SCREEN_RELAYOUT_MAX_ATTEMPTS: u8 = 5;
 const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(750);
 const FULLSCREEN_EXIT_CONFIRMATION_TIMEOUT: Duration = Duration::from_millis(500);
@@ -47,6 +53,7 @@ use impeller2::types::ComponentId;
 use impeller2_bevy::ComponentValueMap;
 use impeller2_wkt::{
     ComponentMetadata, ComponentValue, ComponentValue as WktComponentValue, VectorArrow3d,
+    WindowRect,
 };
 
 use crate::{
@@ -1636,9 +1643,21 @@ fn window_on_screen(
         return false;
     };
 
-    window
+    if window
         .current_monitor()
         .is_some_and(|current| monitors_match(&current, target_monitor))
+    {
+        return true;
+    }
+
+    if let Ok(pos) = window.outer_position() {
+        let size = window.outer_size();
+        if let Some(idx) = tiles::monitor_index_from_bounds(pos, size, monitors) {
+            return idx == screen;
+        }
+    }
+
+    false
 }
 
 fn exit_fullscreen(window: &WinitWindow) {
