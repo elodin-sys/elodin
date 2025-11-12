@@ -283,6 +283,7 @@ impl LoadSchematicParams<'_, '_> {
                             pending_exit_state: PendingFullscreenExit::None,
                             relayout_attempts: 0,
                             relayout_started_at: None,
+                            awaiting_screen_confirmation: false,
                             skip_metadata_capture: true,
                         });
                     }

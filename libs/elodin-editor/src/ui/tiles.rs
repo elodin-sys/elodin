@@ -133,6 +133,7 @@ pub struct SecondaryWindowState {
     pub pending_exit_started_at: Option<Instant>,
     pub relayout_attempts: u8,
     pub relayout_started_at: Option<Instant>,
+    pub awaiting_screen_confirmation: bool,
     pub skip_metadata_capture: bool,
     pub pending_exit_state: PendingFullscreenExit,
 }
@@ -159,6 +160,7 @@ pub struct PrimaryWindowLayout {
     pub captured_rect: Option<WindowRect>,
     pub requested_screen: Option<usize>,
     pub requested_rect: Option<WindowRect>,
+    pub awaiting_screen_confirmation: bool,
 }
 
 impl PrimaryWindowLayout {
@@ -180,6 +182,7 @@ impl PrimaryWindowLayout {
         } else {
             PrimaryWindowRelayoutPhase::Idle
         };
+        self.awaiting_screen_confirmation = false;
     }
 }
 
@@ -201,6 +204,7 @@ impl SecondaryWindowState {
         self.pending_fullscreen_exit = false;
         self.pending_exit_started_at = None;
         self.pending_exit_state = PendingFullscreenExit::None;
+        self.awaiting_screen_confirmation = false;
     }
 
     pub fn update_descriptor_from_window(
@@ -499,6 +503,7 @@ impl WindowManager {
             pending_exit_state: PendingFullscreenExit::None,
             relayout_attempts: 0,
             relayout_started_at: None,
+            awaiting_screen_confirmation: false,
             skip_metadata_capture: false,
         });
         id
