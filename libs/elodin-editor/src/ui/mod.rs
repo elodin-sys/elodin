@@ -30,7 +30,6 @@ use winit::{
 const SCREEN_RELAYOUT_MAX_ATTEMPTS: u8 = 5;
 const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(750);
 const FULLSCREEN_EXIT_CONFIRMATION_TIMEOUT: Duration = Duration::from_millis(500);
-const LINUX_FULLSCREEN_SPIN_DELAY: Duration = Duration::from_millis(10);
 const LINUX_MULTI_WINDOW: bool = cfg!(target_os = "linux");
 const PRIMARY_VIEWPORT_ORDER_BASE: isize = 0;
 const PRIMARY_GRAPH_ORDER_BASE: isize = 100;
@@ -990,7 +989,6 @@ fn apply_secondary_window_screens(
                                     path = %state.descriptor.path.display(),
                                     "Waiting for Linux fullscreen exit before reassigning screen"
                                 );
-                                std::thread::sleep(LINUX_FULLSCREEN_SPIN_DELAY);
                                 continue;
                             }
                             info!(
@@ -1096,14 +1094,12 @@ fn apply_primary_window_layout(
                     if LINUX_MULTI_WINDOW {
                         if window.fullscreen().is_some() {
                             exit_fullscreen(window);
-                            if fullscreen_exit_timed_out(layout.pending_fullscreen_exit_started_at)
-                            {
+                            if fullscreen_exit_timed_out(layout.pending_fullscreen_exit_started_at) {
                                 info!(
                                     screen = layout.screen.map(|idx| idx as i32).unwrap_or(-1),
                                     "Timed out while waiting for primary window fullscreen exit; forcing apply"
                                 );
                             } else {
-                                std::thread::sleep(LINUX_FULLSCREEN_SPIN_DELAY);
                                 return;
                             }
                         }
@@ -1120,7 +1116,6 @@ fn apply_primary_window_layout(
                 } else if LINUX_MULTI_WINDOW {
                     if window.fullscreen().is_some() {
                         exit_fullscreen(window);
-                        std::thread::sleep(LINUX_FULLSCREEN_SPIN_DELAY);
                         return;
                     }
                     linux_force_windowed(window);
@@ -1538,13 +1533,6 @@ fn capture_secondary_window_screens(
     screens: Query<(Entity, &Monitor)>,
 ) {
     for state in windows.secondary_mut().iter_mut() {
-        if !matches!(
-            state.relayout_phase,
-            tiles::SecondaryWindowRelayoutPhase::Idle
-        ) {
-            continue;
-        }
-
         let Some(entity) = state.window_entity else {
             continue;
         };
@@ -1669,11 +1657,12 @@ fn secondary_graph_order_base(id: tiles::SecondaryWindowId) -> isize {
 
 fn capture_primary_window_layout(
     mut windows: ResMut<tiles::WindowManager>,
-    primary_query: Query<Entity, With<PrimaryWindow>>,
+    primary_query: Query<(Entity, &Window), With<PrimaryWindow>>,
     winit_windows: NonSend<bevy::winit::WinitWindows>,
+    screens: Query<(Entity, &Monitor)>,
 ) {
     #[allow(deprecated)]
-    let Ok(primary_entity) = primary_query.get_single() else {
+    let Ok((primary_entity, primary_window_component)) = primary_query.get_single() else {
         return;
     };
     let Some(window) = winit_windows.get_window(primary_entity) else {
@@ -1688,39 +1677,79 @@ fn capture_primary_window_layout(
     }
 
     let monitors = collect_sorted_monitors(window);
-    let outer_pos = match window.outer_position() {
-        Ok(pos) => pos,
-        Err(_) => return,
-    };
-    let outer_size = window.outer_size();
-    let monitor_index = window
-        .current_monitor()
-        .as_ref()
-        .and_then(|current| {
-            monitors
-                .iter()
-                .position(|monitor| monitors_match(monitor, current))
-        })
-        .or_else(|| tiles::monitor_index_from_bounds(outer_pos, outer_size, &monitors));
-    layout.captured_screen = monitor_index;
-
-    if let Some(idx) = monitor_index
-        && let Some(monitor) = monitors.get(idx)
-    {
-        let monitor_pos = monitor.position();
-        let monitor_size = monitor.size();
-        if let Some(rect) = tiles::rect_from_bounds(
-            (outer_pos.x, outer_pos.y),
-            (outer_size.width, outer_size.height),
-            (monitor_pos.x, monitor_pos.y),
-            (monitor_size.width, monitor_size.height),
-        ) {
-            layout.captured_rect = Some(rect);
-            layout.requested_rect = Some(rect);
+    let mut captured = false;
+    if let Ok(outer_pos) = window.outer_position() {
+        let outer_size = window.outer_size();
+        let monitor_index = window
+            .current_monitor()
+            .as_ref()
+            .and_then(|current| {
+                monitors
+                    .iter()
+                    .position(|monitor| monitors_match(monitor, current))
+            })
+            .or_else(|| tiles::monitor_index_from_bounds(outer_pos, outer_size, &monitors));
+        if let Some(idx) = monitor_index {
+            layout.captured_screen = Some(idx);
+            layout.requested_screen = Some(idx);
+            if let Some(monitor) = monitors.get(idx) {
+                let monitor_pos = monitor.position();
+                let monitor_size = monitor.size();
+                if let Some(rect) = tiles::rect_from_bounds(
+                    (outer_pos.x, outer_pos.y),
+                    (outer_size.width, outer_size.height),
+                    (monitor_pos.x, monitor_pos.y),
+                    (monitor_size.width, monitor_size.height),
+                ) {
+                    layout.captured_rect = Some(rect);
+                    layout.requested_rect = Some(rect);
+                    captured = true;
+                }
+            }
         }
     }
-    if let Some(screen) = layout.captured_screen {
-        layout.requested_screen = Some(screen);
+
+    if !captured {
+        let fallback_pos = match primary_window_component.position {
+            WindowPosition::At(pos) => pos,
+            WindowPosition::Centered(_) | WindowPosition::Automatic => IVec2::ZERO,
+        };
+        let fallback_size = primary_window_component.resolution.physical_size();
+
+        let mut best: Option<(usize, i32)> = None;
+        let mut best_bounds: Option<(IVec2, UVec2)> = None;
+        for (index, (_, screen)) in screens.iter().enumerate() {
+            let min = screen.physical_position;
+            let size = screen.physical_size();
+            let max = IVec2::new(min.x + size.x as i32, min.y + size.y as i32);
+            if fallback_pos.x >= min.x
+                && fallback_pos.x < max.x
+                && fallback_pos.y >= min.y
+                && fallback_pos.y < max.y
+            {
+                let distance = (fallback_pos.x - min.x).abs() + (fallback_pos.y - min.y).abs();
+                if best.map(|(_, d)| distance < d).unwrap_or(true) {
+                    best = Some((index, distance));
+                    best_bounds = Some((min, size));
+                }
+            }
+        }
+
+        if let Some((index, _)) = best {
+            layout.captured_screen = Some(index);
+            layout.requested_screen = Some(index);
+            if let Some((monitor_pos, monitor_size)) = best_bounds {
+                if let Some(rect) = tiles::rect_from_bounds(
+                    (fallback_pos.x, fallback_pos.y),
+                    (fallback_size.x, fallback_size.y),
+                    (monitor_pos.x, monitor_pos.y),
+                    (monitor_size.x, monitor_size.y),
+                ) {
+                    layout.captured_rect = Some(rect);
+                    layout.requested_rect = Some(rect);
+                }
+            }
+        }
     }
 }
 
