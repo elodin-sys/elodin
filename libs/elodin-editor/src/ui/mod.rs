@@ -51,8 +51,8 @@ use self::{command_palette::CommandPaletteState, plot::GraphState, timeline::tim
 use egui::CornerRadius;
 use impeller2::types::ComponentId;
 use impeller2_bevy::ComponentValueMap;
-use impeller2_wkt::{ComponentMetadata, WindowRect};
 use impeller2_wkt::ComponentValue;
+use impeller2_wkt::{ComponentMetadata, WindowRect};
 
 use crate::{GridHandle, MainCamera, plugins::LogicalKeyState};
 
