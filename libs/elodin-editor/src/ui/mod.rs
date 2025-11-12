@@ -1094,7 +1094,8 @@ fn apply_primary_window_layout(
                     if LINUX_MULTI_WINDOW {
                         if window.fullscreen().is_some() {
                             exit_fullscreen(window);
-                            if fullscreen_exit_timed_out(layout.pending_fullscreen_exit_started_at) {
+                            if fullscreen_exit_timed_out(layout.pending_fullscreen_exit_started_at)
+                            {
                                 info!(
                                     screen = layout.screen.map(|idx| idx as i32).unwrap_or(-1),
                                     "Timed out while waiting for primary window fullscreen exit; forcing apply"
