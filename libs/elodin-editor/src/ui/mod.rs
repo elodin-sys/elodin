@@ -1072,10 +1072,9 @@ fn apply_secondary_window_rect(
             window.set_maximized(false);
             window.set_minimized(false);
         }
+    } else if LINUX_MULTI_WINDOW {
+        linux_force_windowed(window);
     } else {
-        if LINUX_MULTI_WINDOW {
-            linux_force_windowed(window);
-        }
         window.set_maximized(false);
         window.set_minimized(false);
     }
@@ -1268,10 +1267,9 @@ fn apply_primary_window_rect(
             window.set_maximized(false);
             window.set_minimized(false);
         }
+    } else if LINUX_MULTI_WINDOW {
+        linux_force_windowed(window);
     } else {
-        if LINUX_MULTI_WINDOW {
-            linux_force_windowed(window);
-        }
         window.set_maximized(false);
         window.set_minimized(false);
     }
@@ -1385,16 +1383,30 @@ fn confirm_secondary_screen_assignment(
 fn collect_sorted_monitors(window: &WinitWindow) -> Vec<MonitorHandle> {
     let mut monitors: Vec<MonitorHandle> = window.available_monitors().collect();
     monitors.sort_by(|a, b| {
-        a.position()
+        let result = a
+            .position()
             .x
             .cmp(&b.position().x)
-            .then(a.position().y.cmp(&b.position().y))
+            .then(a.position().y.cmp(&b.position().y));
+        if result == std::cmp::Ordering::Equal {
+            let name_a = a.name();
+            let name_b = b.name();
+            name_a.cmp(&name_b)
+        } else {
+            result
+        }
     });
     monitors
 }
 
 fn monitors_match(a: &MonitorHandle, b: &MonitorHandle) -> bool {
-    a.position() == b.position() && a.size() == b.size()
+    if a.position() == b.position() && a.size() == b.size() {
+        return true;
+    }
+    match (a.name(), b.name()) {
+        (Some(an), Some(bn)) => an == bn && a.size() == b.size(),
+        _ => false,
+    }
 }
 
 fn window_on_target_screen(
@@ -1442,7 +1454,6 @@ fn linux_force_windowed(window: &WinitWindow) {
     window.set_visible(true);
     window.set_decorations(true);
     window.set_maximized(false);
-    window.set_minimized(false);
 }
 
 fn secondary_graph_order_base(id: tiles::SecondaryWindowId) -> isize {
