@@ -15,6 +15,7 @@ import typing as ty
 from dataclasses import dataclass, field
 
 import numpy as np
+import jax
 import jax.numpy as jnp
 
 # Add the rocket-barrowman directory to path
@@ -117,47 +118,43 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     fin_deflect_data = aero_forces
     aero_coefs_data = jnp.stack([machs, aoas, dynamic_pressures], axis=1)
 
-    AltitudeComp = ty.Annotated[
-        float,
-        el.Component("altitude", el.ComponentType(el.PrimitiveType.F64, ())),
-    ]
-    VelocityMagComp = ty.Annotated[
-        float,
-        el.Component("velocity_magnitude", el.ComponentType(el.PrimitiveType.F64, ())),
-    ]
-    MachComp = ty.Annotated[
-        float,
-        el.Component("mach", el.ComponentType(el.PrimitiveType.F64, ())),
-    ]
-    AoAComp = ty.Annotated[
-        float,
-        el.Component("angle_of_attack", el.ComponentType(el.PrimitiveType.F64, ())),
-    ]
-    DynPressureComp = ty.Annotated[
-        float,
-        el.Component("dynamic_pressure", el.ComponentType(el.PrimitiveType.F64, ())),
-    ]
-    Vector3Type = el.ComponentType(el.PrimitiveType.F64, (3,))
+    Altitude = ty.Annotated[jax.Array, el.Component("altitude", el.ComponentType.F64)]
+    VelocityMag = ty.Annotated[jax.Array, el.Component("velocity_magnitude", el.ComponentType.F64)]
+    MachComp = ty.Annotated[jax.Array, el.Component("mach", el.ComponentType.F64)]
+    AngleOfAttackComp = ty.Annotated[jax.Array, el.Component("angle_of_attack", el.ComponentType.F64)]
+    DynamicPressureComp = ty.Annotated[jax.Array, el.Component("dynamic_pressure", el.ComponentType.F64)]
     FinControlTrimComp = ty.Annotated[
-        np.ndarray,
-        el.Component("fin_control_trim", Vector3Type, metadata={"element_names": "x,y,z"}),
+        jax.Array,
+        el.Component(
+            "fin_control_trim",
+            el.ComponentType(el.PrimitiveType.F64, (3,)),
+            metadata={"element_names": "x,y,z"},
+        ),
     ]
     FinDeflectComp = ty.Annotated[
-        np.ndarray,
-        el.Component("fin_deflect", Vector3Type, metadata={"element_names": "x,y,z"}),
+        jax.Array,
+        el.Component(
+            "fin_deflect",
+            el.ComponentType(el.PrimitiveType.F64, (3,)),
+            metadata={"element_names": "x,y,z"},
+        ),
     ]
     AeroCoefsComp = ty.Annotated[
-        np.ndarray,
-        el.Component("aero_coefs", Vector3Type, metadata={"element_names": "mach,aoa,q"}),
+        jax.Array,
+        el.Component(
+            "aero_coefs",
+            el.ComponentType(el.PrimitiveType.F64, (3,)),
+            metadata={"element_names": "mach,aoa,q"},
+        ),
     ]
 
-    @dataclass
-    class RocketTelemetry(el.Archetype):
-        altitude: AltitudeComp = 0.0
-        velocity_magnitude: VelocityMagComp = 0.0
-        mach: MachComp = 0.0
-        angle_of_attack: AoAComp = 0.0
-        dynamic_pressure: DynPressureComp = 0.0
+    @el.dataclass
+    class PlaybackTelemetry(el.Archetype):
+        altitude: Altitude = field(default_factory=lambda: jnp.float64(0.0))
+        velocity_magnitude: VelocityMag = field(default_factory=lambda: jnp.float64(0.0))
+        mach: MachComp = field(default_factory=lambda: jnp.float64(0.0))
+        angle_of_attack: AngleOfAttackComp = field(default_factory=lambda: jnp.float64(0.0))
+        dynamic_pressure: DynamicPressureComp = field(default_factory=lambda: jnp.float64(0.0))
         fin_control_trim: FinControlTrimComp = field(default_factory=lambda: jnp.zeros(3))
         fin_deflect: FinDeflectComp = field(default_factory=lambda: jnp.zeros(3))
         aero_coefs: AeroCoefsComp = field(default_factory=lambda: jnp.zeros(3))
@@ -178,7 +175,7 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
                     inertia=inertia_diag0,
                 ),
             ),
-            RocketTelemetry(),
+            PlaybackTelemetry(),
         ],
         name="rocket",
         id="rocket",
@@ -247,18 +244,18 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     @el.system
     def playback_altitude(
         tick: el.Query[el.SimulationTick],
-        comp: el.Query[AltitudeComp],
-    ) -> el.Query[AltitudeComp]:
+        comp: el.Query[Altitude],
+    ) -> el.Query[Altitude]:
         idx = frame_index(tick[0])
-        return comp.map(AltitudeComp, lambda _: float(altitudes[idx]))
+        return comp.map(Altitude, lambda _: jnp.float64(altitudes[idx]))
 
     @el.system
     def playback_velocity_mag(
         tick: el.Query[el.SimulationTick],
-        comp: el.Query[VelocityMagComp],
-    ) -> el.Query[VelocityMagComp]:
+        comp: el.Query[VelocityMag],
+    ) -> el.Query[VelocityMag]:
         idx = frame_index(tick[0])
-        return comp.map(VelocityMagComp, lambda _: float(velocity_mags[idx]))
+        return comp.map(VelocityMag, lambda _: jnp.float64(velocity_mags[idx]))
 
     @el.system
     def playback_mach(
@@ -266,23 +263,23 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
         comp: el.Query[MachComp],
     ) -> el.Query[MachComp]:
         idx = frame_index(tick[0])
-        return comp.map(MachComp, lambda _: float(machs[idx]))
+        return comp.map(MachComp, lambda _: jnp.float64(machs[idx]))
 
     @el.system
     def playback_aoa(
         tick: el.Query[el.SimulationTick],
-        comp: el.Query[AoAComp],
-    ) -> el.Query[AoAComp]:
+        comp: el.Query[AngleOfAttackComp],
+    ) -> el.Query[AngleOfAttackComp]:
         idx = frame_index(tick[0])
-        return comp.map(AoAComp, lambda _: float(aoas[idx]))
+        return comp.map(AngleOfAttackComp, lambda _: jnp.float64(aoas[idx]))
 
     @el.system
     def playback_dynamic_pressure(
         tick: el.Query[el.SimulationTick],
-        comp: el.Query[DynPressureComp],
-    ) -> el.Query[DynPressureComp]:
+        comp: el.Query[DynamicPressureComp],
+    ) -> el.Query[DynamicPressureComp]:
         idx = frame_index(tick[0])
-        return comp.map(DynPressureComp, lambda _: float(dynamic_pressures[idx]))
+        return comp.map(DynamicPressureComp, lambda _: jnp.float64(dynamic_pressures[idx]))
 
     @el.system
     def playback_fin_trim(
