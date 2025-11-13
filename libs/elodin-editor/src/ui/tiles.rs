@@ -22,7 +22,11 @@ use egui_tiles::{Container, Tile, TileId, Tiles};
 use impeller2_wkt::{Dashboard, Graph, Viewport, WindowRect};
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, HashMap};
-use std::{fmt::Write as _, path::PathBuf, time::Instant};
+use std::{
+    fmt::Write as _,
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 use winit::{
     dpi::{PhysicalPosition, PhysicalSize},
     monitor::MonitorHandle,
@@ -136,6 +140,7 @@ pub struct SecondaryWindowState {
     pub awaiting_screen_confirmation: bool,
     pub skip_metadata_capture: bool,
     pub pending_exit_state: PendingFullscreenExit,
+    pub metadata_capture_blocked_until: Option<Instant>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -207,11 +212,39 @@ impl SecondaryWindowState {
         self.awaiting_screen_confirmation = false;
     }
 
+    pub fn extend_metadata_capture_block(&mut self, duration: Duration) {
+        let candidate = Instant::now() + duration;
+        if self
+            .metadata_capture_blocked_until
+            .map(|current| candidate > current)
+            .unwrap_or(true)
+        {
+            self.metadata_capture_blocked_until = Some(candidate);
+        }
+    }
+
+    pub fn clear_metadata_capture_block(&mut self) {
+        self.metadata_capture_blocked_until = None;
+    }
+
+    pub fn is_metadata_capture_blocked(&mut self) -> bool {
+        if let Some(until) = self.metadata_capture_blocked_until {
+            if Instant::now() < until {
+                return true;
+            }
+            self.metadata_capture_blocked_until = None;
+        }
+        false
+    }
+
     pub fn update_descriptor_from_window(
         &mut self,
         window: &Window,
         screens: &Query<(Entity, &Monitor)>,
     ) {
+        if self.is_metadata_capture_blocked() {
+            return;
+        }
         if self.skip_metadata_capture {
             self.skip_metadata_capture = false;
             return;
@@ -263,6 +296,9 @@ impl SecondaryWindowState {
         window: &WinitWindow,
         monitors: &[MonitorHandle],
     ) -> bool {
+        if self.is_metadata_capture_blocked() {
+            return false;
+        }
         if self.skip_metadata_capture {
             self.skip_metadata_capture = false;
             return false;
@@ -523,6 +559,7 @@ impl WindowManager {
             relayout_started_at: None,
             awaiting_screen_confirmation: false,
             skip_metadata_capture: false,
+            metadata_capture_blocked_until: None,
         });
         id
     }
