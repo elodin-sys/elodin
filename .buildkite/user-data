@@ -87,10 +87,11 @@ write_files:
 
       bash -c 'cat >> /etc/nix/nix.custom.conf << "NIXCONF"
       # S3 Binary Cache Configuration
-      substituters = https://cache.nixos.org s3://elodin-nix-cache?region=us-west-2
+      extra-substituters = s3://elodin-nix-cache?region=us-west-2
       trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= elodin-cache-1:vvbmIQvTOjcBjIs8Ri7xlT2I3XAmeJyF5mNlWB+fIwM=
       post-build-hook = /etc/nix/upload-to-cache.sh
       accept-flake-config = true
+      download-buffer-size = 1073741824
       NIXCONF'
 
       # --- Buildkite Agent (APT) ---
