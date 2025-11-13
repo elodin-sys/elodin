@@ -61,8 +61,8 @@ def main():
         motor=motor,
         environment=env,
         rail_length=5.2,  # meters
-        inclination_deg=90.0,  # degrees from horizontal (90 = vertical)
-        heading_deg=0.0,  # degrees
+        inclination_deg=0.0,  # degrees from vertical (0 = straight up, 90 = horizontal)
+        heading_deg=0.0,  # degrees (north)
     )
     
     result = solver.run(max_time=200.0)
