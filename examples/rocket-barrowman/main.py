@@ -54,15 +54,6 @@ def main():
     # Environment (Spaceport America: elevation=1400m, no wind)
     env = Environment(elevation=1400.0)
     
-    # Initial conditions (vertical launch from rail)
-    initial_position = np.array([0.0, 0.0, 0.0])  # Start at ground level
-    initial_velocity = np.array([0.0, 0.0, 0.0])
-    initial_orientation = el.Quaternion.from_axis_angle(
-        axis=np.array([0.0, 1.0, 0.0]),
-        angle=0.0,  # Vertical (0° inclination from vertical)
-    )
-    initial_angular_velocity = np.array([0.0, 0.0, 0.0])
-    
     # Run simulation
     print(f"\nRunning simulation...")
     solver = FlightSolver(
@@ -70,18 +61,11 @@ def main():
         motor=motor,
         environment=env,
         rail_length=5.2,  # meters
-        inclination=0.0,  # degrees from vertical
-        heading=0.0,  # degrees
+        inclination_deg=90.0,  # degrees from horizontal (90 = vertical)
+        heading_deg=0.0,  # degrees
     )
     
-    result = solver.simulate(
-        initial_position=initial_position,
-        initial_velocity=initial_velocity,
-        initial_orientation=initial_orientation,
-        initial_angular_velocity=initial_angular_velocity,
-        max_time=200.0,
-        time_step=0.05,
-    )
+    result = solver.run(max_time=200.0)
     
     # Print summary
     max_alt = max(s.z for s in result.history)
