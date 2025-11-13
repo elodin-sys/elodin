@@ -245,27 +245,81 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
         return vel_q.map(el.WorldVel, lambda _: motion)
 
     @el.system
-    def playback_telemetry(
+    def playback_altitude(
         tick: el.Query[el.SimulationTick],
-        telemetry_q: el.Query[RocketTelemetry],
-    ) -> el.Query[RocketTelemetry]:
+        comp: el.Query[AltitudeComp],
+    ) -> el.Query[AltitudeComp]:
         idx = frame_index(tick[0])
+        return comp.map(AltitudeComp, lambda _: float(altitudes[idx]))
 
-        def mapper(_: RocketTelemetry) -> RocketTelemetry:
-            return RocketTelemetry(
-                altitude=altitudes[idx],
-                velocity_magnitude=velocity_mags[idx],
-                mach=machs[idx],
-                angle_of_attack=aoas[idx],
-                dynamic_pressure=dynamic_pressures[idx],
-                fin_control_trim=fin_control_trim_data[idx],
-                fin_deflect=fin_deflect_data[idx],
-                aero_coefs=aero_coefs_data[idx],
-            )
+    @el.system
+    def playback_velocity_mag(
+        tick: el.Query[el.SimulationTick],
+        comp: el.Query[VelocityMagComp],
+    ) -> el.Query[VelocityMagComp]:
+        idx = frame_index(tick[0])
+        return comp.map(VelocityMagComp, lambda _: float(velocity_mags[idx]))
 
-        return telemetry_q.map(RocketTelemetry, mapper)
+    @el.system
+    def playback_mach(
+        tick: el.Query[el.SimulationTick],
+        comp: el.Query[MachComp],
+    ) -> el.Query[MachComp]:
+        idx = frame_index(tick[0])
+        return comp.map(MachComp, lambda _: float(machs[idx]))
 
-    playback_system = playback_world_pos | playback_world_vel | playback_telemetry
+    @el.system
+    def playback_aoa(
+        tick: el.Query[el.SimulationTick],
+        comp: el.Query[AoAComp],
+    ) -> el.Query[AoAComp]:
+        idx = frame_index(tick[0])
+        return comp.map(AoAComp, lambda _: float(aoas[idx]))
+
+    @el.system
+    def playback_dynamic_pressure(
+        tick: el.Query[el.SimulationTick],
+        comp: el.Query[DynPressureComp],
+    ) -> el.Query[DynPressureComp]:
+        idx = frame_index(tick[0])
+        return comp.map(DynPressureComp, lambda _: float(dynamic_pressures[idx]))
+
+    @el.system
+    def playback_fin_trim(
+        tick: el.Query[el.SimulationTick],
+        comp: el.Query[FinControlTrimComp],
+    ) -> el.Query[FinControlTrimComp]:
+        idx = frame_index(tick[0])
+        return comp.map(FinControlTrimComp, lambda _: fin_control_trim_data[idx])
+
+    @el.system
+    def playback_fin_deflect(
+        tick: el.Query[el.SimulationTick],
+        comp: el.Query[FinDeflectComp],
+    ) -> el.Query[FinDeflectComp]:
+        idx = frame_index(tick[0])
+        return comp.map(FinDeflectComp, lambda _: fin_deflect_data[idx])
+
+    @el.system
+    def playback_aero_coefs(
+        tick: el.Query[el.SimulationTick],
+        comp: el.Query[AeroCoefsComp],
+    ) -> el.Query[AeroCoefsComp]:
+        idx = frame_index(tick[0])
+        return comp.map(AeroCoefsComp, lambda _: aero_coefs_data[idx])
+
+    playback_system = (
+        playback_world_pos
+        | playback_world_vel
+        | playback_altitude
+        | playback_velocity_mag
+        | playback_mach
+        | playback_aoa
+        | playback_dynamic_pressure
+        | playback_fin_trim
+        | playback_fin_deflect
+        | playback_aero_coefs
+    )
 
     print(f"\n✓ Schematic: rocket.kdl")
     print(f"✓ Launching Elodin editor...")
