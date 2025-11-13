@@ -106,58 +106,75 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     velocities = jnp.asarray([s.velocity for s in history])
     quaternions = jnp.asarray([s.quaternion for s in history])
     angular_velocities = jnp.asarray([s.angular_velocity for s in history])
+    aero_forces = jnp.asarray([s.total_aero_force for s in history])
 
-    altitudes = jnp.asarray([s.z for s in history])
-    velocity_mags = jnp.asarray([jnp.linalg.norm(jnp.asarray(s.velocity)) for s in history])
+    altitudes = positions[:, 2]
+    downrange = jnp.linalg.norm(positions[:, :2], axis=1)
+    speed = jnp.linalg.norm(velocities, axis=1)
+
+    accel_vec = (velocities[1:] - velocities[:-1]) / dt
+    accel_vec = jnp.concatenate((accel_vec[:1], accel_vec), axis=0)
+    accel_mag = jnp.linalg.norm(accel_vec, axis=1)
+
     machs = jnp.nan_to_num(jnp.asarray([s.mach for s in history]))
     aoas = jnp.asarray([s.angle_of_attack for s in history])
     dynamic_pressures = jnp.asarray([s.dynamic_pressure for s in history])
-    aero_forces = jnp.asarray([s.total_aero_force for s in history])
+    aero_force_mag = jnp.linalg.norm(aero_forces, axis=1)
 
-    fin_control_trim_data = angular_velocities
-    fin_deflect_data = aero_forces
-    aero_coefs_data = jnp.stack([machs, aoas, dynamic_pressures], axis=1)
+    def quat_to_euler_deg(q: jnp.ndarray) -> jnp.ndarray:
+        x, y, z, w = q
+        sinr_cosp = 2.0 * (w * x + y * z)
+        cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
+        roll = jnp.arctan2(sinr_cosp, cosr_cosp)
 
-    Altitude = ty.Annotated[jax.Array, el.Component("altitude", el.ComponentType.F64)]
-    VelocityMag = ty.Annotated[jax.Array, el.Component("velocity_magnitude", el.ComponentType.F64)]
+        sinp = 2.0 * (w * y - z * x)
+        pitch = jnp.where(jnp.abs(sinp) >= 1.0, jnp.sign(sinp) * (jnp.pi / 2.0), jnp.arcsin(sinp))
+
+        siny_cosp = 2.0 * (w * z + x * y)
+        cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+        yaw = jnp.arctan2(siny_cosp, cosy_cosp)
+
+        return jnp.rad2deg(jnp.array([roll, pitch, yaw]))
+
+    euler_deg = jax.vmap(quat_to_euler_deg)(quaternions)
+
+    angular_rates_deg = jnp.rad2deg(angular_velocities)
+
+    Altitude = ty.Annotated[jax.Array, el.Component("altitude_m", el.ComponentType.F64)]
+    Downrange = ty.Annotated[jax.Array, el.Component("downrange_m", el.ComponentType.F64)]
+    Speed = ty.Annotated[jax.Array, el.Component("speed_ms", el.ComponentType.F64)]
+    Accel = ty.Annotated[jax.Array, el.Component("accel_ms2", el.ComponentType.F64)]
     MachComp = ty.Annotated[jax.Array, el.Component("mach", el.ComponentType.F64)]
-    AngleOfAttackComp = ty.Annotated[jax.Array, el.Component("angle_of_attack", el.ComponentType.F64)]
-    DynamicPressureComp = ty.Annotated[jax.Array, el.Component("dynamic_pressure", el.ComponentType.F64)]
-    FinControlTrimComp = ty.Annotated[
+    AngleOfAttackComp = ty.Annotated[jax.Array, el.Component("angle_of_attack_deg", el.ComponentType.F64)]
+    DynamicPressureComp = ty.Annotated[jax.Array, el.Component("dynamic_pressure_pa", el.ComponentType.F64)]
+    AeroForceMag = ty.Annotated[jax.Array, el.Component("aero_force_n", el.ComponentType.F64)]
+    EulerAngles = ty.Annotated[
         jax.Array,
         el.Component(
-            "fin_control_trim",
+            "euler_deg",
             el.ComponentType(el.PrimitiveType.F64, (3,)),
-            metadata={"element_names": "x,y,z"},
+            metadata={"element_names": "roll,pitch,yaw"},
         ),
     ]
-    FinDeflectComp = ty.Annotated[
+    BodyRates = ty.Annotated[
         jax.Array,
         el.Component(
-            "fin_deflect",
-            el.ComponentType(el.PrimitiveType.F64, (3,)),
-            metadata={"element_names": "x,y,z"},
-        ),
-    ]
-    AeroCoefsComp = ty.Annotated[
-        jax.Array,
-        el.Component(
-            "aero_coefs",
-            el.ComponentType(el.PrimitiveType.F64, (3,)),
-            metadata={"element_names": "mach,aoa,q"},
+            "angular_rates_deg", el.ComponentType(el.PrimitiveType.F64, (3,)), metadata={"element_names": "p,q,r"}
         ),
     ]
 
     @el.dataclass
     class PlaybackTelemetry(el.Archetype):
         altitude: Altitude = field(default_factory=lambda: jnp.float64(0.0))
-        velocity_magnitude: VelocityMag = field(default_factory=lambda: jnp.float64(0.0))
+        downrange: Downrange = field(default_factory=lambda: jnp.float64(0.0))
+        speed: Speed = field(default_factory=lambda: jnp.float64(0.0))
+        acceleration: Accel = field(default_factory=lambda: jnp.float64(0.0))
         mach: MachComp = field(default_factory=lambda: jnp.float64(0.0))
         angle_of_attack: AngleOfAttackComp = field(default_factory=lambda: jnp.float64(0.0))
         dynamic_pressure: DynamicPressureComp = field(default_factory=lambda: jnp.float64(0.0))
-        fin_control_trim: FinControlTrimComp = field(default_factory=lambda: jnp.zeros(3))
-        fin_deflect: FinDeflectComp = field(default_factory=lambda: jnp.zeros(3))
-        aero_coefs: AeroCoefsComp = field(default_factory=lambda: jnp.zeros(3))
+        aero_force: AeroForceMag = field(default_factory=lambda: jnp.float64(0.0))
+        euler: EulerAngles = field(default_factory=lambda: jnp.zeros(3))
+        angular_rates: BodyRates = field(default_factory=lambda: jnp.zeros(3))
 
     world = el.World()
     mass0 = solver.mass_model.total_mass(0.0)
@@ -182,14 +199,18 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     )
 
     schematic = """
-    hsplit {
-        tabs share=0.8 {
-            viewport name=Viewport pos="rocket.world_pos + (0.0,0.0,0.0,0.0, 5.0, 0.0, 1.0)" look_at="rocket.world_pos" hdr=#true
+    tabs {
+        hsplit share=0.65 name="Flight View" {
+            viewport name=Viewport pos="rocket.world_pos + (0,0,0,0, 6,3,2)" look_at="rocket.world_pos" hdr=#true show_grid=#true active=#true
+            vsplit share=0.45 {
+                graph "rocket.altitude_m,rocket.downrange_m" name="Altitude / Downrange"
+                graph "rocket.speed_ms,rocket.accel_ms2" name="Speed / Accel"
+                graph "rocket.dynamic_pressure_pa,rocket.mach,rocket.aero_force_n" name="Aero Loads"
+            }
         }
-        vsplit share=0.4 {
-            graph "rocket.fin_control_trim" name="Trim Control"
-            graph "rocket.fin_deflect" name="Fin Deflection"
-            graph "rocket.aero_coefs" name="Aero Coefficients"
+        hsplit share=0.35 name="Orientation" {
+            graph "rocket.euler_deg[0],rocket.euler_deg[1],rocket.euler_deg[2]" name="Euler Angles"
+            graph "rocket.angular_rates_deg[0],rocket.angular_rates_deg[1],rocket.angular_rates_deg[2]" name="Body Rates"
         }
     }
 
@@ -199,8 +220,8 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     object_3d rocket.world_pos {
         glb path="https://storage.googleapis.com/elodin-assets/rocket.glb"
     }
-    line_3d rocket.world_pos line_width=11.0 perspective=#false {
-        color yolk
+    line_3d rocket.world_pos line_width=6.0 perspective=#false {
+        color 255 223 0
     }
     """
 
@@ -250,12 +271,28 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
         return comp.map(Altitude, lambda _: jnp.float64(altitudes[idx]))
 
     @el.system
-    def playback_velocity_mag(
+    def playback_downrange(
         tick: el.Query[el.SimulationTick],
-        comp: el.Query[VelocityMag],
-    ) -> el.Query[VelocityMag]:
+        comp: el.Query[Downrange],
+    ) -> el.Query[Downrange]:
         idx = frame_index(tick[0])
-        return comp.map(VelocityMag, lambda _: jnp.float64(velocity_mags[idx]))
+        return comp.map(Downrange, lambda _: jnp.float64(downrange[idx]))
+
+    @el.system
+    def playback_speed(
+        tick: el.Query[el.SimulationTick],
+        comp: el.Query[Speed],
+    ) -> el.Query[Speed]:
+        idx = frame_index(tick[0])
+        return comp.map(Speed, lambda _: jnp.float64(speed[idx]))
+
+    @el.system
+    def playback_accel(
+        tick: el.Query[el.SimulationTick],
+        comp: el.Query[Accel],
+    ) -> el.Query[Accel]:
+        idx = frame_index(tick[0])
+        return comp.map(Accel, lambda _: jnp.float64(accel_mag[idx]))
 
     @el.system
     def playback_mach(
@@ -282,40 +319,42 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
         return comp.map(DynamicPressureComp, lambda _: jnp.float64(dynamic_pressures[idx]))
 
     @el.system
-    def playback_fin_trim(
+    def playback_aero_force(
         tick: el.Query[el.SimulationTick],
-        comp: el.Query[FinControlTrimComp],
-    ) -> el.Query[FinControlTrimComp]:
+        comp: el.Query[AeroForceMag],
+    ) -> el.Query[AeroForceMag]:
         idx = frame_index(tick[0])
-        return comp.map(FinControlTrimComp, lambda _: fin_control_trim_data[idx])
+        return comp.map(AeroForceMag, lambda _: jnp.float64(aero_force_mag[idx]))
 
     @el.system
-    def playback_fin_deflect(
+    def playback_euler(
         tick: el.Query[el.SimulationTick],
-        comp: el.Query[FinDeflectComp],
-    ) -> el.Query[FinDeflectComp]:
+        comp: el.Query[EulerAngles],
+    ) -> el.Query[EulerAngles]:
         idx = frame_index(tick[0])
-        return comp.map(FinDeflectComp, lambda _: fin_deflect_data[idx])
+        return comp.map(EulerAngles, lambda _: euler_deg[idx])
 
     @el.system
-    def playback_aero_coefs(
+    def playback_body_rates(
         tick: el.Query[el.SimulationTick],
-        comp: el.Query[AeroCoefsComp],
-    ) -> el.Query[AeroCoefsComp]:
+        comp: el.Query[BodyRates],
+    ) -> el.Query[BodyRates]:
         idx = frame_index(tick[0])
-        return comp.map(AeroCoefsComp, lambda _: aero_coefs_data[idx])
+        return comp.map(BodyRates, lambda _: angular_rates_deg[idx])
 
     playback_system = (
         playback_world_pos
         | playback_world_vel
         | playback_altitude
-        | playback_velocity_mag
+        | playback_downrange
+        | playback_speed
+        | playback_accel
         | playback_mach
         | playback_aoa
         | playback_dynamic_pressure
-        | playback_fin_trim
-        | playback_fin_deflect
-        | playback_aero_coefs
+        | playback_aero_force
+        | playback_euler
+        | playback_body_rates
     )
 
     print(f"\n✓ Schematic: rocket.kdl")
