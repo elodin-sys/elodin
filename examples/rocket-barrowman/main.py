@@ -15,6 +15,7 @@ import typing as ty
 from dataclasses import dataclass, field
 
 import numpy as np
+import jax.numpy as jnp
 
 # Add the rocket-barrowman directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
@@ -97,22 +98,24 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     print(f"\nConverting to Elodin format and launching editor...")
 
     history = result.history
-    times = np.array([s.time for s in history])
-    positions = np.array([s.position for s in history])
-    velocities = np.array([s.velocity for s in history])
-    quaternions = np.array([s.quaternion for s in history])
-    angular_velocities = np.array([s.angular_velocity for s in history])
+    times_np = np.array([s.time for s in history])
+    dt = float(times_np[1] - times_np[0]) if len(times_np) > 1 else 0.01
 
-    altitudes = np.array([s.z for s in history])
-    velocity_mags = np.array([np.linalg.norm(s.velocity) for s in history])
-    machs = np.nan_to_num(np.array([s.mach for s in history]))
-    aoas = np.array([s.angle_of_attack for s in history])
-    dynamic_pressures = np.array([s.dynamic_pressure for s in history])
-    aero_forces = np.array([s.total_aero_force for s in history])
+    positions = jnp.asarray([s.position for s in history])
+    velocities = jnp.asarray([s.velocity for s in history])
+    quaternions = jnp.asarray([s.quaternion for s in history])
+    angular_velocities = jnp.asarray([s.angular_velocity for s in history])
+
+    altitudes = jnp.asarray([s.z for s in history])
+    velocity_mags = jnp.asarray([jnp.linalg.norm(jnp.asarray(s.velocity)) for s in history])
+    machs = jnp.nan_to_num(jnp.asarray([s.mach for s in history]))
+    aoas = jnp.asarray([s.angle_of_attack for s in history])
+    dynamic_pressures = jnp.asarray([s.dynamic_pressure for s in history])
+    aero_forces = jnp.asarray([s.total_aero_force for s in history])
 
     fin_control_trim_data = angular_velocities
     fin_deflect_data = aero_forces
-    aero_coefs_data = np.stack([machs, aoas, dynamic_pressures], axis=1)
+    aero_coefs_data = jnp.stack([machs, aoas, dynamic_pressures], axis=1)
 
     AltitudeComp = ty.Annotated[
         float,
@@ -155,9 +158,9 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
         mach: MachComp = 0.0
         angle_of_attack: AoAComp = 0.0
         dynamic_pressure: DynPressureComp = 0.0
-        fin_control_trim: FinControlTrimComp = field(default_factory=lambda: np.zeros(3))
-        fin_deflect: FinDeflectComp = field(default_factory=lambda: np.zeros(3))
-        aero_coefs: AeroCoefsComp = field(default_factory=lambda: np.zeros(3))
+        fin_control_trim: FinControlTrimComp = field(default_factory=lambda: jnp.zeros(3))
+        fin_deflect: FinDeflectComp = field(default_factory=lambda: jnp.zeros(3))
+        aero_coefs: AeroCoefsComp = field(default_factory=lambda: jnp.zeros(3))
 
     world = el.World()
     mass0 = solver.mass_model.total_mass(0.0)
@@ -178,6 +181,7 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
             RocketTelemetry(),
         ],
         name="rocket",
+        id="rocket",
     )
 
     schematic = """
@@ -209,30 +213,66 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     with open("rocket.kdl", "w") as f:
         f.write(schematic)
 
-    exec = el.Executor(world)
+    frame_count = positions.shape[0]
+    frame_max = float(frame_count - 1)
 
-    quats_el = [el.Quaternion.from_array(q) for q in quaternions]
+    def frame_index(tick_value: jnp.ndarray) -> jnp.ndarray:
+        idx = jnp.clip(jnp.floor(tick_value), 0.0, frame_max)
+        return idx.astype(jnp.int32)
 
-    for i in range(len(times)):
-        exec.set_component(rocket_entity, "world_pos.linear", positions[i])
-        exec.set_component(rocket_entity, "world_pos.angular", quats_el[i])
-        exec.set_component(rocket_entity, "world_vel.linear", velocities[i])
-        exec.set_component(rocket_entity, "world_vel.angular", angular_velocities[i])
-        exec.set_component(rocket_entity, "altitude", float(altitudes[i]))
-        exec.set_component(rocket_entity, "velocity_magnitude", float(velocity_mags[i]))
-        exec.set_component(rocket_entity, "mach", float(machs[i]))
-        exec.set_component(rocket_entity, "angle_of_attack", float(aoas[i]))
-        exec.set_component(rocket_entity, "dynamic_pressure", float(dynamic_pressures[i]))
-        exec.set_component(rocket_entity, "fin_control_trim", np.asarray(fin_control_trim_data[i]))
-        exec.set_component(rocket_entity, "fin_deflect", np.asarray(fin_deflect_data[i]))
-        exec.set_component(rocket_entity, "aero_coefs", np.asarray(aero_coefs_data[i]))
-        if i < len(times) - 1:
-            exec.step(times[i + 1] - times[i])
+    @el.system
+    def playback_body(
+        tick: el.Query[el.SimulationTick],
+        pos_q: el.Query[el.WorldPos],
+        vel_q: el.Query[el.WorldVel],
+    ) -> tuple[el.Query[el.WorldPos], el.Query[el.WorldVel]]:
+        idx = frame_index(tick[0])
+        transform = el.SpatialTransform(
+            linear=positions[idx],
+            angular=el.Quaternion.from_array(quaternions[idx]),
+        )
+        motion = el.SpatialMotion(
+            linear=velocities[idx],
+            angular=angular_velocities[idx],
+        )
+        return (
+            pos_q.map(el.WorldPos, lambda _: transform),
+            vel_q.map(el.WorldVel, lambda _: motion),
+        )
+
+    @el.system
+    def playback_telemetry(
+        tick: el.Query[el.SimulationTick],
+        telemetry_q: el.Query[RocketTelemetry],
+    ) -> el.Query[RocketTelemetry]:
+        idx = frame_index(tick[0])
+
+        def mapper(_: RocketTelemetry) -> RocketTelemetry:
+            return RocketTelemetry(
+                altitude=altitudes[idx],
+                velocity_magnitude=velocity_mags[idx],
+                mach=machs[idx],
+                angle_of_attack=aoas[idx],
+                dynamic_pressure=dynamic_pressures[idx],
+                fin_control_trim=fin_control_trim_data[idx],
+                fin_deflect=fin_deflect_data[idx],
+                aero_coefs=aero_coefs_data[idx],
+            )
+
+        return telemetry_q.map(RocketTelemetry, mapper)
+
+    playback_system = playback_body | playback_telemetry
 
     print(f"\n✓ Schematic: rocket.kdl")
     print(f"✓ Launching Elodin editor...")
 
-    exec.run_with_schematic(schematic)
+    world.run(
+        playback_system,
+        sim_time_step=dt,
+        run_time_step=dt,
+        default_playback_speed=1.0,
+        max_ticks=frame_count,
+    )
 
     print(f"\n{'='*70}")
     print(f"Simulation + visualization complete!")
