@@ -1,8 +1,8 @@
 {
   nixConfig = {
-    extra-substituters = ["http://ci-arm1.elodin.dev:5000"];
+    extra-substituters = ["https://elodin-nix-cache.s3.us-west-2.amazonaws.com"];
     extra-trusted-public-keys = [
-      "builder-cache-1:q7rDGIQgkg1nsxNEg7mHN1kEDuxPmJhQpuIXCCwLj8E="
+      "elodin-cache-1:vvbmIQvTOjcBjIs8Ri7xlT2I3XAmeJyF5mNlWB+fIwM="
     ];
     fallback = true;
   };
@@ -12,12 +12,9 @@
     jetpack.url = "github:anduril/jetpack-nixos/de01bba154f27a96b40c7f406f1f84517ee11780";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
-    agenix.url = "github:ryantm/agenix";
 
     jetpack.inputs.nixpkgs.follows = "nixpkgs";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
-    agenix.inputs.nixpkgs.follows = "nixpkgs";
-    agenix.inputs.systems.follows = "flake-utils/systems";
   };
   outputs = {
     self,
@@ -26,7 +23,6 @@
     flake-utils,
     jetpack,
     rust-overlay,
-    agenix,
   }: let
     system = "aarch64-linux";
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ../rust-toolchain.toml;
@@ -35,9 +31,6 @@
         directory = ./pkgs;
         callPackage = path: args: final.callPackage path (args // {inherit rustToolchain;});
       })
-      // {
-        memserve = final.callPackage ../nix/pkgs/memserve.nix {inherit rustToolchain;};
-      }
       // (rust-overlay.overlays.default final prev);
     # Temporarily disabled for nixpkgs 25.05 compatibility (CUDA issues)
     # // {
@@ -134,20 +127,6 @@
         installer = installerSystem ({...}: {
           imports = builtins.attrValues baseModules;
         });
-        docs = nixpkgs.lib.nixosSystem {
-          inherit system;
-          modules =
-            builtins.attrValues baseModules
-            ++ [
-              agenix.nixosModules.default
-              ../nix/modules/docs.nix
-              ../nix/modules/tunnel.nix
-              ({pkgs, ...}: {
-                services.nvpmodel.profileNumber = 1;
-                services.nvpmodel.configFile = "${pkgs.nvidia-jetpack.l4t-nvpmodel}/etc/nvpmodel/nvpmodel_p3767_0003.conf";
-              })
-            ];
-        };
       };
       packages.aarch64-linux = {
         toplevel = nixosConfigurations.default.config.system.build.toplevel;
