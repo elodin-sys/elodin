@@ -22,6 +22,7 @@ packages:
   - git-filter-repo
   - pciutils
   - openssl
+  - awscli
 
 write_files:
   - path: /etc/overlayroot.local.conf
@@ -84,12 +85,13 @@ write_files:
       # Configure Nix to use the S3 cache and post-build-hook
       mkdir -p /etc/nix
 
-      bash -c 'cat >> /etc/nix/nix.conf << "NIXCONF"
+      bash -c 'cat >> /etc/nix/nix.custom.conf << "NIXCONF"
       # S3 Binary Cache Configuration
       substituters = https://cache.nixos.org s3://elodin-nix-cache?region=us-west-2
       trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= elodin-cache-1:vvbmIQvTOjcBjIs8Ri7xlT2I3XAmeJyF5mNlWB+fIwM=
       trusted-users = root buildkite-agent nix-users
       post-build-hook = /etc/nix/upload-to-cache.sh
+      accept-flake-config = true
       NIXCONF'
 
       # --- Buildkite Agent (APT) ---
