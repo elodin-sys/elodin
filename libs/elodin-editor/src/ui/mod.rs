@@ -4,7 +4,7 @@ use bevy::{
     app::AppExit,
     ecs::{
         query::QueryData,
-        system::{SystemParam, SystemState},
+        system::{SystemParam, SystemState, NonSendMarker},
     },
     input::keyboard::Key,
     prelude::*,
@@ -13,9 +13,10 @@ use bevy::{
         EnabledButtons, PresentMode, PrimaryWindow, WindowCloseRequested, WindowRef,
         WindowResolution,
     },
+    winit::WINIT_WINDOWS,
 };
 use bevy_egui::{
-    EguiContext, EguiContexts, EguiTextureHandle,
+    EguiContext, EguiContexts, EguiTextureHandle, EguiPrimaryContextPass,
     egui::{self, Color32, Label, Margin, RichText},
 };
 use egui_tiles::{Container, Tile};
@@ -212,27 +213,27 @@ impl Plugin for UiPlugin {
             .init_resource::<timeline::StreamTickOrigin>()
             .init_resource::<command_palette::CommandPaletteState>()
             .add_event::<DialogEvent>()
-            .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
-            .add_systems(Update, actions::spawn_lua_actor)
-            .add_systems(Update, shortcuts)
-            .add_systems(Update, handle_primary_close.before(render_layout))
-            .add_systems(Update, render_layout)
-            .add_systems(Update, sync_secondary_windows.after(render_layout))
-            .add_systems(Update, handle_secondary_close.after(sync_secondary_windows))
+            .add_systems(EguiPrimaryContextPass, timeline_slider::sync_ui_tick.before(render_layout))
+            .add_systems(EguiPrimaryContextPass, actions::spawn_lua_actor)
+            .add_systems(EguiPrimaryContextPass, shortcuts)
+            .add_systems(EguiPrimaryContextPass, handle_primary_close.before(render_layout))
+            .add_systems(EguiPrimaryContextPass, render_layout)
+            .add_systems(EguiPrimaryContextPass, sync_secondary_windows.after(render_layout))
+            .add_systems(EguiPrimaryContextPass, handle_secondary_close.after(sync_secondary_windows))
             .add_systems(
-                Update,
+                EguiPrimaryContextPass,
                 set_secondary_camera_viewport.after(sync_secondary_windows),
             )
             .add_systems(
-                Update,
+                EguiPrimaryContextPass,
                 render_secondary_windows.after(handle_secondary_close),
             )
-            //.add_systems(Update, sync_hdr)
-            .add_systems(Update, tiles::shortcuts)
-            .add_systems(Update, set_camera_viewport.after(render_layout))
-            .add_systems(Update, sync_camera_grid_cell.after(render_layout))
-            .add_systems(Update, query_plot::auto_bounds)
-            .add_systems(Update, dashboard::update_nodes)
+            //.add_systems(EguiPrimaryContextPass, sync_hdr)
+            .add_systems(EguiPrimaryContextPass, tiles::shortcuts)
+            .add_systems(EguiPrimaryContextPass, set_camera_viewport.after(render_layout))
+            .add_systems(EguiPrimaryContextPass, sync_camera_grid_cell.after(render_layout))
+            .add_systems(EguiPrimaryContextPass, query_plot::auto_bounds)
+            .add_systems(EguiPrimaryContextPass, dashboard::update_nodes)
             .add_plugins(SchematicPlugin)
             .add_plugins(LinePlot3dPlugin)
             .add_plugins(command_palette::palette_items::plugin);
@@ -304,7 +305,8 @@ pub struct Titlebar<'w, 's> {
             &'static bevy::window::PrimaryWindow,
         ),
     >,
-    winit_windows: NonSend<'w, bevy::winit::WinitWindows>,
+    // TODO: AP - is this marker actually doing anything in this case?
+    _non_send_marker: NonSendMarker,
 }
 
 impl RootWidgetSystem for Titlebar<'_, '_> {
@@ -394,100 +396,65 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
                             let Ok((window_id, _, _)) = state_mut.windows.single() else {
                                 return;
                             };
-                            let winit_window =
-                                state_mut.winit_windows.get_window(window_id).unwrap();
-                            ui.horizontal_centered(|ui| {
-                                ui.style_mut().visuals.widgets.hovered.weak_bg_fill =
-                                    egui::Color32::from_hex("#E81123").expect("invalid red color");
 
-                                ui.style_mut().visuals.widgets.hovered.fg_stroke =
-                                    egui::Stroke::new(1.0, Color32::WHITE);
-                                ui.style_mut().visuals.widgets.hovered.corner_radius =
-                                    CornerRadius {
-                                        nw: 0,
-                                        ne: if cfg!(target_os = "windows") { 4 } else { 0 },
-                                        sw: 0,
-                                        se: 0,
-                                    };
-                                let btn = if cfg!(target_os = "windows") {
-                                    egui::Button::new(
-                                        RichText::new("\u{e8bb}")
-                                            .font(egui::FontId {
-                                                size: 10.0,
-                                                family: egui::FontFamily::Proportional,
-                                            })
-                                            .line_height(Some(11.0)),
-                                    )
-                                } else {
-                                    egui::Button::image(egui::load::SizedTexture::new(
-                                        icon_close,
-                                        egui::vec2(11., 11.),
-                                    ))
-                                    .image_tint_follows_text_color(true)
-                                };
-                                if ui
-                                    .add_sized(
-                                        egui::vec2(45.0, 40.0),
-                                        btn.stroke(egui::Stroke::NONE),
-                                    )
-                                    .clicked()
-                                {
-                                    state_mut.app_exit.write(AppExit::Success);
-                                }
-                                ui.add_space(2.0);
-                            });
+                            WINIT_WINDOWS.with_borrow(|winit_windows| {
+                                let winit_window =
+                                    winit_windows.get_window(window_id).unwrap();
+                                ui.horizontal_centered(|ui| {
+                                    ui.style_mut().visuals.widgets.hovered.weak_bg_fill =
+                                        egui::Color32::from_hex("#E81123").expect("invalid red color");
 
-                            let maximized = winit_window.is_maximized();
-                            ui.scope(|ui| {
-                                ui.style_mut().visuals.widgets.hovered.fg_stroke =
-                                    egui::Stroke::new(1.0, Color32::WHITE);
-                                ui.style_mut().visuals.widgets.hovered.weak_bg_fill =
-                                    egui::Color32::from_hex("#4E4D53").expect("invalid red color");
-                                ui.style_mut().visuals.widgets.hovered.corner_radius =
-                                    CornerRadius::ZERO;
-                                let btn = if cfg!(target_os = "windows") {
-                                    egui::Button::new(
-                                        RichText::new(if maximized {
-                                            "\u{e923}"
-                                        } else {
-                                            "\u{e922}"
-                                        })
-                                        .font(egui::FontId {
-                                            size: 10.0,
-                                            family: egui::FontFamily::Proportional,
-                                        })
-                                        .line_height(Some(11.0)),
-                                    )
-                                } else {
-                                    egui::Button::image(egui::load::SizedTexture::new(
-                                        if maximized {
-                                            icon_exit_fullscreen
-                                        } else {
-                                            icon_fullscreen
-                                        },
-                                        egui::vec2(11., 11.),
-                                    ))
-                                    .image_tint_follows_text_color(true)
-                                };
-                                if ui
-                                    .add_sized(
-                                        egui::vec2(45.0, 40.0),
-                                        btn.stroke(egui::Stroke::NONE),
-                                    )
-                                    .clicked()
-                                {
-                                    winit_window.set_maximized(!maximized);
-                                }
-
-                                ui.add_space(2.0);
-                                if ui
-                                    .add_sized(
-                                        egui::vec2(45.0, 40.0),
+                                    ui.style_mut().visuals.widgets.hovered.fg_stroke =
+                                        egui::Stroke::new(1.0, Color32::WHITE);
+                                    ui.style_mut().visuals.widgets.hovered.corner_radius =
+                                        CornerRadius {
+                                            nw: 0,
+                                            ne: if cfg!(target_os = "windows") { 4 } else { 0 },
+                                            sw: 0,
+                                            se: 0,
+                                        };
+                                    let btn = if cfg!(target_os = "windows") {
                                         egui::Button::new(
-                                            RichText::new(if cfg!(target_os = "windows") {
-                                                "\u{e921}"
+                                            RichText::new("\u{e8bb}")
+                                                .font(egui::FontId {
+                                                    size: 10.0,
+                                                    family: egui::FontFamily::Proportional,
+                                                })
+                                                .line_height(Some(11.0)),
+                                        )
+                                    } else {
+                                        egui::Button::image(egui::load::SizedTexture::new(
+                                            icon_close,
+                                            egui::vec2(11., 11.),
+                                        ))
+                                        .image_tint_follows_text_color(true)
+                                    };
+                                    if ui
+                                        .add_sized(
+                                            egui::vec2(45.0, 40.0),
+                                            btn.stroke(egui::Stroke::NONE),
+                                        )
+                                        .clicked()
+                                    {
+                                        state_mut.app_exit.write(AppExit::Success);
+                                    }
+                                    ui.add_space(2.0);
+                                });
+
+                                let maximized = winit_window.is_maximized();
+                                ui.scope(|ui| {
+                                    ui.style_mut().visuals.widgets.hovered.fg_stroke =
+                                        egui::Stroke::new(1.0, Color32::WHITE);
+                                    ui.style_mut().visuals.widgets.hovered.weak_bg_fill =
+                                        egui::Color32::from_hex("#4E4D53").expect("invalid red color");
+                                    ui.style_mut().visuals.widgets.hovered.corner_radius =
+                                        CornerRadius::ZERO;
+                                    let btn = if cfg!(target_os = "windows") {
+                                        egui::Button::new(
+                                            RichText::new(if maximized {
+                                                "\u{e923}"
                                             } else {
-                                                "—"
+                                                "\u{e922}"
                                             })
                                             .font(egui::FontId {
                                                 size: 10.0,
@@ -495,14 +462,53 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
                                             })
                                             .line_height(Some(11.0)),
                                         )
-                                        .stroke(egui::Stroke::NONE),
-                                    )
-                                    .clicked()
-                                {
-                                    winit_window.set_minimized(true);
-                                }
+                                    } else {
+                                        egui::Button::image(egui::load::SizedTexture::new(
+                                            if maximized {
+                                                icon_exit_fullscreen
+                                            } else {
+                                                icon_fullscreen
+                                            },
+                                            egui::vec2(11., 11.),
+                                        ))
+                                        .image_tint_follows_text_color(true)
+                                    };
+                                    if ui
+                                        .add_sized(
+                                            egui::vec2(45.0, 40.0),
+                                            btn.stroke(egui::Stroke::NONE),
+                                        )
+                                        .clicked()
+                                    {
+                                        winit_window.set_maximized(!maximized);
+                                    }
+
+                                    ui.add_space(2.0);
+                                    if ui
+                                        .add_sized(
+                                            egui::vec2(45.0, 40.0),
+                                            egui::Button::new(
+                                                RichText::new(if cfg!(target_os = "windows") {
+                                                    "\u{e921}"
+                                                } else {
+                                                    "—"
+                                                })
+                                                .font(egui::FontId {
+                                                    size: 10.0,
+                                                    family: egui::FontFamily::Proportional,
+                                                })
+                                                .line_height(Some(11.0)),
+                                            )
+                                            .stroke(egui::Stroke::NONE),
+                                        )
+                                        .clicked()
+                                    {
+                                        winit_window.set_minimized(true);
+                                    }
+                                });
+                                ui.add_space(8.0);
+
                             });
-                            ui.add_space(8.0);
                         }
                     });
                 });
@@ -543,7 +549,7 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
             icon_close: contexts.add_image(EguiTextureHandle::Weak(images.icon_close.id())),
         };
 
-        world.add_root_widget_with::<Titlebar, With<PrimaryWindow>>("titlebar", titlebar_icons);
+        world.add_root_widget_with::<Titlebar, With<IsDefaultUiCamera>>("titlebar", titlebar_icons);
 
         #[cfg(not(target_family = "wasm"))]
         world.add_root_widget::<status_bar::StatusBar>("status_bar");
