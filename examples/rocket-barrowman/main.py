@@ -11,6 +11,9 @@ Usage:
 
 import sys
 import os
+import typing as ty
+from dataclasses import dataclass, field
+
 import numpy as np
 
 # Add the rocket-barrowman directory to path
@@ -87,86 +90,105 @@ def main():
     for i, s in enumerate(result.history[:3]):
         print(f"  t={s.time:.2f}s: pos={s.position}, z={s.z:.2f}m")
     
-    print(f"\n{'='*70}")
-    print(f"Simulation complete! Elodin visualization coming soon...")
-    print(f"{'='*70}\n")
-    return
-    
-    # TODO: Convert to Elodin format
-    print(f"\nConverting to Elodin format...")
-    
-    # Create Elodin world
-    world_builder = el.WorldBuilder()
-    
-    # Create rocket entity
-    rocket_entity = world_builder.spawn(
-        el.Body(
-            world_pos=el.SpatialTransform(
-                pos=el.Component(shape=[3]),
-                rot=el.Component(shape=[4]),
+    visualize_in_elodin(result, solver)
+
+
+def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
+    print(f"\nConverting to Elodin format and launching editor...")
+
+    history = result.history
+    times = np.array([s.time for s in history])
+    positions = np.array([s.position for s in history])
+    velocities = np.array([s.velocity for s in history])
+    quaternions = np.array([s.quaternion for s in history])
+    angular_velocities = np.array([s.angular_velocity for s in history])
+
+    altitudes = np.array([s.z for s in history])
+    velocity_mags = np.array([np.linalg.norm(s.velocity) for s in history])
+    machs = np.nan_to_num(np.array([s.mach for s in history]))
+    aoas = np.array([s.angle_of_attack for s in history])
+    dynamic_pressures = np.array([s.dynamic_pressure for s in history])
+    aero_forces = np.array([s.total_aero_force for s in history])
+
+    fin_control_trim_data = angular_velocities
+    fin_deflect_data = aero_forces
+    aero_coefs_data = np.stack([machs, aoas, dynamic_pressures], axis=1)
+
+    AltitudeComp = ty.Annotated[
+        float,
+        el.Component("altitude", el.ComponentType(el.PrimitiveType.F64)),
+    ]
+    VelocityMagComp = ty.Annotated[
+        float,
+        el.Component("velocity_magnitude", el.ComponentType(el.PrimitiveType.F64)),
+    ]
+    MachComp = ty.Annotated[
+        float,
+        el.Component("mach", el.ComponentType(el.PrimitiveType.F64)),
+    ]
+    AoAComp = ty.Annotated[
+        float,
+        el.Component("angle_of_attack", el.ComponentType(el.PrimitiveType.F64)),
+    ]
+    DynPressureComp = ty.Annotated[
+        float,
+        el.Component("dynamic_pressure", el.ComponentType(el.PrimitiveType.F64)),
+    ]
+    Vector3Type = el.ComponentType(el.PrimitiveType.F64, (3,))
+    FinControlTrimComp = ty.Annotated[
+        np.ndarray,
+        el.Component("fin_control_trim", Vector3Type, metadata={"element_names": "x,y,z"}),
+    ]
+    FinDeflectComp = ty.Annotated[
+        np.ndarray,
+        el.Component("fin_deflect", Vector3Type, metadata={"element_names": "x,y,z"}),
+    ]
+    AeroCoefsComp = ty.Annotated[
+        np.ndarray,
+        el.Component("aero_coefs", Vector3Type, metadata={"element_names": "mach,aoa,q"}),
+    ]
+
+    @dataclass
+    class RocketTelemetry(el.Archetype):
+        altitude: AltitudeComp = 0.0
+        velocity_magnitude: VelocityMagComp = 0.0
+        mach: MachComp = 0.0
+        angle_of_attack: AoAComp = 0.0
+        dynamic_pressure: DynPressureComp = 0.0
+        fin_control_trim: FinControlTrimComp = field(default_factory=lambda: np.zeros(3))
+        fin_deflect: FinDeflectComp = field(default_factory=lambda: np.zeros(3))
+        aero_coefs: AeroCoefsComp = field(default_factory=lambda: np.zeros(3))
+
+    world = el.World()
+    mass0 = solver.mass_model.total_mass(0.0)
+    inertia_diag0 = solver.mass_model.inertia_diag(0.0)
+
+    rocket_entity = world.spawn(
+        [
+            el.Body(
+                world_pos=el.SpatialTransform(
+                    linear=positions[0],
+                    angular=el.Quaternion.from_array(quaternions[0]),
+                ),
+                inertia=el.SpatialInertia(
+                    mass=mass0,
+                    inertia=inertia_diag0,
+                ),
             ),
-            world_vel=el.SpatialMotion(
-                linear=el.Component(shape=[3]),
-                angular=el.Component(shape=[3]),
-            ),
-        ),
+            RocketTelemetry(),
+        ],
         name="rocket",
     )
-    
-    # Add metadata components
-    rocket_entity.insert(
-        el.Metadata(
-            altitude=el.Component(shape=[]),
-            velocity_magnitude=el.Component(shape=[]),
-            mach=el.Component(shape=[]),
-            angle_of_attack=el.Component(shape=[]),
-            dynamic_pressure=el.Component(shape=[]),
-        )
-    )
-    
-    # Build world
-    world = world_builder.build()
-    
-    # Create time series data
-    times = np.array([s.time for s in result.history])
-    positions = np.array([s.position for s in result.history])
-    velocities = np.array([s.velocity for s in result.history])
-    quaternions = np.array([s.quaternion for s in result.history])
-    angular_velocities = np.array([s.angular_velocity for s in result.history])
-    
-    # Metadata
-    altitudes = np.array([s.z for s in result.history])
-    velocity_mags = np.array([np.linalg.norm(s.velocity) for s in result.history])
-    machs = np.array([s.mach for s in result.history])
-    aoas = np.array([s.angle_of_attack for s in result.history])
-    dynamic_pressures = np.array([s.dynamic_pressure for s in result.history])
-    
-    # Create exec
-    exec = el.Executor(world)
-    
-    # Set initial state
-    exec.set_component(rocket_entity.id(), "world_pos.pos", positions[0])
-    exec.set_component(rocket_entity.id(), "world_pos.rot", quaternions[0])
-    exec.set_component(rocket_entity.id(), "world_vel.linear", velocities[0])
-    exec.set_component(rocket_entity.id(), "world_vel.angular", angular_velocities[0])
-    exec.set_component(rocket_entity.id(), "altitude", altitudes[0])
-    exec.set_component(rocket_entity.id(), "velocity_magnitude", velocity_mags[0])
-    exec.set_component(rocket_entity.id(), "mach", machs[0])
-    exec.set_component(rocket_entity.id(), "angle_of_attack", aoas[0])
-    exec.set_component(rocket_entity.id(), "dynamic_pressure", dynamic_pressures[0])
-    
-    # Create schematic
+
     schematic = """
     hsplit {
         tabs share=0.8 {
             viewport name=Viewport pos="rocket.world_pos + (0.0,0.0,0.0,0.0, 5.0, 0.0, 1.0)" look_at="rocket.world_pos" hdr=#true
         }
         vsplit share=0.4 {
-            graph "rocket.altitude" name="Altitude (m)"
-            graph "rocket.velocity_magnitude" name="Velocity (m/s)"
-            graph "rocket.mach" name="Mach Number"
-            graph "rocket.angle_of_attack" name="Angle of Attack (rad)"
-            graph "rocket.dynamic_pressure" name="Dynamic Pressure (Pa)"
+            graph "rocket.fin_control_trim" name="Trim Control"
+            graph "rocket.fin_deflect" name="Fin Deflection"
+            graph "rocket.aero_coefs" name="Aero Coefficients"
         }
     }
 
@@ -180,38 +202,40 @@ def main():
         color yolk
     }
     """
-    
-    # Run simulation with visualization
-    print(f"\nLaunching Elodin editor...")
-    
-    for i, t in enumerate(times):
-        exec.set_component(rocket_entity.id(), "world_pos.pos", positions[i])
-        exec.set_component(rocket_entity.id(), "world_pos.rot", quaternions[i])
-        exec.set_component(rocket_entity.id(), "world_vel.linear", velocities[i])
-        exec.set_component(rocket_entity.id(), "world_vel.angular", angular_velocities[i])
-        exec.set_component(rocket_entity.id(), "altitude", altitudes[i])
-        exec.set_component(rocket_entity.id(), "velocity_magnitude", velocity_mags[i])
-        exec.set_component(rocket_entity.id(), "mach", machs[i])
-        exec.set_component(rocket_entity.id(), "angle_of_attack", aoas[i])
-        exec.set_component(rocket_entity.id(), "dynamic_pressure", dynamic_pressures[i])
-        
-        # Step with delta time
-        if i < len(times) - 1:
-            dt = times[i + 1] - times[i]
-            exec.step(dt)
-    
-    # Save schematic and open editor
+
+    if hasattr(world, "schematic"):
+        world.schematic(schematic, "rocket.kdl")
+
     with open("rocket.kdl", "w") as f:
         f.write(schematic)
-    
-    print(f"\n✓ Schematic saved to rocket.kdl")
-    print(f"✓ Opening Elodin editor...")
-    
-    # Open in editor
+
+    exec = el.Executor(world)
+
+    quats_el = [el.Quaternion.from_array(q) for q in quaternions]
+
+    for i in range(len(times)):
+        exec.set_component(rocket_entity, "world_pos.linear", positions[i])
+        exec.set_component(rocket_entity, "world_pos.angular", quats_el[i])
+        exec.set_component(rocket_entity, "world_vel.linear", velocities[i])
+        exec.set_component(rocket_entity, "world_vel.angular", angular_velocities[i])
+        exec.set_component(rocket_entity, "altitude", altitudes[i])
+        exec.set_component(rocket_entity, "velocity_magnitude", velocity_mags[i])
+        exec.set_component(rocket_entity, "mach", machs[i])
+        exec.set_component(rocket_entity, "angle_of_attack", aoas[i])
+        exec.set_component(rocket_entity, "dynamic_pressure", dynamic_pressures[i])
+        exec.set_component(rocket_entity, "fin_control_trim", fin_control_trim_data[i])
+        exec.set_component(rocket_entity, "fin_deflect", fin_deflect_data[i])
+        exec.set_component(rocket_entity, "aero_coefs", aero_coefs_data[i])
+        if i < len(times) - 1:
+            exec.step(times[i + 1] - times[i])
+
+    print(f"\n✓ Schematic: rocket.kdl")
+    print(f"✓ Launching Elodin editor...")
+
     exec.run_with_schematic(schematic)
-    
+
     print(f"\n{'='*70}")
-    print(f"Simulation complete!")
+    print(f"Simulation + visualization complete!")
     print(f"{'='*70}\n")
 
 
