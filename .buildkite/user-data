@@ -22,6 +22,7 @@ packages:
   - git-filter-repo
   - pciutils
   - openssl
+  - awscli
 
 write_files:
   - path: /etc/overlayroot.local.conf
@@ -56,9 +57,44 @@ write_files:
       #!/usr/bin/env bash
       set -euo pipefail
 
-      # --- Determinate Nix (non-interactive) ---
+      # --- Nix Installation (non-interactive) ---
       curl --proto '=https' --tlsv1.2 -fsSL -L https://install.determinate.systems/nix \
-        | sh -s -- install linux --determinate --no-confirm
+        | sh -s -- install linux --no-confirm --determinate \
+        --extra-conf "trusted-users = root buildkite-agent @nix-users"
+
+      # --- Configure Nix Binary Cache Upload ---
+      CACHE_SIGNING_KEY_BASE64="LS0tLS1...your-base64-encoded-signing-key-here"
+      
+      mkdir -p /etc/nix
+      echo "$CACHE_SIGNING_KEY_BASE64" | base64 -d > /etc/nix/cache-priv-key.pem
+      chmod 600 /etc/nix/cache-priv-key.pem
+
+      # Create upload script for post-build-hook
+      bash -c 'cat > /etc/nix/upload-to-cache.sh << "UPLOADEOF"
+      #!/bin/sh
+      set -eu
+      set -f # disable globbing
+      export IFS=" "
+
+      echo "Uploading paths to S3 cache: $OUT_PATHS"
+      exec nix copy --to "s3://elodin-nix-cache?region=us-west-2&secret-key=/etc/nix/cache-priv-key.pem" $OUT_PATHS
+      UPLOADEOF
+      '
+
+      chmod +x /etc/nix/upload-to-cache.sh
+
+      # Configure Nix to use the S3 cache and post-build-hook
+      mkdir -p /etc/nix
+
+      bash -c 'cat >> /etc/nix/nix.custom.conf << "NIXCONF"
+      # S3 Binary Cache Configuration
+      extra-substituters = s3://elodin-nix-cache?region=us-west-2
+      trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= elodin-cache-1:vvbmIQvTOjcBjIs8Ri7xlT2I3XAmeJyF5mNlWB+fIwM=
+      post-build-hook = /etc/nix/upload-to-cache.sh
+      accept-flake-config = true
+      download-buffer-size = 1073741824
+      NIXCONF
+      '
 
       # --- Buildkite Agent (APT) ---
       install -d -m 0755 /etc/apt/keyrings
@@ -91,7 +127,9 @@ write_files:
         HostName github.com
         IdentityFile ~/.ssh/id_ed25519
         StrictHostKeyChecking accept-new
-      SSHEOF"'
+      SSHEOF
+      '
+
       chmod 600 /var/lib/buildkite-agent/.ssh/config
       chown buildkite-agent:buildkite-agent /var/lib/buildkite-agent/.ssh/config
 
@@ -126,7 +164,8 @@ write_files:
       Environment=PATH=/nix/var/nix/profiles/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
       # Disable eval cache to prevent SQLite contention between spawned agents
       Environment=NIX_CONFIG="eval-cache = false"
-      EOF"'
+      EOF
+      '
 
       systemctl daemon-reload
       systemctl enable --now buildkite-agent
