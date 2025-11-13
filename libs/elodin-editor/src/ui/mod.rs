@@ -1044,7 +1044,7 @@ fn apply_secondary_window_rect(
         target_rect = ?state.descriptor.screen_rect,
         "apply_secondary_window_rect start"
     );
-    if !LINUX_MULTI_WINDOW && state.descriptor.screen_rect.is_some() {
+    if state.descriptor.screen_rect.is_some() {
         state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_LOAD_GUARD);
     }
     if state.pending_fullscreen_exit {
@@ -1183,10 +1183,8 @@ fn apply_secondary_window_rect(
     window.set_outer_position(PhysicalPosition::new(x, y));
     state.applied_rect = Some(rect);
     state.skip_metadata_capture = true;
-    if !LINUX_MULTI_WINDOW {
-        state.clear_metadata_capture_block();
-        state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_STABILIZE_GUARD);
-    }
+    state.clear_metadata_capture_block();
+    state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_STABILIZE_GUARD);
     info!(
         path = %state.descriptor.path.display(),
         rect = ?rect,
@@ -1245,16 +1243,14 @@ fn complete_screen_assignment(
     } else {
         tiles::SecondaryWindowRelayoutPhase::Idle
     };
-    if !LINUX_MULTI_WINDOW {
-        if matches!(
-            state.relayout_phase,
-            tiles::SecondaryWindowRelayoutPhase::NeedRect
-        ) && state.descriptor.screen_rect.is_some()
-        {
-            state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_LOAD_GUARD);
-        } else {
-            state.clear_metadata_capture_block();
-        }
+    if matches!(
+        state.relayout_phase,
+        tiles::SecondaryWindowRelayoutPhase::NeedRect
+    ) && state.descriptor.screen_rect.is_some()
+    {
+        state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_LOAD_GUARD);
+    } else {
+        state.clear_metadata_capture_block();
     }
 
     info!(
