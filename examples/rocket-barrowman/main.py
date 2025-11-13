@@ -68,6 +68,10 @@ def main():
     result = solver.run(max_time=200.0)
     
     # Print summary
+    if len(result.history) == 0:
+        print(f"\n❌ Simulation failed - no history recorded")
+        return
+    
     max_alt = max(s.z for s in result.history)
     apogee_time = next(s.time for s in result.history if s.z == max_alt)
     max_v = max(np.linalg.norm(s.velocity) for s in result.history)
@@ -76,8 +80,19 @@ def main():
     print(f"  Max altitude: {max_alt:.1f} m (AGL)")
     print(f"  Apogee time: {apogee_time:.2f} s")
     print(f"  Max velocity: {max_v:.1f} m/s")
+    print(f"  History length: {len(result.history)} snapshots")
     
-    # Convert to Elodin format
+    # Debug: print first few states
+    print(f"\nFirst 3 states:")
+    for i, s in enumerate(result.history[:3]):
+        print(f"  t={s.time:.2f}s: pos={s.position}, z={s.z:.2f}m")
+    
+    print(f"\n{'='*70}")
+    print(f"Simulation complete! Elodin visualization coming soon...")
+    print(f"{'='*70}\n")
+    return
+    
+    # TODO: Convert to Elodin format
     print(f"\nConverting to Elodin format...")
     
     # Create Elodin world
