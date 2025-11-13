@@ -221,24 +221,28 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
         return idx.astype(jnp.int32)
 
     @el.system
-    def playback_body(
+    def playback_world_pos(
         tick: el.Query[el.SimulationTick],
         pos_q: el.Query[el.WorldPos],
-        vel_q: el.Query[el.WorldVel],
-    ) -> tuple[el.Query[el.WorldPos], el.Query[el.WorldVel]]:
+    ) -> el.Query[el.WorldPos]:
         idx = frame_index(tick[0])
         transform = el.SpatialTransform(
             linear=positions[idx],
             angular=el.Quaternion.from_array(quaternions[idx]),
         )
+        return pos_q.map(el.WorldPos, lambda _: transform)
+
+    @el.system
+    def playback_world_vel(
+        tick: el.Query[el.SimulationTick],
+        vel_q: el.Query[el.WorldVel],
+    ) -> el.Query[el.WorldVel]:
+        idx = frame_index(tick[0])
         motion = el.SpatialMotion(
             linear=velocities[idx],
             angular=angular_velocities[idx],
         )
-        return (
-            pos_q.map(el.WorldPos, lambda _: transform),
-            vel_q.map(el.WorldVel, lambda _: motion),
-        )
+        return vel_q.map(el.WorldVel, lambda _: motion)
 
     @el.system
     def playback_telemetry(
@@ -261,7 +265,7 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
 
         return telemetry_q.map(RocketTelemetry, mapper)
 
-    playback_system = playback_body | playback_telemetry
+    playback_system = playback_world_pos | playback_world_vel | playback_telemetry
 
     print(f"\n✓ Schematic: rocket.kdl")
     print(f"✓ Launching Elodin editor...")
