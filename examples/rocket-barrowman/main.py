@@ -116,23 +116,23 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
 
     AltitudeComp = ty.Annotated[
         float,
-        el.Component("altitude", el.ComponentType(el.PrimitiveType.F64)),
+        el.Component("altitude", el.ComponentType(el.PrimitiveType.F64, ())),
     ]
     VelocityMagComp = ty.Annotated[
         float,
-        el.Component("velocity_magnitude", el.ComponentType(el.PrimitiveType.F64)),
+        el.Component("velocity_magnitude", el.ComponentType(el.PrimitiveType.F64, ())),
     ]
     MachComp = ty.Annotated[
         float,
-        el.Component("mach", el.ComponentType(el.PrimitiveType.F64)),
+        el.Component("mach", el.ComponentType(el.PrimitiveType.F64, ())),
     ]
     AoAComp = ty.Annotated[
         float,
-        el.Component("angle_of_attack", el.ComponentType(el.PrimitiveType.F64)),
+        el.Component("angle_of_attack", el.ComponentType(el.PrimitiveType.F64, ())),
     ]
     DynPressureComp = ty.Annotated[
         float,
-        el.Component("dynamic_pressure", el.ComponentType(el.PrimitiveType.F64)),
+        el.Component("dynamic_pressure", el.ComponentType(el.PrimitiveType.F64, ())),
     ]
     Vector3Type = el.ComponentType(el.PrimitiveType.F64, (3,))
     FinControlTrimComp = ty.Annotated[
@@ -218,14 +218,14 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
         exec.set_component(rocket_entity, "world_pos.angular", quats_el[i])
         exec.set_component(rocket_entity, "world_vel.linear", velocities[i])
         exec.set_component(rocket_entity, "world_vel.angular", angular_velocities[i])
-        exec.set_component(rocket_entity, "altitude", altitudes[i])
-        exec.set_component(rocket_entity, "velocity_magnitude", velocity_mags[i])
-        exec.set_component(rocket_entity, "mach", machs[i])
-        exec.set_component(rocket_entity, "angle_of_attack", aoas[i])
-        exec.set_component(rocket_entity, "dynamic_pressure", dynamic_pressures[i])
-        exec.set_component(rocket_entity, "fin_control_trim", fin_control_trim_data[i])
-        exec.set_component(rocket_entity, "fin_deflect", fin_deflect_data[i])
-        exec.set_component(rocket_entity, "aero_coefs", aero_coefs_data[i])
+        exec.set_component(rocket_entity, "altitude", float(altitudes[i]))
+        exec.set_component(rocket_entity, "velocity_magnitude", float(velocity_mags[i]))
+        exec.set_component(rocket_entity, "mach", float(machs[i]))
+        exec.set_component(rocket_entity, "angle_of_attack", float(aoas[i]))
+        exec.set_component(rocket_entity, "dynamic_pressure", float(dynamic_pressures[i]))
+        exec.set_component(rocket_entity, "fin_control_trim", np.asarray(fin_control_trim_data[i]))
+        exec.set_component(rocket_entity, "fin_deflect", np.asarray(fin_deflect_data[i]))
+        exec.set_component(rocket_entity, "aero_coefs", np.asarray(aero_coefs_data[i]))
         if i < len(times) - 1:
             exec.step(times[i + 1] - times[i])
 
