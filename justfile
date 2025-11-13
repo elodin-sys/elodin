@@ -66,7 +66,6 @@ install:
   echo "🚧 Installing elodin and elodin-db to ~/.nix-profile/bin"
   sh -v ${DRY_RUN:+-n} <<EOF
     cargo build --release --package elodin --package elodin-db
-    mkdir -p ~/.nix-profile 2>/dev/null || true
-    cd ~/.nix-profile && mkdir -p bin
+    mkdir -p ~/.nix-profile/bin 2>/dev/null || true
     cp target/release/elodin target/release/elodin-db ~/.nix-profile/bin
   EOF
