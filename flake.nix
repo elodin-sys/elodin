@@ -1,4 +1,11 @@
 {
+  nixConfig = {
+    extra-substituters = ["s3://elodin-nix-cache?region=us-west-2"];
+    extra-trusted-public-keys = [
+      "elodin-cache-1:vvbmIQvTOjcBjIs8Ri7xlT2I3XAmeJyF5mNlWB+fIwM="
+    ];
+    fallback = true;
+  };
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
     systems.url = "github:nix-systems/default";

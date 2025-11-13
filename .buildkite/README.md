@@ -146,13 +146,16 @@ The user-data script uses a two-stage boot process:
 ### Second Boot (Automatic)
 1. System boots with overlayroot active (root filesystem is now tmpfs)
 2. `buildkite-bootstrap.service` runs automatically
-3. Installs Nix and configures S3 binary cache
-4. Sets up post-build-hook to automatically upload builds to S3
-5. Installs and configures Buildkite agent
-6. Creates flag file `/var/lib/buildkite-bootstrap-complete` so it only runs once
-7. Buildkite agent starts and joins the queue
+3. Installs standard Nix using Determinate Systems installer (without auth features)
+4. Configures S3 binary cache for downloads and uploads
+5. Sets up post-build-hook to automatically upload builds to S3
+6. Installs and configures Buildkite agent
+7. Creates flag file `/var/lib/buildkite-bootstrap-complete` so it only runs once
+8. Buildkite agent starts and joins the queue
 
 **Why two boots?** Overlayroot needs to be active before installing Nix/Buildkite, otherwise those installations would be on the persistent disk instead of tmpfs.
+
+**Note on Nix installation:** We use the Determinate Systems installer but without the `--determinate` flag. This gives us standard Nix without authentication requirements, which is ideal for ephemeral CI environments.
 
 ### Cache Upload Process
 
