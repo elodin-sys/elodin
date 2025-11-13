@@ -60,6 +60,36 @@ write_files:
       curl --proto '=https' --tlsv1.2 -fsSL -L https://install.determinate.systems/nix \
         | sh -s -- install linux --determinate --no-confirm
 
+      # --- Configure Nix Binary Cache Upload ---
+      CACHE_SIGNING_KEY_BASE64="LS0tLS1...your-base64-encoded-signing-key-here"
+      
+      mkdir -p /etc/nix
+      echo "$CACHE_SIGNING_KEY_BASE64" | base64 -d > /etc/nix/cache-priv-key.pem
+      chmod 600 /etc/nix/cache-priv-key.pem
+
+      # Create upload script for post-build-hook
+      bash -c 'cat > /etc/nix/upload-to-cache.sh << "UPLOADEOF"
+      #!/bin/sh
+      set -eu
+      set -f # disable globbing
+      export IFS=" "
+
+      echo "Uploading paths to S3 cache: $OUT_PATHS"
+      exec nix copy --to "s3://elodin-nix-cache?region=us-west-2&secret-key=/etc/nix/cache-priv-key.pem" $OUT_PATHS
+      UPLOADEOF'
+
+      chmod +x /etc/nix/upload-to-cache.sh
+
+      # Configure Nix to use the S3 cache and post-build-hook
+      mkdir -p /etc/nix
+
+      bash -c 'cat >> /etc/nix/nix.conf << "NIXCONF"
+      # S3 Binary Cache Configuration
+      substituters = https://cache.nixos.org s3://elodin-nix-cache?region=us-west-2
+      trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= elodin-cache-1:vvbmIQvTOjcBjIs8Ri7xlT2I3XAmeJyF5mNlWB+fIwM=
+      post-build-hook = /etc/nix/upload-to-cache.sh
+      NIXCONF'
+
       # --- Buildkite Agent (APT) ---
       install -d -m 0755 /etc/apt/keyrings
       curl -fsSL https://keys.openpgp.org/vks/v1/by-fingerprint/32A37959C2FA5C3C99EFBC32A79206696452D198 \

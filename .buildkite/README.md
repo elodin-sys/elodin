@@ -14,18 +14,23 @@ ssh-keygen -t ed25519 -C "buildkite-ci@elodin.systems" -f ~/.ssh/buildkite_deplo
 base64 -w 0 ~/.ssh/buildkite_deploy_key
 # Copy the output and paste it into user-data at the SSH_KEY_BASE64 variable
 
-# 3. Add your Buildkite agent token to user-data
+# 3. Generate Nix cache signing keys
+nix-store --generate-binary-cache-key elodin-cache-1 cache-priv-key.pem cache-pub-key.pem
+base64 -w 0 cache-priv-key.pem
+# Copy the output and paste it into user-data at the CACHE_SIGNING_KEY_BASE64 variable
+
+# 4. Add your Buildkite agent token to user-data
 # Get from: Buildkite Dashboard → Organization Settings → Agents → Reveal Agent Token
 # Replace BUILDKITE_AGENT_TOKEN="bkt_your_actual_token_here" in user-data
 
-# 4. Add public key to GitHub
+# 5. Add public key to GitHub
 cat ~/.ssh/buildkite_deploy_key.pub
 # Copy output and add as Deploy Key in GitHub repo settings
 
-# 5. Launch EC2 instances with the updated user-data script
+# 6. Launch EC2 instances with the updated user-data script
 ```
 
-**Note:** If you're on macOS, use `base64 -i ~/.ssh/buildkite_deploy_key` (no `-w` flag).
+**Note:** If you're on macOS, use `base64 -i` instead of `base64 -w 0` for base64 encoding.
 
 ## Prerequisites
 
@@ -65,12 +70,67 @@ Add to GitHub:
 4. Name it "Buildkite CI"
 5. **Do NOT** check "Allow write access" (read-only is safer)
 
-### 3. Add Buildkite Agent Token
+### 3. Configure S3 Binary Cache (Already Set Up)
+
+The CI uses an S3 bucket (`elodin-nix-cache`) for caching Nix build artifacts:
+
+**S3 Bucket Setup** (one-time, already completed):
+```bash
+# Create the S3 bucket
+aws s3 mb s3://elodin-nix-cache --region us-west-2
+
+# Set bucket policy for public read access (allowing developers and CI to download)
+# See user-data script for the full configuration
+```
+
+**Generate Signing Keys** (needed for each agent setup):
+```bash
+# Generate new signing keys
+nix-store --generate-binary-cache-key elodin-cache-1 cache-priv-key.pem cache-pub-key.pem
+
+# Base64 encode the PRIVATE key (no line wrapping)
+# Linux:
+base64 -w 0 cache-priv-key.pem
+
+# macOS:
+base64 -i cache-priv-key.pem
+
+# Copy the output and paste it into user-data at:
+# CACHE_SIGNING_KEY_BASE64="paste-here"
+```
+
+**Important:** Keep `cache-priv-key.pem` secure and do NOT commit it to the repository. Only the public key should be shared (already in `aleph/flake.nix`).
+
+### 4. Add Buildkite Agent Token
 
 Get your agent token from Buildkite:
 - Go to: Buildkite Dashboard → Organization Settings → Agents → Reveal Agent Token
 - Copy the token (starts with `bkt_`)
 - In `user-data`, replace: `BUILDKITE_AGENT_TOKEN="bkt_your_actual_token_here"`
+
+### 5. IAM Role for EC2 Instances
+
+Ensure your EC2 instances have an IAM role with permissions to read/write from the S3 cache:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::elodin-nix-cache",
+        "arn:aws:s3:::elodin-nix-cache/*"
+      ]
+    }
+  ]
+}
+```
 
 ## How It Works
 
@@ -86,11 +146,21 @@ The user-data script uses a two-stage boot process:
 ### Second Boot (Automatic)
 1. System boots with overlayroot active (root filesystem is now tmpfs)
 2. `buildkite-bootstrap.service` runs automatically
-3. Installs Nix and Buildkite agent
-4. Creates flag file `/var/lib/buildkite-bootstrap-complete` so it only runs once
-5. Buildkite agent starts and joins the queue
+3. Installs Nix and configures S3 binary cache
+4. Sets up post-build-hook to automatically upload builds to S3
+5. Installs and configures Buildkite agent
+6. Creates flag file `/var/lib/buildkite-bootstrap-complete` so it only runs once
+7. Buildkite agent starts and joins the queue
 
 **Why two boots?** Overlayroot needs to be active before installing Nix/Buildkite, otherwise those installations would be on the persistent disk instead of tmpfs.
+
+### Cache Upload Process
+
+After each successful build:
+1. Nix invokes the post-build-hook (`/etc/nix/upload-to-cache.sh`)
+2. The script signs the build outputs with the private signing key
+3. Build artifacts are uploaded to `s3://elodin-nix-cache`
+4. Other agents and developers can now fetch these cached builds
 
 ## Architecture
 
@@ -149,3 +219,31 @@ grep tags /etc/buildkite-agent/buildkite-agent.cfg
 #          or: tags="nix=true,os=nixos,arch=arm64,queue=nixos-arm-aws"
 ```
 
+### Verify S3 cache configuration
+
+```bash
+# Check if the upload script exists and is executable
+ls -la /etc/nix/upload-to-cache.sh
+
+# Check if the signing key is in place
+ls -la /etc/nix/cache-priv-key.pem
+
+# Verify Nix configuration includes S3 cache
+cat /etc/nix/nix.conf | grep -A 3 "S3 Binary Cache"
+
+# Test S3 access (requires AWS credentials via IAM role)
+aws s3 ls s3://elodin-nix-cache/
+
+# Manually test uploading to cache
+nix copy --to 's3://elodin-nix-cache?region=us-west-2&secret-key=/etc/nix/cache-priv-key.pem' /nix/store/some-path
+```
+
+### Check cache upload logs
+
+```bash
+# Watch Nix daemon logs to see cache uploads
+sudo journalctl -u nix-daemon.service -f
+
+# Look for lines like:
+# "Uploading paths to S3 cache: /nix/store/..."
+```
