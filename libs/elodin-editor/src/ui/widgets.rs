@@ -4,16 +4,15 @@ use bevy::{
         system::{SystemParam, SystemState},
         world::{Mut, World},
     },
-    prelude::Resource,
-    window::PrimaryWindow,
+    prelude::{IsDefaultUiCamera, Resource},
 };
 use bevy_egui::{EguiContext, egui};
 use std::collections::HashMap;
 
 pub trait RootWidgetSystemExt {
     fn add_root_widget<S: RootWidgetSystem<Args = ()> + 'static>(&mut self, id: &str) -> S::Output {
-        self.add_root_widget_with::<S, With<PrimaryWindow>>(id, ())
-            .expect("missing window")
+        self.add_root_widget_with::<S, With<IsDefaultUiCamera>>(id, ())
+            .expect("missing camera")
     }
 
     fn add_root_widget_with<S: RootWidgetSystem + 'static, F: QueryFilter>(

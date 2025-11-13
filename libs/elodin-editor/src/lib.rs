@@ -15,7 +15,8 @@ use bevy::{
     light::DirectionalLightShadowMap,
     prelude::*,
     window::{PresentMode, WindowResolution, WindowTheme},
-    winit::WinitSettings,
+    winit::{WinitSettings, WINIT_WINDOWS},
+    ecs::system::NonSendMarker,
 };
 use bevy_egui::{EguiContextSettings, EguiPlugin};
 use bevy_render::alpha::AlphaMode;
@@ -356,117 +357,133 @@ struct SetupTitlebar;
 #[cfg(target_os = "macos")]
 fn setup_titlebar(
     windows: Query<Entity, Without<SetupTitlebar>>,
-    winit_windows: NonSend<bevy::winit::WinitWindows>,
     mut commands: Commands,
+    _non_send_marker: NonSendMarker,
 ) {
     use objc2::rc::Retained;
     use objc2::{ClassType, msg_send, msg_send_id};
     use objc2_app_kit::{NSColor, NSToolbar, NSWindow, NSWindowStyleMask, NSWindowToolbarStyle};
 
-    for id in &windows {
-        let Some(window) = winit_windows.get_window(id) else {
-            continue;
-        };
-        window.set_blur(true);
-        use raw_window_handle::HasRawWindowHandle;
-        let handle = window.raw_window_handle();
-        let raw_window_handle::RawWindowHandle::AppKit(handle) = handle else {
-            error!("non AppKit window on macOS");
-            continue;
-        };
-        let window: *mut NSWindow = handle.ns_window.cast();
-        if window.is_null() {
-            continue;
+    WINIT_WINDOWS.with_borrow(|winit_windows| {
+
+            let Some(window) = winit_windows.get_window(id) else {
+                continue;
+            };
+            window.set_blur(true);
+            use raw_window_handle::HasRawWindowHandle;
+            let handle = window.raw_window_handle();
+            let raw_window_handle::RawWindowHandle::AppKit(handle) = handle else {
+                error!("non AppKit window on macOS");
+                continue;
+            };
+            let window: *mut NSWindow = handle.ns_window.cast();
+            if window.is_null() {
+                continue;
+            }
+            unsafe {
+                let window = &*window;
+
+                // Create a simple toolbar without delegate for now
+                // The delegate isn't strictly necessary for basic toolbar functionality
+                use objc2_foundation::NSString;
+                let identifier = NSString::from_str("MainToolbar");
+                let toolbar: Retained<NSToolbar> = msg_send_id![
+                    msg_send_id![NSToolbar::class(), alloc],
+                    initWithIdentifier: &*identifier
+                ];
+
+                window.setTitlebarAppearsTransparent(true);
+
+                // Create color with RGBA
+                let color = NSColor::colorWithRed_green_blue_alpha(
+                    (0x0C as f64) / (0xFF as f64),
+                    (0x0C as f64) / (0xFF as f64),
+                    (0x0C as f64) / (0xFF as f64),
+                    0.7,
+                );
+                window.setBackgroundColor(Some(&color));
+
+                // TODO: Benoit or Anders rebase leftover.
+                // // Keep the native titlebar visible and readable.
+                // window.setTitlebarAppearsTransparent(false);
+                // let color = NSColor::windowBackgroundColor();
+                // window.setBackgroundColor(Some(&color));
+                window.setStyleMask(
+                    NSWindowStyleMask::FullSizeContentView
+                        | NSWindowStyleMask::Resizable
+                        | NSWindowStyleMask::Titled
+                        | NSWindowStyleMask::Closable
+                        | NSWindowStyleMask::Miniaturizable
+                        | NSWindowStyleMask::UnifiedTitleAndToolbar,
+                );
+                window.setToolbarStyle(NSWindowToolbarStyle::UnifiedCompact);
+                let _: () = msg_send![window, setTitleVisibility: 1u64]; // NSWindowTitleHidden = 1
+                window.setToolbar(Some(&toolbar));
+                commands.entity(id).insert(SetupTitlebar);
+            }
         }
-        unsafe {
-            let window = &*window;
-
-            // Create a simple toolbar without delegate for now
-            // The delegate isn't strictly necessary for basic toolbar functionality
-            use objc2_foundation::NSString;
-            let identifier = NSString::from_str("MainToolbar");
-            let toolbar: Retained<NSToolbar> = msg_send_id![
-                msg_send_id![NSToolbar::class(), alloc],
-                initWithIdentifier: &*identifier
-            ];
-
-            // Keep the native titlebar visible and readable.
-            window.setTitlebarAppearsTransparent(false);
-            let color = NSColor::windowBackgroundColor();
-            window.setBackgroundColor(Some(&color));
-
-            window.setStyleMask(
-                NSWindowStyleMask::FullSizeContentView
-                    | NSWindowStyleMask::Resizable
-                    | NSWindowStyleMask::Titled
-                    | NSWindowStyleMask::Closable
-                    | NSWindowStyleMask::Miniaturizable
-                    | NSWindowStyleMask::UnifiedTitleAndToolbar,
-            );
-            window.setToolbarStyle(NSWindowToolbarStyle::UnifiedCompact);
-            // Keep the native title visible in the toolbar/titlebar area.
-            let _: () = msg_send![window, setTitleVisibility: 0u64]; // NSWindowTitleVisible = 0
-            window.setToolbar(Some(&toolbar));
-            commands.entity(id).insert(SetupTitlebar);
-        }
-    }
+    });
 }
 
 fn handle_drag_resize(
     windows: Query<(Entity, &Window, &bevy::window::PrimaryWindow)>,
-    winit_windows: NonSend<bevy::winit::WinitWindows>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     mut just_set_cursor: Local<bool>,
+    _non_send_marker: NonSendMarker,
 ) {
-    for (id, window, _) in &windows {
-        let Some(cursor_pos) = window.physical_cursor_position() else {
-            continue;
-        };
-        let size = window.physical_size().as_vec2();
-        let window = winit_windows.get_window(id).unwrap();
-        const RESIZE_ZONE: f32 = 5.0;
-        let resize_west = cursor_pos.x < RESIZE_ZONE;
-        let resize_east = cursor_pos.x > size.x - RESIZE_ZONE;
-        let resize_north = cursor_pos.y < RESIZE_ZONE;
-        let resize_south = cursor_pos.y > size.y - RESIZE_ZONE;
-        if cursor_pos.y < 45.0
-            && !resize_north
-            && !resize_east
-            && !resize_west
-            && mouse_buttons.pressed(MouseButton::Left)
-        {
-            let _ = window.drag_window();
-        }
-        let resize_dir = match (resize_west, resize_east, resize_north, resize_south) {
-            (true, _, true, _) => Some(winit::window::ResizeDirection::NorthWest),
-            (_, true, true, _) => Some(winit::window::ResizeDirection::NorthEast),
-
-            (true, _, _, true) => Some(winit::window::ResizeDirection::SouthWest),
-            (_, true, _, true) => Some(winit::window::ResizeDirection::SouthEast),
-            (true, _, _, _) => Some(winit::window::ResizeDirection::West),
-            (_, true, _, _) => Some(winit::window::ResizeDirection::East),
-            (_, _, true, _) => Some(winit::window::ResizeDirection::North),
-            (_, _, _, true) => Some(winit::window::ResizeDirection::South),
-            _ => None,
-        };
-        if let Some(resize_dir) = resize_dir {
-            if mouse_buttons.pressed(MouseButton::Left) {
-                let _ = window.drag_resize_window(resize_dir);
+    WINIT_WINDOWS.with_borrow(|winit_windows| {
+        for (id, window, _) in &windows {
+            let Some(cursor_pos) = window.physical_cursor_position() else {
+                continue;
+            };
+            let size = window.physical_size().as_vec2();
+            let window = winit_windows.get_window(id).unwrap();
+            const RESIZE_ZONE: f32 = 5.0;
+            let resize_west = cursor_pos.x < RESIZE_ZONE;
+            let resize_east = cursor_pos.x > size.x - RESIZE_ZONE;
+            let resize_north = cursor_pos.y < RESIZE_ZONE;
+            let resize_south = cursor_pos.y > size.y - RESIZE_ZONE;
+            if cursor_pos.y < 45.0
+                && !resize_north
+                && !resize_east
+                && !resize_west
+                && mouse_buttons.pressed(MouseButton::Left)
+            {
+                let _ = window.drag_window();
             }
-            window.set_cursor(winit::window::CursorIcon::from(resize_dir));
-            *just_set_cursor = true
-        } else if *just_set_cursor {
-            *just_set_cursor = false;
-            window.set_cursor(winit::window::CursorIcon::Default);
+            let resize_dir = match (resize_west, resize_east, resize_north, resize_south) {
+                (true, _, true, _) => Some(winit::window::ResizeDirection::NorthWest),
+                (_, true, true, _) => Some(winit::window::ResizeDirection::NorthEast),
+
+                (true, _, _, true) => Some(winit::window::ResizeDirection::SouthWest),
+                (_, true, _, true) => Some(winit::window::ResizeDirection::SouthEast),
+                (true, _, _, _) => Some(winit::window::ResizeDirection::West),
+                (_, true, _, _) => Some(winit::window::ResizeDirection::East),
+                (_, _, true, _) => Some(winit::window::ResizeDirection::North),
+                (_, _, _, true) => Some(winit::window::ResizeDirection::South),
+                _ => None,
+            };
+            if let Some(resize_dir) = resize_dir {
+                if mouse_buttons.pressed(MouseButton::Left) {
+                    let _ = window.drag_resize_window(resize_dir);
+                }
+                window.set_cursor(winit::window::CursorIcon::from(resize_dir));
+                *just_set_cursor = true
+            } else if *just_set_cursor {
+                *just_set_cursor = false;
+                window.set_cursor(winit::window::CursorIcon::Default);
+            }
         }
-    }
+    });
 }
 
 fn setup_window_icon(
     _windows: Query<(Entity, &bevy::window::PrimaryWindow)>,
+    // TODO: AP - is this still load bearing? Does the query above not ensure
+    // a window?
     // this is load bearing, because it ensures that there is at
     // least one window spawned
-    _winit_windows: NonSend<bevy::winit::WinitWindows>,
+    //_winit_windows: NonSend<bevy::winit::WinitWindows>,
 ) {
     #[cfg(target_os = "macos")]
     set_icon_mac();

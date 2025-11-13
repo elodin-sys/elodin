@@ -3,7 +3,7 @@ use bevy::{
     prelude::*,
     window::{EnabledButtons, PrimaryWindow, WindowResolution, WindowTheme},
 };
-use bevy_egui::{EguiContexts, EguiTextureHandle};
+use bevy_egui::{EguiContexts, EguiTextureHandle, EguiPrimaryContextPass};
 use egui::{Color32, CornerRadius, RichText, Stroke, load::SizedTexture};
 use hifitime::Epoch;
 use impeller2_bevy::{
@@ -73,7 +73,8 @@ fn create_startup_window(
 }
 
 pub fn add_layouts(world: &mut World) {
-    world.add_root_widget_with::<StartupLayout, With<StartupWindow>>("startup_layout", ());
+    // TODO - AP - I think we need to manually attach this to a camera
+    world.add_root_widget::<StartupLayout>("startup_layout");
 }
 
 pub struct StartupPlugin;
@@ -81,7 +82,7 @@ pub struct StartupPlugin;
 impl Plugin for StartupPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, create_startup_window);
-        app.add_systems(Update, add_layouts);
+        app.add_systems(EguiPrimaryContextPass, add_layouts);
     }
 }
 
