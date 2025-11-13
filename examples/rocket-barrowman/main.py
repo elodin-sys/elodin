@@ -218,7 +218,7 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
         glb path="compass.glb"
     }
     object_3d rocket.world_pos {
-        glb path="https://storage.googleapis.com/elodin-assets/rocket.glb"
+        glb path="assets/rocket.glb"
     }
     line_3d rocket.world_pos line_width=6.0 perspective=#false {
         color 255 223 0
