@@ -15,7 +15,7 @@ use std::{
     time::Duration,
 };
 
-use super::super::{LINUX_MULTI_WINDOW, SECONDARY_RECT_CAPTURE_LOAD_GUARD};
+use super::super::SECONDARY_RECT_CAPTURE_LOAD_GUARD;
 use crate::{
     EqlContext, MainCamera,
     object_3d::Object3DState,
@@ -288,7 +288,7 @@ impl LoadSchematicParams<'_, '_> {
                             skip_metadata_capture: true,
                             metadata_capture_blocked_until: None,
                         };
-                        if !LINUX_MULTI_WINDOW && state.descriptor.screen_rect.is_some() {
+                        if state.descriptor.screen_rect.is_some() {
                             state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_LOAD_GUARD);
                         }
                         secondary_states.push(state);
