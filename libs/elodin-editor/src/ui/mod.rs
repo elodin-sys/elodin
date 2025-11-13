@@ -37,6 +37,8 @@ const SCREEN_RELAYOUT_MAX_ATTEMPTS: u8 = 5;
 const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(750);
 const FULLSCREEN_EXIT_CONFIRMATION_TIMEOUT: Duration = Duration::from_millis(500);
 const LINUX_MULTI_WINDOW: bool = cfg!(target_os = "linux");
+const SECONDARY_RECT_CAPTURE_LOAD_GUARD: Duration = Duration::from_millis(2500);
+const SECONDARY_RECT_CAPTURE_STABILIZE_GUARD: Duration = Duration::from_millis(400);
 const PRIMARY_VIEWPORT_ORDER_BASE: isize = 0;
 const PRIMARY_GRAPH_ORDER_BASE: isize = 100;
 const SECONDARY_GRAPH_ORDER_BASE: isize = 10;
@@ -1012,7 +1014,9 @@ fn apply_secondary_window_screens(
                         state.pending_exit_started_at = None;
                     } else {
                         if window.fullscreen().is_some() {
-                            continue;
+                            exit_fullscreen(window);
+                            state.pending_fullscreen_exit = false;
+                            state.pending_exit_started_at = None;
                         }
                         window.set_maximized(false);
                         linux_clear_minimized(window);
@@ -1058,7 +1062,9 @@ fn apply_secondary_window_screens(
 
                 if let Some(target_monitor) = monitors.get(screen).cloned() {
                     assign_window_to_screen(state, window, target_monitor);
-                    state.pending_exit_state = tiles::PendingFullscreenExit::Requested;
+                    if !LINUX_MULTI_WINDOW {
+                        state.pending_exit_state = tiles::PendingFullscreenExit::Requested;
+                    }
                     state.relayout_attempts = state.relayout_attempts.saturating_add(1);
                     if state.relayout_started_at.is_none() {
                         state.relayout_started_at = Some(Instant::now());
@@ -1239,6 +1245,16 @@ fn apply_secondary_window_rect(
     state: &mut tiles::SecondaryWindowState,
     window: &WinitWindow,
 ) -> bool {
+    info!(
+        path = %state.descriptor.path.display(),
+        pending_fullscreen_exit = state.pending_fullscreen_exit,
+        applied_rect = ?state.applied_rect,
+        target_rect = ?state.descriptor.screen_rect,
+        "apply_secondary_window_rect start"
+    );
+    if !LINUX_MULTI_WINDOW && state.descriptor.screen_rect.is_some() {
+        state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_LOAD_GUARD);
+    }
     if state.pending_fullscreen_exit {
         if LINUX_MULTI_WINDOW {
             if window.fullscreen().is_some() {
@@ -1260,6 +1276,10 @@ fn apply_secondary_window_rect(
                 window.set_fullscreen(None);
                 window.set_maximized(false);
                 linux_clear_minimized(window);
+                info!(
+                    path = %state.descriptor.path.display(),
+                    "Waiting for fullscreen exit before applying rect"
+                );
                 return false;
             }
             state.pending_fullscreen_exit = false;
@@ -1275,6 +1295,10 @@ fn apply_secondary_window_rect(
     };
 
     if state.applied_rect == Some(rect) {
+        info!(
+            path = %state.descriptor.path.display(),
+            "Rect already applied"
+        );
         return true;
     }
 
@@ -1282,6 +1306,10 @@ fn apply_secondary_window_rect(
         linux_request_minimize(window);
         state.applied_rect = Some(rect);
         state.skip_metadata_capture = true;
+        info!(
+            path = %state.descriptor.path.display(),
+            "Applied minimize rect"
+        );
         return true;
     }
 
@@ -1313,6 +1341,10 @@ fn apply_secondary_window_rect(
             window.set_maximized(false);
             linux_clear_minimized(window);
         }
+        info!(
+            path = %state.descriptor.path.display(),
+            "Exited fullscreen before applying rect"
+        );
     } else if LINUX_MULTI_WINDOW {
         linux_force_windowed(window);
     } else {
@@ -1359,6 +1391,19 @@ fn apply_secondary_window_rect(
     window.set_outer_position(PhysicalPosition::new(x, y));
     state.applied_rect = Some(rect);
     state.skip_metadata_capture = true;
+    if !LINUX_MULTI_WINDOW {
+        state.clear_metadata_capture_block();
+        state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_STABILIZE_GUARD);
+    }
+    info!(
+        path = %state.descriptor.path.display(),
+        rect = ?rect,
+        size_w = width_px,
+        size_h = height_px,
+        pos_x = x,
+        pos_y = y,
+        "Applied rect"
+    );
     true
 }
 
@@ -1373,17 +1418,23 @@ fn assign_window_to_screen(
     let x = monitor_pos.x + (monitor_size.width as i32 - window_size.width as i32) / 2;
     let y = monitor_pos.y + (monitor_size.height as i32 - window_size.height as i32) / 2;
 
-    window.set_fullscreen(Some(Fullscreen::Borderless(Some(target_monitor))));
+    info!(
+        path = %state.descriptor.path.display(),
+        screen = state.descriptor.screen.map(|idx| idx as i32).unwrap_or(-1),
+        "assign_window_to_screen"
+    );
     if LINUX_MULTI_WINDOW {
+        window.set_fullscreen(None);
         window.set_visible(true);
-    }
-    state.pending_fullscreen_exit = true;
-    if LINUX_MULTI_WINDOW {
-        state.pending_exit_started_at = Some(Instant::now());
+        linux_force_windowed(window);
+        state.pending_fullscreen_exit = false;
+        state.pending_exit_started_at = None;
+        state.pending_exit_state = tiles::PendingFullscreenExit::None;
     } else {
+        window.set_fullscreen(Some(Fullscreen::Borderless(Some(target_monitor))));
+        state.pending_fullscreen_exit = true;
         state.pending_exit_started_at = None;
     }
-    state.pending_exit_state = tiles::PendingFullscreenExit::Requested;
     window.set_outer_position(PhysicalPosition::new(x, y));
     state.skip_metadata_capture = true;
 }
@@ -1402,6 +1453,17 @@ fn complete_screen_assignment(
     } else {
         tiles::SecondaryWindowRelayoutPhase::Idle
     };
+    if !LINUX_MULTI_WINDOW {
+        if matches!(
+            state.relayout_phase,
+            tiles::SecondaryWindowRelayoutPhase::NeedRect
+        ) && state.descriptor.screen_rect.is_some()
+        {
+            state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_LOAD_GUARD);
+        } else {
+            state.clear_metadata_capture_block();
+        }
+    }
 
     info!(
         screen = state
@@ -1449,14 +1511,15 @@ fn assign_primary_window_to_screen(
     let x = monitor_pos.x + (monitor_size.width as i32 - window_size.width as i32) / 2;
     let y = monitor_pos.y + (monitor_size.height as i32 - window_size.height as i32) / 2;
 
-    window.set_fullscreen(Some(Fullscreen::Borderless(Some(target_monitor))));
     if LINUX_MULTI_WINDOW {
+        window.set_fullscreen(None);
         window.set_visible(true);
-    }
-    layout.pending_fullscreen_exit = true;
-    if LINUX_MULTI_WINDOW {
-        layout.pending_fullscreen_exit_started_at = Some(Instant::now());
+        linux_force_windowed(window);
+        layout.pending_fullscreen_exit = false;
+        layout.pending_fullscreen_exit_started_at = None;
     } else {
+        window.set_fullscreen(Some(Fullscreen::Borderless(Some(target_monitor))));
+        layout.pending_fullscreen_exit = true;
         layout.pending_fullscreen_exit_started_at = None;
     }
     window.set_outer_position(PhysicalPosition::new(x, y));
@@ -1751,6 +1814,13 @@ fn record_window_rect_from_window(
     monitors: &[MonitorHandle],
     forced_position: Option<PhysicalPosition<i32>>,
 ) {
+    if state.is_metadata_capture_blocked() {
+        return;
+    }
+    if state.skip_metadata_capture {
+        state.skip_metadata_capture = false;
+        return;
+    }
     let size = window.outer_size();
     if size.width == 0 || size.height == 0 {
         return;
