@@ -155,6 +155,10 @@ in {
       doCheck = false;
 
       shellHook = ''
+        case "$(uname -s)" in
+          Linux*) export DISPLAY=:0 ;;
+        esac
+
         # start the shell if we're in an interactive shell
         if [[ $- == *i* ]]; then
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
