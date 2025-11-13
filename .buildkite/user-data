@@ -60,7 +60,7 @@ write_files:
       # --- Nix Installation (non-interactive) ---
       # Use Determinate installer but without --determinate flag to avoid auth requirements in CI
       curl --proto '=https' --tlsv1.2 -fsSL -L https://install.determinate.systems/nix \
-        | sh -s -- install linux --no-confirm
+        | sh -s -- install linux --no-confirm --extra-conf "trusted-users = root buildkite-agent @nix-users"
 
       # --- Configure Nix Binary Cache Upload ---
       CACHE_SIGNING_KEY_BASE64="LS0tLS1...your-base64-encoded-signing-key-here"
@@ -89,7 +89,6 @@ write_files:
       # S3 Binary Cache Configuration
       substituters = https://cache.nixos.org s3://elodin-nix-cache?region=us-west-2
       trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= elodin-cache-1:vvbmIQvTOjcBjIs8Ri7xlT2I3XAmeJyF5mNlWB+fIwM=
-      trusted-users = root buildkite-agent nix-users
       post-build-hook = /etc/nix/upload-to-cache.sh
       accept-flake-config = true
       NIXCONF'
