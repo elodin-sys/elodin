@@ -20,8 +20,11 @@ use bevy::image::BevyDefault;
 use bevy::render::renderer::RenderQueue;
 use bevy::render::view::{ExtractedView, Msaa};
 use bevy::camera::visibility::RenderLayers;
-use bevy::render::{ExtractSchedule, MainWorld, Render, RenderSystems};
-use bevy::sprite_render::{Mesh2dPipeline, Mesh2dPipelineKey, SetMesh2dViewBindGroup};
+use bevy::render::{ExtractSchedule, MainWorld, RenderStartup, Render, RenderSystems};
+use bevy::sprite_render::{
+    Mesh2dPipeline, Mesh2dPipelineKey, SetMesh2dViewBindGroup,
+    init_mesh_2d_pipeline,
+};
 use bevy::{
     app::Plugin,
     asset::{Handle, load_internal_asset},
@@ -29,7 +32,6 @@ use bevy::{
     ecs::{
         component::Component,
         system::lifetimeless::{Read, SRes},
-        world::FromWorld,
     },
     prelude::{Color, Resource, Shader},
     render::{
@@ -96,6 +98,7 @@ impl Plugin for PlotGpuPlugin {
                     ),
             )
             .add_systems(ExtractSchedule, extract_lines)
+            .add_systems(RenderStartup, init_line_pipeline.after(init_mesh_2d_pipeline))
             .add_systems(
                 Render,
                 prepare_uniform_bind_group.in_set(RenderSystems::PrepareBindGroups),
@@ -135,7 +138,6 @@ impl Plugin for PlotGpuPlugin {
         render_app.insert_resource(UniformLayout {
             layout: uniform_layout,
         });
-        render_app.init_resource::<LinePipeline>();
     }
 }
 
@@ -306,14 +308,17 @@ pub struct LinePipeline {
     storage_layout: BindGroupLayout,
 }
 
-impl FromWorld for LinePipeline {
-    fn from_world(world: &mut bevy::prelude::World) -> Self {
-        Self {
-            mesh_pipeline: world.resource::<Mesh2dPipeline>().clone(),
-            uniform_layout: world.resource::<UniformLayout>().layout.clone(),
-            storage_layout: world.resource::<LineValuesLayout>().layout.clone(),
-        }
-    }
+fn init_line_pipeline(
+    mut commands: Commands,
+    mesh_pipeline: Res<Mesh2dPipeline>,
+    uniform_layout: Res<UniformLayout>,
+    storage_layout: Res<LineValuesLayout>,
+) {
+    commands.insert_resource(LinePipeline{
+        mesh_pipeline: mesh_pipeline.clone(),
+        uniform_layout: uniform_layout.layout.clone(),
+        storage_layout: storage_layout.layout.clone(),
+    });
 }
 
 #[derive(PartialEq, Eq, Hash, Clone)]
