@@ -58,9 +58,9 @@ write_files:
       set -euo pipefail
 
       # --- Nix Installation (non-interactive) ---
-      # Use Determinate installer but without --determinate flag to avoid auth requirements in CI
       curl --proto '=https' --tlsv1.2 -fsSL -L https://install.determinate.systems/nix \
-        | sh -s -- install linux --no-confirm --extra-conf "trusted-users = root buildkite-agent @nix-users"
+        | sh -s -- install linux --no-confirm --determinate \
+        --extra-conf "trusted-users = root buildkite-agent @nix-users"
 
       # --- Configure Nix Binary Cache Upload ---
       CACHE_SIGNING_KEY_BASE64="LS0tLS1...your-base64-encoded-signing-key-here"
@@ -78,7 +78,8 @@ write_files:
 
       echo "Uploading paths to S3 cache: $OUT_PATHS"
       exec nix copy --to "s3://elodin-nix-cache?region=us-west-2&secret-key=/etc/nix/cache-priv-key.pem" $OUT_PATHS
-      UPLOADEOF'
+      UPLOADEOF
+      '
 
       chmod +x /etc/nix/upload-to-cache.sh
 
@@ -92,7 +93,8 @@ write_files:
       post-build-hook = /etc/nix/upload-to-cache.sh
       accept-flake-config = true
       download-buffer-size = 1073741824
-      NIXCONF'
+      NIXCONF
+      '
 
       # --- Buildkite Agent (APT) ---
       install -d -m 0755 /etc/apt/keyrings
@@ -125,7 +127,9 @@ write_files:
         HostName github.com
         IdentityFile ~/.ssh/id_ed25519
         StrictHostKeyChecking accept-new
-      SSHEOF"'
+      SSHEOF
+      '
+
       chmod 600 /var/lib/buildkite-agent/.ssh/config
       chown buildkite-agent:buildkite-agent /var/lib/buildkite-agent/.ssh/config
 
@@ -160,7 +164,8 @@ write_files:
       Environment=PATH=/nix/var/nix/profiles/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
       # Disable eval cache to prevent SQLite contention between spawned agents
       Environment=NIX_CONFIG="eval-cache = false"
-      EOF"'
+      EOF
+      '
 
       systemctl daemon-reload
       systemctl enable --now buildkite-agent
