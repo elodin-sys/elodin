@@ -17,7 +17,6 @@ use std::{
     iter,
     net::SocketAddr,
     path::{Path, PathBuf},
-    sync::Arc,
     time,
 };
 use tracing::{error, info};
@@ -261,12 +260,6 @@ impl WorldBuilder {
                 if let Some(port) = liveness_port {
                     stellarator::struc_con::stellar(move || ::s10::liveness::monitor(port));
                 }
-                let is_canceled_arc: Option<Arc<Py<PyAny>>> = is_canceled.as_ref().map(|obj| {
-                    Python::with_gil(|py| {
-                        // PyObject is Py<PyAny>, so we can clone it using clone_ref
-                        Arc::new(obj.clone_ref(py))
-                    })
-                });
                 py.allow_threads(|| {
                     stellarator::run(|| {
                         let tmpfile = tempfile::tempdir().unwrap().keep();
@@ -275,9 +268,8 @@ impl WorldBuilder {
                             exec,
                         )
                         .run_with_cancellation({
-                            let is_canceled_fn = is_canceled_arc.clone();
                             move || {
-                                if let Some(ref func) = is_canceled_fn {
+                                if let Some(ref func) = is_canceled {
                                     Python::with_gil(|py| {
                                         func.call0(py)
                                             .and_then(|result| result.extract::<bool>(py))
