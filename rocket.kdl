@@ -1,12 +1,16 @@
 
-    hsplit {
-        tabs share=0.8 {
-            viewport name=Viewport pos="rocket.world_pos + (0.0,0.0,0.0,0.0, 5.0, 0.0, 1.0)" look_at="rocket.world_pos" hdr=#true
+    tabs {
+        hsplit share=0.65 name="Flight View" {
+            viewport name=Viewport pos="rocket.world_pos + (0,0,0,0, 6,3,2)" look_at="rocket.world_pos" hdr=#true show_grid=#true active=#true
+            vsplit share=0.45 {
+                graph "rocket.altitude_m,rocket.downrange_m" name="Altitude / Downrange"
+                graph "rocket.speed_ms,rocket.accel_ms2" name="Speed / Accel"
+                graph "rocket.dynamic_pressure_pa,rocket.mach,rocket.aero_force_n" name="Aero Loads"
+            }
         }
-        vsplit share=0.4 {
-            graph "rocket.fin_control_trim" name="Trim Control"
-            graph "rocket.fin_deflect" name="Fin Deflection"
-            graph "rocket.aero_coefs" name="Aero Coefficients"
+        hsplit share=0.35 name="Orientation" {
+            graph "rocket.euler_deg[0],rocket.euler_deg[1],rocket.euler_deg[2]" name="Euler Angles"
+            graph "rocket.angular_rates_deg[0],rocket.angular_rates_deg[1],rocket.angular_rates_deg[2]" name="Body Rates"
         }
     }
 
@@ -14,9 +18,9 @@
         glb path="compass.glb"
     }
     object_3d rocket.world_pos {
-        glb path="https://storage.googleapis.com/elodin-assets/rocket.glb"
+        glb path="assets/rocket.glb"
     }
-    line_3d rocket.world_pos line_width=11.0 perspective=#false {
-        color yolk
+    line_3d rocket.world_pos line_width=2.0 perspective=#false {
+        color 255 223 0
     }
     

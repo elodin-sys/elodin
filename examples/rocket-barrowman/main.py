@@ -66,7 +66,7 @@ def main():
         motor=motor,
         environment=env,
         rail_length=5.2,  # meters
-        inclination_deg=0.0,  # degrees from vertical (0 = straight up, 90 = horizontal)
+        inclination_deg=5.0,  # degrees from vertical (0 = straight up, 90 = horizontal)
         heading_deg=0.0,  # degrees (north)
     )
     
@@ -220,7 +220,7 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     object_3d rocket.world_pos {
         glb path="assets/rocket.glb"
     }
-    line_3d rocket.world_pos line_width=6.0 perspective=#false {
+    line_3d rocket.world_pos line_width=2.0 perspective=#false {
         color 255 223 0
     }
     """
