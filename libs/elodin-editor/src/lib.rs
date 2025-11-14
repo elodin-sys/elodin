@@ -17,9 +17,9 @@ use bevy::{
     window::{PresentMode, WindowResolution, WindowTheme},
     winit::WinitSettings,
 };
+use bevy_editor_cam::{SyncCameraPosition, controller::component::EditorCam};
 use bevy_egui::{EguiContextSettings, EguiPlugin};
 use bevy_render::alpha::AlphaMode;
-use bevy_editor_cam::{controller::component::EditorCam, SyncCameraPosition};
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use impeller2::types::{ComponentId, OwnedPacket};
 use impeller2::types::{Msg, Timestamp};
@@ -669,9 +669,7 @@ fn sanitize_editor_cam_anchor_depth(mut cams: Query<(Entity, &mut EditorCam)>) {
         }
         warn!(
             "Resetting invalid camera anchor depth (entity {:?}) from {} to {}",
-            entity,
-            cam.last_anchor_depth,
-            DEFAULT_DEPTH
+            entity, cam.last_anchor_depth, DEFAULT_DEPTH
         );
         cam.last_anchor_depth = DEFAULT_DEPTH;
     }
