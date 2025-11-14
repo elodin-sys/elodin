@@ -34,7 +34,7 @@ pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
     height: 80,
 };
 const SCREEN_RELAYOUT_MAX_ATTEMPTS: u8 = 5;
-const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(750);
+const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(2000);
 const FULLSCREEN_EXIT_CONFIRMATION_TIMEOUT: Duration = Duration::from_millis(500);
 const LINUX_MULTI_WINDOW: bool = cfg!(target_os = "linux");
 const SECONDARY_RECT_CAPTURE_LOAD_GUARD: Duration = Duration::from_millis(2500);
@@ -780,6 +780,14 @@ fn apply_secondary_window_screens(
         ) {
             continue;
         }
+        if matches!(
+            state.relayout_phase,
+            tiles::SecondaryWindowRelayoutPhase::NeedScreen
+        ) && !state.descriptor.layout_locked
+        {
+            state.relayout_phase = tiles::SecondaryWindowRelayoutPhase::Idle;
+            continue;
+        }
         let Some(entity) = state.window_entity else {
             continue;
         };
@@ -1464,6 +1472,9 @@ fn capture_secondary_window_screens(
     screens: Query<(Entity, &Monitor)>,
 ) {
     for state in windows.secondary_mut().iter_mut() {
+        if state.descriptor.layout_locked {
+            continue;
+        }
         let Some(entity) = state.window_entity else {
             continue;
         };
@@ -1543,6 +1554,9 @@ fn track_secondary_window_geometry(
         let Some(state) = windows.get_secondary_mut(id) else {
             continue;
         };
+        if state.descriptor.layout_locked {
+            continue;
+        }
         let Some(window) = winit_windows.get_window(entity) else {
             continue;
         };
@@ -1620,6 +1634,9 @@ fn record_window_rect_from_window(
     monitors: &[MonitorHandle],
     forced_position: Option<PhysicalPosition<i32>>,
 ) {
+    if state.descriptor.layout_locked {
+        return;
+    }
     if state.is_metadata_capture_blocked() {
         return;
     }
