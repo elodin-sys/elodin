@@ -152,7 +152,7 @@ def world() -> tuple[el.World, el.EntityId]:
         
         window path="examples/drone/motor-panel.kdl"
         window path="examples/drone/rate-control-panel.kdl"
-        
+
         vector_arrow "(1, 0, 0)" origin="drone.world_pos" scale=1.0 name="Drone Velocity X" body_frame=#true
         vector_arrow "(0, 1, 0)" origin="drone.world_pos" scale=1.0 name="Drone Velocity Y" body_frame=#true
         vector_arrow "(0, 0, 1)" origin="drone.world_pos" scale=1.0 name="Drone Velocity Z" body_frame=#true
