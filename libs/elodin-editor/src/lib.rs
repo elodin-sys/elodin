@@ -7,7 +7,7 @@ use bevy::{
     DefaultPlugins,
     asset::{UnapprovedPathMode, embedded_asset},
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
-    log::LogPlugin,
+    log::{LogPlugin, warn},
     math::{DQuat, DVec3},
     pbr::{
         DirectionalLightShadowMap,
@@ -19,6 +19,7 @@ use bevy::{
 };
 use bevy_egui::{EguiContextSettings, EguiPlugin};
 use bevy_render::alpha::AlphaMode;
+use bevy_editor_cam::{controller::component::EditorCam, SyncCameraPosition};
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use impeller2::types::{ComponentId, OwnedPacket};
 use impeller2::types::{Msg, Timestamp};
@@ -199,6 +200,10 @@ impl Plugin for EditorPlugin {
             .add_systems(PreUpdate, setup_cell)
             .add_systems(PreUpdate, sync_res::<CurrentTimestamp>)
             .add_systems(PreUpdate, sync_res::<impeller2_wkt::SimulationTimeStep>)
+            .add_systems(
+                PreUpdate,
+                sanitize_editor_cam_anchor_depth.before(SyncCameraPosition),
+            )
             .add_systems(
                 PreUpdate,
                 (
@@ -654,6 +659,22 @@ pub fn sync_pos(
                 ..Default::default()
             }
         });
+}
+
+fn sanitize_editor_cam_anchor_depth(mut cams: Query<(Entity, &mut EditorCam)>) {
+    const DEFAULT_DEPTH: f64 = -2.0;
+    for (entity, mut cam) in cams.iter_mut() {
+        if cam.last_anchor_depth.is_finite() {
+            continue;
+        }
+        warn!(
+            "Resetting invalid camera anchor depth (entity {:?}) from {} to {}",
+            entity,
+            cam.last_anchor_depth,
+            DEFAULT_DEPTH
+        );
+        cam.last_anchor_depth = DEFAULT_DEPTH;
+    }
 }
 
 pub trait BevyExt {

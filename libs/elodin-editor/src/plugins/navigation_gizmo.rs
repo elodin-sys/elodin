@@ -1,6 +1,9 @@
-use crate::{MainCamera, plugins::gizmos::GIZMO_RENDER_LAYER};
+use crate::{
+    MainCamera,
+    plugins::{camera_anchor::camera_anchor_from_transform, gizmos::GIZMO_RENDER_LAYER},
+};
 use bevy::animation::{AnimationTarget, AnimationTargetId, animated_field};
-use bevy::math::{DVec3, Dir3};
+use bevy::math::Dir3;
 use bevy::prelude::*;
 use bevy::render::camera::Viewport;
 use bevy::render::view::RenderLayers;
@@ -288,13 +291,9 @@ pub fn drag_nav_gizmo(
             .unwrap_or_else(|| UVec2::new(256, 256))
             .as_vec2()
         / 75.0;
-    let anchor = transform
-        .compute_matrix()
-        .as_dmat4()
-        .inverse()
-        .transform_point3(DVec3::ZERO);
+    let anchor = camera_anchor_from_transform(transform.as_ref());
     editor_cam.end_move();
-    editor_cam.start_orbit(Some(anchor));
+    editor_cam.start_orbit(anchor);
     editor_cam.send_screenspace_input(delta);
 }
 
