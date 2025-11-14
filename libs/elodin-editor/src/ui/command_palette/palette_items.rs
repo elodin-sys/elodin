@@ -859,7 +859,8 @@ pub fn save_schematic() -> PaletteItem {
         |_name: In<String>,
          db_config: Res<DbConfig>,
          schematic: Res<CurrentSchematic>,
-         secondary: Res<CurrentSecondarySchematics>| {
+         secondary: Res<CurrentSecondarySchematics>,
+         mut live_reload: ResMut<SchematicLiveReloadRx>| {
             match db_config.schematic_path() {
                 Some(path) => {
                     let kdl = schematic.0.to_kdl();
@@ -869,8 +870,9 @@ pub fn save_schematic() -> PaletteItem {
                         error!(?e, "saving schematic to {:?}", dest.display());
                     } else {
                         info!("saved schematic to {:?}", dest.display());
+                        live_reload.ignore_path(dest.clone());
                         let base_dir = dest.parent().unwrap_or_else(|| Path::new("."));
-                        write_secondary_schematics(base_dir, &secondary);
+                        write_secondary_schematics(base_dir, &secondary, &mut live_reload);
                     }
                     PaletteEvent::Exit
                 }
@@ -1028,7 +1030,7 @@ pub fn clear_schematic() -> PaletteItem {
         PRESETS_LABEL,
         |_: In<String>, mut params: LoadSchematicParams, mut rx: ResMut<SchematicLiveReloadRx>| {
             params.load_schematic(&impeller2_wkt::Schematic::default(), None);
-            rx.0 = None;
+            rx.clear();
             PaletteEvent::Exit
         },
     )
@@ -1040,7 +1042,8 @@ pub fn save_schematic_inner() -> PaletteItem {
         "",
         move |In(name): In<String>,
               schematic: Res<CurrentSchematic>,
-              secondary: Res<CurrentSecondarySchematics>| {
+              secondary: Res<CurrentSecondarySchematics>,
+              mut live_reload: ResMut<SchematicLiveReloadRx>| {
             let kdl = schematic.0.to_kdl();
             let path = PathBuf::from(name).with_extension("kdl");
             let dest = schematic_file(&path);
@@ -1048,8 +1051,9 @@ pub fn save_schematic_inner() -> PaletteItem {
                 error!(?e, "saving schematic");
             } else {
                 info!("saved schematic to {:?}", dest.display());
+                live_reload.ignore_path(dest.clone());
                 let base_dir = dest.parent().unwrap_or_else(|| Path::new("."));
-                write_secondary_schematics(base_dir, &secondary);
+                write_secondary_schematics(base_dir, &secondary, &mut live_reload);
             }
             PaletteEvent::Exit
         },
@@ -1057,7 +1061,11 @@ pub fn save_schematic_inner() -> PaletteItem {
     .default()
 }
 
-fn write_secondary_schematics(base_dir: &Path, secondary: &CurrentSecondarySchematics) {
+fn write_secondary_schematics(
+    base_dir: &Path,
+    secondary: &CurrentSecondarySchematics,
+    live_reload: &mut SchematicLiveReloadRx,
+) {
     for entry in &secondary.0 {
         let dest = base_dir.join(&entry.file_name);
         if let Some(parent) = dest.parent()
@@ -1076,6 +1084,7 @@ fn write_secondary_schematics(base_dir: &Path, secondary: &CurrentSecondarySchem
             error!(?e, path = %dest.display(), "saving secondary schematic");
         } else {
             info!(path = %dest.display(), "saved secondary schematic");
+            live_reload.ignore_path(dest);
         }
     }
 }
