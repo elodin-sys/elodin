@@ -192,6 +192,7 @@ impl WorldBuilder {
         max_ticks = None,
         optimize = false,
         is_canceled = None,
+        db_path = None,
     ))]
     pub fn run(
         &mut self,
@@ -203,6 +204,7 @@ impl WorldBuilder {
         max_ticks: Option<u64>,
         optimize: bool,
         is_canceled: Option<PyObject>,
+        db_path: Option<String>,
     ) -> Result<Option<String>, Error> {
         let _ = tracing_subscriber::fmt::fmt()
             .with_env_filter(
@@ -310,8 +312,9 @@ impl WorldBuilder {
                         default_playback_speed,
                         max_ticks,
                         optimize,
+                        db_path,
                     )?;
-                    exec.run(py, ticks, true)?;
+                    exec.run(py, ticks, true, None)?;
                     let profile = exec.profile();
                     println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
                     println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
@@ -827,7 +830,7 @@ impl WorldBuilder {
                         exec: compiled_exec,
                         db,
                     };
-                    exec_with_db.run(py, ticks, true)?;
+                    exec_with_db.run(py, ticks, true, None)?;
                     let profile = exec_with_db.profile();
 
                     println!("\n[Runtime Metrics]");
@@ -863,6 +866,7 @@ impl WorldBuilder {
         default_playback_speed = 1.0,
         max_ticks = None,
         optimize = false,
+        db_path = None,
     ))]
     pub fn build(
         &mut self,
@@ -873,6 +877,7 @@ impl WorldBuilder {
         default_playback_speed: f64,
         max_ticks: Option<u64>,
         optimize: bool,
+        db_path: Option<String>,
     ) -> Result<Exec, Error> {
         let exec = self.build_uncompiled(
             py,
@@ -887,9 +892,11 @@ impl WorldBuilder {
             client.disable_optimizations();
         }
         let mut exec = exec.compile(client.clone())?;
-        let db_dir = tempfile::tempdir()?;
-        let db_dir = db_dir.keep();
-        let db = elodin_db::DB::create(db_dir.join("db"))?;
+        let db_path = match db_path {
+            Some(p) => PathBuf::from(p),
+            None => tempfile::tempdir()?.keep().join("db"),
+        };
+        let db = elodin_db::DB::create(db_path)?;
         nox_ecs::impeller2_server::init_db(&db, &mut exec.world, Timestamp::now())?;
         Ok(Exec { exec, db })
     }
