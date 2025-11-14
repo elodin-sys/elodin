@@ -268,10 +268,11 @@ impl SpecializedRenderPipeline for LinePipeline {
         let view_layout = self
             .mesh_pipeline
             .get_view_layout(key.view_key.into())
+            .main_layout
             .clone();
 
         let layout = vec![
-            //view_layout,
+            view_layout,
             self.uniform_layout.clone(),
             self.values_layout.clone(),
             self.index_layout.clone(),
