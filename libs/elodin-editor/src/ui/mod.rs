@@ -792,6 +792,9 @@ fn apply_secondary_window_screens(
                 if state.pending_exit_state == tiles::PendingFullscreenExit::Requested {
                     if LINUX_MULTI_WINDOW {
                         if window.fullscreen().is_some() {
+                            state
+                                .pending_exit_started_at
+                                .get_or_insert_with(Instant::now);
                             exit_fullscreen(window);
                             if !fullscreen_exit_timed_out(state.pending_exit_started_at) {
                                 continue;
@@ -806,6 +809,9 @@ fn apply_secondary_window_screens(
                         state.pending_exit_started_at = None;
                     } else {
                         if window.fullscreen().is_some() {
+                            state
+                                .pending_exit_started_at
+                                .get_or_insert_with(Instant::now);
                             exit_fullscreen(window);
                             state.pending_fullscreen_exit = false;
                             state.pending_exit_started_at = None;
@@ -856,6 +862,9 @@ fn apply_secondary_window_screens(
                     assign_window_to_screen(state, window, target_monitor);
                     if !LINUX_MULTI_WINDOW {
                         state.pending_exit_state = tiles::PendingFullscreenExit::Requested;
+                        state
+                            .pending_exit_started_at
+                            .get_or_insert_with(Instant::now);
                     }
                     state.relayout_attempts = state.relayout_attempts.saturating_add(1);
                     if state.relayout_started_at.is_none() {
@@ -1050,6 +1059,9 @@ fn apply_secondary_window_rect(
     if state.pending_fullscreen_exit {
         if LINUX_MULTI_WINDOW {
             if window.fullscreen().is_some() {
+                state
+                    .pending_exit_started_at
+                    .get_or_insert_with(Instant::now);
                 exit_fullscreen(window);
                 if fullscreen_exit_timed_out(state.pending_exit_started_at) {
                     info!(
@@ -1065,6 +1077,9 @@ fn apply_secondary_window_rect(
             state.pending_exit_started_at = None;
         } else {
             if window.fullscreen().is_some() {
+                state
+                    .pending_exit_started_at
+                    .get_or_insert_with(Instant::now);
                 window.set_fullscreen(None);
                 window.set_maximized(false);
                 linux_clear_minimized(window);
@@ -1223,7 +1238,7 @@ fn assign_window_to_screen(
     } else {
         window.set_fullscreen(Some(Fullscreen::Borderless(Some(target_monitor))));
         state.pending_fullscreen_exit = true;
-        state.pending_exit_started_at = None;
+        state.pending_exit_started_at = Some(Instant::now());
     }
     window.set_outer_position(PhysicalPosition::new(x, y));
     state.skip_metadata_capture = true;
@@ -1308,7 +1323,7 @@ fn assign_primary_window_to_screen(
     } else {
         window.set_fullscreen(Some(Fullscreen::Borderless(Some(target_monitor))));
         layout.pending_fullscreen_exit = true;
-        layout.pending_fullscreen_exit_started_at = None;
+        layout.pending_fullscreen_exit_started_at = Some(Instant::now());
     }
     window.set_outer_position(PhysicalPosition::new(x, y));
 }
@@ -1320,6 +1335,9 @@ fn apply_primary_window_rect(
     if layout.pending_fullscreen_exit {
         if LINUX_MULTI_WINDOW {
             if window.fullscreen().is_some() {
+                layout
+                    .pending_fullscreen_exit_started_at
+                    .get_or_insert_with(Instant::now);
                 exit_fullscreen(window);
                 if fullscreen_exit_timed_out(layout.pending_fullscreen_exit_started_at) {
                     info!(
