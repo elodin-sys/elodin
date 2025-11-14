@@ -96,6 +96,7 @@ pub struct SecondaryWindowDescriptor {
     pub title: Option<String>,
     pub screen: Option<usize>,
     pub screen_rect: Option<WindowRect>,
+    pub layout_locked: bool,
 }
 
 impl SecondaryWindowDescriptor {
@@ -195,7 +196,7 @@ impl SecondaryWindowState {
     pub fn relayout_phase_from_descriptor(
         descriptor: &SecondaryWindowDescriptor,
     ) -> SecondaryWindowRelayoutPhase {
-        if descriptor.wants_explicit_layout() {
+        if descriptor.layout_locked {
             SecondaryWindowRelayoutPhase::NeedScreen
         } else {
             SecondaryWindowRelayoutPhase::Idle
@@ -242,6 +243,9 @@ impl SecondaryWindowState {
         window: &Window,
         screens: &Query<(Entity, &Monitor)>,
     ) {
+        if self.descriptor.layout_locked {
+            return;
+        }
         if self.is_metadata_capture_blocked() {
             return;
         }
@@ -296,6 +300,9 @@ impl SecondaryWindowState {
         window: &WinitWindow,
         monitors: &[MonitorHandle],
     ) -> bool {
+        if self.descriptor.layout_locked {
+            return false;
+        }
         if self.is_metadata_capture_blocked() {
             return false;
         }
@@ -534,6 +541,7 @@ impl WindowManager {
             title: cleaned_title.or_else(|| Some(format!("Window {}", id.0 + 1))),
             screen: None,
             screen_rect: None,
+            layout_locked: false,
         };
         let relayout_phase = SecondaryWindowState::relayout_phase_from_descriptor(&descriptor);
         let tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
