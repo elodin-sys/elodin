@@ -77,7 +77,7 @@ write_files:
       export IFS=" "
 
       echo "Uploading paths to S3 cache: $OUT_PATHS"
-      exec nix copy --to "s3://elodin-nix-cache?region=us-west-2&secret-key=/etc/nix/cache-priv-key.pem" $OUT_PATHS
+      exec /nix/var/nix/profiles/default/bin/nix copy --to "s3://elodin-nix-cache?region=us-west-2&secret-key=/etc/nix/cache-priv-key.pem" $OUT_PATHS
       UPLOADEOF
       '
 

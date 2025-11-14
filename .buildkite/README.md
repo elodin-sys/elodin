@@ -156,8 +156,6 @@ The user-data script uses a two-stage boot process:
 
 **Why two boots?** Overlayroot needs to be active before installing Nix/Buildkite, otherwise those installations would be on the persistent disk instead of tmpfs.
 
-**Note on Nix installation:** We use the Determinate Systems installer but without the `--determinate` flag. This gives us standard Nix without authentication requirements, which is ideal for ephemeral CI environments.
-
 ### Cache Upload Process
 
 After each successful build:
