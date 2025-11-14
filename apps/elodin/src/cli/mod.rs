@@ -33,7 +33,6 @@ impl Cli {
     }
 
     pub fn run(self) -> miette::Result<()> {
-        self.ensure_xwayland_if_needed()?;
         if self.markdown_help {
             clap_markdown::print_help_markdown::<Cli>();
             std::process::exit(0);
@@ -108,57 +107,5 @@ impl Cli {
             std::io::ErrorKind::NotFound,
             "failed to get data directory",
         ))
-    }
-
-    #[cfg(target_os = "linux")]
-    fn ensure_xwayland_if_needed(&self) -> miette::Result<()> {
-        use std::{
-            env,
-            process::{Command, Stdio},
-        };
-
-        if env::var_os("ELODIN_FORCE_WAYLAND").is_some() || env::var_os("ELODIN_XWAYLAND").is_some()
-        {
-            return Ok(());
-        }
-
-        let is_wayland_session = env::var_os("WAYLAND_DISPLAY").is_some()
-            || env::var("XDG_SESSION_TYPE")
-                .map(|value| value.eq_ignore_ascii_case("wayland"))
-                .unwrap_or(false);
-        if !is_wayland_session {
-            return Ok(());
-        }
-
-        let display_set = env::var_os("DISPLAY").is_some();
-        if !display_set {
-            eprintln!(
-                "Warning: Wayland session detected but DISPLAY is unset; continuing under Wayland"
-            );
-            return Ok(());
-        }
-
-        let current_exe = std::env::current_exe().into_diagnostic()?;
-        let mut env_overrides = env::vars_os().collect::<Vec<_>>();
-        env_overrides.retain(|(key, _)| {
-            key != "WAYLAND_DISPLAY" && key != "XDG_SESSION_TYPE" && key != "ELODIN_FORCE_WAYLAND"
-        });
-        env_overrides.push(("ELODIN_XWAYLAND".into(), "1".into()));
-
-        let status = Command::new(current_exe)
-            .args(std::env::args_os().skip(1))
-            .env_clear()
-            .envs(env_overrides)
-            .stdin(Stdio::inherit())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .status()
-            .into_diagnostic()?;
-        std::process::exit(status.code().unwrap_or(1));
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    fn ensure_xwayland_if_needed(&self) -> miette::Result<()> {
-        Ok(())
     }
 }
