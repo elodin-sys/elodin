@@ -17,12 +17,13 @@ pub struct Exec {
 
 #[pymethods]
 impl Exec {
-    #[pyo3(signature = (ticks=1, show_progress=true))]
+    #[pyo3(signature = (ticks=1, show_progress=true, is_canceled = None))]
     pub fn run(
         &mut self,
         py: Python<'_>,
         ticks: usize,
         mut show_progress: bool,
+        is_canceled: Option<PyObject>,
     ) -> Result<(), Error> {
         show_progress &= ticks >= 100;
 
@@ -43,6 +44,17 @@ impl Exec {
                 nox_ecs::impeller2_server::commit_world_head(state, &mut self.exec, timestamp, None)
             })?;
             timestamp += self.exec.world.sim_time_step().0;
+
+            if let Some(func) = &is_canceled {
+                let is_canceled = Python::with_gil(|py| {
+                    func.call0(py)
+                        .and_then(|result| result.extract::<bool>(py))
+                })?;
+                if is_canceled {
+                    eprintln!("exec.run canceled!");
+                    return Ok(())
+                }
+            }
             py.check_signals()?;
             progress_bar.inc(1);
         }
