@@ -5,7 +5,7 @@ use crate::{ScalarDim, Tensor};
 /// Type alias for a scalar tensor with a specific type `T`, an underlying representation `P`.
 pub type Scalar<T, P = DefaultRepr> = Tensor<T, ScalarDim, P>;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "noxpr"))]
 mod tests {
     use crate::{Client, CompFn};
 

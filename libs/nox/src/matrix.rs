@@ -111,8 +111,11 @@ impl<T: RealField> Matrix3<T, ArrayRepr> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "noxpr"))]
 mod tests {
+    // Tests require std for println!
+    extern crate std;
+    use std::println;
 
     use crate::{Client, CompFn, Vector, Vector3, tensor};
 

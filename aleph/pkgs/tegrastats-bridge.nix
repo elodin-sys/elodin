@@ -23,6 +23,8 @@ in
 
     nativeBuildInputs = [
       (rustToolchain pkgs)
+      pkgs.cmake
+      pkgs.gfortran
     ];
 
     HOST_CC = "${pkgs.stdenv.cc.nativePrefix}cc";

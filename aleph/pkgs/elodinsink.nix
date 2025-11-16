@@ -28,6 +28,8 @@ in
       (rustToolchain pkgs)
       pkg-config
       clang
+      pkgs.cmake
+      pkgs.gfortran
     ];
 
     buildInputs = with gst_all_1; [

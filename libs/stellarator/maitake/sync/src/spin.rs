@@ -173,22 +173,32 @@ unsafe impl RawRwLock for RwSpinlock {
 
     #[cfg_attr(test, track_caller)]
     fn try_lock_shared(&self) -> bool {
-        // Add a reader.
-        let state = test_dbg!(self.state.fetch_add(READER, Acquire));
+        // Use a compare-exchange loop to atomically check for writers
+        // and increment the reader count only if no writer is present.
+        let mut state = self.state.load(Relaxed);
+        loop {
+            // If a writer is present, we cannot acquire the read lock.
+            if state & WRITER != 0 {
+                return false;
+            }
 
-        // Ensure we don't overflow the reader count and clobber the lock's
-        // state.
-        assert!(
-            state < usize::MAX - (READER * 2),
-            "read lock counter overflow! this is very bad"
-        );
+            // Ensure we don't overflow the reader count and clobber the lock's
+            // state.
+            assert!(
+                state < usize::MAX - (READER * 2),
+                "read lock counter overflow! this is very bad"
+            );
 
-        // Is the write lock held? If so, undo the increment and bail.
-        if state & WRITER == 1 {
-            test_dbg!(self.state.fetch_sub(READER, Release));
-            false
-        } else {
-            true
+            // Try to increment the reader count atomically.
+            match test_dbg!(self.state.compare_exchange_weak(
+                state,
+                state + READER,
+                Acquire,
+                Relaxed
+            )) {
+                Ok(_) => return true,
+                Err(new_state) => state = new_state,
+            }
         }
     }
 

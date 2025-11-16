@@ -339,11 +339,11 @@ mod tests {
     #[test]
     fn test_angular_distance() {
         let q1 = Quaternion::from_axis_angle(Vector3::z_axis(), 0.0);
-        let q2 = Quaternion::from_axis_angle(Vector3::z_axis(), std::f64::consts::PI / 2.0);
+        let q2 = Quaternion::from_axis_angle(Vector3::z_axis(), core::f64::consts::PI / 2.0);
         let distance = q1.angular_distance(&q2);
         assert_relative_eq!(
             distance.into_buf(),
-            std::f64::consts::PI / 2.0,
+            core::f64::consts::PI / 2.0,
             epsilon = 1e-6
         );
     }

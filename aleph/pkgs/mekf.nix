@@ -23,6 +23,8 @@ in
 
     nativeBuildInputs = [
       (rustToolchain pkgs)
+      pkgs.cmake
+      pkgs.gfortran
     ];
 
     buildInputs = [

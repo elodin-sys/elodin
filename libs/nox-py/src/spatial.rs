@@ -23,9 +23,9 @@ impl SpatialTransform {
     #[new]
     #[pyo3(signature = (arr=None, angular=None, linear=None))]
     fn new(
-        arr: Option<PyObject>,
+        arr: Option<Py<PyAny>>,
         angular: Option<Quaternion>,
-        linear: Option<PyObject>,
+        linear: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         if let Some(arr) = arr {
             if linear.is_some() || angular.is_some() {
@@ -45,12 +45,12 @@ impl SpatialTransform {
         }
     }
 
-    fn flatten(&self) -> Result<((PyObject,), Option<()>), Error> {
+    fn flatten(&self) -> Result<((Py<PyAny>,), Option<()>), Error> {
         let jax = self.inner.clone().into_inner().to_jax()?;
         Ok(((jax,), None))
     }
     #[staticmethod]
-    fn unflatten(py: Python<'_>, _aux: PyObject, jax: PyObject) -> pyo3::PyResult<Self> {
+    fn unflatten(py: Python<'_>, _aux: Py<PyAny>, jax: Py<PyAny>) -> pyo3::PyResult<Self> {
         let jax = if let Ok(tuple) = jax.downcast_bound::<PyTuple>(py) {
             tuple.get_item(0)?.into()
         } else {
@@ -61,11 +61,11 @@ impl SpatialTransform {
     }
 
     #[staticmethod]
-    fn from_array(jax: PyObject) -> Self {
+    fn from_array(jax: Py<PyAny>) -> Self {
         nox::SpatialTransform::from_inner(Noxpr::jax(jax)).into()
     }
 
-    fn linear(&self) -> Result<PyObject, Error> {
+    fn linear(&self) -> Result<Py<PyAny>, Error> {
         Ok(self.inner.linear().into_inner().to_jax()?)
     }
 
@@ -75,7 +75,7 @@ impl SpatialTransform {
         }
     }
 
-    fn asarray(&self) -> Result<PyObject, Error> {
+    fn asarray(&self) -> Result<Py<PyAny>, Error> {
         Ok(self.inner.clone().into_inner().to_jax()?)
     }
 
@@ -89,7 +89,7 @@ impl SpatialTransform {
         (Self::metadata(),)
     }
 
-    fn __add__(&self, py: Python<'_>, rhs: PyObject) -> PyResult<PyObject> {
+    fn __add__(&self, py: Python<'_>, rhs: Py<PyAny>) -> PyResult<Py<PyAny>> {
         if let Ok(s) = rhs.extract::<SpatialTransform>(py) {
             let op = self.inner.clone().add(s.inner).into_inner();
             let spatial_transform = SpatialTransform::from(nox::SpatialTransform::from_inner(op));
@@ -122,7 +122,7 @@ impl From<nox::SpatialMotion<f64>> for SpatialMotion {
 impl SpatialMotion {
     #[new]
     #[pyo3(signature = (angular=None, linear=None))]
-    fn new(angular: Option<PyObject>, linear: Option<PyObject>) -> Self {
+    fn new(angular: Option<Py<PyAny>>, linear: Option<Py<PyAny>>) -> Self {
         let linear = linear
             .map(|arr| Tensor::<_, _, Op>::from_inner(Noxpr::jax(arr)))
             .unwrap_or_else(Vector::zeros);
@@ -132,12 +132,12 @@ impl SpatialMotion {
         nox::SpatialMotion::new(angular, linear).into()
     }
 
-    fn flatten(&self) -> Result<((PyObject,), Option<()>), Error> {
+    fn flatten(&self) -> Result<((Py<PyAny>,), Option<()>), Error> {
         let jax = self.inner.clone().into_inner().to_jax()?;
         Ok(((jax,), None))
     }
     #[staticmethod]
-    fn unflatten(py: Python<'_>, _aux: PyObject, jax: PyObject) -> pyo3::PyResult<Self> {
+    fn unflatten(py: Python<'_>, _aux: Py<PyAny>, jax: Py<PyAny>) -> pyo3::PyResult<Self> {
         let jax = if let Ok(tuple) = jax.downcast_bound::<PyTuple>(py) {
             tuple.get_item(0)?.into()
         } else {
@@ -148,15 +148,15 @@ impl SpatialMotion {
     }
 
     #[staticmethod]
-    fn from_array(jax: PyObject) -> Self {
+    fn from_array(jax: Py<PyAny>) -> Self {
         nox::SpatialMotion::from_inner(Noxpr::jax(jax)).into()
     }
 
-    fn linear(&self) -> Result<PyObject, Error> {
+    fn linear(&self) -> Result<Py<PyAny>, Error> {
         Ok(self.inner.linear().into_inner().to_jax()?)
     }
 
-    fn angular(&self) -> Result<PyObject, Error> {
+    fn angular(&self) -> Result<Py<PyAny>, Error> {
         Ok(self.inner.angular().into_inner().to_jax()?)
     }
 
@@ -192,9 +192,9 @@ impl SpatialForce {
     #[new]
     #[pyo3(signature = (arr=None, torque=None, linear=None))]
     fn new(
-        arr: Option<PyObject>,
-        torque: Option<PyObject>,
-        linear: Option<PyObject>,
+        arr: Option<Py<PyAny>>,
+        torque: Option<Py<PyAny>>,
+        linear: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         if let Some(arr) = arr {
             if linear.is_some() || torque.is_some() {
@@ -214,13 +214,13 @@ impl SpatialForce {
         }
     }
 
-    fn flatten(&self) -> Result<((PyObject,), Option<()>), Error> {
+    fn flatten(&self) -> Result<((Py<PyAny>,), Option<()>), Error> {
         let jax = self.inner.clone().into_inner().to_jax()?;
         Ok(((jax,), None))
     }
 
     #[staticmethod]
-    fn unflatten(py: Python<'_>, _aux: PyObject, jax: PyObject) -> pyo3::PyResult<Self> {
+    fn unflatten(py: Python<'_>, _aux: Py<PyAny>, jax: Py<PyAny>) -> pyo3::PyResult<Self> {
         let jax = if let Ok(tuple) = jax.downcast_bound::<PyTuple>(py) {
             tuple.get_item(0)?.into()
         } else {
@@ -230,19 +230,19 @@ impl SpatialForce {
     }
 
     #[staticmethod]
-    fn from_array(jax: PyObject) -> Self {
+    fn from_array(jax: Py<PyAny>) -> Self {
         nox::SpatialForce::from_inner(Noxpr::jax(jax)).into()
     }
 
-    fn force(&self) -> Result<PyObject, Error> {
+    fn force(&self) -> Result<Py<PyAny>, Error> {
         Ok(self.inner.force().into_inner().to_jax()?)
     }
 
-    fn linear(&self) -> Result<PyObject, Error> {
+    fn linear(&self) -> Result<Py<PyAny>, Error> {
         Ok(self.inner.force().into_inner().to_jax()?)
     }
 
-    fn torque(&self) -> Result<PyObject, Error> {
+    fn torque(&self) -> Result<Py<PyAny>, Error> {
         Ok(self.inner.torque().into_inner().to_jax()?)
     }
 
@@ -276,13 +276,13 @@ impl From<nox::Quaternion<f64>> for Quaternion {
 #[pymethods]
 impl Quaternion {
     #[new]
-    fn new(arr: PyObject) -> Self {
+    fn new(arr: Py<PyAny>) -> Self {
         Quaternion {
             inner: nox::Quaternion::from_inner(Noxpr::jax(arr)),
         }
     }
 
-    fn vector(&self) -> Result<PyObject, Error> {
+    fn vector(&self) -> Result<Py<PyAny>, Error> {
         self.inner
             .clone()
             .into_inner()
@@ -290,13 +290,13 @@ impl Quaternion {
             .map_err(Error::from)
     }
 
-    fn flatten(&self) -> Result<((PyObject,), Option<()>), Error> {
+    fn flatten(&self) -> Result<((Py<PyAny>,), Option<()>), Error> {
         let jax = self.inner.clone().into_inner().to_jax()?;
         Ok(((jax,), None))
     }
 
     #[staticmethod]
-    fn unflatten(py: Python<'_>, _aux: PyObject, jax: PyObject) -> pyo3::PyResult<Self> {
+    fn unflatten(py: Python<'_>, _aux: Py<PyAny>, jax: Py<PyAny>) -> pyo3::PyResult<Self> {
         let jax = if let Ok(tuple) = jax.downcast_bound::<PyTuple>(py) {
             tuple.get_item(0)?.into()
         } else {
@@ -307,7 +307,7 @@ impl Quaternion {
     }
 
     #[staticmethod]
-    fn from_array(jax: PyObject) -> Self {
+    fn from_array(jax: Py<PyAny>) -> Self {
         nox::Quaternion::from_inner(Noxpr::jax(jax)).into()
     }
 
@@ -322,7 +322,7 @@ impl Quaternion {
     }
 
     #[staticmethod]
-    fn from_axis_angle(axis: PyObject, angle: PyObject) -> Self {
+    fn from_axis_angle(axis: Py<PyAny>, angle: Py<PyAny>) -> Self {
         nox::Quaternion::from_axis_angle(
             Tensor::<_, _, Op>::from_inner(Noxpr::jax(axis)),
             Tensor::<_, _, Op>::from_inner(Noxpr::jax(angle)),
@@ -348,7 +348,7 @@ impl Quaternion {
         self.inner.clone().add(rhs.inner.clone()).into()
     }
 
-    pub fn __matmul__(&self, py: Python<'_>, rhs: PyObject) -> Result<PyObject, Error> {
+    pub fn __matmul__(&self, py: Python<'_>, rhs: Py<PyAny>) -> Result<Py<PyAny>, Error> {
         if let Ok(s) = rhs.extract::<SpatialTransform>(py) {
             let op = self.inner.clone().mul(s.inner).into_inner();
             let spatial_transform = SpatialTransform::from(nox::SpatialTransform::from_inner(op));
@@ -372,7 +372,7 @@ impl Quaternion {
         self.inner.clone().inverse().into()
     }
 
-    pub fn integrate_body(&self, arr: PyObject) -> Self {
+    pub fn integrate_body(&self, arr: Py<PyAny>) -> Self {
         let body_delta = Vector::from_inner(Noxpr::jax(arr));
         self.inner.integrate_body(body_delta).into()
     }
@@ -393,7 +393,7 @@ impl From<nox::SpatialInertia<f64>> for SpatialInertia {
 impl SpatialInertia {
     #[new]
     #[pyo3(signature = (mass, inertia=None))]
-    fn new(mass: PyObject, inertia: Option<PyObject>) -> Self {
+    fn new(mass: Py<PyAny>, inertia: Option<Py<PyAny>>) -> Self {
         let mass = Scalar::<f64>::from_inner(Noxpr::jax(mass));
         let momentum = Vector::<f64, 3>::zeros();
         let inertia = if let Some(inertia) = inertia {
@@ -404,13 +404,13 @@ impl SpatialInertia {
         nox::SpatialInertia::new(inertia, momentum, mass).into()
     }
 
-    fn flatten(&self) -> Result<((PyObject,), Option<()>), Error> {
+    fn flatten(&self) -> Result<((Py<PyAny>,), Option<()>), Error> {
         let jax = self.inner.clone().into_inner().to_jax()?;
         Ok(((jax,), None))
     }
 
     #[staticmethod]
-    fn unflatten(py: Python<'_>, _aux: PyObject, jax: PyObject) -> pyo3::PyResult<Self> {
+    fn unflatten(py: Python<'_>, _aux: Py<PyAny>, jax: Py<PyAny>) -> pyo3::PyResult<Self> {
         let jax = if let Ok(tuple) = jax.downcast_bound::<PyTuple>(py) {
             tuple.get_item(0)?.into()
         } else {
@@ -421,19 +421,19 @@ impl SpatialInertia {
     }
 
     #[staticmethod]
-    fn from_array(jax: PyObject) -> Self {
+    fn from_array(jax: Py<PyAny>) -> Self {
         nox::SpatialInertia::from_inner(Noxpr::jax(jax)).into()
     }
 
-    fn mass(&self) -> Result<PyObject, Error> {
+    fn mass(&self) -> Result<Py<PyAny>, Error> {
         Ok(self.inner.mass().into_inner().to_jax()?)
     }
 
-    fn inertia_diag(&self) -> Result<PyObject, Error> {
+    fn inertia_diag(&self) -> Result<Py<PyAny>, Error> {
         Ok(self.inner.inertia_diag().into_inner().to_jax()?)
     }
 
-    fn asarray(&self) -> Result<PyObject, Error> {
+    fn asarray(&self) -> Result<Py<PyAny>, Error> {
         Ok(self.inner.clone().into_inner().to_jax()?)
     }
 

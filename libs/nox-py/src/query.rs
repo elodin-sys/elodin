@@ -17,7 +17,7 @@ pub struct QueryInner {
 impl QueryInner {
     #[staticmethod]
     pub fn from_arrays(
-        arrays: Vec<PyObject>,
+        arrays: Vec<Py<PyAny>>,
         //component_names: Vec<String>,
         metadata: QueryMetadata,
     ) -> Result<QueryInner, Error> {
@@ -36,7 +36,7 @@ impl QueryInner {
     pub fn from_builder(
         builder: SystemBuilder,
         component_ids: Vec<String>,
-        args: Vec<PyObject>,
+        args: Vec<Py<PyAny>>,
     ) -> Result<QueryInner, Error> {
         let (query, metadata) = component_ids
             .iter()
@@ -48,7 +48,7 @@ impl QueryInner {
                 let buffer = args.get(i).ok_or(nox_ecs::Error::ComponentNotFound)?;
                 Ok::<_, Error>((
                     ComponentArray {
-                        buffer: Noxpr::jax(Python::with_gil(|py| buffer.clone_ref(py))),
+                        buffer: Noxpr::jax(Python::attach(|py| buffer.clone_ref(py))),
                         len: meta.len,
                         entity_map: meta.entity_map,
                         component_id: id,
@@ -72,7 +72,7 @@ impl QueryInner {
         Ok(Self { query, metadata })
     }
 
-    pub fn map(&self, new_buf: PyObject, metadata: Component) -> QueryInner {
+    pub fn map(&self, new_buf: Py<PyAny>, metadata: Component) -> QueryInner {
         let expr = Noxpr::jax(new_buf);
         QueryInner {
             query: nox_ecs::Query {
@@ -85,7 +85,7 @@ impl QueryInner {
         }
     }
 
-    pub fn output(&self, builder: SystemBuilder, args: Vec<PyObject>) -> Result<PyObject, Error> {
+    pub fn output(&self, builder: SystemBuilder, args: Vec<Py<PyAny>>) -> Result<Py<PyAny>, Error> {
         let mut outputs = vec![];
         for (expr, id) in self
             .query
@@ -104,7 +104,7 @@ impl QueryInner {
                 let out = update_var(
                     &meta.entity_map,
                     &self.query.entity_map,
-                    &Noxpr::jax(Python::with_gil(|py| buffer.clone_ref(py))),
+                    &Noxpr::jax(Python::attach(|py| buffer.clone_ref(py))),
                     expr,
                 );
                 outputs.push(out);
@@ -117,7 +117,7 @@ impl QueryInner {
         }
     }
 
-    pub fn arrays(&self) -> Result<Vec<PyObject>, Error> {
+    pub fn arrays(&self) -> Result<Vec<Py<PyAny>>, Error> {
         self.query
             .exprs
             .iter()
