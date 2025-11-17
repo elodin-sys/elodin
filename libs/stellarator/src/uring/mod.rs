@@ -6,6 +6,7 @@ use pin_project::{pin_project, pinned_drop};
 use slab::Slab;
 use std::any::Any;
 use std::future::Future;
+use std::io;
 use std::mem;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -22,6 +23,15 @@ pub struct UringReactor {
 }
 
 impl UringReactor {
+    /// Treat EINTR/ETIME from io_uring submissions as a harmless wakeup so Ctrl-C
+    /// doesn't bubble up as a panic while shutting down.
+    fn handle_submit_error(err: io::Error) -> Result<(), Error> {
+        if err.kind() == io::ErrorKind::Interrupted || err.raw_os_error() == Some(62) {
+            return Ok(());
+        }
+        Err(Error::from(err))
+    }
+
     pub fn submit_op<O: OpCode>(&mut self, mut op_code: O) -> Result<Completion<O>, (O, Error)> {
         let entry = self.states.vacant_entry();
         let sqe = unsafe { op_code.sqe().user_data(entry.key() as u64) };
@@ -117,8 +127,6 @@ fn take_completion_op_code<O: OpCode>(completion: CompletionProj<'_, O>) -> O {
 
 impl Reactor for UringReactor {
     fn wait_for_io(&mut self, timeout: Option<Duration>) -> Result<(), Error> {
-        // submit_and_wait(1) may ignore signals; without I/O we could block
-        // forever. Force a short timeout so the loop wakes and sees SIGINT.
         let timeout = timeout.or(Some(Duration::from_millis(50)));
         if let Some(d) = timeout {
             let timespec = io_uring::types::Timespec::new()
@@ -130,7 +138,9 @@ impl Reactor for UringReactor {
                     .user_data(u64::MAX);
                 unsafe { s.push(&sqe) }
             })?;
-            self.uring.submitter().submit()?; // NOTE: not sure why this is required? It seems to be some sort of uring race condition?
+            if let Err(err) = self.uring.submitter().submit() {
+                Self::handle_submit_error(err)?;
+            } // NOTE: not sure why this is required? It seems to be some sort of uring race condition?
         }
         // let mut args = io_uring::types::SubmitArgs::new();
         // let timeout = timeout.map(|d| {
@@ -143,15 +153,15 @@ impl Reactor for UringReactor {
         // }
         // match self.uring.submitter().submit_with_args(1, &args) {
         // NOTE: the above code works on Linux 6.x but not 5.x kernels. We should switch to this when reasonable
-        let res = self.uring.submitter().submit_and_wait(1);
-        match res {
+        match self.uring.submitter().submit_and_wait(1) {
             Ok(_) => Ok(()),
-            Err(err) if err.raw_os_error() == Some(62) => Ok(()),
-            Err(err) => Err(Error::from(err)),
+            Err(err) => Self::handle_submit_error(err),
         }
     }
     fn process_io(&mut self) -> Result<(), Error> {
-        self.uring.submitter().submit()?;
+        if let Err(err) = self.uring.submitter().submit() {
+            Self::handle_submit_error(err)?;
+        }
         self.uring.with_completion(|c| {
             for comp in c {
                 let id = comp.user_data() as usize;

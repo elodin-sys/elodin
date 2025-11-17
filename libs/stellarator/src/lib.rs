@@ -1,6 +1,7 @@
 use std::{
     cell::{RefCell, UnsafeCell},
     future::Future,
+    io::ErrorKind,
     pin::pin,
     task::{Context, Poll, Waker},
     time::Duration,
@@ -104,18 +105,22 @@ impl<R: Reactor> Executor<R> {
         F: Future<Output = O> + 'static,
         O: 'static,
     {
+        let ignore_interrupted = |res: Result<(), Error>| match res {
+            Err(Error::Io(err)) if err.kind() == ErrorKind::Interrupted => Ok(()),
+            other => other,
+        };
         let future = func();
         let main_task = self.scheduler.spawn(future);
         let mut main_task = pin!(main_task);
         let waker = self.reactor.borrow_mut().waker();
         let mut cx = Context::from_waker(&waker);
-        let mut output = None;
+        let mut output: Option<Result<O, Error>> = None;
         let out = loop {
             self.timer.try_turn();
-            self.reactor.borrow_mut().process_io()?;
+            ignore_interrupted(self.reactor.borrow_mut().process_io())?;
             let tick = self.scheduler.tick();
             if let Poll::Ready(o) = main_task.as_mut().poll(&mut cx) {
-                output = Some(o.unwrap());
+                output = Some(o.map_err(|_| Error::JoinFailed));
             }
             if !tick.has_remaining
                 && let Some(output) = output
@@ -124,9 +129,11 @@ impl<R: Reactor> Executor<R> {
             }
             let turn = self.timer.try_turn();
             if !tick.has_remaining && turn.as_ref().map(|t| t.expired == 0).unwrap_or(true) {
-                self.reactor
-                    .borrow_mut()
-                    .wait_for_io(turn.and_then(|turn| turn.time_to_next_deadline()))?;
+                ignore_interrupted(
+                    self.reactor
+                        .borrow_mut()
+                        .wait_for_io(turn.and_then(|turn| turn.time_to_next_deadline())),
+                )?;
             }
         };
         unsafe {
@@ -143,7 +150,7 @@ impl<R: Reactor> Executor<R> {
                 drop(exec.take().expect("missing reactor"));
             })
         }
-        Ok(out)
+        out
     }
 }
 
@@ -171,7 +178,18 @@ where
     F: Future<Output = R> + 'static,
     R: 'static,
 {
-    Executor::with(|e| e.run(func).unwrap())
+    match Executor::with(|e| e.run(func)) {
+        Ok(res) => res,
+        Err(Error::Io(err)) if err.kind() == ErrorKind::Interrupted => {
+            // Treat EINTR as a graceful shutdown (e.g. Ctrl-C) and exit with a
+            // conventional 130 status instead of panicking.
+            std::process::exit(130);
+        }
+        Err(err) => {
+            eprintln!("stellarator::run failed: {err:?}");
+            std::process::exit(1);
+        }
+    }
 }
 
 impl Executor<DefaultReactor> {
