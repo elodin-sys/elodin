@@ -12,7 +12,9 @@ use pyo3::types::IntoPyDict;
 #[pyclass]
 pub struct Exec {
     pub exec: nox_ecs::WorldExec<Compiled>,
-    pub db: elodin_db::DB,
+    // DB is 128-bit aligned. We box to avoid `Exec` being 128-bit aligned,
+    // which Python doesn't like.
+    pub db: Box<elodin_db::DB>,
 }
 
 #[pymethods]
@@ -47,12 +49,11 @@ impl Exec {
 
             if let Some(func) = &is_canceled {
                 let is_canceled = Python::with_gil(|py| {
-                    func.call0(py)
-                        .and_then(|result| result.extract::<bool>(py))
+                    func.call0(py).and_then(|result| result.extract::<bool>(py))
                 })?;
                 if is_canceled {
                     eprintln!("exec.run canceled!");
-                    return Ok(())
+                    return Ok(());
                 }
             }
             py.check_signals()?;

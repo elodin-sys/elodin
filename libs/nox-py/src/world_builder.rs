@@ -828,7 +828,7 @@ impl WorldBuilder {
 
                     let mut exec_with_db = Exec {
                         exec: compiled_exec,
-                        db,
+                        db: Box::new(db),
                     };
                     exec_with_db.run(py, ticks, true, None)?;
                     let profile = exec_with_db.profile();
@@ -898,7 +898,7 @@ impl WorldBuilder {
         };
         let db = elodin_db::DB::create(db_path)?;
         nox_ecs::impeller2_server::init_db(&db, &mut exec.world, Timestamp::now())?;
-        Ok(Exec { exec, db })
+        Ok(Exec { exec, db: Box::new(db) })
     }
 
     #[allow(clippy::too_many_arguments)]
