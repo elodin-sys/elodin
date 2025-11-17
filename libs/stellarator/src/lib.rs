@@ -181,8 +181,6 @@ where
     match Executor::with(|e| e.run(func)) {
         Ok(res) => res,
         Err(Error::Io(err)) if err.kind() == ErrorKind::Interrupted => {
-            // Treat EINTR as a graceful shutdown (e.g. Ctrl-C) and exit with a
-            // conventional 130 status instead of panicking.
             std::process::exit(130);
         }
         Err(err) => {

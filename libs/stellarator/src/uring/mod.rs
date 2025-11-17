@@ -23,8 +23,6 @@ pub struct UringReactor {
 }
 
 impl UringReactor {
-    /// Treat EINTR/ETIME from io_uring submissions as a harmless wakeup so Ctrl-C
-    /// doesn't bubble up as a panic while shutting down.
     fn handle_submit_error(err: io::Error) -> Result<(), Error> {
         if err.kind() == io::ErrorKind::Interrupted || err.raw_os_error() == Some(62) {
             return Ok(());
@@ -140,7 +138,7 @@ impl Reactor for UringReactor {
             })?;
             if let Err(err) = self.uring.submitter().submit() {
                 Self::handle_submit_error(err)?;
-            } // NOTE: not sure why this is required? It seems to be some sort of uring race condition?
+            }
         }
         // let mut args = io_uring::types::SubmitArgs::new();
         // let timeout = timeout.map(|d| {
