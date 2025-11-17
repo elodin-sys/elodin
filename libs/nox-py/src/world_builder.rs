@@ -262,11 +262,16 @@ impl WorldBuilder {
                 if let Some(port) = liveness_port {
                     stellarator::struc_con::stellar(move || ::s10::liveness::monitor(port));
                 }
+
+                let db_path = match db_path {
+                    Some(p) => PathBuf::from(p),
+                    None => tempfile::tempdir()?.keep().join("db"),
+                };
                 py.allow_threads(|| {
                     stellarator::run(|| {
-                        let tmpfile = tempfile::tempdir().unwrap().keep();
                         nox_ecs::impeller2_server::Server::new(
-                            elodin_db::Server::new(tmpfile.join("db"), addr).unwrap(),
+                            // Here we start the DB with an address.
+                            elodin_db::Server::new(db_path, addr).unwrap(),
                             exec,
                         )
                         .run_with_cancellation({
