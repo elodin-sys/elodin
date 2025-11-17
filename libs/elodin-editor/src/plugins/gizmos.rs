@@ -25,7 +25,15 @@ use crate::{
 };
 
 pub const GIZMO_RENDER_LAYER: usize = 30;
-const MIN_ARROW_LENGTH_SQUARED: f64 = 1.0e-6;
+pub(crate) const MIN_ARROW_LENGTH_SQUARED: f64 = 1.0e-6;
+
+#[derive(Clone)]
+pub struct EvaluatedVectorArrow {
+    pub start: DVec3,
+    pub end: DVec3,
+    pub color: Color,
+    pub name: Option<String>,
+}
 
 pub struct GizmoPlugin;
 
@@ -47,6 +55,64 @@ fn gizmo_setup(mut config_store: ResMut<GizmoConfigStore>) {
     config.render_layers = RenderLayers::layer(GIZMO_RENDER_LAYER);
 }
 
+/// Evaluate a vector arrow's expressions and return its world-space positions+metadata.
+pub fn evaluate_vector_arrow(
+    arrow: &VectorArrow3d,
+    state: &VectorArrowState,
+    entity_map: &EntityMap,
+    component_values: &Query<'_, '_, &'static WktComponentValue>,
+) -> Option<EvaluatedVectorArrow> {
+    let Some(vector_expr) = &state.vector_expr else {
+        return None;
+    };
+
+    let Ok(vector_value) = vector_expr.execute(entity_map, component_values) else {
+        return None;
+    };
+
+    let mut direction = component_value_tail_to_vec3(&vector_value)?;
+
+    if direction.length_squared() <= MIN_ARROW_LENGTH_SQUARED {
+        return None;
+    }
+
+    if arrow.normalize {
+        direction = direction.normalize();
+    }
+
+    direction *= arrow.scale;
+    if direction.length_squared() <= MIN_ARROW_LENGTH_SQUARED {
+        return None;
+    }
+
+    let mut start_world = DVec3::ZERO;
+    let mut rotation = DQuat::IDENTITY;
+    if let Some(origin_expr) = &state.origin_expr {
+        let Ok(origin_value) = origin_expr.execute(entity_map, component_values) else {
+            return None;
+        };
+        if let Some(world_pos) = origin_value.as_world_pos() {
+            start_world = world_pos.bevy_pos();
+            rotation = world_pos.bevy_att();
+        } else if let Some(origin) = component_value_tail_to_vec3(&origin_value) {
+            start_world = origin;
+        }
+    }
+
+    if arrow.body_frame {
+        direction = rotation * direction;
+    }
+
+    let end_world = start_world + direction;
+
+    Some(EvaluatedVectorArrow {
+        start: start_world,
+        end: end_world,
+        color: wkt_color_to_bevy(&arrow.color),
+        name: arrow.name.clone(),
+    })
+}
+
 fn render_vector_arrow(
     entity_map: Res<EntityMap>,
     vector_arrows: Query<(&VectorArrow3d, &VectorArrowState)>,
@@ -55,53 +121,15 @@ fn render_vector_arrow(
     mut gizmos: Gizmos,
 ) {
     for (arrow, state) in vector_arrows.iter() {
-        let Some(vector_expr) = &state.vector_expr else {
+        let Some(result) = evaluate_vector_arrow(arrow, state, &entity_map, &component_values)
+        else {
             continue;
         };
 
-        let Ok(vector_value) = vector_expr.execute(&entity_map, &component_values) else {
-            continue;
-        };
+        let (_, start) = floating_origin.translation_to_grid::<i128>(result.start);
 
-        let Some(mut direction) = component_value_tail_to_vec3(&vector_value) else {
-            continue;
-        };
-
-        if direction.length_squared() <= MIN_ARROW_LENGTH_SQUARED {
-            continue;
-        }
-
-        if arrow.normalize {
-            direction = direction.normalize();
-        }
-
-        direction *= arrow.scale;
-        if direction.length_squared() <= MIN_ARROW_LENGTH_SQUARED {
-            continue;
-        }
-
-        let mut start_world = DVec3::ZERO;
-        let mut rotation = DQuat::IDENTITY;
-        if let Some(origin_expr) = &state.origin_expr {
-            let Ok(origin_value) = origin_expr.execute(&entity_map, &component_values) else {
-                continue;
-            };
-            if let Some(world_pos) = origin_value.as_world_pos() {
-                start_world = world_pos.bevy_pos();
-                rotation = world_pos.bevy_att();
-            } else if let Some(origin) = component_value_tail_to_vec3(&origin_value) {
-                start_world = origin;
-            }
-        }
-
-        if arrow.body_frame {
-            direction = rotation * direction;
-        }
-
-        let (_, start) = floating_origin.translation_to_grid::<i128>(start_world);
-
-        let (_, end) = floating_origin.translation_to_grid::<i128>(start_world + direction);
-        gizmos.arrow(start, end, wkt_color_to_bevy(&arrow.color));
+        let (_, end) = floating_origin.translation_to_grid::<i128>(result.end);
+        gizmos.arrow(start, end, result.color);
     }
 }
 

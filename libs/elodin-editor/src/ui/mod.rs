@@ -16,23 +16,31 @@ use bevy::{
 };
 use bevy_egui::{
     EguiContext, EguiContexts,
-    egui::{self, Color32, Label, Margin, RichText},
+    egui::{self, Align2, Color32, Label, Margin, RichText},
 };
 use egui_tiles::{Container, Tile};
 
-use big_space::GridCell;
+use big_space::{FloatingOriginSettings, GridCell};
 use plot_3d::LinePlot3dPlugin;
 use schematic::SchematicPlugin;
 
-use self::colors::get_scheme;
+use self::colors::{ColorExt, get_scheme};
 use self::{command_palette::CommandPaletteState, timeline::timeline_slider};
 use egui::CornerRadius;
 use impeller2::types::ComponentId;
-use impeller2_bevy::ComponentValueMap;
-use impeller2_wkt::ComponentMetadata;
-use impeller2_wkt::ComponentValue;
+use impeller2_bevy::{ComponentValueMap, EntityMap};
+use impeller2_wkt::{
+    BodyAxes, ComponentMetadata, ComponentValue, ComponentValue as WktComponentValue, VectorArrow3d,
+};
 
-use crate::{GridHandle, MainCamera, plugins::LogicalKeyState};
+use crate::{
+    GridHandle, MainCamera,
+    plugins::{
+        LogicalKeyState,
+        gizmos::{MIN_ARROW_LENGTH_SQUARED, evaluate_vector_arrow},
+    },
+    vector_arrow::VectorArrowState,
+};
 
 use self::inspector::entity::ComponentFilter;
 
@@ -171,6 +179,19 @@ pub type EntityDataReadOnly<'a> = (
     &'a ComponentValueMap,
     &'a ComponentMetadata,
 );
+
+#[derive(Default)]
+struct CachedGizmoLabel {
+    pos: egui::Pos2,
+    text: String,
+    color: Color32,
+}
+
+#[derive(Default)]
+struct GizmoLabelCache {
+    frame: u32,
+    labels: Vec<CachedGizmoLabel>,
+}
 
 #[derive(QueryData)]
 #[query_data(mutable)]
@@ -556,8 +577,16 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
 #[derive(SystemParam)]
 pub struct ViewportOverlay<'w, 's> {
     window: Query<'w, 's, &'static Window>,
-    entities_meta: Query<'w, 's, EntityData<'static>>,
+    entities_meta: Query<'w, 's, EntityDataReadOnly<'static>>,
     hovered_entity: Res<'w, HoveredEntity>,
+    vector_arrows: Query<'w, 's, (&'static VectorArrow3d, &'static VectorArrowState)>,
+    component_values: Query<'w, 's, &'static WktComponentValue>,
+    entity_map: Res<'w, EntityMap>,
+    floating_origin: Res<'w, FloatingOriginSettings>,
+    cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<MainCamera>>,
+    body_axes: Query<'w, 's, &'static BodyAxes>,
+    transforms: Query<'w, 's, &'static Transform>,
+    label_cache: Local<'s, GizmoLabelCache>,
 }
 
 impl RootWidgetSystem for ViewportOverlay<'_, '_> {
@@ -570,7 +599,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
         ctx: &mut egui::Context,
         _args: Self::Args,
     ) {
-        let state_mut = state.get_mut(world);
+        let mut state_mut = state.get_mut(world);
 
         let window = state_mut.window;
         let entities_meta = state_mut.entities_meta;
@@ -614,6 +643,125 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
                             RichText::new(hovered_entity_meta.name).color(Color32::WHITE),
                         ));
                     });
+            }
+        }
+
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("gizmo_labels"),
+        ));
+        let font_id = egui::FontId::proportional(12.0);
+        let shadow_color = Color32::from_rgba_unmultiplied(0, 0, 0, 160);
+        let label_offset = 0.08;
+        const GIZMO_LABEL_FRAME_SKIP: u32 = 3;
+        state_mut.label_cache.frame = state_mut.label_cache.frame.wrapping_add(1);
+        let recompute_labels = state_mut.label_cache.frame % GIZMO_LABEL_FRAME_SKIP == 0
+            || state_mut.label_cache.labels.is_empty();
+
+        if recompute_labels {
+            state_mut.label_cache.labels.clear();
+        }
+
+        for (camera, camera_transform) in state_mut.cameras.iter() {
+            if !camera.is_active {
+                continue;
+            }
+
+            let draw_text = |pos: egui::Pos2, text: &str, color: Color32| {
+                painter.text(
+                    pos + egui::vec2(1.0, 1.0),
+                    Align2::CENTER_CENTER,
+                    text,
+                    font_id.clone(),
+                    shadow_color,
+                );
+                painter.text(pos, Align2::CENTER_CENTER, text, font_id.clone(), color);
+            };
+
+            let project = |world: Vec3| -> Option<egui::Pos2> {
+                let Ok(pos) = camera.world_to_viewport(camera_transform, world) else {
+                    return None;
+                };
+                Some(egui::pos2(pos.x, pos.y))
+            };
+
+            if recompute_labels {
+                for (arrow, arrow_state) in state_mut.vector_arrows.iter() {
+                    let Some(result) = evaluate_vector_arrow(
+                        arrow,
+                        arrow_state,
+                        &state_mut.entity_map,
+                        &state_mut.component_values,
+                    ) else {
+                        continue;
+                    };
+                    let Some(name) = result.name.as_ref() else {
+                        continue;
+                    };
+
+                    let (_, start) = state_mut
+                        .floating_origin
+                        .translation_to_grid::<i128>(result.start);
+                    let (_, end) = state_mut
+                        .floating_origin
+                        .translation_to_grid::<i128>(result.end);
+                    let direction = end - start;
+
+                    if direction.length_squared() <= MIN_ARROW_LENGTH_SQUARED as f32 {
+                        continue;
+                    }
+
+                    let label_pos =
+                        end + direction.try_normalize().unwrap_or(Vec3::ZERO) * label_offset;
+                    let Some(screen_pos) = project(label_pos) else {
+                        continue;
+                    };
+                    state_mut.label_cache.labels.push(CachedGizmoLabel {
+                        pos: screen_pos,
+                        text: name.clone(),
+                        color: Color32::from_bevy(result.color),
+                    });
+                }
+
+                for body_axes in state_mut.body_axes.iter() {
+                    let Some(entity_id) = state_mut
+                        .entity_map
+                        .get(&ComponentId(body_axes.entity_id.0))
+                    else {
+                        continue;
+                    };
+                    let Ok(transform) = state_mut.transforms.get(*entity_id) else {
+                        continue;
+                    };
+
+                    let origin = transform.translation;
+                    let rotation = transform.rotation;
+                    let scale = body_axes.scale;
+                    let axes = [
+                        (Vec3::X, "X", colors::bevy::RED),
+                        (Vec3::Y, "Y", colors::bevy::GREEN),
+                        (Vec3::Z, "Z", colors::bevy::BLUE),
+                    ];
+
+                    for (axis, label, color) in axes {
+                        let axis_dir = rotation * axis * scale;
+                        let label_pos = origin
+                            + axis_dir
+                            + axis_dir.try_normalize().unwrap_or(Vec3::ZERO) * label_offset;
+                        let Some(screen_pos) = project(label_pos) else {
+                            continue;
+                        };
+                        state_mut.label_cache.labels.push(CachedGizmoLabel {
+                            pos: screen_pos,
+                            text: label.to_string(),
+                            color: Color32::from_bevy(color),
+                        });
+                    }
+                }
+            }
+
+            for CachedGizmoLabel { pos, text, color } in &state_mut.label_cache.labels {
+                draw_text(*pos, text, *color);
             }
         }
     }
