@@ -117,6 +117,9 @@ fn take_completion_op_code<O: OpCode>(completion: CompletionProj<'_, O>) -> O {
 
 impl Reactor for UringReactor {
     fn wait_for_io(&mut self, timeout: Option<Duration>) -> Result<(), Error> {
+        // submit_and_wait(1) may ignore signals; without I/O we could block
+        // forever. Force a short timeout so the loop wakes and sees SIGINT.
+        let timeout = timeout.or(Some(Duration::from_millis(50)));
         if let Some(d) = timeout {
             let timespec = io_uring::types::Timespec::new()
                 .sec(d.as_secs())
