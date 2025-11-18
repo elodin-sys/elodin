@@ -329,6 +329,8 @@ impl LoadSchematicParams<'_, '_> {
             VectorArrowState {
                 vector_expr,
                 origin_expr,
+                visual: None,
+                label: None,
             },
         ));
     }
