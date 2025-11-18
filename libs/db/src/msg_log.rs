@@ -99,7 +99,7 @@ impl MsgLog {
 
     pub fn get_range(
         &self,
-        range: std::ops::Range<Timestamp>,
+        range: &std::ops::Range<Timestamp>,
     ) -> impl Iterator<Item = (Timestamp, &[u8])> {
         let timestamps = self.timestamps();
         let start_index = match timestamps.binary_search(&range.start) {

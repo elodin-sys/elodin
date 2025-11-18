@@ -844,7 +844,7 @@ impl Component {
         self.time_series.get_nearest(timestamp)
     }
 
-    fn get_range(&self, range: Range<Timestamp>) -> Option<(&[Timestamp], &[u8])> {
+    fn get_range(&self, range: &Range<Timestamp>) -> Option<(&[Timestamp], &[u8])> {
         self.time_series.get_range(range)
     }
 
@@ -920,7 +920,8 @@ pub struct Server {
 
 impl Server {
     pub fn new(path: impl AsRef<Path>, addr: SocketAddr) -> Result<Server, Error> {
-        info!(?addr, "listening");
+        let path = path.as_ref();
+        info!(?addr, "listening with path {:?}", path.display());
         let listener = TcpListener::bind(addr)?;
         Server::from_listener(listener, path)
     }
@@ -1160,8 +1161,10 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 };
                 Ok(component.clone())
             })?;
-            let Some((timestamps, data)) = component.get_range(range) else {
-                return Err(Error::TimeRangeOutOfBounds);
+            let Some((timestamps, data)) = component.get_range(&range) else {
+                return Err(Error::TimeRangeOutOfBounds { range,
+                                                         component_id: component.component_id,
+                                                         latest: component.time_series.latest().map(|x| *x.0)});
             };
             let size = component.schema.size();
             let (timestamps, data) = if let Some(limit) = limit {
@@ -1381,7 +1384,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     .ok_or(Error::MsgNotFound(msg_id))
                     .cloned()
             })?;
-            let iter = msg_log.get_range(range).map(|(t, b)| (t, b.to_vec()));
+            let iter = msg_log.get_range(&range).map(|(t, b)| (t, b.to_vec()));
             let data = if let Some(limit) = limit {
                 iter.take(limit).collect()
             } else {
