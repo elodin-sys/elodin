@@ -16,7 +16,7 @@ use bevy::{
     winit::WINIT_WINDOWS,
 };
 use bevy_egui::{
-    EguiContext, EguiContexts, EguiTextureHandle, EguiPrimaryContextPass,
+    EguiContext, EguiContexts, EguiTextureHandle, EguiPrimaryContextPass, PrimaryEguiContext,
     egui::{self, Color32, Label, Margin, RichText},
 };
 use egui_tiles::{Container, Tile};
@@ -918,9 +918,21 @@ struct CameraViewportQuery {
 }
 
 fn set_camera_viewport(
-    window: Query<(&Window, &bevy_egui::EguiContextSettings), With<PrimaryWindow>>,
+    window: Query<&Window, With<PrimaryWindow>>,
+    primary_egui_context: Query<&bevy_egui::EguiContextSettings, With<PrimaryEguiContext>>,
     mut main_camera_query: Query<CameraViewportQuery, With<MainCamera>>,
 ) {
+    let Some(window) = window.iter().next() else {
+        return;
+    };
+    let Some(egui_settings) = primary_egui_context.iter().next() else {
+        return;
+    };
+    let window_scale_factor = window.scale_factor();
+    let window_width = window.width();
+    let window_height = window.height();
+    let egui_scale_factor = egui_settings.scale_factor;
+
     for CameraViewportQueryItem {
         mut camera,
         viewport_rect,
@@ -938,13 +950,10 @@ fn set_camera_viewport(
             continue;
         };
         camera.is_active = true;
-        let Some((window, egui_settings)) = window.iter().next() else {
-            continue;
-        };
-        let scale_factor = window.scale_factor() * egui_settings.scale_factor;
+        let scale_factor = window_scale_factor * egui_scale_factor;
         let viewport_pos = available_rect.left_top().to_vec2() * scale_factor;
         let viewport_size = available_rect.size() * scale_factor;
-        if available_rect.size().x > window.width() || available_rect.size().y > window.height() {
+        if available_rect.size().x > window_width || available_rect.size().y > window_height {
             return;
         }
         if viewport_size.x < 10.0 || viewport_size.y < 10.0 {
@@ -968,17 +977,23 @@ fn set_camera_viewport(
 fn set_secondary_camera_viewport(
     windows: Res<tiles::WindowManager>,
     mut cameras: Query<(&mut Camera, &ViewportRect)>,
-    window_query: Query<(&Window, &bevy_egui::EguiContextSettings)>,
+    window_query: Query<&Window>,
+    primary_egui_context: Query<&bevy_egui::EguiContextSettings, With<PrimaryEguiContext>>,
 ) {
+    let Some(egui_settings) = primary_egui_context.iter().next() else {
+        return;
+    };
+    let egui_scale_factor = egui_settings.scale_factor;
+
     for state in windows.secondary() {
         let Some(window_entity) = state.window_entity else {
             continue;
         };
 
-        let Ok((window, egui_settings)) = window_query.get(window_entity) else {
+        let Ok(window) = window_query.get(window_entity) else {
             continue;
         };
-        let scale_factor = window.scale_factor() * egui_settings.scale_factor;
+        let scale_factor = window.scale_factor() * egui_scale_factor;
 
         for (index, &graph) in state.graph_entities.iter().enumerate() {
             let Ok((mut camera, viewport_rect)) = cameras.get_mut(graph) else {
