@@ -44,6 +44,10 @@ impl Plugin for GizmoPlugin {
         // This is how the `big_space` crate did it.
         // app.add_systems(PostUpdate, render_vector_arrow.after(TransformSystem::TransformPropagate));
         app.add_systems(bevy::app::PreUpdate, render_vector_arrow);
+        app.add_systems(
+            bevy::app::PostUpdate,
+            cleanup_removed_arrows.after(render_vector_arrow),
+        );
         app.add_systems(Update, render_body_axis);
     }
 }
@@ -148,14 +152,13 @@ fn render_vector_arrow(
             continue;
         };
 
-        let (_, start) = floating_origin.translation_to_grid::<i128>(result.start);
+        let (start_cell, start) = floating_origin.translation_to_grid::<i128>(result.start);
 
-        let (_, end) = floating_origin.translation_to_grid::<i128>(result.end);
-        let direction = end - start;
-        let length = direction.length();
+        let direction_world = (result.end - result.start).as_vec3();
+        let length = direction_world.length();
         let too_small = length <= (MIN_ARROW_LENGTH_SQUARED as f32).sqrt();
 
-        let dir_norm = direction / length;
+        let dir_norm = direction_world / length;
         let rotation = Quat::from_rotation_arc(Vec3::Y, dir_norm);
         let base_color = axis_color_from_name(result.name.as_deref(), result.color);
 
@@ -187,6 +190,7 @@ fn render_vector_arrow(
 
             commands.entity(visual.root).insert((
                 Transform::from_translation(start).with_rotation(rotation),
+                start_cell,
                 Visibility::Visible,
                 RenderLayers::layer(GIZMO_RENDER_LAYER),
             ));
@@ -299,6 +303,24 @@ fn hide_arrow_visual(commands: &mut Commands, visual: &ArrowVisual) {
 fn hide_label(commands: &mut Commands, label: Option<Entity>) {
     if let Some(label) = label {
         commands.entity(label).insert(Visibility::Hidden);
+    }
+}
+
+// Despawn visuals when a VectorArrow3d is removed, to avoid stray meshes.
+fn cleanup_removed_arrows(
+    mut removed: RemovedComponents<VectorArrow3d>,
+    mut commands: Commands,
+    mut states: Query<&mut VectorArrowState>,
+) {
+    for entity in removed.read() {
+        if let Ok(mut state) = states.get_mut(entity) {
+            if let Some(visual) = state.visual.take() {
+                commands.entity(visual.root).despawn();
+            }
+            if let Some(label) = state.label.take() {
+                commands.entity(label).despawn();
+            }
+        }
     }
 }
 

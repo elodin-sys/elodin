@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bevy::{
     app::AppExit,
@@ -179,6 +179,14 @@ pub type EntityDataReadOnly<'a> = (
     &'a ComponentValueMap,
     &'a ComponentMetadata,
 );
+
+#[derive(Clone, Copy)]
+struct CachedLabel {
+    screen: egui::Pos2,
+    end_world: Vec3,
+    cam_pos: Vec3,
+    cam_rot: Quat,
+}
 
 #[derive(QueryData)]
 #[query_data(mutable)]
@@ -566,11 +574,12 @@ pub struct ViewportOverlay<'w, 's> {
     window: Query<'w, 's, &'static Window>,
     entities_meta: Query<'w, 's, EntityDataReadOnly<'static>>,
     hovered_entity: Res<'w, HoveredEntity>,
-    vector_arrows: Query<'w, 's, (&'static VectorArrow3d, &'static VectorArrowState)>,
+    vector_arrows: Query<'w, 's, (Entity, &'static VectorArrow3d, &'static VectorArrowState)>,
     component_values: Query<'w, 's, &'static WktComponentValue>,
     entity_map: Res<'w, impeller2_bevy::EntityMap>,
     floating_origin: Res<'w, big_space::FloatingOriginSettings>,
     cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<MainCamera>>,
+    label_cache: Local<'s, HashMap<Entity, CachedLabel>>,
 }
 
 impl RootWidgetSystem for ViewportOverlay<'_, '_> {
@@ -583,7 +592,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
         ctx: &mut egui::Context,
         _args: Self::Args,
     ) {
-        let state_mut = state.get_mut(world);
+        let mut state_mut = state.get_mut(world);
 
         let window = state_mut.window;
         let entities_meta = state_mut.entities_meta;
@@ -639,48 +648,58 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
         let shadow_color = Color32::from_rgba_unmultiplied(0, 0, 0, 180);
         let screen_offset = egui::vec2(0.0, -8.0);
 
-        for (camera, camera_transform) in state_mut.cameras.iter() {
-            if !camera.is_active {
+        let Some((camera, camera_transform)) =
+            state_mut.cameras.iter().find(|(cam, _)| cam.is_active)
+        else {
+            return;
+        };
+
+        let cam_pos = camera_transform.translation();
+        let cam_rot = camera_transform.to_scale_rotation_translation().1;
+
+        let mut seen = HashSet::new();
+
+        for (entity, arrow, arrow_state) in state_mut.vector_arrows.iter() {
+            let Some(result) = evaluate_vector_arrow(
+                arrow,
+                arrow_state,
+                &state_mut.entity_map,
+                &state_mut.component_values,
+            ) else {
+                state_mut.label_cache.remove(&entity);
                 continue;
-            }
-            let project = |world: Vec3| -> Option<egui::Pos2> {
-                let Ok(pos) = camera.world_to_viewport(camera_transform, world) else {
-                    return None;
-                };
-                Some(egui::pos2(pos.x, pos.y))
+            };
+            let Some(name) = result.name.as_ref() else {
+                state_mut.label_cache.remove(&entity);
+                continue;
             };
 
-            for (arrow, arrow_state) in state_mut.vector_arrows.iter() {
-                let Some(result) = evaluate_vector_arrow(
-                    arrow,
-                    arrow_state,
-                    &state_mut.entity_map,
-                    &state_mut.component_values,
-                ) else {
-                    continue;
-                };
-                let Some(name) = result.name.as_ref() else {
-                    continue;
-                };
+            let (_, start) = state_mut
+                .floating_origin
+                .translation_to_grid::<i128>(result.start);
+            let (_, end) = state_mut
+                .floating_origin
+                .translation_to_grid::<i128>(result.end);
+            let direction = end - start;
+            if direction.length_squared() <= MIN_ARROW_LENGTH_SQUARED as f32 {
+                state_mut.label_cache.remove(&entity);
+                continue;
+            }
 
-                let (_, start) = state_mut
-                    .floating_origin
-                    .translation_to_grid::<i128>(result.start);
-                let (_, end) = state_mut
-                    .floating_origin
-                    .translation_to_grid::<i128>(result.end);
-                let direction = end - start;
-                if direction.length_squared() <= MIN_ARROW_LENGTH_SQUARED as f32 {
-                    continue;
-                }
-                let label_pos = end + direction.try_normalize().unwrap_or(Vec3::ZERO) * 0.02;
-                let Some(mut screen_pos) = project(label_pos) else {
-                    continue;
-                };
-                screen_pos += screen_offset;
-                screen_pos.x = screen_pos.x.round();
-                screen_pos.y = screen_pos.y.round();
+            // Reuse cached screen position if arrow and camera didn't move.
+            let pos_stable = |a: Vec3, b: Vec3| (a - b).length_squared() <= 0.3 * 0.3; // ~0.3 m
+            let rot_stable = |a: Quat, b: Quat| {
+                // Use dot to be insensitive to quaternion sign; small angular delta -> dot ~ 1
+                (1.0 - a.dot(b).abs()) <= 1.0e-3
+            };
 
+            if let Some(cached) = state_mut.label_cache.get(&entity)
+                && pos_stable(cached.end_world, end)
+                && pos_stable(cached.cam_pos, cam_pos)
+                && rot_stable(cached.cam_rot, cam_rot)
+            {
+                seen.insert(entity);
+                let screen_pos = cached.screen;
                 painter.text(
                     screen_pos + egui::vec2(1.0, 1.0),
                     Align2::CENTER_CENTER,
@@ -695,8 +714,71 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
                     font_id.clone(),
                     Color32::from_bevy(result.color),
                 );
+                continue;
             }
+
+            let dir_norm = direction.try_normalize().unwrap_or(Vec3::ZERO);
+            let tip_pos = end;
+            let label_world = tip_pos + dir_norm * 0.04;
+
+            let Ok(tip_screen) = camera.world_to_viewport(camera_transform, tip_pos) else {
+                state_mut.label_cache.remove(&entity);
+                continue;
+            };
+
+            let mut screen_pos = if let Ok(offset_screen) =
+                camera.world_to_viewport(camera_transform, label_world)
+            {
+                // Offset in screen space following the arrow direction for a more “attached” feel
+                let delta = offset_screen - tip_screen;
+                egui::pos2(tip_screen.x + delta.x, tip_screen.y + delta.y)
+            } else {
+                egui::pos2(tip_screen.x, tip_screen.y)
+            };
+
+            // If the new projection is within 1px of the cached one, reuse cached to avoid micro-jitter.
+            if let Some(cached) = state_mut.label_cache.get(&entity) {
+                let delta = screen_pos - cached.screen;
+                if delta.length_sq() <= 1.0 {
+                    screen_pos = cached.screen;
+                }
+            }
+
+            screen_pos += screen_offset;
+            screen_pos.x = screen_pos.x.round();
+            screen_pos.y = screen_pos.y.round();
+
+            state_mut.label_cache.insert(
+                entity,
+                CachedLabel {
+                    screen: screen_pos,
+                    end_world: end,
+                    cam_pos,
+                    cam_rot,
+                },
+            );
+            seen.insert(entity);
+
+            painter.text(
+                screen_pos + egui::vec2(1.0, 1.0),
+                Align2::CENTER_CENTER,
+                name,
+                font_id.clone(),
+                shadow_color,
+            );
+            painter.text(
+                screen_pos,
+                Align2::CENTER_CENTER,
+                name,
+                font_id.clone(),
+                Color32::from_bevy(result.color),
+            );
         }
+
+        // Drop cache entries for arrows that disappeared.
+        state_mut
+            .label_cache
+            .retain(|entity, _| seen.contains(entity));
     }
 }
 
