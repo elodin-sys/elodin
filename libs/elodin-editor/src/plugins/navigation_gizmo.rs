@@ -4,9 +4,10 @@ use bevy::math::{DVec3, Dir3};
 use bevy::prelude::*;
 use bevy::camera::Viewport;
 use bevy::camera::visibility::RenderLayers;
+use bevy::window::PrimaryWindow;
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;
-use bevy_egui::EguiContexts;
+use bevy_egui::{EguiContexts, PrimaryEguiContext};
 use std::f32::consts;
 
 pub struct NavigationGizmoPlugin;
@@ -347,7 +348,8 @@ pub fn sync_nav_camera(
 }
 
 pub fn set_camera_viewport(
-    windows: Query<(Entity, &Window, &bevy_egui::EguiContextSettings)>,
+    window: Query<&Window, With<PrimaryWindow>>,
+    primary_egui_context: Query<&bevy_egui::EguiContextSettings, With<PrimaryEguiContext>>,
     _contexts: EguiContexts,
     mut nav_camera_query: Query<(&mut Camera, &NavGizmoParent)>,
     main_camera_query: Query<&mut Camera, Without<NavGizmoParent>>,
@@ -355,6 +357,16 @@ pub fn set_camera_viewport(
 ) {
     let margin = 8.0;
     let side_length = 128.0;
+    let Some(window) = window.iter().next() else {
+        return;
+    };
+    let Some(egui_settings) = primary_egui_context.iter().next() else {
+        return;
+    };
+    let scale_factor = window.scale_factor() * egui_settings.scale_factor;
+
+    let margin = margin * scale_factor;
+    let side_length = side_length * scale_factor;
     for (mut nav_camera, parent) in nav_camera_query.iter_mut() {
         let Ok(main) = main_camera_query.get(parent.main_camera) else {
             continue;
