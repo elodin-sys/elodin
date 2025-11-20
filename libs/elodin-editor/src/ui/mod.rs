@@ -758,36 +758,38 @@ fn sync_secondary_windows(
 
         // Try to pre-size and pre-position the window to its target rect to avoid an
         // extra resize pass (and the resulting swapchain churn).
-        let (resolution, position, pre_applied_rect, pre_applied_screen) =
-            if let Some(rect) = state.descriptor.screen_rect
-                && let Some(screen_idx) = state.descriptor.screen
-                && let Some(monitors) = monitors_any.as_ref()
-                && let Some(monitor) = monitors.get(screen_idx)
-            {
-                let monitor_pos = monitor.position();
-                let monitor_size = monitor.size();
-                let width_px = ((rect.width as f64 / 100.0) * monitor_size.width as f64).round()
-                    .max(1.0);
-                let height_px =
-                    ((rect.height as f64 / 100.0) * monitor_size.height as f64).round().max(1.0);
-                let x = monitor_pos.x
-                    + ((rect.x as f64 / 100.0) * monitor_size.width as f64).round() as i32;
-                let y = monitor_pos.y
-                    + ((rect.y as f64 / 100.0) * monitor_size.height as f64).round() as i32;
-                (
-                    WindowResolution::new(width_px as f32, height_px as f32),
-                    Some(WindowPosition::At(IVec2::new(x, y))),
-                    Some(rect),
-                    Some(screen_idx),
-                )
-            } else {
-                (
-                    WindowResolution::new(640.0, 480.0),
-                    None,
-                    None,
-                    state.descriptor.screen,
-                )
-            };
+        let (resolution, position, pre_applied_rect, pre_applied_screen) = if let Some(rect) =
+            state.descriptor.screen_rect
+            && let Some(screen_idx) = state.descriptor.screen
+            && let Some(monitors) = monitors_any.as_ref()
+            && let Some(monitor) = monitors.get(screen_idx)
+        {
+            let monitor_pos = monitor.position();
+            let monitor_size = monitor.size();
+            let width_px = ((rect.width as f64 / 100.0) * monitor_size.width as f64)
+                .round()
+                .max(1.0);
+            let height_px = ((rect.height as f64 / 100.0) * monitor_size.height as f64)
+                .round()
+                .max(1.0);
+            let x = monitor_pos.x
+                + ((rect.x as f64 / 100.0) * monitor_size.width as f64).round() as i32;
+            let y = monitor_pos.y
+                + ((rect.y as f64 / 100.0) * monitor_size.height as f64).round() as i32;
+            (
+                WindowResolution::new(width_px as f32, height_px as f32),
+                Some(WindowPosition::At(IVec2::new(x, y))),
+                Some(rect),
+                Some(screen_idx),
+            )
+        } else {
+            (
+                WindowResolution::new(640.0, 480.0),
+                None,
+                None,
+                state.descriptor.screen,
+            )
+        };
 
         let window_component = Window {
             title,
@@ -2015,9 +2017,7 @@ fn capture_primary_window_layout(
     }
 }
 
-fn handle_secondary_close(
-    mut events: EventReader<WindowCloseRequested>,
-) {
+fn handle_secondary_close(mut events: EventReader<WindowCloseRequested>) {
     // Ignore close requests for secondary windows for now to avoid tearing down
     // and respawning windows repeatedly during schematic loads.
     let _ = events.read(); // drain

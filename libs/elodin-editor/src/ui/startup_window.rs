@@ -19,7 +19,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{ui::DEFAULT_PRESENT_MODE, VERSION, dirs};
+use crate::{VERSION, dirs, ui::DEFAULT_PRESENT_MODE};
 
 use super::{
     button::EButton,

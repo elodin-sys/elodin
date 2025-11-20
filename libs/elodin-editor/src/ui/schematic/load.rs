@@ -706,7 +706,9 @@ impl SchematicLiveReloadRx {
                     .unwrap_or(deadline),
             );
         }
-        if let Some(until) = self.load_guard_until && now < until {
+        if let Some(until) = self.load_guard_until
+            && now < until
+        {
             return true;
         }
         self.load_guard_until = None;
