@@ -863,6 +863,7 @@ pub fn save_schematic() -> PaletteItem {
          mut live_reload: ResMut<SchematicLiveReloadRx>| {
             match db_config.schematic_path() {
                 Some(path) => {
+                    live_reload.guard_for(Duration::from_millis(2000));
                     let kdl = schematic.0.to_kdl();
                     let path = Path::new(path).with_extension("kdl");
                     let dest = schematic_file(&path);
@@ -871,6 +872,7 @@ pub fn save_schematic() -> PaletteItem {
                     } else {
                         info!("saved schematic to {:?}", dest.display());
                         live_reload.ignore_path(dest.clone());
+                        live_reload.record_loaded(&dest);
                         let base_dir = dest.parent().unwrap_or_else(|| Path::new("."));
                         write_secondary_schematics(base_dir, &secondary, &mut live_reload);
                     }
@@ -1047,6 +1049,7 @@ pub fn save_schematic_inner() -> PaletteItem {
             let kdl = schematic.0.to_kdl();
             let path = PathBuf::from(name).with_extension("kdl");
             let dest = schematic_file(&path);
+            live_reload.guard_for(Duration::from_millis(2000));
             if let Err(e) = std::fs::write(&dest, kdl) {
                 error!(?e, "saving schematic");
             } else {
@@ -1084,7 +1087,8 @@ fn write_secondary_schematics(
             error!(?e, path = %dest.display(), "saving secondary schematic");
         } else {
             info!(path = %dest.display(), "saved secondary schematic");
-            live_reload.ignore_path(dest);
+            live_reload.ignore_path(dest.clone());
+            live_reload.record_loaded(&dest);
         }
     }
 }

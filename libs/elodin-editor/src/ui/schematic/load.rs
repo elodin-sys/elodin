@@ -14,6 +14,11 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
+#[cfg(target_os = "linux")]
+use std::time::{Instant, SystemTime};
+
+#[cfg(target_os = "linux")]
+const NOTIFY_SILENCE: Duration = Duration::from_millis(3000);
 
 use super::super::SECONDARY_RECT_CAPTURE_LOAD_GUARD;
 use crate::{
@@ -145,6 +150,8 @@ pub fn load_schematic_file(
     let watch_path = resolved_path.clone();
     let (tx, rx) = flume::bounded(1);
     live_reload_rx.set_receiver(rx);
+    #[cfg(target_os = "linux")]
+    live_reload_rx.guard_for(Duration::from_millis(2000));
     std::thread::spawn(move || {
         let cb_path = watch_path.clone();
         let mut debouncer = notify_debouncer_mini::new_debouncer(
@@ -154,7 +161,6 @@ pub fn load_schematic_file(
                     return;
                 }
 
-                info!(path = ?cb_path, "refreshing schematic");
                 if let Ok(kdl) = std::fs::read_to_string(&cb_path) {
                     let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(&kdl) else {
                         return;
@@ -182,6 +188,7 @@ pub fn load_schematic_file(
         let schematic = impeller2_wkt::Schematic::from_kdl(&kdl)?;
         let base_dir_owned = resolved_path.parent().map(|p| p.to_path_buf());
         params.load_schematic(&schematic, base_dir_owned.as_deref());
+        live_reload_rx.record_loaded(&resolved_path);
     }
     Ok(())
 }
@@ -635,6 +642,10 @@ pub struct SchematicReloadEvent {
 pub struct SchematicLiveReloadRx {
     receiver: Option<flume::Receiver<SchematicReloadEvent>>,
     ignored_paths: HashMap<PathBuf, usize>,
+    #[cfg(target_os = "linux")]
+    load_guard_until: Option<Instant>,
+    #[cfg(target_os = "linux")]
+    last_loaded: HashMap<PathBuf, SystemTime>,
 }
 
 impl SchematicLiveReloadRx {
@@ -652,6 +663,19 @@ impl SchematicLiveReloadRx {
         *self.ignored_paths.entry(canonical).or_insert(0) += 1;
     }
 
+    #[cfg(not(target_os = "linux"))]
+    pub fn guard_for(&mut self, _duration: Duration) {}
+
+    #[cfg(target_os = "linux")]
+    pub fn guard_for(&mut self, duration: Duration) {
+        let candidate = Instant::now() + duration;
+        self.load_guard_until = Some(
+            self.load_guard_until
+                .map(|current| current.max(candidate))
+                .unwrap_or(candidate),
+        );
+    }
+
     fn should_ignore(&mut self, path: &Path) -> bool {
         let canonical = canonicalize_for_ignore(path.to_path_buf());
         if let Some(count) = self.ignored_paths.get_mut(&canonical) {
@@ -664,6 +688,75 @@ impl SchematicLiveReloadRx {
         }
         false
     }
+
+    #[cfg(target_os = "linux")]
+    fn guard_active(&mut self) -> bool {
+        let now = Instant::now();
+        let mut saw_event = false;
+        if let Some(receiver) = &mut self.receiver {
+            while receiver.try_recv().is_ok() {
+                saw_event = true;
+            }
+        }
+        if saw_event {
+            let deadline = now + NOTIFY_SILENCE;
+            self.load_guard_until = Some(
+                self.load_guard_until
+                    .map(|current| current.max(deadline))
+                    .unwrap_or(deadline),
+            );
+        }
+        if let Some(until) = self.load_guard_until {
+            if now < until {
+                return true;
+            }
+        }
+        self.load_guard_until = None;
+        false
+    }
+
+    #[cfg(target_os = "linux")]
+    fn has_changed(&mut self, path: &Path) -> bool {
+        let canonical = canonicalize_for_ignore(path.to_path_buf());
+        let metadata = match std::fs::metadata(&canonical) {
+            Ok(meta) => meta,
+            Err(_) => {
+                self.last_loaded.remove(&canonical);
+                return true;
+            }
+        };
+        let modified = match metadata.modified() {
+            Ok(ts) => ts,
+            Err(_) => {
+                self.last_loaded.remove(&canonical);
+                return true;
+            }
+        };
+        let last = self.last_loaded.get(&canonical).copied();
+        let changed = last.map(|ts| modified > ts).unwrap_or(true);
+        if changed {
+            self.last_loaded.insert(canonical, modified);
+        }
+        changed
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn record_loaded(&mut self, path: &Path) {
+        let canonical = canonicalize_for_ignore(path.to_path_buf());
+        if let Ok(meta) = std::fs::metadata(&canonical)
+            && let Ok(modified) = meta.modified()
+        {
+            self.last_loaded.insert(canonical, modified);
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn has_changed(&mut self, _path: &Path) -> bool {
+        true
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn record_loaded(&mut self, _path: &Path) {}
 }
 
 fn canonicalize_for_ignore(path: PathBuf) -> PathBuf {
@@ -674,6 +767,10 @@ pub fn schematic_live_reload(
     mut rx: ResMut<SchematicLiveReloadRx>,
     mut params: LoadSchematicParams,
 ) {
+    #[cfg(target_os = "linux")]
+    if rx.guard_active() {
+        return;
+    }
     let Some(receiver) = &mut rx.receiver else {
         return;
     };
@@ -683,6 +780,11 @@ pub fn schematic_live_reload(
     if rx.should_ignore(&event.path) {
         return;
     }
+    if !rx.has_changed(&event.path) {
+        return;
+    }
+    info!(path = ?event.path, "refreshing schematic");
     let base_dir = event.path.parent().map(|p| p.to_path_buf());
     params.load_schematic(&event.schematic, base_dir.as_deref());
+    rx.record_loaded(&event.path);
 }
