@@ -2458,10 +2458,32 @@ fn capture_primary_window_layout(
     }
 }
 
-fn handle_secondary_close(mut events: EventReader<WindowCloseRequested>) {
-    // Ignore close requests for secondary windows for now to avoid tearing down
-    // and respawning windows repeatedly during schematic loads.
-    let _ = events.read(); // drain
+fn handle_secondary_close(
+    mut events: EventReader<WindowCloseRequested>,
+    mut windows: ResMut<tiles::WindowManager>,
+    window_query: Query<(Entity, &Window)>,
+    screens: Query<(Entity, &Monitor)>,
+) {
+    let mut to_remove = Vec::new();
+    for evt in events.read() {
+        if let Some(id) = windows.find_secondary_by_entity(evt.window) {
+            to_remove.push(id);
+        }
+    }
+
+    if !to_remove.is_empty() {
+        windows.secondary_mut().retain_mut(|state| {
+            let keep = !to_remove.contains(&state.id);
+            if !keep
+                && let Some((_, window)) = state
+                    .window_entity
+                    .and_then(|entity| window_query.get(entity).ok())
+            {
+                state.update_descriptor_from_window(window, &screens);
+            }
+            keep
+        });
+    }
 }
 
 fn handle_primary_close(
