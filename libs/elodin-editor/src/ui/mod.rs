@@ -820,14 +820,14 @@ fn sync_secondary_windows(
         state.window_entity = Some(window_entity);
         state.applied_screen = pre_applied_screen;
         state.applied_rect = None;
-        state.relayout_phase = if state.descriptor.layout_locked && state.descriptor.screen.is_some()
-        {
-            tiles::SecondaryWindowRelayoutPhase::NeedScreen
-        } else if state.descriptor.layout_locked && state.descriptor.screen_rect.is_some() {
-            tiles::SecondaryWindowRelayoutPhase::NeedRect
-        } else {
-            tiles::SecondaryWindowRelayoutPhase::Idle
-        };
+        state.relayout_phase =
+            if state.descriptor.layout_locked && state.descriptor.screen.is_some() {
+                tiles::SecondaryWindowRelayoutPhase::NeedScreen
+            } else if state.descriptor.layout_locked && state.descriptor.screen_rect.is_some() {
+                tiles::SecondaryWindowRelayoutPhase::NeedRect
+            } else {
+                tiles::SecondaryWindowRelayoutPhase::Idle
+            };
         state.skip_metadata_capture = true;
         existing_map.insert(state.id, window_entity);
         let window_ref = WindowRef::Entity(window_entity);
