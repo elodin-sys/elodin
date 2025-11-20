@@ -41,8 +41,13 @@ const SECONDARY_RECT_CAPTURE_LOAD_GUARD: Duration = Duration::from_millis(2500);
 const SECONDARY_RECT_CAPTURE_STABILIZE_GUARD: Duration = Duration::from_millis(400);
 const PRIMARY_VIEWPORT_ORDER_BASE: isize = 0;
 const PRIMARY_GRAPH_ORDER_BASE: isize = 100;
-const SECONDARY_GRAPH_ORDER_BASE: isize = 10;
+// Secondary cameras are offset high to avoid clashing with primary/UI cameras.
+const SECONDARY_GRAPH_ORDER_BASE: isize = 1000;
 const SECONDARY_GRAPH_ORDER_STRIDE: isize = 50;
+#[cfg(target_os = "linux")]
+const DEFAULT_PRESENT_MODE: PresentMode = PresentMode::Fifo;
+#[cfg(not(target_os = "linux"))]
+const DEFAULT_PRESENT_MODE: PresentMode = PresentMode::AutoVsync;
 
 use big_space::GridCell;
 use plot_3d::LinePlot3dPlugin;
@@ -241,6 +246,8 @@ impl Plugin for UiPlugin {
             .add_systems(Update, shortcuts)
             .add_systems(Update, handle_primary_close.before(render_layout))
             .add_systems(Update, render_layout)
+            // Ensure camera orders are unique before rendering the frame.
+            .add_systems(First, dedup_camera_orders)
             .add_systems(
                 Update,
                 apply_primary_window_layout
@@ -283,8 +290,15 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
+                dedup_camera_orders
+                    .after(set_secondary_camera_viewport)
+                    .after(set_camera_viewport),
+            )
+            .add_systems(
+                Update,
                 render_secondary_windows.after(handle_secondary_close),
             )
+            .add_systems(First, fix_visibility_hierarchy)
             .add_systems(Update, sync_hdr)
             .add_systems(Update, tiles::shortcuts)
             .add_systems(Update, set_camera_viewport.after(render_layout))
@@ -692,10 +706,15 @@ fn sync_secondary_windows(
     mut windows: ResMut<tiles::WindowManager>,
     existing: Query<(Entity, &SecondaryWindowMarker)>,
     mut cameras: Query<&mut Camera>,
+    winit_windows: NonSend<bevy::winit::WinitWindows>,
 ) {
     let mut existing_map: HashMap<tiles::SecondaryWindowId, Entity> = HashMap::new();
     for (entity, marker) in existing.iter() {
         existing_map.insert(marker.id, entity);
+    }
+    let monitors_any = collect_monitors_from_any_window(&winit_windows);
+    if monitors_any.is_none() {
+        warn!("No monitor info available; secondary windows will use default sizing/position");
     }
 
     for (id, entity) in existing_map.clone() {
@@ -726,20 +745,55 @@ fn sync_secondary_windows(
                 }
             }
             continue;
-        } else {
-            for &graph in &state.graph_entities {
-                if let Ok(mut camera) = cameras.get_mut(graph) {
-                    camera.is_active = false;
-                }
+        }
+
+        // Window is missing: ensure associated cameras are deactivated before spawn.
+        for &graph in &state.graph_entities {
+            if let Ok(mut camera) = cameras.get_mut(graph) {
+                camera.is_active = false;
             }
         }
 
         let title = compute_secondary_window_title(state);
 
+        // Try to pre-size and pre-position the window to its target rect to avoid an
+        // extra resize pass (and the resulting swapchain churn).
+        let (resolution, position, pre_applied_rect, pre_applied_screen) =
+            if let Some(rect) = state.descriptor.screen_rect
+                && let Some(screen_idx) = state.descriptor.screen
+                && let Some(monitors) = monitors_any.as_ref()
+                && let Some(monitor) = monitors.get(screen_idx)
+            {
+                let monitor_pos = monitor.position();
+                let monitor_size = monitor.size();
+                let width_px = ((rect.width as f64 / 100.0) * monitor_size.width as f64).round()
+                    .max(1.0);
+                let height_px =
+                    ((rect.height as f64 / 100.0) * monitor_size.height as f64).round().max(1.0);
+                let x = monitor_pos.x
+                    + ((rect.x as f64 / 100.0) * monitor_size.width as f64).round() as i32;
+                let y = monitor_pos.y
+                    + ((rect.y as f64 / 100.0) * monitor_size.height as f64).round() as i32;
+                (
+                    WindowResolution::new(width_px as f32, height_px as f32),
+                    Some(WindowPosition::At(IVec2::new(x, y))),
+                    Some(rect),
+                    Some(screen_idx),
+                )
+            } else {
+                (
+                    WindowResolution::new(640.0, 480.0),
+                    None,
+                    None,
+                    state.descriptor.screen,
+                )
+            };
+
         let window_component = Window {
             title,
-            resolution: WindowResolution::new(640.0, 480.0),
-            present_mode: PresentMode::AutoVsync,
+            resolution,
+            position: position.unwrap_or(WindowPosition::Automatic),
+            present_mode: DEFAULT_PRESENT_MODE,
             enabled_buttons: EnabledButtons {
                 close: true,
                 ..Default::default()
@@ -752,9 +806,13 @@ fn sync_secondary_windows(
             .id();
 
         state.window_entity = Some(window_entity);
-        state.applied_screen = None;
-        state.applied_rect = None;
-        state.refresh_relayout_phase();
+        state.applied_screen = pre_applied_screen;
+        state.applied_rect = pre_applied_rect;
+        state.relayout_phase = match (state.descriptor.screen, pre_applied_rect) {
+            (Some(_), Some(_)) => tiles::SecondaryWindowRelayoutPhase::Idle,
+            (Some(_), None) => tiles::SecondaryWindowRelayoutPhase::NeedRect,
+            _ => tiles::SecondaryWindowRelayoutPhase::NeedScreen,
+        };
         state.skip_metadata_capture = true;
         existing_map.insert(state.id, window_entity);
         let window_ref = WindowRef::Entity(window_entity);
@@ -967,6 +1025,19 @@ fn apply_primary_window_layout(
 
             let monitors = collect_sorted_monitors(window);
             if window_on_screen(layout.screen, window, &monitors) {
+                // If rect already applied, proceed to Idle to avoid extra swapchain reconfig.
+                if let Some(rect) = layout.screen_rect
+                    && layout.applied_rect == Some(rect)
+                {
+                    layout.relayout_phase = tiles::PrimaryWindowRelayoutPhase::Idle;
+                    layout.awaiting_screen_confirmation = false;
+                    complete_primary_screen_assignment(
+                        layout,
+                        window,
+                        "Primary window confirmed on target screen",
+                    );
+                    return;
+                }
                 if LINUX_MULTI_WINDOW {
                     if window.fullscreen().is_some() {
                         exit_fullscreen(window);
@@ -1059,6 +1130,10 @@ fn apply_secondary_window_rect(
         pending_fullscreen_exit = state.pending_fullscreen_exit,
         applied_rect = ?state.applied_rect,
         target_rect = ?state.descriptor.screen_rect,
+        size_w = window.outer_size().width,
+        size_h = window.outer_size().height,
+        pos_x = window.outer_position().map(|p| p.x).unwrap_or_default(),
+        pos_y = window.outer_position().map(|p| p.y).unwrap_or_default(),
         "apply_secondary_window_rect start"
     );
     if state.descriptor.screen_rect.is_some() {
@@ -1199,6 +1274,30 @@ fn apply_secondary_window_rect(
         );
     }
 
+    if let Ok(current_pos) = window.outer_position() {
+        let current_size = window.outer_size();
+        if current_pos.x == x
+            && current_pos.y == y
+            && current_size.width as i32 == width_px
+            && current_size.height as i32 == height_px
+        {
+            state.applied_rect = Some(rect);
+            state.skip_metadata_capture = true;
+            state.clear_metadata_capture_block();
+            state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_STABILIZE_GUARD);
+            info!(
+                path = %state.descriptor.path.display(),
+                rect = ?rect,
+                size_w = width_px,
+                size_h = height_px,
+                pos_x = x,
+                pos_y = y,
+                "Rect already applied"
+            );
+            return true;
+        }
+    }
+
     let _ = window.request_inner_size(PhysicalSize::new(
         width_px.max(1) as u32,
         height_px.max(1) as u32,
@@ -1261,20 +1360,17 @@ fn complete_screen_assignment(
     state.applied_screen = state.descriptor.screen;
     state.relayout_attempts = 0;
     state.relayout_started_at = None;
-    state.relayout_phase = if state.descriptor.screen_rect.is_some() {
-        tiles::SecondaryWindowRelayoutPhase::NeedRect
-    } else {
-        tiles::SecondaryWindowRelayoutPhase::Idle
+    // If a rect was already applied, don't re-enter NeedRect and reconfigure swapchain.
+    state.relayout_phase = match state.descriptor.screen_rect {
+        Some(rect) if state.applied_rect != Some(rect) => {
+            state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_LOAD_GUARD);
+            tiles::SecondaryWindowRelayoutPhase::NeedRect
+        }
+        _ => {
+            state.clear_metadata_capture_block();
+            tiles::SecondaryWindowRelayoutPhase::Idle
+        }
     };
-    if matches!(
-        state.relayout_phase,
-        tiles::SecondaryWindowRelayoutPhase::NeedRect
-    ) && state.descriptor.screen_rect.is_some()
-    {
-        state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_LOAD_GUARD);
-    } else {
-        state.clear_metadata_capture_block();
-    }
 
     info!(
         screen = state
@@ -1456,6 +1552,17 @@ fn apply_primary_window_rect(
         "Applying primary window rect"
     );
 
+    if let Ok(current_pos) = window.outer_position() {
+        let current_size = window.outer_size();
+        if current_pos.x == x
+            && current_pos.y == y
+            && current_size.width as i32 == width_px
+            && current_size.height as i32 == height_px
+        {
+            layout.applied_rect = Some(rect);
+            return true;
+        }
+    }
     let _ = window.request_inner_size(PhysicalSize::new(
         width_px.max(1) as u32,
         height_px.max(1) as u32,
@@ -1625,6 +1732,39 @@ fn monitors_match(a: &MonitorHandle, b: &MonitorHandle) -> bool {
     match (a.name(), b.name()) {
         (Some(an), Some(bn)) => an == bn && a.size() == b.size(),
         _ => false,
+    }
+}
+
+fn collect_monitors_from_any_window(
+    windows: &bevy::winit::WinitWindows,
+) -> Option<Vec<MonitorHandle>> {
+    let handle = windows.windows.values().next()?;
+    Some(collect_sorted_monitors(handle))
+}
+
+fn fix_visibility_hierarchy(
+    mut commands: Commands,
+    inherited_with_parent: Query<&ChildOf, With<InheritedVisibility>>,
+    global_with_parent: Query<&ChildOf, With<GlobalTransform>>,
+    has_inherited: Query<(), With<InheritedVisibility>>,
+    has_global: Query<(), With<GlobalTransform>>,
+) {
+    for parent in inherited_with_parent.iter() {
+        let parent_entity = parent.parent();
+        if has_inherited.get(parent_entity).is_err() {
+            commands
+                .entity(parent_entity)
+                .insert(InheritedVisibility::default());
+        }
+    }
+
+    for parent in global_with_parent.iter() {
+        let parent_entity = parent.parent();
+        if has_global.get(parent_entity).is_err() {
+            commands
+                .entity(parent_entity)
+                .insert(GlobalTransform::default());
+        }
     }
 }
 
@@ -1877,31 +2017,10 @@ fn capture_primary_window_layout(
 
 fn handle_secondary_close(
     mut events: EventReader<WindowCloseRequested>,
-    mut windows: ResMut<tiles::WindowManager>,
-    window_query: Query<(Entity, &Window)>,
-    screens: Query<(Entity, &Monitor)>,
 ) {
-    let mut to_remove = Vec::new();
-    for evt in events.read() {
-        let entity = evt.window;
-        if let Some(id) = windows.find_secondary_by_entity(entity) {
-            to_remove.push(id);
-        }
-    }
-
-    if !to_remove.is_empty() {
-        windows.secondary_mut().retain_mut(|state| {
-            let keep = !to_remove.contains(&state.id);
-            if !keep
-                && let Some((_, window)) = state
-                    .window_entity
-                    .and_then(|entity| window_query.get(entity).ok())
-            {
-                state.update_descriptor_from_window(window, &screens);
-            }
-            keep
-        });
-    }
+    // Ignore close requests for secondary windows for now to avoid tearing down
+    // and respawning windows repeatedly during schematic loads.
+    let _ = events.read(); // drain
 }
 
 fn handle_primary_close(
@@ -2191,13 +2310,63 @@ fn set_secondary_camera_viewport(
             }
 
             camera.is_active = true;
-            let base_order = secondary_graph_order_base(state.id);
-            camera.order = base_order + index as isize;
+            // Offset secondary cameras to avoid colliding with primary orders.
+            let base_order =
+                SECONDARY_GRAPH_ORDER_BASE + SECONDARY_GRAPH_ORDER_STRIDE * state.id.0 as isize;
+            let offset = base_order + index as isize;
+            camera.order = offset;
             camera.viewport = Some(Viewport {
                 physical_position: UVec2::new(viewport_pos.x as u32, viewport_pos.y as u32),
                 physical_size: UVec2::new(viewport_size.x as u32, viewport_size.y as u32),
                 depth: 0.0..1.0,
             });
+        }
+    }
+}
+
+fn dedup_camera_orders(mut cameras: Query<(Entity, &mut Camera)>) {
+    // Collect active window-targeted cameras with their current order.
+    let mut entries: Vec<(Entity, String, isize)> = cameras
+        .iter()
+        .filter_map(|(entity, camera)| {
+            if !camera.is_active {
+                return None;
+            }
+            if let RenderTarget::Window(window_ref) = &camera.target {
+                return Some((entity, format!("{:?}", window_ref), camera.order));
+            }
+            None
+        })
+        .collect();
+
+    // Sort by target key, then order, then entity to make de-dup deterministic.
+    entries.sort_by(|(a_ent, a_key, a_order), (b_ent, b_key, b_order)| {
+        a_key
+            .cmp(b_key)
+            .then_with(|| a_order.cmp(b_order))
+            .then_with(|| a_ent.index().cmp(&b_ent.index()))
+    });
+
+    let mut new_orders: HashMap<Entity, isize> = HashMap::new();
+    let mut current_key: Option<String> = None;
+    let mut last_order_for_key: Option<isize> = None;
+
+    for (entity, key, order) in entries {
+        if current_key.as_deref() != Some(&key) {
+            current_key = Some(key.clone());
+            last_order_for_key = None;
+        }
+        let new_order = match last_order_for_key {
+            Some(last) if order <= last => last + 1,
+            _ => order,
+        };
+        new_orders.insert(entity, new_order);
+        last_order_for_key = Some(new_order);
+    }
+
+    for (entity, mut camera) in cameras.iter_mut() {
+        if let Some(new_order) = new_orders.get(&entity) {
+            camera.order = *new_order;
         }
     }
 }

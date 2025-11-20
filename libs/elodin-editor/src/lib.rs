@@ -7,7 +7,7 @@ use bevy::{
     DefaultPlugins,
     asset::{UnapprovedPathMode, embedded_asset},
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
-    log::LogPlugin,
+    log::{Level, LogPlugin},
     math::{DQuat, DVec3},
     pbr::{
         DirectionalLightShadowMap,
@@ -46,6 +46,16 @@ mod offset_parse;
 mod plugins;
 pub mod ui;
 pub mod vector_arrow;
+
+#[cfg(target_os = "linux")]
+const fn default_present_mode() -> PresentMode {
+    PresentMode::Fifo
+}
+
+#[cfg(not(target_os = "linux"))]
+const fn default_present_mode() -> PresentMode {
+    PresentMode::AutoVsync
+}
 
 #[cfg(not(target_family = "wasm"))]
 pub mod run;
@@ -143,7 +153,7 @@ impl Plugin for EditorPlugin {
                         primary_window: Some(Window {
                             window_theme: Some(WindowTheme::Dark),
                             title: "Elodin".into(),
-                            present_mode: PresentMode::AutoVsync,
+                        present_mode: default_present_mode(),
                             canvas: Some("#editor".to_string()),
                             resolution: self.window_resolution.clone(),
                             resize_constraints: WindowResizeConstraints {
@@ -170,6 +180,17 @@ impl Plugin for EditorPlugin {
                     .disable::<LogPlugin>()
                     .build(),
             )
+            .add_plugins(LogPlugin {
+                // Reduce wgpu/present_frames noise on Linux to curb UI lag from log spam.
+                // Only set on Linux; other platforms keep defaults.
+                level: Level::INFO,
+                filter: if cfg!(target_os = "linux") {
+                    "info,wgpu=error,present_frames=error".to_string()
+                } else {
+                    "info".to_string()
+                },
+                ..Default::default()
+            })
             .insert_resource(winit_settings)
             .init_resource::<tiles::ViewportContainsPointer>()
             .add_plugins(bevy_framepace::FramepacePlugin)
