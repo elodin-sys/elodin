@@ -193,6 +193,7 @@ impl WorldBuilder {
         optimize = false,
         is_canceled = None,
         db_path = None,
+        interactive = true,
     ))]
     pub fn run(
         &mut self,
@@ -205,6 +206,7 @@ impl WorldBuilder {
         optimize: bool,
         is_canceled: Option<PyObject>,
         db_path: Option<String>,
+        interactive: bool,
     ) -> Result<Option<String>, Error> {
         let _ = tracing_subscriber::fmt::fmt()
             .with_env_filter(
@@ -289,7 +291,8 @@ impl WorldBuilder {
                                     Python::with_gil(|py| py.check_signals().is_err())
                                 }
                             }
-                        })
+                        },
+                        interactive)
                     })?;
 
                     Ok(None)

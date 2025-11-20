@@ -25,12 +25,13 @@ impl Server {
 
     pub async fn run(self) -> Result<(), Error> {
         tracing::info!("running server");
-        self.run_with_cancellation(|| false).await
+        self.run_with_cancellation(|| false, false).await
     }
 
     pub async fn run_with_cancellation(
         self,
         is_cancelled: impl Fn() -> bool + 'static,
+        interactive: bool,
     ) -> Result<(), Error> {
         tracing::info!("running server with cancellation");
         let Self { db, mut world } = self;
@@ -46,13 +47,13 @@ impl Server {
                     handles.push(stellarator::spawn(handle_conn(stream, db.clone())).drop_guard());
                 }
             });
-        let tick = stellarator::spawn(tick(tick_db, world, is_cancelled, start_time));
+        let tick = stellarator::spawn(tick(tick_db, world, is_cancelled, start_time, interactive));
         futures_lite::future::race(async { stream.join().await.unwrap().unwrap() }, async {
             tick.await
                 .map_err(|_| stellarator::Error::JoinFailed)
                 .map_err(Error::from)
         })
-        .await
+        .await?
     }
 }
 
@@ -257,6 +258,7 @@ async fn tick(
     mut world: WorldExec<Compiled>,
     is_cancelled: impl Fn() -> bool + 'static,
     mut timestamp: Timestamp,
+    interactive: bool,
 ) {
     // XXX This is what world.run ultimately calls.
     let mut tick = 0;
@@ -274,9 +276,12 @@ async fn tick(
         if tick >= world.world.max_tick() {
             db.recording_cell.set_playing(false);
             world.world.metadata.max_tick = u64::MAX;
+            if ! interactive {
+                return;
+            }
         }
-        // loop {}
         db.with_state(|state| copy_db_to_world(state, &mut world));
+        // JAX runs.
         if let Err(err) = world.run() {
             warn!(?err, "error ticking world");
         }
@@ -292,10 +297,14 @@ async fn tick(
             && !timestamps_changed(&db, &mut wait_for_write_pair_ids).unwrap_or(false)
         {
             stellarator::sleep(Duration::from_millis(1)).await;
-            if is_cancelled() {
-                return;
-            }
+            // NOTE: Let's ensure we only run is_canceled once per tick.
+            // 
+            // if is_cancelled() {
+            //     return;
+            // }
         }
+
+        // Python func runs.
         if is_cancelled() {
             return;
         }
