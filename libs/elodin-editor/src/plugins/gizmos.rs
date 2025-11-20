@@ -325,7 +325,6 @@ fn cleanup_removed_arrows(
 }
 
 fn axis_color_from_name(_name: Option<&str>, default: Color) -> Color {
-    // Respecte la couleur configurée dans le KDL lorsqu'aucun override spécifique n'est requis
     default
 }
 
