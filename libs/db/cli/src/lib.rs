@@ -644,7 +644,14 @@ impl Highlighter for CliHelper {
 
 #[derive(clap::Args, Clone, Debug)]
 pub struct Args {
-    pub path: Option<PathBuf>,
+    /// Path to Lua config script
+    pub config: Option<PathBuf>,
+    #[arg(long)]
+    /// Path to Elodin database
+    pub db: Option<PathBuf>,
+    /// Arguments to Lua script
+    #[arg(last = true)]
+    pub lua_args: Vec<String>
 }
 
 #[allow(dead_code)]
@@ -793,7 +800,17 @@ impl UserData for LuaFieldBuilder {}
 
 pub async fn run(args: Args) -> anyhow::Result<()> {
     let lua = lua()?;
-    if let Some(path) = args.path {
+    if !args.lua_args.is_empty() {
+        lua.globals();
+
+        let arg_table = lua.create_table()?;
+        for (i, arg) in args.lua_args.iter().enumerate() {
+            arg_table.set((i + 1) as i64, arg.as_str())?;
+        }
+        arg_table.set(0, "elodin_db")?;
+        lua.globals().set("arg", arg_table)?;
+    }
+    if let Some(path) = args.config {
         let script = std::fs::read_to_string(path)?;
         lua.load(&script).eval_async::<MultiValue>().await?;
         Ok(())
