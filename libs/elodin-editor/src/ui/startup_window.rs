@@ -1,7 +1,7 @@
 use bevy::{
     ecs::system::SystemParam,
     prelude::*,
-    window::{EnabledButtons, PresentMode, PrimaryWindow, WindowResolution, WindowTheme},
+    window::{EnabledButtons, PrimaryWindow, WindowResolution, WindowTheme},
 };
 use bevy_egui::EguiContexts;
 use egui::{Color32, CornerRadius, RichText, Stroke, load::SizedTexture};
@@ -19,7 +19,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{VERSION, dirs};
+use crate::{ui::DEFAULT_PRESENT_MODE, VERSION, dirs};
 
 use super::{
     button::EButton,
@@ -55,7 +55,7 @@ fn create_startup_window(
                     max_width: 730.0,
                     max_height: 470.0,
                 },
-                present_mode: PresentMode::AutoVsync,
+                present_mode: DEFAULT_PRESENT_MODE,
                 window_theme: Some(WindowTheme::Dark),
                 enabled_buttons: EnabledButtons {
                     minimize: false,
