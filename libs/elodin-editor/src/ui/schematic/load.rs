@@ -9,13 +9,13 @@ use impeller2_wkt::{
     DbConfig, Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowSchematic,
 };
 use miette::{Diagnostic, miette};
+#[cfg(target_os = "linux")]
+use std::time::{Instant, SystemTime};
 use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
     time::Duration,
 };
-#[cfg(target_os = "linux")]
-use std::time::{Instant, SystemTime};
 
 #[cfg(target_os = "linux")]
 const NOTIFY_SILENCE: Duration = Duration::from_millis(3000);
@@ -706,10 +706,8 @@ impl SchematicLiveReloadRx {
                     .unwrap_or(deadline),
             );
         }
-        if let Some(until) = self.load_guard_until {
-            if now < until {
-                return true;
-            }
+        if let Some(until) = self.load_guard_until && now < until {
+            return true;
         }
         self.load_guard_until = None;
         false
