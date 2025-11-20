@@ -660,6 +660,10 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
         let mut seen = HashSet::new();
 
         for (entity, arrow, arrow_state) in state_mut.vector_arrows.iter() {
+            if !arrow.display_name {
+                state_mut.label_cache.remove(&entity);
+                continue;
+            }
             let Some(result) = evaluate_vector_arrow(
                 arrow,
                 arrow_state,
@@ -712,7 +716,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
                     Align2::CENTER_CENTER,
                     name,
                     font_id.clone(),
-                    Color32::from_bevy(result.color),
+                    readable_label_color(result.color),
                 );
                 continue;
             }
@@ -771,7 +775,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
                 Align2::CENTER_CENTER,
                 name,
                 font_id.clone(),
-                Color32::from_bevy(result.color),
+                readable_label_color(result.color),
             );
         }
 
@@ -780,6 +784,11 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
             .label_cache
             .retain(|entity, _| seen.contains(entity));
     }
+}
+
+fn readable_label_color(color: Color) -> Color32 {
+    let color32 = Color32::from_bevy(color);
+    Color32::from_rgba_unmultiplied(color32.r(), color32.g(), color32.b(), 255)
 }
 
 pub fn render_layout(world: &mut World) {

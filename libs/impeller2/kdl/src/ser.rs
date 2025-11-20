@@ -375,6 +375,11 @@ fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
             .push(KdlEntry::new_prop("normalize", true));
     }
 
+    if !arrow.display_name {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("display_name", false));
+    }
+
     serialize_color_to_node(&mut node, &arrow.color);
 
     node
@@ -1013,6 +1018,7 @@ mod tests {
                 color: Color::BLUE,
                 body_frame: true,
                 normalize: true,
+                display_name: false,
                 aux: (),
             }));
 
@@ -1030,6 +1036,7 @@ mod tests {
             assert_eq!(arrow.name.as_deref(), Some("Velocity"));
             assert!(arrow.body_frame);
             assert!(arrow.normalize);
+            assert!(!arrow.display_name);
             assert_color_close(arrow.color, Color::BLUE);
         } else {
             panic!("Expected vector_arrow");

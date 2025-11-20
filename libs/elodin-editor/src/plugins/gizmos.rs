@@ -324,13 +324,9 @@ fn cleanup_removed_arrows(
     }
 }
 
-fn axis_color_from_name(name: Option<&str>, _default: Color) -> Color {
-    let Some(_name) = name else {
-        // Orange clair translucide pour tout le monde
-        return Color::linear_rgba(1.0, 0.7, 0.4, 0.7);
-    };
-    // Orange clair translucide pour tout le monde
-    Color::linear_rgba(1.0, 0.7, 0.4, 0.7)
+fn axis_color_from_name(_name: Option<&str>, default: Color) -> Color {
+    // Respecte la couleur configurée dans le KDL lorsqu'aucun override spécifique n'est requis
+    default
 }
 
 fn lighten_color(color: Color, factor: f32) -> Color {

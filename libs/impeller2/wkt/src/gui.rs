@@ -301,6 +301,8 @@ pub struct VectorArrow3d<T = ()> {
     pub body_frame: bool,
     #[serde(default)]
     pub normalize: bool,
+    #[serde(default = "VectorArrow3d::<T>::default_display_name")]
+    pub display_name: bool,
     pub aux: T,
 }
 
@@ -313,6 +315,10 @@ impl<T> VectorArrow3d<T> {
         Color::WHITE
     }
 
+    fn default_display_name() -> bool {
+        true
+    }
+
     pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> VectorArrow3d<U> {
         VectorArrow3d {
             vector: self.vector.clone(),
@@ -322,6 +328,7 @@ impl<T> VectorArrow3d<T> {
             color: self.color,
             body_frame: self.body_frame,
             normalize: self.normalize,
+            display_name: self.display_name,
             aux: f(&self.aux),
         }
     }
