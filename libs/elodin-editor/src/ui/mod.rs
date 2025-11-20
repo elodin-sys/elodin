@@ -117,6 +117,11 @@ pub struct HdrEnabled(pub bool);
 #[derive(Resource, Default)]
 pub struct Paused(pub bool);
 
+#[derive(Resource, Default)]
+struct SecondaryLogState(
+    HashMap<tiles::SecondaryWindowId, (Option<usize>, bool, tiles::SecondaryWindowRelayoutPhase)>,
+);
+
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
 pub enum SelectedObject {
     #[default]
@@ -258,6 +263,7 @@ impl Plugin for UiPlugin {
             .init_resource::<SettingModalState>()
             .init_resource::<HdrEnabled>()
             .init_resource::<timeline_slider::UITick>()
+            .init_resource::<SecondaryLogState>()
             .init_resource::<timeline::StreamTickOrigin>()
             .init_resource::<command_palette::CommandPaletteState>()
             .add_event::<DialogEvent>()
@@ -918,6 +924,7 @@ fn sync_secondary_windows(
     existing: Query<(Entity, &SecondaryWindowMarker)>,
     mut cameras: Query<&mut Camera>,
     winit_windows: NonSend<bevy::winit::WinitWindows>,
+    mut log_state: ResMut<SecondaryLogState>,
 ) {
     let mut existing_map: HashMap<tiles::SecondaryWindowId, Entity> = HashMap::new();
     for (entity, marker) in existing.iter() {
@@ -936,13 +943,22 @@ fn sync_secondary_windows(
     }
 
     for state in windows.secondary_mut().iter_mut() {
-        info!(
-            id = state.id.0,
-            screen = state.descriptor.screen.map(|s| s as i32).unwrap_or(-1),
-            locked = state.descriptor.layout_locked,
-            relayout = ?state.relayout_phase,
-            "secondary_window_state"
+        let current_key = (
+            state.descriptor.screen,
+            state.descriptor.layout_locked,
+            state.relayout_phase,
         );
+        let last = log_state.0.get(&state.id).copied();
+        if last != Some(current_key) {
+            info!(
+                id = state.id.0,
+                screen = state.descriptor.screen.map(|s| s as i32).unwrap_or(-1),
+                locked = state.descriptor.layout_locked,
+                relayout = ?state.relayout_phase,
+                "secondary_window_state"
+            );
+            log_state.0.insert(state.id, current_key);
+        }
         state.graph_entities = state.tile_state.collect_graph_entities();
 
         if let Some(entity) = state.window_entity
