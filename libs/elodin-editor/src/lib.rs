@@ -7,7 +7,7 @@ use bevy::{
     DefaultPlugins,
     asset::{UnapprovedPathMode, embedded_asset},
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
-    log::{LogPlugin, warn},
+    log::{Level, LogPlugin},
     math::{DQuat, DVec3},
     pbr::{
         DirectionalLightShadowMap,
@@ -47,6 +47,10 @@ mod offset_parse;
 mod plugins;
 pub mod ui;
 pub mod vector_arrow;
+
+const fn default_present_mode() -> PresentMode {
+    PresentMode::Fifo
+}
 
 #[cfg(not(target_family = "wasm"))]
 pub mod run;
@@ -144,7 +148,7 @@ impl Plugin for EditorPlugin {
                         primary_window: Some(Window {
                             window_theme: Some(WindowTheme::Dark),
                             title: "Elodin".into(),
-                            present_mode: PresentMode::AutoVsync,
+                        present_mode: default_present_mode(),
                             canvas: Some("#editor".to_string()),
                             resolution: self.window_resolution.clone(),
                             resize_constraints: WindowResizeConstraints {
@@ -171,6 +175,12 @@ impl Plugin for EditorPlugin {
                     .disable::<LogPlugin>()
                     .build(),
             )
+            .add_plugins(LogPlugin {
+                level: Level::INFO,
+                filter: "info,wgpu=error,present_frames=error,wgpu_core=warn,wgpu_hal=warn"
+                    .to_string(),
+                ..Default::default()
+            })
             .insert_resource(winit_settings)
             .init_resource::<tiles::ViewportContainsPointer>()
             .add_plugins(bevy_framepace::FramepacePlugin)
