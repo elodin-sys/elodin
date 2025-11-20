@@ -21,6 +21,18 @@ use std::{
 };
 use tracing::{error, info};
 use zerocopy::{FromBytes, TryFromBytes};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+fn install_signal_handlers(terminate_flag: &Arc<AtomicBool>) {
+    use signal_hook::consts::signal::*;
+    use signal_hook::flag;
+
+    // Ignore errors for brevity; in real code, handle Result
+    flag::register(SIGINT, terminate_flag.clone()).expect("register SIGINT failed");
+    flag::register(SIGTERM, terminate_flag.clone()).expect("register SIGTERM failed");
+    // Add others if you want: SIGHUP, SIGQUIT, etc.
+}
+
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -226,13 +238,14 @@ impl WorldBuilder {
         let path = args.first().ok_or(Error::MissingArg("path".to_string()))?;
         let path = PathBuf::from(path);
         let args = Args::parse_from(args);
-
         match args {
             Args::Run {
                 addr,
                 no_s10,
                 liveness_port,
             } => {
+                let terminate_flag = Arc::new(AtomicBool::new(false));
+                install_signal_handlers(&terminate_flag);
                 let exec = self.build_uncompiled(
                     py,
                     sys,
@@ -282,13 +295,9 @@ impl WorldBuilder {
                                     Python::with_gil(|py| {
                                         func.call0(py)
                                             .and_then(|result| result.extract::<bool>(py))
-                                            .unwrap_or_else(|_| {
-                                                // If the function raises an exception or returns non-bool, treat as cancel
-                                                py.check_signals().is_err()
-                                            })
-                                    })
+                                    }).unwrap_or_else(|_| terminate_flag.load(Ordering::Relaxed))
                                 } else {
-                                    Python::with_gil(|py| py.check_signals().is_err())
+                                    terminate_flag.load(Ordering::Relaxed)
                                 }
                             }
                         },

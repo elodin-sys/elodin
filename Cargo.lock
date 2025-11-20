@@ -8678,6 +8678,7 @@ dependencies = [
  "roci-adcs",
  "s10",
  "serde_json",
+ "signal-hook",
  "stellarator",
  "tempfile",
  "thiserror 2.0.17",
