@@ -2669,6 +2669,33 @@ struct CameraViewportQuery {
     graph_state: Option<&'static GraphState>,
 }
 
+fn clamp_viewport_to_window(
+    mut pos: Vec2,
+    mut size: Vec2,
+    window_size: Vec2,
+) -> Option<(Vec2, Vec2)> {
+    if size.x <= 0.0 || size.y <= 0.0 {
+        return None;
+    }
+    if pos.x >= window_size.x || pos.y >= window_size.y {
+        return None;
+    }
+    if pos.x < 0.0 {
+        size.x += pos.x;
+        pos.x = 0.0;
+    }
+    if pos.y < 0.0 {
+        size.y += pos.y;
+        pos.y = 0.0;
+    }
+    size.x = size.x.min(window_size.x - pos.x);
+    size.y = size.y.min(window_size.y - pos.y);
+    if size.x <= 0.0 || size.y <= 0.0 {
+        return None;
+    }
+    Some((pos, size))
+}
+
 fn set_camera_viewport(
     window: Query<(&Window, &bevy_egui::EguiContextSettings), With<PrimaryWindow>>,
     mut main_camera_query: Query<CameraViewportQuery, With<MainCamera>>,
@@ -2709,24 +2736,28 @@ fn set_camera_viewport(
         let scale_factor = window.scale_factor() * egui_settings.scale_factor;
         let viewport_pos = available_rect.left_top().to_vec2() * scale_factor;
         let viewport_size = available_rect.size() * scale_factor;
-        if available_rect.size().x > window.width() || available_rect.size().y > window.height() {
-            return;
-        }
-        if viewport_size.x < 10.0 || viewport_size.y < 10.0 {
+        let viewport_pos = Vec2::new(viewport_pos.x, viewport_pos.y);
+        let viewport_size = Vec2::new(viewport_size.x, viewport_size.y);
+        let window_size = Vec2::new(
+            window.physical_width() as f32,
+            window.physical_height() as f32,
+        );
+        if let Some((clamped_pos, clamped_size)) =
+            clamp_viewport_to_window(viewport_pos, viewport_size, window_size)
+        {
+            camera.viewport = Some(Viewport {
+                physical_position: UVec2::new(clamped_pos.x as u32, clamped_pos.y as u32),
+                physical_size: UVec2::new(clamped_size.x as u32, clamped_size.y as u32),
+                depth: 0.0..1.0,
+            });
+        } else {
             camera.is_active = false;
             camera.viewport = Some(Viewport {
                 physical_position: UVec2::new(0, 0),
                 physical_size: UVec2::new(1, 1),
                 depth: 0.0..1.0,
             });
-
-            continue;
         }
-        camera.viewport = Some(Viewport {
-            physical_position: UVec2::new(viewport_pos.x as u32, viewport_pos.y as u32),
-            physical_size: UVec2::new(viewport_size.x as u32, viewport_size.y as u32),
-            depth: 0.0..1.0,
-        });
     }
 }
 
@@ -2762,6 +2793,8 @@ fn set_secondary_camera_viewport(
 
             let viewport_pos = available_rect.left_top().to_vec2() * scale_factor;
             let viewport_size = available_rect.size() * scale_factor;
+            let viewport_pos = Vec2::new(viewport_pos.x, viewport_pos.y);
+            let viewport_size = Vec2::new(viewport_size.x, viewport_size.y);
 
             if viewport_size.x < 1.0 || viewport_size.y < 1.0 {
                 camera.is_active = false;
@@ -2773,17 +2806,32 @@ fn set_secondary_camera_viewport(
                 continue;
             }
 
-            camera.is_active = true;
-            // Offset secondary cameras to avoid colliding with primary orders.
-            let base_order =
-                SECONDARY_GRAPH_ORDER_BASE + SECONDARY_GRAPH_ORDER_STRIDE * state.id.0 as isize;
-            let offset = base_order + index as isize;
-            camera.order = offset;
-            camera.viewport = Some(Viewport {
-                physical_position: UVec2::new(viewport_pos.x as u32, viewport_pos.y as u32),
-                physical_size: UVec2::new(viewport_size.x as u32, viewport_size.y as u32),
-                depth: 0.0..1.0,
-            });
+            let window_size = Vec2::new(
+                window.physical_width() as f32,
+                window.physical_height() as f32,
+            );
+            if let Some((clamped_pos, clamped_size)) =
+                clamp_viewport_to_window(viewport_pos, viewport_size, window_size)
+            {
+                camera.is_active = true;
+                // Offset secondary cameras to avoid colliding with primary orders.
+                let base_order =
+                    SECONDARY_GRAPH_ORDER_BASE + SECONDARY_GRAPH_ORDER_STRIDE * state.id.0 as isize;
+                let offset = base_order + index as isize;
+                camera.order = offset;
+                camera.viewport = Some(Viewport {
+                    physical_position: UVec2::new(clamped_pos.x as u32, clamped_pos.y as u32),
+                    physical_size: UVec2::new(clamped_size.x as u32, clamped_size.y as u32),
+                    depth: 0.0..1.0,
+                });
+            } else {
+                camera.is_active = false;
+                camera.viewport = Some(Viewport {
+                    physical_position: UVec2::new(0, 0),
+                    physical_size: UVec2::new(1, 1),
+                    depth: 0.0..1.0,
+                });
+            }
         }
     }
 }
