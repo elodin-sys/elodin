@@ -1696,10 +1696,25 @@ impl RootWidgetSystem for TileSystem<'_, '_> {
             colors::TRANSPARENT
         };
 
-        let central = egui::CentralPanel::default().frame(Frame {
+        #[cfg(target_os = "macos")]
+        let frame = {
+            let mut frame = Frame {
+                fill: fill_color,
+                ..Default::default()
+            };
+            if target.is_some() {
+                // Leave room for the native titlebar controls on secondary windows.
+                frame.inner_margin.top = 32;
+            }
+            frame
+        };
+        #[cfg(not(target_os = "macos"))]
+        let frame = Frame {
             fill: fill_color,
             ..Default::default()
-        });
+        };
+
+        let central = egui::CentralPanel::default().frame(frame);
 
         central.show(ctx, |ui| {
             Self::render_panel_contents(
