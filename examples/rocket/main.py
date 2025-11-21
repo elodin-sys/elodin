@@ -70,6 +70,15 @@ FinControlTrim = ty.Annotated[
     ),
 ]
 
+VBody = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "v_body",
+        el.ComponentType(el.PrimitiveType.F64, (3,)),
+        metadata={"element_names": "u,v,w"},
+    ),
+]
+
 VRelAccel = ty.Annotated[
     jax.Array,
     el.Component(
@@ -263,6 +272,7 @@ class Rocket(el.Archetype):
     fin_deflect: FinDeflect = field(default_factory=lambda: jnp.float64(0.0))
     fin_control: FinControl = field(default_factory=lambda: jnp.float64(0.0))
     fin_control_trim: FinControlTrim = field(default_factory=lambda: jnp.float64(0.0))
+    v_body: VBody = field(default_factory=lambda: jnp.array([0.0, 0.0, 0.0]))
     v_rel_accel_buffer: VRelAccelBuffer = field(
         default_factory=lambda: jnp.zeros((lp_buffer_size, 3))
     )
@@ -303,6 +313,21 @@ def mach(p: el.WorldPos, v: el.WorldVel, w: Wind) -> tuple[Mach, DynamicPressure
     dynamic_pressure = 0.5 * density * local_flow_velocity**2
     dynamic_pressure = jnp.clip(dynamic_pressure, 1e-6)
     return mach, dynamic_pressure
+
+
+@el.map
+def compute_v_body(p: el.WorldPos, v: el.WorldVel, w: Wind) -> VBody:
+    """
+    Compute velocity in body frame.
+    Transforms world velocity (relative to wind) to body frame using the rocket's orientation.
+    Returns [u, v, w] where:
+    - u = velocity along body x-axis (forward, aligned with thrust)
+    - v = velocity along body y-axis (sideways)
+    - w = velocity along body z-axis (upward)
+    """
+    # Transform world velocity (relative to wind) to body frame
+    v_body = p.angular().inverse() @ (v.linear() - w)
+    return v_body
 
 
 @el.map
@@ -489,9 +514,24 @@ w.schematic(
             viewport name=Viewport pos="rocket.world_pos + (0.0,0.0,0.0,0.0, 5.0, 0.0, 1.0)" look_at="rocket.world_pos" hdr=#true
         }
         vsplit share=0.4 {
-            graph "rocket.fin_control_trim" name="Trim Control"
-            graph "rocket.fin_deflect" name="Fin Deflection"
-            graph "rocket.aero_coefs" name="Aero Coefficients"
+            vsplit {
+                graph "rocket.fin_control_trim" name="Trim Control"
+                graph "rocket.fin_deflect" name="Fin Deflection"
+                graph "rocket.aero_coefs" name="Aero Coefficients"
+            }
+            vsplit {
+                // EQL-derived aerodynamic angles and velocity magnitude
+                // Using v_body component which contains velocity in body frame [u, v, w]
+                // Angle of Attack: Matches the actual angle_of_attack function exactly:
+                //   arccos(dot(u, [-1,0,0]) / norm(u)) * -sign(w)
+                //   = arccos(-u[0] / norm(u)) * -sign(w)
+                //   The arccos() formula automatically clips its input to [-1, 1] to match Python's behavior
+                //   = arccos((rocket.v_body[0] * -1.0) / rocket.v_body.norm()) * (rocket.v_body[2] * -1.0).sign()
+                query_plot Angle-of-Attack-EQL query="((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(0.000000001, 999999)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign()" type="eql" auto_refresh=#true
+                
+                // Velocity magnitude using norm() formula
+                query_plot Velocity-Magnitude query="rocket.v_body.norm()" type="eql" auto_refresh=#true
+            }
         }
     }
 
@@ -509,7 +549,8 @@ w.schematic(
 )
 
 non_effectors = (
-    mach
+    compute_v_body
+    | mach
     | angle_of_attack
     | accel_setpoint_smooth
     | v_rel_accel
@@ -529,6 +570,5 @@ w.run(
     sim_time_step=SIM_TIME_STEP,
     # run_time_step=SIM_TIME_STEP,  # This creates real-time streaming
     default_playback_speed=1.0,
-    # Ensure external control components are properly handled
-    # The copy_db_to_world should run before each tick
+    max_ticks=5000,
 )

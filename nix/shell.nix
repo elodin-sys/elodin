@@ -173,8 +173,9 @@ in {
           echo "uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml"
           echo ""
 
-          export RUSTC_WRAPPER="''${SCCACHE_BIN}"
-          export SCCACHE_DIR="''${HOME}/.cache/sccache"
+          export RUSTC_WRAPPER=""
+          # export RUSTC_WRAPPER="''${SCCACHE_BIN}"
+          # export SCCACHE_DIR="''${HOME}/.cache/sccache"
           mkdir -p "''${SCCACHE_DIR}"
           exec ${pkgs.zsh}/bin/zsh
         fi

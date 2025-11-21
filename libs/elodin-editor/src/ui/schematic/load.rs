@@ -534,17 +534,23 @@ impl LoadSchematicParams<'_, '_> {
                 let graph_bundle = GraphBundle::new(
                     &mut self.render_layer_alloc,
                     BTreeMap::default(),
-                    "Query Plot".to_string(),
+                    plot.label.clone(),
                 );
                 let entity = self
                     .commands
                     .spawn(QueryPlotData {
                         data: plot.clone(),
+                        // Set last_refresh to None so the query executes immediately on first render
+                        last_refresh: None,
                         ..Default::default()
                     })
                     .insert(graph_bundle)
                     .id();
-                let pane = Pane::QueryPlot(super::query_plot::QueryPlotPane { entity, rect: None });
+                let pane = Pane::QueryPlot(super::query_plot::QueryPlotPane {
+                    entity,
+                    rect: None,
+                    scrub_icon: None,
+                });
                 tile_state.insert_tile(Tile::Pane(pane), parent_id, false)
             }
             Panel::Dashboard(dashboard) => {

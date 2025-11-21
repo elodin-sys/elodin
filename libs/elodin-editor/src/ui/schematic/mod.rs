@@ -379,15 +379,29 @@ impl EqlExt for eql::Expr {
                     .collect()
             }
             eql::Expr::ArrayAccess(expr, i) => {
-                let eql::Expr::ComponentPart(component_part) = &**expr else {
-                    return vec![];
-                };
-                vec![(ComponentPath::from_name(&component_part.name), *i)]
+                // Handle array access - recursively get components from the inner expression
+                match &**expr {
+                    eql::Expr::ComponentPart(component_part) => {
+                        vec![(ComponentPath::from_name(&component_part.name), *i)]
+                    }
+                    // For formulas or binary ops, extract components recursively
+                    _ => expr.to_graph_components(),
+                }
             }
             eql::Expr::Tuple(exprs) => exprs
                 .iter()
                 .flat_map(|expr| expr.to_graph_components().into_iter())
                 .collect(),
+            eql::Expr::BinaryOp(left, right, _) => {
+                // Extract components from both operands
+                let mut components = left.to_graph_components();
+                components.extend(right.to_graph_components());
+                components
+            }
+            eql::Expr::Formula(_, expr) => {
+                // Extract components from the formula's receiver/operand
+                expr.to_graph_components()
+            }
             _ => vec![],
         }
     }

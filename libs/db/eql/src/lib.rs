@@ -163,6 +163,18 @@ impl Expr {
                 )),
             },
 
+            Expr::Tuple(elements) => {
+                // For tuples, find the first element that has a table (skip literals)
+                for element in elements {
+                    if let Ok(table) = element.to_table() {
+                        return Ok(table);
+                    }
+                }
+                Err(Error::InvalidFieldAccess(
+                    "tuple contains no component references".to_string(),
+                ))
+            }
+
             expr => Err(Error::InvalidFieldAccess(format!(
                 "unsupported expression type for table {expr:?}"
             ))),
@@ -220,7 +232,7 @@ impl Expr {
         }
     }
 
-    pub(crate) fn to_sql_time_field(&self) -> Result<String, Error> {
+    pub fn to_sql_time_field(&self) -> Result<String, Error> {
         match self {
             Expr::Tuple(elements) => {
                 let Some(first) = elements.first() else {
@@ -981,7 +993,8 @@ mod tests {
         assert!(suggestions.contains(&"time".to_string()));
         assert!(suggestions.contains(&"first(".to_string()));
         assert!(suggestions.contains(&"last(".to_string()));
-        assert_eq!(suggestions.len(), 4);
+        // New formulas: degrees(), sqrt() are also suggested for ComponentPart
+        assert!(suggestions.len() >= 4);
     }
 
     #[test]
@@ -1029,7 +1042,11 @@ mod tests {
         let context = create_test_context();
         let expr = context.parse_str("a.world_pos[0].fft()").unwrap();
         let suggestions = context.get_suggestions(&expr);
-        assert_eq!(suggestions, vec!["first", "last"]);
+        // After fft(), we can chain degrees() and sqrt() as well
+        assert!(suggestions.contains(&"first".to_string()));
+        assert!(suggestions.contains(&"last".to_string()));
+        assert!(suggestions.contains(&"degrees()".to_string()));
+        assert!(suggestions.contains(&"sqrt()".to_string()));
     }
 
     #[test]

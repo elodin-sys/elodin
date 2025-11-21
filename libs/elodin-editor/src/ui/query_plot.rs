@@ -22,19 +22,17 @@ use impeller2_wkt::{ArrowIPC, ErrorResponse, QueryPlot, QueryType, SQLQuery};
 use itertools::Itertools;
 
 use crate::{
-    EqlContext,
+    EqlContext, SelectedObject, SelectedTimeRange, TimeRangeBehavior,
     ui::{
         colors::{ColorExt, EColor, get_scheme},
         plot::{
-            AXIS_LABEL_MARGIN, GraphState, NOTCH_LENGTH, PlotBounds, STEPS_X_WIDTH_DIVISOR,
-            STEPS_Y_HEIGHT_DIVISOR, XYLine, draw_borders, draw_y_axis, get_inner_rect,
+            GraphState, PlotBounds, PlotDataSource, TimeseriesPlot, XYLine, get_inner_rect,
             gpu::{LineBundle, LineConfig, LineHandle, LineUniform, LineWidgetWidth},
-            pretty_round,
         },
-        utils::format_num,
         widgets::WidgetSystem,
     },
 };
+use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp};
 
 use super::plot::{Line, gpu};
 
@@ -42,6 +40,7 @@ use super::plot::{Line, gpu};
 pub struct QueryPlotPane {
     pub entity: Entity,
     pub rect: Option<egui::Rect>,
+    pub scrub_icon: Option<egui::TextureId>,
 }
 
 #[derive(Component)]
@@ -53,6 +52,7 @@ pub struct QueryPlotData {
     pub x_offset: f64,
     pub y_offset: f64,
     pub last_refresh: Option<Instant>,
+    pub earliest_timestamp: Option<impeller2::types::Timestamp>, // Store earliest timestamp for relative time conversion
 }
 
 impl Default for QueryPlotData {
@@ -73,6 +73,7 @@ impl Default for QueryPlotData {
             x_offset: Default::default(),
             y_offset: Default::default(),
             last_refresh: Some(Instant::now()),
+            earliest_timestamp: None,
         }
     }
 }
@@ -95,8 +96,83 @@ impl QueryPlotData {
         let x_col = batch.column(0);
         let y_col = batch.column(1);
 
-        self.x_offset = array_iter(x_col).fold(f64::INFINITY, f64::min);
-        self.y_offset = array_iter(y_col).fold(f64::INFINITY, f64::min);
+        // Convert timestamp X column to seconds for proper time axis display
+        // Also track the earliest absolute timestamp for relative time conversion
+        let (x_values, earliest_abs_timestamp): (Vec<f64>, Option<i64>) = match x_col.data_type() {
+            DataType::Timestamp(TimeUnit::Microsecond, _) => {
+                let values: Vec<i64> = x_col
+                    .as_any()
+                    .downcast_ref::<TimestampMicrosecondArray>()
+                    .unwrap()
+                    .iter()
+                    .map(|x| x.unwrap_or_default())
+                    .collect();
+                let earliest = values.iter().min().copied();
+                let relative: Vec<f64> = values.iter().map(|&x| x as f64 / 1_000_000.0).collect();
+                (relative, earliest)
+            }
+            DataType::Timestamp(TimeUnit::Nanosecond, _) => {
+                let values: Vec<i64> = x_col
+                    .as_any()
+                    .downcast_ref::<TimestampNanosecondArray>()
+                    .unwrap()
+                    .iter()
+                    .map(|x| x.unwrap_or_default())
+                    .collect();
+                let earliest = values.iter().min().copied();
+                let relative: Vec<f64> =
+                    values.iter().map(|&x| x as f64 / 1_000_000_000.0).collect();
+                (relative, earliest)
+            }
+            DataType::Timestamp(TimeUnit::Millisecond, _) => {
+                let values: Vec<i64> = x_col
+                    .as_any()
+                    .downcast_ref::<TimestampMillisecondArray>()
+                    .unwrap()
+                    .iter()
+                    .map(|x| x.unwrap_or_default())
+                    .collect();
+                let earliest = values.iter().min().copied();
+                let relative: Vec<f64> = values.iter().map(|&x| x as f64 / 1_000.0).collect();
+                (relative, earliest)
+            }
+            DataType::Timestamp(TimeUnit::Second, _) => {
+                let values: Vec<i64> = x_col
+                    .as_any()
+                    .downcast_ref::<TimestampSecondArray>()
+                    .unwrap()
+                    .iter()
+                    .map(|x| x.unwrap_or_default())
+                    .collect();
+                let earliest = values.iter().min().copied();
+                let relative: Vec<f64> = values.iter().map(|&x| x as f64).collect();
+                (relative, earliest)
+            }
+            _ => {
+                // For non-timestamp types, use the existing array_iter logic
+                let values: Vec<f64> = array_iter(x_col).collect();
+                (values, None)
+            }
+        };
+
+        // Store earliest timestamp if this is the first batch or if we found an earlier one
+        if let Some(earliest) = earliest_abs_timestamp
+            && (self.earliest_timestamp.is_none()
+                || Some(impeller2::types::Timestamp(earliest)) < self.earliest_timestamp)
+        {
+            self.earliest_timestamp = Some(impeller2::types::Timestamp(earliest));
+        }
+
+        // Filter out NaN and infinite values for offset calculation
+        let finite_x_values: Vec<f64> = x_values
+            .iter()
+            .copied()
+            .filter(|&x| x.is_finite())
+            .collect();
+        let finite_y_values: Vec<f64> = array_iter(y_col).filter(|&y| y.is_finite()).collect();
+
+        self.x_offset = finite_x_values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+        self.y_offset = finite_y_values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
 
         if !self.x_offset.is_finite() {
             self.x_offset = 0.0;
@@ -113,12 +189,16 @@ impl QueryPlotData {
             y_values: vec![],
         };
 
-        for value in array_iter(x_col) {
-            xy_line.push_x_value((value - self.x_offset) as f32);
-        }
-
-        for value in array_iter(y_col) {
-            xy_line.push_y_value((value - self.y_offset) as f32);
+        // Only add finite x and y pairs to avoid breaking rendering
+        let mut y_iter = array_iter(y_col);
+        for x_value in x_values {
+            if let Some(y_value) = y_iter.next()
+                && x_value.is_finite()
+                && y_value.is_finite()
+            {
+                xy_line.push_x_value((x_value - self.x_offset) as f32);
+                xy_line.push_y_value((y_value - self.y_offset) as f32);
+            }
         }
 
         let handle = xy_lines.add(xy_line);
@@ -153,6 +233,12 @@ pub struct QueryPlotWidget<'w, 's> {
     graphs_state: Query<'w, 's, &'static mut GraphState>,
     eql_context: Res<'w, EqlContext>,
     commands: Commands<'w, 's>,
+    xy_lines: ResMut<'w, Assets<XYLine>>,
+    selected_time_range: Res<'w, SelectedTimeRange>,
+    earliest_timestamp: Res<'w, EarliestTimestamp>,
+    current_timestamp: Res<'w, CurrentTimestamp>,
+    selected_object: ResMut<'w, SelectedObject>,
+    time_range_behavior: ResMut<'w, TimeRangeBehavior>,
 }
 
 trait Vec2Ext {
@@ -173,8 +259,13 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
         world: &mut bevy::prelude::World,
         state: &mut bevy::ecs::system::SystemState<Self>,
         ui: &mut egui::Ui,
-        QueryPlotPane { entity, .. }: Self::Args,
+        QueryPlotPane {
+            entity, scrub_icon, ..
+        }: Self::Args,
     ) -> Self::Output {
+        // Use a default texture ID if scrub_icon is not provided
+        // This should only happen during initialization, and will be set properly in the UI
+        let scrub_icon = scrub_icon.unwrap_or(egui::TextureId::default());
         let mut state = state.get_mut(world);
         let Ok(mut plot) = state.states.get_mut(entity) else {
             return;
@@ -191,15 +282,53 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                 plot.last_refresh = Some(Instant::now());
                 let query = match plot.data.query_type {
                     QueryType::SQL => plot.data.query.to_string(),
-                    QueryType::EQL => match state.eql_context.0.sql(&plot.data.query) {
-                        Ok(sql) => sql,
-                        Err(err) => {
-                            plot.state = QueryPlotState::Error(ErrorResponse {
-                                description: err.to_string(),
-                            });
-                            return;
+                    QueryType::EQL => {
+                        // Parse the EQL expression
+                        let expr = match state.eql_context.0.parse_str(&plot.data.query) {
+                            Ok(expr) => expr,
+                            Err(err) => {
+                                plot.state = QueryPlotState::Error(ErrorResponse {
+                                    description: err.to_string(),
+                                });
+                                return;
+                            }
+                        };
+                        // Get time field for query plots (they need time as first column, value as second)
+                        let time_field = match expr.to_sql_time_field() {
+                            Ok(field) => field,
+                            Err(err) => {
+                                plot.state = QueryPlotState::Error(ErrorResponse {
+                                    description: err.to_string(),
+                                });
+                                return;
+                            }
+                        };
+                        // Generate SQL and prepend time column
+                        match expr.to_sql(&state.eql_context.0) {
+                            Ok(mut sql) => {
+                                // Insert time column after "select " (case-insensitive)
+                                if let Some(pos) = sql.to_lowercase().find("select ") {
+                                    let after_select = pos + 7;
+                                    sql.insert_str(after_select, &format!("{}, ", time_field));
+                                } else {
+                                    // Fallback: prepend time at the beginning
+                                    sql = format!(
+                                        "select {}, {}",
+                                        time_field,
+                                        sql.trim_start_matches("select ")
+                                            .trim_start_matches("SELECT ")
+                                    );
+                                }
+                                sql
+                            }
+                            Err(err) => {
+                                plot.state = QueryPlotState::Error(ErrorResponse {
+                                    description: err.to_string(),
+                                });
+                                return;
+                            }
                         }
-                    },
+                    }
                 };
                 state.commands.send_req_reply(
                     SQLQuery(query),
@@ -233,18 +362,29 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                 );
             }
 
-            if let Some(xy_line_handle) = &plot.xy_line_handle {
+            if let Some(xy_line_handle) = plot.xy_line_handle.clone() {
                 let Ok(mut graph_state) = state.graphs_state.get_mut(entity) else {
                     return;
                 };
 
+                // Store values we need before borrowing plot
+                let query_label = plot.data.label.clone();
+                let query_color = plot.data.color.into_color32();
+                let offset_y = plot.offset().y;
+                let earliest_timestamp = plot
+                    .earliest_timestamp
+                    .unwrap_or(state.earliest_timestamp.0);
+                let selected_range = state.selected_time_range.0.clone();
+                let current_timestamp = state.current_timestamp.0;
+
+                // X-range is already relative (time starts from 0), Y-range needs offset subtracted
                 let data_bounds = PlotBounds::new(
-                    graph_state.x_range.start,
+                    graph_state.x_range.start, // Already relative
                     graph_state.y_range.start,
-                    graph_state.x_range.end,
+                    graph_state.x_range.end, // Already relative
                     graph_state.y_range.end,
                 )
-                .offset(-plot.offset());
+                .offset(DVec2::new(0.0, -offset_y)); // Only subtract Y offset
                 let rect = ui.max_rect();
                 let inner_rect = get_inner_rect(ui.max_rect());
                 let bounds = sync_bounds_query(&mut graph_state, data_bounds, rect, inner_rect);
@@ -256,20 +396,17 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                     .entity(entity)
                     .try_insert(Projection::Orthographic(bounds.as_projection()));
 
-                let entity = if let Some(entity) = plot.line_entity {
+                let line_entity = if let Some(entity) = plot.line_entity {
                     entity
                 } else {
                     state.commands.spawn_empty().id()
                 };
-                let line_entity = state
+                state
                     .commands
-                    .entity(entity)
+                    .entity(line_entity)
                     .insert(LineBundle {
                         line: LineHandle::XY(xy_line_handle.clone()),
-                        uniform: LineUniform::new(
-                            graph_state.line_width,
-                            plot.data.color.into_color32().into_bevy(),
-                        ),
+                        uniform: LineUniform::new(graph_state.line_width, query_color.into_bevy()),
                         config: LineConfig {
                             render_layers: graph_state.render_layers.clone(),
                         },
@@ -277,22 +414,36 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                         graph_type: graph_state.graph_type,
                     })
                     .insert(ChildOf(entity))
-                    .insert(LineWidgetWidth(ui.max_rect().width() as usize))
-                    .id();
-
-                let mut steps_y = ((inner_rect.height() / STEPS_Y_HEIGHT_DIVISOR) as usize).max(1);
-                if !steps_y.is_multiple_of(2) {
-                    steps_y += 1;
-                }
-
-                let steps_x = ((inner_rect.width() / STEPS_X_WIDTH_DIVISOR) as usize).max(1);
-
-                draw_borders(ui, rect, inner_rect);
-                let axis_bounds = bounds.offset(plot.offset());
-                draw_y_axis(ui, axis_bounds, steps_y, rect, inner_rect);
-                draw_x_axis(ui, axis_bounds, steps_x, rect, inner_rect);
+                    .insert(LineWidgetWidth(ui.max_rect().width() as usize));
 
                 plot.line_entity = Some(line_entity);
+
+                // Use TimeseriesPlot for unified rendering
+                let plot_renderer = TimeseriesPlot::from_bounds_with_relative_time(
+                    rect,
+                    bounds,
+                    selected_range,
+                    earliest_timestamp,
+                    current_timestamp,
+                    true, // is_relative_time = true for query plots
+                );
+
+                let data_source = PlotDataSource::XY {
+                    xy_lines: &state.xy_lines,
+                    xy_line_handle,
+                    query_label,
+                    query_color,
+                };
+
+                plot_renderer.render(
+                    ui,
+                    data_source,
+                    &mut graph_state,
+                    &scrub_icon,
+                    entity,
+                    state.selected_object.as_mut(),
+                    state.time_range_behavior.as_mut(),
+                );
             }
             match &plot.state {
                 QueryPlotState::None => {
@@ -317,69 +468,6 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                 }
             }
         });
-    }
-}
-
-pub fn draw_x_axis(
-    ui: &mut egui::Ui,
-    bounds: PlotBounds,
-    steps_x: usize,
-    rect: egui::Rect,
-    inner_rect: egui::Rect,
-) {
-    let border_stroke = egui::Stroke::new(1.0, get_scheme().border_primary);
-    let scheme = get_scheme();
-    let mut font_id = egui::TextStyle::Monospace.resolve(ui.style());
-    font_id.size = 11.0;
-
-    let draw_tick = |tick| {
-        let value = DVec2::new(tick, bounds.min_y);
-        let screen_pos = bounds.value_to_screen_pos(rect, value);
-        let screen_pos = egui::pos2(screen_pos.x, inner_rect.max.y);
-        ui.painter().line_segment(
-            [screen_pos, screen_pos + egui::vec2(0.0, NOTCH_LENGTH)],
-            border_stroke,
-        );
-
-        ui.painter().text(
-            screen_pos + egui::vec2(0.0, NOTCH_LENGTH + AXIS_LABEL_MARGIN),
-            egui::Align2::CENTER_TOP,
-            format_num(tick),
-            font_id.clone(),
-            scheme.text_primary,
-        );
-    };
-
-    if !bounds.min_x.is_finite() || !bounds.max_x.is_finite() {
-        return;
-    }
-
-    if bounds.min_x <= 0.0 {
-        let step_size = pretty_round((bounds.max_x - bounds.min_x) / steps_x as f64);
-        if !step_size.is_normal() {
-            return;
-        }
-        let mut i = 0.0;
-
-        while i < bounds.max_x {
-            draw_tick(i);
-            i += step_size;
-        }
-        draw_tick(i);
-
-        let mut i = 0.0;
-        while i > bounds.min_x {
-            draw_tick(i);
-            i -= step_size;
-        }
-        draw_tick(i);
-    } else {
-        let step_size = pretty_round(bounds.width() / steps_x as f64);
-        let steps_x = (0..=steps_x).map(|i| bounds.min_x + (i as f64) * step_size);
-
-        for x_step in steps_x {
-            draw_tick(x_step);
-        }
     }
 }
 
@@ -417,8 +505,10 @@ pub fn auto_bounds(
                         itertools::MinMaxResult::MinMax(min, max) => (*min, *max),
                         itertools::MinMaxResult::NoElements => continue,
                     };
-                    let min = min as f64 + plot.x_offset;
-                    let max = max as f64 + plot.x_offset;
+                    // For X-axis (time), keep relative values (x_values already have offset subtracted)
+                    // Don't add x_offset back - we want time to start from 0
+                    let min = min as f64;
+                    let max = max as f64;
 
                     graph_state.x_range = min..max;
                 }

@@ -13,10 +13,10 @@ pub use gpu::{
 
 mod widget;
 pub use widget::{
-    AXIS_LABEL_MARGIN, LockTracker, NOTCH_LENGTH, PlotBounds, PlotWidget, STEPS_X_WIDTH_DIVISOR,
-    STEPS_Y_HEIGHT_DIVISOR, XSyncClock, auto_y_bounds, draw_borders, draw_y_axis, get_inner_rect,
-    graph_touch, pan_graph, pretty_round, reset_graph, sync_graphs, sync_locked_graphs,
-    track_lock_toggles, zoom_graph,
+    AXIS_LABEL_MARGIN, LockTracker, NOTCH_LENGTH, PlotBounds, PlotDataSource, PlotWidget,
+    STEPS_X_WIDTH_DIVISOR, STEPS_Y_HEIGHT_DIVISOR, TimeseriesPlot, XSyncClock, auto_y_bounds,
+    draw_borders, draw_y_axis, get_inner_rect, graph_touch, pan_graph, pretty_round, reset_graph,
+    sync_graphs, sync_locked_graphs, track_lock_toggles, zoom_graph,
 };
 
 mod state;
