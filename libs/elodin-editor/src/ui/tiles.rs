@@ -9,9 +9,7 @@ use bevy::{
 use bevy_editor_cam::prelude::{EditorCam, EnabledMotion, OrbitConstraint};
 use bevy_egui::{
     EguiContexts,
-    egui::{
-        self, Color32, CornerRadius, Frame, Id, RichText, Stroke, TopBottomPanel, Ui, Visuals, vec2,
-    },
+    egui::{self, Color32, CornerRadius, Frame, Id, RichText, Stroke, Ui, Visuals, vec2},
 };
 use bevy_render::{
     camera::{Exposure, PhysicalCameraParameters},
@@ -51,7 +49,6 @@ use super::{
     video_stream::{IsTileVisible, VideoDecoderHandle},
     widgets::{RootWidgetSystem, WidgetSystem, WidgetSystemExt},
 };
-use crate::ui::compute_secondary_window_title;
 use crate::{
     EqlContext, GridHandle, MainCamera,
     object_3d::{EditableEQL, compile_eql_expr},
@@ -1699,34 +1696,12 @@ impl RootWidgetSystem for TileSystem<'_, '_> {
             colors::TRANSPARENT
         };
 
-        let header = target.and_then(|id| {
-            world
-                .get_resource::<WindowManager>()
-                .and_then(|windows| windows.get_secondary(id))
-                .map(|state| (id, compute_secondary_window_title(state)))
-        });
-
-        if let Some((id, title)) = header.as_ref() {
-            TopBottomPanel::top(format!("secondary_header_{:?}", id))
-                .exact_height(32.0)
-                .show(ctx, |ui| {
-                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                        // leave room for native window buttons on macOS
-                        ui.add_space(60.0);
-                        ui.label(RichText::new(title).color(Color32::WHITE).strong());
-                    });
-                });
-        }
-
         let central = egui::CentralPanel::default().frame(Frame {
             fill: fill_color,
             ..Default::default()
         });
 
         central.show(ctx, |ui| {
-            if header.is_some() {
-                ui.add_space(6.0);
-            }
             Self::render_panel_contents(
                 world,
                 ui,
