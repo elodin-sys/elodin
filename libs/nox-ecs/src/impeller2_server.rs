@@ -53,7 +53,7 @@ impl Server {
                 .map_err(|_| stellarator::Error::JoinFailed)
                 .map_err(Error::from)
         })
-        .await?
+        .await
     }
 }
 
