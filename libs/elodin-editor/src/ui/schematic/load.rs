@@ -122,14 +122,11 @@ fn resolve_window_descriptor(
         }
     }
 
-    let layout_locked = window.screen.is_some() || window.screen_rect.is_some();
-
     Some(SecondaryWindowDescriptor {
         path: resolved,
         title: window.title.clone(),
         screen: window.screen.map(|idx| idx as usize),
         screen_rect: window.screen_rect.or(Some(DEFAULT_SECONDARY_RECT)),
-        layout_locked,
     })
 }
 

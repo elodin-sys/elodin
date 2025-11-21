@@ -735,17 +735,13 @@ fn sync_secondary_windows(
     }
 
     for state in windows.secondary_mut().iter_mut() {
-        let current_key = (
-            state.descriptor.screen,
-            state.descriptor.layout_locked,
-            state.relayout_phase,
-        );
+        let current_key = (state.descriptor.screen, false, state.relayout_phase);
         let last = log_state.0.get(&state.id).copied();
         if last != Some(current_key) {
             info!(
                 id = state.id.0,
                 screen = state.descriptor.screen.map(|s| s as i32).unwrap_or(-1),
-                locked = state.descriptor.layout_locked,
+                locked = false,
                 relayout = ?state.relayout_phase,
                 "secondary_window_state"
             );
@@ -836,14 +832,13 @@ fn sync_secondary_windows(
         state.window_entity = Some(window_entity);
         state.applied_screen = pre_applied_screen;
         state.applied_rect = None;
-        state.relayout_phase =
-            if state.descriptor.layout_locked && state.descriptor.screen.is_some() {
-                tiles::SecondaryWindowRelayoutPhase::NeedScreen
-            } else if state.descriptor.layout_locked && state.descriptor.screen_rect.is_some() {
-                tiles::SecondaryWindowRelayoutPhase::NeedRect
-            } else {
-                tiles::SecondaryWindowRelayoutPhase::Idle
-            };
+        state.relayout_phase = if state.descriptor.screen.is_some() {
+            tiles::SecondaryWindowRelayoutPhase::NeedScreen
+        } else if state.descriptor.screen_rect.is_some() {
+            tiles::SecondaryWindowRelayoutPhase::NeedRect
+        } else {
+            tiles::SecondaryWindowRelayoutPhase::Idle
+        };
         state.skip_metadata_capture = true;
         existing_map.insert(state.id, window_entity);
         let window_ref = WindowRef::Entity(window_entity);
@@ -869,14 +864,7 @@ fn apply_secondary_window_screens(
         ) {
             continue;
         }
-        if matches!(
-            state.relayout_phase,
-            tiles::SecondaryWindowRelayoutPhase::NeedScreen
-        ) && !state.descriptor.layout_locked
-        {
-            state.relayout_phase = tiles::SecondaryWindowRelayoutPhase::Idle;
-            continue;
-        }
+        // layout locking removed; just proceed if we have the window.
         let Some(entity) = state.window_entity else {
             continue;
         };
@@ -1500,6 +1488,13 @@ fn complete_primary_screen_assignment(
     if LINUX_MULTI_WINDOW {
         layout.pending_fullscreen_exit_started_at = None;
     }
+    // One-shot: clear screen/rect so the user can move the primary window freely after load.
+    layout.screen = None;
+    layout.screen_rect = None;
+    layout.requested_screen = None;
+    layout.requested_rect = None;
+    layout.applied_screen = None;
+    layout.applied_rect = None;
     info!(
         screen = layout.screen.map(|idx| idx as i32).unwrap_or(-1),
         "{reason}"
@@ -1678,9 +1673,6 @@ fn capture_secondary_window_screens(
     screens: Query<(Entity, &Monitor)>,
 ) {
     for state in windows.secondary_mut().iter_mut() {
-        if state.descriptor.layout_locked {
-            continue;
-        }
         let Some(entity) = state.window_entity else {
             continue;
         };
@@ -1764,10 +1756,6 @@ fn track_secondary_window_geometry(
             continue;
         };
         let monitors = collect_sorted_monitors(window);
-        if state.descriptor.layout_locked {
-            enforce_locked_secondary_rect(state, window, &monitors, forced_position);
-            continue;
-        }
         record_window_rect_from_window(state, window, &monitors, forced_position);
     }
 }
@@ -1811,9 +1799,7 @@ fn confirm_primary_screen_assignment(
     ) {
         layout.awaiting_screen_confirmation = false;
     }
-    if layout.screen.is_some() || layout.screen_rect.is_some() {
-        enforce_locked_primary_layout(layout, window, &monitors);
-    }
+    let _ = monitors;
 }
 
 fn collect_sorted_monitors(window: &WinitWindow) -> Vec<MonitorHandle> {
@@ -1884,9 +1870,6 @@ fn record_window_rect_from_window(
     monitors: &[MonitorHandle],
     forced_position: Option<PhysicalPosition<i32>>,
 ) {
-    if state.descriptor.layout_locked {
-        return;
-    }
     if state.is_metadata_capture_blocked() {
         return;
     }
@@ -1926,131 +1909,6 @@ fn record_window_rect_from_window(
     ) {
         state.descriptor.screen = Some(idx);
         state.descriptor.screen_rect = Some(rect);
-    }
-}
-
-fn enforce_locked_secondary_rect(
-    state: &mut tiles::SecondaryWindowState,
-    window: &WinitWindow,
-    monitors: &[MonitorHandle],
-    forced_position: Option<PhysicalPosition<i32>>,
-) {
-    if state.descriptor.screen.is_none() && state.descriptor.screen_rect.is_none() {
-        return;
-    }
-    if state.is_metadata_capture_blocked() {
-        return;
-    }
-    let size = window.outer_size();
-    if size.width == 0 || size.height == 0 {
-        return;
-    }
-    let position = forced_position.or_else(|| window.outer_position().ok());
-    let Some(position) = position else {
-        return;
-    };
-
-    let monitor_index = state
-        .descriptor
-        .screen
-        .or_else(|| tiles::monitor_index_from_bounds(position, size, monitors));
-    let Some(idx) = monitor_index else {
-        return;
-    };
-    let Some(monitor_handle) = monitors.get(idx).cloned() else {
-        return;
-    };
-
-    if state.descriptor.screen != Some(idx) {
-        state.applied_screen = None;
-        state.applied_rect = None;
-        state.awaiting_screen_confirmation = false;
-        state.pending_exit_state = tiles::PendingFullscreenExit::None;
-        state.pending_fullscreen_exit = false;
-        state.pending_exit_started_at = None;
-        state.relayout_phase = tiles::SecondaryWindowRelayoutPhase::NeedScreen;
-        state.skip_metadata_capture = true;
-        state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_STABILIZE_GUARD);
-        return;
-    }
-
-    let monitor_pos = monitor_handle.position();
-    if !event_position_is_reliable(position, monitor_pos) {
-        return;
-    }
-
-    let Some(actual_rect) = tiles::rect_from_bounds(
-        (position.x, position.y),
-        (size.width, size.height),
-        (monitor_pos.x, monitor_pos.y),
-        (monitor_handle.size().width, monitor_handle.size().height),
-    ) else {
-        return;
-    };
-
-    if Some(actual_rect) != state.descriptor.screen_rect {
-        state.applied_rect = None;
-        state.relayout_phase = tiles::SecondaryWindowRelayoutPhase::NeedRect;
-        state.skip_metadata_capture = true;
-        state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_STABILIZE_GUARD);
-    }
-}
-
-fn enforce_locked_primary_layout(
-    layout: &mut tiles::PrimaryWindowLayout,
-    window: &WinitWindow,
-    monitors: &[MonitorHandle],
-) {
-    let wants_screen = layout.screen.is_some();
-    let wants_rect = layout.screen_rect.is_some();
-    if !wants_screen && !wants_rect {
-        return;
-    }
-
-    if wants_screen {
-        let current = detect_window_screen(window, monitors);
-        if layout.screen != current {
-            layout.applied_screen = None;
-            layout.applied_rect = None;
-            layout.awaiting_screen_confirmation = false;
-            layout.pending_fullscreen_exit = false;
-            layout.pending_fullscreen_exit_started_at = None;
-            layout.relayout_phase = tiles::PrimaryWindowRelayoutPhase::NeedScreen;
-            return;
-        }
-    }
-
-    if wants_rect {
-        let Some(monitor_handle) = layout
-            .screen
-            .and_then(|idx| monitors.get(idx).cloned())
-            .or_else(|| window.current_monitor())
-        else {
-            return;
-        };
-        let monitor_pos = monitor_handle.position();
-        let monitor_size = monitor_handle.size();
-        if monitor_size.width == 0 || monitor_size.height == 0 {
-            return;
-        }
-        let Ok(position) = window.outer_position() else {
-            return;
-        };
-        let size = window.outer_size();
-
-        let Some(actual_rect) = tiles::rect_from_bounds(
-            (position.x, position.y),
-            (size.width, size.height),
-            (monitor_pos.x, monitor_pos.y),
-            (monitor_size.width, monitor_size.height),
-        ) else {
-            return;
-        };
-
-        if layout.screen_rect != Some(actual_rect) {
-            layout.applied_rect = None;
-            layout.relayout_phase = tiles::PrimaryWindowRelayoutPhase::NeedRect;
-        }
     }
 }
 
