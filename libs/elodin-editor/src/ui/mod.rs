@@ -16,10 +16,7 @@ use bevy::{
         WindowRef, WindowResized, WindowResolution,
     },
 };
-use bevy_egui::{
-    EguiContext, EguiContexts,
-    egui::{self, Color32, Label, Margin, RichText},
-};
+use bevy_egui::{EguiContext, EguiContexts, egui::{self, Color32, Label, RichText}};
 use egui_tiles::{Container, Tile};
 #[cfg(target_os = "macos")]
 use std::sync::Once;
@@ -58,7 +55,6 @@ use schematic::SchematicPlugin;
 
 use self::colors::get_scheme;
 use self::{command_palette::CommandPaletteState, plot::GraphState, timeline::timeline_slider};
-use egui::CornerRadius;
 use impeller2::types::ComponentId;
 use impeller2_bevy::ComponentValueMap;
 use impeller2_wkt::ComponentValue;
@@ -70,7 +66,6 @@ use self::inspector::entity::ComponentFilter;
 
 use self::command_palette::CommandPalette;
 use self::widgets::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystemExt};
-use self::{button::EImageButton, utils::MarginSides};
 
 pub mod actions;
 pub mod button;
@@ -242,7 +237,6 @@ impl Plugin for UiPlugin {
             .init_resource::<ComponentFilter>()
             .init_resource::<InspectorAnchor>()
             .init_resource::<tiles::WindowManager>()
-            .init_resource::<FullscreenState>()
             .init_resource::<SettingModalState>()
             .init_resource::<HdrEnabled>()
             .init_resource::<timeline_slider::UITick>()
@@ -363,234 +357,6 @@ impl SettingModalState {
     }
 }
 
-#[derive(Resource, Default)]
-pub struct FullscreenState(pub bool);
-
-pub struct TitlebarIcons {
-    pub icon_close: egui::TextureId,
-    pub icon_fullscreen: egui::TextureId,
-    pub icon_exit_fullscreen: egui::TextureId,
-}
-
-#[derive(SystemParam)]
-pub struct Titlebar<'w, 's> {
-    fullscreen_state: ResMut<'w, FullscreenState>,
-    app_exit: EventWriter<'w, AppExit>,
-    windows: Query<
-        'w,
-        's,
-        (
-            Entity,
-            &'static Window,
-            &'static bevy::window::PrimaryWindow,
-        ),
-    >,
-    winit_windows: NonSend<'w, bevy::winit::WinitWindows>,
-}
-
-impl RootWidgetSystem for Titlebar<'_, '_> {
-    type Args = TitlebarIcons;
-    type Output = ();
-
-    fn ctx_system(
-        world: &mut World,
-        state: &mut SystemState<Self>,
-        ctx: &mut egui::Context,
-        args: Self::Args,
-    ) {
-        let mut state_mut = state.get_mut(world);
-
-        let mut fullscreen_state = state_mut.fullscreen_state;
-
-        let TitlebarIcons {
-            icon_fullscreen,
-            icon_exit_fullscreen,
-            icon_close,
-        } = args;
-
-        let titlebar_height = if cfg!(target_os = "macos")
-            || cfg!(target_os = "windows")
-            || cfg!(target_os = "linux")
-        {
-            45.0
-        } else {
-            34.0
-        };
-        let traffic_light_offset = if cfg!(target_os = "macos") { 72. } else { 0. };
-        let titlebar_scale = if cfg!(target_os = "macos") { 1.4 } else { 1.3 };
-        let titlebar_margin = if cfg!(target_os = "macos") {
-            8
-        } else if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
-            0
-        } else {
-            4
-        };
-        let titlebar_right_margin = if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
-            0.
-        } else {
-            10.
-        };
-
-        theme::set_theme(ctx);
-        egui::TopBottomPanel::top("title_bar")
-            .frame(
-                egui::Frame {
-                    fill: Color32::TRANSPARENT,
-                    stroke: egui::Stroke::new(0.0, get_scheme().border_primary),
-                    ..Default::default()
-                }
-                .inner_margin(
-                    Margin::same(titlebar_margin)
-                        .left(16.0)
-                        .right(titlebar_right_margin),
-                ),
-            )
-            .exact_height(titlebar_height)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.horizontal_centered(|ui| {
-                    ui.add_space(traffic_light_offset);
-                    if cfg!(target_family = "wasm") {
-                        if ui
-                            .add(
-                                EImageButton::new(
-                                    if fullscreen_state.bypass_change_detection().0 {
-                                        icon_exit_fullscreen
-                                    } else {
-                                        icon_fullscreen
-                                    },
-                                )
-                                .scale(titlebar_scale, titlebar_scale)
-                                .bg_color(Color32::TRANSPARENT),
-                            )
-                            .clicked()
-                        {
-                            fullscreen_state.0 = !fullscreen_state.0;
-                        }
-                        ui.add_space(8.0);
-                    }
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
-                            let Ok((window_id, _, _)) = state_mut.windows.single() else {
-                                return;
-                            };
-                            let winit_window =
-                                state_mut.winit_windows.get_window(window_id).unwrap();
-                            ui.horizontal_centered(|ui| {
-                                ui.style_mut().visuals.widgets.hovered.weak_bg_fill =
-                                    egui::Color32::from_hex("#E81123").expect("invalid red color");
-
-                                ui.style_mut().visuals.widgets.hovered.fg_stroke =
-                                    egui::Stroke::new(1.0, Color32::WHITE);
-                                ui.style_mut().visuals.widgets.hovered.corner_radius =
-                                    CornerRadius {
-                                        nw: 0,
-                                        ne: if cfg!(target_os = "windows") { 4 } else { 0 },
-                                        sw: 0,
-                                        se: 0,
-                                    };
-                                let btn = if cfg!(target_os = "windows") {
-                                    egui::Button::new(
-                                        RichText::new("\u{e8bb}")
-                                            .font(egui::FontId {
-                                                size: 10.0,
-                                                family: egui::FontFamily::Proportional,
-                                            })
-                                            .line_height(Some(11.0)),
-                                    )
-                                } else {
-                                    egui::Button::image(egui::load::SizedTexture::new(
-                                        icon_close,
-                                        egui::vec2(11., 11.),
-                                    ))
-                                    .image_tint_follows_text_color(true)
-                                };
-                                if ui
-                                    .add_sized(
-                                        egui::vec2(45.0, 40.0),
-                                        btn.stroke(egui::Stroke::NONE),
-                                    )
-                                    .clicked()
-                                {
-                                    state_mut.app_exit.write(AppExit::Success);
-                                }
-                                ui.add_space(2.0);
-                            });
-
-                            let maximized = winit_window.is_maximized();
-                            ui.scope(|ui| {
-                                ui.style_mut().visuals.widgets.hovered.fg_stroke =
-                                    egui::Stroke::new(1.0, Color32::WHITE);
-                                ui.style_mut().visuals.widgets.hovered.weak_bg_fill =
-                                    egui::Color32::from_hex("#4E4D53").expect("invalid red color");
-                                ui.style_mut().visuals.widgets.hovered.corner_radius =
-                                    CornerRadius::ZERO;
-                                let btn = if cfg!(target_os = "windows") {
-                                    egui::Button::new(
-                                        RichText::new(if maximized {
-                                            "\u{e923}"
-                                        } else {
-                                            "\u{e922}"
-                                        })
-                                        .font(egui::FontId {
-                                            size: 10.0,
-                                            family: egui::FontFamily::Proportional,
-                                        })
-                                        .line_height(Some(11.0)),
-                                    )
-                                } else {
-                                    egui::Button::image(egui::load::SizedTexture::new(
-                                        if maximized {
-                                            icon_exit_fullscreen
-                                        } else {
-                                            icon_fullscreen
-                                        },
-                                        egui::vec2(11., 11.),
-                                    ))
-                                    .image_tint_follows_text_color(true)
-                                };
-                                if ui
-                                    .add_sized(
-                                        egui::vec2(45.0, 40.0),
-                                        btn.stroke(egui::Stroke::NONE),
-                                    )
-                                    .clicked()
-                                {
-                                    winit_window.set_maximized(!maximized);
-                                }
-
-                                ui.add_space(2.0);
-                                if ui
-                                    .add_sized(
-                                        egui::vec2(45.0, 40.0),
-                                        egui::Button::new(
-                                            RichText::new(if cfg!(target_os = "windows") {
-                                                "\u{e921}"
-                                            } else {
-                                                "—"
-                                            })
-                                            .font(egui::FontId {
-                                                size: 10.0,
-                                                family: egui::FontFamily::Proportional,
-                                            })
-                                            .line_height(Some(11.0)),
-                                        )
-                                        .stroke(egui::Stroke::NONE),
-                                    )
-                                    .clicked()
-                                {
-                                    linux_request_minimize(winit_window);
-                                }
-                            });
-                            ui.add_space(8.0);
-                        }
-                    });
-                });
-            });
-    }
-}
-
 #[derive(SystemParam)]
 pub struct MainLayout<'w, 's> {
     contexts: EguiContexts<'w, 's>,
@@ -609,18 +375,12 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
     ) {
         let state_mut = state.get_mut(world);
 
-        let mut contexts = state_mut.contexts;
-        let images = state_mut.images;
+        let _contexts = state_mut.contexts;
+        let _images = state_mut.images;
 
         theme::set_theme(ctx);
 
-        let titlebar_icons = TitlebarIcons {
-            icon_fullscreen: contexts.add_image(images.icon_fullscreen.clone_weak()),
-            icon_exit_fullscreen: contexts.add_image(images.icon_exit_fullscreen.clone_weak()),
-            icon_close: contexts.add_image(images.icon_close.clone_weak()),
-        };
-
-        world.add_root_widget_with::<Titlebar, With<PrimaryWindow>>("titlebar", titlebar_icons);
+        // Custom titlebar disabled; rely on native window chrome across all OSes.
 
         #[cfg(not(target_family = "wasm"))]
         world.add_root_widget::<status_bar::StatusBar>("status_bar");
