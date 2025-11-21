@@ -96,7 +96,6 @@ pub struct SecondaryWindowDescriptor {
     pub title: Option<String>,
     pub screen: Option<usize>,
     pub screen_rect: Option<WindowRect>,
-    pub layout_locked: bool,
 }
 
 impl SecondaryWindowDescriptor {
@@ -181,6 +180,7 @@ impl PrimaryWindowLayout {
         self.pending_fullscreen_exit_started_at = None;
         self.requested_screen = screen;
         self.requested_rect = rect;
+        // One-shot relayout on explicit load if screen/rect is provided.
         self.relayout_phase = if self.screen.is_some() {
             PrimaryWindowRelayoutPhase::NeedScreen
         } else if self.screen_rect.is_some() {
@@ -196,8 +196,10 @@ impl SecondaryWindowState {
     pub fn relayout_phase_from_descriptor(
         descriptor: &SecondaryWindowDescriptor,
     ) -> SecondaryWindowRelayoutPhase {
-        if descriptor.layout_locked {
+        if descriptor.screen.is_some() {
             SecondaryWindowRelayoutPhase::NeedScreen
+        } else if descriptor.screen_rect.is_some() {
+            SecondaryWindowRelayoutPhase::NeedRect
         } else {
             SecondaryWindowRelayoutPhase::Idle
         }
@@ -243,9 +245,6 @@ impl SecondaryWindowState {
         window: &Window,
         screens: &Query<(Entity, &Monitor)>,
     ) {
-        if self.descriptor.layout_locked {
-            return;
-        }
         if self.is_metadata_capture_blocked() {
             return;
         }
@@ -300,9 +299,6 @@ impl SecondaryWindowState {
         window: &WinitWindow,
         monitors: &[MonitorHandle],
     ) -> bool {
-        if self.descriptor.layout_locked {
-            return false;
-        }
         if self.is_metadata_capture_blocked() {
             return false;
         }
@@ -541,7 +537,6 @@ impl WindowManager {
             title: cleaned_title.or_else(|| Some(format!("Window {}", id.0 + 1))),
             screen: None,
             screen_rect: None,
-            layout_locked: false,
         };
         let relayout_phase = SecondaryWindowState::relayout_phase_from_descriptor(&descriptor);
         let tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
