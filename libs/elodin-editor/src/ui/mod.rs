@@ -405,12 +405,17 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         #[cfg(not(target_family = "wasm"))]
         world.add_root_widget::<status_bar::StatusBar>("status_bar");
 
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| {
-                ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");
-                ui.add_widget_with::<tiles::TileSystem>(world, "tile_system", None);
-            });
+        let mut frame = egui::Frame::new();
+        #[cfg(target_os = "macos")]
+        {
+            // Leave a small top inset so native titlebar controls don't overlap egui.
+            frame.inner_margin.top = 32;
+        }
+
+        egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
+            ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");
+            ui.add_widget_with::<tiles::TileSystem>(world, "tile_system", None);
+        });
     }
 }
 
