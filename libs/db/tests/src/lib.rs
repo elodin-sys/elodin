@@ -652,7 +652,7 @@ mod tests {
                 .expect("missing component in snapshot");
             let (timestamps, _) = component
                 .time_series
-                .get_range(Timestamp(i64::MIN)..Timestamp(i64::MAX))
+                .get_range(&(Timestamp(i64::MIN)..Timestamp(i64::MAX)))
                 .expect("failed to read snapshot range");
             assert_eq!(timestamps.len(), 3);
             let (_, buf) = component
