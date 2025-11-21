@@ -22,11 +22,11 @@ use bevy_egui::{
 };
 use egui_tiles::{Container, Tile};
 #[cfg(target_os = "macos")]
-use std::sync::Once;
+use winit::window::Fullscreen;
 use winit::{
     dpi::{PhysicalPosition, PhysicalSize},
     monitor::MonitorHandle,
-    window::{Fullscreen, Window as WinitWindow},
+    window::Window as WinitWindow,
 };
 
 pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
@@ -36,11 +36,13 @@ pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
     height: 80,
 };
 const SCREEN_RELAYOUT_MAX_ATTEMPTS: u8 = 5;
-const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(2000);
-const FULLSCREEN_EXIT_CONFIRMATION_TIMEOUT: Duration = Duration::from_millis(500);
 const LINUX_MULTI_WINDOW: bool = cfg!(target_os = "linux");
 const SECONDARY_RECT_CAPTURE_LOAD_GUARD: Duration = Duration::from_millis(2500);
 const SECONDARY_RECT_CAPTURE_STABILIZE_GUARD: Duration = Duration::from_millis(400);
+#[cfg(target_os = "macos")]
+const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(3500);
+#[cfg(not(target_os = "macos"))]
+const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(2000);
 const PRIMARY_VIEWPORT_ORDER_BASE: isize = 0;
 const PRIMARY_GRAPH_ORDER_BASE: isize = 100;
 // Secondary cameras are offset high to avoid clashing with primary/UI cameras.
@@ -495,7 +497,7 @@ fn sync_secondary_windows(
     }
     let monitors_any = collect_monitors_from_any_window(&winit_windows);
     if monitors_any.is_none() {
-        warn!("No monitor info available; secondary windows will use default sizing/position");
+        warn!("No screen info available; secondary windows will use default sizing/position");
     }
 
     for (id, entity) in existing_map.clone() {
@@ -554,21 +556,21 @@ fn sync_secondary_windows(
         let (resolution, position, _pre_applied_rect, pre_applied_screen) = if let Some(rect) =
             state.descriptor.screen_rect
             && let Some(screen_idx) = state.descriptor.screen
-            && let Some(monitors) = monitors_any.as_ref()
-            && let Some(monitor) = monitors.get(screen_idx)
+            && let Some(screens) = monitors_any.as_ref()
+            && let Some(screen) = screens.get(screen_idx)
         {
-            let monitor_pos = monitor.position();
-            let monitor_size = monitor.size();
-            let width_px = ((rect.width as f64 / 100.0) * monitor_size.width as f64)
+            let screen_pos = screen.position();
+            let screen_size = screen.size();
+            let width_px = ((rect.width as f64 / 100.0) * screen_size.width as f64)
                 .round()
                 .max(1.0);
-            let height_px = ((rect.height as f64 / 100.0) * monitor_size.height as f64)
+            let height_px = ((rect.height as f64 / 100.0) * screen_size.height as f64)
                 .round()
                 .max(1.0);
-            let x = monitor_pos.x
-                + ((rect.x as f64 / 100.0) * monitor_size.width as f64).round() as i32;
-            let y = monitor_pos.y
-                + ((rect.y as f64 / 100.0) * monitor_size.height as f64).round() as i32;
+            let x =
+                screen_pos.x + ((rect.x as f64 / 100.0) * screen_size.width as f64).round() as i32;
+            let y =
+                screen_pos.y + ((rect.y as f64 / 100.0) * screen_size.height as f64).round() as i32;
             (
                 WindowResolution::new(width_px as f32, height_px as f32),
                 Some(WindowPosition::At(IVec2::new(x, y))),
@@ -645,71 +647,12 @@ fn apply_secondary_window_screens(
 
         match state.relayout_phase {
             tiles::SecondaryWindowRelayoutPhase::NeedScreen => {
-                #[cfg(target_os = "macos")]
-                {
-                    let monitors = collect_sorted_monitors(window);
-                    let current = detect_window_screen(window, &monitors)
-                        .map(|idx| idx as i32)
-                        .unwrap_or(-1);
-                    for (idx, monitor) in monitors.iter().enumerate() {
-                        info!(
-                            path = %state.descriptor.path.display(),
-                            monitor_index = idx as i32,
-                            pos_x = monitor.position().x,
-                            pos_y = monitor.position().y,
-                            width = monitor.size().width,
-                            height = monitor.size().height,
-                            name = monitor.name().unwrap_or_default(),
-                            "macOS monitor list (secondary)"
-                        );
-                    }
-                    info!(
-                        path = %state.descriptor.path.display(),
-                        target_screen = state.descriptor.screen.map(|s| s as i32).unwrap_or(-1),
-                        monitors = monitors.len(),
-                        current_screen = current,
-                        "macOS monitor inventory for secondary window"
-                    );
-                }
                 info!(
                     path = %state.descriptor.path.display(),
                     target_screen = state.descriptor.screen.map(|s| s as i32).unwrap_or(-1),
                     relayout_phase = ?state.relayout_phase,
                     "Attempting secondary screen assignment"
                 );
-                if state.pending_exit_state == tiles::PendingFullscreenExit::Requested {
-                    if LINUX_MULTI_WINDOW {
-                        if window.fullscreen().is_some() {
-                            state
-                                .pending_exit_started_at
-                                .get_or_insert_with(Instant::now);
-                            exit_fullscreen(window);
-                            if !fullscreen_exit_timed_out(state.pending_exit_started_at) {
-                                continue;
-                            }
-                            info!(
-                                path = %state.descriptor.path.display(),
-                                "Timed out while waiting for fullscreen exit; forcing screen assignment"
-                            );
-                        }
-                        linux_force_windowed(window);
-                        state.pending_fullscreen_exit = false;
-                        state.pending_exit_started_at = None;
-                    } else {
-                        if window.fullscreen().is_some() {
-                            state
-                                .pending_exit_started_at
-                                .get_or_insert_with(Instant::now);
-                            exit_fullscreen(window);
-                            state.pending_fullscreen_exit = false;
-                            state.pending_exit_started_at = None;
-                        }
-                        window.set_maximized(false);
-                        linux_clear_minimized(window);
-                    }
-                    state.pending_exit_state = tiles::PendingFullscreenExit::None;
-                }
-
                 if state.awaiting_screen_confirmation {
                     info!(
                         path = %state.descriptor.path.display(),
@@ -730,12 +673,9 @@ fn apply_secondary_window_screens(
                 if window_on_target_screen(state, window, &monitors) {
                     if LINUX_MULTI_WINDOW {
                         exit_fullscreen(window);
-                        linux_force_windowed(window);
+                        force_windowed(window);
                     } else if window.fullscreen().is_some() {
                         exit_fullscreen(window);
-                        state.pending_fullscreen_exit = false;
-                        state.pending_exit_state = tiles::PendingFullscreenExit::None;
-                        state.pending_exit_started_at = None;
                     }
                     complete_screen_assignment(state, window, "Confirmed screen assignment (sync)");
                     continue;
@@ -751,12 +691,19 @@ fn apply_secondary_window_screens(
                 };
 
                 if let Some(target_monitor) = monitors.get(screen).cloned() {
-                    assign_window_to_screen(state, window, target_monitor);
-                    if !LINUX_MULTI_WINDOW {
-                        state.pending_exit_state = tiles::PendingFullscreenExit::Requested;
-                        state
-                            .pending_exit_started_at
-                            .get_or_insert_with(Instant::now);
+                    assign_window_to_screen(state, window, target_monitor.clone());
+                    // Si le WM ne réévalue pas le moniteur courant, tente un recentrage explicite.
+                    if detect_window_screen(window, &monitors) != Some(screen) {
+                        recenter_window_on_screen(window, &target_monitor);
+                        #[cfg(target_os = "macos")]
+                        {
+                            // Dernier recours macOS : hop fullscreen borderless sur l'écran cible, puis retour fenêtré.
+                            window.set_fullscreen(Some(Fullscreen::Borderless(Some(
+                                target_monitor.clone(),
+                            ))));
+                            window.set_fullscreen(None);
+                            recenter_window_on_screen(window, &target_monitor);
+                        }
                     }
                     state.relayout_attempts = state.relayout_attempts.saturating_add(1);
                     if state.relayout_started_at.is_none() {
@@ -808,33 +755,6 @@ fn apply_primary_window_layout(
         return;
     };
     let layout = windows.primary_layout_mut();
-    #[cfg(target_os = "macos")]
-    {
-        let monitors = collect_sorted_monitors(window);
-        let current = detect_window_screen(window, &monitors)
-            .map(|idx| idx as i32)
-            .unwrap_or(-1);
-        static MONITOR_DUMP_ONCE: Once = Once::new();
-        MONITOR_DUMP_ONCE.call_once(|| {
-            for (idx, monitor) in monitors.iter().enumerate() {
-                info!(
-                    monitor_index = idx as i32,
-                    pos_x = monitor.position().x,
-                    pos_y = monitor.position().y,
-                    width = monitor.size().width,
-                    height = monitor.size().height,
-                    name = monitor.name().unwrap_or_default(),
-                    "macOS monitor list"
-                );
-            }
-        });
-        info!(
-            target_screen = layout.screen.map(|s| s as i32).unwrap_or(-1),
-            monitors = monitors.len(),
-            current_screen = current,
-            "macOS monitor inventory for primary window"
-        );
-    }
     match layout.relayout_phase {
         tiles::PrimaryWindowRelayoutPhase::Idle => {}
         tiles::PrimaryWindowRelayoutPhase::NeedScreen => {
@@ -843,32 +763,6 @@ fn apply_primary_window_layout(
                 relayout_phase = ?layout.relayout_phase,
                 "Attempting primary screen assignment"
             );
-            if layout.pending_fullscreen_exit {
-                if LINUX_MULTI_WINDOW {
-                    if window.fullscreen().is_some() {
-                        exit_fullscreen(window);
-                        if fullscreen_exit_timed_out(layout.pending_fullscreen_exit_started_at) {
-                            info!(
-                                screen = layout.screen.map(|idx| idx as i32).unwrap_or(-1),
-                                "Timed out while waiting for primary window fullscreen exit; forcing apply"
-                            );
-                        } else {
-                            return;
-                        }
-                    }
-                    linux_force_windowed(window);
-                    layout.pending_fullscreen_exit_started_at = None;
-                } else {
-                    if window.fullscreen().is_some() {
-                        window.set_fullscreen(None);
-                        window.set_maximized(false);
-                        linux_clear_minimized(window);
-                        return;
-                    }
-                    layout.pending_fullscreen_exit = false;
-                }
-                layout.pending_fullscreen_exit = false;
-            }
 
             if layout.awaiting_screen_confirmation {
                 let still_waiting = layout
@@ -901,13 +795,14 @@ fn apply_primary_window_layout(
                         exit_fullscreen(window);
                         return;
                     }
-                    linux_force_windowed(window);
+                    force_windowed(window);
                 } else {
                     if window.fullscreen().is_some() {
-                        window.set_fullscreen(None);
+                        exit_fullscreen(window);
+                    } else {
+                        window.set_maximized(false);
+                        linux_clear_minimized(window);
                     }
-                    window.set_maximized(false);
-                    linux_clear_minimized(window);
                 }
                 complete_primary_screen_assignment(
                     layout,
@@ -952,10 +847,6 @@ fn apply_primary_window_layout(
                     } else {
                         tiles::PrimaryWindowRelayoutPhase::Idle
                     };
-                    layout.pending_fullscreen_exit = false;
-                    if LINUX_MULTI_WINDOW {
-                        layout.pending_fullscreen_exit_started_at = None;
-                    }
                 }
             } else {
                 warn!(
@@ -985,7 +876,6 @@ fn apply_secondary_window_rect(
 ) -> bool {
     info!(
         path = %state.descriptor.path.display(),
-        pending_fullscreen_exit = state.pending_fullscreen_exit,
         applied_rect = ?state.applied_rect,
         target_rect = ?state.descriptor.screen_rect,
         size_w = window.outer_size().width,
@@ -996,42 +886,6 @@ fn apply_secondary_window_rect(
     );
     if state.descriptor.screen_rect.is_some() {
         state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_LOAD_GUARD);
-    }
-    if state.pending_fullscreen_exit {
-        if LINUX_MULTI_WINDOW {
-            if window.fullscreen().is_some() {
-                state
-                    .pending_exit_started_at
-                    .get_or_insert_with(Instant::now);
-                exit_fullscreen(window);
-                if fullscreen_exit_timed_out(state.pending_exit_started_at) {
-                    info!(
-                        path = %state.descriptor.path.display(),
-                        "Timed out while exiting fullscreen; applying rect anyway"
-                    );
-                } else {
-                    return false;
-                }
-            }
-            linux_force_windowed(window);
-            state.pending_fullscreen_exit = false;
-            state.pending_exit_started_at = None;
-        } else {
-            if window.fullscreen().is_some() {
-                state
-                    .pending_exit_started_at
-                    .get_or_insert_with(Instant::now);
-                window.set_fullscreen(None);
-                window.set_maximized(false);
-                linux_clear_minimized(window);
-                info!(
-                    path = %state.descriptor.path.display(),
-                    "Waiting for fullscreen exit before applying rect"
-                );
-                return false;
-            }
-            state.pending_fullscreen_exit = false;
-        }
     }
 
     let Some(rect) = state.descriptor.screen_rect else {
@@ -1081,20 +935,14 @@ fn apply_secondary_window_rect(
     }
 
     if window.fullscreen().is_some() {
-        if LINUX_MULTI_WINDOW {
-            exit_fullscreen(window);
-            linux_force_windowed(window);
-        } else {
-            window.set_fullscreen(None);
-            window.set_maximized(false);
-            linux_clear_minimized(window);
-        }
+        exit_fullscreen(window);
+        force_windowed(window);
         info!(
             path = %state.descriptor.path.display(),
             "Exited fullscreen before applying rect"
         );
     } else if LINUX_MULTI_WINDOW {
-        linux_force_windowed(window);
+        force_windowed(window);
     } else {
         window.set_maximized(false);
         linux_clear_minimized(window);
@@ -1193,18 +1041,10 @@ fn assign_window_to_screen(
         screen = state.descriptor.screen.map(|idx| idx as i32).unwrap_or(-1),
         "assign_window_to_screen"
     );
-    if LINUX_MULTI_WINDOW {
-        window.set_fullscreen(None);
-        window.set_visible(true);
-        linux_force_windowed(window);
-        state.pending_fullscreen_exit = false;
-        state.pending_exit_started_at = None;
-        state.pending_exit_state = tiles::PendingFullscreenExit::None;
-    } else {
-        window.set_fullscreen(Some(Fullscreen::Borderless(Some(target_monitor))));
-        state.pending_fullscreen_exit = true;
-        state.pending_exit_started_at = Some(Instant::now());
-    }
+    // Align with Linux path: avoid fullscreen hops on macOS and keep windowed positioning.
+    exit_fullscreen(window);
+    window.set_visible(true);
+    force_windowed(window);
     window.set_outer_position(PhysicalPosition::new(x, y));
     state.skip_metadata_capture = true;
 }
@@ -1255,17 +1095,6 @@ fn complete_primary_screen_assignment(
     };
     layout.relayout_attempts = 0;
     layout.relayout_started_at = None;
-    layout.pending_fullscreen_exit = false;
-    if LINUX_MULTI_WINDOW {
-        layout.pending_fullscreen_exit_started_at = None;
-    }
-    // One-shot: clear screen/rect so the user can move the primary window freely after load.
-    layout.screen = None;
-    layout.screen_rect = None;
-    layout.requested_screen = None;
-    layout.requested_rect = None;
-    layout.applied_screen = None;
-    layout.applied_rect = None;
     info!(
         screen = layout.screen.map(|idx| idx as i32).unwrap_or(-1),
         "{reason}"
@@ -1273,7 +1102,7 @@ fn complete_primary_screen_assignment(
 }
 
 fn assign_primary_window_to_screen(
-    layout: &mut tiles::PrimaryWindowLayout,
+    _layout: &mut tiles::PrimaryWindowLayout,
     window: &WinitWindow,
     target_monitor: MonitorHandle,
 ) {
@@ -1286,51 +1115,42 @@ fn assign_primary_window_to_screen(
     if LINUX_MULTI_WINDOW {
         window.set_fullscreen(None);
         window.set_visible(true);
-        linux_force_windowed(window);
-        layout.pending_fullscreen_exit = false;
-        layout.pending_fullscreen_exit_started_at = None;
+        force_windowed(window);
     } else {
-        window.set_fullscreen(Some(Fullscreen::Borderless(Some(target_monitor))));
-        layout.pending_fullscreen_exit = true;
-        layout.pending_fullscreen_exit_started_at = Some(Instant::now());
+        // Align with Linux path: avoid fullscreen hops on macOS.
+        exit_fullscreen(window);
+        window.set_visible(true);
     }
     window.set_outer_position(PhysicalPosition::new(x, y));
+}
+
+fn recenter_window_on_screen(window: &WinitWindow, target_monitor: &MonitorHandle) {
+    let monitor_pos = target_monitor.position();
+    let monitor_size = target_monitor.size();
+    let window_size = window.outer_size();
+    // Recenter, puis nudge vers l'intérieur de l'écran pour aider winit à rafraîchir current_monitor().
+    let center_x = monitor_pos.x + (monitor_size.width as i32 - window_size.width as i32) / 2;
+    let center_y = monitor_pos.y + (monitor_size.height as i32 - window_size.height as i32) / 2;
+    window.set_outer_position(PhysicalPosition::new(center_x, center_y));
+
+    let nudge_x = monitor_pos
+        .x
+        .saturating_add(10)
+        .min(monitor_pos.x + monitor_size.width as i32 - 1);
+    let nudge_y = monitor_pos
+        .y
+        .saturating_add(10)
+        .min(monitor_pos.y + monitor_size.height as i32 - 1);
+    window.set_outer_position(PhysicalPosition::new(nudge_x, nudge_y));
+    // Secoue légèrement la taille pour forcer un rafraîchissement du monitor courant.
+    let size = window.outer_size();
+    let _ = window.request_inner_size(size);
 }
 
 fn apply_primary_window_rect(
     layout: &mut tiles::PrimaryWindowLayout,
     window: &WinitWindow,
 ) -> bool {
-    if layout.pending_fullscreen_exit {
-        if LINUX_MULTI_WINDOW {
-            if window.fullscreen().is_some() {
-                layout
-                    .pending_fullscreen_exit_started_at
-                    .get_or_insert_with(Instant::now);
-                exit_fullscreen(window);
-                if fullscreen_exit_timed_out(layout.pending_fullscreen_exit_started_at) {
-                    info!(
-                        screen = layout.screen.map(|idx| idx as i32).unwrap_or(-1),
-                        "Timed out while exiting fullscreen for primary window; applying rect anyway"
-                    );
-                } else {
-                    return false;
-                }
-            }
-            linux_force_windowed(window);
-            layout.pending_fullscreen_exit = false;
-            layout.pending_fullscreen_exit_started_at = None;
-        } else {
-            if window.fullscreen().is_some() {
-                window.set_fullscreen(None);
-                window.set_maximized(false);
-                linux_clear_minimized(window);
-                return false;
-            }
-            layout.pending_fullscreen_exit = false;
-        }
-    }
-
     let Some(rect) = layout.screen_rect else {
         layout.applied_rect = None;
         linux_clear_minimized(window);
@@ -1367,16 +1187,10 @@ fn apply_primary_window_rect(
     }
 
     if window.fullscreen().is_some() {
-        if LINUX_MULTI_WINDOW {
-            exit_fullscreen(window);
-            linux_force_windowed(window);
-        } else {
-            window.set_fullscreen(None);
-            window.set_maximized(false);
-            linux_clear_minimized(window);
-        }
+        exit_fullscreen(window);
+        force_windowed(window);
     } else if LINUX_MULTI_WINDOW {
-        linux_force_windowed(window);
+        force_windowed(window);
     } else {
         window.set_maximized(false);
         linux_clear_minimized(window);
@@ -1444,6 +1258,16 @@ fn capture_secondary_window_screens(
     screens: Query<(Entity, &Monitor)>,
 ) {
     for state in windows.secondary_mut().iter_mut() {
+        // Evite d'écraser le screen cible pendant un relayout en cours.
+        #[cfg(target_os = "macos")]
+        if matches!(
+            state.relayout_phase,
+            tiles::SecondaryWindowRelayoutPhase::NeedScreen
+        ) && state.awaiting_screen_confirmation
+        {
+            continue;
+        }
+
         let Some(entity) = state.window_entity else {
             continue;
         };
@@ -1736,13 +1560,7 @@ fn exit_fullscreen(window: &WinitWindow) {
     window.set_decorations(true);
 }
 
-fn fullscreen_exit_timed_out(started_at: Option<Instant>) -> bool {
-    started_at
-        .map(|instant| instant.elapsed() > FULLSCREEN_EXIT_CONFIRMATION_TIMEOUT)
-        .unwrap_or(false)
-}
-
-fn linux_force_windowed(window: &WinitWindow) {
+fn force_windowed(window: &WinitWindow) {
     if !LINUX_MULTI_WINDOW {
         return;
     }
