@@ -779,6 +779,14 @@ impl TileState {
             };
             match tile {
                 Tile::Pane(Pane::Graph(graph)) => out.push(graph.id),
+                Tile::Pane(Pane::Viewport(viewport)) => {
+                    if let Some(cam) = viewport.camera {
+                        out.push(cam);
+                    }
+                    if let Some(nav_cam) = viewport.nav_gizmo_camera {
+                        out.push(nav_cam);
+                    }
+                }
                 Tile::Pane(_) => {}
                 Tile::Container(container) => {
                     for child in container.children() {
