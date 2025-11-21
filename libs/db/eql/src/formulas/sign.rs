@@ -20,8 +20,9 @@ impl super::Formula for Sign {
     }
 
     fn to_qualified_field(&self, expr: &Expr) -> Result<String, Error> {
-        // DataFusion doesn't support PostgreSQL's sign() function
-        // Use CASE statement: CASE WHEN x > 0 THEN 1 WHEN x < 0 THEN -1 ELSE 0 END
+        // DataFusion (the SQL backend used by elodin-db) doesn't have a native sign() function.
+        // Implement it using a CASE statement that returns -1 for negative, 0 for zero, 1 for positive.
+        // This matches the behavior of NumPy's sign() and PostgreSQL's sign() functions.
         let inner = expr.to_qualified_field()?;
         Ok(format!(
             "CASE WHEN {} > 0 THEN 1 WHEN {} < 0 THEN -1 ELSE 0 END",
@@ -120,5 +121,41 @@ mod tests {
         let sign_formula = Sign;
         let suggestions = sign_formula.suggestions(&expr, &context);
         assert!(suggestions.contains(&"sign()".to_string()));
+    }
+
+    #[test]
+    fn test_sign_with_negation() {
+        // Test sign of negated value (common pattern in AoA calculation)
+        let context = create_test_context();
+        let expr = context.parse_str("(a.value * -1.0).sign()").unwrap();
+        let sql = expr.to_sql(&context).unwrap();
+        assert!(sql.contains("CASE WHEN"));
+        assert!(sql.contains("THEN 1"));
+        assert!(sql.contains("THEN -1"));
+        assert!(sql.contains("ELSE 0 END"));
+        assert!(sql.contains(" * -1"));
+    }
+
+    #[test]
+    fn test_sign_case_statement_structure() {
+        // Verify the CASE statement is correctly structured
+        let context = create_test_context();
+        let expr = context.parse_str("a.value.sign()").unwrap();
+        let sql = expr.to_sql(&context).unwrap();
+
+        // Should have positive case first, then negative, then zero
+        let case_pos = sql.find("> 0 THEN 1").expect("Should have positive case");
+        let case_neg = sql.find("< 0 THEN -1").expect("Should have negative case");
+        let case_zero = sql.find("ELSE 0").expect("Should have zero case");
+
+        // Verify order: positive < negative < zero
+        assert!(
+            case_pos < case_neg,
+            "Positive case should come before negative"
+        );
+        assert!(
+            case_neg < case_zero,
+            "Negative case should come before zero"
+        );
     }
 }

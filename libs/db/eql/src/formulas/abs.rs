@@ -109,4 +109,25 @@ mod tests {
         let suggestions = abs_formula.suggestions(&expr, &context);
         assert!(suggestions.contains(&"abs()".to_string()));
     }
+
+    #[test]
+    fn test_abs_with_negative_literal() {
+        let context = create_test_context();
+        let expr = context.parse_str("(a.value * -1.0).abs()").unwrap();
+        let sql = expr.to_sql(&context).unwrap();
+        assert!(sql.contains("abs("));
+        assert!(sql.contains(" * -1"));
+    }
+
+    #[test]
+    fn test_abs_chained() {
+        // Test chaining abs with other operations
+        let context = create_test_context();
+        let expr = context.parse_str("a.value.abs().sqrt()").unwrap();
+        let sql = expr.to_sql(&context).unwrap();
+        assert!(sql.contains("abs("));
+        assert!(sql.contains("sqrt("));
+        // sqrt should wrap abs
+        assert!(sql.contains("sqrt(abs("));
+    }
 }

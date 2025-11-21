@@ -92,4 +92,29 @@ mod tests {
         assert!(sql.contains("sqrt("));
         assert!(sql.contains(" * "));
     }
+
+    #[test]
+    fn test_sqrt_chained_with_abs() {
+        // Test chaining sqrt with other formulas
+        let context = create_test_context();
+        let expr = context.parse_str("a.value.sqrt().abs()").unwrap();
+        let sql = expr.to_sql(&context).unwrap();
+        assert!(sql.contains("sqrt("));
+        assert!(sql.contains("abs("));
+        // abs should wrap sqrt
+        assert!(sql.contains("abs(sqrt("));
+    }
+
+    #[test]
+    fn test_sqrt_with_addition() {
+        // Test sqrt with sum of squares (common pattern)
+        let context = create_test_context();
+        let expr = context
+            .parse_str("(a.value * a.value + 1.0).sqrt()")
+            .unwrap();
+        let sql = expr.to_sql(&context).unwrap();
+        assert!(sql.contains("sqrt("));
+        assert!(sql.contains(" + "));
+        assert!(sql.contains(" * "));
+    }
 }

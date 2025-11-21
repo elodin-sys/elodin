@@ -172,4 +172,45 @@ mod tests {
         assert!(sql.contains("GREATEST("));
         assert!(sql.contains("LEAST("));
     }
+
+    #[test]
+    fn test_clip_very_small_values() {
+        // Test clip with very small epsilon values (common for avoiding division by zero)
+        let context = create_test_context();
+        let expr = context
+            .parse_str("a.value.clip(0.000000000001, 999999)")
+            .unwrap();
+        let sql = expr.to_sql(&context).unwrap();
+        assert!(sql.contains("GREATEST("));
+        assert!(sql.contains("LEAST("));
+        assert!(sql.contains("0.000000000001"));
+        assert!(sql.contains("999999"));
+    }
+
+    #[test]
+    fn test_clip_negative_range() {
+        // Test clip with negative range
+        let context = create_test_context();
+        let expr = context.parse_str("a.value.clip(-100.0, -10.0)").unwrap();
+        let sql = expr.to_sql(&context).unwrap();
+        assert!(sql.contains("GREATEST("));
+        assert!(sql.contains("LEAST("));
+        assert!(sql.contains("-100"));
+        assert!(sql.contains("-10"));
+    }
+
+    #[test]
+    fn test_clip_structure() {
+        // Verify the SQL structure: GREATEST(min, LEAST(value, max))
+        let context = create_test_context();
+        let expr = context.parse_str("a.value.clip(1.0, 10.0)").unwrap();
+        let sql = expr.to_sql(&context).unwrap();
+
+        // Should be: GREATEST(min, LEAST(value, max))
+        let greatest_pos = sql.find("GREATEST(").expect("Should have GREATEST");
+        let least_pos = sql.find("LEAST(").expect("Should have LEAST");
+
+        // LEAST should be inside GREATEST
+        assert!(greatest_pos < least_pos, "GREATEST should wrap LEAST");
+    }
 }

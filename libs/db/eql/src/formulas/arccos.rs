@@ -129,4 +129,28 @@ mod tests {
         let suggestions = arccos_formula.suggestions(&expr, &context);
         assert!(suggestions.contains(&"arccos()".to_string()));
     }
+
+    #[test]
+    fn test_arccos_chained_with_degrees() {
+        // Test common pattern: arccos().degrees() for angle calculations
+        let context = create_test_context();
+        let expr = context.parse_str("a.value.arccos().degrees()").unwrap();
+        let sql = expr.to_sql(&context).unwrap();
+        assert!(sql.contains("acos("));
+        assert!(sql.contains("degrees("));
+        assert!(sql.contains("GREATEST(-1.0, LEAST(1.0"));
+        // degrees should wrap acos
+        assert!(sql.contains("degrees(acos("));
+    }
+
+    #[test]
+    fn test_arccos_with_division() {
+        // Test arccos with normalized vector (common AoA pattern)
+        let context = create_test_context();
+        let expr = context.parse_str("(a.value / 100.0).arccos()").unwrap();
+        let sql = expr.to_sql(&context).unwrap();
+        assert!(sql.contains("acos("));
+        assert!(sql.contains("GREATEST(-1.0, LEAST(1.0"));
+        assert!(sql.contains(" / "));
+    }
 }

@@ -226,4 +226,52 @@ mod tests {
         assert!(sql.contains("atan2("));
         assert!(sql.contains("rocket_v_body"));
     }
+
+    #[test]
+    fn test_atan2_with_float_literals() {
+        // Test atan2 with literal values
+        let context = create_test_context();
+
+        // Test y.atan2(1.0) - using literal for x
+        let expr = context.parse_str("(a.y).atan2(1.0)").unwrap();
+        let sql = expr.to_sql(&context).unwrap();
+        assert!(sql.contains("atan2("));
+        // Literal may be formatted as "1" or "1.0"
+        assert!(sql.contains("1"));
+    }
+
+    #[test]
+    fn test_atan2_chained_with_degrees() {
+        // Test common pattern: atan2().degrees()
+        let context = create_test_context();
+        let expr = context.parse_str("(a.y).atan2(a.x).degrees()").unwrap();
+        let sql = expr.to_sql(&context).unwrap();
+        assert!(sql.contains("atan2("));
+        assert!(sql.contains("degrees("));
+        // degrees should wrap atan2
+        assert!(sql.contains("degrees(atan2("));
+    }
+
+    #[test]
+    fn test_atan2_argument_order() {
+        // Verify atan2(y, x) argument order is correct
+        let context = create_test_context();
+        let expr = context.parse_str("(a.y).atan2(a.x)").unwrap();
+        let sql = expr.to_sql(&context).unwrap();
+
+        // Should be atan2(y, x) not atan2(x, y)
+        assert!(sql.contains("atan2("));
+
+        // Find positions of y and x in the atan2 call
+        let atan2_start = sql.find("atan2(").expect("Should contain atan2");
+        let y_pos = sql[atan2_start..]
+            .find("a_y")
+            .expect("Should contain y component");
+        let x_pos = sql[atan2_start..]
+            .find("a_x")
+            .expect("Should contain x component");
+
+        // y should come before x in the function call
+        assert!(y_pos < x_pos, "atan2 should have y before x: atan2(y, x)");
+    }
 }

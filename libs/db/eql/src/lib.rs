@@ -1146,4 +1146,231 @@ mod tests {
             )
         );
     }
+
+    // Integration tests for complex formula combinations
+    mod integration_tests {
+        use super::*;
+
+        fn create_rocket_context() -> Context {
+            // Create a 3D velocity vector component like rocket.v_body
+            let v_body_comp = Arc::new(Component::new(
+                "rocket.v_body".to_string(),
+                ComponentId::new("rocket.v_body"),
+                Schema::new(impeller2::types::PrimType::F64, vec![3u64]).unwrap(),
+            ));
+            Context::from_leaves([v_body_comp], Timestamp(0), Timestamp(1000))
+        }
+
+        #[test]
+        fn test_angle_of_attack_calculation() {
+            // Test the rocket angle-of-attack calculation pattern:
+            // ((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(min, max)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign()
+            let context = create_rocket_context();
+
+            let expr = context
+                .parse_str(
+                    "((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(0.000000001, 999999)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign()",
+                )
+                .unwrap();
+
+            let sql = expr.to_sql(&context).unwrap();
+
+            // Verify all formulas are present
+            assert!(sql.contains("degrees("), "Should contain degrees()");
+            assert!(sql.contains("acos("), "Should contain acos() from arccos()");
+            assert!(sql.contains("sqrt("), "Should contain sqrt() from norm()");
+            assert!(
+                sql.contains("GREATEST("),
+                "Should contain GREATEST from clip()"
+            );
+            assert!(sql.contains("LEAST("), "Should contain LEAST from clip()");
+            assert!(sql.contains("CASE WHEN"), "Should contain CASE from sign()");
+            assert!(
+                sql.contains("rocket_v_body"),
+                "Should reference rocket.v_body table"
+            );
+
+            // Verify the structure is correct (degrees wraps acos)
+            assert!(
+                sql.contains("degrees(acos("),
+                "degrees() should wrap acos()"
+            );
+        }
+
+        #[test]
+        fn test_complex_chained_formulas() {
+            // Test: (value).sqrt().abs().degrees()
+            let component = Arc::new(Component::new(
+                "a.value".to_string(),
+                ComponentId::new("a.value"),
+                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+            ));
+            let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+
+            let expr = context.parse_str("a.value.sqrt().abs().degrees()").unwrap();
+            let sql = expr.to_sql(&context).unwrap();
+
+            // Verify chaining order: degrees(abs(sqrt(value)))
+            assert!(sql.contains("sqrt("), "Should contain sqrt()");
+            assert!(sql.contains("abs("), "Should contain abs()");
+            assert!(sql.contains("degrees("), "Should contain degrees()");
+
+            // Verify proper nesting
+            assert!(
+                sql.contains("degrees(abs(sqrt("),
+                "Formulas should be properly nested"
+            );
+        }
+
+        #[test]
+        fn test_normalized_vector_with_clip() {
+            // Test: (v_body[0] / v_body.norm().clip(min, max))
+            // Note: EQL doesn't support scientific notation, so use full decimal
+            let context = create_rocket_context();
+
+            let expr = context
+                .parse_str("rocket.v_body[0] / rocket.v_body.norm().clip(0.000000000001, 999999)")
+                .unwrap();
+
+            let sql = expr.to_sql(&context).unwrap();
+
+            // Verify components
+            assert!(sql.contains("sqrt("), "norm() should generate sqrt()");
+            assert!(sql.contains("GREATEST("), "clip() should generate GREATEST");
+            assert!(sql.contains("LEAST("), "clip() should generate LEAST");
+            assert!(sql.contains(" / "), "Should contain division operator");
+        }
+
+        #[test]
+        fn test_atan2_degrees_pattern() {
+            // Test common pattern: y.atan2(x).degrees()
+            let y_comp = Arc::new(Component::new(
+                "a.y".to_string(),
+                ComponentId::new("a.y"),
+                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+            ));
+            let x_comp = Arc::new(Component::new(
+                "a.x".to_string(),
+                ComponentId::new("a.x"),
+                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+            ));
+            let context = Context::from_leaves([y_comp, x_comp], Timestamp(0), Timestamp(1000));
+
+            let expr = context.parse_str("a.y.atan2(a.x).degrees()").unwrap();
+            let sql = expr.to_sql(&context).unwrap();
+
+            // Verify structure
+            assert!(
+                sql.contains("degrees(atan2("),
+                "degrees() should wrap atan2()"
+            );
+            // Both components should be referenced
+            assert!(sql.contains("a_y"), "Should reference a.y component");
+            assert!(sql.contains("a_x"), "Should reference a.x component");
+        }
+
+        #[test]
+        fn test_sign_with_multiplication() {
+            // Test: (value * -1.0).sign()
+            let component = Arc::new(Component::new(
+                "a.value".to_string(),
+                ComponentId::new("a.value"),
+                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+            ));
+            let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+
+            let expr = context.parse_str("(a.value * -1.0).sign()").unwrap();
+            let sql = expr.to_sql(&context).unwrap();
+
+            // Verify CASE statement structure
+            assert!(sql.contains("CASE WHEN"), "Should contain CASE statement");
+            assert!(sql.contains(" * -1"), "Should contain multiplication by -1");
+        }
+
+        #[test]
+        fn test_arccos_clipping_integration() {
+            // Test that arccos automatically clips input to [-1, 1]
+            let component = Arc::new(Component::new(
+                "a.value".to_string(),
+                ComponentId::new("a.value"),
+                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+            ));
+            let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+
+            let expr = context
+                .parse_str("(a.value / 100.0).arccos().degrees()")
+                .unwrap();
+            let sql = expr.to_sql(&context).unwrap();
+
+            // Verify arccos includes clipping
+            assert!(
+                sql.contains("GREATEST(-1.0, LEAST(1.0"),
+                "arccos should clip input to [-1, 1]"
+            );
+            assert!(sql.contains("acos("), "Should contain acos function");
+            assert!(sql.contains("degrees("), "Should contain degrees function");
+        }
+
+        #[test]
+        fn test_angle_of_attack_sql_structure() {
+            // Diagnostic test for the rocket angle-of-attack calculation
+            // This test documents the exact SQL structure generated
+            let context = create_rocket_context();
+
+            let expr = context
+                .parse_str(
+                    "((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(0.000000001, 999999)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign()",
+                )
+                .unwrap();
+
+            let sql = expr.to_sql(&context).unwrap();
+
+            // Print SQL for debugging (will show in test output if run with --nocapture)
+            eprintln!("Generated SQL for angle-of-attack:");
+            eprintln!("{}", sql);
+
+            // Verify the mathematical structure:
+            // degrees(acos(GREATEST(-1, LEAST(1, -v[0] / GREATEST(min, LEAST(norm, max)))))) * CASE...
+
+            // Check for correct nesting of functions
+            assert!(
+                sql.contains("degrees("),
+                "Outermost function should be degrees()"
+            );
+            assert!(sql.contains("acos("), "Should use acos() for arccos");
+            assert!(sql.contains("sqrt("), "norm() should use sqrt()");
+            assert!(
+                sql.contains("CASE WHEN"),
+                "sign() should use CASE statement"
+            );
+
+            // Verify the clipping is present
+            assert!(
+                sql.contains("GREATEST(-1.0, LEAST(1.0"),
+                "arccos should clip to [-1, 1]"
+            );
+            assert!(
+                sql.contains("GREATEST(0.000000001"),
+                "Should clip norm to min value"
+            );
+
+            // Verify multiplication operator is present for final sign multiplication
+            assert!(
+                sql.contains(" * CASE"),
+                "Should multiply arccos result by sign"
+            );
+
+            // Note: If the angle-of-attack shows a +90° offset in the actual application,
+            // possible causes could be:
+            // 1. Coordinate system mismatch (the Python code uses thrust_vector = [-1,0,0])
+            // 2. The arccos clipping behavior differences between Python and SQL
+            // 3. Sign function behavior with zero values
+            //
+            // To debug further:
+            // - Run: cargo test -p eql --lib test_angle_of_attack_sql_structure -- --nocapture
+            // - This will print the generated SQL
+            // - Compare individual component values (v_body[0], norm, sign) in the database
+            //   vs Python to identify where the discrepancy occurs
+        }
+    }
 }

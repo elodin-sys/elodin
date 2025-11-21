@@ -98,4 +98,37 @@ mod tests {
             suggestions
         );
     }
+
+    #[test]
+    fn test_degrees_with_atan2() {
+        // Test common pattern: atan2().degrees() for angle calculations
+        // Create two components for atan2
+        let y_comp = Arc::new(Component::new(
+            "a.y".to_string(),
+            ComponentId::new("a.y"),
+            Schema::new(PrimType::F64, Vec::<u64>::new()).unwrap(),
+        ));
+        let x_comp = Arc::new(Component::new(
+            "a.x".to_string(),
+            ComponentId::new("a.x"),
+            Schema::new(PrimType::F64, Vec::<u64>::new()).unwrap(),
+        ));
+        let context = Context::from_leaves([y_comp, x_comp], Timestamp(0), Timestamp(1000));
+
+        let expr = context.parse_str("a.y.atan2(a.x).degrees()").unwrap();
+        let sql = expr.to_sql(&context).unwrap();
+        assert!(sql.contains("atan2("));
+        assert!(sql.contains("degrees("));
+        // degrees should wrap atan2
+        assert!(sql.contains("degrees(atan2("));
+    }
+
+    #[test]
+    fn test_degrees_with_arithmetic() {
+        let context = create_test_context();
+        let expr = context.parse_str("(a.angle * 2.0).degrees()").unwrap();
+        let sql = expr.to_sql(&context).unwrap();
+        assert!(sql.contains("degrees("));
+        assert!(sql.contains(" * "));
+    }
 }
