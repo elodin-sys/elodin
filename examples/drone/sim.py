@@ -150,15 +150,12 @@ def world() -> tuple[el.World, el.EntityId]:
             }
         }
         
-        vector_arrow "(1, 0, 0)" origin="drone.world_pos" scale=1.0 name="Velocity X" display_name=#true body_frame=#true {
-            color orange 90
-        }
-        vector_arrow "(0, 1, 0)" origin="drone.world_pos" scale=1.5 name="Velocity Y" display_name=#false body_frame=#true {
-            color 255 0 0 30
-        }
-        vector_arrow "(0, 0, 1)" origin="drone.world_pos" scale=0.7 name="Velocity Z" display_name=#true body_frame=#false {
-            color yalk
-        }
+        window path="examples/drone/motor-panel.kdl"
+        window path="examples/drone/rate-control-panel.kdl"
+
+        vector_arrow "(1, 0, 0)" origin="drone.world_pos" scale=1.0 name="Drone Velocity X" body_frame=#true
+        vector_arrow "(0, 1, 0)" origin="drone.world_pos" scale=1.0 name="Drone Velocity Y" body_frame=#true
+        vector_arrow "(0, 0, 1)" origin="drone.world_pos" scale=1.0 name="Drone Velocity Z" body_frame=#true
     """
         + object_mesh,
         "drone.kdl",
