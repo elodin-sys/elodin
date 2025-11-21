@@ -397,15 +397,9 @@ fn setup_titlebar(
                 initWithIdentifier: &*identifier
             ];
 
-            window.setTitlebarAppearsTransparent(true);
-
-            // Create color with RGBA
-            let color = NSColor::colorWithRed_green_blue_alpha(
-                (0x0C as f64) / (0xFF as f64),
-                (0x0C as f64) / (0xFF as f64),
-                (0x0C as f64) / (0xFF as f64),
-                0.7,
-            );
+            // Keep the native titlebar visible and readable.
+            window.setTitlebarAppearsTransparent(false);
+            let color = NSColor::windowBackgroundColor();
             window.setBackgroundColor(Some(&color));
 
             window.setStyleMask(
