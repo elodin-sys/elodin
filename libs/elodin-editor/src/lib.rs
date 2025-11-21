@@ -411,7 +411,8 @@ fn setup_titlebar(
                     | NSWindowStyleMask::UnifiedTitleAndToolbar,
             );
             window.setToolbarStyle(NSWindowToolbarStyle::UnifiedCompact);
-            let _: () = msg_send![window, setTitleVisibility: 1u64]; // NSWindowTitleHidden = 1
+            // Keep the native title visible in the toolbar/titlebar area.
+            let _: () = msg_send![window, setTitleVisibility: 0u64]; // NSWindowTitleVisible = 0
             window.setToolbar(Some(&toolbar));
             commands.entity(id).insert(SetupTitlebar);
         }
