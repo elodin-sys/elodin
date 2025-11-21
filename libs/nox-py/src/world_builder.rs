@@ -8,10 +8,10 @@ use miette::miette;
 use nox_ecs::{ComponentSchema, IntoSystem, System as _, TimeStep, World, increment_sim_tick, nox};
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
 use pyo3::{
-    IntoPyObjectExt,
+    IntoPyObjectExt, Py, PyAny,
     types::{PyDict, PyList},
-    Py, PyAny,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::{HashMap, HashSet},
     iter,
@@ -21,7 +21,6 @@ use std::{
 };
 use tracing::{error, info};
 use zerocopy::{FromBytes, TryFromBytes};
-use std::sync::atomic::{AtomicBool, Ordering};
 
 fn install_signal_handlers(terminate_flag: &Arc<AtomicBool>) {
     use signal_hook::consts::signal::*;
@@ -32,7 +31,6 @@ fn install_signal_handlers(terminate_flag: &Arc<AtomicBool>) {
     flag::register(SIGTERM, terminate_flag.clone()).expect("register SIGTERM failed");
     // Add others if you want: SIGHUP, SIGQUIT, etc.
 }
-
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -289,19 +287,22 @@ impl WorldBuilder {
                             elodin_db::Server::new(db_path, addr).unwrap(),
                             exec,
                         )
-                        .run_with_cancellation({
-                            move || {
-                                if let Some(ref func) = is_canceled {
-                                    Python::with_gil(|py| {
-                                        func.call0(py)
-                                            .and_then(|result| result.extract::<bool>(py))
-                                    }).unwrap_or_else(|_| terminate_flag.load(Ordering::Relaxed))
-                                } else {
-                                    terminate_flag.load(Ordering::Relaxed)
+                        .run_with_cancellation(
+                            {
+                                move || {
+                                    if let Some(ref func) = is_canceled {
+                                        Python::with_gil(|py| {
+                                            func.call0(py)
+                                                .and_then(|result| result.extract::<bool>(py))
+                                        })
+                                        .unwrap_or_else(|_| terminate_flag.load(Ordering::Relaxed))
+                                    } else {
+                                        terminate_flag.load(Ordering::Relaxed)
+                                    }
                                 }
-                            }
-                        },
-                        interactive)
+                            },
+                            interactive,
+                        )
                     })?;
 
                     Ok(None)
@@ -915,7 +916,10 @@ impl WorldBuilder {
         };
         let db = elodin_db::DB::create(db_path)?;
         nox_ecs::impeller2_server::init_db(&db, &mut exec.world, Timestamp::now())?;
-        Ok(Exec { exec, db: Box::new(db) })
+        Ok(Exec {
+            exec,
+            db: Box::new(db),
+        })
     }
 
     #[allow(clippy::too_many_arguments)]

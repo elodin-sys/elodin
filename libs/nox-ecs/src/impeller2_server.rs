@@ -276,7 +276,7 @@ async fn tick(
         if tick >= world.world.max_tick() {
             db.recording_cell.set_playing(false);
             world.world.metadata.max_tick = u64::MAX;
-            if ! interactive {
+            if !interactive {
                 return;
             }
         }
@@ -298,7 +298,7 @@ async fn tick(
         {
             stellarator::sleep(Duration::from_millis(1)).await;
             // NOTE: Let's ensure we only run is_canceled once per tick.
-            // 
+            //
             // if is_cancelled() {
             //     return;
             // }

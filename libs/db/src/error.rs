@@ -1,8 +1,8 @@
-use std::{io, path::PathBuf, ops::Range};
+use crate::Timestamp;
 use impeller2::types::{ComponentId, PacketId};
 use impeller2_wkt::{ErrorResponse, StreamId};
+use std::{io, ops::Range, path::PathBuf};
 use thiserror::Error;
-use crate::Timestamp;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -30,8 +30,14 @@ pub enum Error {
     Arrow(#[from] arrow::error::ArrowError),
     #[error("stream not found {0}")]
     StreamNotFound(StreamId),
-    #[error("time range out of bounds {range:?} for component {component_id} with latest timestamp {latest:?}")]
-    TimeRangeOutOfBounds { range: Range<Timestamp>, latest: Option<Timestamp>, component_id: ComponentId },
+    #[error(
+        "time range out of bounds {range:?} for component {component_id} with latest timestamp {latest:?}"
+    )]
+    TimeRangeOutOfBounds {
+        range: Range<Timestamp>,
+        latest: Option<Timestamp>,
+        component_id: ComponentId,
+    },
     #[error("invalid msg id")]
     InvalidMsgId,
     #[error("msg not found {0:?}")]

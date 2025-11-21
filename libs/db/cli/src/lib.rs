@@ -651,7 +651,7 @@ pub struct Args {
     pub db: Option<PathBuf>,
     /// Arguments to Lua script
     #[arg(last = true)]
-    pub lua_args: Vec<String>
+    pub lua_args: Vec<String>,
 }
 
 #[allow(dead_code)]

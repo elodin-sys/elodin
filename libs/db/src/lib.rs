@@ -1162,9 +1162,11 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 Ok(component.clone())
             })?;
             let Some((timestamps, data)) = component.get_range(&range) else {
-                return Err(Error::TimeRangeOutOfBounds { range,
-                                                         component_id: component.component_id,
-                                                         latest: component.time_series.latest().map(|x| *x.0)});
+                return Err(Error::TimeRangeOutOfBounds {
+                    range,
+                    component_id: component.component_id,
+                    latest: component.time_series.latest().map(|x| *x.0),
+                });
             };
             let size = component.schema.size();
             let (timestamps, data) = if let Some(limit) = limit {
