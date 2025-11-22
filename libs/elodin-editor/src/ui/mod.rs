@@ -930,18 +930,27 @@ fn apply_secondary_window_rect(
         return false;
     }
 
+    let is_full_rect =
+        LINUX_MULTI_WINDOW && rect.x == 0 && rect.y == 0 && rect.width == 100 && rect.height == 100;
+
     if window.fullscreen().is_some() {
         exit_fullscreen(window);
-        force_windowed(window);
+        if !is_full_rect {
+            force_windowed(window);
+        }
         info!(
             path = %state.descriptor.path.display(),
             "Exited fullscreen before applying rect"
         );
     } else if LINUX_MULTI_WINDOW {
-        force_windowed(window);
+        if !is_full_rect {
+            force_windowed(window);
+        }
     } else {
-        window.set_maximized(false);
-        linux_clear_minimized(window);
+        if !is_full_rect {
+            window.set_maximized(false);
+            linux_clear_minimized(window);
+        }
     }
 
     let screen_width = screen_size.width as i32;
