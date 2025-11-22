@@ -692,12 +692,10 @@ fn apply_secondary_window_screens(
 
                 if let Some(target_monitor) = monitors.get(screen).cloned() {
                     assign_window_to_screen(state, window, target_monitor.clone());
-                    // Si le WM ne réévalue pas le moniteur courant, tente un recentrage explicite.
                     if detect_window_screen(window, &monitors) != Some(screen) {
                         recenter_window_on_screen(window, &target_monitor);
                         #[cfg(target_os = "macos")]
                         {
-                            // Dernier recours macOS : hop fullscreen borderless sur l'écran cible, puis retour fenêtré.
                             window.set_fullscreen(Some(Fullscreen::Borderless(Some(
                                 target_monitor.clone(),
                             ))));
@@ -796,13 +794,11 @@ fn apply_primary_window_layout(
                         return;
                     }
                     force_windowed(window);
+                } else if window.fullscreen().is_some() {
+                    exit_fullscreen(window);
                 } else {
-                    if window.fullscreen().is_some() {
-                        exit_fullscreen(window);
-                    } else {
-                        window.set_maximized(false);
-                        linux_clear_minimized(window);
-                    }
+                    window.set_maximized(false);
+                    linux_clear_minimized(window);
                 }
                 complete_primary_screen_assignment(
                     layout,
@@ -1258,7 +1254,6 @@ fn capture_secondary_window_screens(
     screens: Query<(Entity, &Monitor)>,
 ) {
     for state in windows.secondary_mut().iter_mut() {
-        // Evite d'écraser le screen cible pendant un relayout en cours.
         #[cfg(target_os = "macos")]
         if matches!(
             state.relayout_phase,
