@@ -1370,10 +1370,6 @@ mod tests {
 
             let sql = expr.to_sql(&context).unwrap();
 
-            // Print SQL for debugging (will show in test output if run with --nocapture)
-            eprintln!("Generated SQL for angle-of-attack:");
-            eprintln!("{}", sql);
-
             // Verify the mathematical structure:
             // degrees(acos(GREATEST(-1, LEAST(1, -v[0] / GREATEST(min, LEAST(norm, max)))))) * CASE...
 
@@ -1430,9 +1426,6 @@ mod tests {
 
             let expr = context.parse_str("a.value.abs() - 90.0").unwrap();
             let sql = expr.to_sql(&context).unwrap();
-
-            eprintln!("Generated SQL for 'a.value.abs() - 90.0':");
-            eprintln!("{}", sql);
 
             assert!(sql.contains("abs("), "Should contain abs function");
             assert!(sql.contains("- 90"), "Should contain literal subtraction");
@@ -1491,10 +1484,6 @@ mod tests {
                 .unwrap();
 
             let sql = expr.to_sql(&context).unwrap();
-            
-            // Print the SQL for debugging
-            eprintln!("Generated SQL for AoA with -90.0 offset:");
-            eprintln!("{}", sql);
 
             // Should generate valid SQL with the literal subtraction
             assert!(sql.contains("- 90"), "Should subtract 90 degrees");
@@ -1538,26 +1527,26 @@ mod tests {
                 "Should have meaningful error message"
             );
         }
-        
+
         #[test]
         fn test_exact_rocket_queries() {
             // Test the EXACT queries from the rocket example
             let context = create_rocket_context();
-            
+
             // Query WITHOUT -90
             let query1 = "((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(0.000000001, 999999)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign()";
             let expr1 = context.parse_str(query1).unwrap();
             let sql1 = expr1.to_sql(&context).unwrap();
             eprintln!("SQL WITHOUT -90:");
             eprintln!("{}\n", sql1);
-            
+
             // Query WITH -90
             let query2 = "((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(0.000000001, 999999)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign() - 90.0";
             let expr2 = context.parse_str(query2).unwrap();
             let sql2 = expr2.to_sql(&context).unwrap();
             eprintln!("SQL WITH -90:");
             eprintln!("{}\n", sql2);
-            
+
             // They MUST be different
             assert_ne!(sql1, sql2, "SQL queries should be different!");
             assert!(!sql1.contains("- 90"), "First query should NOT have '- 90'");

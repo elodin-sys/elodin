@@ -667,11 +667,10 @@ mod tests {
         // The client `send` completes when bytes are written to the socket, not
         // when the server has applied the write. Poll the DB briefly until the
         // late write becomes visible, then assert.
-        let mut latest_seen = f64::NAN;
         let start = std::time::Instant::now();
         let timeout = Duration::from_millis(500);
         loop {
-            latest_seen = db.with_state(|state| {
+            let latest_seen = db.with_state(|state| {
                 let component = state
                     .get_component(component_id)
                     .expect("missing component");

@@ -171,10 +171,10 @@ impl QueryPlotData {
             .collect();
 
         self.x_offset = finite_x_values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
-        // IMPORTANT: For query plots, we should NOT offset Y values as this would 
+        // IMPORTANT: For query plots, we should NOT offset Y values as this would
         // remove any intentional offset applied in the query (like -90 for angle of attack).
         // Only offset X (time) values to start at 0.
-        self.y_offset = 0.0;  // Don't auto-offset Y values for query plots
+        self.y_offset = 0.0; // Don't auto-offset Y values for query plots
 
         if !self.x_offset.is_finite() {
             self.x_offset = 0.0;
@@ -194,7 +194,7 @@ impl QueryPlotData {
         // Only add finite x and y pairs to avoid breaking rendering
         let mut y_iter = array_iter(y_col);
         let mut points: Vec<(f64, f64)> = Vec::new();
-        
+
         for x_value in x_values {
             if let Some(y_value) = y_iter.next()
                 && x_value.is_finite()
@@ -203,23 +203,24 @@ impl QueryPlotData {
                 points.push((x_value, y_value));
             }
         }
-        
+
         // Skip initial points that have the same timestamp (initialization artifacts)
         // These are typically default values before the simulation actually starts
         let skip_initial_points = if points.len() > 2 {
             // Find how many initial points share the same timestamp
             let first_time = points[0].0;
             let mut skip_count = 1; // At least skip the first point
-            
+
             // Count consecutive points with the same initial timestamp
-            for i in 1..points.len() {
-                if (points[i].0 - first_time).abs() < 0.001 { // Same timestamp (within floating point tolerance)
+            for (i, (time, _)) in points.iter().enumerate().skip(1) {
+                if (*time - first_time).abs() < 0.001 {
+                    // Same timestamp (within floating point tolerance)
                     skip_count = i + 1;
                 } else {
                     break; // Found a different timestamp, stop counting
                 }
             }
-            
+
             // Only skip if there are duplicate timestamps at the start
             if skip_count > 1 {
                 skip_count
@@ -229,22 +230,22 @@ impl QueryPlotData {
                 if points.len() >= 3 {
                     let first_y = points[0].1;
                     let second_y = points[1].1;
-                    
+
                     // If there's a huge jump from first to second point (> 50 units),
                     // it's likely an initialization artifact
                     if (second_y - first_y).abs() > 50.0 {
-                        1  // Skip just the first point
+                        1 // Skip just the first point
                     } else {
-                        0  // Keep all points
+                        0 // Keep all points
                     }
                 } else {
                     0
                 }
             }
         } else {
-            0  // Not enough points to analyze
+            0 // Not enough points to analyze
         };
-        
+
         // Add the points to the plot, skipping initial bad points if needed
         for (x_value, y_value) in points.into_iter().skip(skip_initial_points) {
             xy_line.push_x_value((x_value - self.x_offset) as f32);
