@@ -621,13 +621,17 @@ impl TimeseriesPlot {
                 let (start, end) = if self.is_relative_time {
                     // For relative time plots, bounds.min_x/max_x are in seconds
                     // Convert to microseconds before adding to earliest_timestamp
-                    let start_micros = (self.bounds.min_x * 1_000_000.0) as i64 + self.earliest_timestamp.0;
-                    let end_micros = (self.bounds.max_x * 1_000_000.0) as i64 + self.earliest_timestamp.0;
+                    let start_micros =
+                        (self.bounds.min_x * 1_000_000.0) as i64 + self.earliest_timestamp.0;
+                    let end_micros =
+                        (self.bounds.max_x * 1_000_000.0) as i64 + self.earliest_timestamp.0;
                     (Timestamp(start_micros), Timestamp(end_micros))
                 } else {
                     // For absolute time plots, bounds.min_x/max_x are already in microseconds
-                    (Timestamp((self.bounds.min_x as i64) + self.earliest_timestamp.0),
-                     Timestamp((self.bounds.max_x as i64) + self.earliest_timestamp.0))
+                    (
+                        Timestamp((self.bounds.min_x as i64) + self.earliest_timestamp.0),
+                        Timestamp((self.bounds.max_x as i64) + self.earliest_timestamp.0),
+                    )
                 };
                 graph_state.zoom_factor = Vec2::new(1.0, 1.0);
                 graph_state.pan_offset = Vec2::ZERO;
