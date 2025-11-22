@@ -412,8 +412,9 @@ impl TimeseriesPlot {
                     } => {
                         let time: hifitime::Epoch = timestamp.into();
                         ui.add(time_label(time));
-                        let offset = hifitime::Duration::from_microseconds(
-                            (timestamp.0 - self.selected_range.start.0) as f64,
+                        // Convert microseconds to nanoseconds for consistent precision
+                        let offset = hifitime::Duration::from_nanoseconds(
+                            ((timestamp.0 - self.selected_range.start.0) as f64) * 1_000.0,
                         );
                         ui.label(PrettyDuration(offset).to_string());
                         let mut current_component_path: Option<&ComponentPath> = None;
@@ -502,7 +503,10 @@ impl TimeseriesPlot {
 
                             // Show time
                             if let Some(relative_seconds) = relative_seconds {
-                                let duration = hifitime::Duration::from_seconds(relative_seconds);
+                                // Convert seconds to nanoseconds for consistent precision
+                                let duration = hifitime::Duration::from_nanoseconds(
+                                    relative_seconds * 1_000_000_000.0,
+                                );
                                 ui.label(PrettyDuration(duration).to_string());
                             } else {
                                 let time: hifitime::Epoch = timestamp.into();

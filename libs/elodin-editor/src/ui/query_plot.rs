@@ -98,7 +98,10 @@ impl QueryPlotData {
 
         // Convert timestamp X column to seconds for proper time axis display
         // Also track the earliest absolute timestamp for relative time conversion
-        let (x_values, earliest_abs_timestamp): (Vec<f64>, Option<i64>) = match x_col.data_type() {
+        // IMPORTANT: earliest_timestamp must be in microseconds (as expected by impeller2::types::Timestamp)
+        let (x_values, earliest_abs_timestamp_micros): (Vec<f64>, Option<i64>) = match x_col
+            .data_type()
+        {
             DataType::Timestamp(TimeUnit::Microsecond, _) => {
                 let values: Vec<i64> = x_col
                     .as_any()
@@ -109,6 +112,7 @@ impl QueryPlotData {
                     .collect();
                 let earliest = values.iter().min().copied();
                 let relative: Vec<f64> = values.iter().map(|&x| x as f64 / 1_000_000.0).collect();
+                // Already in microseconds, no conversion needed
                 (relative, earliest)
             }
             DataType::Timestamp(TimeUnit::Nanosecond, _) => {
@@ -122,7 +126,8 @@ impl QueryPlotData {
                 let earliest = values.iter().min().copied();
                 let relative: Vec<f64> =
                     values.iter().map(|&x| x as f64 / 1_000_000_000.0).collect();
-                (relative, earliest)
+                // Convert nanoseconds to microseconds
+                (relative, earliest.map(|ns| ns / 1_000))
             }
             DataType::Timestamp(TimeUnit::Millisecond, _) => {
                 let values: Vec<i64> = x_col
@@ -134,7 +139,8 @@ impl QueryPlotData {
                     .collect();
                 let earliest = values.iter().min().copied();
                 let relative: Vec<f64> = values.iter().map(|&x| x as f64 / 1_000.0).collect();
-                (relative, earliest)
+                // Convert milliseconds to microseconds
+                (relative, earliest.map(|ms| ms * 1_000))
             }
             DataType::Timestamp(TimeUnit::Second, _) => {
                 let values: Vec<i64> = x_col
@@ -146,7 +152,8 @@ impl QueryPlotData {
                     .collect();
                 let earliest = values.iter().min().copied();
                 let relative: Vec<f64> = values.iter().map(|&x| x as f64).collect();
-                (relative, earliest)
+                // Convert seconds to microseconds
+                (relative, earliest.map(|s| s * 1_000_000))
             }
             _ => {
                 // For non-timestamp types, use the existing array_iter logic
@@ -156,11 +163,12 @@ impl QueryPlotData {
         };
 
         // Store earliest timestamp if this is the first batch or if we found an earlier one
-        if let Some(earliest) = earliest_abs_timestamp
+        // earliest_abs_timestamp_micros is already converted to microseconds
+        if let Some(earliest_micros) = earliest_abs_timestamp_micros
             && (self.earliest_timestamp.is_none()
-                || Some(impeller2::types::Timestamp(earliest)) < self.earliest_timestamp)
+                || Some(impeller2::types::Timestamp(earliest_micros)) < self.earliest_timestamp)
         {
-            self.earliest_timestamp = Some(impeller2::types::Timestamp(earliest));
+            self.earliest_timestamp = Some(impeller2::types::Timestamp(earliest_micros));
         }
 
         // Filter out NaN and infinite values for offset calculation
