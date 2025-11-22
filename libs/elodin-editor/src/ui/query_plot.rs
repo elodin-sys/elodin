@@ -172,7 +172,10 @@ impl QueryPlotData {
         let finite_y_values: Vec<f64> = array_iter(y_col).filter(|&y| y.is_finite()).collect();
 
         self.x_offset = finite_x_values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
-        self.y_offset = finite_y_values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+        // IMPORTANT: For query plots, we should NOT offset Y values as this would 
+        // remove any intentional offset applied in the query (like -90 for angle of attack).
+        // Only offset X (time) values to start at 0.
+        self.y_offset = 0.0;  // Don't auto-offset Y values for query plots
 
         if !self.x_offset.is_finite() {
             self.x_offset = 0.0;

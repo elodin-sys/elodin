@@ -520,15 +520,9 @@ w.schematic(
                 graph "rocket.aero_coefs" name="Aero Coefficients"
             }
             vsplit {
-                // EQL-derived aerodynamic angles and velocity magnitude
-                // Using v_body component which contains velocity in body frame [u, v, w]
-                // Angle of Attack: Matches the actual angle_of_attack function exactly:
-                //   arccos(dot(u, [-1,0,0]) / norm(u)) * -sign(w)
-                //   = arccos(-u[0] / norm(u)) * -sign(w)
-                //   The arccos() formula automatically clips its input to [-1, 1] to match Python's behavior
-                //   = arccos((rocket.v_body[0] * -1.0) / rocket.v_body.norm()) * (rocket.v_body[2] * -1.0).sign()
+                // EQL-derived aerodynamic angles and velocity magnitude 
                 query_plot Angle-of-Attack-EQL query="((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(0.000000001, 999999)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign()" type="eql" auto_refresh=#true
-                
+
                 // Velocity magnitude using norm() formula
                 query_plot Velocity-Magnitude query="rocket.v_body.norm()" type="eql" auto_refresh=#true
             }

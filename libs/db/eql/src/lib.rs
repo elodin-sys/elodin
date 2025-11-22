@@ -154,7 +154,13 @@ impl Expr {
 
             Expr::Time(component) => Ok(component.name.replace(".", "_")),
             Expr::Formula(_, expr) => expr.to_table(),
-            Expr::BinaryOp(left, _, _) => left.to_table(),
+            Expr::BinaryOp(left, right, _) => {
+                // Try left first, fall back to right if left is a literal
+                match left.to_table() {
+                    Ok(table) => Ok(table),
+                    Err(_) => right.to_table(),
+                }
+            }
 
             Expr::ArrayAccess(inner_expr, _) => match inner_expr.as_ref() {
                 Expr::ComponentPart(_) => inner_expr.to_table(),
@@ -290,29 +296,68 @@ impl Expr {
                 }
             }
             Expr::BinaryOp(left, right, op) => {
-                let left_table_name = left.to_table()?;
-                let right_table_name = right.to_table()?;
-                let left_select_part = left.to_qualified_field()?;
-                let right_select_part = right.to_qualified_field()?;
-                if left_table_name == right_table_name {
-                    Ok(format!(
-                        "select {} {} {} from {}",
-                        left_select_part,
-                        op.to_str(),
-                        right_select_part,
-                        left_table_name
-                    ))
-                } else {
-                    Ok(format!(
-                        "select {} {} {} from {} join {} on {}.time = {}.time",
-                        left_select_part,
-                        op.to_str(),
-                        right_select_part,
-                        left_table_name,
-                        right_table_name,
-                        left_table_name,
-                        right_table_name
-                    ))
+                // Check if either operand is a literal
+                let left_is_literal = matches!(left.as_ref(), Expr::FloatLiteral(_));
+                let right_is_literal = matches!(right.as_ref(), Expr::FloatLiteral(_));
+
+                match (left_is_literal, right_is_literal) {
+                    // Both are literals - this doesn't make sense for a query
+                    (true, true) => Err(Error::InvalidFieldAccess(
+                        "cannot perform operations on two literals".to_string(),
+                    )),
+                    // Left is literal, right has table
+                    (true, false) => {
+                        let table = right.to_table()?;
+                        let left_value = left.to_qualified_field()?;
+                        let right_field = right.to_qualified_field()?;
+                        Ok(format!(
+                            "select {} {} {} from {}",
+                            left_value,
+                            op.to_str(),
+                            right_field,
+                            table
+                        ))
+                    }
+                    // Right is literal, left has table (most common case: formula - 90.0)
+                    (false, true) => {
+                        let table = left.to_table()?;
+                        let left_field = left.to_qualified_field()?;
+                        let right_value = right.to_qualified_field()?;
+                        Ok(format!(
+                            "select {} {} {} from {}",
+                            left_field,
+                            op.to_str(),
+                            right_value,
+                            table
+                        ))
+                    }
+                    // Both have tables (existing logic)
+                    (false, false) => {
+                        let left_table_name = left.to_table()?;
+                        let right_table_name = right.to_table()?;
+                        let left_select_part = left.to_qualified_field()?;
+                        let right_select_part = right.to_qualified_field()?;
+                        if left_table_name == right_table_name {
+                            Ok(format!(
+                                "select {} {} {} from {}",
+                                left_select_part,
+                                op.to_str(),
+                                right_select_part,
+                                left_table_name
+                            ))
+                        } else {
+                            Ok(format!(
+                                "select {} {} {} from {} join {} on {}.time = {}.time",
+                                left_select_part,
+                                op.to_str(),
+                                right_select_part,
+                                left_table_name,
+                                right_table_name,
+                                left_table_name,
+                                right_table_name
+                            ))
+                        }
+                    }
                 }
             }
 
@@ -1371,6 +1416,152 @@ mod tests {
             // - This will print the generated SQL
             // - Compare individual component values (v_body[0], norm, sign) in the database
             //   vs Python to identify where the discrepancy occurs
+        }
+
+        #[test]
+        fn test_formula_minus_literal() {
+            // Test subtracting a literal from a formula result
+            let component = Arc::new(Component::new(
+                "a.value".to_string(),
+                ComponentId::new("a.value"),
+                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+            ));
+            let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+
+            let expr = context.parse_str("a.value.abs() - 90.0").unwrap();
+            let sql = expr.to_sql(&context).unwrap();
+
+            eprintln!("Generated SQL for 'a.value.abs() - 90.0':");
+            eprintln!("{}", sql);
+
+            assert!(sql.contains("abs("), "Should contain abs function");
+            assert!(sql.contains("- 90"), "Should contain literal subtraction");
+            assert!(
+                sql.contains("from a_value"),
+                "Should query from a_value table"
+            );
+        }
+
+        #[test]
+        fn test_literal_plus_formula() {
+            // Test adding a literal to a formula (less common but should work)
+            let component = Arc::new(Component::new(
+                "a.value".to_string(),
+                ComponentId::new("a.value"),
+                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+            ));
+            let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+
+            let expr = context.parse_str("100.0 + a.value.abs()").unwrap();
+            let sql = expr.to_sql(&context).unwrap();
+
+            assert!(sql.contains("abs("), "Should contain abs function");
+            assert!(sql.contains("100"), "Should contain literal");
+            assert!(sql.contains(" + "), "Should contain addition operator");
+        }
+
+        #[test]
+        fn test_component_times_literal() {
+            // Test multiplying by a literal (unit conversion pattern)
+            let component = Arc::new(Component::new(
+                "a.temperature".to_string(),
+                ComponentId::new("a.temperature"),
+                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+            ));
+            let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+
+            let expr = context.parse_str("a.temperature * 1.8 + 32.0").unwrap();
+            let sql = expr.to_sql(&context).unwrap();
+
+            assert!(sql.contains("1.8"), "Should contain 1.8 multiplier");
+            assert!(sql.contains("32"), "Should contain 32 offset");
+            assert!(sql.contains(" * "), "Should contain multiplication");
+            assert!(sql.contains(" + "), "Should contain addition");
+        }
+
+        #[test]
+        fn test_angle_of_attack_with_offset() {
+            // The full angle-of-attack formula with 90° subtraction
+            let context = create_rocket_context();
+
+            let expr = context
+                .parse_str(
+                    "((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(0.000000001, 999999)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign() - 90.0"
+                )
+                .unwrap();
+
+            let sql = expr.to_sql(&context).unwrap();
+            
+            // Print the SQL for debugging
+            eprintln!("Generated SQL for AoA with -90.0 offset:");
+            eprintln!("{}", sql);
+
+            // Should generate valid SQL with the literal subtraction
+            assert!(sql.contains("- 90"), "Should subtract 90 degrees");
+            assert!(
+                sql.contains("degrees(acos("),
+                "Should have degrees wrapping acos"
+            );
+            assert!(sql.contains("CASE WHEN"), "Should have sign CASE statement");
+            assert!(
+                sql.contains("from rocket_v_body"),
+                "Should query from rocket_v_body"
+            );
+
+            // Verify the subtraction comes at the end
+            assert!(
+                sql.find("- 90").unwrap() > sql.find("CASE").unwrap(),
+                "Subtraction should come after the sign correction"
+            );
+        }
+
+        #[test]
+        fn test_two_literals_error() {
+            // Operations on two literals should fail (no table reference)
+            let component = Arc::new(Component::new(
+                "a.value".to_string(),
+                ComponentId::new("a.value"),
+                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+            ));
+            let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+
+            // Parse will succeed, but to_sql should fail
+            let expr = context.parse_str("90.0 + 180.0").unwrap();
+            let result = expr.to_sql(&context);
+
+            assert!(result.is_err(), "Should error on two literals");
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("cannot perform operations on two literals"),
+                "Should have meaningful error message"
+            );
+        }
+        
+        #[test]
+        fn test_exact_rocket_queries() {
+            // Test the EXACT queries from the rocket example
+            let context = create_rocket_context();
+            
+            // Query WITHOUT -90
+            let query1 = "((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(0.000000001, 999999)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign()";
+            let expr1 = context.parse_str(query1).unwrap();
+            let sql1 = expr1.to_sql(&context).unwrap();
+            eprintln!("SQL WITHOUT -90:");
+            eprintln!("{}\n", sql1);
+            
+            // Query WITH -90
+            let query2 = "((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(0.000000001, 999999)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign() - 90.0";
+            let expr2 = context.parse_str(query2).unwrap();
+            let sql2 = expr2.to_sql(&context).unwrap();
+            eprintln!("SQL WITH -90:");
+            eprintln!("{}\n", sql2);
+            
+            // They MUST be different
+            assert_ne!(sql1, sql2, "SQL queries should be different!");
+            assert!(!sql1.contains("- 90"), "First query should NOT have '- 90'");
+            assert!(sql2.contains("- 90"), "Second query SHOULD have '- 90'");
         }
     }
 }
