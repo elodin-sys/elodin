@@ -495,8 +495,8 @@ fn sync_secondary_windows(
     for (entity, marker) in existing.iter() {
         existing_map.insert(marker.id, entity);
     }
-    let monitors_any = collect_monitors_from_any_window(&winit_windows);
-    if monitors_any.is_none() {
+    let screens_any = collect_screens_from_any_window(&winit_windows);
+    if screens_any.is_none() {
         warn!("No screen info available; secondary windows will use default sizing/position");
     }
 
@@ -556,7 +556,7 @@ fn sync_secondary_windows(
         let (resolution, position, _pre_applied_rect, pre_applied_screen) = if let Some(rect) =
             state.descriptor.screen_rect
             && let Some(screen_idx) = state.descriptor.screen
-            && let Some(screens) = monitors_any.as_ref()
+            && let Some(screens) = screens_any.as_ref()
             && let Some(screen) = screens.get(screen_idx)
         {
             let screen_pos = screen.position();
@@ -668,9 +668,9 @@ fn apply_secondary_window_screens(
                     state.awaiting_screen_confirmation = false;
                 }
 
-                let monitors = collect_sorted_monitors(window);
+                let screens = collect_sorted_screens(window);
 
-                if window_on_target_screen(state, window, &monitors) {
+                if window_on_target_screen(state, window, &screens) {
                     if LINUX_MULTI_WINDOW {
                         exit_fullscreen(window);
                         force_windowed(window);
@@ -690,9 +690,9 @@ fn apply_secondary_window_screens(
                     continue;
                 };
 
-                if let Some(target_monitor) = monitors.get(screen).cloned() {
+                if let Some(target_monitor) = screens.get(screen).cloned() {
                     assign_window_to_screen(state, window, target_monitor.clone());
-                    if detect_window_screen(window, &monitors) != Some(screen) {
+                    if detect_window_screen(window, &screens) != Some(screen) {
                         recenter_window_on_screen(window, &target_monitor);
                         #[cfg(target_os = "macos")]
                         {
@@ -773,8 +773,8 @@ fn apply_primary_window_layout(
                 layout.awaiting_screen_confirmation = false;
             }
 
-            let monitors = collect_sorted_monitors(window);
-            if window_on_screen(layout.screen, window, &monitors) {
+            let screens = collect_sorted_screens(window);
+            if window_on_screen(layout.screen, window, &screens) {
                 // If rect already applied, proceed to Idle to avoid extra swapchain reconfig.
                 if let Some(rect) = layout.screen_rect
                     && layout.applied_rect == Some(rect)
@@ -816,7 +816,7 @@ fn apply_primary_window_layout(
                 };
                 return;
             };
-            if let Some(target_monitor) = monitors.get(screen).cloned() {
+            if let Some(target_monitor) = screens.get(screen).cloned() {
                 info!(
                     screen = screen as i32,
                     "Moving primary window to target screen"
@@ -911,22 +911,22 @@ fn apply_secondary_window_rect(
         return true;
     }
 
-    let monitor_handle = if let Some(idx) = state.descriptor.screen {
-        let monitors = collect_sorted_monitors(window);
-        monitors
+    let screen_handle = if let Some(idx) = state.descriptor.screen {
+        let screens = collect_sorted_screens(window);
+        screens
             .get(idx)
             .cloned()
             .or_else(|| window.current_monitor())
     } else {
         window.current_monitor()
     };
-    let Some(monitor_handle) = monitor_handle else {
+    let Some(screen_handle) = screen_handle else {
         return false;
     };
 
-    let monitor_pos = monitor_handle.position();
-    let monitor_size = monitor_handle.size();
-    if monitor_size.width == 0 || monitor_size.height == 0 {
+    let screen_pos = screen_handle.position();
+    let screen_size = screen_handle.size();
+    if screen_size.width == 0 || screen_size.height == 0 {
         return false;
     }
 
@@ -944,13 +944,13 @@ fn apply_secondary_window_rect(
         linux_clear_minimized(window);
     }
 
-    let monitor_width = monitor_size.width as i32;
-    let monitor_height = monitor_size.height as i32;
+    let screen_width = screen_size.width as i32;
+    let screen_height = screen_size.height as i32;
 
-    let requested_width_px = ((rect.width as f64 / 100.0) * monitor_width as f64).round() as i32;
-    let requested_height_px = ((rect.height as f64 / 100.0) * monitor_height as f64).round() as i32;
-    let width_px = requested_width_px.clamp(1, monitor_width.max(1));
-    let height_px = requested_height_px.clamp(1, monitor_height.max(1));
+    let requested_width_px = ((rect.width as f64 / 100.0) * screen_width as f64).round() as i32;
+    let requested_height_px = ((rect.height as f64 / 100.0) * screen_height as f64).round() as i32;
+    let width_px = requested_width_px.clamp(1, screen_width.max(1));
+    let height_px = requested_height_px.clamp(1, screen_height.max(1));
     if width_px != requested_width_px || height_px != requested_height_px {
         warn!(
             path = %state.descriptor.path.display(),
@@ -959,15 +959,14 @@ fn apply_secondary_window_rect(
         );
     }
 
-    let requested_x =
-        monitor_pos.x + ((rect.x as f64 / 100.0) * monitor_width as f64).round() as i32;
+    let requested_x = screen_pos.x + ((rect.x as f64 / 100.0) * screen_width as f64).round() as i32;
     let requested_y =
-        monitor_pos.y + ((rect.y as f64 / 100.0) * monitor_height as f64).round() as i32;
+        screen_pos.y + ((rect.y as f64 / 100.0) * screen_height as f64).round() as i32;
 
-    let max_x = monitor_pos.x + monitor_width - width_px;
-    let max_y = monitor_pos.y + monitor_height - height_px;
-    let x = requested_x.clamp(monitor_pos.x, max_x);
-    let y = requested_y.clamp(monitor_pos.y, max_y);
+    let max_x = screen_pos.x + screen_width - width_px;
+    let max_y = screen_pos.y + screen_height - height_px;
+    let x = requested_x.clamp(screen_pos.x, max_x);
+    let y = requested_y.clamp(screen_pos.y, max_y);
     if x != requested_x || y != requested_y {
         warn!(
             path = %state.descriptor.path.display(),
@@ -1026,11 +1025,11 @@ fn assign_window_to_screen(
     window: &WinitWindow,
     target_monitor: MonitorHandle,
 ) {
-    let monitor_pos = target_monitor.position();
-    let monitor_size = target_monitor.size();
+    let screen_pos = target_monitor.position();
+    let screen_size = target_monitor.size();
     let window_size = window.outer_size();
-    let x = monitor_pos.x + (monitor_size.width as i32 - window_size.width as i32) / 2;
-    let y = monitor_pos.y + (monitor_size.height as i32 - window_size.height as i32) / 2;
+    let x = screen_pos.x + (screen_size.width as i32 - window_size.width as i32) / 2;
+    let y = screen_pos.y + (screen_size.height as i32 - window_size.height as i32) / 2;
 
     info!(
         path = %state.descriptor.path.display(),
@@ -1102,11 +1101,11 @@ fn assign_primary_window_to_screen(
     window: &WinitWindow,
     target_monitor: MonitorHandle,
 ) {
-    let monitor_pos = target_monitor.position();
-    let monitor_size = target_monitor.size();
+    let screen_pos = target_monitor.position();
+    let screen_size = target_monitor.size();
     let window_size = window.outer_size();
-    let x = monitor_pos.x + (monitor_size.width as i32 - window_size.width as i32) / 2;
-    let y = monitor_pos.y + (monitor_size.height as i32 - window_size.height as i32) / 2;
+    let x = screen_pos.x + (screen_size.width as i32 - window_size.width as i32) / 2;
+    let y = screen_pos.y + (screen_size.height as i32 - window_size.height as i32) / 2;
 
     if LINUX_MULTI_WINDOW {
         window.set_fullscreen(None);
@@ -1121,22 +1120,22 @@ fn assign_primary_window_to_screen(
 }
 
 fn recenter_window_on_screen(window: &WinitWindow, target_monitor: &MonitorHandle) {
-    let monitor_pos = target_monitor.position();
-    let monitor_size = target_monitor.size();
+    let screen_pos = target_monitor.position();
+    let screen_size = target_monitor.size();
     let window_size = window.outer_size();
     // Recenter, puis nudge vers l'intérieur de l'écran pour aider winit à rafraîchir current_monitor().
-    let center_x = monitor_pos.x + (monitor_size.width as i32 - window_size.width as i32) / 2;
-    let center_y = monitor_pos.y + (monitor_size.height as i32 - window_size.height as i32) / 2;
+    let center_x = screen_pos.x + (screen_size.width as i32 - window_size.width as i32) / 2;
+    let center_y = screen_pos.y + (screen_size.height as i32 - window_size.height as i32) / 2;
     window.set_outer_position(PhysicalPosition::new(center_x, center_y));
 
-    let nudge_x = monitor_pos
+    let nudge_x = screen_pos
         .x
         .saturating_add(10)
-        .min(monitor_pos.x + monitor_size.width as i32 - 1);
-    let nudge_y = monitor_pos
+        .min(screen_pos.x + screen_size.width as i32 - 1);
+    let nudge_y = screen_pos
         .y
         .saturating_add(10)
-        .min(monitor_pos.y + monitor_size.height as i32 - 1);
+        .min(screen_pos.y + screen_size.height as i32 - 1);
     window.set_outer_position(PhysicalPosition::new(nudge_x, nudge_y));
     // Secoue légèrement la taille pour forcer un rafraîchissement du monitor courant.
     let size = window.outer_size();
@@ -1163,22 +1162,22 @@ fn apply_primary_window_rect(
         return true;
     }
 
-    let monitor_handle = if let Some(idx) = layout.screen {
-        let monitors = collect_sorted_monitors(window);
-        monitors
+    let screen_handle = if let Some(idx) = layout.screen {
+        let screens = collect_sorted_screens(window);
+        screens
             .get(idx)
             .cloned()
             .or_else(|| window.current_monitor())
     } else {
         window.current_monitor()
     };
-    let Some(monitor_handle) = monitor_handle else {
+    let Some(screen_handle) = screen_handle else {
         return false;
     };
 
-    let monitor_pos = monitor_handle.position();
-    let monitor_size = monitor_handle.size();
-    if monitor_size.width == 0 || monitor_size.height == 0 {
+    let screen_pos = screen_handle.position();
+    let screen_size = screen_handle.size();
+    if screen_size.width == 0 || screen_size.height == 0 {
         return false;
     }
 
@@ -1192,26 +1191,25 @@ fn apply_primary_window_rect(
         linux_clear_minimized(window);
     }
 
-    let monitor_width = monitor_size.width as i32;
-    let monitor_height = monitor_size.height as i32;
+    let screen_width = screen_size.width as i32;
+    let screen_height = screen_size.height as i32;
 
-    let requested_width_px = ((rect.width as f64 / 100.0) * monitor_width as f64).round() as i32;
-    let requested_height_px = ((rect.height as f64 / 100.0) * monitor_height as f64).round() as i32;
-    let width_px = requested_width_px.clamp(1, monitor_width.max(1));
-    let height_px = requested_height_px.clamp(1, monitor_height.max(1));
+    let requested_width_px = ((rect.width as f64 / 100.0) * screen_width as f64).round() as i32;
+    let requested_height_px = ((rect.height as f64 / 100.0) * screen_height as f64).round() as i32;
+    let width_px = requested_width_px.clamp(1, screen_width.max(1));
+    let height_px = requested_height_px.clamp(1, screen_height.max(1));
     if width_px != requested_width_px || height_px != requested_height_px {
         warn!("Primary window rect exceeds screen bounds; clamping size (rect={rect:?})");
     }
 
-    let requested_x =
-        monitor_pos.x + ((rect.x as f64 / 100.0) * monitor_width as f64).round() as i32;
+    let requested_x = screen_pos.x + ((rect.x as f64 / 100.0) * screen_width as f64).round() as i32;
     let requested_y =
-        monitor_pos.y + ((rect.y as f64 / 100.0) * monitor_height as f64).round() as i32;
+        screen_pos.y + ((rect.y as f64 / 100.0) * screen_height as f64).round() as i32;
 
-    let max_x = monitor_pos.x + monitor_width - width_px;
-    let max_y = monitor_pos.y + monitor_height - height_px;
-    let x = requested_x.clamp(monitor_pos.x, max_x);
-    let y = requested_y.clamp(monitor_pos.y, max_y);
+    let max_x = screen_pos.x + screen_width - width_px;
+    let max_y = screen_pos.y + screen_height - height_px;
+    let x = requested_x.clamp(screen_pos.x, max_x);
+    let y = requested_y.clamp(screen_pos.y, max_y);
     if x != requested_x || y != requested_y {
         warn!(
             "Primary window rect origin exceeds screen bounds; clamping position (rect={rect:?})"
@@ -1269,8 +1267,8 @@ fn capture_secondary_window_screens(
         let winit_window = winit_windows.get_window(entity);
         let mut updated = false;
         if let Some(window) = winit_window {
-            let monitors = collect_sorted_monitors(window);
-            updated = state.update_descriptor_from_winit_window(window, &monitors);
+            let screens_sorted = collect_sorted_screens(window);
+            updated = state.update_descriptor_from_winit_window(window, &screens_sorted);
         }
 
         if !updated && let Ok((_, window_component)) = window_query.get(entity) {
@@ -1307,8 +1305,8 @@ fn confirm_secondary_screen_assignment(
         let Some(window) = winit_windows.get_window(entity) else {
             continue;
         };
-        let monitors = collect_sorted_monitors(window);
-        if window_on_target_screen(state, window, &monitors) {
+        let screens_sorted = collect_sorted_screens(window);
+        if window_on_target_screen(state, window, &screens_sorted) {
             complete_screen_assignment(
                 state,
                 window,
@@ -1345,8 +1343,8 @@ fn track_secondary_window_geometry(
         let Some(window) = winit_windows.get_window(entity) else {
             continue;
         };
-        let monitors = collect_sorted_monitors(window);
-        record_window_rect_from_window(state, window, &monitors, forced_position);
+        let screens_sorted = collect_sorted_screens(window);
+        record_window_rect_from_window(state, window, &screens_sorted, forced_position);
     }
 }
 
@@ -1381,7 +1379,7 @@ fn confirm_primary_screen_assignment(
     let Some(window) = winit_windows.get_window(primary_entity) else {
         return;
     };
-    let monitors = collect_sorted_monitors(window);
+    let screens_sorted = collect_sorted_screens(window);
     let layout = windows.primary_layout_mut();
     if matches!(
         layout.relayout_phase,
@@ -1389,12 +1387,12 @@ fn confirm_primary_screen_assignment(
     ) {
         layout.awaiting_screen_confirmation = false;
     }
-    let _ = monitors;
+    let _ = screens_sorted;
 }
 
-fn collect_sorted_monitors(window: &WinitWindow) -> Vec<MonitorHandle> {
-    let mut monitors: Vec<MonitorHandle> = window.available_monitors().collect();
-    monitors.sort_by(|a, b| {
+fn collect_sorted_screens(window: &WinitWindow) -> Vec<MonitorHandle> {
+    let mut screens: Vec<MonitorHandle> = window.available_monitors().collect();
+    screens.sort_by(|a, b| {
         let result = a
             .position()
             .x
@@ -1408,10 +1406,10 @@ fn collect_sorted_monitors(window: &WinitWindow) -> Vec<MonitorHandle> {
             result
         }
     });
-    monitors
+    screens
 }
 
-fn monitors_match(a: &MonitorHandle, b: &MonitorHandle) -> bool {
+fn screens_match(a: &MonitorHandle, b: &MonitorHandle) -> bool {
     if a.position() == b.position() && a.size() == b.size() {
         return true;
     }
@@ -1421,11 +1419,11 @@ fn monitors_match(a: &MonitorHandle, b: &MonitorHandle) -> bool {
     }
 }
 
-fn collect_monitors_from_any_window(
+fn collect_screens_from_any_window(
     windows: &bevy::winit::WinitWindows,
 ) -> Option<Vec<MonitorHandle>> {
     let handle = windows.windows.values().next()?;
-    Some(collect_sorted_monitors(handle))
+    Some(collect_sorted_screens(handle))
 }
 
 fn fix_visibility_hierarchy(
@@ -1457,7 +1455,7 @@ fn fix_visibility_hierarchy(
 fn record_window_rect_from_window(
     state: &mut tiles::SecondaryWindowState,
     window: &WinitWindow,
-    monitors: &[MonitorHandle],
+    screens: &[MonitorHandle],
     forced_position: Option<PhysicalPosition<i32>>,
 ) {
     if state.is_metadata_capture_blocked() {
@@ -1476,26 +1474,26 @@ fn record_window_rect_from_window(
         return;
     };
 
-    let monitor_index = state
+    let screen_index = state
         .descriptor
         .screen
-        .or_else(|| tiles::monitor_index_from_bounds(position, size, monitors));
-    let Some(idx) = monitor_index else {
+        .or_else(|| tiles::screen_index_from_bounds(position, size, screens));
+    let Some(idx) = screen_index else {
         return;
     };
-    let Some(monitor_handle) = monitors.get(idx).cloned() else {
+    let Some(screen_handle) = screens.get(idx).cloned() else {
         return;
     };
-    let monitor_pos = monitor_handle.position();
-    if !event_position_is_reliable(position, monitor_pos) {
+    let screen_pos = screen_handle.position();
+    if !event_position_is_reliable(position, screen_pos) {
         return;
     }
 
     if let Some(rect) = tiles::rect_from_bounds(
         (position.x, position.y),
         (size.width, size.height),
-        (monitor_pos.x, monitor_pos.y),
-        (monitor_handle.size().width, monitor_handle.size().height),
+        (screen_pos.x, screen_pos.y),
+        (screen_handle.size().width, screen_handle.size().height),
     ) {
         state.descriptor.screen = Some(idx);
         state.descriptor.screen_rect = Some(rect);
@@ -1504,13 +1502,13 @@ fn record_window_rect_from_window(
 
 fn event_position_is_reliable(
     position: PhysicalPosition<i32>,
-    monitor_position: PhysicalPosition<i32>,
+    screen_position: PhysicalPosition<i32>,
 ) -> bool {
     if !LINUX_MULTI_WINDOW {
         return true;
     }
     if position.x == 0 && position.y == 0 {
-        monitor_position.x == 0 && monitor_position.y == 0
+        screen_position.x == 0 && screen_position.y == 0
     } else {
         true
     }
@@ -1519,14 +1517,14 @@ fn event_position_is_reliable(
 fn window_on_target_screen(
     state: &mut tiles::SecondaryWindowState,
     window: &WinitWindow,
-    monitors: &[MonitorHandle],
+    screens: &[MonitorHandle],
 ) -> bool {
-    if window_on_screen(state.descriptor.screen, window, monitors) {
+    if window_on_screen(state.descriptor.screen, window, screens) {
         return true;
     }
 
     if state.descriptor.screen.is_none()
-        && let Some(idx) = detect_window_screen(window, monitors)
+        && let Some(idx) = detect_window_screen(window, screens)
     {
         state.descriptor.screen = Some(idx);
         return true;
@@ -1538,9 +1536,9 @@ fn window_on_target_screen(
 fn window_on_screen(
     screen: Option<usize>,
     window: &WinitWindow,
-    monitors: &[MonitorHandle],
+    screens: &[MonitorHandle],
 ) -> bool {
-    let detected = detect_window_screen(window, monitors);
+    let detected = detect_window_screen(window, screens);
     match (screen, detected) {
         (None, _) => true,
         (Some(target), Some(idx)) => idx == target,
@@ -1574,19 +1572,20 @@ fn linux_request_minimize(window: &WinitWindow) {
     window.set_minimized(true);
 }
 
-fn detect_window_screen(window: &WinitWindow, monitors: &[MonitorHandle]) -> Option<usize> {
+fn detect_window_screen(window: &WinitWindow, screens: &[MonitorHandle]) -> Option<usize> {
     window
         .current_monitor()
         .as_ref()
         .and_then(|current| {
-            monitors
+            screens
                 .iter()
-                .position(|monitor| monitors_match(current, monitor))
+                .position(|monitor| screens_match(current, monitor))
         })
         .or_else(|| {
-            window.outer_position().ok().and_then(|pos| {
-                tiles::monitor_index_from_bounds(pos, window.outer_size(), monitors)
-            })
+            window
+                .outer_position()
+                .ok()
+                .and_then(|pos| tiles::screen_index_from_bounds(pos, window.outer_size(), screens))
         })
 }
 
@@ -1615,30 +1614,30 @@ fn capture_primary_window_layout(
         return;
     }
 
-    let monitors = collect_sorted_monitors(window);
+    let screens_sorted = collect_sorted_screens(window);
     let mut captured = false;
     if let Ok(outer_pos) = window.outer_position() {
         let outer_size = window.outer_size();
-        let monitor_index = window
+        let screen_index = window
             .current_monitor()
             .as_ref()
             .and_then(|current| {
-                monitors
+                screens_sorted
                     .iter()
-                    .position(|monitor| monitors_match(monitor, current))
+                    .position(|screen| screens_match(screen, current))
             })
-            .or_else(|| tiles::monitor_index_from_bounds(outer_pos, outer_size, &monitors));
-        if let Some(idx) = monitor_index {
+            .or_else(|| tiles::screen_index_from_bounds(outer_pos, outer_size, &screens_sorted));
+        if let Some(idx) = screen_index {
             layout.captured_screen = Some(idx);
             layout.requested_screen = Some(idx);
-            if let Some(monitor) = monitors.get(idx) {
-                let monitor_pos = monitor.position();
-                let monitor_size = monitor.size();
+            if let Some(screen_handle) = screens_sorted.get(idx) {
+                let screen_pos = screen_handle.position();
+                let screen_size = screen_handle.size();
                 if let Some(rect) = tiles::rect_from_bounds(
                     (outer_pos.x, outer_pos.y),
                     (outer_size.width, outer_size.height),
-                    (monitor_pos.x, monitor_pos.y),
-                    (monitor_size.width, monitor_size.height),
+                    (screen_pos.x, screen_pos.y),
+                    (screen_size.width, screen_size.height),
                 ) {
                     layout.captured_rect = Some(rect);
                     layout.requested_rect = Some(rect);
@@ -1677,12 +1676,12 @@ fn capture_primary_window_layout(
         if let Some((index, _)) = best {
             layout.captured_screen = Some(index);
             layout.requested_screen = Some(index);
-            if let Some((monitor_pos, monitor_size)) = best_bounds
+            if let Some((screen_pos, screen_size)) = best_bounds
                 && let Some(rect) = tiles::rect_from_bounds(
                     (fallback_pos.x, fallback_pos.y),
                     (fallback_size.x, fallback_size.y),
-                    (monitor_pos.x, monitor_pos.y),
-                    (monitor_size.x, monitor_size.y),
+                    (screen_pos.x, screen_pos.y),
+                    (screen_size.x, screen_size.y),
                 )
             {
                 layout.captured_rect = Some(rect);

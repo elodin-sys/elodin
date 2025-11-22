@@ -260,13 +260,13 @@ impl SecondaryWindowState {
 
         if let Some((index, _)) = best {
             self.descriptor.screen = Some(index);
-            if let Some((monitor_pos, monitor_size)) = best_bounds
-                && position_is_reliable_linux(position, (monitor_pos.x, monitor_pos.y))
+            if let Some((screen_pos, screen_size)) = best_bounds
+                && position_is_reliable_linux(position, (screen_pos.x, screen_pos.y))
                 && let Some(rect) = rect_from_bounds(
                     (position.x, position.y),
                     (size.x, size.y),
-                    (monitor_pos.x, monitor_pos.y),
-                    (monitor_size.x, monitor_size.y),
+                    (screen_pos.x, screen_pos.y),
+                    (screen_size.x, screen_size.y),
                 )
             {
                 self.descriptor.screen_rect = Some(rect);
@@ -277,7 +277,7 @@ impl SecondaryWindowState {
     pub fn update_descriptor_from_winit_window(
         &mut self,
         window: &WinitWindow,
-        monitors: &[MonitorHandle],
+        screens: &[MonitorHandle],
     ) -> bool {
         if self.is_metadata_capture_blocked() {
             return false;
@@ -292,35 +292,35 @@ impl SecondaryWindowState {
         let outer_size = window.outer_size();
         let mut updated = false;
 
-        let monitor_index = current_monitor
+        let screen_index = current_monitor
             .as_ref()
-            .and_then(|current| monitors.iter().position(|monitor| monitor == current))
+            .and_then(|current| screens.iter().position(|screen| screen == current))
             .or_else(|| {
                 outer_position
                     .as_ref()
-                    .and_then(|position| monitor_index_from_bounds(*position, outer_size, monitors))
+                    .and_then(|position| screen_index_from_bounds(*position, outer_size, screens))
             });
 
-        if let Some(index) = monitor_index {
+        if let Some(index) = screen_index {
             self.descriptor.screen = Some(index);
             updated = true;
         }
 
-        if let (Some(position), Some(monitor_handle)) = (
+        if let (Some(position), Some(screen_handle)) = (
             outer_position,
-            monitor_index
-                .and_then(|idx| monitors.get(idx).cloned())
+            screen_index
+                .and_then(|idx| screens.get(idx).cloned())
                 .or_else(|| current_monitor.clone()),
         ) {
-            let monitor_pos = monitor_handle.position();
+            let screen_pos = screen_handle.position();
             if position_is_reliable_linux(
                 IVec2::new(position.x, position.y),
-                (monitor_pos.x, monitor_pos.y),
+                (screen_pos.x, screen_pos.y),
             ) && let Some(rect) = rect_from_bounds(
                 (position.x, position.y),
                 (outer_size.width, outer_size.height),
-                (monitor_pos.x, monitor_pos.y),
-                (monitor_handle.size().width, monitor_handle.size().height),
+                (screen_pos.x, screen_pos.y),
+                (screen_handle.size().width, screen_handle.size().height),
             ) {
                 self.descriptor.screen_rect = Some(rect);
                 updated = true;
@@ -331,27 +331,27 @@ impl SecondaryWindowState {
     }
 }
 
-pub(crate) fn monitor_index_from_bounds(
+pub(crate) fn screen_index_from_bounds(
     position: PhysicalPosition<i32>,
     size: PhysicalSize<u32>,
-    monitors: &[MonitorHandle],
+    screens: &[MonitorHandle],
 ) -> Option<usize> {
     let center_x = position.x + size.width as i32 / 2;
     let center_y = position.y + size.height as i32 / 2;
 
-    monitors
+    screens
         .iter()
         .enumerate()
-        .filter_map(|(index, monitor)| {
-            let monitor_pos = monitor.position();
-            let monitor_size = monitor.size();
-            let min_x = monitor_pos.x;
-            let max_x = monitor_pos.x + monitor_size.width as i32;
-            let min_y = monitor_pos.y;
-            let max_y = monitor_pos.y + monitor_size.height as i32;
+        .filter_map(|(index, screen)| {
+            let screen_pos = screen.position();
+            let screen_size = screen.size();
+            let min_x = screen_pos.x;
+            let max_x = screen_pos.x + screen_size.width as i32;
+            let min_y = screen_pos.y;
+            let max_y = screen_pos.y + screen_size.height as i32;
 
             if center_x >= min_x && center_x < max_x && center_y >= min_y && center_y < max_y {
-                let distance = (center_x - monitor_pos.x).abs() + (center_y - monitor_pos.y).abs();
+                let distance = (center_x - screen_pos.x).abs() + (center_y - screen_pos.y).abs();
                 Some((index, distance))
             } else {
                 None
@@ -364,21 +364,21 @@ pub(crate) fn monitor_index_from_bounds(
 pub(crate) fn rect_from_bounds(
     position: (i32, i32),
     size: (u32, u32),
-    monitor_position: (i32, i32),
-    monitor_size: (u32, u32),
+    screen_position: (i32, i32),
+    screen_size: (u32, u32),
 ) -> Option<WindowRect> {
-    if monitor_size.0 == 0 || monitor_size.1 == 0 {
+    if screen_size.0 == 0 || screen_size.1 == 0 {
         return None;
     }
 
-    let width_pct = (size.0 as f32 / monitor_size.0 as f32) * 100.0;
-    let height_pct = (size.1 as f32 / monitor_size.1 as f32) * 100.0;
+    let width_pct = (size.0 as f32 / screen_size.0 as f32) * 100.0;
+    let height_pct = (size.1 as f32 / screen_size.1 as f32) * 100.0;
 
-    let offset_x = position.0 - monitor_position.0;
-    let offset_y = position.1 - monitor_position.1;
+    let offset_x = position.0 - screen_position.0;
+    let offset_y = position.1 - screen_position.1;
 
-    let x_pct = (offset_x as f32 / monitor_size.0 as f32) * 100.0;
-    let y_pct = (offset_y as f32 / monitor_size.1 as f32) * 100.0;
+    let x_pct = (offset_x as f32 / screen_size.0 as f32) * 100.0;
+    let y_pct = (offset_y as f32 / screen_size.1 as f32) * 100.0;
 
     Some(WindowRect {
         x: clamp_percent(x_pct),
@@ -388,12 +388,12 @@ pub(crate) fn rect_from_bounds(
     })
 }
 
-fn position_is_reliable_linux(position: IVec2, monitor_position: (i32, i32)) -> bool {
+fn position_is_reliable_linux(position: IVec2, screen_position: (i32, i32)) -> bool {
     if !cfg!(target_os = "linux") {
         return true;
     }
     if position.x == 0 && position.y == 0 {
-        monitor_position.0 == 0 && monitor_position.1 == 0
+        screen_position.0 == 0 && screen_position.1 == 0
     } else {
         true
     }
