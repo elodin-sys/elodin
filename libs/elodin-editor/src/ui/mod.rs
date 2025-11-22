@@ -946,13 +946,10 @@ fn apply_secondary_window_rect(
         if !is_full_rect {
             force_windowed(window);
         }
-    } else {
-        if !is_full_rect {
-            window.set_maximized(false);
-            linux_clear_minimized(window);
-        }
+    } else if !is_full_rect {
+        window.set_maximized(false);
+        linux_clear_minimized(window);
     }
-
     let screen_width = screen_size.width as i32;
     let screen_height = screen_size.height as i32;
 
