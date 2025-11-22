@@ -618,8 +618,17 @@ impl TimeseriesPlot {
 
         response.context_menu(|ui| {
             if ui.button("Set Time Range to Viewport Bounds").clicked() {
-                let start = Timestamp((self.bounds.min_x as i64) + self.earliest_timestamp.0);
-                let end = Timestamp((self.bounds.max_x as i64) + self.earliest_timestamp.0);
+                let (start, end) = if self.is_relative_time {
+                    // For relative time plots, bounds.min_x/max_x are in seconds
+                    // Convert to microseconds before adding to earliest_timestamp
+                    let start_micros = (self.bounds.min_x * 1_000_000.0) as i64 + self.earliest_timestamp.0;
+                    let end_micros = (self.bounds.max_x * 1_000_000.0) as i64 + self.earliest_timestamp.0;
+                    (Timestamp(start_micros), Timestamp(end_micros))
+                } else {
+                    // For absolute time plots, bounds.min_x/max_x are already in microseconds
+                    (Timestamp((self.bounds.min_x as i64) + self.earliest_timestamp.0),
+                     Timestamp((self.bounds.max_x as i64) + self.earliest_timestamp.0))
+                };
                 graph_state.zoom_factor = Vec2::new(1.0, 1.0);
                 graph_state.pan_offset = Vec2::ZERO;
                 *time_range_behavior = TimeRangeBehavior {
@@ -807,8 +816,16 @@ impl TimeseriesPlot {
     }
 
     fn visible_time_range(&self) -> Range<Timestamp> {
-        Timestamp((self.bounds.min_x as i64).saturating_add(self.earliest_timestamp.0))
-            ..Timestamp((self.bounds.max_x as i64).saturating_add(self.earliest_timestamp.0))
+        if self.is_relative_time {
+            // For relative time plots, bounds.min_x/max_x are in seconds
+            // Convert to microseconds before adding to earliest_timestamp
+            Timestamp((self.bounds.min_x * 1_000_000.0) as i64 + self.earliest_timestamp.0)
+                ..Timestamp((self.bounds.max_x * 1_000_000.0) as i64 + self.earliest_timestamp.0)
+        } else {
+            // For absolute time plots, bounds.min_x/max_x are already in microseconds
+            Timestamp((self.bounds.min_x as i64).saturating_add(self.earliest_timestamp.0))
+                ..Timestamp((self.bounds.max_x as i64).saturating_add(self.earliest_timestamp.0))
+        }
     }
 }
 

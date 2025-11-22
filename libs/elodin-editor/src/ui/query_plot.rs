@@ -214,10 +214,13 @@ impl QueryPlotData {
 
         // Skip initial points that have the same timestamp (initialization artifacts)
         // These are typically default values before the simulation actually starts
+        // NOTE: This handles legitimate data quality issues, not timestamp normalization bugs.
+        // The timestamp normalization bug (now fixed) affected absolute timestamp storage
+        // but not relative time calculations used for plotting.
         let skip_initial_points = if points.len() > 2 {
             // Find how many initial points share the same timestamp
             let first_time = points[0].0;
-            let mut skip_count = 1; // At least skip the first point
+            let mut skip_count = 0;
 
             // Count consecutive points with the same initial timestamp
             for (i, (time, _)) in points.iter().enumerate().skip(1) {
@@ -229,8 +232,8 @@ impl QueryPlotData {
                 }
             }
 
-            // Only skip if there are duplicate timestamps at the start
-            if skip_count > 1 {
+            // If we found duplicate timestamps, skip all of them
+            if skip_count > 0 {
                 skip_count
             } else {
                 // No duplicate timestamps, but check for a huge value jump
