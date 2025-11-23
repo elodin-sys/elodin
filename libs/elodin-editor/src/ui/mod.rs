@@ -12,8 +12,8 @@ use bevy::{
     prelude::*,
     render::camera::{RenderTarget, Viewport},
     window::{
-        EnabledButtons, Monitor, PresentMode, PrimaryWindow, WindowCloseRequested, WindowMoved,
-        WindowRef, WindowResized, WindowResolution,
+        EnabledButtons, Monitor, NormalizedWindowRef, PresentMode, PrimaryWindow,
+        WindowCloseRequested, WindowMoved, WindowRef, WindowResized, WindowResolution,
     },
 };
 use bevy_egui::{
@@ -592,7 +592,6 @@ fn sync_secondary_windows(
                 close: true,
                 minimize: true,
                 maximize: true,
-                ..Default::default()
             },
             ..Default::default()
         };
@@ -2074,16 +2073,22 @@ fn set_secondary_camera_viewport(
     }
 }
 
-fn dedup_camera_orders(mut cameras: Query<(Entity, &mut Camera)>) {
+fn dedup_camera_orders(
+    mut cameras: Query<(Entity, &mut Camera)>,
+    primary_query: Query<Entity, With<PrimaryWindow>>,
+) {
+    let primary = primary_query.iter().next();
     // Collect active window-targeted cameras with their current order.
-    let mut entries: Vec<(Entity, String, isize)> = cameras
+    let mut entries: Vec<(Entity, NormalizedWindowRef, isize)> = cameras
         .iter()
         .filter_map(|(entity, camera)| {
             if !camera.is_active {
                 return None;
             }
-            if let RenderTarget::Window(window_ref) = &camera.target {
-                return Some((entity, format!("{:?}", window_ref), camera.order));
+            if let RenderTarget::Window(window_ref) = &camera.target
+                && let Some(norm) = window_ref.normalize(primary)
+            {
+                return Some((entity, norm, camera.order));
             }
             None
         })
@@ -2098,12 +2103,12 @@ fn dedup_camera_orders(mut cameras: Query<(Entity, &mut Camera)>) {
     });
 
     let mut new_orders: HashMap<Entity, isize> = HashMap::new();
-    let mut current_key: Option<String> = None;
+    let mut current_key: Option<NormalizedWindowRef> = None;
     let mut last_order_for_key: Option<isize> = None;
 
     for (entity, key, order) in entries {
-        if current_key.as_deref() != Some(&key) {
-            current_key = Some(key.clone());
+        if current_key != Some(key) {
+            current_key = Some(key);
             last_order_for_key = None;
         }
         let new_order = match last_order_for_key {
