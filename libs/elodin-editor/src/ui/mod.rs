@@ -36,20 +36,31 @@ pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
     height: 80,
 };
 const SCREEN_RELAYOUT_MAX_ATTEMPTS: u8 = 5;
-const LINUX_MULTI_WINDOW: bool = cfg!(target_os = "linux");
 const SECONDARY_RECT_CAPTURE_LOAD_GUARD: Duration = Duration::from_millis(2500);
 const SECONDARY_RECT_CAPTURE_STABILIZE_GUARD: Duration = Duration::from_millis(400);
-#[cfg(target_os = "macos")]
-const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(3500);
-#[cfg(not(target_os = "macos"))]
-const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(2000);
 const PRIMARY_VIEWPORT_ORDER_BASE: isize = 0;
 const PRIMARY_GRAPH_ORDER_BASE: isize = 100;
-// Secondary cameras are offset high to avoid clashing with primary/UI cameras.
 const SECONDARY_GRAPH_ORDER_BASE: isize = 1000;
 const SECONDARY_GRAPH_ORDER_STRIDE: isize = 50;
-const MACOS_PRIMARY_ORDER_OFFSET: isize = if cfg!(target_os = "macos") { 1000 } else { 0 };
 const DEFAULT_PRESENT_MODE: PresentMode = PresentMode::Fifo;
+
+#[cfg(target_os = "linux")]
+mod platform {
+    use super::*;
+    pub const LINUX_MULTI_WINDOW: bool = true;
+    pub const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(2000);
+    pub const PRIMARY_ORDER_OFFSET: isize = 0;
+}
+
+#[cfg(not(target_os = "linux"))]
+mod platform {
+    use super::*;
+    pub const LINUX_MULTI_WINDOW: bool = false;
+    pub const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(3500);
+    pub const PRIMARY_ORDER_OFFSET: isize = 1000;
+}
+
+use platform::{LINUX_MULTI_WINDOW, PRIMARY_ORDER_OFFSET, SCREEN_RELAYOUT_TIMEOUT};
 
 use big_space::GridCell;
 use plot_3d::LinePlot3dPlugin;
@@ -1936,7 +1947,7 @@ fn set_camera_viewport(
     window: Query<(&Window, &bevy_egui::EguiContextSettings), With<PrimaryWindow>>,
     mut main_camera_query: Query<CameraViewportQuery, With<MainCamera>>,
 ) {
-    let order_offset = MACOS_PRIMARY_ORDER_OFFSET;
+    let order_offset = PRIMARY_ORDER_OFFSET;
     let mut next_viewport_order = PRIMARY_VIEWPORT_ORDER_BASE;
     let mut next_graph_order = PRIMARY_GRAPH_ORDER_BASE;
     for CameraViewportQueryItem {
