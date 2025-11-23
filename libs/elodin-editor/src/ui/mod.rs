@@ -49,10 +49,7 @@ const PRIMARY_GRAPH_ORDER_BASE: isize = 100;
 const SECONDARY_GRAPH_ORDER_BASE: isize = 1000;
 const SECONDARY_GRAPH_ORDER_STRIDE: isize = 50;
 const MACOS_PRIMARY_ORDER_OFFSET: isize = if cfg!(target_os = "macos") { 1000 } else { 0 };
-#[cfg(target_os = "linux")]
 const DEFAULT_PRESENT_MODE: PresentMode = PresentMode::Fifo;
-#[cfg(not(target_os = "linux"))]
-const DEFAULT_PRESENT_MODE: PresentMode = PresentMode::AutoVsync;
 
 use big_space::GridCell;
 use plot_3d::LinePlot3dPlugin;
@@ -801,6 +798,8 @@ fn sync_secondary_windows(
             present_mode: DEFAULT_PRESENT_MODE,
             enabled_buttons: EnabledButtons {
                 close: true,
+                minimize: true,
+                maximize: true,
                 ..Default::default()
             },
             ..Default::default()
