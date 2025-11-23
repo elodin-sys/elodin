@@ -511,7 +511,6 @@ fn sync_secondary_windows(
             info!(
                 id = state.id.0,
                 screen = state.descriptor.screen.map(|s| s as i32).unwrap_or(-1),
-                locked = false,
                 relayout = ?state.relayout_phase,
                 "secondary_window_state"
             );

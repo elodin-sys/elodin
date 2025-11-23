@@ -181,14 +181,9 @@ impl Plugin for EditorPlugin {
                     .build(),
             )
             .add_plugins(LogPlugin {
-                // Reduce wgpu/present_frames noise on Linux to curb UI lag from log spam.
-                // Only set on Linux; other platforms keep defaults.
                 level: Level::INFO,
-                filter: if cfg!(target_os = "linux") {
-                    "info,wgpu=error,present_frames=error".to_string()
-                } else {
-                    "info".to_string()
-                },
+                filter: "info,wgpu=error,present_frames=error,wgpu_core=warn,wgpu_hal=warn"
+                    .to_string(),
                 ..Default::default()
             })
             .insert_resource(winit_settings)
