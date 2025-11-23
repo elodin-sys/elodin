@@ -372,8 +372,8 @@ impl SettingModalState {
 
 #[derive(SystemParam)]
 pub struct MainLayout<'w, 's> {
-    contexts: EguiContexts<'w, 's>,
-    images: Local<'s, images::Images>,
+    _contexts: EguiContexts<'w, 's>,
+    _images: Local<'s, images::Images>,
 }
 
 impl RootWidgetSystem for MainLayout<'_, '_> {
@@ -386,10 +386,7 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         ctx: &mut egui::Context,
         _args: Self::Args,
     ) {
-        let state_mut = state.get_mut(world);
-
-        let _contexts = state_mut.contexts;
-        let _images = state_mut.images;
+        let _state = state.get_mut(world);
 
         theme::set_theme(ctx);
 
