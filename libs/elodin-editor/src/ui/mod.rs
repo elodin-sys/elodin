@@ -393,19 +393,9 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
 
         theme::set_theme(ctx);
 
-        // Custom titlebar disabled; rely on native window chrome across all OSes.
-
         #[cfg(not(target_family = "wasm"))]
         world.add_root_widget::<status_bar::StatusBar>("status_bar");
 
-        #[cfg(target_os = "macos")]
-        let frame = {
-            let mut frame = egui::Frame::new();
-            // Leave a small top inset so native titlebar controls don't overlap egui.
-            frame.inner_margin.top = 32;
-            frame
-        };
-        #[cfg(not(target_os = "macos"))]
         let frame = egui::Frame::new();
 
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
@@ -560,7 +550,7 @@ fn sync_secondary_windows(
 
         // Try to pre-size and pre-position the window to its target rect to avoid an
         // extra resize pass (and the resulting swapchain churn).
-        let (resolution, position, _pre_applied_rect, pre_applied_screen) = if let Some(rect) =
+        let (resolution, position, pre_applied_screen) = if let Some(rect) =
             state.descriptor.screen_rect
             && let Some(screen_idx) = state.descriptor.screen
             && let Some(screens) = screens_any.as_ref()
@@ -581,13 +571,11 @@ fn sync_secondary_windows(
             (
                 WindowResolution::new(width_px as f32, height_px as f32),
                 Some(WindowPosition::At(IVec2::new(x, y))),
-                Some(rect),
                 Some(screen_idx),
             )
         } else {
             (
                 WindowResolution::new(640.0, 480.0),
-                None,
                 None,
                 state.descriptor.screen,
             )

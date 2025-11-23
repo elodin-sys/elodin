@@ -163,7 +163,7 @@ impl Plugin for EditorPlugin {
                             },
                             composite_alpha_mode,
                             prevent_default_event_handling: true,
-                            decorations: cfg!(target_os = "macos"),
+                            decorations: true,
                             visible: cfg!(target_os = "linux"),
                             ..default()
                         }),
