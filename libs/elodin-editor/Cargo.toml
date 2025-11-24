@@ -18,11 +18,11 @@ nox.default-features = false
 egui_material_icons = "0.3"
 
 # bevy
-bevy.version = "0.16"
-bevy.features = ["wayland"]
-bevy_render.version = "0.16"
-bevy_color.version = "0.16"
-bevy_egui.version = "0.34.0-rc.2"
+bevy.version = "0.17"
+bevy.features = []
+bevy_render.version = "0.17"
+bevy_color.version = "0.17"
+bevy_egui.version = "0.38"
 egui.version = "0.31"
 egui.features = ["rayon"]
 egui_tiles = "0.12"
@@ -30,10 +30,16 @@ egui_table = "0.3"
 winit.version = "0.30.12"
 winit.features = ["rwh_05"]
 raw-window-handle = "0.5"
-bevy_infinite_grid = "0.15"
-big_space.version = "0.5"
-bevy_editor_cam = "0.6"
-bevy_framepace = "0.19"
+# TODO: Use elodin/Cargo.toml's patch section for github sources.
+#bevy_infinite_grid = "0.15"
+bevy_infinite_grid.git = "https://github.com/AllenDang/bevy_infinite_grid.git"
+#big_space = "0.11"
+big_space.git = "https://github.com/elodin-sys/big_space.git"
+big_space.branch = "no_prop_rot_v0.17"
+#bevy_editor_cam = "0.6"
+bevy_editor_cam.git = "https://github.com/TotalKrill/bevy_editor_cam"
+bevy_editor_cam.branch = "0.17"
+bevy_framepace = "0.20"
 
 # rand
 fastrand.version = "2"
