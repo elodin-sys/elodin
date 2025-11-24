@@ -288,14 +288,14 @@ impl WorldBuilder {
                             // Here we start the DB with an address.
                             elodin_db::Server::new(db_path, addr).unwrap(),
                             exec,
-                        ).run_with_cancellation(
+                        )
+                        .run_with_cancellation(
                             move || {
                                 if let Some(ref func) = is_canceled {
                                     Python::with_gil(|py| {
-                                        func.call0(py)
-                                            .and_then(|result| result.extract::<bool>(py))
+                                        func.call0(py).and_then(|result| result.extract::<bool>(py))
                                     })
-                                        .unwrap_or_else(|_| terminate_flag.load(Ordering::Relaxed))
+                                    .unwrap_or_else(|_| terminate_flag.load(Ordering::Relaxed))
                                 } else {
                                     terminate_flag.load(Ordering::Relaxed)
                                 }
@@ -303,7 +303,8 @@ impl WorldBuilder {
                             move |tick_count| {
                                 if let Some(ref func) = post_step {
                                     Python::with_gil(|py| {
-                                        let tick_count_py = tick_count.into_bound_py_any(py)
+                                        let tick_count_py = tick_count
+                                            .into_bound_py_any(py)
                                             .unwrap_or_else(|_| py.None().into_bound(py));
                                         if let Err(e) = func.call1(py, (tick_count_py,)) {
                                             tracing::warn!("post_step error {e}");
