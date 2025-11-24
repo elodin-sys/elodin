@@ -2,8 +2,9 @@ use crate::{MainCamera, plugins::gizmos::GIZMO_RENDER_LAYER};
 use bevy::animation::{AnimationTarget, AnimationTargetId, animated_field};
 use bevy::math::{DVec3, Dir3};
 use bevy::prelude::*;
-use bevy::render::camera::Viewport;
+use bevy::render::camera::{RenderTarget, Viewport};
 use bevy::render::view::RenderLayers;
+use bevy::window::{PrimaryWindow, WindowRef};
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;
 use bevy_egui::EguiContexts;
@@ -133,7 +134,7 @@ pub struct NavGizmo;
 
 #[derive(Component, Debug)]
 pub struct NavGizmoParent {
-    main_camera: Entity,
+    pub main_camera: Entity,
 }
 
 pub fn spawn_gizmo(
@@ -346,20 +347,14 @@ pub fn sync_nav_camera(
 }
 
 pub fn set_camera_viewport(
-    window: Query<(&Window, &bevy_egui::EguiContextSettings)>,
+    windows: Query<(Entity, &Window, &bevy_egui::EguiContextSettings)>,
     _contexts: EguiContexts,
     mut nav_camera_query: Query<(&mut Camera, &NavGizmoParent)>,
     main_camera_query: Query<&mut Camera, Without<NavGizmoParent>>,
+    primary_query: Query<Entity, With<PrimaryWindow>>,
 ) {
     let margin = 8.0;
     let side_length = 128.0;
-    let Some((window, egui_settings)) = window.iter().next() else {
-        return;
-    };
-    let scale_factor = window.scale_factor() * egui_settings.scale_factor;
-
-    let margin = margin * scale_factor;
-    let side_length = side_length * scale_factor;
     for (mut nav_camera, parent) in nav_camera_query.iter_mut() {
         let Ok(main) = main_camera_query.get(parent.main_camera) else {
             continue;
@@ -367,6 +362,20 @@ pub fn set_camera_viewport(
         let Some(viewport) = &main.viewport else {
             continue;
         };
+        let target_window = match &nav_camera.target {
+            RenderTarget::Window(WindowRef::Primary) => primary_query.iter().next(),
+            RenderTarget::Window(WindowRef::Entity(entity)) => Some(*entity),
+            _ => None,
+        };
+        let Some(window_entity) = target_window else {
+            continue;
+        };
+        let Ok((_, window, egui_settings)) = windows.get(window_entity) else {
+            continue;
+        };
+        let scale_factor = window.scale_factor() * egui_settings.scale_factor;
+        let margin = margin * scale_factor;
+        let side_length = side_length * scale_factor;
         let viewport_pos = viewport.physical_position.as_vec2();
         let viewport_size = viewport.physical_size.as_vec2();
         let nav_viewport_pos = Vec2::new(
@@ -380,11 +389,22 @@ pub fn set_camera_viewport(
         };
         nav_camera.is_active = main.is_active;
 
-        nav_camera.viewport = Some(Viewport {
+        let new_viewport = Viewport {
             physical_position: UVec2::new(nav_viewport_pos.x as u32, nav_viewport_pos.y as u32),
             physical_size,
             depth: 0.0..1.0,
-        });
+        };
+        let unchanged = nav_camera
+            .viewport
+            .as_ref()
+            .map(|vp| {
+                vp.physical_position == new_viewport.physical_position
+                    && vp.physical_size == new_viewport.physical_size
+            })
+            .unwrap_or(false);
+        if !unchanged {
+            nav_camera.viewport = Some(new_viewport);
+        }
     }
 }
 

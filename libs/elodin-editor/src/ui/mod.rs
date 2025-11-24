@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use bevy::{
@@ -38,10 +38,16 @@ pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
 const SCREEN_RELAYOUT_MAX_ATTEMPTS: u8 = 5;
 const SECONDARY_RECT_CAPTURE_LOAD_GUARD: Duration = Duration::from_millis(2500);
 const SECONDARY_RECT_CAPTURE_STABILIZE_GUARD: Duration = Duration::from_millis(400);
-const PRIMARY_VIEWPORT_ORDER_BASE: isize = 0;
+// Order ranges:
+// 0          -> UI/egui (Bevy default)
+// 10..        primary viewports (3D, gizmo/axes…)
+// 100..       primary graphs
+// 1000..      secondary windows (stride by window id)
+const PRIMARY_VIEWPORT_ORDER_BASE: isize = 10;
 const PRIMARY_GRAPH_ORDER_BASE: isize = 100;
 const SECONDARY_GRAPH_ORDER_BASE: isize = 1000;
 const SECONDARY_GRAPH_ORDER_STRIDE: isize = 50;
+const NAV_GIZMO_ORDER_OFFSET: isize = 1;
 const DEFAULT_PRESENT_MODE: PresentMode = PresentMode::Fifo;
 
 #[cfg(target_os = "linux")]
@@ -73,7 +79,10 @@ use impeller2_bevy::ComponentValueMap;
 use impeller2_wkt::ComponentValue;
 use impeller2_wkt::{ComponentMetadata, WindowRect};
 
-use crate::{GridHandle, MainCamera, plugins::LogicalKeyState};
+use crate::{
+    GridHandle, MainCamera,
+    plugins::{LogicalKeyState, navigation_gizmo::NavGizmoCamera},
+};
 
 use self::inspector::entity::ComponentFilter;
 
@@ -262,8 +271,7 @@ impl Plugin for UiPlugin {
             .add_systems(Update, shortcuts)
             .add_systems(Update, handle_primary_close.before(render_layout))
             .add_systems(Update, render_layout)
-            // Ensure camera orders are unique before rendering the frame.
-            .add_systems(First, dedup_camera_orders)
+            .add_systems(First, warn_camera_order_ambiguities)
             .add_systems(
                 Update,
                 apply_primary_window_layout
@@ -306,7 +314,13 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
-                dedup_camera_orders
+                set_nav_gizmo_camera_orders
+                    .after(set_secondary_camera_viewport)
+                    .after(set_camera_viewport),
+            )
+            .add_systems(
+                Update,
+                warn_camera_order_ambiguities
                     .after(set_secondary_camera_viewport)
                     .after(set_camera_viewport),
             )
@@ -1893,14 +1907,6 @@ pub(crate) fn compute_secondary_window_title(state: &tiles::SecondaryWindowState
         .unwrap_or_else(|| "Panel".to_string())
 }
 
-#[derive(QueryData)]
-#[query_data(mutable)]
-struct CameraViewportQuery {
-    camera: &'static mut Camera,
-    viewport_rect: &'static ViewportRect,
-    graph_state: Option<&'static GraphState>,
-}
-
 fn clamp_viewport_to_window(
     mut pos: Vec2,
     mut size: Vec2,
@@ -1930,18 +1936,27 @@ fn clamp_viewport_to_window(
 
 fn set_camera_viewport(
     window: Query<(&Window, &bevy_egui::EguiContextSettings), With<PrimaryWindow>>,
-    mut main_camera_query: Query<CameraViewportQuery, With<MainCamera>>,
+    mut main_camera_query: Query<
+        (Entity, &ViewportRect, Option<&GraphState>, &mut Camera),
+        With<MainCamera>,
+    >,
 ) {
     let order_offset = PRIMARY_ORDER_OFFSET;
     let mut next_viewport_order = PRIMARY_VIEWPORT_ORDER_BASE;
     let mut next_graph_order = PRIMARY_GRAPH_ORDER_BASE;
-    for CameraViewportQueryItem {
-        mut camera,
-        viewport_rect,
-        graph_state,
-    } in main_camera_query.iter_mut()
-    {
-        let order = if graph_state.is_some() {
+    let mut entries: Vec<_> = main_camera_query
+        .iter()
+        .map(|(entity, _, graph_state, _)| (entity, graph_state.is_some()))
+        .collect();
+    // Stable ordering: non-graph cameras first, then graphs; break ties by entity id.
+    entries.sort_by_key(|(entity, is_graph)| (*is_graph, entity.index()));
+
+    for (entity, is_graph) in entries {
+        let Ok((_, viewport_rect, _graph_state, mut camera)) = main_camera_query.get_mut(entity)
+        else {
+            continue;
+        };
+        let order = if is_graph {
             let order = next_graph_order;
             next_graph_order += 1;
             order
@@ -1995,7 +2010,7 @@ fn set_camera_viewport(
 
 fn set_secondary_camera_viewport(
     windows: Res<tiles::WindowManager>,
-    mut cameras: Query<(&mut Camera, &ViewportRect)>,
+    mut cameras: Query<(&mut Camera, &ViewportRect, Option<&NavGizmoCamera>)>,
     window_query: Query<(&Window, &bevy_egui::EguiContextSettings)>,
 ) {
     for state in windows.secondary() {
@@ -2008,10 +2023,16 @@ fn set_secondary_camera_viewport(
         };
         let scale_factor = window.scale_factor() * egui_settings.scale_factor;
 
-        for (index, &graph) in state.graph_entities.iter().enumerate() {
-            let Ok((mut camera, viewport_rect)) = cameras.get_mut(graph) else {
+        let mut next_order = 0;
+
+        for &graph in state.graph_entities.iter() {
+            let Ok((mut camera, viewport_rect, is_nav_gizmo)) = cameras.get_mut(graph) else {
                 continue;
             };
+            if is_nav_gizmo.is_some() {
+                // Nav gizmo cameras get their order/viewport in dedicated systems.
+                continue;
+            }
 
             let Some(available_rect) = viewport_rect.0 else {
                 camera.is_active = false;
@@ -2049,7 +2070,8 @@ fn set_secondary_camera_viewport(
                 // Offset secondary cameras to avoid colliding with primary orders.
                 let base_order =
                     SECONDARY_GRAPH_ORDER_BASE + SECONDARY_GRAPH_ORDER_STRIDE * state.id.0 as isize;
-                let offset = base_order + index as isize;
+                let offset = base_order + next_order;
+                next_order += 1;
                 camera.order = offset;
                 camera.viewport = Some(Viewport {
                     physical_position: UVec2::new(clamped_pos.x as u32, clamped_pos.y as u32),
@@ -2068,55 +2090,77 @@ fn set_secondary_camera_viewport(
     }
 }
 
-fn dedup_camera_orders(
-    mut cameras: Query<(Entity, &mut Camera)>,
+fn set_nav_gizmo_camera_orders(
+    windows: Res<tiles::WindowManager>,
+    primary_query: Query<Entity, With<PrimaryWindow>>,
+    mut cameras: Query<&mut Camera, With<NavGizmoCamera>>,
+) {
+    let mut base_by_window: HashMap<Entity, isize> = HashMap::new();
+
+    if let Ok(primary) = primary_query.single() {
+        base_by_window.insert(
+            primary,
+            PRIMARY_VIEWPORT_ORDER_BASE + PRIMARY_ORDER_OFFSET + NAV_GIZMO_ORDER_OFFSET,
+        );
+    }
+
+    for state in windows.secondary() {
+        if let Some(window_entity) = state.window_entity {
+            let base = SECONDARY_GRAPH_ORDER_BASE
+                + SECONDARY_GRAPH_ORDER_STRIDE * state.id.0 as isize
+                + NAV_GIZMO_ORDER_OFFSET;
+            base_by_window.insert(window_entity, base);
+        }
+    }
+
+    for mut camera in cameras.iter_mut() {
+        let RenderTarget::Window(window_ref) = &camera.target else {
+            continue;
+        };
+        match window_ref {
+            WindowRef::Primary => {
+                if let Ok(primary) = primary_query.single()
+                    && let Some(base) = base_by_window.get(&primary)
+                {
+                    camera.order = *base;
+                }
+            }
+            WindowRef::Entity(entity) => {
+                if let Some(base) = base_by_window.get(entity) {
+                    camera.order = *base;
+                }
+            }
+        }
+    }
+}
+
+fn warn_camera_order_ambiguities(
+    cameras: Query<(Entity, &Camera)>,
     primary_query: Query<Entity, With<PrimaryWindow>>,
 ) {
     let primary = primary_query.iter().next();
-    // Collect active window-targeted cameras with their current order.
-    let mut entries: Vec<(Entity, NormalizedWindowRef, isize)> = cameras
-        .iter()
-        .filter_map(|(entity, camera)| {
-            if !camera.is_active {
-                return None;
-            }
-            if let RenderTarget::Window(window_ref) = &camera.target
-                && let Some(norm) = window_ref.normalize(primary)
-            {
-                return Some((entity, norm, camera.order));
-            }
-            None
-        })
-        .collect();
+    let mut seen: HashMap<(NormalizedWindowRef, isize), Entity> = HashMap::new();
+    let mut warned: HashSet<NormalizedWindowRef> = HashSet::new();
 
-    // Sort by target key, then order, then entity to make de-dup deterministic.
-    entries.sort_by(|(a_ent, a_key, a_order), (b_ent, b_key, b_order)| {
-        a_key
-            .cmp(b_key)
-            .then_with(|| a_order.cmp(b_order))
-            .then_with(|| a_ent.index().cmp(&b_ent.index()))
-    });
-
-    let mut new_orders: HashMap<Entity, isize> = HashMap::new();
-    let mut current_key: Option<NormalizedWindowRef> = None;
-    let mut last_order_for_key: Option<isize> = None;
-
-    for (entity, key, order) in entries {
-        if current_key != Some(key) {
-            current_key = Some(key);
-            last_order_for_key = None;
+    for (entity, camera) in cameras.iter() {
+        if !camera.is_active {
+            continue;
         }
-        let new_order = match last_order_for_key {
-            Some(last) if order <= last => last + 1,
-            _ => order,
-        };
-        new_orders.insert(entity, new_order);
-        last_order_for_key = Some(new_order);
-    }
-
-    for (entity, mut camera) in cameras.iter_mut() {
-        if let Some(new_order) = new_orders.get(&entity) {
-            camera.order = *new_order;
+        if let RenderTarget::Window(window_ref) = &camera.target
+            && let Some(norm) = window_ref.normalize(primary)
+        {
+            let key = (norm, camera.order);
+            if let Some(prev) = seen.insert(key, entity)
+                && warned.insert(norm)
+            {
+                warn!(
+                    window = ?norm,
+                    order = camera.order,
+                    first = ?prev,
+                    second = ?entity,
+                    "Camera order collision on window"
+                );
+            }
         }
     }
 }
