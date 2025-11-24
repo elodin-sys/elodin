@@ -37,8 +37,8 @@ bevy_infinite_grid.git = "https://github.com/AllenDang/bevy_infinite_grid.git"
 big_space.git = "https://github.com/elodin-sys/big_space.git"
 big_space.branch = "no_prop_rot_v0.17"
 #bevy_editor_cam = "0.6"
-bevy_editor_cam.git = "https://github.com/TotalKrill/bevy_editor_cam"
-bevy_editor_cam.branch = "0.17"
+bevy_editor_cam.git = "https://github.com/aevyrie/bevy_editor_cam"
+bevy_editor_cam.rev = "1ae39bda1aa8d547dec4b26747e466ad5b2ab9ab"
 bevy_framepace = "0.20"
 
 # rand

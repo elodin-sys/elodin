@@ -501,7 +501,7 @@ pub fn create_window() -> PaletteItem {
             .default(),
         ])
         .prompt("Enter a title for the new window")
-        .into()
+        .into_event()
     })
 }
 

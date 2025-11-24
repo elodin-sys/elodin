@@ -1855,7 +1855,7 @@ dependencies = [
 [[package]]
 name = "bevy_editor_cam"
 version = "0.7.0"
-source = "git+https://github.com/TotalKrill/bevy_editor_cam?branch=0.17#b0b1a0993236bbe415a53687b016733fd4df7d0f"
+source = "git+https://github.com/aevyrie/bevy_editor_cam?rev=1ae39bda1aa8d547dec4b26747e466ad5b2ab9ab#1ae39bda1aa8d547dec4b26747e466ad5b2ab9ab"
 dependencies = [
  "bevy_app 0.17.2",
  "bevy_asset 0.17.2",
