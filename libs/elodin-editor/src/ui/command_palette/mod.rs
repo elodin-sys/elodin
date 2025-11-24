@@ -4,8 +4,7 @@ use bevy::{
         world::World,
     },
     input::keyboard::Key,
-    prelude::{Resource, With},
-    window::PrimaryWindow,
+    prelude::{Resource, With, IsDefaultUiCamera},
 };
 use bevy_egui::{EguiContexts, EguiTextureHandle};
 use egui::{Margin, Modifiers, epaint::Shadow};
@@ -98,7 +97,7 @@ impl RootWidgetSystem for CommandPalette<'_> {
         _ctx: &mut egui::Context,
         _args: Self::Args,
     ) {
-        let _ = world.add_root_widget_with::<PaletteWindow, With<PrimaryWindow>>(
+        let _ = world.add_root_widget_with::<PaletteWindow, With<IsDefaultUiCamera>>(
             "command_palette_window",
             None,
         );
