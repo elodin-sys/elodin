@@ -202,6 +202,7 @@ impl WorldBuilder {
         max_ticks = None,
         optimize = false,
         is_canceled = None,
+        post_step = None,
         db_path = None,
         interactive = true,
     ))]
@@ -215,6 +216,7 @@ impl WorldBuilder {
         max_ticks: Option<u64>,
         optimize: bool,
         is_canceled: Option<PyObject>,
+        post_step: Option<PyObject>,
         db_path: Option<String>,
         interactive: bool,
     ) -> Result<Option<String>, Error> {
@@ -286,19 +288,27 @@ impl WorldBuilder {
                             // Here we start the DB with an address.
                             elodin_db::Server::new(db_path, addr).unwrap(),
                             exec,
-                        )
-                        .run_with_cancellation(
-                            {
-                                move || {
-                                    if let Some(ref func) = is_canceled {
-                                        Python::with_gil(|py| {
-                                            func.call0(py)
-                                                .and_then(|result| result.extract::<bool>(py))
-                                        })
+                        ).run_with_cancellation(
+                            move || {
+                                if let Some(ref func) = is_canceled {
+                                    Python::with_gil(|py| {
+                                        func.call0(py)
+                                            .and_then(|result| result.extract::<bool>(py))
+                                    })
                                         .unwrap_or_else(|_| terminate_flag.load(Ordering::Relaxed))
-                                    } else {
-                                        terminate_flag.load(Ordering::Relaxed)
-                                    }
+                                } else {
+                                    terminate_flag.load(Ordering::Relaxed)
+                                }
+                            },
+                            move |tick_count| {
+                                if let Some(ref func) = post_step {
+                                    Python::with_gil(|py| {
+                                        let tick_count_py = tick_count.into_bound_py_any(py)
+                                            .unwrap_or_else(|_| py.None().into_bound(py));
+                                        if let Err(e) = func.call1(py, (tick_count_py,)) {
+                                            tracing::warn!("post_step error {e}");
+                                        }
+                                    });
                                 }
                             },
                             interactive,

@@ -54,6 +54,7 @@ class WorldBuilder:
         max_ticks: Optional[int] = None,
         optimize: bool = False,
         is_canceled: Optional[callable] = None,
+        post_step: Optional[callable] = None,
         db_path: Optional[str] = None,
         interactive: bool = True,
     ): ...

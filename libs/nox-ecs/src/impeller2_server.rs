@@ -25,12 +25,13 @@ impl Server {
 
     pub async fn run(self) -> Result<(), Error> {
         tracing::info!("running server");
-        self.run_with_cancellation(|| false, false).await
+        self.run_with_cancellation(|| false, |_| {}, false).await
     }
 
     pub async fn run_with_cancellation(
         self,
         is_cancelled: impl Fn() -> bool + 'static,
+        post_step: impl Fn(u64) + 'static,
         interactive: bool,
     ) -> Result<(), Error> {
         tracing::info!("running server with cancellation");
@@ -47,7 +48,7 @@ impl Server {
                     handles.push(stellarator::spawn(handle_conn(stream, db.clone())).drop_guard());
                 }
             });
-        let tick = stellarator::spawn(tick(tick_db, world, is_cancelled, start_time, interactive));
+        let tick = stellarator::spawn(tick(tick_db, world, is_cancelled, post_step, start_time, interactive));
         futures_lite::future::race(async { stream.join().await.unwrap().unwrap() }, async {
             tick.await
                 .map_err(|_| stellarator::Error::JoinFailed)
@@ -257,6 +258,7 @@ async fn tick(
     db: Arc<DB>,
     mut world: WorldExec<Compiled>,
     is_cancelled: impl Fn() -> bool + 'static,
+    post_step: impl Fn(u64) + 'static,
     mut timestamp: Timestamp,
     interactive: bool,
 ) {
@@ -297,17 +299,15 @@ async fn tick(
             && !timestamps_changed(&db, &mut wait_for_write_pair_ids).unwrap_or(false)
         {
             stellarator::sleep(Duration::from_millis(1)).await;
-            // NOTE: Let's ensure we only run is_canceled once per tick.
-            //
-            // if is_cancelled() {
-            //     return;
-            // }
+            if is_cancelled() {
+                return;
+            }
         }
-
-        // Python func runs.
         if is_cancelled() {
             return;
         }
+        // Python func runs.
+        post_step(tick);
         // We only wait if there is a run_time_step set and it's >= the time elapsed.
         if let Some(run_time_step) = run_time_step.as_ref()
             && let Some(sleep_time) = run_time_step.checked_sub(start.elapsed())
