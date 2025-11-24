@@ -1,9 +1,10 @@
 use bevy::{
-    ecs::system::SystemParam,
+    ecs::{system::SystemParam, schedule::ScheduleLabel},
     prelude::*,
-    window::{EnabledButtons, PresentMode, PrimaryWindow, WindowResolution, WindowTheme},
+    window::{EnabledButtons, PresentMode, PrimaryWindow, WindowResolution, WindowTheme, WindowRef},
+    camera::RenderTarget,
 };
-use bevy_egui::EguiContexts;
+use bevy_egui::{EguiContexts, EguiTextureHandle, EguiMultipassSchedule};
 use egui::{Color32, CornerRadius, RichText, Stroke, load::SizedTexture};
 use hifitime::Epoch;
 use impeller2_bevy::{
@@ -32,6 +33,12 @@ use super::{
 #[derive(Component)]
 pub struct StartupWindow;
 
+#[derive(Component)]
+pub struct StartupWindowCamera;
+
+#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct StartupWindowContextPass;
+
 fn create_startup_window(
     mut commands: Commands,
     status: Res<ThreadConnectionStatus>,
@@ -45,10 +52,10 @@ fn create_startup_window(
             bevy::window::CompositeAlphaMode::Opaque
         };
 
-        commands.spawn((
+        let startup_window_id = commands.spawn((
             Window {
                 title: "Elodin".to_owned(),
-                resolution: WindowResolution::new(730.0, 470.0),
+                resolution: WindowResolution::new(730, 470),
                 resize_constraints: WindowResizeConstraints {
                     min_width: 730.0,
                     min_height: 470.0,
@@ -66,22 +73,34 @@ fn create_startup_window(
                 ..Default::default()
             },
             StartupWindow,
+        ))
+        .id();
+
+        commands.spawn((
+            Camera2d::default(),
+            Camera {
+                target: RenderTarget::Window(WindowRef::Entity(startup_window_id)),
+                ..Default::default()
+            },
+            EguiMultipassSchedule::new(StartupWindowContextPass),
+            StartupWindowCamera,
         ));
+
     } else if let Ok(mut primary) = primary.single_mut() {
         primary.visible = true
     }
 }
 
 pub fn add_layouts(world: &mut World) {
-    world.add_root_widget_with::<StartupLayout, With<StartupWindow>>("startup_layout", ());
+    world.add_root_widget_with::<StartupLayout, With<StartupWindowCamera>>("startup_layout", ());
 }
 
 pub struct StartupPlugin;
 
 impl Plugin for StartupPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, create_startup_window);
-        app.add_systems(Update, add_layouts);
+        app.add_systems(Startup, create_startup_window.after(crate::spawn_ui_cam));
+        app.add_systems(StartupWindowContextPass, add_layouts);
     }
 }
 
@@ -258,17 +277,17 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
         let mut state = state.get_mut(world);
         let logo_full = state
             .contexts
-            .add_image(state.images.logo_full.clone_weak());
+            .add_image(EguiTextureHandle::Weak(state.images.logo_full.id()));
         let folder = state
             .contexts
-            .add_image(state.images.icon_folder.clone_weak());
+            .add_image(EguiTextureHandle::Weak(state.images.icon_folder.id()));
 
         let arrow = state
             .contexts
-            .add_image(state.images.icon_chevron_right.clone_weak());
+            .add_image(EguiTextureHandle::Weak(state.images.icon_chevron_right.id()));
         let icon_ip_addr = state
             .contexts
-            .add_image(state.images.icon_ip_addr.clone_weak());
+            .add_image(EguiTextureHandle::Weak(state.images.icon_ip_addr.id()));
 
         theme::set_theme(ctx);
         egui::CentralPanel::default()

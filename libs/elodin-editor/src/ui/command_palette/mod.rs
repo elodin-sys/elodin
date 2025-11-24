@@ -4,10 +4,9 @@ use bevy::{
         world::World,
     },
     input::keyboard::Key,
-    prelude::{Resource, With},
-    window::PrimaryWindow,
+    prelude::{Resource, With, IsDefaultUiCamera},
 };
-use bevy_egui::EguiContexts;
+use bevy_egui::{EguiContexts, EguiTextureHandle};
 use egui::{Margin, Modifiers, epaint::Shadow};
 use palette_items::PaletteItem;
 
@@ -51,7 +50,7 @@ impl CommandPaletteState {
     }
 
     pub fn open_page(&mut self, page: impl Fn() -> PalettePage + Send + Sync + 'static) {
-        self.open_item(PaletteItem::new("", "", move |_: In<String>| page().into()));
+        self.open_item(PaletteItem::new("", "", move |_: In<String>| page().into_event()));
     }
 
     pub fn handle_event(&mut self, event: PaletteEvent) {
@@ -98,7 +97,7 @@ impl RootWidgetSystem for CommandPalette<'_> {
         _ctx: &mut egui::Context,
         _args: Self::Args,
     ) {
-        let _ = world.add_root_widget_with::<PaletteWindow, With<PrimaryWindow>>(
+        let _ = world.add_root_widget_with::<PaletteWindow, With<IsDefaultUiCamera>>(
             "command_palette_window",
             None,
         );
@@ -136,7 +135,7 @@ impl RootWidgetSystem for CommandPalette<'_> {
         };
         if let Some(mut item) = auto_open_item {
             item.system.initialize(world);
-            let event = item.system.run(filter, world);
+            let event = item.system.run(filter, world).expect("Missing event");
             let mut state_mut = state.get_mut(world);
             state_mut.command_palette_state.handle_event(event);
         }
@@ -185,10 +184,11 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
             let images = state_mut.images;
 
             let icons = CommandPaletteIcons {
-                link: contexts.add_image(images.icon_link.clone_weak()),
+                link: contexts.add_image(EguiTextureHandle::Weak(images.icon_link.id())),
             };
             (icons, auto_open_none)
         };
+
 
         let screen_rect = ctx.screen_rect();
         let palette_width = (screen_rect.width() / 2.0).clamp(500.0, 900.0);
@@ -450,7 +450,7 @@ impl WidgetSystem for PaletteItems<'_> {
                         });
 
                         if btn.clicked() || (i == selected_index && hit_enter) {
-                            return Some(item.system.run(filter.clone(), world));
+                            return Some(item.system.run(filter.clone(), world).expect("system.run failed"));
                         }
                     }
                     None
@@ -599,7 +599,7 @@ impl PaletteItemWidget {
                     .image(image_id, image_rect, default_uv, self.text_color);
 
                 let layout_job = self.label_with_matched_chars(font_id.clone());
-                let galley = ui.fonts(|f| f.layout_job(layout_job));
+                let galley = ui.fonts_mut(|f| f.layout_job(layout_job));
                 ui.painter().galley(
                     egui::pos2(image_rect.right_top().x + 8.0, image_rect.right_top().y),
                     galley,
@@ -607,7 +607,7 @@ impl PaletteItemWidget {
                 );
             } else {
                 let layout_job = self.label_with_matched_chars(font_id.clone());
-                let galley = ui.fonts(|f| f.layout_job(layout_job));
+                let galley = ui.fonts_mut(|f| f.layout_job(layout_job));
                 ui.painter()
                     .galley(inner_rect.left_top(), galley, self.text_color);
             }

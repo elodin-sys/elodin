@@ -4,18 +4,19 @@ use bevy::{
     app::AppExit,
     ecs::{
         query::QueryData,
-        system::{SystemParam, SystemState},
+        system::{SystemParam, SystemState, NonSendMarker},
     },
     input::keyboard::Key,
     prelude::*,
-    render::camera::{RenderTarget, Viewport},
+    camera::{RenderTarget,Viewport},
     window::{
         EnabledButtons, PresentMode, PrimaryWindow, WindowCloseRequested, WindowRef,
         WindowResolution,
     },
+    winit::WINIT_WINDOWS,
 };
 use bevy_egui::{
-    EguiContext, EguiContexts,
+    EguiContext, EguiContexts, EguiTextureHandle, EguiPrimaryContextPass, PrimaryEguiContext,
     egui::{self, Color32, Label, Margin, RichText},
 };
 use egui_tiles::{Container, Tile};
@@ -212,27 +213,27 @@ impl Plugin for UiPlugin {
             .init_resource::<timeline::StreamTickOrigin>()
             .init_resource::<command_palette::CommandPaletteState>()
             .add_event::<DialogEvent>()
-            .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
-            .add_systems(Update, actions::spawn_lua_actor)
-            .add_systems(Update, shortcuts)
-            .add_systems(Update, handle_primary_close.before(render_layout))
-            .add_systems(Update, render_layout)
-            .add_systems(Update, sync_secondary_windows.after(render_layout))
-            .add_systems(Update, handle_secondary_close.after(sync_secondary_windows))
+            .add_systems(EguiPrimaryContextPass, timeline_slider::sync_ui_tick.before(render_layout))
+            .add_systems(EguiPrimaryContextPass, actions::spawn_lua_actor)
+            .add_systems(EguiPrimaryContextPass, shortcuts)
+            .add_systems(EguiPrimaryContextPass, handle_primary_close.before(render_layout))
+            .add_systems(EguiPrimaryContextPass, render_layout)
+            .add_systems(EguiPrimaryContextPass, sync_secondary_windows.after(render_layout))
+            .add_systems(EguiPrimaryContextPass, handle_secondary_close.after(sync_secondary_windows))
             .add_systems(
-                Update,
+                EguiPrimaryContextPass,
                 set_secondary_camera_viewport.after(sync_secondary_windows),
             )
             .add_systems(
-                Update,
+                EguiPrimaryContextPass,
                 render_secondary_windows.after(handle_secondary_close),
             )
-            .add_systems(Update, sync_hdr)
-            .add_systems(Update, tiles::shortcuts)
-            .add_systems(Update, set_camera_viewport.after(render_layout))
-            .add_systems(Update, sync_camera_grid_cell.after(render_layout))
-            .add_systems(Update, query_plot::auto_bounds)
-            .add_systems(Update, dashboard::update_nodes)
+            //.add_systems(EguiPrimaryContextPass, sync_hdr)
+            .add_systems(EguiPrimaryContextPass, tiles::shortcuts)
+            .add_systems(EguiPrimaryContextPass, set_camera_viewport.after(render_layout))
+            .add_systems(EguiPrimaryContextPass, sync_camera_grid_cell.after(render_layout))
+            .add_systems(EguiPrimaryContextPass, query_plot::auto_bounds)
+            .add_systems(EguiPrimaryContextPass, dashboard::update_nodes)
             .add_plugins(SchematicPlugin)
             .add_plugins(LinePlot3dPlugin)
             .add_plugins(command_palette::palette_items::plugin);
@@ -266,7 +267,7 @@ pub enum DialogAction {
     Custom(String), // Custom action identifier
 }
 
-#[derive(Clone, Debug, Event)]
+#[derive(Clone, Debug, Message)]
 pub struct DialogEvent {
     pub action: DialogAction,
     pub id: String,
@@ -294,7 +295,7 @@ pub struct TitlebarIcons {
 #[derive(SystemParam)]
 pub struct Titlebar<'w, 's> {
     fullscreen_state: ResMut<'w, FullscreenState>,
-    app_exit: EventWriter<'w, AppExit>,
+    app_exit: MessageWriter<'w, AppExit>,
     windows: Query<
         'w,
         's,
@@ -304,7 +305,8 @@ pub struct Titlebar<'w, 's> {
             &'static bevy::window::PrimaryWindow,
         ),
     >,
-    winit_windows: NonSend<'w, bevy::winit::WinitWindows>,
+    // TODO: AP - is this marker actually doing anything in this case?
+    _non_send_marker: NonSendMarker,
 }
 
 impl RootWidgetSystem for Titlebar<'_, '_> {
@@ -394,8 +396,10 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
                             let Ok((window_id, _, _)) = state_mut.windows.single() else {
                                 return;
                             };
+
+                            WINIT_WINDOWS.with_borrow(|winit_windows| {
                             let winit_window =
-                                state_mut.winit_windows.get_window(window_id).unwrap();
+                                winit_windows.get_window(window_id).unwrap();
                             ui.horizontal_centered(|ui| {
                                 ui.style_mut().visuals.widgets.hovered.weak_bg_fill =
                                     egui::Color32::from_hex("#E81123").expect("invalid red color");
@@ -503,6 +507,8 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
                                 }
                             });
                             ui.add_space(8.0);
+
+                            });
                         }
                     });
                 });
@@ -534,12 +540,16 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         theme::set_theme(ctx);
 
         let titlebar_icons = TitlebarIcons {
-            icon_fullscreen: contexts.add_image(images.icon_fullscreen.clone_weak()),
-            icon_exit_fullscreen: contexts.add_image(images.icon_exit_fullscreen.clone_weak()),
-            icon_close: contexts.add_image(images.icon_close.clone_weak()),
+            icon_fullscreen: contexts.add_image(EguiTextureHandle::Weak(
+                images.icon_fullscreen.id(),
+            )),
+            icon_exit_fullscreen: contexts.add_image(EguiTextureHandle::Weak(
+                images.icon_exit_fullscreen.id(),
+            )),
+            icon_close: contexts.add_image(EguiTextureHandle::Weak(images.icon_close.id())),
         };
 
-        world.add_root_widget_with::<Titlebar, With<PrimaryWindow>>("titlebar", titlebar_icons);
+        world.add_root_widget_with::<Titlebar, With<IsDefaultUiCamera>>("titlebar", titlebar_icons);
 
         #[cfg(not(target_family = "wasm"))]
         world.add_root_widget::<status_bar::StatusBar>("status_bar");
@@ -681,7 +691,7 @@ fn sync_secondary_windows(
             .spawn((
                 Window {
                     title,
-                    resolution: WindowResolution::new(640.0, 480.0),
+                    resolution: WindowResolution::new(640, 480),
                     present_mode: PresentMode::AutoVsync,
                     enabled_buttons: EnabledButtons {
                         close: true,
@@ -707,7 +717,7 @@ fn sync_secondary_windows(
 }
 
 fn handle_secondary_close(
-    mut events: EventReader<WindowCloseRequested>,
+    mut events: MessageReader<WindowCloseRequested>,
     mut windows: ResMut<tiles::WindowManager>,
 ) {
     let mut to_remove = Vec::new();
@@ -726,9 +736,9 @@ fn handle_secondary_close(
 }
 
 fn handle_primary_close(
-    mut events: EventReader<WindowCloseRequested>,
+    mut events: MessageReader<WindowCloseRequested>,
     primary: Query<Entity, With<PrimaryWindow>>,
-    mut exit: EventWriter<AppExit>,
+    mut exit: MessageWriter<AppExit>,
 ) {
     let Some(primary_entity) = primary.iter().next() else {
         return;
@@ -908,9 +918,21 @@ struct CameraViewportQuery {
 }
 
 fn set_camera_viewport(
-    window: Query<(&Window, &bevy_egui::EguiContextSettings), With<PrimaryWindow>>,
+    window: Query<&Window, With<PrimaryWindow>>,
+    primary_egui_context: Query<&bevy_egui::EguiContextSettings, With<PrimaryEguiContext>>,
     mut main_camera_query: Query<CameraViewportQuery, With<MainCamera>>,
 ) {
+    let Some(window) = window.iter().next() else {
+        return;
+    };
+    let Some(egui_settings) = primary_egui_context.iter().next() else {
+        return;
+    };
+    let window_scale_factor = window.scale_factor();
+    let window_width = window.width();
+    let window_height = window.height();
+    let egui_scale_factor = egui_settings.scale_factor;
+
     for CameraViewportQueryItem {
         mut camera,
         viewport_rect,
@@ -928,13 +950,10 @@ fn set_camera_viewport(
             continue;
         };
         camera.is_active = true;
-        let Some((window, egui_settings)) = window.iter().next() else {
-            continue;
-        };
-        let scale_factor = window.scale_factor() * egui_settings.scale_factor;
+        let scale_factor = window_scale_factor * egui_scale_factor;
         let viewport_pos = available_rect.left_top().to_vec2() * scale_factor;
         let viewport_size = available_rect.size() * scale_factor;
-        if available_rect.size().x > window.width() || available_rect.size().y > window.height() {
+        if available_rect.size().x > window_width || available_rect.size().y > window_height {
             return;
         }
         if viewport_size.x < 10.0 || viewport_size.y < 10.0 {
@@ -958,17 +977,23 @@ fn set_camera_viewport(
 fn set_secondary_camera_viewport(
     windows: Res<tiles::WindowManager>,
     mut cameras: Query<(&mut Camera, &ViewportRect)>,
-    window_query: Query<(&Window, &bevy_egui::EguiContextSettings)>,
+    window_query: Query<&Window>,
+    primary_egui_context: Query<&bevy_egui::EguiContextSettings, With<PrimaryEguiContext>>,
 ) {
+    let Some(egui_settings) = primary_egui_context.iter().next() else {
+        return;
+    };
+    let egui_scale_factor = egui_settings.scale_factor;
+
     for state in windows.secondary() {
         let Some(window_entity) = state.window_entity else {
             continue;
         };
 
-        let Ok((window, egui_settings)) = window_query.get(window_entity) else {
+        let Ok(window) = window_query.get(window_entity) else {
             continue;
         };
-        let scale_factor = window.scale_factor() * egui_settings.scale_factor;
+        let scale_factor = window.scale_factor() * egui_scale_factor;
 
         for (index, &graph) in state.graph_entities.iter().enumerate() {
             let Ok((mut camera, viewport_rect)) = cameras.get_mut(graph) else {
@@ -1021,8 +1046,8 @@ fn sync_camera_grid_cell(
         }
     }
 }
-fn sync_hdr(hdr_enabled: ResMut<HdrEnabled>, mut query: Query<&mut Camera>) {
-    for mut cam in query.iter_mut() {
-        cam.hdr = hdr_enabled.0;
-    }
-}
+//fn sync_hdr(hdr_enabled: ResMut<HdrEnabled>, mut query: Query<&mut Camera>) {
+//    for mut cam in query.iter_mut() {
+//        cam.hdr = hdr_enabled.0;
+//    }
+//}

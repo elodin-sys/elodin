@@ -1,4 +1,3 @@
-use crate::ui::PrimaryWindow;
 use bevy::asset::Assets;
 use bevy::asset::RenderAssetUsages;
 use bevy::ecs::query::QueryData;
@@ -15,6 +14,7 @@ use bevy::{
     prelude::{Commands, Component, Entity, Query, Res, ResMut, World},
     ui::Val,
 };
+use bevy_egui::PrimaryEguiContext;
 use egui::{self, Color32, TextureHandle, Vec2};
 use impeller2::types::{OwnedPacket, Timestamp};
 use impeller2_bevy::{CommandsExt, CurrentStreamId, PacketGrantR};
@@ -211,7 +211,12 @@ pub struct VideoStreamWidget<'w, 's> {
     stream_id: Res<'w, CurrentStreamId>,
     current_time: Res<'w, CurrentTimestamp>,
     images: ResMut<'w, Assets<Image>>,
-    window: Query<'w, 's, &'static bevy_egui::EguiContextSettings, With<PrimaryWindow>>,
+    egui_settings: Query<
+        'w,
+        's,
+        &'static bevy_egui::EguiContextSettings,
+        With<PrimaryEguiContext>,
+    >,
 }
 
 impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
@@ -266,7 +271,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
 
         let max_rect = ui.max_rect();
 
-        let Some(egui_settings) = state.window.iter().next() else {
+        let Some(egui_settings) = state.egui_settings.iter().next() else {
             return;
         };
 

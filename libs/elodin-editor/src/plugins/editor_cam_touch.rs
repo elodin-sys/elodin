@@ -4,7 +4,7 @@ use bevy::ecs::system::Query;
 use bevy::input::touch::Touch;
 use bevy::math::{DVec3, Vec2};
 use bevy::prelude::{Res, ResMut, Resource, Touches};
-use bevy::render::camera::Camera;
+use bevy::camera::Camera;
 use bevy::transform::components::Transform;
 use bevy_editor_cam::controller::component::EditorCam;
 
@@ -186,7 +186,7 @@ pub fn touch_editor_cam(
             TouchGestures::OneFinger(gesture) => {
                 editor_cam.end_move();
                 let anchor = transform
-                    .compute_matrix()
+                    .to_matrix()
                     .as_dmat4()
                     .inverse()
                     .transform_point3(DVec3::ZERO);
@@ -196,7 +196,7 @@ pub fn touch_editor_cam(
             TouchGestures::TwoFinger(gesture) => {
                 editor_cam.end_move();
                 let anchor = transform
-                    .compute_matrix()
+                    .to_matrix()
                     .as_dmat4()
                     .inverse()
                     .transform_point3(DVec3::ZERO);

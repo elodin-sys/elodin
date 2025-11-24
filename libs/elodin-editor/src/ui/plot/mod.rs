@@ -1,4 +1,4 @@
-use bevy_egui::EguiContexts;
+use bevy_egui::{EguiContexts, EguiPrimaryContextPass};
 pub mod data;
 pub use data::{
     BufferShardAlloc, CHUNK_COUNT, CHUNK_LEN, CollectedGraphData, Line, PlotDataComponent, XYLine,
@@ -28,7 +28,7 @@ use bevy::{
 };
 
 fn load_material_icons(mut egui_contexts: EguiContexts) {
-    let ctx = egui_contexts.ctx_mut();
+    let ctx = egui_contexts.ctx_mut().expect("Failed to get egui context");
     egui_material_icons::initialize(ctx);
 }
 
@@ -39,7 +39,7 @@ impl Plugin for PlotPlugin {
             .init_resource::<LockTracker>()
             .init_resource::<XSyncClock>()
             .add_systems(Startup, setup_pkt_handler)
-            .add_systems(Startup, load_material_icons)
+            .add_systems(EguiPrimaryContextPass, load_material_icons)
             .add_systems(Update, zoom_graph)
             .add_systems(Update, graph_touch)
             .add_systems(Update, pan_graph)

@@ -2,11 +2,12 @@ use crate::{MainCamera, plugins::gizmos::GIZMO_RENDER_LAYER};
 use bevy::animation::{AnimationTarget, AnimationTargetId, animated_field};
 use bevy::math::{DVec3, Dir3};
 use bevy::prelude::*;
-use bevy::render::camera::Viewport;
-use bevy::render::view::RenderLayers;
+use bevy::camera::Viewport;
+use bevy::camera::visibility::RenderLayers;
+use bevy::window::PrimaryWindow;
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;
-use bevy_egui::EguiContexts;
+use bevy_egui::{EguiContexts, PrimaryEguiContext};
 use std::f32::consts;
 
 pub struct NavigationGizmoPlugin;
@@ -24,13 +25,13 @@ impl Plugin for NavigationGizmoPlugin {
 pub struct NavGizmoCamera;
 
 fn cube_color_highlight(
-    event: Trigger<Pointer<Over>>,
+    event: On<Pointer<Over>>,
     mut target_query: Query<Entity>,
     mut animations: ResMut<Assets<AnimationClip>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
     mut commands: Commands,
 ) {
-    if let Ok(entity) = target_query.get_mut(event.target) {
+    if let Ok(entity) = target_query.get_mut(event.event().event_target()) {
         let target = AnimationTargetId::from_name(&Name::new(entity.to_string()));
         let mut animation = AnimationClip::default();
 
@@ -59,13 +60,13 @@ fn cube_color_highlight(
 }
 
 fn cube_color_reset(
-    event: Trigger<Pointer<Out>>,
+    event: On<Pointer<Out>>,
     mut target_query: Query<Entity>,
     mut animations: ResMut<Assets<AnimationClip>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
     mut commands: Commands,
 ) {
-    if let Ok(entity) = target_query.get_mut(event.target) {
+    if let Ok(entity) = target_query.get_mut(event.event().event_target()) {
         let target = AnimationTargetId::from_name(&Name::new(entity.to_string()));
         let mut animation = AnimationClip::default();
 
@@ -245,7 +246,6 @@ pub fn spawn_gizmo(
             Transform::from_xyz(0.0, 0.0, 2.5).looking_at(Vec3::ZERO, Vec3::Y),
             Camera {
                 order: 3,
-                hdr: false,
                 // NOTE: Don't clear on the NavGizmoCamera because the
                 // MainCamera already cleared the window.
                 clear_color: ClearColorConfig::None,
@@ -266,21 +266,22 @@ pub fn spawn_gizmo(
 pub struct DraggedMarker;
 
 pub fn drag_nav_gizmo(
-    drag: Trigger<Pointer<Drag>>,
+    drag: On<Pointer<Drag>>,
     nav_gizmo: Query<&NavGizmoParent>,
     mut query: Query<(&mut Transform, &mut EditorCam, &Camera), With<MainCamera>>,
     mut commands: Commands,
 ) {
-    let Ok(nav_gizmo) = nav_gizmo.get(drag.target) else {
+    let drag_target = drag.event().event_target();
+    let Ok(nav_gizmo) = nav_gizmo.get(drag_target) else {
         return;
     };
     let Ok((transform, mut editor_cam, cam)) = query.get_mut(nav_gizmo.main_camera) else {
         return;
     };
     if drag.delta.length() > 0.1 {
-        commands.entity(drag.target).insert(DraggedMarker);
+        commands.entity(drag_target).insert(DraggedMarker);
     } else {
-        commands.entity(drag.target).remove::<DraggedMarker>();
+        commands.entity(drag_target).remove::<DraggedMarker>();
     }
     let delta = drag.delta
         * cam
@@ -289,7 +290,7 @@ pub fn drag_nav_gizmo(
             .as_vec2()
         / 75.0;
     let anchor = transform
-        .compute_matrix()
+        .to_matrix()
         .as_dmat4()
         .inverse()
         .transform_point3(DVec3::ZERO);
@@ -302,25 +303,26 @@ pub fn drag_nav_gizmo(
 fn side_clicked_cb(
     direction: Dir3,
 ) -> impl Fn(
-    Trigger<Pointer<Click>>,
+    On<Pointer<Click>>,
     Query<(Entity, &Transform, &EditorCam), With<MainCamera>>,
     Query<&NavGizmoParent>,
     Query<&DraggedMarker>,
-    EventWriter<LookToTrigger>,
+    MessageWriter<LookToTrigger>,
 ) {
-    move |click: Trigger<Pointer<Click>>,
+    move |click: On<Pointer<Click>>,
           query: Query<(Entity, &Transform, &EditorCam), With<MainCamera>>,
           nav_gizmo: Query<&NavGizmoParent>,
           drag_query: Query<&DraggedMarker>,
-          mut look_to: EventWriter<LookToTrigger>| {
-        let Ok(nav_gizmo) = nav_gizmo.get(click.target) else {
+          mut look_to: MessageWriter<LookToTrigger>| {
+        let target = click.event().event_target();
+        let Ok(nav_gizmo) = nav_gizmo.get(target) else {
             return;
         };
         let Ok((entity, transform, editor_cam)) = query.get(nav_gizmo.main_camera) else {
             return;
         };
 
-        if drag_query.get(click.target).is_ok() {
+        if drag_query.get(target).is_ok() {
             return;
         }
         if click.button == PointerButton::Primary {
@@ -346,14 +348,18 @@ pub fn sync_nav_camera(
 }
 
 pub fn set_camera_viewport(
-    window: Query<(&Window, &bevy_egui::EguiContextSettings)>,
+    window: Query<&Window, With<PrimaryWindow>>,
+    primary_egui_context: Query<&bevy_egui::EguiContextSettings, With<PrimaryEguiContext>>,
     _contexts: EguiContexts,
     mut nav_camera_query: Query<(&mut Camera, &NavGizmoParent)>,
     main_camera_query: Query<&mut Camera, Without<NavGizmoParent>>,
 ) {
     let margin = 8.0;
     let side_length = 128.0;
-    let Some((window, egui_settings)) = window.iter().next() else {
+    let Some(window) = window.iter().next() else {
+        return;
+    };
+    let Some(egui_settings) = primary_egui_context.iter().next() else {
         return;
     };
     let scale_factor = window.scale_factor() * egui_settings.scale_factor;
