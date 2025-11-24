@@ -6,7 +6,7 @@ use bevy::{
     prelude::{Children, In},
     window::Window,
 };
-use bevy_egui::{EguiContexts, egui};
+use bevy_egui::{EguiContexts, EguiTextureHandle, egui};
 use impeller2::types::ComponentId;
 use impeller2_bevy::{ComponentMetadataRegistry, ComponentPathRegistry};
 
@@ -157,7 +157,7 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
         };
 
         if let Some(setting_modal_state) = setting_modal_state.0.clone() {
-            let close_icon = contexts.add_image(images.icon_close.clone_weak());
+            let close_icon = contexts.add_image(EguiTextureHandle::Weak(images.icon_close.id()));
 
             egui::Window::new("SETTING_MODAL")
                 .title_bar(false)
