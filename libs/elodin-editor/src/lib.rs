@@ -422,7 +422,7 @@ fn setup_titlebar(
                 commands.entity(id).insert(SetupTitlebar);
             }
         }
-    });
+    );
 }
 
 fn handle_drag_resize(

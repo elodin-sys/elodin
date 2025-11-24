@@ -404,242 +404,6 @@ impl SettingModalState {
     }
 }
 
-<<<<<<< HEAD
-=======
-#[derive(Resource, Default)]
-pub struct FullscreenState(pub bool);
-
-pub struct TitlebarIcons {
-    pub icon_close: egui::TextureId,
-    pub icon_fullscreen: egui::TextureId,
-    pub icon_exit_fullscreen: egui::TextureId,
-}
-
-#[derive(SystemParam)]
-pub struct Titlebar<'w, 's> {
-    fullscreen_state: ResMut<'w, FullscreenState>,
-    app_exit: MessageWriter<'w, AppExit>,
-    windows: Query<
-        'w,
-        's,
-        (
-            Entity,
-            &'static Window,
-            &'static bevy::window::PrimaryWindow,
-        ),
-    >,
-    // TODO: AP - is this marker actually doing anything in this case?
-    _non_send_marker: NonSendMarker,
-}
-
-impl RootWidgetSystem for Titlebar<'_, '_> {
-    type Args = TitlebarIcons;
-    type Output = ();
-
-    fn ctx_system(
-        world: &mut World,
-        state: &mut SystemState<Self>,
-        ctx: &mut egui::Context,
-        args: Self::Args,
-    ) {
-        let mut state_mut = state.get_mut(world);
-
-        let mut fullscreen_state = state_mut.fullscreen_state;
-
-        let TitlebarIcons {
-            icon_fullscreen,
-            icon_exit_fullscreen,
-            icon_close,
-        } = args;
-
-        let titlebar_height = if cfg!(target_os = "macos")
-            || cfg!(target_os = "windows")
-            || cfg!(target_os = "linux")
-        {
-            45.0
-        } else {
-            34.0
-        };
-        let traffic_light_offset = if cfg!(target_os = "macos") { 72. } else { 0. };
-        let titlebar_scale = if cfg!(target_os = "macos") { 1.4 } else { 1.3 };
-        let titlebar_margin = if cfg!(target_os = "macos") {
-            8
-        } else if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
-            0
-        } else {
-            4
-        };
-        let titlebar_right_margin = if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
-            0.
-        } else {
-            10.
-        };
-
-        theme::set_theme(ctx);
-        egui::TopBottomPanel::top("title_bar")
-            .frame(
-                egui::Frame {
-                    fill: Color32::TRANSPARENT,
-                    stroke: egui::Stroke::new(0.0, get_scheme().border_primary),
-                    ..Default::default()
-                }
-                .inner_margin(
-                    Margin::same(titlebar_margin)
-                        .left(16.0)
-                        .right(titlebar_right_margin),
-                ),
-            )
-            .exact_height(titlebar_height)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.horizontal_centered(|ui| {
-                    ui.add_space(traffic_light_offset);
-                    if cfg!(target_family = "wasm") {
-                        if ui
-                            .add(
-                                EImageButton::new(
-                                    if fullscreen_state.bypass_change_detection().0 {
-                                        icon_exit_fullscreen
-                                    } else {
-                                        icon_fullscreen
-                                    },
-                                )
-                                .scale(titlebar_scale, titlebar_scale)
-                                .bg_color(Color32::TRANSPARENT),
-                            )
-                            .clicked()
-                        {
-                            fullscreen_state.0 = !fullscreen_state.0;
-                        }
-                        ui.add_space(8.0);
-                    }
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
-                            let Ok((window_id, _, _)) = state_mut.windows.single() else {
-                                return;
-                            };
-
-                            WINIT_WINDOWS.with_borrow(|winit_windows| {
-                                let winit_window =
-                                    winit_windows.get_window(window_id).unwrap();
-                                ui.horizontal_centered(|ui| {
-                                    ui.style_mut().visuals.widgets.hovered.weak_bg_fill =
-                                        egui::Color32::from_hex("#E81123").expect("invalid red color");
-
-                                    ui.style_mut().visuals.widgets.hovered.fg_stroke =
-                                        egui::Stroke::new(1.0, Color32::WHITE);
-                                    ui.style_mut().visuals.widgets.hovered.corner_radius =
-                                        CornerRadius {
-                                            nw: 0,
-                                            ne: if cfg!(target_os = "windows") { 4 } else { 0 },
-                                            sw: 0,
-                                            se: 0,
-                                        };
-                                    let btn = if cfg!(target_os = "windows") {
-                                        egui::Button::new(
-                                            RichText::new("\u{e8bb}")
-                                                .font(egui::FontId {
-                                                    size: 10.0,
-                                                    family: egui::FontFamily::Proportional,
-                                                })
-                                                .line_height(Some(11.0)),
-                                        )
-                                    } else {
-                                        egui::Button::image(egui::load::SizedTexture::new(
-                                            icon_close,
-                                            egui::vec2(11., 11.),
-                                        ))
-                                        .image_tint_follows_text_color(true)
-                                    };
-                                    if ui
-                                        .add_sized(
-                                            egui::vec2(45.0, 40.0),
-                                            btn.stroke(egui::Stroke::NONE),
-                                        )
-                                        .clicked()
-                                    {
-                                        state_mut.app_exit.write(AppExit::Success);
-                                    }
-                                    ui.add_space(2.0);
-                                });
-
-                                let maximized = winit_window.is_maximized();
-                                ui.scope(|ui| {
-                                    ui.style_mut().visuals.widgets.hovered.fg_stroke =
-                                        egui::Stroke::new(1.0, Color32::WHITE);
-                                    ui.style_mut().visuals.widgets.hovered.weak_bg_fill =
-                                        egui::Color32::from_hex("#4E4D53").expect("invalid red color");
-                                    ui.style_mut().visuals.widgets.hovered.corner_radius =
-                                        CornerRadius::ZERO;
-                                    let btn = if cfg!(target_os = "windows") {
-                                        egui::Button::new(
-                                            RichText::new(if maximized {
-                                                "\u{e923}"
-                                            } else {
-                                                "\u{e922}"
-                                            })
-                                            .font(egui::FontId {
-                                                size: 10.0,
-                                                family: egui::FontFamily::Proportional,
-                                            })
-                                            .line_height(Some(11.0)),
-                                        )
-                                    } else {
-                                        egui::Button::image(egui::load::SizedTexture::new(
-                                            if maximized {
-                                                icon_exit_fullscreen
-                                            } else {
-                                                icon_fullscreen
-                                            },
-                                            egui::vec2(11., 11.),
-                                        ))
-                                        .image_tint_follows_text_color(true)
-                                    };
-                                    if ui
-                                        .add_sized(
-                                            egui::vec2(45.0, 40.0),
-                                            btn.stroke(egui::Stroke::NONE),
-                                        )
-                                        .clicked()
-                                    {
-                                        winit_window.set_maximized(!maximized);
-                                    }
-
-                                    ui.add_space(2.0);
-                                    if ui
-                                        .add_sized(
-                                            egui::vec2(45.0, 40.0),
-                                            egui::Button::new(
-                                                RichText::new(if cfg!(target_os = "windows") {
-                                                    "\u{e921}"
-                                                } else {
-                                                    "—"
-                                                })
-                                                .font(egui::FontId {
-                                                    size: 10.0,
-                                                    family: egui::FontFamily::Proportional,
-                                                })
-                                                .line_height(Some(11.0)),
-                                            )
-                                            .stroke(egui::Stroke::NONE),
-                                        )
-                                        .clicked()
-                                    {
-                                        winit_window.set_minimized(true);
-                                    }
-                                });
-                                ui.add_space(8.0);
-
-                            });
-                        }
-                    });
-                });
-            });
-    }
-}
-
->>>>>>> 11a5d282 (bevy 0.17: Update bevy_egui and WinitWindows usage)
 #[derive(SystemParam)]
 pub struct MainLayout<'w, 's> {
     _contexts: EguiContexts<'w, 's>,
@@ -660,21 +424,6 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
 
         theme::set_theme(ctx);
 
-<<<<<<< HEAD
-=======
-        let titlebar_icons = TitlebarIcons {
-            icon_fullscreen: contexts.add_image(EguiTextureHandle::Weak(
-                images.icon_fullscreen.id(),
-            )),
-            icon_exit_fullscreen: contexts.add_image(EguiTextureHandle::Weak(
-                images.icon_exit_fullscreen.id(),
-            )),
-            icon_close: contexts.add_image(EguiTextureHandle::Weak(images.icon_close.id())),
-        };
-
-        world.add_root_widget_with::<Titlebar, With<IsDefaultUiCamera>>("titlebar", titlebar_icons);
-
->>>>>>> 11a5d282 (bevy 0.17: Update bevy_egui and WinitWindows usage)
         #[cfg(not(target_family = "wasm"))]
         world.add_root_widget::<status_bar::StatusBar>("status_bar");
 
@@ -877,23 +626,7 @@ fn sync_secondary_windows(
         };
 
         let window_entity = commands
-<<<<<<< HEAD
             .spawn((window_component, SecondaryWindowMarker { id: state.id }))
-=======
-            .spawn((
-                Window {
-                    title,
-                    resolution: WindowResolution::new(640, 480),
-                    present_mode: PresentMode::AutoVsync,
-                    enabled_buttons: EnabledButtons {
-                        close: true,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-                SecondaryWindowMarker { id: state.id },
-            ))
->>>>>>> ad013157 (A few hacks to reach compiling state)
             .id();
 
         state.window_entity = Some(window_entity);
@@ -2287,7 +2020,6 @@ fn set_camera_viewport(
         let scale_factor = window_scale_factor * egui_scale_factor;
         let viewport_pos = available_rect.left_top().to_vec2() * scale_factor;
         let viewport_size = available_rect.size() * scale_factor;
-<<<<<<< HEAD
         let viewport_pos = Vec2::new(viewport_pos.x, viewport_pos.y);
         let viewport_size = Vec2::new(viewport_size.x, viewport_size.y);
         let window_size = Vec2::new(
@@ -2303,12 +2035,6 @@ fn set_camera_viewport(
                 depth: 0.0..1.0,
             });
         } else {
-=======
-        if available_rect.size().x > window_width || available_rect.size().y > window_height {
-            return;
-        }
-        if viewport_size.x < 10.0 || viewport_size.y < 10.0 {
->>>>>>> bfee91b4 (Fix some EguiContext queries)
             camera.is_active = false;
             camera.viewport = Some(Viewport {
                 physical_position: UVec2::new(0, 0),
@@ -2321,14 +2047,11 @@ fn set_camera_viewport(
 
 fn set_secondary_camera_viewport(
     windows: Res<tiles::WindowManager>,
-<<<<<<< HEAD
     mut cameras: Query<(&mut Camera, &ViewportRect, Option<&NavGizmoCamera>)>,
     window_query: Query<(&Window, &bevy_egui::EguiContextSettings)>,
-=======
-    mut cameras: Query<(&mut Camera, &ViewportRect)>,
-    window_query: Query<&Window>,
-    primary_egui_context: Query<&bevy_egui::EguiContextSettings, With<PrimaryEguiContext>>,
->>>>>>> bfee91b4 (Fix some EguiContext queries)
+    // mut cameras: Query<(&mut Camera, &ViewportRect)>,
+    // window_query: Query<&Window>,
+    // primary_egui_context: Query<&bevy_egui::EguiContextSettings, With<PrimaryEguiContext>>,
 ) {
     let Some(egui_settings) = primary_egui_context.iter().next() else {
         return;
