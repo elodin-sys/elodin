@@ -18,6 +18,7 @@ use impeller2_bevy::EntityMap;
 use impeller2_wkt::{
     BodyAxes, Color as WktColor, ComponentValue as WktComponentValue, VectorArrow3d,
 };
+use std::collections::HashSet;
 
 use crate::{
     WorldPosExt,
@@ -27,6 +28,9 @@ use crate::{
 
 pub const GIZMO_RENDER_LAYER: usize = 30;
 pub(crate) const MIN_ARROW_LENGTH_SQUARED: f64 = 1.0e-6;
+const BASE_HEAD_LENGTH: f32 = 0.06;
+const HEAD_RADIUS_FACTOR: f32 = 1.6;
+const MAX_HEAD_PORTION: f32 = 0.5;
 
 #[derive(Clone)]
 pub struct EvaluatedVectorArrow {
@@ -64,6 +68,11 @@ fn gizmo_setup(mut config_store: ResMut<GizmoConfigStore>) {
 struct ArrowMeshes {
     shaft: Handle<Mesh>,
     head: Handle<Mesh>,
+}
+
+#[derive(Component)]
+struct ArrowVisualOwner {
+    owner: Entity,
 }
 
 fn arrow_mesh_setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
@@ -162,11 +171,13 @@ fn render_vector_arrow(
         let rotation = Quat::from_rotation_arc(Vec3::Y, dir_norm);
         let base_color = axis_color_from_name(result.name.as_deref(), result.color);
 
-        let shaft_length = length * 0.8;
-        let head_length = length * 0.2;
-        // Keep radii mostly stable so long arrows don't become chunky
+        let mut head_length = BASE_HEAD_LENGTH.min(length * MAX_HEAD_PORTION);
+        // Ensure the head never exceeds the total length.
+        head_length = head_length.min(length);
+        let shaft_length = (length - head_length).max(0.0);
+        // Keep radii mostly stable so long arrows don't become chunky; clamp for tiny arrows.
         let shaft_radius = 0.01;
-        let head_radius = shaft_radius * 1.6;
+        let head_radius = (shaft_radius * HEAD_RADIUS_FACTOR).min(length * 0.5);
 
         if state.visual.is_none() {
             state.visual = Some(spawn_arrow_visual(
@@ -247,7 +258,7 @@ fn spawn_arrow_visual(
     meshes: &ArrowMeshes,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     color: Color,
-    _owner: Entity,
+    owner: Entity,
 ) -> ArrowVisual {
     let shaft_material = materials.add(StandardMaterial {
         base_color: color.with_alpha(0.65),
@@ -269,6 +280,7 @@ fn spawn_arrow_visual(
             GlobalTransform::default(),
             Visibility::Hidden,
             RenderLayers::layer(GIZMO_RENDER_LAYER),
+            ArrowVisualOwner { owner },
             Name::new("vector_arrow_mesh"),
         ))
         .id();
@@ -308,18 +320,32 @@ fn hide_label(commands: &mut Commands, label: Option<Entity>) {
 
 // Despawn visuals when a VectorArrow3d is removed, to avoid stray meshes.
 fn cleanup_removed_arrows(
-    mut removed: RemovedComponents<VectorArrow3d>,
+    mut removed_arrows: RemovedComponents<VectorArrow3d>,
+    mut removed_states: RemovedComponents<VectorArrowState>,
     mut commands: Commands,
     mut states: Query<&mut VectorArrowState>,
+    visuals: Query<(Entity, &ArrowVisualOwner)>,
 ) {
-    for entity in removed.read() {
-        if let Ok(mut state) = states.get_mut(entity) {
+    let mut owners: HashSet<Entity> = removed_arrows.read().collect();
+    owners.extend(removed_states.read());
+
+    // If the state still exists, use it to clean up the associated visuals.
+    for owner in owners.clone() {
+        if let Ok(mut state) = states.get_mut(owner) {
             if let Some(visual) = state.visual.take() {
                 commands.entity(visual.root).despawn();
             }
             if let Some(label) = state.label.take() {
                 commands.entity(label).despawn();
             }
+            owners.remove(&owner);
+        }
+    }
+
+    // Fallback: handle orphaned visuals whose owner entity was despawned.
+    for (visual_entity, visual_owner) in visuals.iter() {
+        if owners.contains(&visual_owner.owner) {
+            commands.entity(visual_entity).despawn();
         }
     }
 }
