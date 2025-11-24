@@ -11,8 +11,10 @@ use bevy::{
 };
 use bevy_editor_cam::prelude::{EditorCam, EnabledMotion, OrbitConstraint};
 use bevy_egui::{
-    EguiContexts,
-    egui::{self, Color32, CornerRadius, Frame, Id, RichText, Stroke, Ui, Visuals, vec2},
+    EguiContexts, EguiTextureHandle,
+    egui::{
+        self, Color32, CornerRadius, Frame, Id, RichText, Stroke, Ui, Visuals, vec2,
+    },
 };
 use egui::UiBuilder;
 use egui_tiles::{Container, Tile, TileId, Tiles};
@@ -1565,20 +1567,22 @@ impl<'w, 's> TileSystem<'w, 's> {
         let is_empty_tile_tree = is_empty?;
 
         let icons = TileIcons {
-            add: contexts.add_image(images.icon_add.clone_weak()),
-            close: contexts.add_image(images.icon_close.clone_weak()),
-            scrub: contexts.add_image(images.icon_scrub.clone_weak()),
-            tile_3d_viewer: contexts.add_image(images.icon_tile_3d_viewer.clone_weak()),
-            tile_graph: contexts.add_image(images.icon_tile_graph.clone_weak()),
-            subtract: contexts.add_image(images.icon_subtract.clone_weak()),
-            chart: contexts.add_image(images.icon_chart.clone_weak()),
-            setting: contexts.add_image(images.icon_setting.clone_weak()),
-            search: contexts.add_image(images.icon_search.clone_weak()),
-            chevron: contexts.add_image(images.icon_chevron_right.clone_weak()),
-            plot: contexts.add_image(images.icon_plot.clone_weak()),
-            viewport: contexts.add_image(images.icon_viewport.clone_weak()),
-            container: contexts.add_image(images.icon_container.clone_weak()),
-            entity: contexts.add_image(images.icon_entity.clone_weak()),
+            add: contexts.add_image(EguiTextureHandle::Weak(images.icon_add.id())),
+            close: contexts.add_image(EguiTextureHandle::Weak(images.icon_close.id())),
+            scrub: contexts.add_image(EguiTextureHandle::Weak(images.icon_scrub.id())),
+            tile_3d_viewer: contexts.add_image(EguiTextureHandle::Weak(
+                images.icon_tile_3d_viewer.id(),
+            )),
+            tile_graph: contexts.add_image(EguiTextureHandle::Weak(images.icon_tile_graph.id())),
+            subtract: contexts.add_image(EguiTextureHandle::Weak(images.icon_subtract.id())),
+            chart: contexts.add_image(EguiTextureHandle::Weak(images.icon_chart.id())),
+            setting: contexts.add_image(EguiTextureHandle::Weak(images.icon_setting.id())),
+            search: contexts.add_image(EguiTextureHandle::Weak(images.icon_search.id())),
+            chevron: contexts.add_image(EguiTextureHandle::Weak(images.icon_chevron_right.id())),
+            plot: contexts.add_image(EguiTextureHandle::Weak(images.icon_plot.id())),
+            viewport: contexts.add_image(EguiTextureHandle::Weak(images.icon_viewport.id())),
+            container: contexts.add_image(EguiTextureHandle::Weak(images.icon_container.id())),
+            entity: contexts.add_image(EguiTextureHandle::Weak(images.icon_entity.id())),
         };
 
         Some((icons, is_empty_tile_tree, read_only))

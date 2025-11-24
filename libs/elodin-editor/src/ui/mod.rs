@@ -17,8 +17,8 @@ use bevy::{
     },
 };
 use bevy_egui::{
-    EguiContext, EguiContexts,
-    egui::{self, Color32, Label, RichText},
+    EguiContext, EguiContexts, EguiTextureHandle,
+    egui::{self, Color32, Label, Margin, RichText},
 };
 use egui_tiles::{Container, Tile};
 #[cfg(target_os = "macos")]
@@ -404,6 +404,21 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
 
         theme::set_theme(ctx);
 
+<<<<<<< HEAD
+=======
+        let titlebar_icons = TitlebarIcons {
+            icon_fullscreen: contexts.add_image(EguiTextureHandle::Weak(
+                images.icon_fullscreen.id(),
+            )),
+            icon_exit_fullscreen: contexts.add_image(EguiTextureHandle::Weak(
+                images.icon_exit_fullscreen.id(),
+            )),
+            icon_close: contexts.add_image(EguiTextureHandle::Weak(images.icon_close.id())),
+        };
+
+        world.add_root_widget_with::<Titlebar, With<PrimaryWindow>>("titlebar", titlebar_icons);
+
+>>>>>>> cececcfc (Replace Handle.clone_weak)
         #[cfg(not(target_family = "wasm"))]
         world.add_root_widget::<status_bar::StatusBar>("status_bar");
 

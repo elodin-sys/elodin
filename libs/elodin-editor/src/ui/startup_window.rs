@@ -3,7 +3,7 @@ use bevy::{
     prelude::*,
     window::{EnabledButtons, PrimaryWindow, WindowResolution, WindowTheme},
 };
-use bevy_egui::EguiContexts;
+use bevy_egui::{EguiContexts, EguiTextureHandle};
 use egui::{Color32, CornerRadius, RichText, Stroke, load::SizedTexture};
 use hifitime::Epoch;
 use impeller2_bevy::{
@@ -258,17 +258,17 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
         let mut state = state.get_mut(world);
         let logo_full = state
             .contexts
-            .add_image(state.images.logo_full.clone_weak());
+            .add_image(EguiTextureHandle::Weak(state.images.logo_full.id()));
         let folder = state
             .contexts
-            .add_image(state.images.icon_folder.clone_weak());
+            .add_image(EguiTextureHandle::Weak(state.images.icon_folder.id()));
 
         let arrow = state
             .contexts
-            .add_image(state.images.icon_chevron_right.clone_weak());
+            .add_image(EguiTextureHandle::Weak(state.images.icon_chevron_right.id()));
         let icon_ip_addr = state
             .contexts
-            .add_image(state.images.icon_ip_addr.clone_weak());
+            .add_image(EguiTextureHandle::Weak(state.images.icon_ip_addr.id()));
 
         theme::set_theme(ctx);
         egui::CentralPanel::default()
