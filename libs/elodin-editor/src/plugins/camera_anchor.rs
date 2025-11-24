@@ -1,4 +1,4 @@
-use bevy::math::DVec3;
+use bevy::math::{DVec3, Vec4Swizzles};
 use bevy::transform::components::Transform;
 
 /// Returns the camera's view-space anchor when looking at the world origin.
@@ -11,7 +11,8 @@ pub fn camera_anchor_from_transform(transform: &Transform) -> Option<DVec3> {
         .compute_matrix()
         .as_dmat4()
         .inverse()
-        .transform_point3(DVec3::ZERO);
+        .w_axis
+        .xyz();
 
     let anchor_is_valid = anchor.x.is_finite() && anchor.y.is_finite() && anchor.z.is_finite();
     if !anchor_is_valid {
