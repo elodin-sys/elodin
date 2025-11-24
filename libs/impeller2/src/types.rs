@@ -1121,6 +1121,16 @@ mod tests {
             ComponentId(7719952719430115905),
             ComponentId::new("fin_control_trim")
         );
+
+        assert_eq!(
+            ComponentId(6153382787081793527),
+            ComponentId::new("commanded_deflect")
+        );
+
+        assert_eq!(
+            ComponentId(8902924687221423131),
+            ComponentId::from_pair("rocket", "commanded_deflect")
+        );
     }
 
     #[test]

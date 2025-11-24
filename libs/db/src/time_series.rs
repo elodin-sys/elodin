@@ -84,7 +84,7 @@ impl TimeSeries {
         Some((*timestamp, buf))
     }
 
-    pub fn get_range(&self, range: Range<Timestamp>) -> Option<(&[Timestamp], &[u8])> {
+    pub fn get_range(&self, range: &Range<Timestamp>) -> Option<(&[Timestamp], &[u8])> {
         let timestamps = self.timestamps();
 
         let start = range.start;
@@ -117,6 +117,9 @@ impl TimeSeries {
     }
 
     pub fn latest(&self) -> Option<(&Timestamp, &[u8])> {
+        if self.index.is_empty() {
+            return None;
+        }
         let index = self.index.len() as usize / size_of::<Timestamp>() - 1;
         let element_size = self.element_size();
         let i = index * element_size;

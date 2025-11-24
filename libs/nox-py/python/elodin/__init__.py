@@ -402,6 +402,10 @@ class World(WorldBuilder):
         default_playback_speed: float = 1.0,
         max_ticks: Optional[int] = None,
         optimize: bool = False,
+        is_canceled: Optional[callable] = None,
+        post_step: Optional[callable] = None,
+        db_path: Optional[str] = None,
+        interactive: bool = True,
     ):
         current_frame = inspect.currentframe()
         if current_frame is None:
@@ -416,9 +420,13 @@ class World(WorldBuilder):
             default_playback_speed,
             max_ticks,
             optimize,
+            is_canceled,
+            post_step,
+            db_path,
+            interactive,
         )
         locals = frame.f_locals
-        if addr is not None:
+        if not interactive and addr is not None:
             impeller_client = Impeller.tcp(addr)
             locals["client"] = impeller_client
             readline.set_completer(rlcompleter.Completer(locals).complete)

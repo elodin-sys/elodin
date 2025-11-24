@@ -187,7 +187,7 @@ def build_expr(jit, args):
         let module = PyModule::new(py, "build_expr")?;
         let globals = module.dict();
         // Use std::ffi::CString for the string arguments to run
-        let code_cstr = std::ffi::CString::new(py_code).unwrap();
+        let code_cstr = std::ffi::CString::new(py_code).expect("Python code C string");
         py.run(code_cstr.as_ref(), Some(&globals), None)?;
         let fun: Py<PyAny> = module.getattr("build_expr")?.into();
 
