@@ -303,6 +303,8 @@ pub struct VectorArrow3d<T = ()> {
     pub normalize: bool,
     #[serde(default = "VectorArrow3d::<T>::default_display_name")]
     pub display_name: bool,
+    #[serde(default = "VectorArrow3d::<T>::default_label_position")]
+    pub label_position: f32,
     pub aux: T,
 }
 
@@ -319,6 +321,10 @@ impl<T> VectorArrow3d<T> {
         true
     }
 
+    fn default_label_position() -> f32 {
+        1.0
+    }
+
     pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> VectorArrow3d<U> {
         VectorArrow3d {
             vector: self.vector.clone(),
@@ -329,6 +335,7 @@ impl<T> VectorArrow3d<T> {
             body_frame: self.body_frame,
             normalize: self.normalize,
             display_name: self.display_name,
+            label_position: self.label_position,
             aux: f(&self.aux),
         }
     }

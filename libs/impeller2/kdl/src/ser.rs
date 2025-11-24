@@ -380,6 +380,13 @@ fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
             .push(KdlEntry::new_prop("display_name", false));
     }
 
+    if (arrow.label_position - 1.0).abs() > f32::EPSILON {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "label_position",
+            arrow.label_position as f64,
+        ));
+    }
+
     serialize_color_to_node(&mut node, &arrow.color);
 
     node
@@ -1019,6 +1026,7 @@ mod tests {
                 body_frame: true,
                 normalize: true,
                 display_name: false,
+                label_position: 1.0,
                 aux: (),
             }));
 

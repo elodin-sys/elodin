@@ -183,7 +183,7 @@ pub type EntityDataReadOnly<'a> = (
 #[derive(Clone, Copy)]
 struct CachedLabel {
     screen: egui::Pos2,
-    end_world: Vec3,
+    anchor_world: Vec3,
     cam_pos: Vec3,
     cam_rot: Quat,
 }
@@ -691,14 +691,17 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
             }
 
             // Reuse cached screen position if arrow and camera didn't move.
-            let pos_stable = |a: Vec3, b: Vec3| (a - b).length_squared() <= 0.3 * 0.3; // ~0.3 m
+            let pos_stable = |a: Vec3, b: Vec3| (a - b).length_squared() <= 0.7 * 0.7; // ~0.7 m
             let rot_stable = |a: Quat, b: Quat| {
                 // Use dot to be insensitive to quaternion sign; small angular delta -> dot ~ 1
                 (1.0 - a.dot(b).abs()) <= 1.0e-3
             };
 
+            let label_position = result.label_position;
+            let anchor_world = start + direction * label_position;
+
             if let Some(cached) = state_mut.label_cache.get(&entity)
-                && pos_stable(cached.end_world, end)
+                && pos_stable(cached.anchor_world, anchor_world)
                 && pos_stable(cached.cam_pos, cam_pos)
                 && rot_stable(cached.cam_rot, cam_rot)
             {
@@ -722,10 +725,10 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
             }
 
             let dir_norm = direction.try_normalize().unwrap_or(Vec3::ZERO);
-            let tip_pos = end;
-            let label_world = tip_pos + dir_norm * 0.04;
+            let along_offset = if label_position > 0.9 { 0.06 } else { 0.04 };
+            let label_world = anchor_world + dir_norm * along_offset;
 
-            let Ok(tip_screen) = camera.world_to_viewport(camera_transform, tip_pos) else {
+            let Ok(anchor_screen) = camera.world_to_viewport(camera_transform, anchor_world) else {
                 state_mut.label_cache.remove(&entity);
                 continue;
             };
@@ -734,16 +737,28 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
                 camera.world_to_viewport(camera_transform, label_world)
             {
                 // Offset in screen space following the arrow direction for a more “attached” feel
-                let delta = offset_screen - tip_screen;
-                egui::pos2(tip_screen.x + delta.x, tip_screen.y + delta.y)
+                let delta = offset_screen - anchor_screen;
+                egui::pos2(anchor_screen.x + delta.x, anchor_screen.y + delta.y)
             } else {
-                egui::pos2(tip_screen.x, tip_screen.y)
+                egui::pos2(anchor_screen.x, anchor_screen.y)
             };
 
-            // If the new projection is within 1px of the cached one, reuse cached to avoid micro-jitter.
+            // Nudge label sideways in screen space to keep it from sitting on top of the shaft.
+            if let Ok(offset_screen) = camera.world_to_viewport(camera_transform, label_world) {
+                let delta = offset_screen - anchor_screen;
+                let perp = egui::vec2(-delta.y, delta.x);
+                let len = perp.length();
+                if len > 0.001 {
+                    let side_offset = 10.0;
+                    let normalized = perp * (side_offset / len);
+                    screen_pos += normalized;
+                }
+            }
+
+            // If the new projection is within 3px of the cached one, reuse cached to avoid micro-jitter.
             if let Some(cached) = state_mut.label_cache.get(&entity) {
                 let delta = screen_pos - cached.screen;
-                if delta.length_sq() <= 1.0 {
+                if delta.length_sq() <= 9.0 {
                     screen_pos = cached.screen;
                 }
             }
@@ -756,7 +771,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
                 entity,
                 CachedLabel {
                     screen: screen_pos,
-                    end_world: end,
+                    anchor_world,
                     cam_pos,
                     cam_rot,
                 },

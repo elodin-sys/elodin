@@ -38,6 +38,7 @@ pub struct EvaluatedVectorArrow {
     pub end: DVec3,
     pub color: Color,
     pub name: Option<String>,
+    pub label_position: f32,
 }
 
 pub struct GizmoPlugin;
@@ -130,12 +131,14 @@ pub fn evaluate_vector_arrow(
     }
 
     let end_world = start_world + direction;
+    let label_position = arrow.label_position.clamp(0.0, 1.0);
 
     Some(EvaluatedVectorArrow {
         start: start_world,
         end: end_world,
         color: axis_color_from_name(arrow.name.as_deref(), wkt_color_to_bevy(&arrow.color)),
         name: arrow.name.clone(),
+        label_position,
     })
 }
 

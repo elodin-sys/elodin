@@ -651,6 +651,27 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
+    let label_position = match node.entry("label_position") {
+        None => 1.0,
+        Some(entry) => {
+            let value = entry.value();
+            let label_position = if let Some(value) = value.as_float() {
+                value as f32
+            } else if let Some(value) = value.as_integer() {
+                value as f32
+            } else {
+                return Err(KdlSchematicError::InvalidValue {
+                    property: "label_position".to_string(),
+                    node: "vector_arrow".to_string(),
+                    expected: "a numeric value between 0.0 and 1.0".to_string(),
+                    src: src.to_string(),
+                    span: entry.span(),
+                });
+            };
+            label_position.clamp(0.0, 1.0)
+        }
+    };
+
     let color = parse_color_from_node_or_children(node, None).unwrap_or(Color::WHITE);
 
     Ok(VectorArrow3d {
@@ -662,6 +683,7 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         body_frame,
         normalize,
         display_name,
+        label_position,
         aux: (),
     })
 }
