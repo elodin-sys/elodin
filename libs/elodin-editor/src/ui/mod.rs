@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bevy::{
     app::AppExit,
@@ -16,23 +16,31 @@ use bevy::{
 };
 use bevy_egui::{
     EguiContext, EguiContexts,
-    egui::{self, Color32, Label, Margin, RichText},
+    egui::{self, Align2, Color32, Label, Margin, RichText},
 };
 use egui_tiles::{Container, Tile};
 
-use big_space::GridCell;
+use big_space::{GridCell, precision::GridPrecision};
 use plot_3d::LinePlot3dPlugin;
 use schematic::SchematicPlugin;
 
-use self::colors::get_scheme;
+use self::colors::{ColorExt, get_scheme};
 use self::{command_palette::CommandPaletteState, timeline::timeline_slider};
 use egui::CornerRadius;
 use impeller2::types::ComponentId;
 use impeller2_bevy::ComponentValueMap;
-use impeller2_wkt::ComponentMetadata;
-use impeller2_wkt::ComponentValue;
+use impeller2_wkt::{
+    ComponentMetadata, ComponentValue, ComponentValue as WktComponentValue, VectorArrow3d,
+};
 
-use crate::{GridHandle, MainCamera, plugins::LogicalKeyState};
+use crate::{
+    GridHandle, MainCamera,
+    plugins::{
+        LogicalKeyState,
+        gizmos::{MIN_ARROW_LENGTH_SQUARED, evaluate_vector_arrow},
+    },
+    vector_arrow::VectorArrowState,
+};
 
 use self::inspector::entity::ComponentFilter;
 
@@ -171,6 +179,14 @@ pub type EntityDataReadOnly<'a> = (
     &'a ComponentValueMap,
     &'a ComponentMetadata,
 );
+
+#[derive(Clone, Copy)]
+struct CachedLabel {
+    screen: egui::Pos2,
+    anchor_world: Vec3,
+    cam_pos: Vec3,
+    cam_rot: Quat,
+}
 
 #[derive(QueryData)]
 #[query_data(mutable)]
@@ -556,8 +572,23 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
 #[derive(SystemParam)]
 pub struct ViewportOverlay<'w, 's> {
     window: Query<'w, 's, &'static Window>,
-    entities_meta: Query<'w, 's, EntityData<'static>>,
+    entities_meta: Query<'w, 's, EntityDataReadOnly<'static>>,
     hovered_entity: Res<'w, HoveredEntity>,
+    vector_arrows: Query<'w, 's, (Entity, &'static VectorArrow3d, &'static VectorArrowState)>,
+    component_values: Query<'w, 's, &'static WktComponentValue>,
+    entity_map: Res<'w, impeller2_bevy::EntityMap>,
+    floating_origin: Res<'w, big_space::FloatingOriginSettings>,
+    cameras: Query<
+        'w,
+        's,
+        (
+            &'static Camera,
+            &'static GlobalTransform,
+            &'static GridCell<i128>,
+        ),
+        With<MainCamera>,
+    >,
+    label_cache: Local<'s, HashMap<Entity, CachedLabel>>,
 }
 
 impl RootWidgetSystem for ViewportOverlay<'_, '_> {
@@ -570,7 +601,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
         ctx: &mut egui::Context,
         _args: Self::Args,
     ) {
-        let state_mut = state.get_mut(world);
+        let mut state_mut = state.get_mut(world);
 
         let window = state_mut.window;
         let entities_meta = state_mut.entities_meta;
@@ -616,7 +647,183 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
                     });
             }
         }
+
+        // Overlay labels for vector_arrows (simple, stable path)
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("gizmo_labels"),
+        ));
+        let font_id = egui::FontId::proportional(12.0);
+        let shadow_color = Color32::from_rgba_unmultiplied(0, 0, 0, 180);
+        let screen_offset = egui::vec2(0.0, -8.0);
+
+        let Some((camera, camera_transform, cam_cell)) =
+            state_mut.cameras.iter().find(|(cam, _, _)| cam.is_active)
+        else {
+            return;
+        };
+
+        let cam_pos = camera_transform.translation();
+        let cam_rot = camera_transform.to_scale_rotation_translation().1;
+
+        let mut seen = HashSet::new();
+
+        for (entity, arrow, arrow_state) in state_mut.vector_arrows.iter() {
+            if !arrow.display_name {
+                state_mut.label_cache.remove(&entity);
+                continue;
+            }
+            let Some(result) = evaluate_vector_arrow(
+                arrow,
+                arrow_state,
+                &state_mut.entity_map,
+                &state_mut.component_values,
+            ) else {
+                state_mut.label_cache.remove(&entity);
+                continue;
+            };
+            let Some(name) = result.name.as_ref() else {
+                state_mut.label_cache.remove(&entity);
+                continue;
+            };
+
+            let (start_cell, start_local) = state_mut
+                .floating_origin
+                .translation_to_grid::<i128>(result.start);
+            let (end_cell, end_local) = state_mut
+                .floating_origin
+                .translation_to_grid::<i128>(result.end);
+
+            let edge = state_mut.floating_origin.grid_edge_length();
+            let to_cam = |cell: GridCell<i128>, local: Vec3| {
+                let dx = (cell.x.as_f64() - cam_cell.x.as_f64()) as f32 * edge;
+                let dy = (cell.y.as_f64() - cam_cell.y.as_f64()) as f32 * edge;
+                let dz = (cell.z.as_f64() - cam_cell.z.as_f64()) as f32 * edge;
+                local + Vec3::new(dx, dy, dz)
+            };
+
+            let start = to_cam(start_cell, start_local);
+            let end = to_cam(end_cell, end_local);
+            let direction = end - start;
+            if direction.length_squared() <= MIN_ARROW_LENGTH_SQUARED as f32 {
+                state_mut.label_cache.remove(&entity);
+                continue;
+            }
+
+            // Reuse cached screen position if arrow and camera didn't move.
+            let pos_stable = |a: Vec3, b: Vec3| (a - b).length_squared() <= 0.7 * 0.7; // ~0.7 m
+            let rot_stable = |a: Quat, b: Quat| {
+                // Use dot to be insensitive to quaternion sign; small angular delta -> dot ~ 1
+                (1.0 - a.dot(b).abs()) <= 1.0e-3
+            };
+
+            let label_position = result.label_position;
+            let anchor_world = start + direction * label_position;
+
+            if let Some(cached) = state_mut.label_cache.get(&entity)
+                && pos_stable(cached.anchor_world, anchor_world)
+                && pos_stable(cached.cam_pos, cam_pos)
+                && rot_stable(cached.cam_rot, cam_rot)
+            {
+                seen.insert(entity);
+                let screen_pos = cached.screen;
+                painter.text(
+                    screen_pos + egui::vec2(1.0, 1.0),
+                    Align2::CENTER_CENTER,
+                    name,
+                    font_id.clone(),
+                    shadow_color,
+                );
+                painter.text(
+                    screen_pos,
+                    Align2::CENTER_CENTER,
+                    name,
+                    font_id.clone(),
+                    readable_label_color(result.color),
+                );
+                continue;
+            }
+
+            let dir_norm = direction.try_normalize().unwrap_or(Vec3::ZERO);
+            let along_offset = if label_position > 0.9 { 0.06 } else { 0.04 };
+            let label_world = anchor_world + dir_norm * along_offset;
+
+            let Ok(anchor_screen) = camera.world_to_viewport(camera_transform, anchor_world) else {
+                state_mut.label_cache.remove(&entity);
+                continue;
+            };
+
+            let mut screen_pos = if let Ok(offset_screen) =
+                camera.world_to_viewport(camera_transform, label_world)
+            {
+                // Offset in screen space following the arrow direction for a more “attached” feel
+                let delta = offset_screen - anchor_screen;
+                egui::pos2(anchor_screen.x + delta.x, anchor_screen.y + delta.y)
+            } else {
+                egui::pos2(anchor_screen.x, anchor_screen.y)
+            };
+
+            // Nudge label sideways in screen space to keep it from sitting on top of the shaft.
+            if let Ok(offset_screen) = camera.world_to_viewport(camera_transform, label_world) {
+                let delta = offset_screen - anchor_screen;
+                let perp = egui::vec2(-delta.y, delta.x);
+                let len = perp.length();
+                if len > 0.001 {
+                    let side_offset = 10.0;
+                    let normalized = perp * (side_offset / len);
+                    screen_pos += normalized;
+                }
+            }
+
+            // If the new projection is within 3px of the cached one, reuse cached to avoid micro-jitter.
+            if let Some(cached) = state_mut.label_cache.get(&entity) {
+                let delta = screen_pos - cached.screen;
+                if delta.length_sq() <= 9.0 {
+                    screen_pos = cached.screen;
+                }
+            }
+
+            screen_pos += screen_offset;
+            screen_pos.x = screen_pos.x.round();
+            screen_pos.y = screen_pos.y.round();
+
+            state_mut.label_cache.insert(
+                entity,
+                CachedLabel {
+                    screen: screen_pos,
+                    anchor_world,
+                    cam_pos,
+                    cam_rot,
+                },
+            );
+            seen.insert(entity);
+
+            painter.text(
+                screen_pos + egui::vec2(1.0, 1.0),
+                Align2::CENTER_CENTER,
+                name,
+                font_id.clone(),
+                shadow_color,
+            );
+            painter.text(
+                screen_pos,
+                Align2::CENTER_CENTER,
+                name,
+                font_id.clone(),
+                readable_label_color(result.color),
+            );
+        }
+
+        // Drop cache entries for arrows that disappeared.
+        state_mut
+            .label_cache
+            .retain(|entity, _| seen.contains(entity));
     }
+}
+
+fn readable_label_color(color: Color) -> Color32 {
+    let color32 = Color32::from_bevy(color);
+    Color32::from_rgba_unmultiplied(color32.r(), color32.g(), color32.b(), 255)
 }
 
 pub fn render_layout(world: &mut World) {

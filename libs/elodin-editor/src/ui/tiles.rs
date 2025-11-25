@@ -1031,7 +1031,6 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                         .data_mut(|d| d.insert_temp(persist_id, new_title.clone()));
                     ui.memory_mut(|m| m.surrender_focus(resp.id));
 
-                    // Au lieu de toucher ui_state ici, on envoie une action qui sera traitée après.
                     if !self.read_only {
                         self.tree_actions
                             .push(TreeAction::RenameContainer(tile_id, new_title.clone()));

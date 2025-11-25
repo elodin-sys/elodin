@@ -375,6 +375,30 @@ fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
             .push(KdlEntry::new_prop("normalize", true));
     }
 
+    if !arrow.display_name {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("display_name", false));
+    }
+
+    match arrow.thickness {
+        ArrowThickness::Small => {}
+        ArrowThickness::Middle => {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("arrow_thickness", "middle"));
+        }
+        ArrowThickness::Big => {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("arrow_thickness", "big"));
+        }
+    }
+
+    if (arrow.label_position - 1.0).abs() > f32::EPSILON {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "label_position",
+            arrow.label_position as f64,
+        ));
+    }
+
     serialize_color_to_node(&mut node, &arrow.color);
 
     node
@@ -1013,6 +1037,9 @@ mod tests {
                 color: Color::BLUE,
                 body_frame: true,
                 normalize: true,
+                display_name: false,
+                thickness: ArrowThickness::Small,
+                label_position: 1.0,
                 aux: (),
             }));
 
@@ -1030,6 +1057,7 @@ mod tests {
             assert_eq!(arrow.name.as_deref(), Some("Velocity"));
             assert!(arrow.body_frame);
             assert!(arrow.normalize);
+            assert!(!arrow.display_name);
             assert_color_close(arrow.color, Color::BLUE);
         } else {
             panic!("Expected vector_arrow");

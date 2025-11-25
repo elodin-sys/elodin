@@ -1,8 +1,11 @@
-use impeller2_wkt::{Color, Schematic, SchematicElem, VectorArrow3d, WindowSchematic};
+use impeller2_wkt::{
+    ArrowThickness, Color, Schematic, SchematicElem, VectorArrow3d, WindowSchematic,
+};
 use kdl::{KdlDocument, KdlNode};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
+use tracing::warn;
 
 use impeller2_wkt::*;
 
@@ -646,6 +649,51 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
+    let display_name = node
+        .get("display_name")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
+    let dimension = node
+        .get("arrow_thickness")
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string())
+        .map(|s| s.to_lowercase())
+        .map(|s| match s.as_str() {
+            "small" => ArrowThickness::Small,
+            "middle" => ArrowThickness::Middle,
+            "big" => ArrowThickness::Big,
+            other => {
+                warn!(
+                    value = other,
+                    "Unknown arrow_thickness '{}', defaulting to small", other
+                );
+                ArrowThickness::Small
+            }
+        })
+        .unwrap_or(ArrowThickness::Small);
+
+    let label_position = match node.entry("label_position") {
+        None => 1.0,
+        Some(entry) => {
+            let value = entry.value();
+            let label_position = if let Some(value) = value.as_float() {
+                value as f32
+            } else if let Some(value) = value.as_integer() {
+                value as f32
+            } else {
+                return Err(KdlSchematicError::InvalidValue {
+                    property: "label_position".to_string(),
+                    node: "vector_arrow".to_string(),
+                    expected: "a numeric value between 0.0 and 1.0".to_string(),
+                    src: src.to_string(),
+                    span: entry.span(),
+                });
+            };
+            label_position.clamp(0.0, 1.0)
+        }
+    };
+
     let color = parse_color_from_node_or_children(node, None).unwrap_or(Color::WHITE);
 
     Ok(VectorArrow3d {
@@ -656,6 +704,9 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         color,
         body_frame,
         normalize,
+        display_name,
+        thickness: dimension,
+        label_position,
         aux: (),
     })
 }
@@ -666,13 +717,18 @@ fn parse_color_from_node_or_children(node: &KdlNode, color_tag: Option<&str>) ->
         return Some(color);
     }
 
-    let color_tag = color_tag.unwrap_or("color");
     // If no color found on the node, look for color child nodes
     if let Some(children) = node.children() {
         for child in children.nodes() {
-            if child.name().value() == color_tag
-                && let Some(color) = parse_color_from_node(child)
-            {
+            let name = child.name().value();
+            let matches_tag = if let Some(color_tag) = color_tag {
+                name == color_tag
+            } else {
+                // Accept both “color” and the British “colour” spelling for compatibility
+                matches!(name, "color" | "colour")
+            };
+
+            if matches_tag && let Some(color) = parse_color_from_node(child) {
                 return Some(color);
             }
         }
@@ -1399,7 +1455,7 @@ tabs {
     #[test]
     fn test_parse_vector_arrow() {
         let kdl = r#"
-vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="ball.world_pos" scale=1.5 name="Velocity" body_frame=#true normalize=#true {
+vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="ball.world_pos" scale=1.5 name="Velocity" body_frame=#true normalize=#true display_name=#false {
     color 0 0 255
 }
 "#;
@@ -1416,6 +1472,7 @@ vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="bal
             assert_eq!(arrow.name.as_deref(), Some("Velocity"));
             assert!(arrow.body_frame);
             assert!(arrow.normalize);
+            assert!(!arrow.display_name);
             assert_eq!(arrow.color.b, 1.0);
         } else {
             panic!("Expected vector_arrow");
@@ -1433,6 +1490,7 @@ vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" in_body_fra
         if let SchematicElem::VectorArrow(arrow) = &schematic.elems[0] {
             assert!(arrow.body_frame);
             assert!(!arrow.normalize);
+            assert!(arrow.display_name);
         } else {
             panic!("Expected vector_arrow");
         }

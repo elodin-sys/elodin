@@ -301,7 +301,24 @@ pub struct VectorArrow3d<T = ()> {
     pub body_frame: bool,
     #[serde(default)]
     pub normalize: bool,
+    #[serde(default = "VectorArrow3d::<T>::default_display_name")]
+    pub display_name: bool,
+    #[serde(default = "VectorArrow3d::<T>::default_thickness")]
+    pub thickness: ArrowThickness,
+    #[serde(default = "VectorArrow3d::<T>::default_label_position")]
+    pub label_position: f32,
     pub aux: T,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub enum ArrowThickness {
+    #[serde(alias = "small")]
+    Small,
+    #[serde(alias = "middle")]
+    Middle,
+    #[serde(alias = "big")]
+    Big,
 }
 
 impl<T> VectorArrow3d<T> {
@@ -313,6 +330,18 @@ impl<T> VectorArrow3d<T> {
         Color::WHITE
     }
 
+    fn default_display_name() -> bool {
+        true
+    }
+
+    fn default_thickness() -> ArrowThickness {
+        ArrowThickness::Small
+    }
+
+    fn default_label_position() -> f32 {
+        1.0
+    }
+
     pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> VectorArrow3d<U> {
         VectorArrow3d {
             vector: self.vector.clone(),
@@ -322,6 +351,9 @@ impl<T> VectorArrow3d<T> {
             color: self.color,
             body_frame: self.body_frame,
             normalize: self.normalize,
+            display_name: self.display_name,
+            thickness: self.thickness,
+            label_position: self.label_position,
             aux: f(&self.aux),
         }
     }
