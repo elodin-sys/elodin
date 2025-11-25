@@ -1,6 +1,0 @@
-/* All of the files in this folder (dist3/autoSource) are autocoded by the script
-architecture/messaging/msgAutoSource/GenCMessages.py.
-The script checks for the line "INSTANTIATE_TEMPLATES" in the file architecture/messaging/messaging.i. This
-ensures that if a c++ message is instantiated that we also have a C equivalent of that message.
-*/
-

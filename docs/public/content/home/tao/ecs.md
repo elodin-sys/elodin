@@ -149,5 +149,3 @@ $$
 As you can see, we have built a fairly simple but complete physics simulation in 34 lines of code. It can run on GPU, CPU, or TPU (Tensor Processing Unit).
 
 Running seamlessly on GPUs is not the only nice benefit of our ECS-based Physics engine. You can also see the type-safety that coding like this provides. Math-heavy code can easily fall victim to type errors when everything is stored in untyped matrices. After all, position and velocity are both just vectors of floats and especially when combined with dense shorthand notation, the room for error is immense. Our ECS system uses typing to guide the reader and writer, ensuring that type errors do not occur.
-
-We plan to provide several prebuilt simulation pipelines and components, including a version of the popular MuJoCo algorithm and the algorithm used in the Basilisk Astrodynamics framework.

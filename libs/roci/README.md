@@ -2,11 +2,6 @@
 
 A reactive flight software framework for building composable control systems with real-time telemetry streaming.
 
-<video autoplay loop muted playsinline style="width: 100%; height: auto;">
-  <source src="roci-baselisk-demo.h264.mp4" type="video/mp4">
-  Your browser does not support the video tag.
-</video>
-
 ## Overview
 
 Roci (named after the ship from The Expanse) is a framework designed to simplify the development of flight software by providing:
@@ -227,11 +222,7 @@ Roci has evolved significantly since its initial implementation. Here are some m
    - Basic Conduit (now Impeller2) integration
    - Entity-Component mapping with derive macros
 
-2. **Basilisk Integration** ([#471](https://github.com/elodin-sys/paracosm/pull/471)) - May 2024
-   - First demonstration of external algorithm integration
-   - CubeSat attitude control example using Basilisk's MRP-PD controller
-
-3. **Combinator Refactor** ([#508](https://github.com/elodin-sys/paracosm/pull/508))
+2. **Combinator Refactor** ([#508](https://github.com/elodin-sys/paracosm/pull/508))
    - Introduced pipe combinators for system composition
    - Simplified system chaining and data flow
 
@@ -293,7 +284,6 @@ See the `examples/` directory for complete examples:
 
 - **Impeller2** - High-performance telemetry protocol
 - **Nox** - Tensor and linear algebra library
-- **Basilisk** - Astrodynamics simulation framework (external)
 
 ## Contributing
 
