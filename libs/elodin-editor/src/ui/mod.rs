@@ -20,7 +20,7 @@ use bevy_egui::{
 };
 use egui_tiles::{Container, Tile};
 
-use big_space::GridCell;
+use big_space::{GridCell, precision::GridPrecision};
 use plot_3d::LinePlot3dPlugin;
 use schematic::SchematicPlugin;
 
@@ -578,7 +578,16 @@ pub struct ViewportOverlay<'w, 's> {
     component_values: Query<'w, 's, &'static WktComponentValue>,
     entity_map: Res<'w, impeller2_bevy::EntityMap>,
     floating_origin: Res<'w, big_space::FloatingOriginSettings>,
-    cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<MainCamera>>,
+    cameras: Query<
+        'w,
+        's,
+        (
+            &'static Camera,
+            &'static GlobalTransform,
+            &'static GridCell<i128>,
+        ),
+        With<MainCamera>,
+    >,
     label_cache: Local<'s, HashMap<Entity, CachedLabel>>,
 }
 
@@ -648,8 +657,8 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
         let shadow_color = Color32::from_rgba_unmultiplied(0, 0, 0, 180);
         let screen_offset = egui::vec2(0.0, -8.0);
 
-        let Some((camera, camera_transform)) =
-            state_mut.cameras.iter().find(|(cam, _)| cam.is_active)
+        let Some((camera, camera_transform, cam_cell)) =
+            state_mut.cameras.iter().find(|(cam, _, _)| cam.is_active)
         else {
             return;
         };
@@ -678,12 +687,23 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
                 continue;
             };
 
-            let (_, start) = state_mut
+            let (start_cell, start_local) = state_mut
                 .floating_origin
                 .translation_to_grid::<i128>(result.start);
-            let (_, end) = state_mut
+            let (end_cell, end_local) = state_mut
                 .floating_origin
                 .translation_to_grid::<i128>(result.end);
+
+            let edge = state_mut.floating_origin.grid_edge_length();
+            let to_cam = |cell: GridCell<i128>, local: Vec3| {
+                let dx = (cell.x.as_f64() - cam_cell.x.as_f64()) as f32 * edge;
+                let dy = (cell.y.as_f64() - cam_cell.y.as_f64()) as f32 * edge;
+                let dz = (cell.z.as_f64() - cam_cell.z.as_f64()) as f32 * edge;
+                local + Vec3::new(dx, dy, dz)
+            };
+
+            let start = to_cam(start_cell, start_local);
+            let end = to_cam(end_cell, end_local);
             let direction = end - start;
             if direction.length_squared() <= MIN_ARROW_LENGTH_SQUARED as f32 {
                 state_mut.label_cache.remove(&entity);
