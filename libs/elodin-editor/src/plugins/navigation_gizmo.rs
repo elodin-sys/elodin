@@ -1,6 +1,9 @@
-use crate::{MainCamera, plugins::gizmos::GIZMO_RENDER_LAYER};
+use crate::{
+    MainCamera,
+    plugins::{camera_anchor::camera_anchor_from_transform, gizmos::GIZMO_RENDER_LAYER},
+};
 use bevy::animation::{AnimationTarget, AnimationTargetId, animated_field};
-use bevy::math::{DVec3, Dir3};
+use bevy::math::Dir3;
 use bevy::prelude::*;
 use bevy::render::camera::Viewport;
 use bevy::render::view::RenderLayers;
@@ -158,6 +161,7 @@ pub fn spawn_gizmo(
             Name::new("nav gizmo"),
         ))
         .observe(drag_nav_gizmo)
+        .observe(drag_nav_gizmo_end)
         .id();
 
     let distance = 0.35;
@@ -269,6 +273,7 @@ pub fn drag_nav_gizmo(
     drag: Trigger<Pointer<Drag>>,
     nav_gizmo: Query<&NavGizmoParent>,
     mut query: Query<(&mut Transform, &mut EditorCam, &Camera), With<MainCamera>>,
+    dragged_query: Query<(), With<DraggedMarker>>,
     mut commands: Commands,
 ) {
     let Ok(nav_gizmo) = nav_gizmo.get(drag.target) else {
@@ -277,10 +282,12 @@ pub fn drag_nav_gizmo(
     let Ok((transform, mut editor_cam, cam)) = query.get_mut(nav_gizmo.main_camera) else {
         return;
     };
-    if drag.delta.length() > 0.1 {
+    let first_drag = dragged_query.get(drag.target).is_err();
+    if first_drag {
         commands.entity(drag.target).insert(DraggedMarker);
-    } else {
-        commands.entity(drag.target).remove::<DraggedMarker>();
+        editor_cam.end_move();
+        let anchor = camera_anchor_from_transform(transform.as_ref());
+        editor_cam.start_orbit(anchor);
     }
     let delta = drag.delta
         * cam
@@ -288,14 +295,22 @@ pub fn drag_nav_gizmo(
             .unwrap_or_else(|| UVec2::new(256, 256))
             .as_vec2()
         / 75.0;
-    let anchor = transform
-        .compute_matrix()
-        .as_dmat4()
-        .inverse()
-        .transform_point3(DVec3::ZERO);
-    editor_cam.end_move();
-    editor_cam.start_orbit(Some(anchor));
     editor_cam.send_screenspace_input(delta);
+}
+
+pub fn drag_nav_gizmo_end(
+    drag_end: Trigger<Pointer<DragEnd>>,
+    nav_gizmo: Query<&NavGizmoParent>,
+    mut query: Query<&mut EditorCam, With<MainCamera>>,
+    mut commands: Commands,
+) {
+    let Ok(nav_gizmo) = nav_gizmo.get(drag_end.target) else {
+        return;
+    };
+    if let Ok(mut editor_cam) = query.get_mut(nav_gizmo.main_camera) {
+        editor_cam.end_move();
+    }
+    commands.entity(drag_end.target).remove::<DraggedMarker>();
 }
 
 #[allow(clippy::type_complexity)]

@@ -2,13 +2,15 @@ use bevy::app::{App, Plugin, Update};
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::ecs::system::Query;
 use bevy::input::touch::Touch;
-use bevy::math::{DVec3, Vec2};
+use bevy::math::Vec2;
 use bevy::prelude::{Res, ResMut, Resource, Touches};
 use bevy::render::camera::Camera;
 use bevy::transform::components::Transform;
 use bevy_editor_cam::controller::component::EditorCam;
 
 use crate::ui::tiles;
+
+use super::camera_anchor::camera_anchor_from_transform;
 
 pub struct EditorCamTouchPlugin;
 
@@ -181,26 +183,17 @@ pub fn touch_editor_cam(
         if !viewport_rect.contains(midpoint) || !viewport_contains_pointer.0 {
             continue;
         }
+        let anchor = camera_anchor_from_transform(transform);
         match touch_gestures {
             // orbit
             TouchGestures::OneFinger(gesture) => {
                 editor_cam.end_move();
-                let anchor = transform
-                    .compute_matrix()
-                    .as_dmat4()
-                    .inverse()
-                    .transform_point3(DVec3::ZERO);
-                editor_cam.start_orbit(Some(anchor));
+                editor_cam.start_orbit(anchor);
                 editor_cam.send_screenspace_input(gesture.motion);
             }
             TouchGestures::TwoFinger(gesture) => {
                 editor_cam.end_move();
-                let anchor = transform
-                    .compute_matrix()
-                    .as_dmat4()
-                    .inverse()
-                    .transform_point3(DVec3::ZERO);
-                editor_cam.start_pan(Some(anchor));
+                editor_cam.start_pan(anchor);
                 editor_cam.send_screenspace_input(gesture.motion);
                 editor_cam.send_zoom_input(gesture.pinch * 10.0);
             }
