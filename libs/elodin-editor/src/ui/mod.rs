@@ -18,7 +18,7 @@ use bevy::{
 };
 use bevy_egui::{
     EguiContext, EguiContexts,
-    egui::{self, Align2, Color32, Label, Margin, RichText},
+    egui::{self, Align2, Color32, Label, RichText},
 };
 use egui_tiles::{Container, Tile};
 #[cfg(target_os = "macos")]
@@ -68,7 +68,7 @@ mod platform {
 
 use platform::{LINUX_MULTI_WINDOW, PRIMARY_ORDER_OFFSET, SCREEN_RELAYOUT_TIMEOUT};
 
-use big_space::GridCell;
+use big_space::{GridCell, precision::GridPrecision};
 use plot_3d::LinePlot3dPlugin;
 use schematic::SchematicPlugin;
 
