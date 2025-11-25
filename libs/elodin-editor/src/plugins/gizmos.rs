@@ -16,7 +16,7 @@ use big_space::FloatingOriginSettings;
 use impeller2::types::ComponentId;
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::{
-    BodyAxes, Color as WktColor, ComponentValue as WktComponentValue, VectorArrow3d,
+    ArrowThickness, BodyAxes, Color as WktColor, ComponentValue as WktComponentValue, VectorArrow3d,
 };
 use std::collections::HashSet;
 
@@ -31,6 +31,10 @@ pub(crate) const MIN_ARROW_LENGTH_SQUARED: f64 = 1.0e-6;
 const BASE_HEAD_LENGTH: f32 = 0.06;
 const HEAD_RADIUS_FACTOR: f32 = 1.6;
 const MAX_HEAD_PORTION: f32 = 0.5;
+const DRAW_RAW_ARROW_MESHES: bool = true;
+const TARGET_DIAMETER_PX: f32 = 7.0;
+const MIN_RADIUS_WORLD: f32 = 0.005;
+const MAX_RADIUS_WORLD: f32 = 0.25;
 
 #[derive(Clone)]
 pub struct EvaluatedVectorArrow {
@@ -54,6 +58,38 @@ impl Plugin for GizmoPlugin {
             cleanup_removed_arrows.after(render_vector_arrow),
         );
         app.add_systems(Update, render_body_axis);
+    }
+}
+
+fn radius_for_target_pixels(
+    target_radius_px: f32,
+    camera: &Camera,
+    projection: &Projection,
+    camera_transform: &GlobalTransform,
+    world_pos: Vec3,
+) -> f32 {
+    let viewport = camera
+        .physical_viewport_size()
+        .unwrap_or_else(|| UVec2::new(1920, 1080));
+    let height_px = viewport.y.max(1) as f32;
+
+    match projection {
+        Projection::Perspective(persp) => {
+            let view = camera_transform.compute_matrix().inverse();
+            let cam_space = view.transform_point3(world_pos);
+            let depth = (-cam_space.z).max(0.001);
+            let focal_px = height_px / (2.0 * (persp.fov * 0.5).tan());
+            (target_radius_px * depth / focal_px).max(0.001)
+        }
+        Projection::Orthographic(ortho) => {
+            // In ortho, world units map linearly to pixels via scale.
+            let world_per_px = (2.0 * ortho.scale) / height_px;
+            (target_radius_px * world_per_px).max(0.001)
+        }
+        Projection::Custom(_) => {
+            // Fallback: assume roughly perspective-like scaling using near plane as depth proxy.
+            target_radius_px * 0.001
+        }
     }
 }
 
@@ -151,13 +187,22 @@ fn render_vector_arrow(
     floating_origin: Res<FloatingOriginSettings>,
     arrow_meshes: Res<ArrowMeshes>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    main_cameras: Query<&GlobalTransform, With<crate::MainCamera>>,
+    main_cameras: Query<(&Camera, &Projection, &GlobalTransform), With<crate::MainCamera>>,
+    mut logged_missing: Local<HashSet<Entity>>,
+    mut logged_small: Local<HashSet<Entity>>,
 ) {
-    let _camera_transform = main_cameras.iter().next().copied();
+    let active_cam = main_cameras.iter().next();
 
     for (entity, arrow, mut state) in vector_arrows.iter_mut() {
         let Some(result) = evaluate_vector_arrow(arrow, &state, &entity_map, &component_values)
         else {
+            if logged_missing.insert(entity) {
+                info!(
+                    ?entity,
+                    name = ?arrow.name,
+                    "vector_arrow: evaluation failed (missing data or zero-length)"
+                );
+            }
             if let Some(visual) = state.visual.take() {
                 hide_arrow_visual(&mut commands, &visual);
             }
@@ -166,21 +211,53 @@ fn render_vector_arrow(
 
         let (start_cell, start) = floating_origin.translation_to_grid::<i128>(result.start);
 
+        if !DRAW_RAW_ARROW_MESHES {
+            if let Some(visual) = state.visual.take() {
+                hide_arrow_visual(&mut commands, &visual);
+            }
+            continue;
+        }
+
         let direction_world = (result.end - result.start).as_vec3();
         let length = direction_world.length();
-        let too_small = length <= (MIN_ARROW_LENGTH_SQUARED as f32).sqrt();
-
-        let dir_norm = direction_world / length;
+        let dir_norm = if length > 0.0 {
+            direction_world / length
+        } else {
+            Vec3::Y
+        };
         let rotation = Quat::from_rotation_arc(Vec3::Y, dir_norm);
         let base_color = axis_color_from_name(result.name.as_deref(), result.color);
 
-        let mut head_length = BASE_HEAD_LENGTH.min(length * MAX_HEAD_PORTION);
+        // Keep a minimum draw length so a near-zero vector still shows a tiny arrow.
+        let draw_length = length.max(0.05);
+        if draw_length <= (MIN_ARROW_LENGTH_SQUARED as f32).sqrt() && logged_small.insert(entity) {
+            info!(
+                ?entity,
+                name = ?result.name,
+                length,
+                "vector_arrow: very small magnitude, drawing minimum-sized arrow"
+            );
+        }
+
+        let mut head_length = BASE_HEAD_LENGTH.min(draw_length * MAX_HEAD_PORTION);
         // Ensure the head never exceeds the total length.
-        head_length = head_length.min(length);
-        let shaft_length = (length - head_length).max(0.0);
-        // Keep radii mostly stable so long arrows don't become chunky; clamp for tiny arrows.
-        let shaft_radius = 0.01;
-        let head_radius = (shaft_radius * HEAD_RADIUS_FACTOR).min(length * 0.5);
+        head_length = head_length.min(draw_length);
+        let shaft_length = (draw_length - head_length).max(0.0);
+        // Keep a roughly constant on-screen thickness by scaling radius from screen pixels.
+        let shaft_radius = if let Some((cam, proj, cam_tf)) = active_cam {
+            let radius =
+                radius_for_target_pixels(TARGET_DIAMETER_PX * 0.5, cam, proj, cam_tf, start);
+            radius.clamp(MIN_RADIUS_WORLD, MAX_RADIUS_WORLD)
+        } else {
+            0.03
+        };
+        let dimension_mult = match arrow.thickness {
+            ArrowThickness::Small => 1.0,
+            ArrowThickness::Middle => 1.5,
+            ArrowThickness::Big => 2.0,
+        };
+        let shaft_radius = shaft_radius * dimension_mult;
+        let head_radius = (shaft_radius * HEAD_RADIUS_FACTOR).min(draw_length * 0.75);
 
         if state.visual.is_none() {
             state.visual = Some(spawn_arrow_visual(
@@ -195,12 +272,6 @@ fn render_vector_arrow(
         let _label_root;
         {
             let visual = state.visual.as_mut().unwrap();
-
-            if too_small {
-                hide_arrow_visual(&mut commands, visual);
-                hide_label(&mut commands, state.label.take());
-                continue;
-            }
 
             commands.entity(visual.root).insert((
                 Transform::from_translation(start).with_rotation(rotation),

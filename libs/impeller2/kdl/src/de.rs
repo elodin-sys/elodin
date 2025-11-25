@@ -1,8 +1,11 @@
-use impeller2_wkt::{Color, Schematic, SchematicElem, VectorArrow3d, WindowSchematic};
+use impeller2_wkt::{
+    ArrowThickness, Color, Schematic, SchematicElem, VectorArrow3d, WindowSchematic,
+};
 use kdl::{KdlDocument, KdlNode};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
+use tracing::warn;
 
 use impeller2_wkt::*;
 
@@ -651,6 +654,25 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
+    let dimension = node
+        .get("arrow_thickness")
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string())
+        .map(|s| s.to_lowercase())
+        .map(|s| match s.as_str() {
+            "small" => ArrowThickness::Small,
+            "middle" => ArrowThickness::Middle,
+            "big" => ArrowThickness::Big,
+            other => {
+                warn!(
+                    value = other,
+                    "Unknown arrow_thickness '{}', defaulting to small", other
+                );
+                ArrowThickness::Small
+            }
+        })
+        .unwrap_or(ArrowThickness::Small);
+
     let label_position = match node.entry("label_position") {
         None => 1.0,
         Some(entry) => {
@@ -683,6 +705,7 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         body_frame,
         normalize,
         display_name,
+        thickness: dimension,
         label_position,
         aux: (),
     })
