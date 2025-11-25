@@ -570,7 +570,7 @@ impl XYLine {
             let chunk = gpu.as_index_chunk::<f32>(buf.cpu().len());
             for (i, index) in chunk.into_index_iter().enumerate() {
                 let absolute = global_index + i;
-                if absolute % step == 0 || absolute + 1 == total_points {
+                if absolute.is_multiple_of(step) || absolute + 1 == total_points {
                     view = append_u32(view, index);
                     count += 1;
                 }
