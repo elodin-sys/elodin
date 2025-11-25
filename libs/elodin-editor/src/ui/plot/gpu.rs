@@ -181,7 +181,9 @@ impl LineMut<'_> {
                 line_visible_range,
                 pixel_width,
             ),
-            LineMut::XY(xy_line) => xy_line.write_to_index_buffer(index_buffer, render_queue),
+            LineMut::XY(xy_line) => {
+                xy_line.write_to_index_buffer(index_buffer, render_queue, pixel_width)
+            }
         }
     }
 

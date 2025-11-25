@@ -544,7 +544,16 @@ impl XYLine {
         &mut self,
         index_buffer: &Buffer,
         render_queue: &RenderQueue,
+        pixel_width: usize,
     ) -> u32 {
+        // Decimate to respect the fixed index buffer size (same pattern as timeseries)
+        let desired_index_len = INDEX_BUFFER_LEN.min(pixel_width.max(1) * 4);
+        let total_points: usize = self.x_values.iter().map(|c| c.cpu().len()).sum();
+        if total_points == 0 {
+            return 0;
+        }
+        let step = total_points.div_ceil(desired_index_len.max(1)).max(1);
+
         let mut count = 0;
         let mut view = render_queue
             .write_buffer_with(
@@ -554,14 +563,19 @@ impl XYLine {
             )
             .expect("no write buf");
         let mut view = &mut view[..];
+        let mut global_index = 0usize;
         for buf in &mut self.x_values {
             let gpu = buf.gpu.lock();
             let Some(gpu) = gpu.as_ref() else { return 0 };
             let chunk = gpu.as_index_chunk::<f32>(buf.cpu().len());
-            for index in chunk.into_index_iter() {
-                view = append_u32(view, index);
+            for (i, index) in chunk.into_index_iter().enumerate() {
+                let absolute = global_index + i;
+                if absolute % step == 0 || absolute + 1 == total_points {
+                    view = append_u32(view, index);
+                    count += 1;
+                }
             }
-            count += buf.cpu().len() as u32;
+            global_index += buf.cpu().len();
         }
         count
     }
