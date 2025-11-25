@@ -855,7 +855,7 @@ fn clear_state_new_connection(
     }
     synced_glbs.0.clear();
     windows
-        .main_mut()
+        .main
         .clear(&mut commands, &mut selected_object);
     for secondary in windows.take_secondary() {
         for graph in secondary.graph_entities {
@@ -865,7 +865,7 @@ fn clear_state_new_connection(
             commands.entity(entity).despawn();
         }
     }
-    windows.replace_secondary(Vec::new());
+    windows.secondary.clear();
     *graph_data = CollectedGraphData::default();
     render_layer_alloc.free_all();
 }

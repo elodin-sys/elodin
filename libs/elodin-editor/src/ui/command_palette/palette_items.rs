@@ -256,9 +256,9 @@ fn target_tile_state_mut(
 ) -> Option<&mut tiles::TileState> {
     match target {
         Some(id) => windows
-            .get_secondary_mut(id)
+            .find_secondary_mut(id)
             .map(|state| &mut state.tile_state),
-        None => Some(windows.main_mut()),
+        None => Some(&mut windows.main),
     }
 }
 

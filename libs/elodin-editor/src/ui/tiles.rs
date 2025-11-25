@@ -102,7 +102,7 @@ impl SecondaryWindowDescriptor {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum PrimaryWindowRelayoutPhase {
+pub enum WindowRelayoutPhase {
     #[default]
     Idle,
     NeedScreen,
@@ -111,14 +111,6 @@ pub enum PrimaryWindowRelayoutPhase {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SecondaryWindowId(pub u32);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum SecondaryWindowRelayoutPhase {
-    #[default]
-    Idle,
-    NeedScreen,
-    NeedRect,
-}
 
 #[derive(Clone)]
 pub struct SecondaryWindowState {
@@ -129,7 +121,7 @@ pub struct SecondaryWindowState {
     pub graph_entities: Vec<Entity>,
     pub applied_screen: Option<usize>,
     pub applied_rect: Option<WindowRect>,
-    pub relayout_phase: SecondaryWindowRelayoutPhase,
+    pub relayout_phase: WindowRelayoutPhase,
     pub relayout_attempts: u8,
     pub relayout_started_at: Option<Instant>,
     pub awaiting_screen_confirmation: bool,
@@ -141,7 +133,7 @@ pub struct SecondaryWindowState {
 pub struct PrimaryWindowLayout {
     pub screen: Option<usize>,
     pub screen_rect: Option<WindowRect>,
-    pub relayout_phase: PrimaryWindowRelayoutPhase,
+    pub relayout_phase: WindowRelayoutPhase,
     pub applied_screen: Option<usize>,
     pub applied_rect: Option<WindowRect>,
     pub relayout_attempts: u8,
@@ -165,11 +157,11 @@ impl PrimaryWindowLayout {
         self.requested_rect = rect;
         // One-shot relayout on explicit load if screen/rect is provided.
         self.relayout_phase = if self.screen.is_some() {
-            PrimaryWindowRelayoutPhase::NeedScreen
+            WindowRelayoutPhase::NeedScreen
         } else if self.screen_rect.is_some() {
-            PrimaryWindowRelayoutPhase::NeedRect
+            WindowRelayoutPhase::NeedRect
         } else {
-            PrimaryWindowRelayoutPhase::Idle
+            WindowRelayoutPhase::Idle
         };
         self.awaiting_screen_confirmation = false;
     }
@@ -178,13 +170,13 @@ impl PrimaryWindowLayout {
 impl SecondaryWindowState {
     pub fn relayout_phase_from_descriptor(
         descriptor: &SecondaryWindowDescriptor,
-    ) -> SecondaryWindowRelayoutPhase {
+    ) -> WindowRelayoutPhase {
         if descriptor.screen.is_some() {
-            SecondaryWindowRelayoutPhase::NeedScreen
+            WindowRelayoutPhase::NeedScreen
         } else if descriptor.screen_rect.is_some() {
-            SecondaryWindowRelayoutPhase::NeedRect
+            WindowRelayoutPhase::NeedRect
         } else {
-            SecondaryWindowRelayoutPhase::Idle
+            WindowRelayoutPhase::Idle
         }
     }
 
@@ -405,10 +397,10 @@ pub(crate) fn clamp_percent(value: f32) -> u32 {
 
 #[derive(Resource)]
 pub struct WindowManager {
-    main: TileState,
-    primary: PrimaryWindowLayout,
-    secondary: Vec<SecondaryWindowState>,
-    next_id: u32,
+    pub main: TileState,
+    pub primary: PrimaryWindowLayout,
+    pub secondary: Vec<SecondaryWindowState>,
+    pub next_id: u32,
 }
 
 impl Default for WindowManager {
@@ -423,21 +415,6 @@ impl Default for WindowManager {
 }
 
 impl WindowManager {
-    pub fn main(&self) -> &TileState {
-        &self.main
-    }
-
-    pub fn main_mut(&mut self) -> &mut TileState {
-        &mut self.main
-    }
-
-    pub fn primary_layout(&self) -> &PrimaryWindowLayout {
-        &self.primary
-    }
-
-    pub fn primary_layout_mut(&mut self) -> &mut PrimaryWindowLayout {
-        &mut self.primary
-    }
 
     pub fn clear_primary_layout(&mut self) {
         self.primary = PrimaryWindowLayout::default();
@@ -447,24 +424,8 @@ impl WindowManager {
         std::mem::take(&mut self.main)
     }
 
-    pub fn replace_main(&mut self, state: TileState) {
-        self.main = state;
-    }
-
-    pub fn secondary(&self) -> &[SecondaryWindowState] {
-        &self.secondary
-    }
-
-    pub fn secondary_mut(&mut self) -> &mut Vec<SecondaryWindowState> {
-        &mut self.secondary
-    }
-
     pub fn take_secondary(&mut self) -> Vec<SecondaryWindowState> {
         std::mem::take(&mut self.secondary)
-    }
-
-    pub fn replace_secondary(&mut self, states: Vec<SecondaryWindowState>) {
-        self.secondary = states;
     }
 
     pub fn alloc_id(&mut self) -> SecondaryWindowId {
@@ -473,11 +434,11 @@ impl WindowManager {
         id
     }
 
-    pub fn get_secondary(&self, id: SecondaryWindowId) -> Option<&SecondaryWindowState> {
+    pub fn find_secondary(&self, id: SecondaryWindowId) -> Option<&SecondaryWindowState> {
         self.secondary.iter().find(|s| s.id == id)
     }
 
-    pub fn get_secondary_mut(
+    pub fn find_secondary_mut(
         &mut self,
         id: SecondaryWindowId,
     ) -> Option<&mut SecondaryWindowState> {
@@ -1553,10 +1514,10 @@ impl<'w, 's> TileSystem<'w, 's> {
         let is_empty = match target {
             Some(id) => params
                 .windows
-                .get_secondary(id)
+                .find_secondary(id)
                 .map(|s| s.tile_state.is_empty() && s.tile_state.tree_actions.is_empty()),
             None => Some(
-                params.windows.main().is_empty() && params.windows.main().tree_actions.is_empty(),
+                params.windows.main.is_empty() && params.windows.main.tree_actions.is_empty(),
             ),
         };
 
@@ -1836,8 +1797,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
 
         world.resource_scope::<WindowManager, _>(|world, mut windows| {
             let Some(ui_state) = (match window {
-                Some(id) => windows.get_secondary_mut(id).map(|s| &mut s.tile_state),
-                None => Some(windows.main_mut()),
+                Some(id) => windows.find_secondary_mut(id).map(|s| &mut s.tile_state),
+                None => Some(&mut windows.main),
             }) else {
                 return;
             };
@@ -2252,7 +2213,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
 }
 
 pub fn shortcuts(key_state: Res<LogicalKeyState>, mut windows: ResMut<WindowManager>) {
-    let ui_state = windows.main_mut();
+    let ui_state = &mut windows.main;
     if key_state.pressed(&Key::Control) && key_state.just_pressed(&Key::Tab) {
         let Some(tile_id) = ui_state.tree.root() else {
             return;

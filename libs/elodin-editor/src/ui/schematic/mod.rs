@@ -56,7 +56,7 @@ pub struct SchematicParam<'w, 's> {
 
 impl SchematicParam<'_, '_> {
     pub fn get_panel(&self, tile_id: TileId) -> Option<Panel<Entity>> {
-        self.get_panel_from_state(self.windows.main(), tile_id)
+        self.get_panel_from_state(&self.windows.main, tile_id)
     }
 
     pub fn get_panel_from_state(
@@ -221,7 +221,7 @@ pub fn tiles_to_schematic(
     mut secondary: ResMut<CurrentSecondarySchematics>,
 ) {
     schematic.elems.clear();
-    if let Some(tile_id) = param.windows.main().tree.root() {
+    if let Some(tile_id) = param.windows.main.tree.root() {
         schematic
             .elems
             .extend(param.get_panel(tile_id).map(SchematicElem::Panel))
@@ -249,7 +249,7 @@ pub fn tiles_to_schematic(
     secondary.0.clear();
     let mut window_elems = Vec::new();
     let mut name_counts: HashMap<String, usize> = HashMap::new();
-    for state in param.windows.secondary() {
+    for state in &param.windows.secondary {
         let base_stem = preferred_secondary_stem(state);
         let unique_stem = ensure_unique_stem(&mut name_counts, &base_stem);
         let file_name = format!("{unique_stem}.kdl");
@@ -273,7 +273,7 @@ pub fn tiles_to_schematic(
         }));
     }
 
-    let primary_layout = param.windows.primary_layout();
+    let primary_layout = &param.windows.primary;
     let serialized_screen = primary_layout
         .requested_screen
         .or(primary_layout.captured_screen);

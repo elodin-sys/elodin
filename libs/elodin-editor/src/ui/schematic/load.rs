@@ -234,14 +234,14 @@ impl LoadSchematicParams<'_, '_> {
                     if let Some(descriptor) = resolve_window_descriptor(window, base_dir) {
                         secondary_descriptors.push(descriptor);
                     } else {
-                        let layout = self.windows.primary_layout_mut();
+                        let layout = &mut self.windows.primary;
                         layout.set(window.screen.map(|idx| idx as usize), window.screen_rect);
                     }
                 }
             }
         }
 
-        self.windows.replace_main(main_state);
+        self.windows.main = main_state;
 
         let mut secondary_states = Vec::new();
 
@@ -316,7 +316,7 @@ impl LoadSchematicParams<'_, '_> {
             }
         }
 
-        self.windows.replace_secondary(secondary_states);
+        self.windows.secondary = secondary_states;
     }
 
     pub fn spawn_object_3d(&mut self, object_3d: Object3D) {
@@ -449,7 +449,7 @@ impl LoadSchematicParams<'_, '_> {
                             PanelContext::Secondary(id) => {
                                 let path = self
                                     .windows
-                                    .get_secondary(id)
+                                    .find_secondary(id)
                                     .map(|s| s.descriptor.path.display().to_string());
                                 (format!("secondary({})", id.0), path)
                             }
