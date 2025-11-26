@@ -7,6 +7,7 @@ use std::io::{Read, Seek, Write};
 use std::net::{Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
 use std::thread::JoinHandle;
+use std::time::Duration;
 use stellarator::util::CancelToken;
 use tokio::runtime::Runtime;
 
@@ -68,7 +69,7 @@ impl std::str::FromStr for Simulator {
 }
 
 impl Cli {
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub fn run_sim(
         &self,
         args: &Args,
@@ -80,23 +81,49 @@ impl Cli {
         let cache_dir = dirs.cache_dir().to_owned();
         let thread = std::thread::spawn(move || {
             rt.block_on(async move {
-                let ctrl_c_cancel_token = cancel_token.clone();
-                tokio::spawn(async move {
-                    let _drop = ctrl_c_cancel_token.drop_guard(); // binding needs to be named to ensure drop is called at end of scope
-                    tokio::signal::ctrl_c().await.unwrap();
-                    info!("Received Ctrl-C, shutting down");
-                });
-                if let Simulator::File(path) = &sim {
-                    let res = elodin_editor::run::run_recipe(
-                        cache_dir,
-                        path.clone(),
-                        cancel_token.clone(),
-                    )
-                    .await;
-                    cancel_token.cancel();
-                    res
-                } else {
-                    Ok(())
+                let cancel_on_ctrl_c = {
+                    let cancel_token = cancel_token.clone();
+                    async move {
+                        match tokio::signal::ctrl_c().await {
+                            Ok(()) => {
+                                info!("Received Ctrl-C, shutting down");
+                                cancel_token.cancel();
+                                tokio::time::sleep(Duration::from_millis(2000)).await;
+                                std::process::exit(130);
+                            }
+                            Err(err) => {
+                                warn!(?err, "failed to listen for Ctrl-C");
+                            }
+                        }
+                    }
+                };
+
+                match &sim {
+                    Simulator::File(path) => {
+                        let mut res = None;
+                        let mut recipe_fut = Box::pin(elodin_editor::run::run_recipe(
+                            cache_dir,
+                            path.clone(),
+                            cancel_token.clone(),
+                        ));
+                        tokio::select! {
+                            r = &mut recipe_fut => res = Some(r),
+                            _ = cancel_on_ctrl_c => {
+                                cancel_token.cancel();
+                            }
+                        }
+                        if res.is_none() {
+                            res = Some(recipe_fut.await);
+                        }
+                        cancel_token.cancel();
+                        res.expect("run_recipe result missing")
+                    }
+                    _ => {
+                        tokio::select! {
+                            _ = cancel_on_ctrl_c => Ok(()),
+                            _ = cancel_token.wait() => Ok(()),
+                        }
+                    }
                 }
             })
         });
