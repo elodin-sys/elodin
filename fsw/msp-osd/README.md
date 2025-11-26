@@ -1,18 +1,96 @@
-# Avatar OSD Service
+# MSP OSD Service
 
-MSP DisplayPort OSD service for Walksnail Avatar VTX that connects to Elodin-DB for telemetry data.
+MSP DisplayPort OSD service that connects to Elodin-DB for telemetry data. Supports Walksnail Avatar VTX and other MSP-compatible systems.
 
 ## Features
 
 - Real-time telemetry subscription from Elodin-DB
-- MSP DisplayPort protocol implementation for Walksnail Avatar
+- **Declarative input mappings** - configure how to extract telemetry from any Elodin-DB components
+- MSP DisplayPort protocol implementation
 - Debug terminal backend for local development
-- Configurable OSD layout with:
+- OSD elements:
   - Compass heading with tick marks
   - Altitude ladder and climb rate
   - Speed indicator
   - Artificial horizon with pitch/roll
-  - System status and warnings
+
+## Core Inputs
+
+The OSD requires three inputs in world frame, all configured via `config.toml`:
+
+1. **Position** (x, y, z) - Used for altitude display
+2. **Orientation** (q0, q1, q2, q3) - Quaternion for horizon and compass
+3. **Velocity** (x, y, z) - Used for speed and climb rate
+
+## Configuration
+
+The `config.toml` file uses declarative input mappings to specify how to extract these values from Elodin-DB components.
+
+### Drone Example Configuration
+
+For the drone simulation, `world_pos` contains `[q0, q1, q2, q3, x, y, z]` and `world_vel` contains `[ωx, ωy, ωz, vx, vy, vz]`:
+
+```toml
+[db]
+host = "127.0.0.1"
+port = 2240
+
+[osd]
+rows = 18
+cols = 50
+refresh_rate_hz = 20.0
+
+[serial]
+port = "/dev/ttyTHS7"
+baud = 115200
+
+# Position from world_pos indices 4,5,6
+[inputs.position]
+component = "drone.world_pos"
+x = 4
+y = 5
+z = 6
+
+# Orientation from world_pos indices 0,1,2,3
+[inputs.orientation]
+component = "drone.world_pos"
+q0 = 0
+q1 = 1
+q2 = 2
+q3 = 3
+
+# Velocity from world_vel indices 3,4,5
+[inputs.velocity]
+component = "drone.world_vel"
+x = 3
+y = 4
+z = 5
+```
+
+### Satellite Example
+
+For a satellite with separate position and attitude components:
+
+```toml
+[inputs.position]
+component = "satellite.position"
+x = 0
+y = 1
+z = 2
+
+[inputs.orientation]
+component = "satellite.attitude"
+q0 = 0
+q1 = 1
+q2 = 2
+q3 = 3
+
+[inputs.velocity]
+component = "satellite.velocity"
+x = 0
+y = 1
+z = 2
+```
 
 ## Usage
 
@@ -33,7 +111,7 @@ cargo run -- --mode debug --verbose
 
 ### Serial Mode (MSP DisplayPort)
 
-For actual hardware connection to Walksnail Avatar:
+For actual hardware connection:
 
 ```bash
 # Using configuration file
@@ -41,36 +119,13 @@ cargo run -- --mode serial
 
 # Override serial port
 cargo run -- --mode serial --serial-port /dev/ttyUSB0
-
-# Custom configuration file
-cargo run -- --mode serial --config custom-config.toml
 ```
-
-## Configuration
-
-Edit `config.toml` to configure:
-
-- Database connection (host, port, components to subscribe)
-- OSD grid dimensions and refresh rate
-- Serial port settings for MSP DisplayPort
-
-Default configuration subscribes to drone telemetry components:
-- `drone.gyro` - Angular velocity
-- `drone.accel` - Linear acceleration
-- `drone.magnetometer` - Magnetic field
-- `drone.world_pos` - Position (quaternion + xyz)
-- `drone.world_vel` - Velocity (angular + linear)
-- `drone.body_ang_vel` - Body-frame angular velocity
-- `drone.attitude_target` - Target attitude
-
-**Note:** Component names must match exactly as registered in Elodin-DB (including entity prefix).
 
 ## Testing with Drone Simulation
 
 1. Start the drone example simulation:
    ```bash
-   cd examples/drone
-   python main.py run
+   elodin editor examples/drone/main.py
    ```
 
 2. In another terminal, run the OSD in debug mode:
@@ -99,8 +154,9 @@ For Walksnail Avatar connection on Aleph:
 
 ## Architecture
 
-- `db_client.rs` - Connects to Elodin-DB and subscribes to telemetry
-- `telemetry.rs` - Processes and aggregates telemetry state
+- `config.rs` - Declarative input mapping configuration
+- `db_client.rs` - Generic Elodin-DB client that extracts values based on config
+- `telemetry.rs` - Core state: position, orientation, velocity
 - `osd_grid.rs` - Text grid representation for OSD
 - `layout.rs` - Renders telemetry into OSD elements
 - `backends/terminal.rs` - Terminal display for debugging
@@ -114,10 +170,3 @@ Implements MSP v1 with DisplayPort extensions:
   - `MSP_DP_CLEAR_SCREEN` - Clear OSD canvas
   - `MSP_DP_WRITE_STRING` - Write text at position
   - `MSP_DP_DRAW_SCREEN` - Present frame
-
-## Development Notes
-
-- The service currently processes basic telemetry components
-- Full decomponentization of table data from Elodin-DB is planned
-- Additional OSD elements can be added to `layout.rs`
-- The artificial horizon uses ASCII art for terminal display

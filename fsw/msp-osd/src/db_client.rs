@@ -1,31 +1,50 @@
 use anyhow::{Context, Result};
 use impeller2::com_de::Decomponentize;
 use impeller2::registry::HashMapRegistry;
-use impeller2::schema::Schema;
-use impeller2::types::{ComponentId, ComponentView, PrimType, Timestamp};
+use impeller2::types::{ComponentId, ComponentView, Timestamp};
 use impeller2_stellar::Client;
-use impeller2_wkt::{DumpMetadata, DumpMetadataResp, DumpSchema, DumpSchemaResp, Stream, StreamBehavior, StreamReply};
+use impeller2_wkt::{DumpMetadata, DumpMetadataResp, Stream, StreamBehavior, StreamReply};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
+use crate::config::InputMappings;
 use crate::telemetry::{SystemStatus, TelemetryProcessor};
 
+/// Component info discovered from the database
+#[derive(Debug, Clone)]
+struct ComponentInfo {
+    name: String,
+}
+
+/// Database client that streams telemetry based on configured input mappings
 pub struct DbClient {
     addr: SocketAddr,
-    component_names: Vec<String>,
+    mappings: InputMappings,
     vtable_registry: HashMapRegistry,
 }
 
 impl DbClient {
-    pub fn new(addr: SocketAddr, component_names: Vec<String>) -> Self {
+    pub fn new(addr: SocketAddr, mappings: InputMappings) -> Self {
         Self {
             addr,
-            component_names,
+            mappings,
             vtable_registry: HashMapRegistry::default(),
         }
+    }
+
+    /// Get the unique list of component names required by the mappings
+    fn required_components(&self) -> Vec<String> {
+        let mut components = vec![
+            self.mappings.position.component.clone(),
+            self.mappings.orientation.component.clone(),
+            self.mappings.velocity.component.clone(),
+        ];
+        components.sort();
+        components.dedup();
+        components
     }
 
     pub async fn connect_and_stream(
@@ -34,7 +53,10 @@ impl DbClient {
         update_tx: async_channel::Sender<()>,
     ) -> Result<()> {
         loop {
-            match self.run_stream_loop(telemetry_processor.clone(), update_tx.clone()).await {
+            match self
+                .run_stream_loop(telemetry_processor.clone(), update_tx.clone())
+                .await
+            {
                 Ok(()) => {
                     info!("Stream ended normally, will reconnect...");
                 }
@@ -43,12 +65,9 @@ impl DbClient {
                 }
             }
 
-            // Update status to indicate reconnection
             telemetry_processor
                 .update_status(SystemStatus::Initializing)
                 .await;
-
-            // Wait before retrying
             stellarator::sleep(Duration::from_secs(2)).await;
         }
     }
@@ -59,18 +78,14 @@ impl DbClient {
         update_tx: async_channel::Sender<()>,
     ) -> Result<()> {
         info!("Attempting to connect to database at {}", self.addr);
-        
-        // Connect to database
+
         let mut client = self.connect_with_retry().await?;
 
-        // Update connection status
         telemetry_processor.set_db_connected(true).await;
-        telemetry_processor
-            .update_status(SystemStatus::Ready)
-            .await;
+        telemetry_processor.update_status(SystemStatus::Ready).await;
 
-        // Discover components
-        let _components = self.discover_components(&mut client).await?;
+        // Discover components and build ID -> name mapping
+        let components = self.discover_components(&mut client).await?;
 
         // Subscribe to real-time stream
         let stream = Stream {
@@ -78,7 +93,6 @@ impl DbClient {
             id: 1,
         };
 
-        // Create stream subscription
         let mut sub_stream = client
             .stream(&stream)
             .await
@@ -92,17 +106,15 @@ impl DbClient {
                 Ok(reply) => match reply {
                     StreamReply::Table(table) => {
                         debug!("Received table data, ID: {:?}", table.id);
-                        
-                        // Create extractor for this table
+
                         let mut extractor = TelemetryExtractor::new(
-                            &_components,
+                            &components,
+                            &self.mappings,
                             telemetry_processor.clone(),
                         );
-                        
-                        // Try to decomponentize the table
+
                         match table.sink(&self.vtable_registry, &mut extractor) {
                             Ok(Ok(())) => {
-                                // Successfully processed table
                                 telemetry_processor.increment_update_count().await;
                                 let _ = update_tx.send(()).await;
                             }
@@ -116,7 +128,9 @@ impl DbClient {
                     }
                     StreamReply::VTable(vtable_msg) => {
                         info!("Received VTable message, ID: {:?}", vtable_msg.id);
-                        self.vtable_registry.map.insert(vtable_msg.id, vtable_msg.vtable);
+                        self.vtable_registry
+                            .map
+                            .insert(vtable_msg.id, vtable_msg.vtable);
                     }
                 },
                 Err(e) => {
@@ -136,7 +150,10 @@ impl DbClient {
             attempt += 1;
             match Client::connect(self.addr).await {
                 Ok(client) => {
-                    info!("Connected to database at {} (attempt #{})", self.addr, attempt);
+                    info!(
+                        "Connected to database at {} (attempt #{})",
+                        self.addr, attempt
+                    );
                     return Ok(client);
                 }
                 Err(e) => {
@@ -154,8 +171,14 @@ impl DbClient {
         }
     }
 
-    async fn discover_components(&self, client: &mut Client) -> Result<HashMap<ComponentId, ComponentInfo>> {
+    async fn discover_components(
+        &self,
+        client: &mut Client,
+    ) -> Result<HashMap<ComponentId, ComponentInfo>> {
         let mut components = HashMap::new();
+        let required = self.required_components();
+
+        info!("Looking for components: {:?}", required);
 
         // Request metadata dump
         let dump_metadata = DumpMetadata;
@@ -164,113 +187,62 @@ impl DbClient {
             .await
             .context("Failed to dump metadata")?;
 
-        // Request schema dump
-        let dump_schema = DumpSchema;
-        let schema_resp: DumpSchemaResp = client
-            .request(&dump_schema)
-            .await
-            .context("Failed to dump schemas")?;
-
         // Process component metadata
         for metadata in metadata_resp.component_metadata {
-            // Check if this component is one we're interested in
-            if self.component_names.contains(&metadata.name) {
-                // Find matching schema
-                if let Some(schema) = schema_resp
-                    .schemas
-                    .iter()
-                    .find(|(id, _)| **id == metadata.component_id)
-                    .map(|(_, s)| s.clone())
-                {
-                    info!(
-                        "Found component: {} (ID: {}, Type: {:?})",
-                        metadata.name, metadata.component_id, format_schema(&schema)
-                    );
-                    
-                    components.insert(
-                        metadata.component_id,
-                        ComponentInfo {
-                            id: metadata.component_id,
-                            name: metadata.name.clone(),
-                            schema,
-                        },
-                    );
-                }
+            if required.contains(&metadata.name) {
+                info!(
+                    "Found component: {} (ID: {})",
+                    metadata.name, metadata.component_id
+                );
+
+                components.insert(
+                    metadata.component_id,
+                    ComponentInfo {
+                        name: metadata.name.clone(),
+                    },
+                );
             }
         }
 
-        if components.is_empty() {
-            warn!(
-                "No matching components found. Looking for: {:?}",
-                self.component_names
-            );
+        if components.len() < required.len() {
+            let found: Vec<_> = components.values().map(|c| c.name.clone()).collect();
+            let missing: Vec<_> = required
+                .iter()
+                .filter(|r| !found.contains(r))
+                .cloned()
+                .collect();
+            warn!("Missing components: {:?}", missing);
         } else {
-            info!("Discovered {} relevant components", components.len());
+            info!("Discovered all {} required components", components.len());
         }
 
         Ok(components)
     }
 }
 
-#[derive(Debug, Clone)]
-struct ComponentInfo {
-    id: ComponentId,
-    name: String,
-    schema: Schema<Vec<u64>>,
-}
-
-/// Format a schema for display/logging
-fn format_schema(schema: &Schema<Vec<u64>>) -> String {
-    let prim_type = format_prim_type(schema.prim_type());
-    let shape = schema.dim();
-
-    if shape.is_empty() {
-        prim_type.to_string()
-    } else {
-        format!(
-            "{}[{}]",
-            prim_type,
-            shape
-                .iter()
-                .map(|d| d.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    }
-}
-
-/// Format primitive type for display
-fn format_prim_type(prim_type: PrimType) -> &'static str {
-    match prim_type {
-        PrimType::U8 => "u8",
-        PrimType::U16 => "u16",
-        PrimType::U32 => "u32",
-        PrimType::U64 => "u64",
-        PrimType::I8 => "i8",
-        PrimType::I16 => "i16",
-        PrimType::I32 => "i32",
-        PrimType::I64 => "i64",
-        PrimType::Bool => "bool",
-        PrimType::F32 => "f32",
-        PrimType::F64 => "f64",
-    }
-}
-
-/// Helper to extract telemetry values from packets
+/// Extracts telemetry values based on configured input mappings
 struct TelemetryExtractor {
     components: HashMap<ComponentId, ComponentInfo>,
+    mappings: InputMappings,
     telemetry_processor: Arc<TelemetryProcessor>,
 }
 
 impl TelemetryExtractor {
     fn new(
         components: &HashMap<ComponentId, ComponentInfo>,
+        mappings: &InputMappings,
         telemetry_processor: Arc<TelemetryProcessor>,
     ) -> Self {
         Self {
             components: components.clone(),
+            mappings: mappings.clone(),
             telemetry_processor,
         }
+    }
+
+    /// Extract a value at the given index from an f64 array
+    fn extract_f64(values: &[f64], idx: usize) -> Option<f64> {
+        values.get(idx).copied()
     }
 }
 
@@ -283,65 +255,65 @@ impl Decomponentize for TelemetryExtractor {
         component_view: ComponentView<'_>,
         _timestamp: Option<Timestamp>,
     ) -> Result<(), Self::Error> {
-        // Get component info
-        if let Some(component_info) = self.components.get(&component_id) {
-            let component_name = &component_info.name;
-            
-            // Extract values as f64 vector
-            let values: Vec<f64> = match component_view {
-                ComponentView::F64(array) => array.buf().to_vec(),
-                ComponentView::F32(array) => array.buf().iter().map(|&v| v as f64).collect(),
-                _ => return Ok(()), // Skip non-float components for now
-            };
-            
-            // Process based on component name
-            match component_name.as_str() {
-                name if name.ends_with(".world_pos") && values.len() >= 7 => {
-                    // world_pos is [quat.w, quat.x, quat.y, quat.z, pos.x, pos.y, pos.z]
-                    debug!("Extracting position from {}: [{}, {}, {}]", name, values[4], values[5], values[6]);
-                    let proc = self.telemetry_processor.clone();
-                    let (x, y, z) = (values[4], values[5], values[6]);
-                    stellarator::spawn(async move {
-                        proc.update_position(x, y, z).await;
-                    });
-                }
-                name if name.ends_with(".world_vel") && values.len() >= 6 => {
-                    // world_vel is [ang_vel.x, ang_vel.y, ang_vel.z, lin_vel.x, lin_vel.y, lin_vel.z]
-                    debug!("Extracting velocity from {}: [{}, {}, {}]", name, values[3], values[4], values[5]);
-                    let proc = self.telemetry_processor.clone();
-                    let (vx, vy, vz) = (values[3], values[4], values[5]);
-                    stellarator::spawn(async move {
-                        proc.update_velocity(vx, vy, vz).await;
-                    });
-                }
-                name if name.ends_with(".gyro") && values.len() >= 3 => {
-                    debug!("Extracting gyro from {}: [{}, {}, {}]", name, values[0], values[1], values[2]);
-                    let proc = self.telemetry_processor.clone();
-                    let (x, y, z) = (values[0] as f32, values[1] as f32, values[2] as f32);
-                    stellarator::spawn(async move {
-                        proc.update_gyro(x, y, z).await;
-                    });
-                }
-                name if name.ends_with(".accel") && values.len() >= 3 => {
-                    debug!("Extracting accel from {}: [{}, {}, {}]", name, values[0], values[1], values[2]);
-                    let proc = self.telemetry_processor.clone();
-                    let (x, y, z) = (values[0] as f32, values[1] as f32, values[2] as f32);
-                    stellarator::spawn(async move {
-                        proc.update_accel(x, y, z).await;
-                    });
-                }
-                name if name.ends_with(".magnetometer") && values.len() >= 3 => {
-                    debug!("Extracting magnetometer from {}: [{}, {}, {}]", name, values[0], values[1], values[2]);
-                    let proc = self.telemetry_processor.clone();
-                    let (x, y, z) = (values[0] as f32, values[1] as f32, values[2] as f32);
-                    stellarator::spawn(async move {
-                        proc.update_magnetometer(x, y, z).await;
-                    });
-                }
-                _ => {
-                    // Log other components for debugging
-                    debug!("Skipping component: {} (len={})", component_name, values.len());
-                }
+        // Get component name for this ID
+        let component_name = match self.components.get(&component_id) {
+            Some(info) => &info.name,
+            None => return Ok(()), // Unknown component, skip
+        };
+
+        // Extract values as f64 vector
+        let values: Vec<f64> = match component_view {
+            ComponentView::F64(array) => array.buf().to_vec(),
+            ComponentView::F32(array) => array.buf().iter().map(|&v| v as f64).collect(),
+            _ => return Ok(()), // Skip non-float components
+        };
+
+        // Check if this component is used for position
+        if component_name == &self.mappings.position.component {
+            let m = &self.mappings.position;
+            if let (Some(x), Some(y), Some(z)) = (
+                Self::extract_f64(&values, m.x),
+                Self::extract_f64(&values, m.y),
+                Self::extract_f64(&values, m.z),
+            ) {
+                debug!("Position: x={:.3}, y={:.3}, z={:.3}", x, y, z);
+                let proc = self.telemetry_processor.clone();
+                stellarator::spawn(async move {
+                    proc.update_position(x, y, z).await;
+                });
+            }
+        }
+
+        // Check if this component is used for orientation
+        if component_name == &self.mappings.orientation.component {
+            let m = &self.mappings.orientation;
+            if let (Some(q0), Some(q1), Some(q2), Some(q3)) = (
+                Self::extract_f64(&values, m.q0),
+                Self::extract_f64(&values, m.q1),
+                Self::extract_f64(&values, m.q2),
+                Self::extract_f64(&values, m.q3),
+            ) {
+                debug!("Orientation: q0={:.3}, q1={:.3}, q2={:.3}, q3={:.3}", q0, q1, q2, q3);
+                let proc = self.telemetry_processor.clone();
+                stellarator::spawn(async move {
+                    proc.update_orientation(q0, q1, q2, q3).await;
+                });
+            }
+        }
+
+        // Check if this component is used for velocity
+        if component_name == &self.mappings.velocity.component {
+            let m = &self.mappings.velocity;
+            if let (Some(vx), Some(vy), Some(vz)) = (
+                Self::extract_f64(&values, m.x),
+                Self::extract_f64(&values, m.y),
+                Self::extract_f64(&values, m.z),
+            ) {
+                debug!("Velocity: vx={:.3}, vy={:.3}, vz={:.3}", vx, vy, vz);
+                let proc = self.telemetry_processor.clone();
+                stellarator::spawn(async move {
+                    proc.update_velocity(vx, vy, vz).await;
+                });
             }
         }
 

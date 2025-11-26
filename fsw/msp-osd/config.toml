@@ -1,15 +1,9 @@
+# MSP OSD Configuration
+# This file defines how to extract telemetry from Elodin-DB for OSD display
+
 [db]
 host = "127.0.0.1"
 port = 2240
-components = [
-    "drone.gyro",
-    "drone.accel",
-    "drone.magnetometer",
-    "drone.attitude_target",
-    "drone.body_ang_vel",
-    "drone.world_pos",
-    "drone.world_vel"
-]
 
 [osd]
 rows = 18
@@ -19,3 +13,31 @@ refresh_rate_hz = 20.0
 [serial]
 port = "/dev/ttyTHS7"
 baud = 115200
+
+# Input mappings define how to extract OSD telemetry from Elodin-DB components.
+# Each mapping specifies a component name and the array indices for each value.
+
+# Position in world frame (x, y, z) in meters
+# For drone example: drone.world_pos is [q0, q1, q2, q3, x, y, z]
+[inputs.position]
+component = "drone.world_pos"
+x = 4
+y = 5
+z = 6
+
+# Orientation as quaternion (q0, q1, q2, q3) where q0 is the scalar (w) component
+# For drone example: drone.world_pos is [q0, q1, q2, q3, x, y, z]
+[inputs.orientation]
+component = "drone.world_pos"
+q0 = 0
+q1 = 1
+q2 = 2
+q3 = 3
+
+# Velocity in world frame (x, y, z) in m/s
+# For drone example: drone.world_vel is [ωx, ωy, ωz, vx, vy, vz]
+[inputs.velocity]
+component = "drone.world_vel"
+x = 3
+y = 4
+z = 5

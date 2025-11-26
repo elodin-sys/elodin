@@ -22,7 +22,7 @@ use telemetry::TelemetryProcessor;
 #[command(
     author,
     version,
-    about = "Avatar OSD Service - MSP DisplayPort OSD for Walksnail VTX",
+    about = "MSP OSD Service - MSP DisplayPort OSD for VTX systems",
     long_about = None
 )]
 struct Args {
@@ -61,7 +61,7 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    info!("Avatar OSD Service starting...");
+    info!("MSP OSD Service starting...");
 
     // Load configuration
     let mut config = Config::from_file_or_default(&args.config)?;
@@ -76,6 +76,31 @@ async fn main() -> Result<()> {
     if let Some(port) = args.serial_port {
         config.serial.port = port;
     }
+
+    // Log configured input mappings
+    info!("Input mappings:");
+    info!(
+        "  Position: {}[{},{},{}]",
+        config.inputs.position.component,
+        config.inputs.position.x,
+        config.inputs.position.y,
+        config.inputs.position.z
+    );
+    info!(
+        "  Orientation: {}[{},{},{},{}]",
+        config.inputs.orientation.component,
+        config.inputs.orientation.q0,
+        config.inputs.orientation.q1,
+        config.inputs.orientation.q2,
+        config.inputs.orientation.q3
+    );
+    info!(
+        "  Velocity: {}[{},{},{}]",
+        config.inputs.velocity.component,
+        config.inputs.velocity.x,
+        config.inputs.velocity.y,
+        config.inputs.velocity.z
+    );
 
     // Create OSD grid
     let grid = Arc::new(tokio::sync::RwLock::new(OsdGrid::new(
@@ -104,9 +129,9 @@ async fn main() -> Result<()> {
     // Create telemetry processor
     let telemetry_processor = Arc::new(TelemetryProcessor::new());
 
-    // Connect to database and start streaming
+    // Connect to database using configured input mappings
     let db_addr: SocketAddr = format!("{}:{}", config.db.host, config.db.port).parse()?;
-    let mut db_client = DbClient::new(db_addr, config.db.components.clone());
+    let db_client = DbClient::new(db_addr, config.inputs.clone());
 
     // Create channel for telemetry updates
     let (tx, rx) = async_channel::bounded(100);
@@ -115,7 +140,9 @@ async fn main() -> Result<()> {
     let telemetry_processor_clone = telemetry_processor.clone();
     let tx_clone = tx.clone();
     let db_task = stellarator::spawn(async move {
-        db_client.connect_and_stream(telemetry_processor_clone, tx_clone).await
+        db_client
+            .connect_and_stream(telemetry_processor_clone, tx_clone)
+            .await
     });
 
     // Run OSD update loop
@@ -179,15 +206,17 @@ async fn run_osd_loop(
             // Update grid with layout
             {
                 let mut grid = grid.write().await;
-                layout::render(&mut grid, &state, &config.osd);
+                layout::render(&mut grid, &state);
             }
 
             // Send to backend (with status if terminal backend)
             {
                 let grid = grid.read().await;
-                
+
                 // Check if this is the debug terminal backend
-                if let Some(terminal_backend) = backend.as_any_mut().downcast_mut::<DebugTerminalBackend>() {
+                if let Some(terminal_backend) =
+                    backend.as_any_mut().downcast_mut::<DebugTerminalBackend>()
+                {
                     terminal_backend.render_with_status(&grid, &state).await?;
                 } else {
                     backend.render(&grid).await?;

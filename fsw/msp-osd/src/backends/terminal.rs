@@ -55,7 +55,7 @@ impl Backend for DebugTerminalBackend {
             terminal::Clear(terminal::ClearType::All),
             cursor::MoveTo(0, 0)
         )?;
-        writeln!(out, "Avatar OSD stopped.")?;
+        writeln!(out, "MSP OSD stopped.")?;
         out.flush()?;
         Ok(())
     }
@@ -110,7 +110,7 @@ impl DebugTerminalBackend {
         writeln!(out)?;
         writeln!(
             out,
-            "Avatar OSD Debug Mode | Frame {} | {}x{} grid",
+            "MSP OSD Debug Mode | Frame {} | {}x{} grid",
             self.frame_count, grid.cols, grid.rows
         )?;
         writeln!(
