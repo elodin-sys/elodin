@@ -68,7 +68,7 @@ impl std::str::FromStr for Simulator {
 }
 
 impl Cli {
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     pub fn run_sim(
         &self,
         args: &Args,
@@ -80,23 +80,92 @@ impl Cli {
         let cache_dir = dirs.cache_dir().to_owned();
         let thread = std::thread::spawn(move || {
             rt.block_on(async move {
-                let ctrl_c_cancel_token = cancel_token.clone();
-                tokio::spawn(async move {
-                    let _drop = ctrl_c_cancel_token.drop_guard(); // binding needs to be named to ensure drop is called at end of scope
-                    tokio::signal::ctrl_c().await.unwrap();
-                    info!("Received Ctrl-C, shutting down");
-                });
-                if let Simulator::File(path) = &sim {
-                    let res = elodin_editor::run::run_recipe(
-                        cache_dir,
-                        path.clone(),
-                        cancel_token.clone(),
-                    )
-                    .await;
-                    cancel_token.cancel();
-                    res
-                } else {
-                    Ok(())
+                let cancel_on_ctrl_c = {
+                    let cancel_token = cancel_token.clone();
+                    async move {
+                        match tokio::signal::ctrl_c().await {
+                            Ok(()) => {
+                                info!("Received Ctrl-C, shutting down");
+                                cancel_token.cancel();
+                            }
+                            Err(err) => {
+                                warn!(?err, "failed to listen for Ctrl-C");
+                            }
+                        }
+                    }
+                };
+
+                match &sim {
+                    Simulator::File(path) => {
+                        let res = tokio::select! {
+                            res = elodin_editor::run::run_recipe(
+                                cache_dir,
+                                path.clone(),
+                                cancel_token.clone(),
+                            ) => res,
+                            _ = cancel_on_ctrl_c => Ok(()),
+                        };
+                        cancel_token.cancel();
+                        res
+                    }
+                    _ => {
+                        tokio::select! {
+                            _ = cancel_on_ctrl_c => Ok(()),
+                            _ = cancel_token.wait() => Ok(()),
+                        }
+                    }
+                }
+            })
+        });
+        Ok(thread)
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn run_sim(
+        &self,
+        args: &Args,
+        rt: Runtime,
+        cancel_token: CancelToken,
+    ) -> miette::Result<JoinHandle<miette::Result<()>>> {
+        let sim = args.sim.clone();
+        let dirs = self.dirs().into_diagnostic()?;
+        let cache_dir = dirs.cache_dir().to_owned();
+        let thread = std::thread::spawn(move || {
+            rt.block_on(async move {
+                let cancel_on_ctrl_c = {
+                    let cancel_token = cancel_token.clone();
+                    async move {
+                        match tokio::signal::ctrl_c().await {
+                            Ok(()) => {
+                                info!("Received Ctrl-C, shutting down");
+                                cancel_token.cancel();
+                            }
+                            Err(err) => {
+                                warn!(?err, "failed to listen for Ctrl-C");
+                            }
+                        }
+                    }
+                };
+
+                match &sim {
+                    Simulator::File(path) => {
+                        let res = tokio::select! {
+                            res = elodin_editor::run::run_recipe(
+                                cache_dir,
+                                path.clone(),
+                                cancel_token.clone(),
+                            ) => res,
+                            _ = cancel_on_ctrl_c => Ok(()),
+                        };
+                        cancel_token.cancel();
+                        res
+                    }
+                    _ => {
+                        tokio::select! {
+                            _ = cancel_on_ctrl_c => Ok(()),
+                            _ = cancel_token.wait() => Ok(()),
+                        }
+                    }
                 }
             })
         });
