@@ -28,7 +28,7 @@ use winit::{
     monitor::MonitorHandle,
     window::Window as WinitWindow,
 };
-use bevy_defer::{AsyncPlugin, AsyncWorld, AsyncCommandsExtension, AsyncAccess};
+use bevy_defer::{AsyncPlugin, AsyncWorld, AsyncCommandsExtension, AsyncAccess, AccessError};
 
 pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
     x: 10,
@@ -195,11 +195,6 @@ pub struct ViewportRect(pub Option<egui::Rect>);
 pub struct EntityPair {
     pub bevy: Entity,
     pub impeller: ComponentId,
-}
-
-#[derive(Component)]
-struct SecondaryWindowMarker {
-    id: tiles::WindowId,
 }
 
 #[derive(Component)]
@@ -820,8 +815,7 @@ fn sync_secondary_windows(
 
         let window_entity = commands
             .spawn((window_component,
-                    SecondaryWindowMarker { id: state.id },
-                    WindowId(state.id.0),
+                    state.id,
             ))
             .id();
 
@@ -847,6 +841,36 @@ fn sync_secondary_windows(
             }
         }
     }
+}
+
+/// Wait for a window to change to a target screen or timeout.
+async fn wait_for_window_to_change_screens(window_id: Entity, target_screen: usize, timeout: Duration) -> Result<bool, AccessError> {
+    let start = Instant::now();
+
+    let winit_windows_async = AsyncWorld.non_send_resource::<bevy::winit::WinitWindows>();
+    while start.elapsed() < timeout {
+        match winit_windows_async.get(|winit_windows| {
+            let Some(window) = winit_windows.get_window(window_id) else {
+                error!(%window_id, "No winit window");
+                return Some(false);
+            };
+
+            let screens = collect_sorted_screens(window);
+            if let Some(screen) = detect_window_screen(window, &screens) {
+                if screen == target_screen {
+                    return Some(true);
+                }
+            }
+            None
+        }) {
+            Ok(Some(result)) => { return Ok(result); }
+            Err(e) => { return Err(e); }
+            _ => { }
+        }
+
+        AsyncWorld.yield_now().await;
+    }
+    Ok(false)
 }
 
 async fn process_window_relayout_async(
@@ -911,14 +935,13 @@ async fn process_window_relayout_async(
             } else if window.fullscreen().is_some() {
                 exit_fullscreen(window);
             }
-            complete_screen_assignment(&mut state, window, "Confirmed screen assignment (sync)");
+            complete_screen_assignment(&mut state, "Confirmed screen assignment (sync)");
             return false;
         }
 
         let Some(screen) = state.descriptor.screen else {
             complete_screen_assignment(
                 &mut state,
-                window,
                 "No screen provided; skipping screen alignment",
             );
             return false;
@@ -948,7 +971,7 @@ async fn process_window_relayout_async(
                 "screen out of range; skipping screen assignment"
             );
             state.descriptor.screen = None;
-            complete_screen_assignment(&mut state, window, "screen out of range");
+            complete_screen_assignment(&mut state, "screen out of range");
             false
         }
     })?;
@@ -958,14 +981,9 @@ async fn process_window_relayout_async(
         let start = Instant::now();
         while relayout_attempts < SCREEN_RELAYOUT_MAX_ATTEMPTS
             && start.elapsed() < SCREEN_RELAYOUT_TIMEOUT {
-
-                winit_windows_async.get(|winit_windows| {
-                    let Some(window) = winit_windows.get_window(entity) else {
-                        error!(%entity, "No winit window");
-                        return;
-                    };
-                    complete_screen_assignment(&mut state, window, "Screen assignment timed out");
-                });
+                // TODO: Benoit, I don't understand when this loop is supposed to exit
+                // except through a timeout.
+                complete_screen_assignment(&mut state, "Screen assignment timed out");
                 relayout_attempts += 1;
 
                 // Wait a frame.
@@ -976,6 +994,7 @@ async fn process_window_relayout_async(
 }
 fn apply_secondary_window_screens(
     mut windows: ResMut<tiles::WindowManager>,
+    winit_windows: NonSend<bevy::winit::WinitWindows>,
     mut commands: Commands
 ) {
     for state in windows.secondary.iter_mut() {
@@ -989,7 +1008,6 @@ fn apply_secondary_window_screens(
         let Some(entity) = state.window_entity else {
             continue;
         };
-
         // This is our problem child.
         match state.relayout_phase {
             tiles::WindowRelayoutPhase::NeedScreen => {
@@ -1007,6 +1025,10 @@ fn apply_secondary_window_screens(
 
             }
             tiles::WindowRelayoutPhase::NeedRect => {
+                let Some(window) = winit_windows.get_window(entity) else {
+                    continue;
+                };
+
                 if apply_secondary_window_rect(state, window) {
                     state.relayout_phase = tiles::WindowRelayoutPhase::Idle;
                 }
@@ -1328,13 +1350,10 @@ fn assign_window_to_screen(
 
 fn complete_screen_assignment(
     state: &mut tiles::SecondaryWindowState,
-    _window: &WinitWindow,
     reason: &'static str,
 ) {
     state.awaiting_screen_confirmation = false;
     state.applied_screen = state.descriptor.screen;
-    state.relayout_attempts = 0;
-    state.relayout_started_at = None;
     // If a rect was already applied, don't re-enter NeedRect and reconfigure swapchain.
     state.relayout_phase = match state.descriptor.screen_rect {
         Some(rect) if state.applied_rect != Some(rect) => {
@@ -1591,7 +1610,6 @@ fn confirm_secondary_screen_assignment(
         if window_on_target_screen(state, window, &screens_sorted) {
             complete_screen_assignment(
                 state,
-                window,
                 "Confirmed screen assignment for secondary window",
             );
         }

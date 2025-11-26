@@ -88,14 +88,14 @@ pub struct TileState {
 }
 
 #[derive(Clone, Debug)]
-pub struct SecondaryWindowDescriptor {
+pub struct WindowDescriptor {
     pub path: PathBuf,
     pub title: Option<String>,
     pub screen: Option<usize>,
     pub screen_rect: Option<WindowRect>,
 }
 
-impl SecondaryWindowDescriptor {
+impl WindowDescriptor {
     pub fn wants_explicit_layout(&self) -> bool {
         self.screen.is_some() || self.screen_rect.is_some()
     }
@@ -122,16 +122,15 @@ impl WindowId {
 #[derive(Clone)]
 pub struct SecondaryWindowState {
     pub id: WindowId,
-    pub descriptor: SecondaryWindowDescriptor,
+    pub descriptor: WindowDescriptor,
     pub graph_entities: Vec<Entity>,
     pub tile_state: TileState,
     pub window_entity: Option<Entity>,
     pub skip_metadata_capture: bool,
     pub metadata_capture_blocked_until: Option<Instant>,
 
+    // TODO: Consider making relayout an event.
     pub relayout_phase: WindowRelayoutPhase,
-    pub relayout_attempts: u8,
-    pub relayout_started_at: Option<Instant>,
     pub applied_screen: Option<usize>,
     pub applied_rect: Option<WindowRect>,
     pub awaiting_screen_confirmation: bool,
@@ -180,7 +179,7 @@ impl PrimaryWindowLayout {
 
 impl SecondaryWindowState {
     pub fn relayout_phase_from_descriptor(
-        descriptor: &SecondaryWindowDescriptor,
+        descriptor: &WindowDescriptor,
     ) -> WindowRelayoutPhase {
         if descriptor.screen.is_some() {
             WindowRelayoutPhase::NeedScreen
@@ -193,8 +192,6 @@ impl SecondaryWindowState {
 
     pub fn refresh_relayout_phase(&mut self) {
         self.relayout_phase = Self::relayout_phase_from_descriptor(&self.descriptor);
-        self.relayout_attempts = 0;
-        self.relayout_started_at = None;
         self.awaiting_screen_confirmation = false;
     }
 
@@ -484,7 +481,7 @@ impl WindowManager {
                 }
             })
             .unwrap_or_else(|| format!("secondary-window-{}.kdl", id.0));
-        let descriptor = SecondaryWindowDescriptor {
+        let descriptor = WindowDescriptor {
             path: PathBuf::from(path),
             title: cleaned_title.or_else(|| Some(format!("Window {}", id.0 + 1))),
             screen: None,
@@ -507,8 +504,6 @@ impl WindowManager {
             applied_screen: None,
             applied_rect: None,
             relayout_phase,
-            relayout_attempts: 0,
-            relayout_started_at: None,
             awaiting_screen_confirmation: false,
             skip_metadata_capture: false,
             metadata_capture_blocked_until: None,

@@ -35,7 +35,7 @@ use crate::{
         query_plot::QueryPlotData,
         schematic::EqlExt,
         tiles::{
-            DashboardPane, GraphPane, Pane, SecondaryWindowDescriptor, WindowId,
+            DashboardPane, GraphPane, Pane, WindowDescriptor, WindowId,
             SecondaryWindowState, TileState, TreePane, ViewportPane, WindowManager,
         },
     },
@@ -109,7 +109,7 @@ pub fn sync_schematic(
 fn resolve_window_descriptor(
     window: &WindowSchematic,
     base_dir: Option<&Path>,
-) -> Option<SecondaryWindowDescriptor> {
+) -> Option<WindowDescriptor> {
     let path_str = window.path.as_ref()?;
     let mut resolved = PathBuf::from(path_str);
 
@@ -121,7 +121,7 @@ fn resolve_window_descriptor(
         }
     }
 
-    Some(SecondaryWindowDescriptor {
+    Some(WindowDescriptor {
         path: resolved,
         title: window.title.clone(),
         screen: window.screen.map(|idx| idx as usize),
@@ -214,7 +214,7 @@ impl LoadSchematicParams<'_, '_> {
             self.commands.entity(entity).despawn();
         }
         self.windows.clear_primary_layout();
-        let mut secondary_descriptors: Vec<SecondaryWindowDescriptor> = Vec::new();
+        let mut secondary_descriptors: Vec<WindowDescriptor> = Vec::new();
 
         for elem in &schematic.elems {
             match elem {
@@ -285,8 +285,6 @@ impl LoadSchematicParams<'_, '_> {
                             applied_screen: None,
                             applied_rect: None,
                             relayout_phase,
-                            relayout_attempts: 0,
-                            relayout_started_at: None,
                             awaiting_screen_confirmation: false,
                             skip_metadata_capture: true,
                             metadata_capture_blocked_until: None,
