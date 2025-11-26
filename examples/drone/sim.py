@@ -109,7 +109,7 @@ def gravity(inertia: el.Inertia, f: el.Force) -> el.Force:
 
 
 def world() -> tuple[el.World, el.EntityId]:
-    world = el.World()
+    world = el.World(frame=el.Frame.ENU)
     drone = world.spawn(
         [
             el.Body(

@@ -105,6 +105,10 @@ test_steps = [
                 label=":python: cube-sat",
                 command="python3 examples/cube-sat/main.py bench --ticks 100 --profile",
             ),
+            nix_step(
+                label=":python: frames",
+                command="python3 examples/frames/main.py",
+            ),
         ],
     ),
     nix_step(label="alejandra", command="alejandra -c ."),

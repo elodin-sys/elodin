@@ -59,7 +59,6 @@ pub enum Args {
 }
 
 #[pyclass(subclass)]
-#[derive(Default)]
 pub struct WorldBuilder {
     pub world: World,
     pub recipes: HashMap<String, ::s10::Recipe>,
@@ -101,8 +100,13 @@ fn is_snake_case(s: &str) -> bool {
 #[pymethods]
 impl WorldBuilder {
     #[new]
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(frame: Frame) -> Self {
+        let mut world = World::default();
+        world.metadata.frame = frame.into();
+        Self {
+            world,
+            recipes: HashMap::new(),
+        }
     }
     #[pyo3(signature = (spawnable, name=None, id=None))]
     pub fn spawn(
