@@ -7,6 +7,7 @@ use std::io::{Read, Seek, Write};
 use std::net::{Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
 use std::thread::JoinHandle;
+use std::time::Duration;
 use stellarator::util::CancelToken;
 use tokio::runtime::Runtime;
 
@@ -68,7 +69,7 @@ impl std::str::FromStr for Simulator {
 }
 
 impl Cli {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub fn run_sim(
         &self,
         args: &Args,
@@ -87,65 +88,8 @@ impl Cli {
                             Ok(()) => {
                                 info!("Received Ctrl-C, shutting down");
                                 cancel_token.cancel();
-                            }
-                            Err(err) => {
-                                warn!(?err, "failed to listen for Ctrl-C");
-                            }
-                        }
-                    }
-                };
-
-                match &sim {
-                    Simulator::File(path) => {
-                        let mut res = None;
-                        let mut recipe_fut = Box::pin(elodin_editor::run::run_recipe(
-                            cache_dir,
-                            path.clone(),
-                            cancel_token.clone(),
-                        ));
-                        tokio::select! {
-                            r = &mut recipe_fut => res = Some(r),
-                            _ = cancel_on_ctrl_c => {
-                                cancel_token.cancel();
-                            }
-                        }
-                        if res.is_none() {
-                            res = Some(recipe_fut.await);
-                        }
-                        cancel_token.cancel();
-                        res.expect("run_recipe result missing")
-                    }
-                    _ => {
-                        tokio::select! {
-                            _ = cancel_on_ctrl_c => Ok(()),
-                            _ = cancel_token.wait() => Ok(()),
-                        }
-                    }
-                }
-            })
-        });
-        Ok(thread)
-    }
-
-    #[cfg(target_os = "linux")]
-    pub fn run_sim(
-        &self,
-        args: &Args,
-        rt: Runtime,
-        cancel_token: CancelToken,
-    ) -> miette::Result<JoinHandle<miette::Result<()>>> {
-        let sim = args.sim.clone();
-        let dirs = self.dirs().into_diagnostic()?;
-        let cache_dir = dirs.cache_dir().to_owned();
-        let thread = std::thread::spawn(move || {
-            rt.block_on(async move {
-                let cancel_on_ctrl_c = {
-                    let cancel_token = cancel_token.clone();
-                    async move {
-                        match tokio::signal::ctrl_c().await {
-                            Ok(()) => {
-                                info!("Received Ctrl-C, shutting down");
-                                cancel_token.cancel();
+                                tokio::time::sleep(Duration::from_millis(100)).await;
+                                std::process::exit(130);
                             }
                             Err(err) => {
                                 warn!(?err, "failed to listen for Ctrl-C");
