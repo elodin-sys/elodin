@@ -1,12 +1,26 @@
 #![doc = include_str!("README.md")]
 
+mod abs;
+mod arccos;
+mod atan2;
+mod clip;
+mod degrees;
 mod fft;
 mod fftfreq;
 mod norm;
+mod sign;
+mod sqrt;
 mod time_slice;
+pub use abs::*;
+pub use arccos::*;
+pub use atan2::*;
+pub use clip::*;
+pub use degrees::*;
 pub use fft::*;
 pub use fftfreq::*;
 pub use norm::*;
+pub use sign::*;
+pub use sqrt::*;
 pub use time_slice::*;
 
 use crate::{Context, Error, Expr};
@@ -107,9 +121,16 @@ pub fn create_default_registry() -> FormulaRegistry {
     let mut registry = FormulaRegistry::new();
 
     // Register all built-in formulas
+    registry.register(Abs);
+    registry.register(Arccos);
+    registry.register(Atan2);
+    registry.register(Clip);
+    registry.register(Degrees);
     registry.register(Fft);
     registry.register(FftFreq);
     registry.register(Norm);
+    registry.register(Sign);
+    registry.register(Sqrt);
     registry.register(TimeSlice::Last(None));
     registry.register(TimeSlice::First(None));
 

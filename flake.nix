@@ -4,7 +4,6 @@
     extra-trusted-public-keys = [
       "elodin-cache-1:vvbmIQvTOjcBjIs8Ri7xlT2I3XAmeJyF5mNlWB+fIwM="
     ];
-    fallback = true;
   };
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";

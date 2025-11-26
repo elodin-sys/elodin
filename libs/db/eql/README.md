@@ -44,13 +44,20 @@ Anything not listed is not part of the current language (as of **September 29, 2
 | **Parentheses**          | `(expr)`                        | Grouping                                | Standard grouping of sub-expressions. |
 | **Float literal**        | `12`, `-3`, `1.0`, `2.`         | Numeric literal                          | Grammar: optional `-`, digits, optional `.digits`. No exponent form (`1e3` not supported). |
 | **String literal**       | `"5m"`, `"10s"`, `"text"`       | String value                             | No escapes; cannot contain `'` or `"` inside. Used by `last`/`first`. |
-| **Binary operators**     | `+`, `-`, `*`, `/`              | Arithmetic in projections                | All four share one precedence level, left-associative. No comparisons/booleans. |
+| **Binary operators**     | `+`, `-`, `*`, `/`              | Arithmetic in projections                | All four share one precedence level, left-associative. No comparisons/booleans. Supports mixing components and literals (e.g., `value - 90.0`, `temp * 1.8 + 32`). |
 | **Formula call (generic)**| `expr.method(args)`             | Call a method on a receiver              | Parser accepts a (single) tuple of args due to comma precedence; semantics only support the formulas listed below (registered in `EqlFormula`). |
 | **Formula: fft()**        | `a.world_pos.x.fft()`           | Signal FFT                               | Receiver must be an array access (scalar from vector). No args. Emits `fft(...)` in SQL (requires DB UDF). |
 | **Formula: fftfreq()**    | `a.world_pos.time.fftfreq()`    | Frequency bins                           | Receiver must be `Time(...)` (component.time). No args. Emits `fftfreq(...)` in SQL (requires DB UDF). |
 | **Formula: last("Δt")**   | `(expr).last("PT2S")`           | Time window (latest Δt)                  | Exactly one ISO-8601 string argument like `"PT2S"` (parsed via `jiff::Span`). Appends `WHERE time >= to_timestamp(last - Δt)`. |
 | **Formula: first("Δt")**  | `(expr).first("PT5S")`          | Time window (earliest Δt)                | Exactly one ISO-8601 string argument like `"PT5S"`. Appends `WHERE time <= to_timestamp(earliest + Δt)`. |
 | **Formula: norm()** | `a.world_pos.norm()` | Euclidean norm of a vector component | No args. Expands to sqrt(∑ elem*elem) over all vector elements; works on numeric vector components. |
+| **Formula: atan2(y, x)** | `y.atan2(x)` | Two-argument arctangent | One arg. Computes atan2(y, x) in SQL. Receiver is y, argument is x. |
+| **Formula: degrees(radians)** | `expr.degrees()` | Convert radians to degrees | No args. Converts angle from radians to degrees using PostgreSQL `degrees()` function. |
+| **Formula: clip(value, min, max)** | `value.clip(min, max)` | Clamp value between min and max | Two args. Expands to `GREATEST(min, LEAST(value, max))` in SQL. |
+| **Formula: sqrt(x)** | `expr.sqrt()` | Square root | No args. Computes square root using PostgreSQL `sqrt()` function. |
+| **Formula: abs(x)** | `expr.abs()` | Absolute value | No args. Computes absolute value using PostgreSQL `abs()` function. |
+| **Formula: arccos(x)** | `expr.arccos()` | Inverse cosine (arccosine) | No args. Computes arccosine using PostgreSQL `acos()` function. |
+| **Formula: sign(x)** | `expr.sign()` | Sign function | No args. Returns -1, 0, or 1 based on the sign of x. Uses SQL CASE statement (DataFusion compatible). |
 | **Whitespace**           | spaces / tabs / newlines        | Ignored separators                       | Grammar skips whitespace where sensible. |
 | **Format string**        | `text ${expr} text`             | Parse into segments + embedded ASTs      | Separate entrypoint `fmt_string` returns `Vec<FmtNode>`. Raw `$` not allowed in plain segments. |
 | **Not supported**        | comments                        | —                                       | No comment syntax. |
@@ -63,6 +70,10 @@ Anything not listed is not part of the current language (as of **September 29, 2
 |----------|------------------------------------|---------:|-------------------------------------------|---------:|
 | `fft`    | `a.world_pos.x.fft()`              |        0 | `fft(a_world_pos.a_world_pos[1])`         |        1 |
 | `fftfreq`| `a.world_pos.time.fftfreq()`       |        0 | `fftfreq(a_world_pos.time)`               |        1 |
+| `atan2`  | `a.velocity.y.atan2(a.velocity.x)`  |        1 | `atan2(a_velocity.a_velocity[2], a_velocity.a_velocity[1])` | 2 |
+| `degrees`| `a.angle.degrees()`                 |        0 | `degrees(a_angle.a_angle)`                |        1 |
+| `clip`   | `a.value.clip(0.0, 100.0)`         |        2 | `GREATEST(0.0, LEAST(a_value.a_value, 100.0))` | 3 |
+| `sqrt`   | `a.value.sqrt()`                   |        0 | `sqrt(a_value.a_value)`                   |        1 |
 
 ## EQL → SQL Examples
 
@@ -85,4 +96,15 @@ Anything not listed is not part of the current language (as of **September 29, 2
 | `(a.world_pos.x, a.world_pos.y).first("1h")` | `select a_world_pos.a_world_pos[1] as "a.world_pos.x", a_world_pos.a_world_pos[2] as "a.world_pos.y" from a_world_pos where a_world_pos.time <= to_timestamp(<earliest_timestamp + 1 hour>);` | Select first hour of data (X and Y axes). |
 | `(a.world_pos.x, a.world_pos[1])` | `select a_world_pos.a_world_pos[1] as "a.world_pos.x", a_world_pos.a_world_pos[2] as "a.world_pos.y" from a_world_pos;` | Mix dot-field and array index to select X and Y. |
 | `(a.world_pos, b.velocity, c.acceleration)` | `select a_world_pos.a_world_pos as "a.world_pos", b_velocity.b_velocity as "b.velocity", c_acceleration.c_acceleration as "c.acceleration" from a_world_pos join b_velocity on a_world_pos.time = b_velocity.time join c_acceleration on a_world_pos.time = c_acceleration.time;` | Select three full components with implicit time joins. |
+| `a.velocity.y.atan2(a.velocity.x)` | `select atan2(a_velocity.a_velocity[2], a_velocity.a_velocity[1]) as "atan2(a.velocity.y, a.velocity.x)" from a_velocity;` | Compute two-argument arctangent (angle from y and x components). |
+| `a.angle.degrees()` | `select degrees(a_angle.a_angle) as "degrees(a.angle)" from a_angle;` | Convert angle from radians to degrees. |
+| `a.value.clip(0.0, 100.0)` | `select GREATEST(0.0, LEAST(a_value.a_value, 100.0)) as "clip(a.value)" from a_value;` | Clamp value between 0.0 and 100.0. |
+| `a.value.sqrt()` | `select sqrt(a_value.a_value) as "sqrt(a.value)" from a_value;` | Compute square root. |
+| `a.value.abs()` | `select abs(a_value.a_value) as "abs(a.value)" from a_value;` | Compute absolute value. |
+| `a.value.arccos()` | `select acos(a_value.a_value) as "arccos(a.value)" from a_value;` | Compute arccosine (inverse cosine). |
+| `a.value.sign()` | `select sign(a_value.a_value) as "sign(a.value)" from a_value;` | Compute sign: -1 if negative, 0 if zero, 1 if positive. |
+| `a.value.abs() - 90.0` | `select abs(a_value.a_value) - 90 from a_value;` | Literal arithmetic: subtract constant from formula result. |
+| `a.temperature * 1.8 + 32.0` | `select (a_temperature.a_temperature * 1.8) + 32 from a_temperature;` | Unit conversion: Celsius to Fahrenheit using literal arithmetic. |
+| `100.0 / a.value.clip(1.0, 1000.0)` | `select 100 / GREATEST(1.0, LEAST(a_value.a_value, 1000.0)) from a_value;` | Literal arithmetic works with formulas (inverse of clipped value). |
+| `((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(0.000000001, 999999)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign() - 90.0` | `select degrees(acos(GREATEST(-1.0, LEAST(1.0, ...)))) * CASE ... END - 90 from rocket_v_body;` | Angle of attack with geometric offset correction using literal subtraction. |
 | **Invalid shapes** | `a.world_pos.x.fft(1024) · a.world_pos.time.fftfreq(1) · a.world_pos.last(10)` | `fft`/`fftfreq` take no args; `last`/`first` require a string duration like `"10s"`. |
