@@ -285,7 +285,6 @@ impl LoadSchematicParams<'_, '_> {
                             applied_screen: None,
                             applied_rect: None,
                             relayout_phase,
-                            awaiting_screen_confirmation: false,
                             skip_metadata_capture: true,
                             metadata_capture_blocked_until: None,
                         };

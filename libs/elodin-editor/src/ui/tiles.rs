@@ -133,8 +133,6 @@ pub struct SecondaryWindowState {
     pub relayout_phase: WindowRelayoutPhase,
     pub applied_screen: Option<usize>,
     pub applied_rect: Option<WindowRect>,
-    pub awaiting_screen_confirmation: bool,
-
 }
 
 #[derive(Clone, Default)]
@@ -192,7 +190,6 @@ impl SecondaryWindowState {
 
     pub fn refresh_relayout_phase(&mut self) {
         self.relayout_phase = Self::relayout_phase_from_descriptor(&self.descriptor);
-        self.awaiting_screen_confirmation = false;
     }
 
     pub fn extend_metadata_capture_block(&mut self, duration: Duration) {
@@ -417,7 +414,7 @@ impl Default for WindowManager {
             main: TileState::new(Id::new("main_tab_tree")),
             primary: PrimaryWindowLayout::default(),
             secondary: Vec::new(),
-            next_id: 0,
+            next_id: 1,
         }
     }
 }
@@ -504,7 +501,6 @@ impl WindowManager {
             applied_screen: None,
             applied_rect: None,
             relayout_phase,
-            awaiting_screen_confirmation: false,
             skip_metadata_capture: false,
             metadata_capture_blocked_until: None,
         });

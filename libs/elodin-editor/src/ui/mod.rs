@@ -831,6 +831,7 @@ fn sync_secondary_windows(
         };
         state.skip_metadata_capture = true;
         existing_map.insert(state.id, window_entity);
+        info!("Created window entity {window_entity} with window id {:?}", state.id);
         let window_ref = WindowRef::Entity(window_entity);
         for (index, &graph) in state.graph_entities.iter().enumerate() {
             if let Ok(mut camera) = cameras.get_mut(graph) {
@@ -844,7 +845,15 @@ fn sync_secondary_windows(
 }
 
 /// Wait for a window to change to a target screen or timeout.
-async fn wait_for_window_to_change_screens(window_id: Entity, target_screen: usize, timeout: Duration) -> Result<bool, AccessError> {
+///
+/// ```ignore
+/// set_screen_for_window(id, 2);
+/// let success = wait_for_window_to_change_screens(id, 2, Duration::millis(2000)).await?;
+/// ```
+async fn wait_for_window_to_change_screens(window_id: Entity,
+                                           target_screen: usize,
+                                           timeout: Duration)
+                                           -> Result<bool, AccessError> {
     let start = Instant::now();
 
     let winit_windows_async = AsyncWorld.non_send_resource::<bevy::winit::WinitWindows>();
@@ -876,31 +885,6 @@ async fn wait_for_window_to_change_screens(window_id: Entity, target_screen: usi
 async fn process_window_relayout_async(
     entity: Entity,
 ) -> Result<(), bevy_defer::AccessError> {
-    let start = Instant::now();
-    while start.elapsed() < SCREEN_RELAYOUT_TIMEOUT {
-
-        // Wait a frame.
-        AsyncWorld.yield_now().await;
-        let awaiting_screen_confirmation_maybe: Option<bool> = AsyncWorld
-            .resource_scope::<tiles::WindowManager, Option<bool>>(|windows| {
-                windows.find_secondary_by_entity(entity)
-                       .and_then(|id| windows.find_secondary(id))
-                       .map(|state| state.awaiting_screen_confirmation)
-            });
-        match awaiting_screen_confirmation_maybe {
-            Some(true) => continue,
-            Some(false) => break,
-            None => {
-                // The window is gone.
-                warn!(
-                    // path = %state.descriptor.path.display(),
-                    "Waiting for secondary window that's gone."
-                );
-                return Ok(());
-            }
-        }
-    }
-
     let Some(mut state) = AsyncWorld
         .resource_scope::<tiles::WindowManager,
                           Option<tiles::SecondaryWindowState>>(|windows| {
@@ -911,19 +895,12 @@ async fn process_window_relayout_async(
             return Ok(());
         };
 
-    
-    if start.elapsed() >= SCREEN_RELAYOUT_TIMEOUT {
-        warn!(
-            path = %state.descriptor.path.display(),
-            "Timed out waiting for screen confirmation"
-        );
-    }
     let winit_windows_async = AsyncWorld.non_send_resource::<bevy::winit::WinitWindows>();
-    let retry = winit_windows_async.get(|winit_windows| {
+    let target_monitor_maybe = winit_windows_async.get(|winit_windows| {
         
         let Some(window) = winit_windows.get_window(entity) else {
             error!(%entity, "No winit window");
-            return false;
+            return None;
         };
 
         let screens = collect_sorted_screens(window);
@@ -936,7 +913,7 @@ async fn process_window_relayout_async(
                 exit_fullscreen(window);
             }
             complete_screen_assignment(&mut state, "Confirmed screen assignment (sync)");
-            return false;
+            return None;
         }
 
         let Some(screen) = state.descriptor.screen else {
@@ -944,13 +921,38 @@ async fn process_window_relayout_async(
                 &mut state,
                 "No screen provided; skipping screen alignment",
             );
-            return false;
+            return None;
         };
 
         if let Some(target_monitor) = screens.get(screen).cloned() {
+            assign_window_to_screen(window, target_monitor.clone());
+            state.skip_metadata_capture = true;
+            // We have to do some retries in an async context. Inside this
+            // `.get()` we're not in an async context.
+            Some(target_monitor)
+        } else {
+            warn!(
+                screen,
+                path = %state.descriptor.path.display(),
+                "screen out of range; skipping screen assignment"
+            );
+            state.descriptor.screen = None;
+            complete_screen_assignment(&mut state, "screen out of range");
+            None
+        }
+    })?;
+    if let Some(target_monitor) = target_monitor_maybe {
+        // We can't do this await with the `winit_windows_async.get(|| {...})` block.
+        let success = wait_for_window_to_change_screens(entity, 2, Duration::from_millis(1000)).await?;
+        if !success {
+            let _ = winit_windows_async.get(|winit_windows| {
+                
+                let Some(window) = winit_windows.get_window(entity) else {
+                    error!(%entity, "No winit window");
+                    return;
+                };
 
-            assign_window_to_screen(&mut state, window, target_monitor.clone());
-            if detect_window_screen(window, &screens) != Some(screen) {
+
                 recenter_window_on_screen(window, &target_monitor);
                 #[cfg(target_os = "macos")]
                 {
@@ -960,22 +962,8 @@ async fn process_window_relayout_async(
                     window.set_fullscreen(None);
                     recenter_window_on_screen(window, &target_monitor);
                 }
-            }
-            // We have to do some retries in an async context. Inside this
-            // `.get()` we're not in an async context.
-            true
-        } else {
-            warn!(
-                screen,
-                path = %state.descriptor.path.display(),
-                "screen out of range; skipping screen assignment"
-            );
-            state.descriptor.screen = None;
-            complete_screen_assignment(&mut state, "screen out of range");
-            false
+            })?;
         }
-    })?;
-    if retry {
         // We have some retries to do.
         let mut relayout_attempts = 0;
         let start = Instant::now();
@@ -1325,7 +1313,7 @@ fn apply_secondary_window_rect(
 }
 
 fn assign_window_to_screen(
-    state: &mut tiles::SecondaryWindowState,
+    // state: &mut tiles::SecondaryWindowState,
     window: &WinitWindow,
     target_monitor: MonitorHandle,
 ) {
@@ -1335,24 +1323,23 @@ fn assign_window_to_screen(
     let x = screen_pos.x + (screen_size.width as i32 - window_size.width as i32) / 2;
     let y = screen_pos.y + (screen_size.height as i32 - window_size.height as i32) / 2;
 
-    info!(
-        path = %state.descriptor.path.display(),
-        screen = state.descriptor.screen.map(|idx| idx as i32).unwrap_or(-1),
-        "assign_window_to_screen"
-    );
+    // info!(
+    //     path = %state.descriptor.path.display(),
+    //     screen = state.descriptor.screen.map(|idx| idx as i32).unwrap_or(-1),
+    //     "assign_window_to_screen"
+    // );
     // Align with Linux path: avoid fullscreen hops on macOS and keep windowed positioning.
     exit_fullscreen(window);
     window.set_visible(true);
     force_windowed(window);
     window.set_outer_position(PhysicalPosition::new(x, y));
-    state.skip_metadata_capture = true;
+    // state.skip_metadata_capture = true;
 }
 
 fn complete_screen_assignment(
     state: &mut tiles::SecondaryWindowState,
     reason: &'static str,
 ) {
-    state.awaiting_screen_confirmation = false;
     state.applied_screen = state.descriptor.screen;
     // If a rect was already applied, don't re-enter NeedRect and reconfigure swapchain.
     state.relayout_phase = match state.descriptor.screen_rect {
