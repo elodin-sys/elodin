@@ -135,12 +135,27 @@ fn render_horizon(grid: &mut OsdGrid, roll_deg: f32, pitch_deg: f32) {
     grid.set_char(center_row, center_col + 3, '►');
 
     // Draw pitch ladder marks
-    for i in [-20, -10, 10, 20] {
-        let ladder_row = (center_row as i8 + (i / 10) - pitch_offset as i8) as u8;
-        if ladder_row >= start_row && ladder_row <= end_row {
-            let mark = format!("{:+2}", i);
-            grid.write_text(ladder_row, start_col.saturating_sub(3), &mark);
-            grid.write_text(ladder_row, end_col + 1, &mark);
+    // Generate marks every 10 degrees, visible range depends on current pitch
+    // Scale: approximately 2-3 rows per 10 degrees for better spacing
+    let rows_per_10deg = 2.5;
+    let pitch_range = 50; // Show marks from -50 to +50 degrees relative to current pitch
+    
+    for pitch_mark in (-pitch_range..=pitch_range).step_by(10) {
+        if pitch_mark == 0 {
+            continue; // Skip zero, the horizon line shows that
+        }
+        
+        // Calculate row position: offset from center based on pitch difference
+        let pitch_diff = pitch_mark as f32 - pitch_deg;
+        let row_offset = -pitch_diff / 10.0 * rows_per_10deg;
+        let ladder_row = center_row as f32 + row_offset;
+        
+        // Only draw if within visible area
+        if ladder_row >= start_row as f32 && ladder_row <= end_row as f32 {
+            let ladder_row_u8 = ladder_row.round() as u8;
+            let mark = format!("{:+2}", pitch_mark);
+            grid.write_text(ladder_row_u8, start_col.saturating_sub(3), &mark);
+            grid.write_text(ladder_row_u8, end_col + 1, &mark);
         }
     }
 }
