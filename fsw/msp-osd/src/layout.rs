@@ -72,37 +72,22 @@ fn render_compass(grid: &mut OsdGrid, heading: f32) {
 }
 
 /// Render altitude on the left side
-fn render_altitude(grid: &mut OsdGrid, altitude_m: f32, climb_rate: f32) {
+fn render_altitude(grid: &mut OsdGrid, altitude_m: f32, _climb_rate: f32) {
     let start_row = 3;
 
     // Altitude value
     let alt_text = format!("ALT:{:5.0}m", altitude_m);
     grid.write_text(start_row, 0, &alt_text);
-
-    // Climb rate indicator
-    let climb_text = if climb_rate.abs() < 0.1 {
-        "VS: ---".to_string()
-    } else {
-        format!("VS:{:+4.1}", climb_rate)
-    };
-    grid.write_text(start_row + 1, 0, &climb_text);
 }
 
 /// Render speed on the right side
 fn render_speed(grid: &mut OsdGrid, speed_ms: f32) {
     let start_row = 3;
-    let col = grid.cols.saturating_sub(14);
+    let col = grid.cols.saturating_sub(12);
 
-    // Speed in knots (1 m/s ≈ 1.94384 knots)
-    let speed_kts = speed_ms * 1.94384;
-
-    let speed_text = format!("SPD:{:4.0}kt", speed_kts);
+    // Speed in meters per second
+    let speed_text = format!("SPD:{:4.1}m/s", speed_ms);
     grid.write_text(start_row, col, &speed_text);
-
-    // Speed bar graph
-    let bar_length = ((speed_kts / 10.0).min(10.0)) as usize;
-    let bar = "▮".repeat(bar_length) + &"·".repeat(10_usize.saturating_sub(bar_length));
-    grid.write_text(start_row + 1, col, &bar);
 }
 
 /// Render artificial horizon in the center
