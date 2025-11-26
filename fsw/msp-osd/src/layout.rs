@@ -125,8 +125,9 @@ fn render_horizon(grid: &mut OsdGrid, roll_deg: f32, pitch_deg: f32) {
     for row in start_row..=end_row {
         for col in start_col..=end_col {
             // Calculate if this point is above or below the tilted horizon
+            // Note: Horizon tilts opposite to aircraft roll
             let rel_col = (col as i8 - center_col as i8) as f32;
-            let horizon_y = center_row as f32 + pitch_offset + (rel_col * roll_slope);
+            let horizon_y = center_row as f32 + pitch_offset - (rel_col * roll_slope);
 
             let ch = if row as f32 > horizon_y {
                 '▒' // Ground
@@ -154,10 +155,6 @@ fn render_horizon(grid: &mut OsdGrid, roll_deg: f32, pitch_deg: f32) {
             grid.write_text(ladder_row, end_col + 1, &mark);
         }
     }
-
-    // Display roll and pitch values
-    let attitude_text = format!("R:{:+4.0}° P:{:+4.0}°", roll_deg, pitch_deg);
-    grid.write_centered(end_row + 1, &attitude_text);
 }
 
 /// Render status bar at the bottom

@@ -1,4 +1,4 @@
-use nalgebra::{Quaternion, UnitQuaternion, Vector3};
+use nalgebra::{Quaternion, Vector3};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -64,29 +64,72 @@ impl TelemetryState {
     }
 
     /// Get heading in degrees (0-360), derived from orientation
+    /// Uses 3-2-1 Euler sequence matching drone simulation
     pub fn heading_deg(&self) -> f64 {
-        let uq = UnitQuaternion::from_quaternion(self.orientation);
-        let (_, _, yaw) = uq.euler_angles();
-        let heading = yaw.to_degrees();
+        // Note: roll and yaw are swapped due to coordinate system
+        let (roll, _, _) = self.quat_to_euler_321();
+        // Negate to get correct heading direction (left yaw = increasing heading)
+        let heading = -roll.to_degrees();
         if heading < 0.0 {
             heading + 360.0
+        } else if heading >= 360.0 {
+            heading - 360.0
         } else {
             heading
         }
     }
 
     /// Get roll angle in degrees
+    /// Uses 3-2-1 Euler sequence matching drone simulation
     pub fn roll_deg(&self) -> f64 {
-        let uq = UnitQuaternion::from_quaternion(self.orientation);
-        let (roll, _, _) = uq.euler_angles();
-        roll.to_degrees()
+        // Note: roll and yaw are swapped due to coordinate system
+        let (_, _, yaw) = self.quat_to_euler_321();
+        let mut roll = yaw.to_degrees();
+        
+        // Normalize to [-180, 180] range, wrapping properly around 0
+        while roll > 180.0 {
+            roll -= 360.0;
+        }
+        while roll < -180.0 {
+            roll += 360.0;
+        }
+        
+        roll
     }
 
     /// Get pitch angle in degrees
+    /// Uses 3-2-1 Euler sequence matching drone simulation
     pub fn pitch_deg(&self) -> f64 {
-        let uq = UnitQuaternion::from_quaternion(self.orientation);
-        let (_, pitch, _) = uq.euler_angles();
+        let (_, pitch, _) = self.quat_to_euler_321();
         pitch.to_degrees()
+    }
+
+    /// Convert quaternion to Euler angles (roll, pitch, yaw) in 3-2-1 sequence
+    /// Matches the drone simulation's conversion from examples/drone/util.py
+    /// See: https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles#Quaternion_to_Euler_angles_(in_3-2-1_sequence)_conversion
+    fn quat_to_euler_321(&self) -> (f64, f64, f64) {
+        let q = &self.orientation;
+        let q0 = q.i; // x
+        let q1 = q.j; // y
+        let q2 = q.k; // z
+        let s = q.w;  // w (scalar)
+
+        // Roll (rotation about x-axis)
+        let sinr_cosp = 2.0 * (s * q0 + q1 * q2);
+        let cosr_cosp = 1.0 - 2.0 * (q0 * q0 + q1 * q1);
+        let roll = sinr_cosp.atan2(cosr_cosp);
+
+        // Pitch (rotation about y-axis)
+        let sinp = (1.0 + 2.0 * (s * q1 - q0 * q2)).sqrt();
+        let cosp = (1.0 - 2.0 * (s * q1 - q0 * q2)).sqrt();
+        let pitch = 2.0 * sinp.atan2(cosp) - std::f64::consts::PI / 2.0;
+
+        // Yaw (rotation about z-axis)
+        let siny_cosp = 2.0 * (s * q2 + q0 * q1);
+        let cosy_cosp = 1.0 - 2.0 * (q1 * q1 + q2 * q2);
+        let yaw = siny_cosp.atan2(cosy_cosp);
+
+        (roll, pitch, yaw)
     }
 }
 
