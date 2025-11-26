@@ -28,7 +28,7 @@ use winit::{
     monitor::MonitorHandle,
     window::Window as WinitWindow,
 };
-use bevy_defer::{AsyncWorld, AsyncCommandsExtension, AsyncAccess};
+use bevy_defer::{AsyncPlugin, AsyncWorld, AsyncCommandsExtension, AsyncAccess};
 
 pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
     x: 10,
@@ -353,6 +353,7 @@ impl Plugin for UiPlugin {
             .add_systems(Update, dashboard::update_nodes)
             .add_plugins(SchematicPlugin)
             .add_plugins(LinePlot3dPlugin)
+            .add_plugins(AsyncPlugin::default_settings())
             .add_plugins(command_palette::palette_items::plugin);
     }
 }
@@ -887,64 +888,82 @@ async fn process_window_relayout_async(
         );
     }
     let winit_windows_async = AsyncWorld.non_send_resource::<bevy::winit::WinitWindows>();
-    let Ok(true) = winit_windows_async.get(|winit_windows| winit_windows.get_window(entity).is_some()) else {
-        error!(%entity, "No winit window");
-        return Ok(());
-    };
-    let window = todo!("Must bring the window into scope.");
-    let screens = collect_sorted_screens(window);
+    let retry = winit_windows_async.get(|winit_windows| {
+        
+        let Some(window) = winit_windows.get_window(entity) else {
+            error!(%entity, "No winit window");
+            return false;
+        };
 
-    if window_on_target_screen(&mut state, window, &screens) {
-        if LINUX_MULTI_WINDOW {
-            exit_fullscreen(window);
-            force_windowed(window);
-        } else if window.fullscreen().is_some() {
-            exit_fullscreen(window);
-        }
-        complete_screen_assignment(&mut state, window, "Confirmed screen assignment (sync)");
-        return Ok(());
-    }
+        let screens = collect_sorted_screens(window);
 
-    let Some(screen) = state.descriptor.screen else {
-        complete_screen_assignment(
-            &mut state,
-            window,
-            "No screen provided; skipping screen alignment",
-        );
-        return Ok(());
-    };
-
-    if let Some(target_monitor) = screens.get(screen).cloned() {
-        assign_window_to_screen(&mut state, window, target_monitor.clone());
-        if detect_window_screen(window, &screens) != Some(screen) {
-            recenter_window_on_screen(window, &target_monitor);
-            #[cfg(target_os = "macos")]
-            {
-                window.set_fullscreen(Some(Fullscreen::Borderless(Some(
-                    target_monitor.clone(),
-                ))));
-                window.set_fullscreen(None);
-                recenter_window_on_screen(window, &target_monitor);
+        if window_on_target_screen(&mut state, window, &screens) {
+            if LINUX_MULTI_WINDOW {
+                exit_fullscreen(window);
+                force_windowed(window);
+            } else if window.fullscreen().is_some() {
+                exit_fullscreen(window);
             }
+            complete_screen_assignment(&mut state, window, "Confirmed screen assignment (sync)");
+            return false;
         }
+
+        let Some(screen) = state.descriptor.screen else {
+            complete_screen_assignment(
+                &mut state,
+                window,
+                "No screen provided; skipping screen alignment",
+            );
+            return false;
+        };
+
+        if let Some(target_monitor) = screens.get(screen).cloned() {
+
+            assign_window_to_screen(&mut state, window, target_monitor.clone());
+            if detect_window_screen(window, &screens) != Some(screen) {
+                recenter_window_on_screen(window, &target_monitor);
+                #[cfg(target_os = "macos")]
+                {
+                    window.set_fullscreen(Some(Fullscreen::Borderless(Some(
+                        target_monitor.clone(),
+                    ))));
+                    window.set_fullscreen(None);
+                    recenter_window_on_screen(window, &target_monitor);
+                }
+            }
+            // We have to do some retries in an async context. Inside this
+            // `.get()` we're not in an async context.
+            true
+        } else {
+            warn!(
+                screen,
+                path = %state.descriptor.path.display(),
+                "screen out of range; skipping screen assignment"
+            );
+            state.descriptor.screen = None;
+            complete_screen_assignment(&mut state, window, "screen out of range");
+            false
+        }
+    })?;
+    if retry {
+        // We have some retries to do.
         let mut relayout_attempts = 0;
         let start = Instant::now();
         while relayout_attempts < SCREEN_RELAYOUT_MAX_ATTEMPTS
             && start.elapsed() < SCREEN_RELAYOUT_TIMEOUT {
-                complete_screen_assignment(&mut state, window, "Screen assignment timed out");
+
+                winit_windows_async.get(|winit_windows| {
+                    let Some(window) = winit_windows.get_window(entity) else {
+                        error!(%entity, "No winit window");
+                        return;
+                    };
+                    complete_screen_assignment(&mut state, window, "Screen assignment timed out");
+                });
                 relayout_attempts += 1;
 
                 // Wait a frame.
                 AsyncWorld.yield_now().await;
             }
-    } else {
-        warn!(
-            screen,
-            path = %state.descriptor.path.display(),
-            "screen out of range; skipping screen assignment"
-        );
-        state.descriptor.screen = None;
-        complete_screen_assignment(&mut state, window, "screen out of range");
     }
     Ok(())
 }
