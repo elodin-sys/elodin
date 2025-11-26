@@ -40,7 +40,8 @@ fn render_compass(grid: &mut OsdGrid, heading: f32) {
     let mut compass_line = String::new();
 
     // Calculate what part of the compass to show based on heading
-    let start_heading = (heading - 20.0).rem_euclid(360.0) as i32;
+    // Each column represents 2 degrees, so subtract half the total range to center
+    let start_heading = (heading - (compass_width as f32)).rem_euclid(360.0) as i32;
 
     for i in 0..compass_width {
         let deg = (start_heading + i as i32 * 2) % 360;
