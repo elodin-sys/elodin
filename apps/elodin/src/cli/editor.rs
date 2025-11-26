@@ -97,16 +97,23 @@ impl Cli {
 
                 match &sim {
                     Simulator::File(path) => {
-                        let res = tokio::select! {
-                            res = elodin_editor::run::run_recipe(
-                                cache_dir,
-                                path.clone(),
-                                cancel_token.clone(),
-                            ) => res,
-                            _ = cancel_on_ctrl_c => Ok(()),
-                        };
+                        let mut res = None;
+                        let mut recipe_fut = Box::pin(elodin_editor::run::run_recipe(
+                            cache_dir,
+                            path.clone(),
+                            cancel_token.clone(),
+                        ));
+                        tokio::select! {
+                            r = &mut recipe_fut => res = Some(r),
+                            _ = cancel_on_ctrl_c => {
+                                cancel_token.cancel();
+                            }
+                        }
+                        if res.is_none() {
+                            res = Some(recipe_fut.await);
+                        }
                         cancel_token.cancel();
-                        res
+                        res.expect("run_recipe result missing")
                     }
                     _ => {
                         tokio::select! {
@@ -149,16 +156,23 @@ impl Cli {
 
                 match &sim {
                     Simulator::File(path) => {
-                        let res = tokio::select! {
-                            res = elodin_editor::run::run_recipe(
-                                cache_dir,
-                                path.clone(),
-                                cancel_token.clone(),
-                            ) => res,
-                            _ = cancel_on_ctrl_c => Ok(()),
-                        };
+                        let mut res = None;
+                        let mut recipe_fut = Box::pin(elodin_editor::run::run_recipe(
+                            cache_dir,
+                            path.clone(),
+                            cancel_token.clone(),
+                        ));
+                        tokio::select! {
+                            r = &mut recipe_fut => res = Some(r),
+                            _ = cancel_on_ctrl_c => {
+                                cancel_token.cancel();
+                            }
+                        }
+                        if res.is_none() {
+                            res = Some(recipe_fut.await);
+                        }
                         cancel_token.cancel();
-                        res
+                        res.expect("run_recipe result missing")
                     }
                     _ => {
                         tokio::select! {
