@@ -1,0 +1,21 @@
+[db]
+host = "127.0.0.1"
+port = 2240
+components = [
+    "drone.gyro",
+    "drone.accel",
+    "drone.magnetometer",
+    "drone.attitude_target",
+    "drone.body_ang_vel",
+    "drone.world_pos",
+    "drone.world_vel"
+]
+
+[osd]
+rows = 18
+cols = 50
+refresh_rate_hz = 20.0
+
+[serial]
+port = "/dev/ttyTHS7"
+baud = 115200

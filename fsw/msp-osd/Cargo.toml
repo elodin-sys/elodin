@@ -1,0 +1,48 @@
+[package]
+name = "msp-osd"
+version = "0.1.0"
+edition = "2021"
+authors = ["Elodin Systems"]
+
+[[bin]]
+name = "msp-osd"
+path = "src/main.rs"
+
+[dependencies]
+# Core protocol for Elodin-DB
+impeller2 = { path = "../../libs/impeller2", features = ["std"] }
+impeller2-stellar = { path = "../../libs/impeller2/stellar" }
+impeller2-wkt = { path = "../../libs/impeller2/wkt" }
+
+# Async runtime
+stellarator = { path = "../../libs/stellarator", features = ["tokio"] }
+
+# Serial port communication
+serialport = "4.8"
+
+# Terminal UI
+crossterm = "0.27"
+
+# Math
+nalgebra = "0.33"
+
+# Configuration
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utilities
+async-channel = "2"
+futures-lite = "2"
+zerocopy = "0.8"
+postcard = "1.1"
+clap = { version = "4", features = ["derive"] }
+async-trait = "0.1"
+tokio = { version = "1", features = ["sync", "time", "macros"] }
