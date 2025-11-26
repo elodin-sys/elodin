@@ -14,7 +14,6 @@ Tests:
 
 import elodin as el
 import jax.numpy as jnp
-import polars as pl
 from typing import Tuple
 
 
@@ -32,7 +31,6 @@ def test_gravity_enu_ned() -> Tuple[bool, str]:
     print("TEST 1: Gravity in ENU vs NED")
     print("=" * 60)
 
-    dt = 1.0 / 120.0
     ticks = 120  # 1 second
     initial_height = 10.0
     mass = 1.0
@@ -95,13 +93,13 @@ def test_gravity_enu_ned() -> Tuple[bool, str]:
     # In NED: ball falls from -10 to some higher value (positive displacement)
     delta_z_ned = z_ned_final - z_ned_initial
 
-    print(f"\nENU Results:")
+    print("\nENU Results:")
     print(f"  Initial Z: {z_enu_initial:.4f} m")
     print(f"  Final Z:   {z_enu_final:.4f} m")
     print(f"  Delta Z:   {delta_z_enu:.4f} m")
     print(f"  Final Vz:  {vz_enu_final:.4f} m/s")
 
-    print(f"\nNED Results:")
+    print("\nNED Results:")
     print(f"  Initial Z: {z_ned_initial:.4f} m")
     print(f"  Final Z:   {z_ned_final:.4f} m")
     print(f"  Delta Z:   {delta_z_ned:.4f} m")
@@ -111,7 +109,7 @@ def test_gravity_enu_ned() -> Tuple[bool, str]:
     displacement_match = jnp.isclose(delta_z_enu, -delta_z_ned, atol=0.01)
     velocity_match = jnp.isclose(vz_enu_final, -vz_ned_final, atol=0.01)
 
-    print(f"\nVerification:")
+    print("\nVerification:")
     print(f"  Displacement magnitudes match: {displacement_match}")
     print(f"  Velocity magnitudes match:     {velocity_match}")
 
@@ -135,7 +133,6 @@ def test_inertial_frames() -> Tuple[bool, str]:
     print("TEST 2: Inertial Frame Equivalence (ECI vs GCRF)")
     print("=" * 60)
 
-    dt = 1.0 / 120.0
     ticks = 240  # 2 seconds
     G = 6.6743e-11
 
@@ -223,7 +220,7 @@ def test_inertial_frames() -> Tuple[bool, str]:
     pos_gcrf_final = df_gcrf["orbiter.world_pos"][-1][4:7].to_numpy()
     vel_gcrf_final = df_gcrf["orbiter.world_vel"][-1][3:6].to_numpy()
 
-    print(f"\nECI Results:")
+    print("\nECI Results:")
     print(
         f"  Final position: [{pos_eci_final[0]:.6f}, {pos_eci_final[1]:.6f}, {pos_eci_final[2]:.6f}]"
     )
@@ -231,7 +228,7 @@ def test_inertial_frames() -> Tuple[bool, str]:
         f"  Final velocity: [{vel_eci_final[0]:.6f}, {vel_eci_final[1]:.6f}, {vel_eci_final[2]:.6f}]"
     )
 
-    print(f"\nGCRF Results:")
+    print("\nGCRF Results:")
     print(
         f"  Final position: [{pos_gcrf_final[0]:.6f}, {pos_gcrf_final[1]:.6f}, {pos_gcrf_final[2]:.6f}]"
     )
@@ -243,7 +240,7 @@ def test_inertial_frames() -> Tuple[bool, str]:
     pos_match = jnp.allclose(pos_eci_final, pos_gcrf_final, atol=1e-6)
     vel_match = jnp.allclose(vel_eci_final, vel_gcrf_final, atol=1e-6)
 
-    print(f"\nVerification:")
+    print("\nVerification:")
     print(f"  Positions match: {pos_match}")
     print(f"  Velocities match: {vel_match}")
 
@@ -273,7 +270,6 @@ def test_energy_conservation() -> Tuple[bool, str]:
     print("TEST 3: Energy Conservation")
     print("=" * 60)
 
-    dt = 1.0 / 120.0
     ticks = 60  # 0.5 seconds
     initial_height = 5.0
     mass = 1.0
@@ -313,7 +309,7 @@ def test_energy_conservation() -> Tuple[bool, str]:
     final_energy = energies[-1]
     energy_variation = jnp.std(energies)
 
-    print(f"\nEnergy Analysis:")
+    print("\nEnergy Analysis:")
     print(f"  Initial energy: {initial_energy:.6f} J")
     print(f"  Final energy:   {final_energy:.6f} J")
     print(f"  Energy change:  {final_energy - initial_energy:.6f} J")
@@ -324,7 +320,7 @@ def test_energy_conservation() -> Tuple[bool, str]:
     # Allow 1% error due to discretization
     energy_conserved = jnp.isclose(initial_energy, final_energy, rtol=0.01)
 
-    print(f"\nVerification:")
+    print("\nVerification:")
     print(f"  Energy conserved: {energy_conserved}")
 
     if energy_conserved:
