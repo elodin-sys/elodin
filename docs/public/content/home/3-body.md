@@ -37,7 +37,7 @@ SIM_TIME_STEP = 1.0 / 120.0
 #### Add 1st & 2nd Body
 Before we can do anything we'll need an instance of a World, and with that we can spawn our first entities:
 ```python
-w = el.World()
+w = el.World(frame=el.Frame.GCRF)
 mesh = w.insert_asset(el.Mesh.sphere(0.2))
 a = w.spawn(
     [

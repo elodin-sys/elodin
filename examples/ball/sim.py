@@ -13,7 +13,7 @@ BALL_RADIUS = 0.2
 
 
 def world(seed: int = 0) -> el.World:
-    world = el.World()
+    world = el.World(frame=el.Frame.ENU)
     world.spawn(
         [
             el.Body(world_pos=el.SpatialTransform(linear=jnp.array([0.0, 0.0, 6.0]))),
