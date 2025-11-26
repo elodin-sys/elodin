@@ -118,9 +118,9 @@ fn render_horizon(grid: &mut OsdGrid, roll_deg: f32, pitch_deg: f32) {
             let horizon_y = center_row as f32 + pitch_offset - (rel_col * roll_slope);
 
             let ch = if row as f32 > horizon_y {
-                '▒' // Ground
+                '·' // Ground (minimal dot pattern for least camera occlusion)
             } else if (row as f32 - horizon_y).abs() < 0.5 {
-                '═' // Horizon line
+                '-' // Horizon line
             } else {
                 ' ' // Sky
             };
