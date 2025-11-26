@@ -88,7 +88,7 @@ impl Cli {
                             Ok(()) => {
                                 info!("Received Ctrl-C, shutting down");
                                 cancel_token.cancel();
-                                tokio::time::sleep(Duration::from_millis(100)).await;
+                                tokio::time::sleep(Duration::from_millis(1000)).await;
                                 std::process::exit(130);
                             }
                             Err(err) => {
