@@ -252,7 +252,7 @@ const PRESETS_LABEL: &str = "Presets";
 
 fn target_tile_state_mut(
     windows: &mut tiles::WindowManager,
-    target: Option<tiles::SecondaryWindowId>,
+    target: Option<tiles::WindowId>,
 ) -> Option<&mut tiles::TileState> {
     match target {
         Some(id) => windows

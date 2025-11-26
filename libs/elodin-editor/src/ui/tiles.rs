@@ -109,40 +109,51 @@ pub enum WindowRelayoutPhase {
     NeedRect,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct SecondaryWindowId(pub u32);
+/// The primary window is 0; all other windows are secondary windows.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct WindowId(pub u32);
+
+impl WindowId {
+    pub fn is_primary(&self) -> bool {
+        self.0 == 0
+    }
+}
 
 #[derive(Clone)]
 pub struct SecondaryWindowState {
-    pub id: SecondaryWindowId,
+    pub id: WindowId,
     pub descriptor: SecondaryWindowDescriptor,
+    pub graph_entities: Vec<Entity>,
     pub tile_state: TileState,
     pub window_entity: Option<Entity>,
-    pub graph_entities: Vec<Entity>,
-    pub applied_screen: Option<usize>,
-    pub applied_rect: Option<WindowRect>,
+    pub skip_metadata_capture: bool,
+    pub metadata_capture_blocked_until: Option<Instant>,
+
     pub relayout_phase: WindowRelayoutPhase,
     pub relayout_attempts: u8,
     pub relayout_started_at: Option<Instant>,
+    pub applied_screen: Option<usize>,
+    pub applied_rect: Option<WindowRect>,
     pub awaiting_screen_confirmation: bool,
-    pub skip_metadata_capture: bool,
-    pub metadata_capture_blocked_until: Option<Instant>,
+
 }
 
 #[derive(Clone, Default)]
 pub struct PrimaryWindowLayout {
     pub screen: Option<usize>,
     pub screen_rect: Option<WindowRect>,
-    pub relayout_phase: WindowRelayoutPhase,
-    pub applied_screen: Option<usize>,
-    pub applied_rect: Option<WindowRect>,
-    pub relayout_attempts: u8,
-    pub relayout_started_at: Option<Instant>,
     pub captured_screen: Option<usize>,
     pub captured_rect: Option<WindowRect>,
     pub requested_screen: Option<usize>,
     pub requested_rect: Option<WindowRect>,
+
+    pub relayout_phase: WindowRelayoutPhase,
+    pub relayout_attempts: u8,
+    pub relayout_started_at: Option<Instant>,
+    pub applied_screen: Option<usize>,
+    pub applied_rect: Option<WindowRect>,
     pub awaiting_screen_confirmation: bool,
+
 }
 
 impl PrimaryWindowLayout {
@@ -428,31 +439,31 @@ impl WindowManager {
         std::mem::take(&mut self.secondary)
     }
 
-    pub fn alloc_id(&mut self) -> SecondaryWindowId {
-        let id = SecondaryWindowId(self.next_id);
+    pub fn alloc_id(&mut self) -> WindowId {
+        let id = WindowId(self.next_id);
         self.next_id = self.next_id.wrapping_add(1);
         id
     }
 
-    pub fn find_secondary(&self, id: SecondaryWindowId) -> Option<&SecondaryWindowState> {
+    pub fn find_secondary(&self, id: WindowId) -> Option<&SecondaryWindowState> {
         self.secondary.iter().find(|s| s.id == id)
     }
 
     pub fn find_secondary_mut(
         &mut self,
-        id: SecondaryWindowId,
+        id: WindowId,
     ) -> Option<&mut SecondaryWindowState> {
         self.secondary.iter_mut().find(|s| s.id == id)
     }
 
-    pub fn find_secondary_by_entity(&self, entity: Entity) -> Option<SecondaryWindowId> {
+    pub fn find_secondary_by_entity(&self, entity: Entity) -> Option<WindowId> {
         self.secondary
             .iter()
             .find(|state| state.window_entity == Some(entity))
             .map(|state| state.id)
     }
 
-    pub fn create_secondary_window(&mut self, title: Option<String>) -> SecondaryWindowId {
+    pub fn create_secondary_window(&mut self, title: Option<String>) -> WindowId {
         let id = self.alloc_id();
         let cleaned_title = title.and_then(|t| {
             let trimmed = t.trim();
@@ -1168,7 +1179,7 @@ struct TreeBehavior<'w> {
     world: &'w mut World,
     container_titles: HashMap<TileId, String>,
     read_only: bool,
-    target_window: Option<SecondaryWindowId>,
+    target_window: Option<WindowId>,
 }
 
 #[derive(Clone)]
@@ -1505,7 +1516,7 @@ impl<'w, 's> TileSystem<'w, 's> {
     fn prepare_panel_data(
         world: &mut World,
         state: &mut SystemState<Self>,
-        target: Option<SecondaryWindowId>,
+        target: Option<WindowId>,
     ) -> Option<(TileIcons, bool, bool)> {
         let read_only = false;
         let params = state.get_mut(world);
@@ -1546,7 +1557,7 @@ impl<'w, 's> TileSystem<'w, 's> {
     fn render_panel_contents(
         world: &mut World,
         ui: &mut egui::Ui,
-        target: Option<SecondaryWindowId>,
+        target: Option<WindowId>,
         icons: TileIcons,
         is_empty_tile_tree: bool,
         read_only: bool,
@@ -1576,7 +1587,7 @@ impl<'w, 's> TileSystem<'w, 's> {
 }
 
 impl WidgetSystem for TileSystem<'_, '_> {
-    type Args = Option<SecondaryWindowId>;
+    type Args = Option<WindowId>;
     type Output = ();
 
     fn ui_system(
@@ -1616,7 +1627,7 @@ impl WidgetSystem for TileSystem<'_, '_> {
 }
 
 impl RootWidgetSystem for TileSystem<'_, '_> {
-    type Args = Option<SecondaryWindowId>;
+    type Args = Option<WindowId>;
     type Output = ();
 
     fn ctx_system(
@@ -1678,7 +1689,7 @@ pub struct TileLayoutEmpty<'w> {
 #[derive(Clone)]
 pub struct TileLayoutEmptyArgs {
     pub icons: TileIcons,
-    pub window: Option<SecondaryWindowId>,
+    pub window: Option<WindowId>,
 }
 
 impl WidgetSystem for TileLayoutEmpty<'_> {
@@ -1775,7 +1786,7 @@ pub struct TileLayout<'w, 's> {
 #[derive(Clone)]
 pub struct TileLayoutArgs {
     pub icons: TileIcons,
-    pub window: Option<SecondaryWindowId>,
+    pub window: Option<WindowId>,
     pub read_only: bool,
 }
 

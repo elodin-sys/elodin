@@ -38,7 +38,7 @@ pub struct CommandPaletteState {
     pub selected_index: usize,
     pub auto_open_item: Option<PaletteItem>,
     pub error: Option<String>,
-    pub target_window: Option<tiles::SecondaryWindowId>,
+    pub target_window: Option<tiles::WindowId>,
 }
 
 impl CommandPaletteState {
@@ -157,7 +157,7 @@ pub struct PaletteWindow<'w, 's> {
 }
 
 impl RootWidgetSystem for PaletteWindow<'_, '_> {
-    type Args = Option<tiles::SecondaryWindowId>;
+    type Args = Option<tiles::WindowId>;
     type Output = bool;
 
     fn ctx_system(

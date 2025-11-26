@@ -65,6 +65,7 @@ fn create_startup_window(
                 composite_alpha_mode,
                 ..Default::default()
             },
+            crate::tiles::WindowId(0),
             StartupWindow,
         ));
     } else if let Ok(mut primary) = primary.single_mut() {

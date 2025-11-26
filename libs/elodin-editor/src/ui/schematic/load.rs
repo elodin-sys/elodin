@@ -35,7 +35,7 @@ use crate::{
         query_plot::QueryPlotData,
         schematic::EqlExt,
         tiles::{
-            DashboardPane, GraphPane, Pane, SecondaryWindowDescriptor, SecondaryWindowId,
+            DashboardPane, GraphPane, Pane, SecondaryWindowDescriptor, WindowId,
             SecondaryWindowState, TileState, TreePane, ViewportPane, WindowManager,
         },
     },
@@ -45,7 +45,7 @@ use crate::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PanelContext {
     Main,
-    Secondary(SecondaryWindowId),
+    Secondary(WindowId),
 }
 
 #[derive(Component)]

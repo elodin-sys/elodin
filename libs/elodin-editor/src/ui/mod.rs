@@ -90,6 +90,7 @@ use crate::{
         navigation_gizmo::NavGizmoCamera,
     },
     vector_arrow::VectorArrowState,
+    tiles::WindowId,
 };
 
 use self::inspector::entity::ComponentFilter;
@@ -135,7 +136,7 @@ pub struct Paused(pub bool);
 
 #[derive(Resource, Default)]
 struct SecondaryLogState(
-    HashMap<tiles::SecondaryWindowId, (Option<usize>, bool, tiles::WindowRelayoutPhase)>,
+    HashMap<tiles::WindowId, (Option<usize>, bool, tiles::WindowRelayoutPhase)>,
 );
 
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
@@ -198,7 +199,7 @@ pub struct EntityPair {
 
 #[derive(Component)]
 struct SecondaryWindowMarker {
-    id: tiles::SecondaryWindowId,
+    id: tiles::WindowId,
 }
 
 #[derive(Component)]
@@ -703,14 +704,18 @@ pub fn render_layout(world: &mut World) {
 fn sync_secondary_windows(
     mut commands: Commands,
     mut windows: ResMut<tiles::WindowManager>,
-    existing: Query<(Entity, &SecondaryWindowMarker)>,
+    existing: Query<(Entity, &WindowId)>,
     mut cameras: Query<&mut Camera>,
     winit_windows: NonSend<bevy::winit::WinitWindows>,
     mut log_state: ResMut<SecondaryLogState>,
+    mut existing_map: Local<HashMap<tiles::WindowId, Entity>>,
 ) {
-    let mut existing_map: HashMap<tiles::SecondaryWindowId, Entity> = HashMap::new();
+    existing_map.clear();
     for (entity, marker) in existing.iter() {
-        existing_map.insert(marker.id, entity);
+        // Add secondary windows.
+        if !marker.is_primary() {
+            existing_map.insert(*marker, entity);
+        }
     }
     let screens_any = collect_screens_from_any_window(&winit_windows);
     if screens_any.is_none() {
@@ -814,7 +819,10 @@ fn sync_secondary_windows(
         };
 
         let window_entity = commands
-            .spawn((window_component, SecondaryWindowMarker { id: state.id }))
+            .spawn((window_component,
+                    SecondaryWindowMarker { id: state.id },
+                    WindowId(state.id.0),
+            ))
             .id();
 
         state.window_entity = Some(window_entity);
@@ -842,7 +850,6 @@ fn sync_secondary_windows(
 }
 
 async fn process_window_relayout_async(
-    window_id: tiles::SecondaryWindowId,
     entity: Entity,
 ) -> Result<(), bevy_defer::AccessError> {
     let start = Instant::now();
@@ -969,7 +976,6 @@ async fn process_window_relayout_async(
 }
 fn apply_secondary_window_screens(
     mut windows: ResMut<tiles::WindowManager>,
-    winit_windows: NonSend<bevy::winit::WinitWindows>,
     mut commands: Commands
 ) {
     for state in windows.secondary.iter_mut() {
@@ -981,9 +987,6 @@ fn apply_secondary_window_screens(
         }
         // layout locking removed; just proceed if we have the window.
         let Some(entity) = state.window_entity else {
-            continue;
-        };
-        let Some(window) = winit_windows.get_window(entity) else {
             continue;
         };
 
@@ -999,8 +1002,7 @@ fn apply_secondary_window_screens(
 
                 // Let's spawn an asynchronous task instead of carrying a bunch
                 // state in our components.
-                let id = state.id;
-                commands.spawn_task(move || process_window_relayout_async(id, entity));
+                commands.spawn_task(move || process_window_relayout_async(entity));
                 state.relayout_phase = tiles::WindowRelayoutPhase::Idle;
 
             }
@@ -1869,7 +1871,7 @@ fn detect_window_screen(window: &WinitWindow, screens: &[MonitorHandle]) -> Opti
         })
 }
 
-fn secondary_graph_order_base(id: tiles::SecondaryWindowId) -> isize {
+fn secondary_graph_order_base(id: tiles::WindowId) -> isize {
     SECONDARY_GRAPH_ORDER_BASE + SECONDARY_GRAPH_ORDER_STRIDE * id.0 as isize
 }
 
@@ -2102,7 +2104,7 @@ fn friendly_title_from_stem(stem: &str) -> Option<String> {
 }
 
 fn render_secondary_windows(world: &mut World) {
-    let window_entries: Vec<(tiles::SecondaryWindowId, Entity, String)> = {
+    let window_entries: Vec<(tiles::WindowId, Entity, String)> = {
         let windows = world.resource::<tiles::WindowManager>();
         windows
             .secondary
