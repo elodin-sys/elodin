@@ -49,6 +49,7 @@ pub struct SchematicParam<'w, 's> {
     pub lines_3d: Query<'w, 's, (Entity, &'static Line3d)>,
     pub vector_arrows: Query<'w, 's, (Entity, &'static VectorArrow3d)>,
     pub windows: Res<'w, tiles::WindowManager>,
+    pub windows_state: Query<'w, 's, &'static tiles::WindowState>,
     pub dashboards: Query<'w, 's, &'static Dashboard<Entity>>,
     pub hdr_enabled: Res<'w, HdrEnabled>,
     pub metadata: Res<'w, ComponentMetadataRegistry>,
@@ -216,7 +217,7 @@ impl SchematicParam<'_, '_> {
 }
 
 pub fn tiles_to_schematic(
-    param: SchematicParam,
+    mut param: SchematicParam,
     mut schematic: ResMut<CurrentSchematic>,
     mut secondary: ResMut<CurrentSecondarySchematics>,
 ) {
@@ -249,7 +250,7 @@ pub fn tiles_to_schematic(
     secondary.0.clear();
     let mut window_elems = Vec::new();
     let mut name_counts: HashMap<String, usize> = HashMap::new();
-    for state in &param.windows.secondary {
+    for state in &param.windows_state {
         let base_stem = preferred_secondary_stem(state);
         let unique_stem = ensure_unique_stem(&mut name_counts, &base_stem);
         let file_name = format!("{unique_stem}.kdl");

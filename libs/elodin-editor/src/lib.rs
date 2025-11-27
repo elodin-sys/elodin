@@ -833,6 +833,7 @@ fn clear_state_new_connection(
     mut synced_glbs: ResMut<SyncedObject3d>,
     mut eql_context: ResMut<EqlContext>,
     mut commands: Commands,
+    windows_state: Query<(Entity, &tiles::WindowState)>,
 ) {
     match packet {
         OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
@@ -857,15 +858,13 @@ fn clear_state_new_connection(
     windows
         .main
         .clear(&mut commands, &mut selected_object);
-    for secondary in windows.take_secondary() {
-        for graph in secondary.graph_entities {
-            commands.entity(graph).despawn();
+    for (entity, secondary) in &windows_state {
+        for graph in secondary.graph_entities.iter() {
+            commands.entity(*graph).despawn();
         }
-        if let Some(entity) = secondary.window_entity {
-            commands.entity(entity).despawn();
-        }
+        commands.entity(entity).despawn();
     }
-    windows.secondary.clear();
+    // windows.secondary.clear();
     *graph_data = CollectedGraphData::default();
     render_layer_alloc.free_all();
 }

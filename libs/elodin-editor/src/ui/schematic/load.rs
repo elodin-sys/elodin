@@ -69,6 +69,8 @@ pub struct LoadSchematicParams<'w, 's> {
     objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
     vector_arrows: Query<'w, 's, Entity, With<VectorArrowState>>,
     grid_lines: Query<'w, 's, Entity, With<InfiniteGrid>>,
+    window_states: Query<'w, 's, (Entity, &'static WindowId, &'static WindowState)>,
+    
 }
 
 pub fn sync_schematic(
@@ -193,13 +195,12 @@ pub fn load_schematic_file(
 impl LoadSchematicParams<'_, '_> {
     pub fn load_schematic(&mut self, schematic: &Schematic, base_dir: Option<&Path>) {
         self.render_layer_alloc.free_all();
-        for secondary in self.windows.take_secondary() {
-            for graph in secondary.graph_entities {
-                self.commands.entity(graph).despawn();
+        for (id, window_id, window_state) in self.window_states {
+        // for secondary in self.windows.take_secondary() {
+            for graph in window_state.graph_entities.iter() {
+                self.commands.entity(*graph).despawn();
             }
-            if let Some(entity) = secondary.window_entity {
-                self.commands.entity(entity).despawn();
-            }
+            self.commands.entity(id).despawn();
         }
         let mut main_state = self.windows.take_main();
         main_state.clear(&mut self.commands, &mut self.selected_object);
@@ -244,8 +245,6 @@ impl LoadSchematicParams<'_, '_> {
 
         self.windows.main = main_state;
 
-        let mut secondary_states = Vec::new();
-
         for descriptor in secondary_descriptors {
             match std::fs::read_to_string(&descriptor.path) {
                 Ok(kdl) => match impeller2_wkt::Schematic::from_kdl(&kdl) {
@@ -279,7 +278,6 @@ impl LoadSchematicParams<'_, '_> {
                             id,
                             descriptor,
                             tile_state,
-                            window_entity: None,
                             graph_entities,
                         };
                         if state.descriptor.screen_rect.is_some() {
@@ -290,7 +288,7 @@ impl LoadSchematicParams<'_, '_> {
                                 Ok(())
                             });
                         }
-                        secondary_states.push(state);
+                        self.commands.spawn((state.id, state));
                     }
                     Err(err) => {
                         let diag = render_diag(&err);
@@ -312,7 +310,6 @@ impl LoadSchematicParams<'_, '_> {
             }
         }
 
-        self.windows.secondary = secondary_states;
     }
 
     pub fn spawn_object_3d(&mut self, object_3d: Object3D) {
@@ -442,12 +439,13 @@ impl LoadSchematicParams<'_, '_> {
                     .inspect_err(|err| {
                         let (ctx, path) = match context {
                             PanelContext::Main => ("main".to_string(), None),
-                            PanelContext::Secondary(id) => {
+                            PanelContext::Secondary(target_id) => {
                                 let path = self
-                                    .windows
-                                    .find_secondary(id)
-                                    .map(|s| s.descriptor.path.display().to_string());
-                                (format!("secondary({})", id.0), path)
+                                    .window_states
+                                    .iter()
+                                    .find(|(_entity, id, _state)| **id == target_id)
+                                    .map(|(_, _, s)| s.descriptor.path.display().to_string());
+                                (format!("secondary({})", target_id.0), path)
                             }
                         };
                         if let Some(p) = path {

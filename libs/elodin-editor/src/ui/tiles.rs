@@ -139,7 +139,6 @@ pub struct WindowState {
     pub descriptor: WindowDescriptor,
     pub graph_entities: Vec<Entity>,
     pub tile_state: TileState,
-    pub window_entity: Option<Entity>,
 }
 
 #[derive(Clone, Default)]
@@ -354,7 +353,6 @@ pub(crate) fn clamp_percent(value: f32) -> u32 {
 pub struct WindowManager {
     pub main: TileState,
     pub primary: PrimaryWindowLayout,
-    pub secondary: Vec<WindowState>,
     pub next_id: u32,
 }
 
@@ -363,7 +361,6 @@ impl Default for WindowManager {
         Self {
             main: TileState::new(Id::new("main_tab_tree")),
             primary: PrimaryWindowLayout::default(),
-            secondary: Vec::new(),
             next_id: 1,
         }
     }
@@ -379,35 +376,7 @@ impl WindowManager {
         std::mem::take(&mut self.main)
     }
 
-    pub fn take_secondary(&mut self) -> Vec<WindowState> {
-        std::mem::take(&mut self.secondary)
-    }
-
-    pub fn alloc_id(&mut self) -> WindowId {
-        let id = WindowId(self.next_id);
-        self.next_id = self.next_id.wrapping_add(1);
-        id
-    }
-
-    pub fn find_secondary(&self, id: WindowId) -> Option<&WindowState> {
-        self.secondary.iter().find(|s| s.id == id)
-    }
-
-    pub fn find_secondary_mut(
-        &mut self,
-        id: WindowId,
-    ) -> Option<&mut WindowState> {
-        self.secondary.iter_mut().find(|s| s.id == id)
-    }
-
-    pub fn find_secondary_by_entity(&self, entity: Entity) -> Option<WindowId> {
-        self.secondary
-            .iter()
-            .find(|state| state.window_entity == Some(entity))
-            .map(|state| state.id)
-    }
-
-    pub fn create_secondary_window(&mut self, title: Option<String>) -> WindowId {
+    pub fn create_secondary_window(&mut self, title: Option<String>) -> WindowState {
         let id = self.alloc_id();
         let cleaned_title = title.and_then(|t| {
             let trimmed = t.trim();
@@ -441,14 +410,12 @@ impl WindowManager {
             path = %descriptor.path.display(),
             "Created secondary window"
         );
-        self.secondary.push(WindowState {
+        WindowState {
             id,
             descriptor,
             tile_state,
-            window_entity: None,
             graph_entities: Vec::new(),
-        });
-        id
+        }
     }
 }
 
@@ -1445,6 +1412,7 @@ pub struct TileSystem<'w, 's> {
     contexts: EguiContexts<'w, 's>,
     images: Local<'s, images::Images>,
     windows: Res<'w, WindowManager>,
+    window_states: Query<'w, 's, (Entity, &'static WindowId, &'static WindowState)>,
 }
 
 impl<'w, 's> TileSystem<'w, 's> {
@@ -1458,10 +1426,11 @@ impl<'w, 's> TileSystem<'w, 's> {
         let mut contexts = params.contexts;
         let images = params.images;
         let is_empty = match target {
-            Some(id) => params
-                .windows
-                .find_secondary(id)
-                .map(|s| s.tile_state.is_empty() && s.tile_state.tree_actions.is_empty()),
+            Some(target_id) => params
+                .window_states
+                .iter()
+                .find(|(_entity, id, _state)| **id == target_id)
+                .map(|(_, _, s)| s.tile_state.is_empty() && s.tile_state.tree_actions.is_empty()),
             None => Some(
                 params.windows.main.is_empty() && params.windows.main.tree_actions.is_empty(),
             ),
@@ -1716,6 +1685,7 @@ pub struct TileLayout<'w, 's> {
     cmd_palette_state: ResMut<'w, CommandPaletteState>,
     eql_ctx: Res<'w, EqlContext>,
     node_updater_params: NodeUpdaterParams<'w, 's>,
+    tile_param: crate::ui::command_palette::palette_items::TileParam<'w, 's>,
 }
 
 #[derive(Clone)]
@@ -1741,31 +1711,38 @@ impl WidgetSystem for TileLayout<'_, '_> {
             read_only,
         } = args;
 
-        world.resource_scope::<WindowManager, _>(|world, mut windows| {
-            let Some(ui_state) = (match window {
-                Some(id) => windows.find_secondary_mut(id).map(|s| &mut s.tile_state),
-                None => Some(&mut windows.main),
-            }) else {
-                return;
-            };
             let icons = icons;
 
-            let mut tree_actions = {
-                let tab_diffs = std::mem::take(&mut ui_state.tree_actions);
+            let (tree, mut tree_actions) = {
+                let (tab_diffs, container_titles, mut tree) = {
+                    let mut state_mut = state.get_mut(world);
+                    let Some(mut ui_state) = state_mut.tile_param.target(window) else {
+                        return;
+                    };
+                    let empty_tree = egui_tiles::Tree::empty(ui_state.tree_id);
+                    (std::mem::take(&mut ui_state.tree_actions),
+                     ui_state.container_titles.clone(),
+                     std::mem::replace(&mut ui_state.tree, empty_tree))
+                };
                 let mut behavior = TreeBehavior {
                     icons,
+                    // This world here makes getting ui_state difficult.
                     world,
                     tree_actions: tab_diffs,
-                    container_titles: ui_state.container_titles.clone(),
+                    container_titles,
                     read_only,
                     target_window: window,
                 };
-                ui_state.tree.ui(&mut behavior, ui);
-
+                tree.ui(&mut behavior, ui);
                 let TreeBehavior { tree_actions, .. } = behavior;
-                tree_actions
+                (tree, tree_actions)
             };
+
             let mut state_mut = state.get_mut(world);
+            let Some(mut ui_state) = state_mut.tile_param.target(window) else {
+                return;
+            };
+            let _ = std::mem::replace(&mut ui_state.tree, tree);
             state_mut.viewport_contains_pointer.0 = ui.ui_contains_pointer();
 
             for mut editor_cam in state_mut.editor_cam.iter_mut() {
@@ -2154,7 +2131,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     }
                 }
             }
-        })
     }
 }
 
