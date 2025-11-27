@@ -128,7 +128,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
 
             let mut changed = false;
             let current_mesh_type = match &object_3d_state.data.mesh {
-                Object3DMesh::Glb(_) => "GLB",
+                Object3DMesh::Glb { .. } => "GLB",
                 Object3DMesh::Mesh { mesh, .. } => match mesh {
                     Mesh::Sphere { .. } => "Sphere",
                     Mesh::Box { .. } => "Box",
@@ -160,7 +160,10 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                 changed = true;
                 match selected_mesh_type {
                     "GLB" => {
-                        object_3d_state.data.mesh = Object3DMesh::Glb(String::new());
+                        object_3d_state.data.mesh = Object3DMesh::Glb {
+                            path: String::new(),
+                            scale: 1.0,
+                        };
                         object_3d_state.scale_expr = None;
                         object_3d_state.scale_error = None;
                     }
@@ -238,11 +241,26 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
             ui.separator();
 
             match &mut object_3d_state.data.mesh {
-                Object3DMesh::Glb(path) => {
+                Object3DMesh::Glb { path, scale } => {
                     ui.label(egui::RichText::new("GLB Path").color(get_scheme().text_secondary));
                     ui.add_space(8.0);
                     if ui
                         .add(inspector_text_field(path, "Enter a path to a glb"))
+                        .changed()
+                    {
+                        changed = true;
+                    }
+                    
+                    ui.separator();
+                    
+                    ui.label(egui::RichText::new("Scale").color(get_scheme().text_secondary));
+                    ui.add_space(8.0);
+                    if ui
+                        .add(
+                            egui::DragValue::new(scale)
+                                .speed(0.01)
+                                .range(0.001..=100.0),
+                        )
                         .changed()
                     {
                         changed = true;

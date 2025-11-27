@@ -445,10 +445,18 @@ pub fn default_ellipsoid_color() -> Color {
     Color::WHITE
 }
 
+pub fn default_glb_scale() -> f32 {
+    1.0
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub enum Object3DMesh {
-    Glb(String),
+    Glb {
+        path: String,
+        #[serde(default = "default_glb_scale")]
+        scale: f32,
+    },
     Mesh {
         mesh: Mesh,
         material: Material,

@@ -436,9 +436,15 @@ fn parse_object_3d_mesh(
                     node: "glb".to_string(),
                     src: src.to_string(),
                     span: node.span(),
-                })?;
+                })?
+                .to_string();
 
-            Ok(Object3DMesh::Glb(path.to_string()))
+            let scale = node
+                .get("scale")
+                .and_then(|v| v.as_float())
+                .unwrap_or(1.0) as f32;
+
+            Ok(Object3DMesh::Glb { path, scale })
         }
         "sphere" => {
             let radius = node
@@ -1663,7 +1669,10 @@ object_3d "a.world_pos" {
         if let SchematicElem::Object3d(obj) = &schematic.elems[1] {
             assert_eq!(obj.eql, "a.world_pos");
             match &obj.mesh {
-                Object3DMesh::Glb(s) => assert_eq!(s.as_str(), "hi"),
+                Object3DMesh::Glb { path, scale } => {
+                    assert_eq!(path.as_str(), "hi");
+                    assert_eq!(*scale, 1.0);
+                }
                 _ => panic!("Expected glb"),
             }
         } else {

@@ -653,10 +653,12 @@ pub fn sync_pos(
             let att = world_pos.bevy_att();
             let (new_grid_cell, translation) = floating_origin.translation_to_grid(pos);
             *grid_cell = new_grid_cell;
+            // Preserve the existing scale when updating position and rotation
+            let existing_scale = transform.scale;
             *transform = bevy::prelude::Transform {
                 translation,
                 rotation: att.as_quat(),
-                ..Default::default()
+                scale: existing_scale,
             }
         });
 }
@@ -774,7 +776,10 @@ fn sync_object_3d(
             .and_then(|e| materials.get(*e).ok());
 
         let mesh_source = match (glb, mesh, material) {
-            (Some(glb), _, _) => impeller2_wkt::Object3DMesh::Glb(glb.0.clone()),
+            (Some(glb), _, _) => impeller2_wkt::Object3DMesh::Glb {
+                path: glb.0.clone(),
+                scale: 1.0,
+            },
             (_, Some(mesh), Some(mat)) => impeller2_wkt::Object3DMesh::Mesh {
                 mesh: mesh.clone(),
                 material: mat.clone(),

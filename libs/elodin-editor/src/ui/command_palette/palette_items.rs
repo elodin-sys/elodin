@@ -1282,7 +1282,10 @@ pub fn create_3d_object() -> PaletteItem {
                                                   mut material_assets: ResMut<Assets<StandardMaterial>>,
                                                   mut mesh_assets: ResMut<Assets<bevy::prelude::Mesh>>,
                                                   assets: Res<AssetServer>| {
-                                                let obj = impeller2_wkt::Object3DMesh::Glb(gltf_path.trim().to_string());
+                                                let obj = impeller2_wkt::Object3DMesh::Glb {
+                                                    path: gltf_path.trim().to_string(),
+                                                    scale: 1.0,
+                                                };
 
                                                 crate::object_3d::create_object_3d_entity(
                                                     &mut commands,

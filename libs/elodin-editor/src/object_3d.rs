@@ -953,7 +953,7 @@ pub fn warn_imported_cameras(
 
         if let Ok(state) = object_states.get(object_root) {
             let source = match &state.data.mesh {
-                impeller2_wkt::Object3DMesh::Glb(path) => format!("GLB '{path}'"),
+                impeller2_wkt::Object3DMesh::Glb { path, .. } => format!("GLB '{path}'"),
                 _ => "object_3d".to_string(),
             };
             warn_once!(
@@ -1046,6 +1046,14 @@ pub fn create_object_3d_entity(
         _ => (None, None),
     };
 
+    // Get initial transform scale from GLB if applicable
+    let initial_transform = match &data.mesh {
+        impeller2_wkt::Object3DMesh::Glb { scale, .. } if *scale != 1.0 => {
+            Transform::from_scale(Vec3::splat(*scale))
+        }
+        _ => Transform::default(),
+    };
+
     let entity_id = commands
         .spawn((
             Object3DState {
@@ -1054,7 +1062,7 @@ pub fn create_object_3d_entity(
                 scale_error,
                 data: data.clone(),
             },
-            Transform::default(),
+            initial_transform,
             GlobalTransform::default(),
             Visibility::default(),
             InheritedVisibility::default(),
@@ -1088,7 +1096,7 @@ pub fn spawn_mesh(
     assets: &Res<AssetServer>,
 ) -> Option<EllipsoidVisual> {
     match mesh {
-        impeller2_wkt::Object3DMesh::Glb(path) => {
+        impeller2_wkt::Object3DMesh::Glb { path, .. } => {
             let url = format!("{path}#Scene0");
             let scene = assets.load(&url);
             commands.entity(entity).insert(SceneRoot(scene));

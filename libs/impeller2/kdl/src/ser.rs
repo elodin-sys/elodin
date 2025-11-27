@@ -270,10 +270,14 @@ fn serialize_object_3d<T>(obj: &Object3D<T>) -> KdlNode {
 
 fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> KdlNode {
     match mesh {
-        Object3DMesh::Glb(path) => {
+        Object3DMesh::Glb { path, scale } => {
             let mut node = KdlNode::new("glb");
             node.entries_mut()
                 .push(KdlEntry::new_prop("path", path.clone()));
+            if *scale != 1.0 {
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("scale", *scale as f64));
+            }
             node
         }
         Object3DMesh::Mesh { mesh, material } => match mesh {
