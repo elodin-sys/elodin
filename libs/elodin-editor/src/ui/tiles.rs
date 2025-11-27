@@ -60,6 +60,10 @@ use crate::{
     ui::dashboard::NodeUpdaterParams,
 };
 
+pub(crate) fn plugin(app: &mut App) {
+    app.add_event::<WindowRelayout>();
+}
+
 #[derive(Clone)]
 pub struct TileIcons {
     pub add: egui::TextureId,
@@ -109,6 +113,12 @@ pub enum WindowRelayoutPhase {
     NeedRect,
 }
 
+#[derive(Event, Clone, Debug, PartialEq, Eq)]
+pub enum WindowRelayout {
+    Screen { window: Entity, screen: usize },
+    Rect { window: Entity, rect: WindowRect },
+}
+
 /// The primary window is 0; all other windows are secondary windows.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct WindowId(pub u32);
@@ -130,7 +140,7 @@ pub struct SecondaryWindowState {
     pub metadata_capture_blocked_until: Option<Instant>,
 
     // TODO: Consider making relayout an event.
-    pub relayout_phase: WindowRelayoutPhase,
+    // pub relayout_phase: WindowRelayoutPhase,
     pub applied_screen: Option<usize>,
     pub applied_rect: Option<WindowRect>,
 }
@@ -186,10 +196,6 @@ impl SecondaryWindowState {
         } else {
             WindowRelayoutPhase::Idle
         }
-    }
-
-    pub fn refresh_relayout_phase(&mut self) {
-        self.relayout_phase = Self::relayout_phase_from_descriptor(&self.descriptor);
     }
 
     pub fn extend_metadata_capture_block(&mut self, duration: Duration) {
@@ -500,7 +506,6 @@ impl WindowManager {
             graph_entities: Vec::new(),
             applied_screen: None,
             applied_rect: None,
-            relayout_phase,
             skip_metadata_capture: false,
             metadata_capture_blocked_until: None,
         });

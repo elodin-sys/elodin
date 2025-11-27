@@ -284,7 +284,6 @@ impl LoadSchematicParams<'_, '_> {
                             graph_entities,
                             applied_screen: None,
                             applied_rect: None,
-                            relayout_phase,
                             skip_metadata_capture: true,
                             metadata_capture_blocked_until: None,
                         };
