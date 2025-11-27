@@ -16,6 +16,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
+use bevy_defer::{AsyncWorld, AsyncCommandsExtension};
 
 #[cfg(target_os = "linux")]
 const NOTIFY_SILENCE: Duration = Duration::from_millis(3000);
@@ -282,13 +283,13 @@ impl LoadSchematicParams<'_, '_> {
                             tile_state,
                             window_entity: None,
                             graph_entities,
-                            applied_screen: None,
-                            applied_rect: None,
-                            skip_metadata_capture: true,
-                            metadata_capture_blocked_until: None,
                         };
                         if state.descriptor.screen_rect.is_some() {
-                            state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_LOAD_GUARD);
+                            self.commands.spawn_task(|| async move {
+                                AsyncWorld.sleep(SECONDARY_RECT_CAPTURE_LOAD_GUARD).await;
+                                AsyncWorld.send_event(crate::ui::tiles::WindowRelayout::UpdateDescriptors)?;
+                                Ok(())
+                            });
                         }
                         secondary_states.push(state);
                     }

@@ -7,6 +7,7 @@ use bevy::{
         query::QueryData,
         system::{SystemParam, SystemState},
     },
+    // platform::collections::{HashMap, HashSet},
     input::keyboard::Key,
     log::{error, info, warn},
     prelude::*,
@@ -313,11 +314,7 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
-                capture_secondary_window_screens.after(track_secondary_window_geometry),
-            )
-            .add_systems(
-                Update,
-                capture_primary_window_layout.after(capture_secondary_window_screens),
+                capture_primary_window_layout.after(handle_window_relayout_events),
             )
             .add_systems(Update, handle_secondary_close.after(sync_secondary_windows))
             .add_systems(
@@ -823,8 +820,8 @@ fn sync_secondary_windows(
             .id();
 
         state.window_entity = Some(window_entity);
-        state.applied_screen = pre_applied_screen;
-        state.applied_rect = None;
+        // state.applied_screen = pre_applied_screen;
+        // state.applied_rect = None;
         if let Some(screen) = state.descriptor.screen.as_ref() {
             commands.send_event(WindowRelayout::Screen { window: window_entity, screen: screen.clone() });
         }
@@ -832,7 +829,6 @@ fn sync_secondary_windows(
         if let Some(rect) = state.descriptor.screen_rect.as_ref() {
             commands.send_event(WindowRelayout::Rect { window: window_entity, rect: rect.clone() });
         }
-        state.skip_metadata_capture = true;
         existing_map.insert(state.id, window_entity);
         info!("Created window entity {window_entity} with window id {:?}", state.id);
         let window_ref = WindowRef::Entity(window_entity);
@@ -931,7 +927,6 @@ async fn apply_window_screen(
 
         if let Some(target_monitor) = screens.get(screen).cloned() {
             assign_window_to_screen(window, target_monitor.clone());
-            state.skip_metadata_capture = true;
             // We have to do some retries in an async context. Inside this
             // `.get()` we're not in an async context.
             Some(target_monitor)
@@ -1005,6 +1000,11 @@ fn handle_window_relayout_events(
 
                 // if ! apply_window_rect(rect, window) {
                 // }
+            }
+            WindowRelayout::UpdateDescriptors => {
+                // Instead of placing this system into the schedule and blocking
+                // it from running, let's run it only when necessary.
+                commands.run_system_cached(capture_secondary_window_screens_oneoff);
             }
         }
     }
@@ -1546,7 +1546,9 @@ fn apply_primary_window_rect(
     true
 }
 
-fn capture_secondary_window_screens(
+/// Runs as a one-off system to capture the window descriptor. Does not run
+/// every frameñ.
+fn capture_secondary_window_screens_oneoff(
     mut windows: ResMut<tiles::WindowManager>,
     winit_windows: NonSend<bevy::winit::WinitWindows>,
     window_query: Query<(Entity, &Window)>,
@@ -1620,10 +1622,9 @@ fn track_secondary_window_geometry(
     mut resized_events: EventReader<WindowResized>,
     mut windows: ResMut<tiles::WindowManager>,
     winit_windows: NonSend<bevy::winit::WinitWindows>,
+    mut touched: Local<HashMap<Entity, Option<PhysicalPosition<i32>>>>,
 ) {
-    use std::collections::HashMap;
 
-    let mut touched: HashMap<Entity, Option<PhysicalPosition<i32>>> = HashMap::new();
     for evt in moved_events.read() {
         let position = PhysicalPosition::new(evt.position.x, evt.position.y);
         touched.insert(evt.window, Some(position));
@@ -1632,7 +1633,7 @@ fn track_secondary_window_geometry(
         touched.entry(evt.window).or_insert(None);
     }
 
-    for (entity, forced_position) in touched {
+    for (entity, forced_position) in touched.drain() {
         let Some(id) = windows.find_secondary_by_entity(entity) else {
             continue;
         };
@@ -1757,13 +1758,6 @@ fn record_window_rect_from_window(
     screens: &[MonitorHandle],
     forced_position: Option<PhysicalPosition<i32>>,
 ) {
-    if state.is_metadata_capture_blocked() {
-        return;
-    }
-    if state.skip_metadata_capture {
-        state.skip_metadata_capture = false;
-        return;
-    }
     let size = window.outer_size();
     if size.width == 0 || size.height == 0 {
         return;

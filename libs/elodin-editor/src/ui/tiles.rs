@@ -117,6 +117,7 @@ pub enum WindowRelayoutPhase {
 pub enum WindowRelayout {
     Screen { window: Entity, screen: usize },
     Rect { window: Entity, rect: WindowRect },
+    UpdateDescriptors,
 }
 
 /// The primary window is 0; all other windows are secondary windows.
@@ -136,13 +137,6 @@ pub struct SecondaryWindowState {
     pub graph_entities: Vec<Entity>,
     pub tile_state: TileState,
     pub window_entity: Option<Entity>,
-    pub skip_metadata_capture: bool,
-    pub metadata_capture_blocked_until: Option<Instant>,
-
-    // TODO: Consider making relayout an event.
-    // pub relayout_phase: WindowRelayoutPhase,
-    pub applied_screen: Option<usize>,
-    pub applied_rect: Option<WindowRect>,
 }
 
 #[derive(Clone, Default)]
@@ -198,44 +192,11 @@ impl SecondaryWindowState {
         }
     }
 
-    pub fn extend_metadata_capture_block(&mut self, duration: Duration) {
-        let candidate = Instant::now() + duration;
-        if self
-            .metadata_capture_blocked_until
-            .map(|current| candidate > current)
-            .unwrap_or(true)
-        {
-            self.metadata_capture_blocked_until = Some(candidate);
-        }
-    }
-
-    pub fn clear_metadata_capture_block(&mut self) {
-        self.metadata_capture_blocked_until = None;
-    }
-
-    pub fn is_metadata_capture_blocked(&mut self) -> bool {
-        if let Some(until) = self.metadata_capture_blocked_until {
-            if Instant::now() < until {
-                return true;
-            }
-            self.metadata_capture_blocked_until = None;
-        }
-        false
-    }
-
     pub fn update_descriptor_from_window(
         &mut self,
         window: &Window,
         screens: &Query<(Entity, &Monitor)>,
     ) {
-        if self.is_metadata_capture_blocked() {
-            return;
-        }
-        if self.skip_metadata_capture {
-            self.skip_metadata_capture = false;
-            return;
-        }
-
         let position = match window.position {
             WindowPosition::At(pos) => pos,
             WindowPosition::Centered(_) | WindowPosition::Automatic => IVec2::ZERO,
@@ -282,14 +243,6 @@ impl SecondaryWindowState {
         window: &WinitWindow,
         screens: &[MonitorHandle],
     ) -> bool {
-        if self.is_metadata_capture_blocked() {
-            return false;
-        }
-        if self.skip_metadata_capture {
-            self.skip_metadata_capture = false;
-            return false;
-        }
-
         let current_monitor = window.current_monitor();
         let outer_position = window.outer_position().ok();
         let outer_size = window.outer_size();
@@ -504,10 +457,6 @@ impl WindowManager {
             tile_state,
             window_entity: None,
             graph_entities: Vec::new(),
-            applied_screen: None,
-            applied_rect: None,
-            skip_metadata_capture: false,
-            metadata_capture_blocked_until: None,
         });
         id
     }
