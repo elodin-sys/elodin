@@ -8,9 +8,11 @@ mod degrees;
 mod fft;
 mod fftfreq;
 mod norm;
+mod rotate;
 mod sign;
 mod sqrt;
 mod time_slice;
+mod translate;
 pub use abs::*;
 pub use arccos::*;
 pub use atan2::*;
@@ -19,9 +21,11 @@ pub use degrees::*;
 pub use fft::*;
 pub use fftfreq::*;
 pub use norm::*;
+pub use rotate::*;
 pub use sign::*;
 pub use sqrt::*;
 pub use time_slice::*;
+pub use translate::*;
 
 use crate::{Context, Error, Expr};
 use std::collections::HashMap;
@@ -129,10 +133,18 @@ pub fn create_default_registry() -> FormulaRegistry {
     registry.register(Fft);
     registry.register(FftFreq);
     registry.register(Norm);
+    registry.register(RotateX);
+    registry.register(RotateY);
+    registry.register(RotateZ);
+    registry.register(Rotate);
     registry.register(Sign);
     registry.register(Sqrt);
     registry.register(TimeSlice::Last(None));
     registry.register(TimeSlice::First(None));
+    registry.register(TranslateX);
+    registry.register(TranslateY);
+    registry.register(TranslateZ);
+    registry.register(Translate);
 
     registry
 }
