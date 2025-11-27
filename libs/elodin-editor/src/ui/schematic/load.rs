@@ -1,4 +1,5 @@
 use bevy::{ecs::system::SystemParam, prelude::*};
+use bevy_defer::{AsyncCommandsExtension, AsyncWorld};
 use bevy_egui::egui::{Color32, Id};
 use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::{Container, Tile, TileId};
@@ -16,7 +17,6 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-use bevy_defer::{AsyncWorld, AsyncCommandsExtension};
 
 #[cfg(target_os = "linux")]
 const NOTIFY_SILENCE: Duration = Duration::from_millis(3000);
@@ -36,8 +36,8 @@ use crate::{
         query_plot::QueryPlotData,
         schematic::EqlExt,
         tiles::{
-            DashboardPane, GraphPane, Pane, WindowDescriptor, WindowId,
-            WindowState, TileState, TreePane, ViewportPane, WindowManager,
+            DashboardPane, GraphPane, Pane, TileState, TreePane, ViewportPane, WindowDescriptor,
+            WindowId, WindowManager, WindowState,
         },
     },
     vector_arrow::VectorArrowState,
@@ -70,7 +70,6 @@ pub struct LoadSchematicParams<'w, 's> {
     vector_arrows: Query<'w, 's, Entity, With<VectorArrowState>>,
     grid_lines: Query<'w, 's, Entity, With<InfiniteGrid>>,
     window_states: Query<'w, 's, (Entity, &'static WindowId, &'static WindowState)>,
-    
 }
 
 pub fn sync_schematic(
@@ -196,7 +195,7 @@ impl LoadSchematicParams<'_, '_> {
     pub fn load_schematic(&mut self, schematic: &Schematic, base_dir: Option<&Path>) {
         self.render_layer_alloc.free_all();
         for (id, window_id, window_state) in self.window_states {
-        // for secondary in self.windows.take_secondary() {
+            // for secondary in self.windows.take_secondary() {
             for graph in window_state.graph_entities.iter() {
                 self.commands.entity(*graph).despawn();
             }
@@ -284,7 +283,9 @@ impl LoadSchematicParams<'_, '_> {
                             self.commands.spawn_task(|| async move {
                                 // Wait a bit then capture the window descriptor.
                                 AsyncWorld.sleep(SECONDARY_RECT_CAPTURE_LOAD_GUARD).await;
-                                AsyncWorld.send_event(crate::ui::tiles::WindowRelayout::UpdateDescriptors)?;
+                                AsyncWorld.send_event(
+                                    crate::ui::tiles::WindowRelayout::UpdateDescriptors,
+                                )?;
                                 Ok(())
                             });
                         }
@@ -309,7 +310,6 @@ impl LoadSchematicParams<'_, '_> {
                 }
             }
         }
-
     }
 
     pub fn spawn_object_3d(&mut self, object_3d: Object3D) {

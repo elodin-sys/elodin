@@ -17,6 +17,7 @@ use bevy::{
         WindowCloseRequested, WindowMoved, WindowRef, WindowResized, WindowResolution,
     },
 };
+use bevy_defer::{AccessError, AsyncAccess, AsyncCommandsExtension, AsyncPlugin, AsyncWorld};
 use bevy_egui::{
     EguiContext, EguiContexts,
     egui::{self, Align2, Color32, Label, RichText},
@@ -29,7 +30,6 @@ use winit::{
     monitor::MonitorHandle,
     window::Window as WinitWindow,
 };
-use bevy_defer::{AsyncPlugin, AsyncWorld, AsyncCommandsExtension, AsyncAccess, AccessError};
 
 pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
     x: 10,
@@ -89,8 +89,8 @@ use crate::{
         gizmos::{MIN_ARROW_LENGTH_SQUARED, evaluate_vector_arrow},
         navigation_gizmo::NavGizmoCamera,
     },
+    tiles::{WindowId, WindowRelayout},
     vector_arrow::VectorArrowState,
-    tiles::{WindowRelayout, WindowId},
 };
 
 use self::inspector::entity::ComponentFilter;
@@ -807,23 +807,30 @@ fn sync_secondary_windows(
 
         let window_entity = commands
             .entity(entity)
-            .insert((window_component,
-                    state.id,
-            ))
+            .insert((window_component, state.id))
             .id();
 
         // state.window_entity = Some(window_entity);
         // state.applied_screen = pre_applied_screen;
         // state.applied_rect = None;
         if let Some(screen) = state.descriptor.screen.as_ref() {
-            commands.send_event(WindowRelayout::Screen { window: window_entity, screen: screen.clone() });
+            commands.send_event(WindowRelayout::Screen {
+                window: window_entity,
+                screen: screen.clone(),
+            });
         }
-        
+
         if let Some(rect) = state.descriptor.screen_rect.as_ref() {
-            commands.send_event(WindowRelayout::Rect { window: window_entity, rect: rect.clone() });
+            commands.send_event(WindowRelayout::Rect {
+                window: window_entity,
+                rect: rect.clone(),
+            });
         }
         existing_map.insert(state.id, window_entity);
-        info!("Created window entity {window_entity} with window id {:?}", state.id);
+        info!(
+            "Created window entity {window_entity} with window id {:?}",
+            state.id
+        );
         let window_ref = WindowRef::Entity(window_entity);
         for (index, &graph) in state.graph_entities.iter().enumerate() {
             if let Ok(mut camera) = cameras.get_mut(graph) {
@@ -838,15 +845,11 @@ fn sync_secondary_windows(
 
 /// Wait until a winit window is created or timeout. Return true when found or
 /// false on timeout.
-async fn wait_for_winit_window(window_id: Entity,
-                               timeout: Duration)
-                               -> Result<bool, AccessError> {
+async fn wait_for_winit_window(window_id: Entity, timeout: Duration) -> Result<bool, AccessError> {
     let start = Instant::now();
     let winit_windows_async = AsyncWorld.non_send_resource::<bevy::winit::WinitWindows>();
     while start.elapsed() < timeout {
-        if winit_windows_async.get(|winit_windows| {
-            winit_windows.get_window(window_id).is_some()
-        })? {
+        if winit_windows_async.get(|winit_windows| winit_windows.get_window(window_id).is_some())? {
             return Ok(true);
         }
         AsyncWorld.yield_now().await;
@@ -860,10 +863,11 @@ async fn wait_for_winit_window(window_id: Entity,
 /// set_screen_for_window(id, 2);
 /// let success = wait_for_window_to_change_screens(id, 2, Duration::millis(2000)).await?;
 /// ```
-async fn wait_for_window_to_change_screens(window_id: Entity,
-                                           target_screen: usize,
-                                           timeout: Duration)
-                                           -> Result<bool, AccessError> {
+async fn wait_for_window_to_change_screens(
+    window_id: Entity,
+    target_screen: usize,
+    timeout: Duration,
+) -> Result<bool, AccessError> {
     let start = Instant::now();
     let winit_windows_async = AsyncWorld.non_send_resource::<bevy::winit::WinitWindows>();
     while start.elapsed() < timeout {
@@ -881,9 +885,13 @@ async fn wait_for_window_to_change_screens(window_id: Entity,
             }
             None
         }) {
-            Ok(Some(result)) => { return Ok(result); }
-            Err(e) => { return Err(e); }
-            _ => { }
+            Ok(Some(result)) => {
+                return Ok(result);
+            }
+            Err(e) => {
+                return Err(e);
+            }
+            _ => {}
         }
 
         AsyncWorld.yield_now().await;
@@ -891,26 +899,23 @@ async fn wait_for_window_to_change_screens(window_id: Entity,
     Ok(false)
 }
 
-async fn apply_window_screen(
-    entity: Entity,
-    screen: usize,
-) -> Result<(), bevy_defer::AccessError> {
-
+async fn apply_window_screen(entity: Entity, screen: usize) -> Result<(), bevy_defer::AccessError> {
     info!(
         window = %entity,
         %screen,
         "apply_window_screen start"
     );
-    if ! wait_for_winit_window(entity, Duration::from_millis(1000)).await? {
+    if !wait_for_winit_window(entity, Duration::from_millis(1000)).await? {
         error!(%entity, "Unable to apply window to screen: winit window not found.");
         return Ok(());
     }
     let window_states = AsyncWorld.query::<&tiles::WindowState>();
-    let mut state = window_states.entity(entity).get_mut(|state| state.clone())?;
+    let mut state = window_states
+        .entity(entity)
+        .get_mut(|state| state.clone())?;
     let winit_windows_async = AsyncWorld.non_send_resource::<bevy::winit::WinitWindows>();
     // This might need to loop.
     let target_monitor_maybe = winit_windows_async.get(|winit_windows| {
-        
         let Some(window) = winit_windows.get_window(entity) else {
             error!(%entity, "No winit window in apply window screen");
             return None;
@@ -955,7 +960,8 @@ async fn apply_window_screen(
     })?;
     if let Some(target_monitor) = target_monitor_maybe {
         // We can't do this await with the `winit_windows_async.get(|| {...})` block.
-        let success = wait_for_window_to_change_screens(entity, 2, Duration::from_millis(1000)).await?;
+        let success =
+            wait_for_window_to_change_screens(entity, 2, Duration::from_millis(1000)).await?;
         let _ = winit_windows_async.get(|winit_windows| {
             let Some(window) = winit_windows.get_window(entity) else {
                 error!(%entity, "No winit window in apply screen");
@@ -972,9 +978,8 @@ async fn apply_window_screen(
                 recenter_window_on_screen(window, &target_monitor);
                 #[cfg(target_os = "macos")]
                 {
-                    window.set_fullscreen(Some(Fullscreen::Borderless(Some(
-                        target_monitor.clone(),
-                    ))));
+                    window
+                        .set_fullscreen(Some(Fullscreen::Borderless(Some(target_monitor.clone()))));
                     window.set_fullscreen(None);
                     recenter_window_on_screen(window, &target_monitor);
                 }
@@ -985,11 +990,11 @@ async fn apply_window_screen(
 }
 fn handle_window_relayout_events(
     mut relayout_events: EventReader<WindowRelayout>,
-    mut commands: Commands
+    mut commands: Commands,
 ) {
     for relayout_event in relayout_events.read().cloned() {
         match relayout_event {
-            WindowRelayout::Screen { window, screen }=> {
+            WindowRelayout::Screen { window, screen } => {
                 info!(
                     // path = %state.descriptor.path.display(),
                     target_screen = screen,
@@ -1001,11 +1006,11 @@ fn handle_window_relayout_events(
                 // state in our components.
                 commands.spawn_task(move || apply_window_screen(window, screen));
                 // state.relayout_phase = tiles::WindowRelayoutPhase::Idle;
-
             }
             WindowRelayout::Rect { window, rect } => {
-
-                commands.spawn_task(move || apply_window_rect(rect, window, Duration::from_millis(1000)));
+                commands.spawn_task(move || {
+                    apply_window_rect(rect, window, Duration::from_millis(1000))
+                });
                 // let Some(window) = winit_windows.get_window(entity) else {
                 //     continue;
                 // };
@@ -1202,8 +1207,11 @@ async fn apply_window_rect(
                 return true;
             }
 
-            let is_full_rect =
-                LINUX_MULTI_WINDOW && rect.x == 0 && rect.y == 0 && rect.width == 100 && rect.height == 100;
+            let is_full_rect = LINUX_MULTI_WINDOW
+                && rect.x == 0
+                && rect.y == 0
+                && rect.width == 100
+                && rect.height == 100;
 
             if window.fullscreen().is_some() {
                 exit_fullscreen(window);
@@ -1225,8 +1233,10 @@ async fn apply_window_rect(
             let screen_width = screen_size.width as i32;
             let screen_height = screen_size.height as i32;
 
-            let requested_width_px = ((rect.width as f64 / 100.0) * screen_width as f64).round() as i32;
-            let requested_height_px = ((rect.height as f64 / 100.0) * screen_height as f64).round() as i32;
+            let requested_width_px =
+                ((rect.width as f64 / 100.0) * screen_width as f64).round() as i32;
+            let requested_height_px =
+                ((rect.height as f64 / 100.0) * screen_height as f64).round() as i32;
             let width_px = requested_width_px.clamp(1, screen_width.max(1));
             let height_px = requested_height_px.clamp(1, screen_height.max(1));
             if width_px != requested_width_px || height_px != requested_height_px {
@@ -1237,7 +1247,8 @@ async fn apply_window_rect(
                 );
             }
 
-            let requested_x = screen_pos.x + ((rect.x as f64 / 100.0) * screen_width as f64).round() as i32;
+            let requested_x =
+                screen_pos.x + ((rect.x as f64 / 100.0) * screen_width as f64).round() as i32;
             let requested_y =
                 screen_pos.y + ((rect.y as f64 / 100.0) * screen_height as f64).round() as i32;
 
@@ -1514,7 +1525,6 @@ fn track_secondary_window_geometry(
     mut windows_state: Query<(&Window, &tiles::WindowId, &mut tiles::WindowState)>,
     mut touched: Local<HashMap<Entity, Option<PhysicalPosition<i32>>>>,
 ) {
-
     for evt in moved_events.read() {
         let position = PhysicalPosition::new(evt.position.x, evt.position.y);
         touched.insert(evt.window, Some(position));
@@ -1787,10 +1797,7 @@ fn capture_primary_window_layout(
         return;
     };
     let layout = &mut windows.primary;
-    if !matches!(
-        layout.relayout_phase,
-        tiles::WindowRelayoutPhase::Idle
-    ) {
+    if !matches!(layout.relayout_phase, tiles::WindowRelayoutPhase::Idle) {
         return;
     }
 
@@ -2013,7 +2020,8 @@ fn render_secondary_windows(world: &mut World) {
         //             .map(|entity| (state.id, entity, compute_secondary_window_title(state)))
         //     })
         //     .collect()
-        world.query::<(Entity, &tiles::WindowId, &tiles::WindowState)>()
+        world
+            .query::<(Entity, &tiles::WindowId, &tiles::WindowState)>()
             .iter(world)
             .map(|(entity, id, state)| (*id, entity, compute_secondary_window_title(state)))
             .collect()
@@ -2117,13 +2125,15 @@ fn set_camera_viewport(
     let mut next_viewport_order = PRIMARY_VIEWPORT_ORDER_BASE;
     let mut next_graph_order = PRIMARY_GRAPH_ORDER_BASE;
     entries.clear();
-    entries.extend(main_camera_query
-        .iter()
-        .map(|(entity, _, graph_state, _)| (entity, graph_state.is_some())));
+    entries.extend(
+        main_camera_query
+            .iter()
+            .map(|(entity, _, graph_state, _)| (entity, graph_state.is_some())),
+    );
     // Stable ordering: non-graph cameras first, then graphs; break ties by entity id.
     entries.sort_by_key(|(entity, is_graph)| (*is_graph, entity.index()));
 
-    for (entity, is_graph) in & entries {
+    for (entity, is_graph) in &entries {
         let Ok((_, viewport_rect, _graph_state, mut camera)) = main_camera_query.get_mut(*entity)
         else {
             continue;
@@ -2180,7 +2190,12 @@ fn set_camera_viewport(
 fn set_secondary_camera_viewport(
     // windows: Res<tiles::WindowManager>,
     mut cameras: Query<(&mut Camera, &ViewportRect, Option<&NavGizmoCamera>)>,
-    window_query: Query<(Entity, &Window, &tiles::WindowState, &bevy_egui::EguiContextSettings)>,
+    window_query: Query<(
+        Entity,
+        &Window,
+        &tiles::WindowState,
+        &bevy_egui::EguiContextSettings,
+    )>,
 ) {
     // for state in &windows.secondary {
     for (window_entity, window, state, egui_settings) in &window_query {

@@ -855,9 +855,7 @@ fn clear_state_new_connection(
         }
     }
     synced_glbs.0.clear();
-    windows
-        .main
-        .clear(&mut commands, &mut selected_object);
+    windows.main.clear(&mut commands, &mut selected_object);
     for (entity, secondary) in &windows_state {
         for graph in secondary.graph_entities.iter() {
             commands.entity(*graph).despawn();
