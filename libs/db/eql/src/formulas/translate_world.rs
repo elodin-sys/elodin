@@ -2,30 +2,30 @@ use crate::{Context, Error, Expr};
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
-pub struct TranslateX;
+pub struct TranslateWorldX;
 
-impl super::Formula for TranslateX {
+impl super::Formula for TranslateWorldX {
     fn name(&self) -> &'static str {
-        "translate_x"
+        "translate_world_x"
     }
 
     fn parse(&self, recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
         if args.len() == 1 {
             // Store as tuple: (receiver, distance)
             Ok(Expr::Formula(
-                Arc::new(TranslateX),
+                Arc::new(TranslateWorldX),
                 Box::new(Expr::Tuple(vec![recv, args[0].clone()])),
             ))
         } else {
             Err(Error::InvalidMethodCall(
-                "translate_x requires one argument: distance".to_string(),
+                "translate_world_x requires one argument: distance".to_string(),
             ))
         }
     }
 
     fn to_qualified_field(&self, _expr: &Expr) -> Result<String, Error> {
         Err(Error::InvalidMethodCall(
-            "translate_x is only supported in editor runtime, not in SQL queries".to_string(),
+            "translate_world_x is only supported in editor runtime, not in SQL queries".to_string(),
         ))
     }
 
@@ -35,48 +35,47 @@ impl super::Formula for TranslateX {
         {
             let value_name = elements[0].to_column_name().unwrap_or_default();
             if !value_name.is_empty() {
-                return Some(format!("translate_x({})", value_name));
+                return Some(format!("translate_world_x({})", value_name));
             }
         }
         None
     }
 
     fn suggestions(&self, expr: &Expr, _context: &Context) -> Vec<String> {
-        // Suggest translate_x for SpatialTransform components (7-element arrays)
         if let Expr::ComponentPart(part) = expr
             && let Some(component) = &part.component
             && component.name.ends_with(".world_pos")
         {
-            return vec!["translate_x(".to_string()];
+            return vec!["translate_world_x(".to_string()];
         }
         Vec::new()
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct TranslateY;
+pub struct TranslateWorldY;
 
-impl super::Formula for TranslateY {
+impl super::Formula for TranslateWorldY {
     fn name(&self) -> &'static str {
-        "translate_y"
+        "translate_world_y"
     }
 
     fn parse(&self, recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
         if args.len() == 1 {
             Ok(Expr::Formula(
-                Arc::new(TranslateY),
+                Arc::new(TranslateWorldY),
                 Box::new(Expr::Tuple(vec![recv, args[0].clone()])),
             ))
         } else {
             Err(Error::InvalidMethodCall(
-                "translate_y requires one argument: distance".to_string(),
+                "translate_world_y requires one argument: distance".to_string(),
             ))
         }
     }
 
     fn to_qualified_field(&self, _expr: &Expr) -> Result<String, Error> {
         Err(Error::InvalidMethodCall(
-            "translate_y is only supported in editor runtime, not in SQL queries".to_string(),
+            "translate_world_y is only supported in editor runtime, not in SQL queries".to_string(),
         ))
     }
 
@@ -86,7 +85,7 @@ impl super::Formula for TranslateY {
         {
             let value_name = elements[0].to_column_name().unwrap_or_default();
             if !value_name.is_empty() {
-                return Some(format!("translate_y({})", value_name));
+                return Some(format!("translate_world_y({})", value_name));
             }
         }
         None
@@ -97,36 +96,36 @@ impl super::Formula for TranslateY {
             && let Some(component) = &part.component
             && component.name.ends_with(".world_pos")
         {
-            return vec!["translate_y(".to_string()];
+            return vec!["translate_world_y(".to_string()];
         }
         Vec::new()
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct TranslateZ;
+pub struct TranslateWorldZ;
 
-impl super::Formula for TranslateZ {
+impl super::Formula for TranslateWorldZ {
     fn name(&self) -> &'static str {
-        "translate_z"
+        "translate_world_z"
     }
 
     fn parse(&self, recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
         if args.len() == 1 {
             Ok(Expr::Formula(
-                Arc::new(TranslateZ),
+                Arc::new(TranslateWorldZ),
                 Box::new(Expr::Tuple(vec![recv, args[0].clone()])),
             ))
         } else {
             Err(Error::InvalidMethodCall(
-                "translate_z requires one argument: distance".to_string(),
+                "translate_world_z requires one argument: distance".to_string(),
             ))
         }
     }
 
     fn to_qualified_field(&self, _expr: &Expr) -> Result<String, Error> {
         Err(Error::InvalidMethodCall(
-            "translate_z is only supported in editor runtime, not in SQL queries".to_string(),
+            "translate_world_z is only supported in editor runtime, not in SQL queries".to_string(),
         ))
     }
 
@@ -136,7 +135,7 @@ impl super::Formula for TranslateZ {
         {
             let value_name = elements[0].to_column_name().unwrap_or_default();
             if !value_name.is_empty() {
-                return Some(format!("translate_z({})", value_name));
+                return Some(format!("translate_world_z({})", value_name));
             }
         }
         None
@@ -147,22 +146,22 @@ impl super::Formula for TranslateZ {
             && let Some(component) = &part.component
             && component.name.ends_with(".world_pos")
         {
-            return vec!["translate_z(".to_string()];
+            return vec!["translate_world_z(".to_string()];
         }
         Vec::new()
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Translate;
+pub struct TranslateWorld;
 
-impl super::Formula for Translate {
+impl super::Formula for TranslateWorld {
     fn name(&self) -> &'static str {
-        "translate"
+        "translate_world"
     }
 
     fn parse(&self, recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
-        // Syntax: pos.translate(x, y, z)
+        // Syntax: pos.translate_world(x, y, z)
         // Parser creates nested tuples: Tuple(Tuple(a, b), c) for f(a, b, c)
         let (x_expr, y_expr, z_expr) = if args.len() == 1 {
             if let Expr::Tuple(outer_elements) = &args[0] {
@@ -177,12 +176,12 @@ impl super::Formula for Translate {
                             )
                         } else {
                             return Err(Error::InvalidMethodCall(
-                                "translate requires three arguments: x, y, z distances".to_string(),
+                                "translate_world requires three arguments: x, y, z distances".to_string(),
                             ));
                         }
                     } else {
                         return Err(Error::InvalidMethodCall(
-                            "translate requires three arguments: x, y, z distances".to_string(),
+                            "translate_world requires three arguments: x, y, z distances".to_string(),
                         ));
                     }
                 } else if outer_elements.len() == 3 {
@@ -194,31 +193,31 @@ impl super::Formula for Translate {
                     )
                 } else {
                     return Err(Error::InvalidMethodCall(
-                        "translate requires three arguments: x, y, z distances".to_string(),
+                        "translate_world requires three arguments: x, y, z distances".to_string(),
                     ));
                 }
             } else {
                 return Err(Error::InvalidMethodCall(
-                    "translate requires three arguments: x, y, z distances".to_string(),
+                    "translate_world requires three arguments: x, y, z distances".to_string(),
                 ));
             }
         } else if args.len() == 3 {
             (args[0].clone(), args[1].clone(), args[2].clone())
         } else {
             return Err(Error::InvalidMethodCall(
-                "translate requires three arguments: x, y, z distances".to_string(),
+                "translate_world requires three arguments: x, y, z distances".to_string(),
             ));
         };
 
         Ok(Expr::Formula(
-            Arc::new(Translate),
+            Arc::new(TranslateWorld),
             Box::new(Expr::Tuple(vec![recv, x_expr, y_expr, z_expr])),
         ))
     }
 
     fn to_qualified_field(&self, _expr: &Expr) -> Result<String, Error> {
         Err(Error::InvalidMethodCall(
-            "translate is only supported in editor runtime, not in SQL queries".to_string(),
+            "translate_world is only supported in editor runtime, not in SQL queries".to_string(),
         ))
     }
 
@@ -228,7 +227,7 @@ impl super::Formula for Translate {
         {
             let value_name = elements[0].to_column_name().unwrap_or_default();
             if !value_name.is_empty() {
-                return Some(format!("translate({})", value_name));
+                return Some(format!("translate_world({})", value_name));
             }
         }
         None
@@ -239,7 +238,7 @@ impl super::Formula for Translate {
             && let Some(component) = &part.component
             && component.name.ends_with(".world_pos")
         {
-            return vec!["translate(".to_string()];
+            return vec!["translate_world(".to_string()];
         }
         Vec::new()
     }
@@ -271,20 +270,18 @@ mod tests {
     }
 
     #[test]
-    fn test_translate_x_parse() {
+    fn test_translate_world_x_parse() {
         let context = create_test_context();
         let expr = context
-            .parse_str("bdx.world_pos.translate_x(1.0)")
+            .parse_str("bdx.world_pos.translate_world_x(-8.0)")
             .unwrap();
 
-        // Verify it creates a Formula expression
         if let Expr::Formula(formula, inner) = expr {
-            assert_eq!(formula.name(), "translate_x");
-            // Inner should be a tuple with receiver and distance
+            assert_eq!(formula.name(), "translate_world_x");
             if let Expr::Tuple(elements) = *inner {
                 assert_eq!(elements.len(), 2);
                 assert!(matches!(elements[0], Expr::ComponentPart(_)));
-                assert!(matches!(elements[1], Expr::FloatLiteral(1.0)));
+                assert!(matches!(elements[1], Expr::FloatLiteral(-8.0)));
             } else {
                 panic!("Expected Tuple in Formula");
             }
@@ -294,64 +291,34 @@ mod tests {
     }
 
     #[test]
-    fn test_translate_y_parse() {
+    fn test_translate_world_parse_debug() {
         let context = create_test_context();
-        let expr = context
-            .parse_str("bdx.world_pos.translate_y(-2.0)")
-            .unwrap();
-
-        if let Expr::Formula(formula, _) = expr {
-            assert_eq!(formula.name(), "translate_y");
-        } else {
-            panic!("Expected Formula expression");
+        let result = context.parse_str("bdx.world_pos.translate_world(-8.0, -8.0, 4.0)");
+        if let Err(e) = &result {
+            eprintln!("Parse error: {}", e);
         }
+        result.unwrap();
     }
 
     #[test]
-    fn test_translate_z_parse() {
+    fn test_translate_world_parse() {
         let context = create_test_context();
         let expr = context
-            .parse_str("bdx.world_pos.translate_z(0.5)")
+            .parse_str("bdx.world_pos.translate_world(-8.0, -8.0, 4.0)")
             .unwrap();
 
         if let Expr::Formula(formula, inner) = expr {
-            assert_eq!(formula.name(), "translate_z");
+            assert_eq!(formula.name(), "translate_world");
             if let Expr::Tuple(elements) = *inner {
-                assert_eq!(elements.len(), 2);
-                assert!(matches!(elements[1], Expr::FloatLiteral(0.5)));
-            }
-        } else {
-            panic!("Expected Formula expression");
-        }
-    }
-
-    #[test]
-    fn test_translate_parse() {
-        let context = create_test_context();
-        let expr = context
-            .parse_str("bdx.world_pos.translate(1.0, 2.0, 3.0)")
-            .unwrap();
-
-        if let Expr::Formula(formula, inner) = expr {
-            assert_eq!(formula.name(), "translate");
-            if let Expr::Tuple(elements) = *inner {
-                assert_eq!(elements.len(), 4); // receiver + 3 distances
+                assert_eq!(elements.len(), 4);
                 assert!(matches!(elements[0], Expr::ComponentPart(_)));
-                assert!(matches!(elements[1], Expr::FloatLiteral(1.0)));
-                assert!(matches!(elements[2], Expr::FloatLiteral(2.0)));
-                assert!(matches!(elements[3], Expr::FloatLiteral(3.0)));
+                assert!(matches!(elements[1], Expr::FloatLiteral(-8.0)));
+                assert!(matches!(elements[2], Expr::FloatLiteral(-8.0)));
+                assert!(matches!(elements[3], Expr::FloatLiteral(4.0)));
             }
         } else {
             panic!("Expected Formula expression");
         }
-    }
-
-    #[test]
-    fn test_translate_x_chaining() {
-        let context = create_test_context();
-        // Test parsing translation (will test chaining in editor compile later)
-        let result = context.parse_str("bdx.world_pos.translate_x(1.0)");
-        assert!(result.is_ok());
     }
 }
 

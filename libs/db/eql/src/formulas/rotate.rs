@@ -163,14 +163,34 @@ impl super::Formula for Rotate {
 
     fn parse(&self, recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
         // Syntax: pos.rotate(x_angle, y_angle, z_angle)
-        // Parser may give us a single Tuple or three separate args
+        // Parser creates nested tuples: Tuple(Tuple(a, b), c) for f(a, b, c)
         let (x_expr, y_expr, z_expr) = if args.len() == 1 {
-            if let Expr::Tuple(tuple_elements) = &args[0] {
-                if tuple_elements.len() == 3 {
+            if let Expr::Tuple(outer_elements) = &args[0] {
+                if outer_elements.len() == 2 {
+                    // Nested tuple: Tuple(Tuple(x, y), z)
+                    if let Expr::Tuple(inner_elements) = &outer_elements[0] {
+                        if inner_elements.len() == 2 {
+                            (
+                                inner_elements[0].clone(),
+                                inner_elements[1].clone(),
+                                outer_elements[1].clone(),
+                            )
+                        } else {
+                            return Err(Error::InvalidMethodCall(
+                                "rotate requires three arguments: x, y, z angles in degrees".to_string(),
+                            ));
+                        }
+                    } else {
+                        return Err(Error::InvalidMethodCall(
+                            "rotate requires three arguments: x, y, z angles in degrees".to_string(),
+                        ));
+                    }
+                } else if outer_elements.len() == 3 {
+                    // Flat tuple (in case parser changes)
                     (
-                        tuple_elements[0].clone(),
-                        tuple_elements[1].clone(),
-                        tuple_elements[2].clone(),
+                        outer_elements[0].clone(),
+                        outer_elements[1].clone(),
+                        outer_elements[2].clone(),
                     )
                 } else {
                     return Err(Error::InvalidMethodCall(

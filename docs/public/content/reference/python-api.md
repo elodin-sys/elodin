@@ -657,6 +657,105 @@ A spatial inertia is a 7D vector that represents the mass, moment of inertia, an
 
     Get the inertia tensor diagonal of the spatial inertia with shape (3,).
 
+<br></br>
+## EQL Viewport Formulas
+
+When defining viewport positions in schematics, you can use EQL (Elodin Query Language) formulas to apply rotations and translations to entity positions. These formulas are chainable and operate on [elodin.WorldPos] (SpatialTransform) data.
+
+### Rotation Formulas
+
+Rotation formulas modify the orientation quaternion of a spatial transform. All angles are specified in degrees.
+
+#### Body-Frame Rotations
+
+Body-frame rotations apply relative to the entity's local coordinate system (the axes rotate with the entity):
+
+- `rotate_x(angle)` - Rotate about the body X axis (roll)
+- `rotate_y(angle)` - Rotate about the body Y axis (pitch)
+- `rotate_z(angle)` - Rotate about the body Z axis (yaw)
+- `rotate(x, y, z)` - Apply combined XYZ Euler rotations in order
+
+**Example - FPV camera rotated 90° right:**
+```kdl
+viewport name=FPVCamera pos="aircraft.world_pos.rotate_z(-90)" show_grid=#true
+```
+
+#### World-Frame Rotations
+
+World-frame rotations apply relative to the world coordinate system (independent of entity orientation):
+
+- `rotate_world_x(angle)` - Rotate about the world X axis
+- `rotate_world_y(angle)` - Rotate about the world Y axis
+- `rotate_world_z(angle)` - Rotate about the world Z axis
+- `rotate_world(x, y, z)` - Apply combined XYZ Euler rotations in world frame
+
+**Example - Camera tilted down 15° in world space:**
+```kdl
+viewport name=TopView pos="satellite.world_pos.rotate_world_y(-15)" look_at="earth.world_pos"
+```
+
+### Translation Formulas
+
+Translation formulas modify the position component of a spatial transform.
+
+#### Body-Frame Translations
+
+Body-frame translations move the camera relative to the entity's local axes (the offset direction rotates with the entity):
+
+- `translate_x(distance)` - Translate along body X axis (forward/back)
+- `translate_y(distance)` - Translate along body Y axis (left/right)
+- `translate_z(distance)` - Translate along body Z axis (up/down)
+- `translate(x, y, z)` - Apply combined XYZ translation
+
+**Example - Camera 2m behind and 1m above in body frame:**
+```kdl
+viewport name=ChaseCamera pos="car.world_pos.translate_x(-2.0).translate_z(1.0)"
+```
+
+#### World-Frame Translations
+
+World-frame translations move the camera in world coordinates (the offset stays fixed regardless of entity orientation):
+
+- `translate_world_x(distance)` - Translate along world X axis (East in ENU)
+- `translate_world_y(distance)` - Translate along world Y axis (North in ENU)
+- `translate_world_z(distance)` - Translate along world Z axis (Up in ENU)
+- `translate_world(x, y, z)` - Apply combined XYZ translation
+
+**Example - Chase camera at fixed world offset:**
+```kdl
+viewport name=Viewport pos="drone.world_pos.translate_world(-5, -5, 3)" look_at="drone.world_pos"
+```
+
+### Chaining Formulas
+
+All rotation and translation formulas can be chained together to create complex camera behaviors:
+
+```kdl
+// Rotate 90° right, then move 2m left in new orientation, then offset up 5m in world space
+viewport pos="jet.world_pos.rotate_z(-90).translate_y(-2.0).translate_world_z(5.0)"
+
+// Multiple rotations
+viewport pos="satellite.world_pos.rotate_x(45).rotate_z(90)"
+
+// Body-frame position then world-frame adjustment
+viewport pos="aircraft.world_pos.translate(1, 0, 0.5).translate_world(0, 0, 10)"
+```
+
+### Usage Notes
+
+- **Body-frame** functions (`rotate`, `translate`) are ideal for:
+  - FPV cameras that move with the vehicle
+  - Wing-mounted or cockpit cameras
+  - Camera positions defined relative to vehicle geometry
+
+- **World-frame** functions (`rotate_world`, `translate_world`) are ideal for:
+  - Chase cameras that maintain fixed world offset
+  - Orbital cameras
+  - External tracking cameras
+
+- Rotations are applied before translations when chained
+- The old `+` operator for viewport positions is equivalent to `translate_world()`
+
 [elodin.World]: #class-elodin-world
 [elodin.EntityId]: #class-elodin-entityid
 [elodin.Panel]: #class-elodin-panel

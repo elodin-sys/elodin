@@ -9,10 +9,12 @@ mod fft;
 mod fftfreq;
 mod norm;
 mod rotate;
+mod rotate_world;
 mod sign;
 mod sqrt;
 mod time_slice;
 mod translate;
+mod translate_world;
 pub use abs::*;
 pub use arccos::*;
 pub use atan2::*;
@@ -22,10 +24,12 @@ pub use fft::*;
 pub use fftfreq::*;
 pub use norm::*;
 pub use rotate::*;
+pub use rotate_world::*;
 pub use sign::*;
 pub use sqrt::*;
 pub use time_slice::*;
 pub use translate::*;
+pub use translate_world::*;
 
 use crate::{Context, Error, Expr};
 use std::collections::HashMap;
@@ -137,6 +141,10 @@ pub fn create_default_registry() -> FormulaRegistry {
     registry.register(RotateY);
     registry.register(RotateZ);
     registry.register(Rotate);
+    registry.register(RotateWorldX);
+    registry.register(RotateWorldY);
+    registry.register(RotateWorldZ);
+    registry.register(RotateWorld);
     registry.register(Sign);
     registry.register(Sqrt);
     registry.register(TimeSlice::Last(None));
@@ -145,6 +153,10 @@ pub fn create_default_registry() -> FormulaRegistry {
     registry.register(TranslateY);
     registry.register(TranslateZ);
     registry.register(Translate);
+    registry.register(TranslateWorldX);
+    registry.register(TranslateWorldY);
+    registry.register(TranslateWorldZ);
+    registry.register(TranslateWorld);
 
     registry
 }

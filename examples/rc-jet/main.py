@@ -64,7 +64,7 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId]:
         """
         tabs {
             hsplit name="Main View" {
-                viewport name=Viewport pos="bdx.world_pos.translate(-8,-8,4)" look_at="bdx.world_pos" show_grid=#true active=#true
+                viewport name=Viewport pos="bdx.world_pos.translate_world(-8.0,-8.0,4.0)" look_at="bdx.world_pos" show_grid=#true active=#true
                 vsplit share=0.4 {
                     vsplit {
                         graph "bdx.alpha, bdx.beta" name="Aero Angles (rad)"
