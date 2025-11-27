@@ -306,7 +306,7 @@ impl Plugin for SchematicPlugin {
     }
 }
 
-fn preferred_secondary_stem(state: &tiles::SecondaryWindowState) -> String {
+fn preferred_secondary_stem(state: &tiles::WindowState) -> String {
     if let Some(title) = state.descriptor.title.as_deref() {
         let stem = sanitize_to_stem(title);
         if !stem.is_empty() {

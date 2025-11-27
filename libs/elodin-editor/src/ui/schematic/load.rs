@@ -37,7 +37,7 @@ use crate::{
         schematic::EqlExt,
         tiles::{
             DashboardPane, GraphPane, Pane, WindowDescriptor, WindowId,
-            SecondaryWindowState, TileState, TreePane, ViewportPane, WindowManager,
+            WindowState, TileState, TreePane, ViewportPane, WindowManager,
         },
     },
     vector_arrow::VectorArrowState,
@@ -275,9 +275,7 @@ impl LoadSchematicParams<'_, '_> {
                             }
                         }
 
-                        let relayout_phase =
-                            SecondaryWindowState::relayout_phase_from_descriptor(&descriptor);
-                        let mut state = SecondaryWindowState {
+                        let state = WindowState {
                             id,
                             descriptor,
                             tile_state,
@@ -286,6 +284,7 @@ impl LoadSchematicParams<'_, '_> {
                         };
                         if state.descriptor.screen_rect.is_some() {
                             self.commands.spawn_task(|| async move {
+                                // Wait a bit then capture the window descriptor.
                                 AsyncWorld.sleep(SECONDARY_RECT_CAPTURE_LOAD_GUARD).await;
                                 AsyncWorld.send_event(crate::ui::tiles::WindowRelayout::UpdateDescriptors)?;
                                 Ok(())

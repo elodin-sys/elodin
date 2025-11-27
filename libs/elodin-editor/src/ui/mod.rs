@@ -39,7 +39,6 @@ pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
 };
 const SCREEN_RELAYOUT_MAX_ATTEMPTS: u8 = 5;
 const SECONDARY_RECT_CAPTURE_LOAD_GUARD: Duration = Duration::from_millis(2500);
-const SECONDARY_RECT_CAPTURE_STABILIZE_GUARD: Duration = Duration::from_millis(400);
 // Order ranges:
 // 0          -> UI/egui (Bevy default)
 // 10..        primary viewports (3D, gizmo/axes…)
@@ -304,13 +303,7 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
-                confirm_secondary_screen_assignment
-                    .after(handle_window_relayout_events)
-                    .before(track_secondary_window_geometry),
-            )
-            .add_systems(
-                Update,
-                track_secondary_window_geometry.after(confirm_secondary_screen_assignment),
+                track_secondary_window_geometry.after(handle_window_relayout_events),
             )
             .add_systems(
                 Update,
@@ -769,7 +762,7 @@ fn sync_secondary_windows(
 
         // Try to pre-size and pre-position the window to its target rect to avoid an
         // extra resize pass (and the resulting swapchain churn).
-        let (resolution, position, pre_applied_screen) = if let Some(rect) =
+        let (resolution, position, _pre_applied_screen) = if let Some(rect) =
             state.descriptor.screen_rect
             && let Some(screen_idx) = state.descriptor.screen
             && let Some(screens) = screens_any.as_ref()
@@ -887,7 +880,7 @@ async fn apply_window_screen(
 ) -> Result<(), bevy_defer::AccessError> {
     let Some(mut state) = AsyncWorld
         .resource_scope::<tiles::WindowManager,
-                          Option<tiles::SecondaryWindowState>>(|windows| {
+                          Option<tiles::WindowState>>(|windows| {
                               windows.find_secondary_by_entity(entity)
                                      .and_then(|id| windows.find_secondary(id).cloned())
                           }) else {
@@ -913,7 +906,7 @@ async fn apply_window_screen(
             } else if window.fullscreen().is_some() {
                 exit_fullscreen(window);
             }
-            complete_screen_assignment(&mut state, "Confirmed screen assignment (sync)");
+            info!(%entity, "Confirmed screen assignment (sync)");
             return None;
         }
 
@@ -937,7 +930,7 @@ async fn apply_window_screen(
                 "screen out of range; skipping screen assignment"
             );
             state.descriptor.screen = None;
-            complete_screen_assignment(&mut state, "screen out of range");
+            warn!(%entity, "screen out of range");
             None
         }
     })?;
@@ -1137,7 +1130,7 @@ fn apply_primary_window_layout(
 }
 
 async fn apply_window_rect(
-    // state: &mut tiles::SecondaryWindowState,
+    // state: &mut tiles::WindowState,
     rect: WindowRect,
     entity: Entity,
     timeout: Duration,
@@ -1157,7 +1150,7 @@ async fn apply_window_rect(
 
     let Some(state) = AsyncWorld
         .resource_scope::<tiles::WindowManager,
-                          Option<tiles::SecondaryWindowState>>(|windows| {
+                          Option<tiles::WindowState>>(|windows| {
                               windows.find_secondary_by_entity(entity)
                                      .and_then(|id| windows.find_secondary(id).cloned())
                           }) else {
@@ -1287,7 +1280,6 @@ async fn apply_window_rect(
                     // state.applied_rect = Some(rect);
                     // state.skip_metadata_capture = true;
                     // state.clear_metadata_capture_block();
-                    // state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_STABILIZE_GUARD);
                     info!(
                         path = %state.descriptor.path.display(),
                         rect = ?rect,
@@ -1326,7 +1318,7 @@ async fn apply_window_rect(
 }
 
 fn assign_window_to_screen(
-    // state: &mut tiles::SecondaryWindowState,
+    // state: &mut tiles::WindowState,
     window: &WinitWindow,
     target_monitor: MonitorHandle,
 ) {
@@ -1347,34 +1339,6 @@ fn assign_window_to_screen(
     force_windowed(window);
     window.set_outer_position(PhysicalPosition::new(x, y));
     // state.skip_metadata_capture = true;
-}
-
-fn complete_screen_assignment(
-    state: &mut tiles::SecondaryWindowState,
-    reason: &'static str,
-) {
-    // state.applied_screen = state.descriptor.screen;
-    // // If a rect was already applied, don't re-enter NeedRect and reconfigure swapchain.
-    // // state.relayout_phase = match state.descriptor.screen_rect {
-    // //     Some(rect) if state.applied_rect != Some(rect) => {
-    // //         state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_LOAD_GUARD);
-    // //         tiles::WindowRelayoutPhase::NeedRect
-    // //     }
-    // //     _ => {
-    // //         state.clear_metadata_capture_block();
-    // //         tiles::WindowRelayoutPhase::Idle
-    // //     }
-    // // };
-
-    // info!(
-    //     screen = state
-    //         .descriptor
-    //         .screen
-    //         .map(|idx| idx as i32)
-    //         .unwrap_or(-1),
-    //     path = %state.descriptor.path.display(),
-    //     "{reason}"
-    // );
 }
 
 fn complete_primary_screen_assignment(
@@ -1579,44 +1543,6 @@ fn capture_secondary_window_screens_oneoff(
     }
 }
 
-fn confirm_secondary_screen_assignment(
-    mut moved_events: EventReader<WindowMoved>,
-    mut resized_events: EventReader<WindowResized>,
-    mut windows: ResMut<tiles::WindowManager>,
-    winit_windows: NonSend<bevy::winit::WinitWindows>,
-) {
-    // let mut touched: Vec<Entity> = Vec::new();
-    // touched.extend(moved_events.read().map(|evt| evt.window));
-    // touched.extend(resized_events.read().map(|evt| evt.window));
-    // touched.sort_unstable();
-    // touched.dedup();
-
-    // for entity in touched {
-    //     let Some(id) = windows.find_secondary_by_entity(entity) else {
-    //         continue;
-    //     };
-    //     let Some(state) = windows.find_secondary_mut(id) else {
-    //         continue;
-    //     };
-    //     if !matches!(
-    //         state.relayout_phase,
-    //         tiles::WindowRelayoutPhase::NeedScreen
-    //     ) {
-    //         continue;
-    //     }
-    //     let Some(window) = winit_windows.get_window(entity) else {
-    //         continue;
-    //     };
-    //     let screens_sorted = collect_sorted_screens(window);
-    //     if window_on_target_screen(state, window, &screens_sorted) {
-    //         complete_screen_assignment(
-    //             state,
-    //             "Confirmed screen assignment for secondary window",
-    //         );
-    //     }
-    // }
-}
-
 fn track_secondary_window_geometry(
     mut moved_events: EventReader<WindowMoved>,
     mut resized_events: EventReader<WindowResized>,
@@ -1753,7 +1679,7 @@ fn fix_visibility_hierarchy(
 }
 
 fn record_window_rect_from_window(
-    state: &mut tiles::SecondaryWindowState,
+    state: &mut tiles::WindowState,
     window: &WinitWindow,
     screens: &[MonitorHandle],
     forced_position: Option<PhysicalPosition<i32>>,
@@ -1808,7 +1734,7 @@ fn event_position_is_reliable(
 }
 
 fn window_on_target_screen(
-    state: &mut tiles::SecondaryWindowState,
+    state: &mut tiles::WindowState,
     window: &WinitWindow,
     screens: &[MonitorHandle],
 ) -> bool {
@@ -2029,7 +1955,7 @@ fn handle_primary_close(
     }
 }
 
-fn secondary_window_container_title(state: &tiles::SecondaryWindowState) -> Option<String> {
+fn secondary_window_container_title(state: &tiles::WindowState) -> Option<String> {
     let root = state.tile_state.tree.root()?;
     find_named_container_title(
         &state.tile_state.tree,
@@ -2170,7 +2096,7 @@ fn render_secondary_windows(world: &mut World) {
     }
 }
 
-pub(crate) fn compute_secondary_window_title(state: &tiles::SecondaryWindowState) -> String {
+pub(crate) fn compute_secondary_window_title(state: &tiles::WindowState) -> String {
     state
         .descriptor
         .title

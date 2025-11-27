@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::{
     fmt::Write as _,
     path::PathBuf,
-    time::{Duration, Instant},
+    time::Instant,
 };
 use winit::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -115,8 +115,11 @@ pub enum WindowRelayoutPhase {
 
 #[derive(Event, Clone, Debug, PartialEq, Eq)]
 pub enum WindowRelayout {
+    /// Move window to given screen.
     Screen { window: Entity, screen: usize },
+    /// Set window to given rect.
     Rect { window: Entity, rect: WindowRect },
+    /// Update all window descriptors.
     UpdateDescriptors,
 }
 
@@ -130,8 +133,8 @@ impl WindowId {
     }
 }
 
-#[derive(Clone)]
-pub struct SecondaryWindowState {
+#[derive(Component, Clone)]
+pub struct WindowState {
     pub id: WindowId,
     pub descriptor: WindowDescriptor,
     pub graph_entities: Vec<Entity>,
@@ -179,19 +182,7 @@ impl PrimaryWindowLayout {
     }
 }
 
-impl SecondaryWindowState {
-    pub fn relayout_phase_from_descriptor(
-        descriptor: &WindowDescriptor,
-    ) -> WindowRelayoutPhase {
-        if descriptor.screen.is_some() {
-            WindowRelayoutPhase::NeedScreen
-        } else if descriptor.screen_rect.is_some() {
-            WindowRelayoutPhase::NeedRect
-        } else {
-            WindowRelayoutPhase::Idle
-        }
-    }
-
+impl WindowState {
     pub fn update_descriptor_from_window(
         &mut self,
         window: &Window,
@@ -363,7 +354,7 @@ pub(crate) fn clamp_percent(value: f32) -> u32 {
 pub struct WindowManager {
     pub main: TileState,
     pub primary: PrimaryWindowLayout,
-    pub secondary: Vec<SecondaryWindowState>,
+    pub secondary: Vec<WindowState>,
     pub next_id: u32,
 }
 
@@ -388,7 +379,7 @@ impl WindowManager {
         std::mem::take(&mut self.main)
     }
 
-    pub fn take_secondary(&mut self) -> Vec<SecondaryWindowState> {
+    pub fn take_secondary(&mut self) -> Vec<WindowState> {
         std::mem::take(&mut self.secondary)
     }
 
@@ -398,14 +389,14 @@ impl WindowManager {
         id
     }
 
-    pub fn find_secondary(&self, id: WindowId) -> Option<&SecondaryWindowState> {
+    pub fn find_secondary(&self, id: WindowId) -> Option<&WindowState> {
         self.secondary.iter().find(|s| s.id == id)
     }
 
     pub fn find_secondary_mut(
         &mut self,
         id: WindowId,
-    ) -> Option<&mut SecondaryWindowState> {
+    ) -> Option<&mut WindowState> {
         self.secondary.iter_mut().find(|s| s.id == id)
     }
 
@@ -443,7 +434,6 @@ impl WindowManager {
             screen: None,
             screen_rect: None,
         };
-        let relayout_phase = SecondaryWindowState::relayout_phase_from_descriptor(&descriptor);
         let tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
         info!(
             id = id.0,
@@ -451,7 +441,7 @@ impl WindowManager {
             path = %descriptor.path.display(),
             "Created secondary window"
         );
-        self.secondary.push(SecondaryWindowState {
+        self.secondary.push(WindowState {
             id,
             descriptor,
             tile_state,
