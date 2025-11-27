@@ -249,7 +249,7 @@ impl LoadSchematicParams<'_, '_> {
             match std::fs::read_to_string(&descriptor.path) {
                 Ok(kdl) => match impeller2_wkt::Schematic::from_kdl(&kdl) {
                     Ok(sec_schematic) => {
-                        let id = self.windows.alloc_id();
+                        let id = WindowId::default();
                         let mut tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
                         for elem in &sec_schematic.elems {
                             if let impeller2_wkt::SchematicElem::Panel(panel) = elem {

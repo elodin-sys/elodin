@@ -21,6 +21,7 @@ use impeller2_wkt::{Dashboard, Graph, Viewport, WindowRect};
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, HashMap};
 use std::{
+    sync::atomic::{Ordering, AtomicU32},
     fmt::Write as _,
     path::PathBuf,
     time::Instant,
@@ -132,6 +133,16 @@ impl WindowId {
         self.0 == 0
     }
 }
+
+impl Default for WindowId {
+    fn default() -> Self {
+        static NEXT_ID: AtomicU32 = AtomicU32::new(1);
+
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        WindowId(id)
+    }
+}
+
 
 #[derive(Component, Clone)]
 pub struct WindowState {
@@ -353,7 +364,6 @@ pub(crate) fn clamp_percent(value: f32) -> u32 {
 pub struct WindowManager {
     pub main: TileState,
     pub primary: PrimaryWindowLayout,
-    pub next_id: u32,
 }
 
 impl Default for WindowManager {
@@ -361,7 +371,6 @@ impl Default for WindowManager {
         Self {
             main: TileState::new(Id::new("main_tab_tree")),
             primary: PrimaryWindowLayout::default(),
-            next_id: 1,
         }
     }
 }
@@ -377,7 +386,7 @@ impl WindowManager {
     }
 
     pub fn create_secondary_window(&mut self, title: Option<String>) -> WindowState {
-        let id = self.alloc_id();
+        let id = WindowId::default();
         let cleaned_title = title.and_then(|t| {
             let trimmed = t.trim();
             if trimmed.is_empty() {
