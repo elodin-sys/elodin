@@ -271,6 +271,7 @@ pub struct TileParam<'w, 's> {
 // }
 
 impl<'w, 's> TileParam<'w, 's> {
+    /// TODO: Switch from using `WindowId` to `Entity` for lookup.
     pub fn target(&mut self, target: Option<tiles::WindowId>) -> Option<Mut<'_, tiles::TileState>> {
         match target {
             // Look up a specific window and project its WindowState -> TileState

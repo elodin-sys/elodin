@@ -106,6 +106,7 @@ impl WindowDescriptor {
     }
 }
 
+/// TODO: Remove this once `PrimaryWindowLayout` is gone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum WindowRelayoutPhase {
     #[default]
@@ -114,6 +115,7 @@ pub enum WindowRelayoutPhase {
     NeedRect,
 }
 
+/// Events dealing with window layout.
 #[derive(Event, Clone, Debug, PartialEq, Eq)]
 pub enum WindowRelayout {
     /// Move window to given screen.
@@ -125,7 +127,7 @@ pub enum WindowRelayout {
 }
 
 /// The primary window is 0; all other windows are secondary windows.
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash, Reflect)]
 pub struct WindowId(pub u32);
 
 impl WindowId {
@@ -135,9 +137,9 @@ impl WindowId {
 }
 
 impl Default for WindowId {
+    /// Return a new `WindowId` that's auto-incremented starting from 1.
     fn default() -> Self {
         static NEXT_ID: AtomicU32 = AtomicU32::new(1);
-
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         WindowId(id)
     }
@@ -145,12 +147,20 @@ impl Default for WindowId {
 
 #[derive(Component, Clone)]
 pub struct WindowState {
+    // TODO: Decide to keep this `id` field or use `WindowId` as a component.
     pub id: WindowId,
     pub descriptor: WindowDescriptor,
     pub graph_entities: Vec<Entity>,
     pub tile_state: TileState,
 }
 
+// TOOD: Seek to remove this by using async and `WindowState` with the primary
+// window.
+//
+// The primary window ought to have a `WindowId(0)` component and a
+// `WindowState` component but otherwise be handled almost like a regular
+// window. For state-less distinctions use `window_id.is_primary()`. If state is
+// required only for the primary window, use a new or old component.
 #[derive(Clone, Default)]
 pub struct PrimaryWindowLayout {
     pub screen: Option<usize>,
@@ -358,9 +368,13 @@ pub(crate) fn clamp_percent(value: f32) -> u32 {
     value.round().clamp(0.0, 100.0) as u32
 }
 
+// TODO: Remove this by making the primary window use `WindowState` too.
 #[derive(Resource)]
 pub struct WindowManager {
+    // TODO: We can avoid this state by making the primary window use `WindowState`
+    // which has a `TileState` field.
     pub main: TileState,
+    // TODO: Refactor and try to eliminate.
     pub primary: PrimaryWindowLayout,
 }
 
@@ -382,6 +396,8 @@ impl WindowManager {
         std::mem::take(&mut self.main)
     }
 
+    /// Creates a `WindowState`. Must be spawned with a `WindowId` to create an
+    /// actual window.
     pub fn create_secondary_window(&mut self, title: Option<String>) -> WindowState {
         let id = WindowId::default();
         let cleaned_title = title.and_then(|t| {
