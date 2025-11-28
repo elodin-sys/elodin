@@ -13,7 +13,6 @@ Usage:
 
 import elodin as el
 import jax.numpy as jnp
-import numpy as np
 
 from config import BDXConfig
 from sim import BDXJet, system
@@ -67,10 +66,8 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId]:
                 viewport name=Viewport pos="bdx.world_pos.translate_world(-8.0,-8.0,4.0)" look_at="bdx.world_pos" show_grid=#true active=#true
                 vsplit share=0.4 {
                     vsplit {
-                        graph "bdx.alpha, bdx.beta" name="Aero Angles (rad)"
-                        graph "bdx.aero_coefs" name="Aero Coefficients"
+                        graph "bdx.alpha" name="Angle of Attack (rad)"
                         graph "bdx.thrust" name="Thrust (N)"
-                        graph "bdx.spool_speed" name="Spool Speed"
                         viewport name=FPVViewport pos="bdx.world_pos.rotate_z(-90).translate_y(-2.0)" show_grid=#true
                     }
                 }
@@ -93,11 +90,11 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId]:
             vsplit name="Aerodynamics" {
                 hsplit {
                     graph "bdx.alpha" name="Angle of Attack (rad)"
-                    graph "bdx.beta" name="Sideslip Angle (rad)"
+                    graph "bdx.beta" name="Sideslip (rad)"
                 }
                 hsplit {
-                    graph "bdx.aero_coefs[0], bdx.aero_coefs[1]" name="CL, CD"
-                    graph "bdx.aero_coefs[2], bdx.aero_coefs[3], bdx.aero_coefs[4], bdx.aero_coefs[5]" name="CY, Cl, Cm, Cn"
+                    graph "bdx.aero_coefs.CL, bdx.aero_coefs.CD" name="CL, CD"
+                    graph "bdx.aero_coefs.Cm" name="Pitch Moment Cm"
                 }
             }
         }
@@ -132,8 +129,8 @@ world, jet = setup_world(config)
 # Build system
 sim_system = system()
 
-print(f"BDX RC Jet Simulation")
-print(f"=====================")
+print("BDX RC Jet Simulation")
+print("=====================")
 print(f"Initial altitude: {config.initial_altitude:.1f} m")
 print(f"Initial speed: {config.initial_speed:.1f} m/s")
 print(f"Mass: {config.mass:.1f} kg")

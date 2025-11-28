@@ -18,19 +18,21 @@ class AeroCoefficients:
     """Longitudinal and lateral-directional stability derivatives."""
     
     # Longitudinal coefficients (Section 3.3 of whitepaper)
-    C_L0: float = 0.15      # Zero-α lift
-    C_Lalpha: float = 5.5   # Lift curve slope (/rad)
-    C_Lq: float = 8.0       # Pitch damping contribution to lift (/rad)
-    C_Lde: float = 0.4      # Elevator effectiveness on lift (/rad)
+    # NOTE: Trimmed for level flight at 70 m/s
+    # Required CL = W/(q*S) = 186/(3001*0.75) = 0.083
+    C_L0: float = 0.083     # Exactly trimmed for level flight
+    C_Lalpha: float = 0.5   # Very gentle lift slope for stability
+    C_Lq: float = 1.0       # Low pitch-lift coupling
+    C_Lde: float = 0.1      # Low elevator-lift coupling
     
     C_D0: float = 0.025     # Parasite drag
     C_Dde: float = 0.02     # Control surface drag (/rad)
     k: float = 0.045        # Induced drag factor
     
-    C_m0: float = 0.0       # Trim pitching moment
-    C_malpha: float = -1.2  # Static stability (/rad)
-    C_mq: float = -20.0     # Pitch damping (/rad)
-    C_mde: float = -1.5     # Elevator control power (/rad)
+    C_m0: float = 0.0       # Trim pitching moment (assuming trimmed)
+    C_malpha: float = -0.5  # Moderate static stability
+    C_mq: float = -20.0     # Very strong pitch damping - prevents oscillation
+    C_mde: float = +0.5     # Moderate elevator control
     
     # Lateral-directional coefficients
     C_Ybeta: float = -0.5   # Side force due to sideslip (/rad)
@@ -60,7 +62,7 @@ class PropulsionParams:
     """Turbine engine parameters."""
     
     max_thrust: float = 200.0   # Maximum thrust (N) - P200 class turbine
-    spool_tau: float = 0.5      # Spool time constant (s)
+    spool_tau: float = 0.3      # Spool time constant (s) - faster for RC application
     thrust_a1: float = 0.2      # Linear thrust coefficient
     thrust_a2: float = 0.8      # Quadratic thrust coefficient
     idle_spool: float = 0.2     # Idle spool speed (normalized)
@@ -106,16 +108,16 @@ class BDXConfig:
     # Actuators
     actuators: ActuatorParams = None
     
-    # Initial conditions
-    initial_speed: float = 40.0     # m/s (cruise speed)
-    initial_altitude: float = 100.0 # m
-    initial_pitch_deg: float = 0.0  # degrees
+    # Initial conditions - start in fast cruise (easier to stabilize)
+    initial_speed: float = 70.0     # m/s (fast cruise - more stable)
+    initial_altitude: float = 50.0  # m (higher altitude)
+    initial_pitch_deg: float = 0.0  # degrees (level on runway)
     initial_roll_deg: float = 0.0   # degrees
-    initial_yaw_deg: float = 0.0    # degrees
+    initial_yaw_deg: float = 0.0    # degrees (aligned with runway)
     
     # Simulation parameters
     dt: float = 1.0 / 120.0         # 120 Hz simulation rate
-    simulation_time: float = 60.0   # Total simulation time (s)
+    simulation_time: float = 180.0  # Total simulation time (s) - 3 minutes for full pattern
     
     def __post_init__(self):
         """Initialize sub-configurations if not provided."""

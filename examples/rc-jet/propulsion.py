@@ -43,6 +43,22 @@ Thrust = ty.Annotated[
     ),
 ]
 
+# Import ControlCommands type (define locally to avoid circular import)
+ControlCommands = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "control_commands",
+        el.ComponentType(el.PrimitiveType.F64, (4,)),
+        metadata={"element_names": "elevator,aileron,rudder,throttle"},
+    ),
+]
+
+
+@el.map
+def extract_throttle_command(commands: ControlCommands) -> ThrottleCommand:
+    """Extract throttle from control commands array."""
+    return commands[3]  # Throttle is 4th element
+
 
 @el.map
 def spool_dynamics(

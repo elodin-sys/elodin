@@ -41,7 +41,7 @@ pub struct InputMappings {
 /// Mapping for a 3D vector (x, y, z) from a component
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Vec3Mapping {
-    /// The Elodin-DB component name (e.g., "drone.world_pos")
+    /// The Elodin-DB component name (e.g., "bdx.world_pos")
     pub component: String,
     /// Array index for x value
     pub x: usize,
@@ -54,7 +54,7 @@ pub struct Vec3Mapping {
 /// Mapping for a quaternion (q0, q1, q2, q3) from a component
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuatMapping {
-    /// The Elodin-DB component name (e.g., "drone.world_pos")
+    /// The Elodin-DB component name (e.g., "bdx.world_pos")
     pub component: String,
     /// Array index for q0 (w) value
     pub q0: usize,
@@ -83,22 +83,22 @@ impl Default for Config {
                 baud: 115200,
             },
             inputs: InputMappings {
-                // Default to drone example mappings
+                // Default to rc jet example mappings
                 position: Vec3Mapping {
-                    component: "drone.world_pos".to_string(),
+                    component: "bdx.world_pos".to_string(),
                     x: 4,
                     y: 5,
                     z: 6,
                 },
                 orientation: QuatMapping {
-                    component: "drone.world_pos".to_string(),
+                    component: "bdx.world_pos".to_string(),
                     q0: 0,
                     q1: 1,
                     q2: 2,
                     q3: 3,
                 },
                 velocity: Vec3Mapping {
-                    component: "drone.world_vel".to_string(),
+                    component: "bdx.world_vel".to_string(),
                     x: 3,
                     y: 4,
                     z: 5,

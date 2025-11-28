@@ -64,7 +64,7 @@ impl TelemetryState {
     }
 
     /// Get heading in degrees (0-360), derived from orientation
-    /// Uses 3-2-1 Euler sequence matching drone simulation
+    /// Uses 3-2-1 Euler sequence matching rc jet simulation
     pub fn heading_deg(&self) -> f64 {
         // Note: roll and yaw are swapped due to coordinate system
         let (roll, _, _) = self.quat_to_euler_321();
@@ -80,7 +80,7 @@ impl TelemetryState {
     }
 
     /// Get roll angle in degrees
-    /// Uses 3-2-1 Euler sequence matching drone simulation
+    /// Uses 3-2-1 Euler sequence matching rc jet simulation
     pub fn roll_deg(&self) -> f64 {
         // Note: roll and yaw are swapped due to coordinate system
         let (_, _, yaw) = self.quat_to_euler_321();
@@ -98,14 +98,14 @@ impl TelemetryState {
     }
 
     /// Get pitch angle in degrees
-    /// Uses 3-2-1 Euler sequence matching drone simulation
+    /// Uses 3-2-1 Euler sequence matching rc jet simulation
     pub fn pitch_deg(&self) -> f64 {
         let (_, pitch, _) = self.quat_to_euler_321();
         pitch.to_degrees()
     }
 
     /// Convert quaternion to Euler angles (roll, pitch, yaw) in 3-2-1 sequence
-    /// Matches the drone simulation's conversion from examples/drone/util.py
+    /// Matches the rc jet simulation's conversion from examples/rc-jet/util.py
     /// See: https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles#Quaternion_to_Euler_angles_(in_3-2-1_sequence)_conversion
     fn quat_to_euler_321(&self) -> (f64, f64, f64) {
         let q = &self.orientation;

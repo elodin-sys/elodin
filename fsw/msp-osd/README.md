@@ -26,9 +26,9 @@ The OSD requires three inputs in world frame, all configured via `config.toml`:
 
 The `config.toml` file uses declarative input mappings to specify how to extract these values from Elodin-DB components.
 
-### Drone Example Configuration
+### BDX RC Jet Example Configuration
 
-For the drone simulation, `world_pos` contains `[q0, q1, q2, q3, x, y, z]` and `world_vel` contains `[ωx, ωy, ωz, vx, vy, vz]`:
+For the bdx simulation, `world_pos` contains `[q0, q1, q2, q3, x, y, z]` and `world_vel` contains `[ωx, ωy, ωz, vx, vy, vz]`:
 
 ```toml
 [db]
@@ -46,14 +46,14 @@ baud = 115200
 
 # Position from world_pos indices 4,5,6
 [inputs.position]
-component = "drone.world_pos"
+component = "bdx.world_pos"
 x = 4
 y = 5
 z = 6
 
 # Orientation from world_pos indices 0,1,2,3
 [inputs.orientation]
-component = "drone.world_pos"
+component = "bdx.world_pos"
 q0 = 0
 q1 = 1
 q2 = 2
@@ -61,7 +61,7 @@ q3 = 3
 
 # Velocity from world_vel indices 3,4,5
 [inputs.velocity]
-component = "drone.world_vel"
+component = "bdx.world_vel"
 x = 3
 y = 4
 z = 5
@@ -123,9 +123,9 @@ cargo run -- --mode serial --serial-port /dev/ttyUSB0
 
 ## Testing with Drone Simulation
 
-1. Start the drone example simulation:
+1. Start the bdx example simulation:
    ```bash
-   elodin editor examples/drone/main.py
+   elodin editor examples/rc-jet/main.py
    ```
 
 2. In another terminal, run the OSD in debug mode:
