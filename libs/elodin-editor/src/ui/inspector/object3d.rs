@@ -257,24 +257,20 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     {
                         changed = true;
                     }
-                    
+
                     ui.separator();
-                    
+
                     ui.label(egui::RichText::new("Scale").color(get_scheme().text_secondary));
                     ui.add_space(8.0);
                     if ui
-                        .add(
-                            egui::DragValue::new(scale)
-                                .speed(0.01)
-                                .range(0.001..=100.0),
-                        )
+                        .add(egui::DragValue::new(scale).speed(0.01).range(0.001..=100.0))
                         .changed()
                     {
                         changed = true;
                     }
-                    
+
                     ui.separator();
-                    
+
                     ui.label(egui::RichText::new("Translate").color(get_scheme().text_secondary));
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
@@ -291,10 +287,12 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                             .add(egui::DragValue::new(&mut translate.2).speed(0.1))
                             .changed();
                     });
-                    
+
                     ui.separator();
-                    
-                    ui.label(egui::RichText::new("Rotate (degrees)").color(get_scheme().text_secondary));
+
+                    ui.label(
+                        egui::RichText::new("Rotate (degrees)").color(get_scheme().text_secondary),
+                    );
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         ui.label("X:");

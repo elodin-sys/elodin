@@ -120,6 +120,7 @@ impl Config {
     }
 
     /// Get unique list of component names needed from DB
+    #[allow(dead_code)]
     pub fn required_components(&self) -> Vec<String> {
         let mut components = vec![
             self.inputs.position.component.clone(),

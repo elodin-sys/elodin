@@ -139,17 +139,17 @@ fn render_horizon(grid: &mut OsdGrid, roll_deg: f32, pitch_deg: f32) {
     // Scale: approximately 2-3 rows per 10 degrees for better spacing
     let rows_per_10deg = 2.5;
     let pitch_range = 50; // Show marks from -50 to +50 degrees relative to current pitch
-    
+
     for pitch_mark in (-pitch_range..=pitch_range).step_by(10) {
         if pitch_mark == 0 {
             continue; // Skip zero, the horizon line shows that
         }
-        
+
         // Calculate row position: offset from center based on pitch difference
         let pitch_diff = pitch_mark as f32 - pitch_deg;
         let row_offset = -pitch_diff / 10.0 * rows_per_10deg;
         let ladder_row = center_row as f32 + row_offset;
-        
+
         // Only draw if within visible area
         if ladder_row >= start_row as f32 && ladder_row <= end_row as f32 {
             let ladder_row_u8 = ladder_row.round() as u8;

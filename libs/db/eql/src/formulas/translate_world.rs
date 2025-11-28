@@ -176,12 +176,14 @@ impl super::Formula for TranslateWorld {
                             )
                         } else {
                             return Err(Error::InvalidMethodCall(
-                                "translate_world requires three arguments: x, y, z distances".to_string(),
+                                "translate_world requires three arguments: x, y, z distances"
+                                    .to_string(),
                             ));
                         }
                     } else {
                         return Err(Error::InvalidMethodCall(
-                            "translate_world requires three arguments: x, y, z distances".to_string(),
+                            "translate_world requires three arguments: x, y, z distances"
+                                .to_string(),
                         ));
                     }
                 } else if outer_elements.len() == 3 {
@@ -321,4 +323,3 @@ mod tests {
         }
     }
 }
-

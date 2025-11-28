@@ -17,6 +17,7 @@ const MSP_DP_HEARTBEAT: u8 = 0;
 const MSP_DP_CLEAR_SCREEN: u8 = 2;
 const MSP_DP_WRITE_STRING: u8 = 3;
 const MSP_DP_DRAW_SCREEN: u8 = 4;
+#[allow(dead_code)]
 const MSP_DP_OPTIONS: u8 = 5;
 
 pub struct DisplayPortBackend {
@@ -30,11 +31,7 @@ impl DisplayPortBackend {
             .timeout(Duration::from_millis(100))
             .open()?;
 
-        tracing::info!(
-            "Opened serial port {} at {} baud",
-            config.port,
-            config.baud
-        );
+        tracing::info!("Opened serial port {} at {} baud", config.port, config.baud);
 
         Ok(Self {
             port: Arc::new(Mutex::new(port)),
@@ -48,7 +45,7 @@ impl DisplayPortBackend {
         out.push(b'$');
         out.push(b'M');
         out.push(b'>'); // Direction: FC -> OSD
-        
+
         let size = payload.len() as u8;
         out.push(size);
         out.push(cmd);
@@ -59,19 +56,24 @@ impl DisplayPortBackend {
             cksum ^= b;
         }
         out.push(cksum);
-        
-        trace!("MSP packet: cmd={}, size={}, checksum={:02x}", cmd, size, cksum);
+
+        trace!(
+            "MSP packet: cmd={}, size={}, checksum={:02x}",
+            cmd,
+            size,
+            cksum
+        );
         out
     }
 
     fn send_heartbeat(&self) -> Result<()> {
         let payload = [MSP_DP_HEARTBEAT];
         let packet = Self::encode_msp(MSP_DISPLAYPORT, &payload);
-        
+
         let mut port = self.port.lock().unwrap();
         port.write_all(&packet)?;
         port.flush()?;
-        
+
         debug!("Sent MSP_DP_HEARTBEAT");
         Ok(())
     }
@@ -79,10 +81,10 @@ impl DisplayPortBackend {
     fn send_clear_screen(&self) -> Result<()> {
         let payload = [MSP_DP_CLEAR_SCREEN];
         let packet = Self::encode_msp(MSP_DISPLAYPORT, &payload);
-        
+
         let mut port = self.port.lock().unwrap();
         port.write_all(&packet)?;
-        
+
         trace!("Sent MSP_DP_CLEAR_SCREEN");
         Ok(())
     }
@@ -99,33 +101,39 @@ impl DisplayPortBackend {
         payload.push(0); // Null terminator
 
         let packet = Self::encode_msp(MSP_DISPLAYPORT, &payload);
-        
+
         let mut port = self.port.lock().unwrap();
         port.write_all(&packet)?;
-        
-        trace!("Sent MSP_DP_WRITE_STRING: row={}, col={}, text='{}'", row, col, text);
+
+        trace!(
+            "Sent MSP_DP_WRITE_STRING: row={}, col={}, text='{}'",
+            row,
+            col,
+            text
+        );
         Ok(())
     }
 
     fn send_draw_screen(&self) -> Result<()> {
         let payload = [MSP_DP_DRAW_SCREEN];
         let packet = Self::encode_msp(MSP_DISPLAYPORT, &payload);
-        
+
         let mut port = self.port.lock().unwrap();
         port.write_all(&packet)?;
         port.flush()?;
-        
+
         trace!("Sent MSP_DP_DRAW_SCREEN");
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn send_options(&self, font_index: u8) -> Result<()> {
         let payload = [MSP_DP_OPTIONS, font_index];
         let packet = Self::encode_msp(MSP_DISPLAYPORT, &payload);
-        
+
         let mut port = self.port.lock().unwrap();
         port.write_all(&packet)?;
-        
+
         debug!("Sent MSP_DP_OPTIONS with font_index={}", font_index);
         Ok(())
     }
@@ -140,10 +148,10 @@ impl Backend for DisplayPortBackend {
     async fn init(&mut self) -> Result<()> {
         // Send initial options to set HD font (if available)
         self.send_options(0)?; // 0 = default font
-        
+
         // Send initial heartbeat
         self.send_heartbeat()?;
-        
+
         Ok(())
     }
 

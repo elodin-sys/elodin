@@ -85,7 +85,7 @@ impl TelemetryState {
         // Note: roll and yaw are swapped due to coordinate system
         let (_, _, yaw) = self.quat_to_euler_321();
         let mut roll = yaw.to_degrees();
-        
+
         // Normalize to [-180, 180] range, wrapping properly around 0
         while roll > 180.0 {
             roll -= 360.0;
@@ -93,7 +93,7 @@ impl TelemetryState {
         while roll < -180.0 {
             roll += 360.0;
         }
-        
+
         roll
     }
 
@@ -112,7 +112,7 @@ impl TelemetryState {
         let q0 = q.i; // x
         let q1 = q.j; // y
         let q2 = q.k; // z
-        let s = q.w;  // w (scalar)
+        let s = q.w; // w (scalar)
 
         // Roll (rotation about x-axis)
         let sinr_cosp = 2.0 * (s * q0 + q1 * q2);

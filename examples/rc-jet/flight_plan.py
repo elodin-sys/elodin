@@ -21,7 +21,7 @@ def flight_plan(
 ) -> el.Query[ControlCommands]:
     """
     Cruise flight plan with altitude hold.
-    
+
     Uses PD controller to maintain target altitude:
     - Proportional gain: responds to altitude error
     - Derivative gain: damps vertical velocity to prevent oscillation
@@ -30,23 +30,22 @@ def flight_plan(
     current_vel = vel[0]
     altitude = current_pos.linear()[2]
     vertical_vel = current_vel.linear()[2]
-    
+
     # Target altitude
     target_alt = 50.0
     alt_error = target_alt - altitude
-    
+
     # PD altitude controller
     K_p = 0.05  # Proportional gain (rad/m)
-    K_d = 1.5   # Derivative gain (rad/(m/s))
+    K_d = 1.5  # Derivative gain (rad/(m/s))
     elevator = -K_p * alt_error - K_d * vertical_vel
     elevator = jnp.clip(elevator, jnp.deg2rad(-8.0), jnp.deg2rad(8.0))
-    
+
     # Throttle for level cruise at 70 m/s
     # Drag ≈ 56N, Thrust = 0.30 * 200N = 60N
     throttle = 0.30
-    
+
     # Command: [elevator, aileron, rudder, throttle]
     cmd = jnp.array([elevator, 0.0, 0.0, throttle])
-    
-    return commands.map(ControlCommands, lambda _: cmd)
 
+    return commands.map(ControlCommands, lambda _: cmd)

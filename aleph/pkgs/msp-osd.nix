@@ -1,4 +1,5 @@
 { lib
+, pkgs
 , rustPlatform
 , rustToolchain
 , pkg-config
@@ -30,7 +31,7 @@ rustPlatform.buildRustPackage rec {
   '';
 
   meta = with lib; {
-    description = "Avatar OSD Service - MSP DisplayPort OSD for Walksnail VTX";
+    description = "MSP OSD Service - MSP DisplayPort OSD for VTX";
     homepage = "https://github.com/elodin-sys/elodin";
     license = licenses.mit;
     maintainers = with maintainers; [ ];

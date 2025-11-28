@@ -24,12 +24,12 @@ let
 in
 {
   options.services.msp-osd = {
-    enable = mkEnableOption "Avatar OSD service for MSP DisplayPort";
+    enable = mkEnableOption "MSP OSD service for MSP DisplayPort";
 
     package = mkOption {
       type = types.package;
       default = pkgs.msp-osd;
-      description = "Avatar OSD package to use";
+      description = "MSP OSD package to use";
     };
 
     mode = mkOption {
@@ -103,7 +103,7 @@ in
 
   config = mkIf cfg.enable {
     systemd.services.msp-osd = {
-      description = "Avatar OSD Service";
+      description = "MSP DisplayPort OSD Service";
       wantedBy = [ "multi-user.target" ];
       after = [ "network.target" "elodin-db.service" ];
       wants = [ "elodin-db.service" ];

@@ -273,9 +273,7 @@ mod tests {
     #[test]
     fn test_translate_x_parse() {
         let context = create_test_context();
-        let expr = context
-            .parse_str("bdx.world_pos.translate_x(1.0)")
-            .unwrap();
+        let expr = context.parse_str("bdx.world_pos.translate_x(1.0)").unwrap();
 
         // Verify it creates a Formula expression
         if let Expr::Formula(formula, inner) = expr {
@@ -310,9 +308,7 @@ mod tests {
     #[test]
     fn test_translate_z_parse() {
         let context = create_test_context();
-        let expr = context
-            .parse_str("bdx.world_pos.translate_z(0.5)")
-            .unwrap();
+        let expr = context.parse_str("bdx.world_pos.translate_z(0.5)").unwrap();
 
         if let Expr::Formula(formula, inner) = expr {
             assert_eq!(formula.name(), "translate_z");
@@ -354,4 +350,3 @@ mod tests {
         assert!(result.is_ok());
     }
 }
-

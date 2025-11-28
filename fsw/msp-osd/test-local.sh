@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Test script for running Avatar OSD locally
+# Test script for running MSP OSD locally
 
 set -e
 
-echo "Avatar OSD Local Test Script"
+echo "MSP OSD Local Test Script"
 echo "============================"
 echo ""
-echo "This script demonstrates how to test the Avatar OSD service locally."
+echo "This script demonstrates how to test the MSP DisplayPort OSD service locally."
 echo ""
 
 # Check if cargo is available
@@ -16,11 +16,11 @@ if ! command -v cargo &> /dev/null; then
 fi
 
 # Build the project
-echo "Building Avatar OSD..."
+echo "Building MSP OSD..."
 cargo build --release
 
 echo ""
-echo "You can now run the Avatar OSD in different modes:"
+echo "You can now run the MSP OSD in different modes:"
 echo ""
 echo "1. Debug Mode (Terminal Display):"
 echo "   cargo run -- --mode debug"
@@ -37,10 +37,10 @@ echo "   2. In another terminal: cargo run -- --mode debug"
 echo ""
 
 # Optionally run in debug mode
-read -p "Would you like to run Avatar OSD in debug mode now? (y/n) " -n 1 -r
+read -p "Would you like to run MSP OSD in debug mode now? (y/n) " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    echo "Starting Avatar OSD in debug mode..."
+    echo "Starting MSP OSD in debug mode..."
     echo "Press Ctrl-C to exit."
     echo ""
     cargo run -- --mode debug

@@ -23,7 +23,7 @@ impl Backend for DebugTerminalBackend {
 
     async fn render(&mut self, grid: &OsdGrid) -> Result<()> {
         let mut out = stdout();
-        
+
         // Clear screen and move to top
         execute!(
             out,
@@ -63,9 +63,13 @@ impl Backend for DebugTerminalBackend {
 
 impl DebugTerminalBackend {
     /// Render with status information
-    pub async fn render_with_status(&mut self, grid: &OsdGrid, state: &crate::telemetry::TelemetryState) -> Result<()> {
+    pub async fn render_with_status(
+        &mut self,
+        grid: &OsdGrid,
+        state: &crate::telemetry::TelemetryState,
+    ) -> Result<()> {
         let mut out = stdout();
-        
+
         // Clear screen and move to top
         execute!(
             out,
@@ -91,13 +95,13 @@ impl DebugTerminalBackend {
         } else {
             "✗ Disconnected"
         };
-        
+
         let updates_text = if state.update_count > 0 {
             format!("{} updates", state.update_count)
         } else {
             "No data".to_string()
         };
-        
+
         let staleness = state.last_update.elapsed().as_secs();
         let data_status = if staleness < 2 {
             "Fresh"

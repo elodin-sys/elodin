@@ -54,6 +54,7 @@ impl OsdGrid {
     }
 
     /// Write text right-aligned on a row
+    #[allow(dead_code)]
     pub fn write_right_aligned(&mut self, row: u8, text: &str) {
         let text_len = text.chars().count();
         let cols = self.cols as usize;
@@ -66,6 +67,7 @@ impl OsdGrid {
     }
 
     /// Draw a vertical line
+    #[allow(dead_code)]
     pub fn draw_vertical_line(&mut self, col: u8, start_row: u8, end_row: u8, ch: char) {
         for row in start_row..=end_row.min(self.rows - 1) {
             self.set_char(row, col, ch);
@@ -73,6 +75,7 @@ impl OsdGrid {
     }
 
     /// Draw a horizontal line
+    #[allow(dead_code)]
     pub fn draw_horizontal_line(&mut self, row: u8, start_col: u8, end_col: u8, ch: char) {
         for col in start_col..=end_col.min(self.cols - 1) {
             self.set_char(row, col, ch);
@@ -92,6 +95,7 @@ impl OsdGrid {
     }
 
     /// Get a character at (row, col)
+    #[allow(dead_code)]
     pub fn get_char(&self, row: u8, col: u8) -> Option<char> {
         let row = row as usize;
         let col = col as usize;
@@ -131,6 +135,7 @@ impl OsdGrid {
     }
 
     /// Draw a box around a region
+    #[allow(dead_code)]
     pub fn draw_box(&mut self, top: u8, left: u8, bottom: u8, right: u8) {
         // Corners
         self.set_char(top, left, '┌');

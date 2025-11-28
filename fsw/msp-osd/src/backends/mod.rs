@@ -15,6 +15,7 @@ pub trait Backend: Send + Sync {
     async fn render(&mut self, grid: &OsdGrid) -> Result<()>;
 
     /// Optional: Handle initialization
+    #[allow(dead_code)]
     async fn init(&mut self) -> Result<()> {
         Ok(())
     }

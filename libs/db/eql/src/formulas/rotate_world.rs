@@ -177,12 +177,14 @@ impl super::Formula for RotateWorld {
                             )
                         } else {
                             return Err(Error::InvalidMethodCall(
-                                "rotate_world requires three arguments: x, y, z angles in degrees".to_string(),
+                                "rotate_world requires three arguments: x, y, z angles in degrees"
+                                    .to_string(),
                             ));
                         }
                     } else {
                         return Err(Error::InvalidMethodCall(
-                            "rotate_world requires three arguments: x, y, z angles in degrees".to_string(),
+                            "rotate_world requires three arguments: x, y, z angles in degrees"
+                                .to_string(),
                         ));
                     }
                 } else if outer_elements.len() == 3 {
@@ -194,7 +196,8 @@ impl super::Formula for RotateWorld {
                     )
                 } else {
                     return Err(Error::InvalidMethodCall(
-                        "rotate_world requires three arguments: x, y, z angles in degrees".to_string(),
+                        "rotate_world requires three arguments: x, y, z angles in degrees"
+                            .to_string(),
                     ));
                 }
             } else {
@@ -272,7 +275,9 @@ mod tests {
     #[test]
     fn test_rotate_world_x_parse() {
         let context = create_test_context();
-        let expr = context.parse_str("bdx.world_pos.rotate_world_x(45.0)").unwrap();
+        let expr = context
+            .parse_str("bdx.world_pos.rotate_world_x(45.0)")
+            .unwrap();
 
         if let Expr::Formula(formula, inner) = expr {
             assert_eq!(formula.name(), "rotate_world_x");
@@ -291,7 +296,9 @@ mod tests {
     #[test]
     fn test_rotate_world_z_parse() {
         let context = create_test_context();
-        let expr = context.parse_str("bdx.world_pos.rotate_world_z(90.0)").unwrap();
+        let expr = context
+            .parse_str("bdx.world_pos.rotate_world_z(90.0)")
+            .unwrap();
 
         if let Expr::Formula(formula, _) = expr {
             assert_eq!(formula.name(), "rotate_world_z");
@@ -318,4 +325,3 @@ mod tests {
         }
     }
 }
-

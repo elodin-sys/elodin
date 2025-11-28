@@ -177,12 +177,14 @@ impl super::Formula for Rotate {
                             )
                         } else {
                             return Err(Error::InvalidMethodCall(
-                                "rotate requires three arguments: x, y, z angles in degrees".to_string(),
+                                "rotate requires three arguments: x, y, z angles in degrees"
+                                    .to_string(),
                             ));
                         }
                     } else {
                         return Err(Error::InvalidMethodCall(
-                            "rotate requires three arguments: x, y, z angles in degrees".to_string(),
+                            "rotate requires three arguments: x, y, z angles in degrees"
+                                .to_string(),
                         ));
                     }
                 } else if outer_elements.len() == 3 {
@@ -348,4 +350,3 @@ mod tests {
         assert!(result.is_ok());
     }
 }
-

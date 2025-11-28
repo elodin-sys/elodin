@@ -751,7 +751,11 @@ impl ViewportPane {
                 let compiled_expr = match eql_ctx.parse_str(eql) {
                     Ok(expr) => Some(compile_eql_expr(expr)),
                     Err(e) => {
-                        bevy::log::error!("Failed to parse viewport pos expression '{}': {}", eql, e);
+                        bevy::log::error!(
+                            "Failed to parse viewport pos expression '{}': {}",
+                            eql,
+                            e
+                        );
                         None
                     }
                 };
@@ -768,7 +772,11 @@ impl ViewportPane {
                 let compiled_expr = match eql_ctx.parse_str(eql) {
                     Ok(expr) => Some(compile_eql_expr(expr)),
                     Err(e) => {
-                        bevy::log::error!("Failed to parse viewport look_at expression '{}': {}", eql, e);
+                        bevy::log::error!(
+                            "Failed to parse viewport look_at expression '{}': {}",
+                            eql,
+                            e
+                        );
                         None
                     }
                 };

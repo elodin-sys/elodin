@@ -293,7 +293,10 @@ impl Decomponentize for TelemetryExtractor {
                 Self::extract_f64(&values, m.q2),
                 Self::extract_f64(&values, m.q3),
             ) {
-                debug!("Orientation: q0={:.3}, q1={:.3}, q2={:.3}, q3={:.3}", q0, q1, q2, q3);
+                debug!(
+                    "Orientation: q0={:.3}, q1={:.3}, q2={:.3}, q3={:.3}",
+                    q0, q1, q2, q3
+                );
                 let proc = self.telemetry_processor.clone();
                 stellarator::spawn(async move {
                     proc.update_orientation(q0, q1, q2, q3).await;

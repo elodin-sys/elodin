@@ -25,20 +25,20 @@ config.set_as_global()
 def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId]:
     """
     Create and configure the simulation world with a BDX jet.
-    
+
     Returns:
         tuple: (world, jet_entity_id)
     """
     world = el.World()
-    
+
     # Calculate initial position and velocity
     initial_pos = jnp.array([0.0, 0.0, config.initial_altitude])
-    
+
     # Initial velocity: forward flight at cruise speed
     # Transform body velocity to world frame using initial attitude
     v_body = config.initial_velocity_body
     v_world = config.initial_attitude @ v_body
-    
+
     # Spawn the BDX jet
     jet = world.spawn(
         [
@@ -57,7 +57,7 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId]:
         ],
         name="bdx",
     )
-    
+
     # Create schematic for visualization
     world.schematic(
         """
@@ -119,7 +119,7 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId]:
         """,
         "bdx.kdl",
     )
-    
+
     return world, jet
 
 
@@ -136,7 +136,7 @@ print(f"Initial speed: {config.initial_speed:.1f} m/s")
 print(f"Mass: {config.mass:.1f} kg")
 print(f"Max thrust: {config.propulsion.max_thrust:.1f} N")
 print(f"Simulation time: {config.simulation_time:.1f} s")
-print(f"Time step: {config.dt:.6f} s ({1/config.dt:.0f} Hz)")
+print(f"Time step: {config.dt:.6f} s ({1 / config.dt:.0f} Hz)")
 print(f"Total ticks: {config.total_ticks}")
 print()
 
