@@ -46,3 +46,9 @@ postcard = "1.1"
 clap = { version = "4", features = ["derive"] }
 async-trait = "0.1"
 tokio = { version = "1", features = ["sync", "time", "macros"] }
+
+[package.metadata.wix]
+upgrade-guid = "F7A8B2E1-3C4D-5E6F-A1B2-C3D4E5F60718"
+path-guid = "A1B2C3D4-E5F6-7A8B-9C0D-E1F2A3B4C5D6"
+license = false
+eula = false
