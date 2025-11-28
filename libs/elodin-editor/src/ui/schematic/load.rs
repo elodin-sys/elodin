@@ -274,7 +274,6 @@ impl LoadSchematicParams<'_, '_> {
                         }
 
                         let state = WindowState {
-                            id,
                             descriptor,
                             tile_state,
                             graph_entities,
@@ -289,7 +288,7 @@ impl LoadSchematicParams<'_, '_> {
                                 Ok(())
                             });
                         }
-                        self.commands.spawn((state.id, state));
+                        self.commands.spawn((id, state));
                     }
                     Err(err) => {
                         let diag = render_diag(&err);

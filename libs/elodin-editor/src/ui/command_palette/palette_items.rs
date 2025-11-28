@@ -272,20 +272,12 @@ pub struct TileParam<'w, 's> {
 
 impl<'w, 's> TileParam<'w, 's> {
     /// TODO: Switch from using `WindowId` to `Entity` for lookup.
-    pub fn target(&mut self, target: Option<tiles::WindowId>) -> Option<Mut<'_, tiles::TileState>> {
+    pub fn target(&mut self, target: Option<Entity>) -> Option<Mut<'_, tiles::TileState>> {
         match target {
             // Look up a specific window and project its WindowState -> TileState
             Some(target_id) => {
-                let Some(id) = self
-                    .windows_id
-                    .iter_mut()
-                    .find(|(_entity, id)| **id == target_id)
-                    .map(|(entity, id)| entity)
-                else {
-                    return None;
-                };
                 self.windows_state
-                    .get_mut(id)
+                    .get_mut(target_id)
                     .ok()
                     .map(|s| s.map_unchanged(|s| &mut s.tile_state))
             }
@@ -515,9 +507,9 @@ pub fn create_window() -> PaletteItem {
                     } else {
                         Some(title.trim().to_string())
                     };
-                    let state = windows.create_secondary_window(title_opt);
-                    palette_state.target_window = Some(state.id);
-                    commands.spawn((state.id, state));
+                    let (state, id) = windows.create_secondary_window(title_opt);
+                    let entity = commands.spawn((id, state)).id();
+                    palette_state.target_window = Some(entity);
                     PaletteEvent::Exit
                 },
             )

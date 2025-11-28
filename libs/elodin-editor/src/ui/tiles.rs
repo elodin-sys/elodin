@@ -115,7 +115,7 @@ pub enum WindowRelayoutPhase {
     NeedRect,
 }
 
-/// Events dealing with window layout.
+/// Events dealing with window layout
 #[derive(Event, Clone, Debug, PartialEq, Eq)]
 pub enum WindowRelayout {
     /// Move window to given screen.
@@ -147,8 +147,6 @@ impl Default for WindowId {
 
 #[derive(Component, Clone)]
 pub struct WindowState {
-    // TODO: Decide to keep this `id` field or use `WindowId` as a component.
-    pub id: WindowId,
     pub descriptor: WindowDescriptor,
     pub graph_entities: Vec<Entity>,
     pub tile_state: TileState,
@@ -398,7 +396,7 @@ impl WindowManager {
 
     /// Creates a `WindowState`. Must be spawned with a `WindowId` to create an
     /// actual window.
-    pub fn create_secondary_window(&mut self, title: Option<String>) -> WindowState {
+    pub fn create_secondary_window(&mut self, title: Option<String>) -> (WindowState, WindowId) {
         let id = WindowId::default();
         let cleaned_title = title.and_then(|t| {
             let trimmed = t.trim();
@@ -432,12 +430,12 @@ impl WindowManager {
             path = %descriptor.path.display(),
             "Created secondary window"
         );
-        WindowState {
-            id,
+        (WindowState {
             descriptor,
             tile_state,
             graph_entities: Vec::new(),
-        }
+        },
+         id)
     }
 }
 
@@ -1103,7 +1101,7 @@ struct TreeBehavior<'w> {
     world: &'w mut World,
     container_titles: HashMap<TileId, String>,
     read_only: bool,
-    target_window: Option<WindowId>,
+    target_window: Option<Entity>,
 }
 
 #[derive(Clone)]
@@ -1441,7 +1439,7 @@ impl<'w, 's> TileSystem<'w, 's> {
     fn prepare_panel_data(
         world: &mut World,
         state: &mut SystemState<Self>,
-        target: Option<WindowId>,
+        target: Option<Entity>,
     ) -> Option<(TileIcons, bool, bool)> {
         let read_only = false;
         let params = state.get_mut(world);
@@ -1450,9 +1448,9 @@ impl<'w, 's> TileSystem<'w, 's> {
         let is_empty = match target {
             Some(target_id) => params
                 .window_states
-                .iter()
-                .find(|(_entity, id, _state)| **id == target_id)
-                .map(|(_, _, s)| s.tile_state.is_empty() && s.tile_state.tree_actions.is_empty()),
+                .get(target_id)
+                .map(|(_, _, s)| s.tile_state.is_empty() && s.tile_state.tree_actions.is_empty())
+                .ok(),
             None => {
                 Some(params.windows.main.is_empty() && params.windows.main.tree_actions.is_empty())
             }
@@ -1483,7 +1481,7 @@ impl<'w, 's> TileSystem<'w, 's> {
     fn render_panel_contents(
         world: &mut World,
         ui: &mut egui::Ui,
-        target: Option<WindowId>,
+        target: Option<Entity>,
         icons: TileIcons,
         is_empty_tile_tree: bool,
         read_only: bool,
@@ -1513,7 +1511,7 @@ impl<'w, 's> TileSystem<'w, 's> {
 }
 
 impl WidgetSystem for TileSystem<'_, '_> {
-    type Args = Option<WindowId>;
+    type Args = Option<Entity>;
     type Output = ();
 
     fn ui_system(
@@ -1553,7 +1551,7 @@ impl WidgetSystem for TileSystem<'_, '_> {
 }
 
 impl RootWidgetSystem for TileSystem<'_, '_> {
-    type Args = Option<WindowId>;
+    type Args = Option<Entity>;
     type Output = ();
 
     fn ctx_system(
@@ -1615,7 +1613,7 @@ pub struct TileLayoutEmpty<'w> {
 #[derive(Clone)]
 pub struct TileLayoutEmptyArgs {
     pub icons: TileIcons,
-    pub window: Option<WindowId>,
+    pub window: Option<Entity>,
 }
 
 impl WidgetSystem for TileLayoutEmpty<'_> {
@@ -1713,7 +1711,7 @@ pub struct TileLayout<'w, 's> {
 #[derive(Clone)]
 pub struct TileLayoutArgs {
     pub icons: TileIcons,
-    pub window: Option<WindowId>,
+    pub window: Option<Entity>,
     pub read_only: bool,
 }
 

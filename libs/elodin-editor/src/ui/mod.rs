@@ -718,15 +718,15 @@ fn sync_secondary_windows(
     for (entity, marker, mut state, window_maybe) in &mut windows_state {
         let phase = crate::ui::tiles::WindowRelayoutPhase::Idle;
         let current_key = (state.descriptor.screen, false, phase);
-        let last = log_state.0.get(&state.id).copied();
+        let last = log_state.0.get(&marker).copied();
         if last != Some(current_key) {
             info!(
-                id = state.id.0,
+                id = ?marker,
                 screen = state.descriptor.screen.map(|s| s as i32).unwrap_or(-1),
                 relayout = ?phase,
                 "secondary_window_state"
             );
-            log_state.0.insert(state.id, current_key);
+            log_state.0.insert(*marker, current_key);
         }
         state.graph_entities = state.tile_state.collect_graph_entities();
 
@@ -737,13 +737,13 @@ fn sync_secondary_windows(
         // }
 
         if window_maybe.is_some() {
-            existing_map.insert(state.id, entity);
+            existing_map.insert(*marker, entity);
             let window_ref = WindowRef::Entity(entity);
             for (index, &graph) in state.graph_entities.iter().enumerate() {
                 if let Ok(mut camera) = cameras.get_mut(graph) {
                     camera.target = RenderTarget::Window(window_ref);
                     camera.is_active = true;
-                    let base_order = secondary_graph_order_base(state.id);
+                    let base_order = secondary_graph_order_base(*marker);
                     camera.order = base_order + index as isize;
                 }
             }
@@ -807,7 +807,7 @@ fn sync_secondary_windows(
 
         let window_entity = commands
             .entity(entity)
-            .insert((window_component, state.id))
+            .insert((window_component, *marker))
             .id();
 
         // state.window_entity = Some(window_entity);
@@ -826,17 +826,17 @@ fn sync_secondary_windows(
                 rect: rect.clone(),
             });
         }
-        existing_map.insert(state.id, window_entity);
+        existing_map.insert(*marker, window_entity);
         info!(
             "Created window entity {window_entity} with window id {:?}",
-            state.id
+            marker
         );
         let window_ref = WindowRef::Entity(window_entity);
         for (index, &graph) in state.graph_entities.iter().enumerate() {
             if let Ok(mut camera) = cameras.get_mut(graph) {
                 camera.target = RenderTarget::Window(window_ref);
                 camera.is_active = true;
-                let base_order = secondary_graph_order_base(state.id);
+                let base_order = secondary_graph_order_base(*marker);
                 camera.order = base_order + index as isize;
             }
         }
@@ -2029,7 +2029,7 @@ fn render_secondary_windows(world: &mut World) {
 
     if let Some(mut palette_state) = world.get_resource_mut::<CommandPaletteState>()
         && let Some(target) = palette_state.target_window
-        && !window_entries.iter().any(|(id, _, _)| *id == target)
+        && !window_entries.iter().any(|(_, entity, _)| *entity == target)
     {
         palette_state.target_window = None;
         if palette_state.auto_open_item.is_none() {
@@ -2055,12 +2055,12 @@ fn render_secondary_windows(world: &mut World) {
         let widget_id = format!("secondary_window_{}", id.0);
         world.add_root_widget_with::<tiles::TileSystem, With<ActiveSecondaryWindow>>(
             &widget_id,
-            Some(id),
+            Some(entity),
         );
         let palette_widget_id = format!("secondary_command_palette_{}", id.0);
         world.add_root_widget_with::<command_palette::PaletteWindow, With<ActiveSecondaryWindow>>(
             &palette_widget_id,
-            Some(id),
+            Some(entity),
         );
 
         if let Ok(mut entity_mut) = world.get_entity_mut(entity) {
@@ -2193,12 +2193,13 @@ fn set_secondary_camera_viewport(
     window_query: Query<(
         Entity,
         &Window,
+        &tiles::WindowId,
         &tiles::WindowState,
         &bevy_egui::EguiContextSettings,
     )>,
 ) {
     // for state in &windows.secondary {
-    for (window_entity, window, state, egui_settings) in &window_query {
+    for (window_entity, window, id, state, egui_settings) in &window_query {
         // let Some(window_entity) = state.window_entity else {
         //     continue;
         // };
@@ -2254,7 +2255,7 @@ fn set_secondary_camera_viewport(
                 camera.is_active = true;
                 // Offset secondary cameras to avoid colliding with primary orders.
                 let base_order =
-                    SECONDARY_GRAPH_ORDER_BASE + SECONDARY_GRAPH_ORDER_STRIDE * state.id.0 as isize;
+                    SECONDARY_GRAPH_ORDER_BASE + SECONDARY_GRAPH_ORDER_STRIDE * id.0 as isize;
                 let offset = base_order + next_order;
                 next_order += 1;
                 camera.order = offset;
@@ -2277,7 +2278,7 @@ fn set_secondary_camera_viewport(
 
 fn set_nav_gizmo_camera_orders(
     _windows: Res<tiles::WindowManager>,
-    states: Query<(Entity, &tiles::WindowState)>,
+    states: Query<(Entity, &tiles::WindowState, &tiles::WindowId)>,
     primary_query: Query<Entity, With<PrimaryWindow>>,
     mut cameras: Query<&mut Camera, With<NavGizmoCamera>>,
 ) {
@@ -2290,9 +2291,9 @@ fn set_nav_gizmo_camera_orders(
         );
     }
 
-    for (window_entity, state) in &states {
+    for (window_entity, state, id) in &states {
         let base = SECONDARY_GRAPH_ORDER_BASE
-            + SECONDARY_GRAPH_ORDER_STRIDE * state.id.0 as isize
+            + SECONDARY_GRAPH_ORDER_STRIDE * id.0 as isize
             + NAV_GIZMO_ORDER_OFFSET;
         base_by_window.insert(window_entity, base);
     }
