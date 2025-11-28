@@ -103,7 +103,7 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId]:
         }
 
         object_3d bdx.world_pos {
-            glb path="f22.glb" scale=0.01
+            glb path="f22.glb" scale=0.01 translate="(0.0, 0.0, 0.0)" rotate="(0.0, 0.0, 0.0)"
         }
         
         vector_arrow "(1, 0, 0)" origin="bdx.world_pos" scale=1.0 name="Forward (X)" display_name=#true body_frame=#true {

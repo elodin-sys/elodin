@@ -1285,6 +1285,8 @@ pub fn create_3d_object() -> PaletteItem {
                                                 let obj = impeller2_wkt::Object3DMesh::Glb {
                                                     path: gltf_path.trim().to_string(),
                                                     scale: 1.0,
+                                                    translate: (0.0, 0.0, 0.0),
+                                                    rotate: (0.0, 0.0, 0.0),
                                                 };
 
                                                 crate::object_3d::create_object_3d_entity(

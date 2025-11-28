@@ -1046,14 +1046,6 @@ pub fn create_object_3d_entity(
         _ => (None, None),
     };
 
-    // Get initial transform scale from GLB if applicable
-    let initial_transform = match &data.mesh {
-        impeller2_wkt::Object3DMesh::Glb { scale, .. } if *scale != 1.0 => {
-            Transform::from_scale(Vec3::splat(*scale))
-        }
-        _ => Transform::default(),
-    };
-
     let entity_id = commands
         .spawn((
             Object3DState {
@@ -1062,7 +1054,7 @@ pub fn create_object_3d_entity(
                 scale_error,
                 data: data.clone(),
             },
-            initial_transform,
+            Transform::default(),
             GlobalTransform::default(),
             Visibility::default(),
             InheritedVisibility::default(),
@@ -1096,13 +1088,47 @@ pub fn spawn_mesh(
     assets: &Res<AssetServer>,
 ) -> Option<EllipsoidVisual> {
     match mesh {
-        impeller2_wkt::Object3DMesh::Glb { path, .. } => {
+        impeller2_wkt::Object3DMesh::Glb {
+            path,
+            scale,
+            translate,
+            rotate,
+        } => {
             let url = format!("{path}#Scene0");
             let scene = assets.load(&url);
-            commands.entity(entity).insert(SceneRoot(scene));
+            
+            // Create transform for offset (translate, rotate, scale)
+            let translation = Vec3::new(translate.0, translate.1, translate.2);
+            let rotation = Quat::from_euler(
+                EulerRot::XYZ,
+                rotate.0.to_radians(),
+                rotate.1.to_radians(),
+                rotate.2.to_radians(),
+            );
+            let offset_transform = Transform {
+                translation,
+                rotation,
+                scale: Vec3::splat(*scale),
+            };
+            
+            // Create a child entity to hold the scene with the offset transform
+            // This way the parent can be synced with WorldPos without affecting the offset
+            commands
+                .spawn((
+                    SceneRoot(scene),
+                    offset_transform,
+                    GlobalTransform::default(),
+                    Visibility::default(),
+                    InheritedVisibility::default(),
+                    ViewVisibility::default(),
+                    ChildOf(entity),
+                    Name::new(format!("object_3d_scene {}", path)),
+                ))
+                .id();
+            
             commands
                 .entity(entity)
-                .insert(Name::new(format!("object_3d {}", &path)));
+                .insert(Name::new(format!("object_3d {}", path)));
             None
         }
         impeller2_wkt::Object3DMesh::Mesh { mesh, material } => {

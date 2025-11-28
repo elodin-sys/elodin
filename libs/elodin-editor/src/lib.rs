@@ -779,6 +779,8 @@ fn sync_object_3d(
             (Some(glb), _, _) => impeller2_wkt::Object3DMesh::Glb {
                 path: glb.0.clone(),
                 scale: 1.0,
+                translate: (0.0, 0.0, 0.0),
+                rotate: (0.0, 0.0, 0.0),
             },
             (_, Some(mesh), Some(mat)) => impeller2_wkt::Object3DMesh::Mesh {
                 mesh: mesh.clone(),

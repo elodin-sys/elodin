@@ -658,6 +658,107 @@ A spatial inertia is a 7D vector that represents the mass, moment of inertia, an
     Get the inertia tensor diagonal of the spatial inertia with shape (3,).
 
 <br></br>
+## Schematic Syntax for 3D Objects
+
+When visualizing entities in the Elodin editor, you can define 3D objects using KDL schematic syntax. The `object_3d` declaration connects a visual representation to an entity's `world_pos` component.
+
+### Basic Shapes
+
+Create basic geometric shapes with customizable dimensions and colors:
+
+```kdl
+object_3d ball.world_pos {
+    sphere radius=0.2 {
+        color 25 50 255  // RGB values (0-255), optional alpha
+    }
+}
+
+object_3d box.world_pos {
+    box x=1.0 y=1.0 z=1.0 {
+        color 255 128 0
+    }
+}
+
+object_3d ground.world_pos {
+    plane width=20 depth=20 {
+        color 32 128 32
+    }
+}
+
+object_3d cylinder.world_pos {
+    cylinder radius=0.5 height=2.0 {
+        color 100 100 200
+    }
+}
+```
+
+### Ellipsoids with Dynamic Scaling
+
+Create ellipsoids that can dynamically change size based on component values:
+
+```kdl
+object_3d satellite.world_pos {
+    ellipsoid scale="(1, 1, 2)" {
+        color 200 200 0
+    }
+}
+```
+
+The `scale` parameter accepts an EQL expression for dynamic sizing.
+
+### GLB Models
+
+Load external 3D models from GLB files with optional transformations:
+
+```kdl
+object_3d aircraft.world_pos {
+    glb path="f22.glb" scale=0.01 translate="(0, 0, 1.5)" rotate="(0, 90, 0)"
+}
+```
+
+**GLB Parameters:**
+- `path` (required): Path or URL to the GLB file
+- `scale` (optional): Uniform scale multiplier (default: 1.0)
+- `translate` (optional): Translation offset as `"(x, y, z)"` tuple in meters (default: "(0, 0, 0)")
+- `rotate` (optional): Rotation as `"(x, y, z)"` Euler angles in degrees (default: "(0, 0, 0)")
+
+**Example use cases:**
+
+Scale down a large model:
+```kdl
+object_3d rocket.world_pos {
+    glb path="rocket.glb" scale=0.1
+}
+```
+
+Offset model origin to center of mass:
+```kdl
+object_3d drone.world_pos {
+    glb path="drone.glb" translate="(0, 0, -0.05)"
+}
+```
+
+Rotate model to match simulation frame:
+```kdl
+object_3d vehicle.world_pos {
+    glb path="car.glb" rotate="(0, 0, 180)"
+}
+```
+
+Combine all transformations:
+```kdl
+object_3d jet.world_pos {
+    glb path="jet.glb" scale=0.01 translate="(0, 0, 0.5)" rotate="(0, 90, 0)"
+}
+```
+
+**Notes:**
+- Transformations are applied in order: scale → rotate → translate
+- Rotations use XYZ Euler order
+- Coordinates are in the simulation's coordinate frame
+- The parent entity's `world_pos` determines the base position, and these transformations are applied as offsets
+
+<br></br>
 ## EQL Viewport Formulas
 
 When defining viewport positions in schematics, you can use EQL (Elodin Query Language) formulas to apply rotations and translations to entity positions. These formulas are chainable and operate on [elodin.WorldPos] (SpatialTransform) data.

@@ -163,6 +163,8 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                         object_3d_state.data.mesh = Object3DMesh::Glb {
                             path: String::new(),
                             scale: 1.0,
+                            translate: (0.0, 0.0, 0.0),
+                            rotate: (0.0, 0.0, 0.0),
                         };
                         object_3d_state.scale_expr = None;
                         object_3d_state.scale_error = None;
@@ -241,7 +243,12 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
             ui.separator();
 
             match &mut object_3d_state.data.mesh {
-                Object3DMesh::Glb { path, scale } => {
+                Object3DMesh::Glb {
+                    path,
+                    scale,
+                    translate,
+                    rotate,
+                } => {
                     ui.label(egui::RichText::new("GLB Path").color(get_scheme().text_secondary));
                     ui.add_space(8.0);
                     if ui
@@ -265,6 +272,44 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     {
                         changed = true;
                     }
+                    
+                    ui.separator();
+                    
+                    ui.label(egui::RichText::new("Translate").color(get_scheme().text_secondary));
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.label("X:");
+                        changed |= ui
+                            .add(egui::DragValue::new(&mut translate.0).speed(0.1))
+                            .changed();
+                        ui.label("Y:");
+                        changed |= ui
+                            .add(egui::DragValue::new(&mut translate.1).speed(0.1))
+                            .changed();
+                        ui.label("Z:");
+                        changed |= ui
+                            .add(egui::DragValue::new(&mut translate.2).speed(0.1))
+                            .changed();
+                    });
+                    
+                    ui.separator();
+                    
+                    ui.label(egui::RichText::new("Rotate (degrees)").color(get_scheme().text_secondary));
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.label("X:");
+                        changed |= ui
+                            .add(egui::DragValue::new(&mut rotate.0).speed(1.0))
+                            .changed();
+                        ui.label("Y:");
+                        changed |= ui
+                            .add(egui::DragValue::new(&mut rotate.1).speed(1.0))
+                            .changed();
+                        ui.label("Z:");
+                        changed |= ui
+                            .add(egui::DragValue::new(&mut rotate.2).speed(1.0))
+                            .changed();
+                    });
                 }
                 Object3DMesh::Mesh { mesh, material } => {
                     ui.horizontal(|ui| {
@@ -397,6 +442,12 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     commands.entity(ellipse_visual.child).despawn();
                     commands.entity(entity).remove::<EllipsoidVisual>();
                 }
+
+                // Note: GLB child entities are not explicitly despawned here.
+                // When a new mesh is spawned, the old child will become orphaned
+                // but remain in the hierarchy. This is acceptable since it won't
+                // be rendered without the parent's SceneRoot.
+                // A future optimization could track child entities similar to EllipsoidVisual.
 
                 commands
                     .entity(entity)

@@ -270,13 +270,28 @@ fn serialize_object_3d<T>(obj: &Object3D<T>) -> KdlNode {
 
 fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> KdlNode {
     match mesh {
-        Object3DMesh::Glb { path, scale } => {
+        Object3DMesh::Glb {
+            path,
+            scale,
+            translate,
+            rotate,
+        } => {
             let mut node = KdlNode::new("glb");
             node.entries_mut()
                 .push(KdlEntry::new_prop("path", path.clone()));
             if *scale != 1.0 {
                 node.entries_mut()
                     .push(KdlEntry::new_prop("scale", *scale as f64));
+            }
+            if *translate != (0.0, 0.0, 0.0) {
+                let tuple_str = format!("({}, {}, {})", translate.0, translate.1, translate.2);
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("translate", tuple_str));
+            }
+            if *rotate != (0.0, 0.0, 0.0) {
+                let tuple_str = format!("({}, {}, {})", rotate.0, rotate.1, rotate.2);
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("rotate", tuple_str));
             }
             node
         }
