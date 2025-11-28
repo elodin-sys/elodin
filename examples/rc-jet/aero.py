@@ -83,9 +83,11 @@ def compute_aero_angles(v_body: VelocityBody) -> tuple[AngleOfAttack, Sideslip]:
     V = jnp.sqrt(u**2 + v**2 + w**2)
     V_safe = jnp.maximum(V, 1.0)
 
-    # Alpha: angle between velocity vector and X-Y plane, projected onto X-Z plane
-    # Positive when w > 0 (velocity has upward component, nose pitched up)
-    alpha = jnp.arctan2(w, jnp.maximum(jnp.abs(u), 1e-6))
+    # Alpha: angle of attack (standard aerodynamic convention)
+    # Positive when nose is up relative to velocity vector.
+    # In Z-up body frame, when nose is up, velocity has negative w component,
+    # so we use -w to get the standard sign convention.
+    alpha = jnp.arctan2(-w, jnp.maximum(jnp.abs(u), 1e-6))
 
     # Beta: sideslip angle
     beta = jnp.arcsin(jnp.clip(v / V_safe, -1.0, 1.0))
@@ -144,9 +146,12 @@ def compute_aero_coefs(
     # Non-dimensional rates
     c = config.mean_chord
     b = config.wingspan
-    q_hat = q * c / (2.0 * V)  # Pitch rate
-    p_hat = p * b / (2.0 * V)  # Roll rate
-    r_hat = r * b / (2.0 * V)  # Yaw rate
+    p_hat = p * b / (2.0 * V)  # Roll rate (same convention as standard aerospace)
+    r_hat = r * b / (2.0 * V)  # Yaw rate (inverted, but beta is also inverted, so cancels)
+
+    # Pitch rate: In Elodin's Y-left frame, q > 0 means nose-DOWN (opposite of standard).
+    # To use standard aerospace pitch rate derivatives (C_Lq, C_mq), we negate q.
+    q_hat = -q * c / (2.0 * V)  # Negated to use standard aerospace convention
 
     # Clamp alpha to valid range (pre-stall)
     alpha_clamped = jnp.clip(alpha, jnp.deg2rad(-12.0), jnp.deg2rad(12.0))
@@ -234,27 +239,40 @@ def aero_forces(
     Y = CY * q_bar * S  # Side force
 
     # Convert from wind/stability axis to body axis
-    # This is the key transformation that was problematic before
     #
     # Wind axis: L perpendicular to velocity, D parallel to velocity
     # Body axis: Forces along body X, Y, Z
     #
-    # When alpha > 0 (nose up), velocity is below body X-axis
-    # Lift acts perpendicular to velocity (up and slightly forward)
-    # Drag acts opposite to velocity (back and slightly up)
+    # When alpha > 0 (nose up), velocity is below body X-axis:
+    # - Drag opposes velocity -> has backward (-X) and upward (+Z) components
+    # - Lift is perpendicular to velocity -> has forward (+X) and upward (+Z) components
     ca = jnp.cos(alpha)
     sa = jnp.sin(alpha)
 
-    # Transform: [F_x, F_z] = R(-alpha) @ [-D, L]
-    # where R(-alpha) rotates from wind to body frame
-    F_x = -D * ca + L * sa  # Axial force (mostly drag, negative = forward)
-    F_z = -D * sa + L * ca  # Normal force (mostly lift, positive = up)
+    # Standard wind-to-body transformation:
+    # F_x = -D*cos(alpha) + L*sin(alpha)  (drag backward, lift slightly forward)
+    # F_z = D*sin(alpha) + L*cos(alpha)   (drag slightly up, lift mostly up)
+    F_x = -D * ca + L * sa  # Axial force (mostly drag, negative = aft)
+    F_z = D * sa + L * ca  # Normal force (mostly lift, positive = up)
     F_y = Y  # Side force
 
-    # Moments (already in body frame)
-    tau_x = Cl * q_bar * S * b  # Roll moment
-    tau_y = Cm * q_bar * S * c  # Pitch moment
-    tau_z = Cn * q_bar * S * b  # Yaw moment
+    # Moments: Convert from standard aerospace convention to Elodin's body frame
+    #
+    # Standard aerospace body frame: X-forward, Y-right, Z-down
+    # Elodin body frame: X-forward, Y-left, Z-up
+    #
+    # The Y and Z axes are negated, which inverts the pitch and yaw moment conventions:
+    # - Standard: positive Cm = nose-up moment
+    # - Elodin: positive tau_y = nose-down moment (due to Y pointing left)
+    #
+    # To use standard aerospace coefficients (C_malpha < 0 for stability),
+    # we negate tau_y so that negative Cm produces positive tau_y (nose-down).
+    #
+    # Note: tau_z is NOT negated because the sideslip angle (beta) is also inverted
+    # in the Y-left frame, and these inversions cancel out for directional stability.
+    tau_x = Cl * q_bar * S * b  # Roll moment (same convention, X-axis unchanged)
+    tau_y = -Cm * q_bar * S * c  # Pitch moment (negated for Y-left frame)
+    tau_z = Cn * q_bar * S * b  # Yaw moment (beta inversion compensates)
 
     return el.SpatialForce(
         linear=jnp.array([F_x, F_y, F_z]), torque=jnp.array([tau_x, tau_y, tau_z])

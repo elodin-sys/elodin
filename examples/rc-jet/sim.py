@@ -34,6 +34,7 @@ from propulsion import (
     spool_dynamics,
     compute_thrust,
     apply_thrust,
+    extract_throttle_command,
 )
 from actuators import (
     ControlSurfaces,
@@ -41,7 +42,7 @@ from actuators import (
     actuator_dynamics,
 )
 from ground import ground_contact
-
+from flight_plan import flight_plan
 
 @el.dataclass
 class BDXJet(el.Archetype):
