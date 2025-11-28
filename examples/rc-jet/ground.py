@@ -4,7 +4,6 @@ Ground Contact Model
 Implements simple ground collision to prevent aircraft from penetrating ground.
 """
 
-
 import elodin as el
 import jax
 import jax.numpy as jnp
