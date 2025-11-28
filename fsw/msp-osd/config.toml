@@ -25,14 +25,15 @@ x = 4
 y = 5
 z = 6
 
-# Orientation as quaternion (q0, q1, q2, q3) where q0 is the scalar (w) component
-# For bdx example: bdx.world_pos is [q0, q1, q2, q3, x, y, z]
+# Orientation quaternion from database
+# Elodin stores quaternions as [x, y, z, w] (scalar w is at index 3)
+# For bdx example: bdx.world_pos is [qx, qy, qz, qw, pos_x, pos_y, pos_z]
 [inputs.orientation]
 component = "bdx.world_pos"
-q0 = 0
-q1 = 1
-q2 = 2
-q3 = 3
+qx = 0
+qy = 1
+qz = 2
+qw = 3
 
 # Velocity in world frame (x, y, z) in m/s
 # For bdx example: bdx.world_vel is [ωx, ωy, ωz, vx, vy, vz]

@@ -51,19 +51,20 @@ pub struct Vec3Mapping {
     pub z: usize,
 }
 
-/// Mapping for a quaternion (q0, q1, q2, q3) from a component
+/// Mapping for a quaternion from a component
+/// Elodin stores quaternions as [x, y, z, w] (scalar w is last)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuatMapping {
     /// The Elodin-DB component name (e.g., "bdx.world_pos")
     pub component: String,
-    /// Array index for q0 (w) value
-    pub q0: usize,
-    /// Array index for q1 (x) value
-    pub q1: usize,
-    /// Array index for q2 (y) value
-    pub q2: usize,
-    /// Array index for q3 (z) value
-    pub q3: usize,
+    /// Array index for x (i) component
+    pub qx: usize,
+    /// Array index for y (j) component
+    pub qy: usize,
+    /// Array index for z (k) component
+    pub qz: usize,
+    /// Array index for w (scalar) component
+    pub qw: usize,
 }
 
 impl Default for Config {
@@ -92,10 +93,10 @@ impl Default for Config {
                 },
                 orientation: QuatMapping {
                     component: "bdx.world_pos".to_string(),
-                    q0: 0,
-                    q1: 1,
-                    q2: 2,
-                    q3: 3,
+                    qx: 0,
+                    qy: 1,
+                    qz: 2,
+                    qw: 3,
                 },
                 velocity: Vec3Mapping {
                     component: "bdx.world_vel".to_string(),

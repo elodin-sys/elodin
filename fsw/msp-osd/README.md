@@ -19,7 +19,8 @@ MSP DisplayPort OSD service that connects to Elodin-DB for telemetry data. Suppo
 The OSD requires three inputs in world frame, all configured via `config.toml`:
 
 1. **Position** (x, y, z) - Used for altitude display
-2. **Orientation** (q0, q1, q2, q3) - Quaternion for horizon and compass
+2. **Orientation** (qx, qy, qz, qw) - Quaternion for horizon and compass
+   - Elodin stores quaternions as `[x, y, z, w]` (scalar w is last)
 3. **Velocity** (x, y, z) - Used for speed and climb rate
 
 ## Configuration
@@ -28,7 +29,7 @@ The `config.toml` file uses declarative input mappings to specify how to extract
 
 ### BDX RC Jet Example Configuration
 
-For the bdx simulation, `world_pos` contains `[q0, q1, q2, q3, x, y, z]` and `world_vel` contains `[ωx, ωy, ωz, vx, vy, vz]`:
+For the bdx simulation, `world_pos` contains `[qx, qy, qz, qw, x, y, z]` and `world_vel` contains `[ωx, ωy, ωz, vx, vy, vz]`:
 
 ```toml
 [db]
@@ -52,12 +53,13 @@ y = 5
 z = 6
 
 # Orientation from world_pos indices 0,1,2,3
+# Elodin stores quaternions as [x, y, z, w] (scalar w is last)
 [inputs.orientation]
 component = "bdx.world_pos"
-q0 = 0
-q1 = 1
-q2 = 2
-q3 = 3
+qx = 0
+qy = 1
+qz = 2
+qw = 3
 
 # Velocity from world_vel indices 3,4,5
 [inputs.velocity]
@@ -78,12 +80,13 @@ x = 0
 y = 1
 z = 2
 
+# Quaternion components: Elodin uses [x, y, z, w] ordering
 [inputs.orientation]
 component = "satellite.attitude"
-q0 = 0
-q1 = 1
-q2 = 2
-q3 = 3
+qx = 0
+qy = 1
+qz = 2
+qw = 3
 
 [inputs.velocity]
 component = "satellite.velocity"

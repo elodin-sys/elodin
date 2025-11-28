@@ -285,21 +285,22 @@ impl Decomponentize for TelemetryExtractor {
         }
 
         // Check if this component is used for orientation
+        // Elodin stores quaternions as [x, y, z, w] (scalar w is last)
         if component_name == &self.mappings.orientation.component {
             let m = &self.mappings.orientation;
-            if let (Some(q0), Some(q1), Some(q2), Some(q3)) = (
-                Self::extract_f64(&values, m.q0),
-                Self::extract_f64(&values, m.q1),
-                Self::extract_f64(&values, m.q2),
-                Self::extract_f64(&values, m.q3),
+            if let (Some(qx), Some(qy), Some(qz), Some(qw)) = (
+                Self::extract_f64(&values, m.qx),
+                Self::extract_f64(&values, m.qy),
+                Self::extract_f64(&values, m.qz),
+                Self::extract_f64(&values, m.qw),
             ) {
                 debug!(
-                    "Orientation: q0={:.3}, q1={:.3}, q2={:.3}, q3={:.3}",
-                    q0, q1, q2, q3
+                    "Orientation: qx={:.3}, qy={:.3}, qz={:.3}, qw={:.3}",
+                    qx, qy, qz, qw
                 );
                 let proc = self.telemetry_processor.clone();
                 stellarator::spawn(async move {
-                    proc.update_orientation(q0, q1, q2, q3).await;
+                    proc.update_orientation(qx, qy, qz, qw).await;
                 });
             }
         }

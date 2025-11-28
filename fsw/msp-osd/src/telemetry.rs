@@ -8,7 +8,8 @@ pub struct TelemetryState {
     /// Position in world frame (x, y, z) in meters
     pub position: Vector3<f64>,
 
-    /// Orientation as quaternion (w, i, j, k)
+    /// Orientation as quaternion in nalgebra format (w, i, j, k)
+    /// Note: Elodin stores quaternions as [x, y, z, w], converted on input
     pub orientation: Quaternion<f64>,
 
     /// Velocity in world frame (x, y, z) in m/s
@@ -64,12 +65,11 @@ impl TelemetryState {
     }
 
     /// Get heading in degrees (0-360), derived from orientation
-    /// Uses 3-2-1 Euler sequence matching rc jet simulation
+    /// Uses 3-2-1 Euler sequence (yaw-pitch-roll)
     pub fn heading_deg(&self) -> f64 {
-        // Note: roll and yaw are swapped due to coordinate system
-        let (roll, _, _) = self.quat_to_euler_321();
-        // Negate to get correct heading direction (left yaw = increasing heading)
-        let heading = -roll.to_degrees();
+        let (_, _, yaw) = self.quat_to_euler_321();
+        // Convert yaw to heading (0-360 degrees, 0=East, 90=North)
+        let heading = yaw.to_degrees();
         if heading < 0.0 {
             heading + 360.0
         } else if heading >= 360.0 {
@@ -80,21 +80,20 @@ impl TelemetryState {
     }
 
     /// Get roll angle in degrees
-    /// Uses 3-2-1 Euler sequence matching rc jet simulation
+    /// Uses 3-2-1 Euler sequence (yaw-pitch-roll)
     pub fn roll_deg(&self) -> f64 {
-        // Note: roll and yaw are swapped due to coordinate system
-        let (_, _, yaw) = self.quat_to_euler_321();
-        let mut roll = yaw.to_degrees();
+        let (roll, _, _) = self.quat_to_euler_321();
+        let mut roll_deg = roll.to_degrees();
 
-        // Normalize to [-180, 180] range, wrapping properly around 0
-        while roll > 180.0 {
-            roll -= 360.0;
+        // Normalize to [-180, 180] range
+        while roll_deg > 180.0 {
+            roll_deg -= 360.0;
         }
-        while roll < -180.0 {
-            roll += 360.0;
+        while roll_deg < -180.0 {
+            roll_deg += 360.0;
         }
 
-        roll
+        roll_deg
     }
 
     /// Get pitch angle in degrees
@@ -105,28 +104,32 @@ impl TelemetryState {
     }
 
     /// Convert quaternion to Euler angles (roll, pitch, yaw) in 3-2-1 sequence
-    /// Matches the rc jet simulation's conversion from examples/rc-jet/util.py
-    /// See: https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles#Quaternion_to_Euler_angles_(in_3-2-1_sequence)_conversion
+    /// Returns angles in radians: (roll, pitch, yaw)
+    /// - roll: rotation about x-axis (body roll)
+    /// - pitch: rotation about y-axis (nose up/down)
+    /// - yaw: rotation about z-axis (heading)
+    /// See: https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles
     fn quat_to_euler_321(&self) -> (f64, f64, f64) {
         let q = &self.orientation;
-        let q0 = q.i; // x
-        let q1 = q.j; // y
-        let q2 = q.k; // z
-        let s = q.w; // w (scalar)
+        // nalgebra quaternion: q.w is scalar, q.i/j/k are x/y/z components
+        let x = q.i;
+        let y = q.j;
+        let z = q.k;
+        let w = q.w;
 
         // Roll (rotation about x-axis)
-        let sinr_cosp = 2.0 * (s * q0 + q1 * q2);
-        let cosr_cosp = 1.0 - 2.0 * (q0 * q0 + q1 * q1);
+        let sinr_cosp = 2.0 * (w * x + y * z);
+        let cosr_cosp = 1.0 - 2.0 * (x * x + y * y);
         let roll = sinr_cosp.atan2(cosr_cosp);
 
         // Pitch (rotation about y-axis)
-        let sinp = (1.0 + 2.0 * (s * q1 - q0 * q2)).sqrt();
-        let cosp = (1.0 - 2.0 * (s * q1 - q0 * q2)).sqrt();
+        let sinp = (1.0 + 2.0 * (w * y - x * z)).sqrt();
+        let cosp = (1.0 - 2.0 * (w * y - x * z)).sqrt();
         let pitch = 2.0 * sinp.atan2(cosp) - std::f64::consts::PI / 2.0;
 
         // Yaw (rotation about z-axis)
-        let siny_cosp = 2.0 * (s * q2 + q0 * q1);
-        let cosy_cosp = 1.0 - 2.0 * (q1 * q1 + q2 * q2);
+        let siny_cosp = 2.0 * (w * z + x * y);
+        let cosy_cosp = 1.0 - 2.0 * (y * y + z * z);
         let yaw = siny_cosp.atan2(cosy_cosp);
 
         (roll, pitch, yaw)
@@ -156,11 +159,13 @@ impl TelemetryProcessor {
         state.last_update = std::time::Instant::now();
     }
 
-    /// Update orientation quaternion (w, x, y, z)
-    pub async fn update_orientation(&self, q0: f64, q1: f64, q2: f64, q3: f64) {
+    /// Update orientation quaternion from Elodin database
+    /// Elodin stores quaternions as [x, y, z, w] (scalar w is last)
+    /// nalgebra::Quaternion::new expects (w, i, j, k) order
+    pub async fn update_orientation(&self, qx: f64, qy: f64, qz: f64, qw: f64) {
         let mut state = self.state.write().await;
-        // q0 is scalar (w), q1,q2,q3 are vector (i,j,k)
-        state.orientation = Quaternion::new(q0, q1, q2, q3);
+        // Reorder: Elodin gives (x, y, z, w), nalgebra expects (w, x, y, z)
+        state.orientation = Quaternion::new(qw, qx, qy, qz);
         state.last_update = std::time::Instant::now();
     }
 

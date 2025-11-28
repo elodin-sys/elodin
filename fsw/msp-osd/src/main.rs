@@ -86,12 +86,12 @@ async fn main() -> Result<()> {
         config.inputs.position.z
     );
     info!(
-        "  Orientation: {}[{},{},{},{}]",
+        "  Orientation: {}[x={},y={},z={},w={}]",
         config.inputs.orientation.component,
-        config.inputs.orientation.q0,
-        config.inputs.orientation.q1,
-        config.inputs.orientation.q2,
-        config.inputs.orientation.q3
+        config.inputs.orientation.qx,
+        config.inputs.orientation.qy,
+        config.inputs.orientation.qz,
+        config.inputs.orientation.qw
     );
     info!(
         "  Velocity: {}[{},{},{}]",
