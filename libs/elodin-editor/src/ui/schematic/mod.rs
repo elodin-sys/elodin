@@ -314,7 +314,13 @@ fn preferred_secondary_stem(state: &tiles::WindowState) -> String {
             return stem;
         }
     }
-    if let Some(stem) = state.descriptor.path.file_stem().and_then(|s| s.to_str()) {
+    if let Some(stem) = state
+        .descriptor
+        .path
+        .as_ref()
+        .and_then(|p| p.file_stem())
+        .and_then(|s| s.to_str())
+    {
         let stem = sanitize_to_stem(stem);
         if !stem.is_empty() {
             return stem;

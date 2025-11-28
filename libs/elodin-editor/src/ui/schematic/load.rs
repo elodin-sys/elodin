@@ -124,7 +124,7 @@ fn resolve_window_descriptor(
     }
 
     Some(WindowDescriptor {
-        path: resolved,
+        path: Some(resolved),
         title: window.title.clone(),
         screen: window.screen.map(|idx| idx as usize),
         screen_rect: window.screen_rect.or(Some(DEFAULT_SECONDARY_RECT)),
@@ -245,67 +245,70 @@ impl LoadSchematicParams<'_, '_> {
         self.windows.main = main_state;
 
         for descriptor in secondary_descriptors {
-            match std::fs::read_to_string(&descriptor.path) {
-                Ok(kdl) => match impeller2_wkt::Schematic::from_kdl(&kdl) {
-                    Ok(sec_schematic) => {
-                        let id = WindowId::default();
-                        let mut tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
-                        for elem in &sec_schematic.elems {
-                            if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
-                                self.spawn_panel(
-                                    &mut tile_state,
-                                    panel,
-                                    None,
-                                    PanelContext::Secondary(id),
-                                );
+            if let Some(path) = descriptor.path.as_ref() {
+                match std::fs::read_to_string(path) {
+                    Ok(kdl) => match impeller2_wkt::Schematic::from_kdl(&kdl) {
+                        Ok(sec_schematic) => {
+                            let id = WindowId::default();
+                            let mut tile_state =
+                                TileState::new(Id::new(("secondary_tab_tree", id.0)));
+                            for elem in &sec_schematic.elems {
+                                if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
+                                    self.spawn_panel(
+                                        &mut tile_state,
+                                        panel,
+                                        None,
+                                        PanelContext::Secondary(id),
+                                    );
+                                }
                             }
-                        }
 
-                        let graph_entities = tile_state.collect_graph_entities();
-                        info!(
-                            path = %descriptor.path.display(),
-                            "Loaded secondary schematic"
-                        );
+                            let graph_entities = tile_state.collect_graph_entities();
+                            info!(
+                                path = ?descriptor.path,
+                                "Loaded secondary schematic"
+                            );
 
-                        for &graph in &graph_entities {
-                            if let Ok(mut camera) = self.cameras.get_mut(graph) {
-                                camera.is_active = false;
+                            for &graph in &graph_entities {
+                                if let Ok(mut camera) = self.cameras.get_mut(graph) {
+                                    camera.is_active = false;
+                                }
                             }
-                        }
 
-                        let state = WindowState {
-                            descriptor,
-                            tile_state,
-                            graph_entities,
-                        };
-                        if state.descriptor.screen_rect.is_some() {
-                            self.commands.spawn_task(|| async move {
-                                // Wait a bit then capture the window descriptor.
-                                AsyncWorld.sleep(SECONDARY_RECT_CAPTURE_LOAD_GUARD).await;
-                                AsyncWorld.send_event(
-                                    crate::ui::tiles::WindowRelayout::UpdateDescriptors,
-                                )?;
-                                Ok(())
-                            });
+                            let state = WindowState {
+                                descriptor,
+                                tile_state,
+                                graph_entities,
+                            };
+                            if state.descriptor.screen_rect.is_some() {
+                                self.commands.spawn_task(|| async move {
+                                    // Wait a bit then capture the window descriptor.
+                                    AsyncWorld.sleep(SECONDARY_RECT_CAPTURE_LOAD_GUARD).await;
+                                    AsyncWorld.send_event(
+                                        crate::ui::tiles::WindowRelayout::UpdateDescriptors,
+                                    )?;
+                                    Ok(())
+                                });
+                            }
+                            self.commands.spawn((id, state));
                         }
-                        self.commands.spawn((id, state));
-                    }
+                        Err(err) => {
+                            let diag = render_diag(&err);
+                            let report = miette!(err.clone());
+                            warn!(
+                                ?report,
+                                path = ?descriptor.path,
+                                "Failed to parse secondary schematic: \n{diag}"
+                            );
+                        }
+                    },
                     Err(err) => {
-                        let diag = render_diag(&err);
-                        let report = miette!(err.clone());
                         warn!(
-                            ?report,
-                            path = %descriptor.path.display(),
-                            "Failed to parse secondary schematic: \n{diag}"
+                            ?err,
+                            path = ?descriptor.path,
+                            "Failed to read secondary schematic"
                         );
                     }
-                },
-                Err(err) => {
-                    warn!(
-                        ?err,
-                        path = %descriptor.path.display(),
-                        "Failed to read secondary schematic"
-                    );
                 }
             }
         }
@@ -443,7 +446,9 @@ impl LoadSchematicParams<'_, '_> {
                                     .window_states
                                     .iter()
                                     .find(|(_entity, id, _state)| **id == target_id)
-                                    .map(|(_, _, s)| s.descriptor.path.display().to_string());
+                                    .and_then(|(_, _, s)| {
+                                        s.descriptor.path.as_ref().map(|p| p.display().to_string())
+                                    });
                                 (format!("secondary({})", target_id.0), path)
                             }
                         };

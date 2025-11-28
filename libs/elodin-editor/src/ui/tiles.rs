@@ -92,9 +92,9 @@ pub struct TileState {
     tree_id: Id,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct WindowDescriptor {
-    pub path: PathBuf,
+    pub path: Option<PathBuf>,
     pub title: Option<String>,
     pub screen: Option<usize>,
     pub screen_rect: Option<WindowRect>,
@@ -131,6 +131,7 @@ pub enum WindowRelayout {
 pub struct WindowId(pub u32);
 
 impl WindowId {
+    /// Returns true if this is the primary window.
     pub fn is_primary(&self) -> bool {
         self.0 == 0
     }
@@ -418,7 +419,7 @@ impl WindowManager {
             })
             .unwrap_or_else(|| format!("secondary-window-{}.kdl", id.0));
         let descriptor = WindowDescriptor {
-            path: PathBuf::from(path),
+            path: Some(PathBuf::from(path)),
             title: cleaned_title.or_else(|| Some(format!("Window {}", id.0 + 1))),
             screen: None,
             screen_rect: None,
@@ -427,15 +428,17 @@ impl WindowManager {
         info!(
             id = id.0,
             title = descriptor.title.as_deref().unwrap_or(""),
-            path = %descriptor.path.display(),
+            path = ?descriptor.path,
             "Created secondary window"
         );
-        (WindowState {
-            descriptor,
-            tile_state,
-            graph_entities: Vec::new(),
-        },
-         id)
+        (
+            WindowState {
+                descriptor,
+                tile_state,
+                graph_entities: Vec::new(),
+            },
+            id,
+        )
     }
 }
 

@@ -4,7 +4,7 @@ use bevy::{
         world::World,
     },
     input::keyboard::Key,
-    prelude::{Resource, With, Entity},
+    prelude::{Entity, Resource, With},
     window::PrimaryWindow,
 };
 use bevy_egui::EguiContexts;
@@ -15,7 +15,8 @@ use crate::{
     plugins::LogicalKeyState,
     ui::{
         colors::{self, ColorExt, get_scheme, with_opacity},
-        images, theme, utils::{MarginSides, Shrink4},
+        images, theme,
+        utils::{MarginSides, Shrink4},
     },
 };
 

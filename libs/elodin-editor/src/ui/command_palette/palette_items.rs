@@ -275,12 +275,11 @@ impl<'w, 's> TileParam<'w, 's> {
     pub fn target(&mut self, target: Option<Entity>) -> Option<Mut<'_, tiles::TileState>> {
         match target {
             // Look up a specific window and project its WindowState -> TileState
-            Some(target_id) => {
-                self.windows_state
-                    .get_mut(target_id)
-                    .ok()
-                    .map(|s| s.map_unchanged(|s| &mut s.tile_state))
-            }
+            Some(target_id) => self
+                .windows_state
+                .get_mut(target_id)
+                .ok()
+                .map(|s| s.map_unchanged(|s| &mut s.tile_state)),
             // Fallback to the "main" tile in the WindowManager resource
             None => Some(self.windows.reborrow().map_unchanged(|w| &mut w.main)),
         }

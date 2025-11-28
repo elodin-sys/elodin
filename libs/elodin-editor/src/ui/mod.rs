@@ -905,7 +905,7 @@ async fn apply_window_screen(entity: Entity, screen: usize) -> Result<(), bevy_d
         %screen,
         "apply_window_screen start"
     );
-    if !wait_for_winit_window(entity, Duration::from_millis(1000)).await? {
+    if !wait_for_winit_window(entity, Duration::from_millis(2000)).await? {
         error!(%entity, "Unable to apply window to screen: winit window not found.");
         return Ok(());
     }
@@ -950,7 +950,7 @@ async fn apply_window_screen(entity: Entity, screen: usize) -> Result<(), bevy_d
         } else {
             warn!(
                 screen,
-                path = %state.descriptor.path.display(),
+                path = ?state.descriptor.path,
                 "screen out of range; skipping screen assignment"
             );
             state.descriptor.screen = None;
@@ -1241,7 +1241,7 @@ async fn apply_window_rect(
             let height_px = requested_height_px.clamp(1, screen_height.max(1));
             if width_px != requested_width_px || height_px != requested_height_px {
                 warn!(
-                    path = %state.descriptor.path.display(),
+                    path = ?state.descriptor.path,
                     rect = ?rect,
                     "Window rect exceeds screen bounds; clamping size"
                 );
@@ -1258,7 +1258,7 @@ async fn apply_window_rect(
             let y = requested_y.clamp(screen_pos.y, max_y);
             if x != requested_x || y != requested_y {
                 warn!(
-                    path = %state.descriptor.path.display(),
+                    path = ?state.descriptor.path,
                     rect = ?rect,
                     "Window rect origin exceeds screen bounds; clamping position"
                 );
@@ -1272,7 +1272,7 @@ async fn apply_window_rect(
                     && current_size.height as i32 == height_px
                 {
                     info!(
-                        path = %state.descriptor.path.display(),
+                        path = ?state.descriptor.path,
                         rect = ?rect,
                         size_w = width_px,
                         size_h = height_px,
@@ -1908,16 +1908,16 @@ fn handle_secondary_close(
 
 fn handle_primary_close(
     mut events: EventReader<WindowCloseRequested>,
-    primary: Query<Entity, With<PrimaryWindow>>,
+    primary: Query<&WindowId, With<PrimaryWindow>>,
     mut exit: EventWriter<AppExit>,
 ) {
-    let Some(primary_entity) = primary.iter().next() else {
-        return;
-    };
-
     for evt in events.read() {
         let entity = evt.window;
-        if entity == primary_entity {
+        if primary
+            .get(entity)
+            .map(|window_id| window_id.is_primary())
+            .unwrap_or(false)
+        {
             exit.write(AppExit::Success);
         }
     }
@@ -2029,7 +2029,9 @@ fn render_secondary_windows(world: &mut World) {
 
     if let Some(mut palette_state) = world.get_resource_mut::<CommandPaletteState>()
         && let Some(target) = palette_state.target_window
-        && !window_entries.iter().any(|(_, entity, _)| *entity == target)
+        && !window_entries
+            .iter()
+            .any(|(_, entity, _)| *entity == target)
     {
         palette_state.target_window = None;
         if palette_state.auto_open_item.is_none() {
@@ -2079,7 +2081,8 @@ pub(crate) fn compute_secondary_window_title(state: &tiles::WindowState) -> Stri
             state
                 .descriptor
                 .path
-                .file_stem()
+                .as_ref()
+                .and_then(|p| p.file_stem())
                 .and_then(|s| friendly_title_from_stem(&s.to_string_lossy()))
         })
         .filter(|title| !title.is_empty())
