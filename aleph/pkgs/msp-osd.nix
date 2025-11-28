@@ -1,11 +1,11 @@
-{ lib
-, pkgs
-, rustPlatform
-, rustToolchain
-, pkg-config
-, systemd
+{
+  lib,
+  pkgs,
+  rustPlatform,
+  rustToolchain,
+  pkg-config,
+  systemd,
 }:
-
 rustPlatform.buildRustPackage rec {
   pname = "msp-osd";
   version = "0.1.0";
@@ -34,7 +34,7 @@ rustPlatform.buildRustPackage rec {
     description = "MSP OSD Service - MSP DisplayPort OSD for VTX";
     homepage = "https://github.com/elodin-sys/elodin";
     license = licenses.mit;
-    maintainers = with maintainers; [ ];
+    maintainers = with maintainers; [];
     mainProgram = "msp-osd";
   };
 }

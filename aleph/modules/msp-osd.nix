@@ -1,8 +1,10 @@
-{ config, lib, pkgs, ... }:
-
-with lib;
-
-let
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
+with lib; let
   cfg = config.services.msp-osd;
   configFile = pkgs.writeText "config.toml" ''
     [db]
@@ -21,8 +23,7 @@ let
     port = "${cfg.serialPort}"
     baud = ${toString cfg.baudRate}
   '';
-in
-{
+in {
   options.services.msp-osd = {
     enable = mkEnableOption "MSP OSD service for MSP DisplayPort";
 
@@ -33,7 +34,7 @@ in
     };
 
     mode = mkOption {
-      type = types.enum [ "serial" "debug" ];
+      type = types.enum ["serial" "debug"];
       default = "serial";
       description = "Operation mode: serial for MSP DisplayPort, debug for terminal";
     };
@@ -104,9 +105,9 @@ in
   config = mkIf cfg.enable {
     systemd.services.msp-osd = {
       description = "MSP DisplayPort OSD Service";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "network.target" "elodin-db.service" ];
-      wants = [ "elodin-db.service" ];
+      wantedBy = ["multi-user.target"];
+      after = ["network.target" "elodin-db.service"];
+      wants = ["elodin-db.service"];
 
       serviceConfig = {
         Type = "simple";
@@ -115,16 +116,16 @@ in
         RestartSec = 5;
         StandardOutput = "journal";
         StandardError = "journal";
-        
+
         # Run as root for serial port access (or configure udev rules)
         User = "root";
-        
+
         # Device access for serial port
         DeviceAllow = [
           "${cfg.serialPort} rw"
         ];
         PrivateDevices = false;
-        
+
         # Security hardening
         NoNewPrivileges = true;
         ProtectSystem = "strict";
