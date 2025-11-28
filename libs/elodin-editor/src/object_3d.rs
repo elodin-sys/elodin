@@ -1169,17 +1169,16 @@ pub fn spawn_mesh(
 
             // Create a child entity to hold the scene with the offset transform
             // This way the parent can be synced with WorldPos without affecting the offset
-            commands
-                .spawn((
-                    SceneRoot(scene),
-                    offset_transform,
-                    GlobalTransform::default(),
-                    Visibility::default(),
-                    InheritedVisibility::default(),
-                    ViewVisibility::default(),
-                    ChildOf(entity),
-                    Name::new(format!("object_3d_scene {}", path)),
-                ));
+            commands.spawn((
+                SceneRoot(scene),
+                offset_transform,
+                GlobalTransform::default(),
+                Visibility::default(),
+                InheritedVisibility::default(),
+                ViewVisibility::default(),
+                ChildOf(entity),
+                Name::new(format!("object_3d_scene {}", path)),
+            ));
 
             commands
                 .entity(entity)
