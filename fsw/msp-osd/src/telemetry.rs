@@ -108,7 +108,7 @@ impl TelemetryState {
     /// - roll: rotation about x-axis (body roll)
     /// - pitch: rotation about y-axis (nose up/down)
     /// - yaw: rotation about z-axis (heading)
-    /// See: https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles
+    ///   See: https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles
     fn quat_to_euler_321(&self) -> (f64, f64, f64) {
         let q = &self.orientation;
         // nalgebra quaternion: q.w is scalar, q.i/j/k are x/y/z components
