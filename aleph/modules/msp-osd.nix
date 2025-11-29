@@ -10,9 +10,6 @@ with lib; let
     [db]
     host = "${cfg.dbHost}"
     port = ${toString cfg.dbPort}
-    components = [
-      ${concatStringsSep ",\n      " (map (c: ''"${c}"'') cfg.components)}
-    ]
 
     [osd]
     rows = ${toString cfg.osdRows}
@@ -23,6 +20,26 @@ with lib; let
     [serial]
     port = "${cfg.serialPort}"
     baud = ${toString cfg.baudRate}
+
+    # Input mappings for extracting telemetry from Elodin-DB components
+    [inputs.position]
+    component = "${cfg.inputs.position.component}"
+    x = ${toString cfg.inputs.position.x}
+    y = ${toString cfg.inputs.position.y}
+    z = ${toString cfg.inputs.position.z}
+
+    [inputs.orientation]
+    component = "${cfg.inputs.orientation.component}"
+    qx = ${toString cfg.inputs.orientation.qx}
+    qy = ${toString cfg.inputs.orientation.qy}
+    qz = ${toString cfg.inputs.orientation.qz}
+    qw = ${toString cfg.inputs.orientation.qw}
+
+    [inputs.velocity]
+    component = "${cfg.inputs.velocity.component}"
+    x = ${toString cfg.inputs.velocity.x}
+    y = ${toString cfg.inputs.velocity.y}
+    z = ${toString cfg.inputs.velocity.z}
   '';
 in {
   options.services.msp-osd = {
@@ -50,20 +67,6 @@ in {
       type = types.port;
       default = 2240;
       description = "Elodin-DB port";
-    };
-
-    components = mkOption {
-      type = types.listOf types.str;
-      default = [
-        "gyro"
-        "accel"
-        "magnetometer"
-        "attitude_target"
-        "body_ang_vel"
-        "world_pos"
-        "world_vel"
-      ];
-      description = "List of components to subscribe to from Elodin-DB";
     };
 
     osdRows = mkOption {
@@ -113,6 +116,83 @@ in {
       type = types.listOf types.str;
       default = [];
       description = "Extra command-line arguments to pass to msp-osd";
+    };
+
+    # Input mappings for extracting telemetry from Elodin-DB components
+    inputs = {
+      position = {
+        component = mkOption {
+          type = types.str;
+          default = "bdx.world_pos";
+          description = "Component name for position data (e.g., 'bdx.world_pos')";
+        };
+        x = mkOption {
+          type = types.int;
+          default = 4;
+          description = "Array index for X position";
+        };
+        y = mkOption {
+          type = types.int;
+          default = 5;
+          description = "Array index for Y position";
+        };
+        z = mkOption {
+          type = types.int;
+          default = 6;
+          description = "Array index for Z position (altitude)";
+        };
+      };
+
+      orientation = {
+        component = mkOption {
+          type = types.str;
+          default = "bdx.world_pos";
+          description = "Component name for orientation quaternion data";
+        };
+        qx = mkOption {
+          type = types.int;
+          default = 0;
+          description = "Array index for quaternion X component";
+        };
+        qy = mkOption {
+          type = types.int;
+          default = 1;
+          description = "Array index for quaternion Y component";
+        };
+        qz = mkOption {
+          type = types.int;
+          default = 2;
+          description = "Array index for quaternion Z component";
+        };
+        qw = mkOption {
+          type = types.int;
+          default = 3;
+          description = "Array index for quaternion W (scalar) component";
+        };
+      };
+
+      velocity = {
+        component = mkOption {
+          type = types.str;
+          default = "bdx.world_vel";
+          description = "Component name for velocity data (e.g., 'bdx.world_vel')";
+        };
+        x = mkOption {
+          type = types.int;
+          default = 3;
+          description = "Array index for X velocity";
+        };
+        y = mkOption {
+          type = types.int;
+          default = 4;
+          description = "Array index for Y velocity";
+        };
+        z = mkOption {
+          type = types.int;
+          default = 5;
+          description = "Array index for Z velocity";
+        };
+      };
     };
   };
 
