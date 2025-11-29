@@ -31,6 +31,7 @@ from propulsion import (
     SpoolSpeed,
     ThrottleCommand,
     Thrust,
+    extract_throttle_command,
     spool_dynamics,
     compute_thrust,
     apply_thrust,
@@ -97,9 +98,8 @@ def system() -> el.System:
 
     # Non-effector systems (compute derived quantities in dependency order)
     non_effectors = (
-        # flight_plan                    # Generate control commands
-        # | extract_throttle_command     # Extract throttle from commands
-        compute_velocity_body  # Transform world vel to body frame
+        extract_throttle_command  # Extract throttle from control commands
+        | compute_velocity_body  # Transform world vel to body frame
         | compute_aero_angles  # Calculate α, β
         | dynamic_pressure_and_mach  # Calculate q̄, M
         | actuator_dynamics  # Update control surface positions

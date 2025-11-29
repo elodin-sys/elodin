@@ -29,7 +29,11 @@ ControlCommands = ty.Annotated[
     el.Component(
         "control_commands",
         el.ComponentType(el.PrimitiveType.F64, (4,)),
-        metadata={"element_names": "elevator,aileron,rudder,throttle", "priority": 71},
+        metadata={
+            "element_names": "elevator,aileron,rudder,throttle",
+            "priority": 71,
+            "external_control": "true",
+        },
     ),
 ]
 

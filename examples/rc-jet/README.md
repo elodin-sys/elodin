@@ -19,29 +19,51 @@ Follow the [main README](../../README.md) for Elodin installation.
 
 ### Running the Simulation
 
-**Basic command-line run:**
-```bash
-cd examples/rc-jet
-python main.py
-```
-
 **With 3D visualization (recommended):**
 ```bash
-elodin editor main.py
+elodin editor examples/rc-jet/main.py
 ```
 
-**Custom parameters:**
+### RC Controller Input
+
+The simulation supports real-time control input from an RC controller (like FrSky X20 R5) or keyboard.
+
+**Terminal 1 - Run the simulation:**
 ```bash
-python main.py --altitude 200 --speed 50 --time 120
+elodin editor examples/rc-jet/main.py
 ```
 
-### Command-Line Options
+**Terminal 2 - Run the controller:**
+```bash
+cargo run -p rc-jet-controller
+```
 
-- `--altitude <meters>`: Set initial altitude (default: 100 m)
-- `--speed <m/s>`: Set initial airspeed (default: 40 m/s)
-- `--time <seconds>`: Set simulation duration (default: 60 s)
-- `--build`: Compile mode (faster for batch runs)
-- `--save`: Save telemetry to `bdx_telemetry.arrow`
+The controller automatically:
+- Detects connected gamepads (FrSky X20 appears as USB HID joystick)
+- Falls back to keyboard input if no gamepad detected
+- Accepts input from both simultaneously (gamepad is primary)
+- Sends control commands at 60Hz to the simulation
+
+#### Control Mapping (Mode 2 - US Standard)
+
+| Gamepad | Keyboard | Control |
+|---------|----------|---------|
+| Left Stick Y | W/S | Throttle (0-100%) |
+| Left Stick X | A/D | Rudder (±30°) |
+| Right Stick Y | ↑/↓ | Elevator (±25°) |
+| Right Stick X | ←/→ | Aileron (±25°) |
+
+For Mode 1 (EU/Asia) stick layout, run:
+```bash
+cargo run -p rc-jet-controller -- --mode1
+```
+
+#### Building the Controller
+
+```bash
+cargo build -p rc-jet-controller --release
+./target/release/rc-jet-controller
+```
 
 ## Flight Plan
 
@@ -178,7 +200,14 @@ examples/rc-jet/
 ├── aero.py              # Aerodynamic force/moment computation
 ├── propulsion.py        # Turbine dynamics and thrust
 ├── actuators.py         # Control surface servo dynamics
-├── control.py           # Flight plans and autopilot
+├── flight_plan.py       # Autopilot flight plans
+├── ground.py            # Ground contact model
+├── controller/          # RC controller input (Rust)
+│   ├── Cargo.toml       # Rust crate configuration
+│   └── src/
+│       ├── main.rs      # Entry point, CLI, connection loop
+│       ├── input.rs     # Gamepad (gilrs) + keyboard input
+│       └── control.rs   # VTable setup and packet sending
 ├── README.md            # This file
 └── BDX_Simulation_Whitepaper.md  # Technical design document
 ```
@@ -238,33 +267,26 @@ def system() -> el.System:
 
 ### Hardware-in-the-Loop
 
-The simulation supports external control via Impeller2 protocol. Mark control components as external:
+The simulation supports external control via the Impeller2 protocol. The `ControlCommands` component is already configured with `external_control: "true"` metadata, which means:
 
-```python
-# In actuators.py, add external control metadata
-ControlCommands = ty.Annotated[
-    jax.Array,
-    el.Component(
-        "control_commands",
-        el.ComponentType(el.PrimitiveType.F64, (4,)),
-        metadata={
-            "element_names": "elevator,aileron,rudder,throttle",
-            "external_control": "true",  # Enable external control
-        },
-    ),
-]
+1. The simulation does **not** write back to this component
+2. External clients have exclusive write access
+3. Real-time updates are synchronized with the simulation loop
+
+The included `controller/` Rust crate demonstrates this:
+
+```rust
+// Send control commands to simulation
+let values = [elevator, aileron, rudder, throttle];
+let mut packet = LenPacket::table(vtable_id, 40);
+packet.extend_aligned(&timestamp.to_le_bytes());
+for value in values {
+    packet.extend_aligned(&value.to_le_bytes());
+}
+client.send(packet).await?;
 ```
 
-Then run with database connection:
-```python
-# In main.py
-world.run(
-    sys,
-    sim_time_step=config.dt,
-    run_time_step=config.dt,  # Real-time execution
-    db_addr="0.0.0.0:2240",   # Listen for connections
-)
-```
+To create your own controller, follow the pattern in `controller/src/control.rs`.
 
 ### XFLR5 Integration
 

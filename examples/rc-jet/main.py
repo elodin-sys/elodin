@@ -7,8 +7,12 @@ Implements a 6-DOF fixed-wing jet aircraft with aerodynamics,
 turbine propulsion, and control surface dynamics.
 
 Usage:
-    python main.py              # Run simulation with default config
     elodin editor main.py       # Run with 3D visualization
+
+For RC controller input, run in a separate terminal:
+    cargo run -p rc-jet-controller
+
+WASD / Arrow keys for keyboard control.
 """
 
 import elodin as el
@@ -87,6 +91,10 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId]:
                 graph "bdx.spool_speed" name="Spool Speed (normalized)"
                 graph "bdx.throttle_command" name="Throttle Command"
             }
+            vsplit name="Control Input" {
+                graph "bdx.control_commands" name="Control Commands (rad/normalized)"
+                graph "bdx.control_surfaces" name="Control Surfaces (rad)"
+            }
             vsplit name="Aerodynamics" {
                 hsplit {
                     graph "bdx.alpha" name="Angle of Attack (rad)"
@@ -141,10 +149,11 @@ print(f"Time step: {config.dt:.6f} s ({1 / config.dt:.0f} Hz)")
 print(f"Total ticks: {config.total_ticks}")
 print()
 
-# Run simulation
+# Run simulation in real-time mode for responsive RC control
+# When using RC controller, run: cargo run -p rc-jet-controller
 world.run(
     sim_system,
     sim_time_step=config.dt,
-    run_time_step=1.0 / 60.0,  # 60 Hz playback
+    run_time_step=2 * config.dt,  # Setting this higher than sim allows for real-time control
     max_ticks=config.total_ticks,
 )

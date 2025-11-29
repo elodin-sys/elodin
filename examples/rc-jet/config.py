@@ -116,7 +116,7 @@ class BDXConfig:
     initial_yaw_deg: float = 35.0  # degrees (35° offset - northeast heading)
 
     # Simulation parameters
-    dt: float = 1.0 / 120.0  # 120 Hz simulation rate
+    dt: float = 1.0 / 120.0  # 60 Hz simulation rate
     simulation_time: float = 180.0  # Total simulation time (s) - 3 minutes for full pattern
 
     def __post_init__(self):

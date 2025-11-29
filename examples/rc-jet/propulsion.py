@@ -12,6 +12,7 @@ import jax
 import jax.numpy as jnp
 
 from config import BDXConfig
+from actuators import ControlCommands
 
 # Component type definitions
 
@@ -41,17 +42,6 @@ Thrust = ty.Annotated[
         metadata={"priority": 59},
     ),
 ]
-
-# Import ControlCommands type (define locally to avoid circular import)
-ControlCommands = ty.Annotated[
-    jax.Array,
-    el.Component(
-        "control_commands",
-        el.ComponentType(el.PrimitiveType.F64, (4,)),
-        metadata={"element_names": "elevator,aileron,rudder,throttle"},
-    ),
-]
-
 
 @el.map
 def extract_throttle_command(commands: ControlCommands) -> ThrottleCommand:
