@@ -168,8 +168,8 @@ fn display_controls(input: &input::ControlInput) {
     // Clear line and print current values
     print!("\r  ");
     print!(
-        "Throttle: {:5.1}%  ",
-        (input.throttle * 100.0).to_string().yellow()
+        "Throttle: {}%  ",
+        format!("{:5.1}", input.throttle * 100.0).yellow()
     );
     print!(
         "Elevator: {:+6.1}°  ",
