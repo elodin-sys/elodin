@@ -1,4 +1,4 @@
-use bevy::{ecs::system::SystemParam, prelude::*};
+use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
 use bevy_defer::{AsyncCommandsExtension, AsyncWorld};
 use bevy_egui::egui::{Color32, Id};
 use bevy_infinite_grid::InfiniteGrid;
@@ -56,6 +56,7 @@ pub struct SyncedViewport;
 pub struct LoadSchematicParams<'w, 's> {
     pub commands: Commands<'w, 's>,
     pub windows: ResMut<'w, WindowManager>,
+    primary_window: Single<'w, Entity, With<PrimaryWindow>>,
     pub asset_server: Res<'w, AssetServer>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub materials: ResMut<'w, Assets<StandardMaterial>>,
@@ -69,7 +70,7 @@ pub struct LoadSchematicParams<'w, 's> {
     objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
     vector_arrows: Query<'w, 's, Entity, With<VectorArrowState>>,
     grid_lines: Query<'w, 's, Entity, With<InfiniteGrid>>,
-    window_states: Query<'w, 's, (Entity, &'static WindowId, &'static WindowState)>,
+    window_states: Query<'w, 's, (Entity, &'static WindowId, &'static mut WindowState)>,
 }
 
 pub fn sync_schematic(
@@ -194,14 +195,22 @@ pub fn load_schematic_file(
 impl LoadSchematicParams<'_, '_> {
     pub fn load_schematic(&mut self, schematic: &Schematic, base_dir: Option<&Path>) {
         self.render_layer_alloc.free_all();
-        for (id, window_id, window_state) in self.window_states {
+        for (id, window_id, window_state) in &self.window_states {
+            if window_id.is_primary() {
+                // We do not despawn the primary window ever.
+                continue;
+            }
             // for secondary in self.windows.take_secondary() {
             for graph in window_state.graph_entities.iter() {
                 self.commands.entity(*graph).despawn();
             }
             self.commands.entity(id).despawn();
         }
-        let mut main_state = self.windows.take_main();
+
+        let mut main_state = {
+            let mut window_state = self.window_states.get_mut(*self.primary_window).expect("no primary window").2;
+            std::mem::take(&mut window_state.tile_state)
+        };
         main_state.clear(&mut self.commands, &mut self.selected_object);
         self.hdr_enabled.0 = false;
         for entity in self.objects_3d.iter() {
@@ -242,7 +251,10 @@ impl LoadSchematicParams<'_, '_> {
             }
         }
 
-        self.windows.main = main_state;
+        let mut main_state = {
+            let mut window_state = self.window_states.get_mut(*self.primary_window).expect("no primary window").2;
+            std::mem::replace(&mut window_state.tile_state, main_state)
+        };
 
         for descriptor in secondary_descriptors {
             if let Some(path) = descriptor.path.as_ref() {

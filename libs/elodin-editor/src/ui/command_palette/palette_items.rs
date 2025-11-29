@@ -12,6 +12,7 @@ use bevy::{
         system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
         world::World,
     },
+    window::PrimaryWindow,
     log::{error, info, warn},
     pbr::{StandardMaterial, wireframe::WireframeConfig},
     prelude::{Deref, DerefMut, Entity, In, Mut, Resource},
@@ -255,6 +256,7 @@ pub struct TileParam<'w, 's> {
     windows: ResMut<'w, tiles::WindowManager>,
     windows_id: Query<'w, 's, (Entity, &'static tiles::WindowId)>,
     windows_state: Query<'w, 's, &'static mut tiles::WindowState>,
+    primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
 }
 
 // impl<'w, 's> TileParam<'w, 's> {
@@ -273,16 +275,12 @@ pub struct TileParam<'w, 's> {
 impl<'w, 's> TileParam<'w, 's> {
     /// TODO: Switch from using `WindowId` to `Entity` for lookup.
     pub fn target(&mut self, target: Option<Entity>) -> Option<Mut<'_, tiles::TileState>> {
-        match target {
-            // Look up a specific window and project its WindowState -> TileState
-            Some(target_id) => self
-                .windows_state
-                .get_mut(target_id)
-                .ok()
-                .map(|s| s.map_unchanged(|s| &mut s.tile_state)),
-            // Fallback to the "main" tile in the WindowManager resource
-            None => Some(self.windows.reborrow().map_unchanged(|w| &mut w.main)),
-        }
+        let target_id = target.or_else(|| self.primary_window.iter().next());
+        target_id.and_then(|target_id|
+                           self.windows_state
+                           .get_mut(target_id)
+                           .ok()
+                           .map(|s| s.map_unchanged(|s| &mut s.tile_state)))
     }
 }
 

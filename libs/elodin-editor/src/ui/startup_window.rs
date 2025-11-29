@@ -49,13 +49,6 @@ fn create_startup_window(
             bevy::window::CompositeAlphaMode::Opaque
         };
 
-        let descriptor = WindowDescriptor::default();
-        let state = WindowState {
-            descriptor,
-            graph_entities: vec![],
-            tile_state: TileState::new(egui::Id::new("main_tab_tree")),
-        };
-
         commands.spawn((
             Window {
                 title: "Elodin".to_owned(),
@@ -76,8 +69,6 @@ fn create_startup_window(
                 composite_alpha_mode,
                 ..Default::default()
             },
-            crate::tiles::WindowId(0),
-            state,
             StartupWindow,
         ));
     } else if let Ok(mut primary) = primary.single_mut() {

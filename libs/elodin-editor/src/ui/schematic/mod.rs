@@ -10,7 +10,7 @@ use crate::{
         tiles::{self, Pane},
     },
 };
-use bevy::{ecs::system::SystemParam, prelude::*};
+use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
 use egui_tiles::{Tile, TileId};
 use impeller2_bevy::ComponentMetadataRegistry;
 use impeller2_wkt::{
@@ -50,6 +50,7 @@ pub struct SchematicParam<'w, 's> {
     pub vector_arrows: Query<'w, 's, (Entity, &'static VectorArrow3d)>,
     pub windows: Res<'w, tiles::WindowManager>,
     pub windows_state: Query<'w, 's, &'static tiles::WindowState>,
+    pub primary_window: Single<'w, Entity, With<PrimaryWindow>>,
     pub dashboards: Query<'w, 's, &'static Dashboard<Entity>>,
     pub hdr_enabled: Res<'w, HdrEnabled>,
     pub metadata: Res<'w, ComponentMetadataRegistry>,
@@ -57,7 +58,11 @@ pub struct SchematicParam<'w, 's> {
 
 impl SchematicParam<'_, '_> {
     pub fn get_panel(&self, tile_id: TileId) -> Option<Panel<Entity>> {
-        self.get_panel_from_state(&self.windows.main, tile_id)
+        self.windows_state
+            .get(*self.primary_window)
+            .ok()
+            .and_then(|window_state|
+                 self.get_panel_from_state(&window_state.tile_state, tile_id))
     }
 
     pub fn get_panel_from_state(
@@ -222,7 +227,12 @@ pub fn tiles_to_schematic(
     mut secondary: ResMut<CurrentSecondarySchematics>,
 ) {
     schematic.elems.clear();
-    if let Some(tile_id) = param.windows.main.tree.root() {
+
+    if let Some(tile_id) = param.windows_state
+        .get(*param.primary_window)
+        .ok()
+        .and_then(|window_state|
+                  window_state.tile_state.tree.root()) {
         schematic
             .elems
             .extend(param.get_panel(tile_id).map(SchematicElem::Panel))

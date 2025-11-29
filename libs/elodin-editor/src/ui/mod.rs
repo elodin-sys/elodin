@@ -134,6 +134,7 @@ pub struct HdrEnabled(pub bool);
 #[derive(Resource, Default)]
 pub struct Paused(pub bool);
 
+// TODO: Try to remove this.
 #[derive(Resource, Default)]
 struct SecondaryLogState(
     HashMap<tiles::WindowId, (Option<usize>, bool, tiles::WindowRelayoutPhase)>,
@@ -281,38 +282,37 @@ impl Plugin for UiPlugin {
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, shortcuts)
-            .add_systems(Update, handle_primary_close.before(render_layout))
+            .add_systems(Update, handle_window_close.before(render_layout))
             .add_systems(Update, render_layout)
             .add_systems(First, warn_camera_order_ambiguities)
+            // .add_systems(
+            //     Update,
+            //     apply_primary_window_layout
+            //         .after(render_layout)
+            //         .before(sync_windows),
+            // )
+            // .add_systems(
+            //     Update,
+            //     confirm_primary_screen_assignment
+            //         .after(apply_primary_window_layout)
+            //         .before(sync_windows),
+            // )
+            .add_systems(Update, sync_windows.after(render_layout))
             .add_systems(
                 Update,
-                apply_primary_window_layout
-                    .after(render_layout)
-                    .before(sync_secondary_windows),
+                handle_window_relayout_events.after(sync_windows),
             )
             .add_systems(
                 Update,
-                confirm_primary_screen_assignment
-                    .after(apply_primary_window_layout)
-                    .before(sync_secondary_windows),
+                track_window_geometry.after(handle_window_relayout_events),
             )
-            .add_systems(Update, sync_secondary_windows.after(render_layout))
+            // .add_systems(
+            //     Update,
+            //     capture_primary_window_layout.after(handle_window_relayout_events),
+            // )
             .add_systems(
                 Update,
-                handle_window_relayout_events.after(sync_secondary_windows),
-            )
-            .add_systems(
-                Update,
-                track_secondary_window_geometry.after(handle_window_relayout_events),
-            )
-            .add_systems(
-                Update,
-                capture_primary_window_layout.after(handle_window_relayout_events),
-            )
-            .add_systems(Update, handle_secondary_close.after(sync_secondary_windows))
-            .add_systems(
-                Update,
-                set_secondary_camera_viewport.after(sync_secondary_windows),
+                set_secondary_camera_viewport.after(sync_windows),
             )
             .add_systems(
                 Update,
@@ -328,7 +328,7 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
-                render_secondary_windows.after(handle_secondary_close),
+                render_secondary_windows.after(sync_windows),
             )
             .add_systems(First, fix_visibility_hierarchy)
             .add_systems(Update, sync_hdr)
@@ -678,6 +678,9 @@ fn readable_label_color(color: Color) -> Color32 {
 }
 
 pub fn render_layout(world: &mut World) {
+    // if world.query::<&PrimaryWindow>().iter(world).next().is_none() {
+    //     return;
+    // }
     world.add_root_widget::<MainLayout>("main_layout");
 
     world.add_root_widget::<ViewportOverlay>("viewport_overlay");
@@ -687,7 +690,7 @@ pub fn render_layout(world: &mut World) {
     world.add_root_widget::<CommandPalette>("command_palette");
 }
 
-fn sync_secondary_windows(
+fn sync_windows(
     mut commands: Commands,
     mut windows_state: Query<(Entity, &WindowId, &mut tiles::WindowState, Option<&Window>)>,
     mut cameras: Query<&mut Camera>,
@@ -716,18 +719,18 @@ fn sync_secondary_windows(
     // }
 
     for (entity, marker, mut state, window_maybe) in &mut windows_state {
-        let phase = crate::ui::tiles::WindowRelayoutPhase::Idle;
-        let current_key = (state.descriptor.screen, false, phase);
-        let last = log_state.0.get(&marker).copied();
-        if last != Some(current_key) {
-            info!(
-                id = ?marker,
-                screen = state.descriptor.screen.map(|s| s as i32).unwrap_or(-1),
-                relayout = ?phase,
-                "secondary_window_state"
-            );
-            log_state.0.insert(*marker, current_key);
-        }
+        // let phase = crate::ui::tiles::WindowRelayoutPhase::Idle;
+        // let current_key = (state.descriptor.screen, false, phase);
+        // let last = log_state.0.get(&marker).copied();
+        // if last != Some(current_key) {
+        //     info!(
+        //         id = ?marker,
+        //         screen = state.descriptor.screen.map(|s| s as i32).unwrap_or(-1),
+        //         relayout = ?phase,
+        //         "window_state"
+        //     );
+        //     log_state.0.insert(*marker, current_key);
+        // }
         state.graph_entities = state.tile_state.collect_graph_entities();
 
         // if let Some(entity) = state.window_entity
@@ -810,9 +813,6 @@ fn sync_secondary_windows(
             .insert((window_component, *marker))
             .id();
 
-        // state.window_entity = Some(window_entity);
-        // state.applied_screen = pre_applied_screen;
-        // state.applied_rect = None;
         if let Some(screen) = state.descriptor.screen.as_ref() {
             commands.send_event(WindowRelayout::Screen {
                 window: window_entity,
@@ -1027,131 +1027,131 @@ fn handle_window_relayout_events(
     }
 }
 
-fn apply_primary_window_layout(
-    mut windows: ResMut<tiles::WindowManager>,
-    primary_query: Query<Entity, With<PrimaryWindow>>,
-    winit_windows: NonSend<bevy::winit::WinitWindows>,
-) {
-    #[allow(deprecated)]
-    let Ok(primary_entity) = primary_query.get_single() else {
-        return;
-    };
-    let Some(window) = winit_windows.get_window(primary_entity) else {
-        return;
-    };
-    let layout = &mut windows.primary;
-    match layout.relayout_phase {
-        tiles::WindowRelayoutPhase::Idle => {}
-        tiles::WindowRelayoutPhase::NeedScreen => {
-            info!(
-                target_screen = layout.screen.map(|s| s as i32).unwrap_or(-1),
-                relayout_phase = ?layout.relayout_phase,
-                "Attempting primary screen assignment"
-            );
+// fn apply_primary_window_layout(
+//     mut windows: ResMut<tiles::WindowManager>,
+//     primary_query: Query<Entity, With<PrimaryWindow>>,
+//     winit_windows: NonSend<bevy::winit::WinitWindows>,
+// ) {
+//     #[allow(deprecated)]
+//     let Ok(primary_entity) = primary_query.get_single() else {
+//         return;
+//     };
+//     let Some(window) = winit_windows.get_window(primary_entity) else {
+//         return;
+//     };
+//     let layout = &mut windows.primary;
+//     match layout.relayout_phase {
+//         tiles::WindowRelayoutPhase::Idle => {}
+//         tiles::WindowRelayoutPhase::NeedScreen => {
+//             info!(
+//                 target_screen = layout.screen.map(|s| s as i32).unwrap_or(-1),
+//                 relayout_phase = ?layout.relayout_phase,
+//                 "Attempting primary screen assignment"
+//             );
 
-            if layout.awaiting_screen_confirmation {
-                let still_waiting = layout
-                    .relayout_started_at
-                    .map(|started| started.elapsed() <= SCREEN_RELAYOUT_TIMEOUT)
-                    .unwrap_or(false);
-                if still_waiting {
-                    return;
-                }
-                layout.awaiting_screen_confirmation = false;
-            }
+//             if layout.awaiting_screen_confirmation {
+//                 let still_waiting = layout
+//                     .relayout_started_at
+//                     .map(|started| started.elapsed() <= SCREEN_RELAYOUT_TIMEOUT)
+//                     .unwrap_or(false);
+//                 if still_waiting {
+//                     return;
+//                 }
+//                 layout.awaiting_screen_confirmation = false;
+//             }
 
-            let screens = collect_sorted_screens(window);
-            if window_on_screen(layout.screen, window, &screens) {
-                // If rect already applied, proceed to Idle to avoid extra swapchain reconfig.
-                if let Some(rect) = layout.screen_rect
-                    && layout.applied_rect == Some(rect)
-                {
-                    layout.relayout_phase = tiles::WindowRelayoutPhase::Idle;
-                    layout.awaiting_screen_confirmation = false;
-                    complete_primary_screen_assignment(
-                        layout,
-                        window,
-                        "Primary window confirmed on target screen",
-                    );
-                    return;
-                }
-                if LINUX_MULTI_WINDOW {
-                    if window.fullscreen().is_some() {
-                        exit_fullscreen(window);
-                        return;
-                    }
-                    force_windowed(window);
-                } else if window.fullscreen().is_some() {
-                    exit_fullscreen(window);
-                } else {
-                    window.set_maximized(false);
-                    linux_clear_minimized(window);
-                }
-                complete_primary_screen_assignment(
-                    layout,
-                    window,
-                    "Primary window confirmed on target screen",
-                );
-                return;
-            }
-            let Some(screen) = layout.screen else {
-                layout.awaiting_screen_confirmation = false;
-                layout.relayout_phase = if layout.screen_rect.is_some() {
-                    tiles::WindowRelayoutPhase::NeedRect
-                } else {
-                    tiles::WindowRelayoutPhase::Idle
-                };
-                return;
-            };
-            if let Some(target_monitor) = screens.get(screen).cloned() {
-                info!(
-                    screen = screen as i32,
-                    "Moving primary window to target screen"
-                );
-                assign_primary_window_to_screen(layout, window, target_monitor);
-                layout.awaiting_screen_confirmation = true;
-                layout.relayout_attempts = layout.relayout_attempts.saturating_add(1);
-                if layout.relayout_started_at.is_none() {
-                    layout.relayout_started_at = Some(Instant::now());
-                }
-                if let Some(started) = layout.relayout_started_at
-                    && started.elapsed() > SCREEN_RELAYOUT_TIMEOUT
-                    && layout.relayout_attempts >= SCREEN_RELAYOUT_MAX_ATTEMPTS
-                {
-                    warn!(
-                        screen = screen as i32,
-                        attempts = layout.relayout_attempts,
-                        elapsed_ms = started.elapsed().as_millis(),
-                        "Primary window screen assignment timed out"
-                    );
-                    layout.awaiting_screen_confirmation = false;
-                    layout.relayout_phase = if layout.screen_rect.is_some() {
-                        tiles::WindowRelayoutPhase::NeedRect
-                    } else {
-                        tiles::WindowRelayoutPhase::Idle
-                    };
-                }
-            } else {
-                warn!(
-                    screen = screen as i32,
-                    "Primary window screen index out of range; skipping"
-                );
-                layout.screen = None;
-                layout.awaiting_screen_confirmation = false;
-                layout.relayout_phase = if layout.screen_rect.is_some() {
-                    tiles::WindowRelayoutPhase::NeedRect
-                } else {
-                    tiles::WindowRelayoutPhase::Idle
-                };
-            }
-        }
-        tiles::WindowRelayoutPhase::NeedRect => {
-            if apply_primary_window_rect(layout, window) {
-                layout.relayout_phase = tiles::WindowRelayoutPhase::Idle;
-            }
-        }
-    }
-}
+//             let screens = collect_sorted_screens(window);
+//             if window_on_screen(layout.screen, window, &screens) {
+//                 // If rect already applied, proceed to Idle to avoid extra swapchain reconfig.
+//                 if let Some(rect) = layout.screen_rect
+//                     && layout.applied_rect == Some(rect)
+//                 {
+//                     layout.relayout_phase = tiles::WindowRelayoutPhase::Idle;
+//                     layout.awaiting_screen_confirmation = false;
+//                     complete_primary_screen_assignment(
+//                         layout,
+//                         window,
+//                         "Primary window confirmed on target screen",
+//                     );
+//                     return;
+//                 }
+//                 if LINUX_MULTI_WINDOW {
+//                     if window.fullscreen().is_some() {
+//                         exit_fullscreen(window);
+//                         return;
+//                     }
+//                     force_windowed(window);
+//                 } else if window.fullscreen().is_some() {
+//                     exit_fullscreen(window);
+//                 } else {
+//                     window.set_maximized(false);
+//                     linux_clear_minimized(window);
+//                 }
+//                 complete_primary_screen_assignment(
+//                     layout,
+//                     window,
+//                     "Primary window confirmed on target screen",
+//                 );
+//                 return;
+//             }
+//             let Some(screen) = layout.screen else {
+//                 layout.awaiting_screen_confirmation = false;
+//                 layout.relayout_phase = if layout.screen_rect.is_some() {
+//                     tiles::WindowRelayoutPhase::NeedRect
+//                 } else {
+//                     tiles::WindowRelayoutPhase::Idle
+//                 };
+//                 return;
+//             };
+//             if let Some(target_monitor) = screens.get(screen).cloned() {
+//                 info!(
+//                     screen = screen as i32,
+//                     "Moving primary window to target screen"
+//                 );
+//                 assign_primary_window_to_screen(layout, window, target_monitor);
+//                 layout.awaiting_screen_confirmation = true;
+//                 layout.relayout_attempts = layout.relayout_attempts.saturating_add(1);
+//                 if layout.relayout_started_at.is_none() {
+//                     layout.relayout_started_at = Some(Instant::now());
+//                 }
+//                 if let Some(started) = layout.relayout_started_at
+//                     && started.elapsed() > SCREEN_RELAYOUT_TIMEOUT
+//                     && layout.relayout_attempts >= SCREEN_RELAYOUT_MAX_ATTEMPTS
+//                 {
+//                     warn!(
+//                         screen = screen as i32,
+//                         attempts = layout.relayout_attempts,
+//                         elapsed_ms = started.elapsed().as_millis(),
+//                         "Primary window screen assignment timed out"
+//                     );
+//                     layout.awaiting_screen_confirmation = false;
+//                     layout.relayout_phase = if layout.screen_rect.is_some() {
+//                         tiles::WindowRelayoutPhase::NeedRect
+//                     } else {
+//                         tiles::WindowRelayoutPhase::Idle
+//                     };
+//                 }
+//             } else {
+//                 warn!(
+//                     screen = screen as i32,
+//                     "Primary window screen index out of range; skipping"
+//                 );
+//                 layout.screen = None;
+//                 layout.awaiting_screen_confirmation = false;
+//                 layout.relayout_phase = if layout.screen_rect.is_some() {
+//                     tiles::WindowRelayoutPhase::NeedRect
+//                 } else {
+//                     tiles::WindowRelayoutPhase::Idle
+//                 };
+//             }
+//         }
+//         tiles::WindowRelayoutPhase::NeedRect => {
+//             if apply_primary_window_rect(layout, window) {
+//                 layout.relayout_phase = tiles::WindowRelayoutPhase::Idle;
+//             }
+//         }
+//     }
+// }
 
 async fn apply_window_rect(
     rect: WindowRect,
@@ -1517,7 +1517,7 @@ fn capture_secondary_window_screens_oneoff(
     }
 }
 
-fn track_secondary_window_geometry(
+fn track_window_geometry(
     mut moved_events: EventReader<WindowMoved>,
     mut resized_events: EventReader<WindowResized>,
     mut windows: ResMut<tiles::WindowManager>,
@@ -1545,63 +1545,19 @@ fn track_secondary_window_geometry(
     }
 }
 
-fn confirm_primary_screen_assignment(
-    mut moved_events: EventReader<WindowMoved>,
-    mut resized_events: EventReader<WindowResized>,
-    mut windows: ResMut<tiles::WindowManager>,
-    primary_query: Query<Entity, With<PrimaryWindow>>,
-    winit_windows: NonSend<bevy::winit::WinitWindows>,
-) {
-    #[allow(deprecated)]
-    let Ok(primary_entity) = primary_query.get_single() else {
-        return;
-    };
-
-    let mut touched = false;
-    for evt in moved_events.read() {
-        if evt.window == primary_entity {
-            touched = true;
-        }
-    }
-    for evt in resized_events.read() {
-        if evt.window == primary_entity {
-            touched = true;
-        }
-    }
-
-    if !touched {
-        return;
-    }
-
-    let Some(window) = winit_windows.get_window(primary_entity) else {
-        return;
-    };
-    let screens_sorted = collect_sorted_screens(window);
-    let layout = &mut windows.primary;
-    if matches!(
-        layout.relayout_phase,
-        tiles::WindowRelayoutPhase::NeedScreen
-    ) {
-        layout.awaiting_screen_confirmation = false;
-    }
-    let _ = screens_sorted;
-}
-
 fn collect_sorted_screens(window: &WinitWindow) -> Vec<MonitorHandle> {
     let mut screens: Vec<MonitorHandle> = window.available_monitors().collect();
     screens.sort_by(|a, b| {
-        let result = a
-            .position()
-            .x
-            .cmp(&b.position().x)
-            .then(a.position().y.cmp(&b.position().y));
-        if result == std::cmp::Ordering::Equal {
-            let name_a = a.name();
-            let name_b = b.name();
-            name_a.cmp(&name_b)
-        } else {
-            result
-        }
+        let p_a = a.position();
+        let p_b = b.position();
+        p_a.x.cmp(&p_b.x)
+             .then(p_a.y.cmp(&p_b.y))
+             .then_with(|| {
+                 
+                 let name_a = a.name();
+                 let name_b = b.name();
+                 name_a.cmp(&name_b)
+             })
     });
     screens
 }
@@ -1616,6 +1572,7 @@ fn screens_match(a: &MonitorHandle, b: &MonitorHandle) -> bool {
     }
 }
 
+// XXX: What does this do that's different from `collect_sorted_screens`?
 fn collect_screens_from_any_window(
     windows: &bevy::winit::WinitWindows,
 ) -> Option<Vec<MonitorHandle>> {
@@ -1878,35 +1835,7 @@ fn capture_primary_window_layout(
     }
 }
 
-fn handle_secondary_close(
-    mut events: EventReader<WindowCloseRequested>,
-    mut windows: ResMut<tiles::WindowManager>,
-    window_query: Query<(Entity, &Window)>,
-    screens: Query<(Entity, &Monitor)>,
-) {
-    // let mut to_remove = Vec::new();
-    // for evt in events.read() {
-    //     if let Some(id) = windows.find_secondary_by_entity(evt.window) {
-    //         to_remove.push(id);
-    //     }
-    // }
-
-    // if !to_remove.is_empty() {
-    //     windows.secondary.retain_mut(|state| {
-    //         let keep = !to_remove.contains(&state.id);
-    //         if !keep
-    //             && let Some((_, window)) = state
-    //                 .window_entity
-    //                 .and_then(|entity| window_query.get(entity).ok())
-    //         {
-    //             state.update_descriptor_from_window(window, &screens);
-    //         }
-    //         keep
-    //     });
-    // }
-}
-
-fn handle_primary_close(
+fn handle_window_close(
     mut events: EventReader<WindowCloseRequested>,
     primary: Query<&WindowId, With<PrimaryWindow>>,
     mut exit: EventWriter<AppExit>,
@@ -2010,16 +1939,6 @@ fn friendly_title_from_stem(stem: &str) -> Option<String> {
 
 fn render_secondary_windows(world: &mut World) {
     let window_entries: Vec<(tiles::WindowId, Entity, String)> = {
-        // let windows = world.resource::<tiles::WindowManager>();
-        // windows
-        //     .secondary
-        //     .iter()
-        //     .filter_map(|state| {
-        //         state
-        //             .window_entity
-        //             .map(|entity| (state.id, entity, compute_secondary_window_title(state)))
-        //     })
-        //     .collect()
         world
             .query::<(Entity, &tiles::WindowId, &tiles::WindowState)>()
             .iter(world)

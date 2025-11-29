@@ -1,10 +1,10 @@
 use bevy::{
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
-    ecs::system::{SystemParam, SystemState},
+    ecs::{component::HookContext, system::{SystemParam, SystemState}},
     input::keyboard::Key,
     log::info,
     prelude::*,
-    window::{Monitor, Window, WindowPosition},
+    window::{Monitor, Window, WindowPosition, PrimaryWindow},
 };
 use bevy_editor_cam::prelude::{EditorCam, EnabledMotion, OrbitConstraint};
 use bevy_egui::{
@@ -62,7 +62,59 @@ use crate::{
 };
 
 pub(crate) fn plugin(app: &mut App) {
-    app.add_event::<WindowRelayout>();
+    app
+        .register_type::<WindowId>()
+        .add_event::<WindowRelayout>()
+        .add_systems(Startup, setup_primary_window_state)
+        ;
+    // app.world_mut()
+    //     .register_component_hooks::<WindowState>()
+    //     .on_insert(|mut world, HookContext {
+    //         entity,
+    //         ..
+    //     }| {
+    //         let Some(state) = world.get::<WindowState>(entity).cloned() else {
+    //             warn!("Could not get window state for {entity}.");
+    //             return;
+    //         };
+    //         if world.get::<Window>(entity).is_none() {
+    //             warn!("No window for entity {entity}");
+    //             // If there's no Window yet, don't try to resize
+    //             return;
+    //         }
+
+    //         if let Some(screen) = state.descriptor.screen.as_ref() {
+    //             world.send_event(WindowRelayout::Screen {
+    //                 window: entity,
+    //                 screen: screen.clone(),
+    //             });
+    //         }
+
+    //         if let Some(rect) = state.descriptor.screen_rect.as_ref() {
+    //             world.send_event(WindowRelayout::Rect {
+    //                 window: entity,
+    //                 rect: rect.clone(),
+    //             });
+    //         }
+    //     });
+}
+
+fn setup_primary_window_state(primary_window: Query<Entity, With<PrimaryWindow>>,
+                              mut commands: Commands) {
+    let Some(id) = primary_window.iter().next() else {
+        warn!("No primary window to setup");
+        return;
+    };
+    let descriptor = WindowDescriptor::default();
+    let state = WindowState {
+        descriptor,
+        graph_entities: vec![],
+        tile_state: TileState::new(egui::Id::new("main_tab_tree")),
+    };
+    commands.entity(id)
+        .insert((state,
+                 WindowId(0)));
+
 }
 
 #[derive(Clone)]
@@ -370,9 +422,6 @@ pub(crate) fn clamp_percent(value: f32) -> u32 {
 // TODO: Remove this by making the primary window use `WindowState` too.
 #[derive(Resource)]
 pub struct WindowManager {
-    // TODO: We can avoid this state by making the primary window use `WindowState`
-    // which has a `TileState` field.
-    pub main: TileState,
     // TODO: Refactor and try to eliminate.
     pub primary: PrimaryWindowLayout,
 }
@@ -380,7 +429,6 @@ pub struct WindowManager {
 impl Default for WindowManager {
     fn default() -> Self {
         Self {
-            main: TileState::new(Id::new("main_tab_tree")),
             primary: PrimaryWindowLayout::default(),
         }
     }
@@ -389,10 +437,6 @@ impl Default for WindowManager {
 impl WindowManager {
     pub fn clear_primary_layout(&mut self) {
         self.primary = PrimaryWindowLayout::default();
-    }
-
-    pub fn take_main(&mut self) -> TileState {
-        std::mem::take(&mut self.main)
     }
 
     /// Creates a `WindowState`. Must be spawned with a `WindowId` to create an
@@ -1436,6 +1480,7 @@ pub struct TileSystem<'w, 's> {
     images: Local<'s, images::Images>,
     windows: Res<'w, WindowManager>,
     window_states: Query<'w, 's, (Entity, &'static WindowId, &'static WindowState)>,
+    primary_window: Single<'w, Entity, With<PrimaryWindow>>,
 }
 
 impl<'w, 's> TileSystem<'w, 's> {
@@ -1448,16 +1493,12 @@ impl<'w, 's> TileSystem<'w, 's> {
         let params = state.get_mut(world);
         let mut contexts = params.contexts;
         let images = params.images;
-        let is_empty = match target {
-            Some(target_id) => params
+        let target_id = target.unwrap_or_else(|| *params.primary_window);
+        let is_empty = params
                 .window_states
                 .get(target_id)
                 .map(|(_, _, s)| s.tile_state.is_empty() && s.tile_state.tree_actions.is_empty())
-                .ok(),
-            None => {
-                Some(params.windows.main.is_empty() && params.windows.main.tree_actions.is_empty())
-            }
-        };
+                .ok();
 
         let is_empty_tile_tree = is_empty?;
 
@@ -2155,8 +2196,15 @@ impl WidgetSystem for TileLayout<'_, '_> {
     }
 }
 
-pub fn shortcuts(key_state: Res<LogicalKeyState>, mut windows: ResMut<WindowManager>) {
-    let ui_state = &mut windows.main;
+pub fn shortcuts(key_state: Res<LogicalKeyState>,
+                 mut windows: ResMut<WindowManager>,
+                 primary_window: Single<Entity, With<PrimaryWindow>>,
+                 mut window_state: Query<&mut WindowState>,
+) {
+    let Ok(window_state) = &mut window_state.get_mut(*primary_window) else {
+        return;
+    };
+    let ui_state = &mut window_state.tile_state;
     if key_state.pressed(&Key::Control) && key_state.just_pressed(&Key::Tab) {
         let Some(tile_id) = ui_state.tree.root() else {
             return;
