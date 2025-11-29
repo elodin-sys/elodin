@@ -29,7 +29,7 @@ pub fn render(grid: &mut OsdGrid, state: &TelemetryState, coordinate_frame: Coor
     render_speed(grid, ground_speed_ms);
 
     // Center - Artificial horizon (from orientation)
-    render_horizon(grid, roll_deg, pitch_deg);
+    render_horizon(grid, roll_deg, pitch_deg, coordinate_frame);
 
     // Bottom bar - Status
     render_status_bar(grid, state);
@@ -99,7 +99,12 @@ fn render_speed(grid: &mut OsdGrid, speed_ms: f32) {
 /// Uses FPV/OSD convention: horizon moves opposite to aircraft pitch
 /// - Climbing (nose up): horizon moves DOWN, more sky visible
 /// - Diving (nose down): horizon moves UP, more ground visible
-fn render_horizon(grid: &mut OsdGrid, roll_deg: f32, pitch_deg: f32) {
+fn render_horizon(
+    grid: &mut OsdGrid,
+    roll_deg: f32,
+    pitch_deg: f32,
+    coordinate_frame: CoordinateFrame,
+) {
     let center_row = grid.rows / 2;
     let center_col = grid.cols / 2;
     let horizon_width = 30.min(grid.cols.saturating_sub(20));
@@ -114,8 +119,13 @@ fn render_horizon(grid: &mut OsdGrid, roll_deg: f32, pitch_deg: f32) {
     // Negative sign: pitch up → horizon moves down (higher row number) → more sky above
     let pitch_offset = (-pitch_deg / 10.0).clamp(-3.0, 3.0);
 
-    // Calculate roll tilt for the horizon line
-    let roll_rad = roll_deg.to_radians();
+    // Calculate roll tilt for the horizon line based on coordinate frame:
+    // - ENU (Elodin): positive roll = left wing up, needs negation for OSD
+    // - NED (aviation): positive roll = right wing down, already correct for OSD
+    let roll_rad = match coordinate_frame {
+        CoordinateFrame::Enu => (-roll_deg).to_radians(),
+        CoordinateFrame::Ned => roll_deg.to_radians(),
+    };
     let roll_slope = roll_rad.tan();
 
     // Draw sky and ground regions
