@@ -119,29 +119,34 @@ fn render_horizon(
     // Negative sign: pitch up → horizon moves down (higher row number) → more sky above
     let pitch_offset = (-pitch_deg / 10.0).clamp(-3.0, 3.0);
 
-    // Calculate roll tilt for the horizon line based on coordinate frame:
+    // Calculate roll angle based on coordinate frame:
     // - ENU (Elodin): positive roll = left wing up, needs negation for OSD
     // - NED (aviation): positive roll = right wing down, already correct for OSD
     let roll_rad = match coordinate_frame {
         CoordinateFrame::Enu => (-roll_deg).to_radians(),
         CoordinateFrame::Ned => roll_deg.to_radians(),
     };
-    let roll_slope = roll_rad.tan();
 
-    // Draw sky and ground regions
+    // Use sin/cos instead of tan() to handle all roll angles smoothly,
+    // including 90° (vertical) and inverted (180°) orientations.
+    // tan() has asymptotes at ±90° causing horizon to "flip" at those angles.
+    let (roll_sin, roll_cos) = roll_rad.sin_cos();
+
+    // Draw sky and ground regions using signed distance from tilted horizon line
     for row in start_row..=end_row {
         for col in start_col..=end_col {
-            // Calculate if this point is above or below the tilted horizon
-            // Note: Horizon tilts opposite to aircraft roll
+            // Signed distance from the tilted horizon line through center point
+            // d > 0: above horizon (sky), d < 0: below horizon (ground)
             let rel_col = (col as i8 - center_col as i8) as f32;
-            let horizon_y = center_row as f32 + pitch_offset - (rel_col * roll_slope);
+            let rel_row = row as f32 - (center_row as f32 + pitch_offset);
+            let d = roll_sin * rel_col - roll_cos * rel_row;
 
-            let ch = if row as f32 > horizon_y {
+            let ch = if d < -0.5 {
                 '·' // Ground (minimal dot pattern for least camera occlusion)
-            } else if (row as f32 - horizon_y).abs() < 0.5 {
-                '-' // Horizon line
-            } else {
+            } else if d > 0.5 {
                 ' ' // Sky
+            } else {
+                '-' // Horizon line
             };
 
             grid.set_char(row, col, ch);
