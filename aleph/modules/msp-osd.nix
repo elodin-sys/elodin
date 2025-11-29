@@ -18,6 +18,7 @@ with lib; let
     rows = ${toString cfg.osdRows}
     cols = ${toString cfg.osdCols}
     refresh_rate_hz = ${toString cfg.refreshRateHz}
+    coordinate_frame = "${cfg.coordinateFrame}"
 
     [serial]
     port = "${cfg.serialPort}"
@@ -81,6 +82,19 @@ in {
       type = types.float;
       default = 20.0;
       description = "OSD refresh rate in Hz";
+    };
+
+    coordinateFrame = mkOption {
+      type = types.enum ["enu" "ned"];
+      default = "ned";
+      description = ''
+        Coordinate frame convention for heading interpretation:
+        - "enu" (East-North-Up): 0°=East, 90°=North (Elodin simulation default)
+        - "ned" (North-East-Down): 0°=North, 90°=East (Aviation convention)
+
+        Defaults to "ned" for real aviation hardware. Use "enu" when testing
+        with Elodin simulations.
+      '';
     };
 
     serialPort = mkOption {

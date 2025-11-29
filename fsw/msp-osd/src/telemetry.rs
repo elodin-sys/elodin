@@ -64,11 +64,17 @@ impl TelemetryState {
         self.velocity.z
     }
 
-    /// Get heading in degrees (0-360), derived from orientation
+    /// Get raw heading in degrees (0-360), derived from orientation
     /// Uses 3-2-1 Euler sequence (yaw-pitch-roll)
+    ///
+    /// Note: This returns heading in mathematical/ENU convention where:
+    /// - 0° = East (positive X axis)
+    /// - 90° = North (positive Y axis)
+    ///
+    /// For aviation display, use `CoordinateFrame::to_aviation_heading()` to convert.
     pub fn heading_deg(&self) -> f64 {
         let (_, _, yaw) = self.quat_to_euler_321();
-        // Convert yaw to heading (0-360 degrees, 0=East, 90=North)
+        // Convert yaw to heading (0-360 degrees, ENU: 0=East, 90=North)
         let heading = yaw.to_degrees();
         if heading < 0.0 {
             heading + 360.0

@@ -10,6 +10,14 @@ rows = 18
 cols = 50
 refresh_rate_hz = 20.0
 
+# Coordinate frame convention for heading interpretation:
+#   "enu" - East-North-Up: 0°=East, 90°=North (Elodin simulation default)
+#   "ned" - North-East-Down: 0°=North, 90°=East (Aviation convention)
+# 
+# Use "enu" when connecting to Elodin simulations (rc-jet, drone examples).
+# Use "ned" when connecting to real aviation hardware with standard conventions.
+coordinate_frame = "enu"
+
 [serial]
 port = "/dev/ttyTHS7"
 baud = 115200

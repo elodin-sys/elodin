@@ -76,6 +76,16 @@ async fn main() -> Result<()> {
         config.serial.port = port;
     }
 
+    // Log coordinate frame convention
+    info!(
+        "Coordinate frame: {:?} (heading 0° = {})",
+        config.osd.coordinate_frame,
+        match config.osd.coordinate_frame {
+            config::CoordinateFrame::Enu => "East, will convert to aviation",
+            config::CoordinateFrame::Ned => "North, native aviation",
+        }
+    );
+
     // Log configured input mappings
     info!("Input mappings:");
     info!(
@@ -205,7 +215,7 @@ async fn run_osd_loop(
             // Update grid with layout
             {
                 let mut grid = grid.write().await;
-                layout::render(&mut grid, &state);
+                layout::render(&mut grid, &state, config.osd.coordinate_frame);
             }
 
             // Send to backend (with status if terminal backend)

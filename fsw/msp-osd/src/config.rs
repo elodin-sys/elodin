@@ -3,6 +3,45 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
+/// Coordinate frame convention for heading interpretation
+///
+/// - **ENU** (East-North-Up): Used by Elodin simulations. 0°=East, 90°=North.
+/// - **NED** (North-East-Down): Aviation convention. 0°=North, 90°=East.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum CoordinateFrame {
+    /// East-North-Up: 0°=East, 90°=North (Elodin simulation default)
+    #[default]
+    Enu,
+    /// North-East-Down: 0°=North, 90°=East (Aviation convention)
+    Ned,
+}
+
+impl CoordinateFrame {
+    /// Convert a heading from ENU convention to aviation/NED convention
+    /// ENU: 0°=East, 90°=North
+    /// NED: 0°=North, 90°=East
+    pub fn to_aviation_heading(self, heading_deg: f32) -> f32 {
+        match self {
+            CoordinateFrame::Enu => {
+                // Convert ENU to NED: heading_ned = (90 - heading_enu) mod 360
+                let ned = 90.0 - heading_deg;
+                if ned < 0.0 {
+                    ned + 360.0
+                } else if ned >= 360.0 {
+                    ned - 360.0
+                } else {
+                    ned
+                }
+            }
+            CoordinateFrame::Ned => {
+                // Already in aviation convention
+                heading_deg
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub db: DbConfig,
@@ -22,6 +61,10 @@ pub struct OsdConfig {
     pub rows: u8,
     pub cols: u8,
     pub refresh_rate_hz: f32,
+    /// Coordinate frame convention for heading interpretation
+    /// Defaults to ENU for Elodin simulations, use NED for real aviation hardware
+    #[serde(default)]
+    pub coordinate_frame: CoordinateFrame,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,6 +121,7 @@ impl Default for Config {
                 rows: 18,
                 cols: 50,
                 refresh_rate_hz: 20.0,
+                coordinate_frame: CoordinateFrame::Enu,
             },
             serial: SerialConfig {
                 port: "/dev/ttyTHS7".to_string(),

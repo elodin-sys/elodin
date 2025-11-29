@@ -1,20 +1,25 @@
+use crate::config::CoordinateFrame;
 use crate::osd_grid::OsdGrid;
 use crate::telemetry::{SystemStatus, TelemetryState};
 
 /// Main render function that lays out all OSD elements
 /// Uses only position, orientation, and velocity inputs
-pub fn render(grid: &mut OsdGrid, state: &TelemetryState) {
+pub fn render(grid: &mut OsdGrid, state: &TelemetryState, coordinate_frame: CoordinateFrame) {
     grid.clear();
 
     // Derive display values from core telemetry
     let altitude_m = state.altitude_m() as f32;
     let ground_speed_ms = state.ground_speed_ms() as f32;
     let climb_rate_ms = state.climb_rate_ms() as f32;
-    let heading_deg = state.heading_deg() as f32;
+    let heading_raw = state.heading_deg() as f32;
     let roll_deg = state.roll_deg() as f32;
     let pitch_deg = state.pitch_deg() as f32;
 
-    // Top bar - Compass (derived from orientation)
+    // Convert heading to aviation convention (0°=North, 90°=East)
+    // based on the configured coordinate frame
+    let heading_deg = coordinate_frame.to_aviation_heading(heading_raw);
+
+    // Top bar - Compass (derived from orientation, in aviation convention)
     render_compass(grid, heading_deg);
 
     // Left side - Altitude ladder (from position.z)
@@ -91,6 +96,9 @@ fn render_speed(grid: &mut OsdGrid, speed_ms: f32) {
 }
 
 /// Render artificial horizon in the center
+/// Uses FPV/OSD convention: horizon moves opposite to aircraft pitch
+/// - Climbing (nose up): horizon moves DOWN, more sky visible
+/// - Diving (nose down): horizon moves UP, more ground visible
 fn render_horizon(grid: &mut OsdGrid, roll_deg: f32, pitch_deg: f32) {
     let center_row = grid.rows / 2;
     let center_col = grid.cols / 2;
@@ -103,7 +111,8 @@ fn render_horizon(grid: &mut OsdGrid, roll_deg: f32, pitch_deg: f32) {
     let end_row = start_row + horizon_height;
 
     // Calculate horizon line position based on pitch
-    let pitch_offset = (pitch_deg / 10.0).clamp(-3.0, 3.0);
+    // Negative sign: pitch up → horizon moves down (higher row number) → more sky above
+    let pitch_offset = (-pitch_deg / 10.0).clamp(-3.0, 3.0);
 
     // Calculate roll tilt for the horizon line
     let roll_rad = roll_deg.to_radians();
@@ -146,8 +155,10 @@ fn render_horizon(grid: &mut OsdGrid, roll_deg: f32, pitch_deg: f32) {
         }
 
         // Calculate row position: offset from center based on pitch difference
+        // Positive pitch marks appear ABOVE center (lower row numbers)
+        // Sign matches the horizon movement direction
         let pitch_diff = pitch_mark as f32 - pitch_deg;
-        let row_offset = -pitch_diff / 10.0 * rows_per_10deg;
+        let row_offset = pitch_diff / 10.0 * rows_per_10deg;
         let ladder_row = center_row as f32 + row_offset;
 
         // Only draw if within visible area
