@@ -4,7 +4,7 @@ use bevy::{
         system::{SystemParam, SystemState},
         world::{Mut, World},
     },
-    prelude::Resource,
+    prelude::{Entity, Resource},
     window::PrimaryWindow,
 };
 use bevy_egui::{EguiContext, egui};
@@ -23,8 +23,21 @@ pub trait RootWidgetSystemExt {
         args: S::Args,
     ) -> Option<S::Output>;
 
+    fn add_root_widget_to<S: RootWidgetSystem + 'static>(
+        &mut self,
+        entity: Entity,
+        id: &str,
+        args: S::Args,
+    ) -> Option<S::Output>;
+
     fn egui_context_scope<R, F: QueryFilter>(
         &mut self,
+        f: impl FnOnce(&mut Self, egui::Context) -> R,
+    ) -> Option<R>;
+
+    fn egui_context_scope_for<R>(
+        &mut self,
+        id: Entity,
         f: impl FnOnce(&mut Self, egui::Context) -> R,
     ) -> Option<R>;
 }
@@ -56,12 +69,51 @@ impl RootWidgetSystemExt for World {
         })
     }
 
+    fn add_root_widget_to<S: RootWidgetSystem + 'static>(
+        &mut self,
+        entity: Entity,
+        id: &str,
+        args: S::Args,
+    ) -> Option<S::Output> {
+        self.egui_context_scope_for::<_>(entity, |world, mut ctx| {
+            let id = WidgetId::new(id);
+
+            if !world.contains_resource::<StateInstances<S>>() {
+                world.insert_resource(StateInstances::<S> {
+                    instances: HashMap::new(),
+                });
+            }
+
+            world.resource_scope(|world, mut states: Mut<StateInstances<S>>| {
+                let cached_state = states
+                    .instances
+                    .entry(id)
+                    .or_insert_with(|| SystemState::new(world));
+                let output = S::ctx_system(world, cached_state, &mut ctx, args);
+                cached_state.apply(world);
+                output
+            })
+        })
+    }
+
     fn egui_context_scope<R, F: QueryFilter>(
         &mut self,
         f: impl FnOnce(&mut Self, egui::Context) -> R,
     ) -> Option<R> {
         let mut state = self.query_filtered::<&mut EguiContext, (With<EguiContext>, F)>();
         let Ok(mut egui_ctx) = state.single_mut(self) else {
+            return None;
+        };
+        let ctx = egui_ctx.get_mut().clone();
+        Some(f(self, ctx))
+    }
+    
+    fn egui_context_scope_for<R>(
+        &mut self,
+        id: Entity,
+        f: impl FnOnce(&mut Self, egui::Context) -> R,
+    ) -> Option<R> {
+        let Some(mut egui_ctx) = self.get_mut::<EguiContext>(id) else {
             return None;
         };
         let ctx = egui_ctx.get_mut().clone();

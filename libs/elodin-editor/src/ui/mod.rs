@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
+use std::fmt::Write;
 
 use bevy::{
     app::AppExit,
@@ -326,10 +327,10 @@ impl Plugin for UiPlugin {
                     .after(set_secondary_camera_viewport)
                     .after(set_camera_viewport),
             )
-            .add_systems(
-                Update,
-                render_secondary_windows.after(sync_windows),
-            )
+            // .add_systems(
+            //     Update,
+            //     render_secondary_windows.after(sync_windows),
+            // )
             .add_systems(First, fix_visibility_hierarchy)
             .add_systems(Update, sync_hdr)
             .add_systems(Update, tiles::shortcuts)
@@ -677,17 +678,96 @@ fn readable_label_color(color: Color) -> Color32 {
     Color32::from_rgba_unmultiplied(color32.r(), color32.g(), color32.b(), 255)
 }
 
-pub fn render_layout(world: &mut World) {
-    // if world.query::<&PrimaryWindow>().iter(world).next().is_none() {
-    //     return;
-    // }
-    world.add_root_widget::<MainLayout>("main_layout");
+pub fn render_layout(world: &mut World,
+                     mut windows: Local<Vec<(Entity, WindowId)>>,
+                     mut widget_id: Local<String>,
+) {
+    windows.extend(world.query::<(Entity, &WindowId)>().iter(world).map(|(id, window_id)| (id, window_id.clone())));
+    let palette_window = world.get_resource_mut::<CommandPaletteState>()
+        .and_then(|palette_state| palette_state.target_window.clone());
+    for (id, window_id) in windows.drain(..) {
+        if window_id.is_primary() {
+            world.add_root_widget_to::<MainLayout>(id, "main_layout", ());
 
-    world.add_root_widget::<ViewportOverlay>("viewport_overlay");
+            world.add_root_widget_to::<ViewportOverlay>(id, "viewport_overlay", ());
 
-    world.add_root_widget::<modal::ModalWithSettings>("modal_graph");
+            world.add_root_widget_to::<modal::ModalWithSettings>(id, "modal_graph", ());
 
-    world.add_root_widget::<CommandPalette>("command_palette");
+            world.add_root_widget_to::<CommandPalette>(id, "command_palette", ());
+        } else {
+            widget_id.clear();
+            let _ = write!(widget_id, "secondary_window_{}", window_id.0);
+            world.add_root_widget_to::<tiles::TileSystem>(id, &widget_id, Some(id));
+            if true || palette_window.map(|window| window == id).unwrap_or(false) {
+                widget_id.clear();
+                let _ = write!(widget_id, "secondary_command_palette_{}", window_id.0);
+                // This doesn't seem to show anything.
+                // world.add_root_widget_to::<CommandPalette>(id, &widget_id, ());
+                world.add_root_widget_to::<command_palette::PaletteWindow>(
+                    id,
+                    &widget_id,
+                    Some(id),
+                );
+            }
+        }
+    }
+}
+
+fn render_secondary_windows(world: &mut World) {
+    let window_entries: Vec<(tiles::WindowId, Entity, String)> = {
+        world
+            .query::<(Entity, &tiles::WindowId, &tiles::WindowState)>()
+            .iter(world)
+            .map(|(entity, id, state)| (*id, entity, compute_secondary_window_title(state)))
+            .collect()
+    };
+
+    if let Some(mut palette_state) = world.get_resource_mut::<CommandPaletteState>()
+        && let Some(target) = palette_state.target_window
+        && !window_entries
+            .iter()
+            .any(|(_, entity, _)| *entity == target)
+    {
+        // What is this doing?
+        palette_state.target_window = None;
+        if palette_state.auto_open_item.is_none() {
+            palette_state.show = false;
+            palette_state.filter.clear();
+            palette_state.page_stack.clear();
+        }
+    }
+
+    for (id, entity, desired_title) in window_entries {
+        let Ok(mut entity_mut) = world.get_entity_mut(entity) else {
+            continue;
+        };
+
+        if let Some(mut window) = entity_mut.get_mut::<Window>()
+            && window.title != desired_title
+        {
+            window.title = desired_title;
+        }
+        // NOTE: I see. This ActiveSecondaryWindow is used to get around the API
+        // that requires a singleton component. I've modified the API so this is
+        // no longer necessary.
+
+        entity_mut.insert(ActiveSecondaryWindow);
+
+        let widget_id = format!("secondary_window_{}", id.0);
+        world.add_root_widget_with::<tiles::TileSystem, With<ActiveSecondaryWindow>>(
+            &widget_id,
+            Some(entity),
+        );
+        let palette_widget_id = format!("secondary_command_palette_{}", id.0);
+        world.add_root_widget_with::<command_palette::PaletteWindow, With<ActiveSecondaryWindow>>(
+            &palette_widget_id,
+            Some(entity),
+        );
+
+        if let Ok(mut entity_mut) = world.get_entity_mut(entity) {
+            entity_mut.remove::<ActiveSecondaryWindow>();
+        }
+    }
 }
 
 fn sync_windows(
@@ -1937,58 +2017,6 @@ fn friendly_title_from_stem(stem: &str) -> Option<String> {
     }
 }
 
-fn render_secondary_windows(world: &mut World) {
-    let window_entries: Vec<(tiles::WindowId, Entity, String)> = {
-        world
-            .query::<(Entity, &tiles::WindowId, &tiles::WindowState)>()
-            .iter(world)
-            .map(|(entity, id, state)| (*id, entity, compute_secondary_window_title(state)))
-            .collect()
-    };
-
-    if let Some(mut palette_state) = world.get_resource_mut::<CommandPaletteState>()
-        && let Some(target) = palette_state.target_window
-        && !window_entries
-            .iter()
-            .any(|(_, entity, _)| *entity == target)
-    {
-        palette_state.target_window = None;
-        if palette_state.auto_open_item.is_none() {
-            palette_state.show = false;
-            palette_state.filter.clear();
-            palette_state.page_stack.clear();
-        }
-    }
-
-    for (id, entity, desired_title) in window_entries {
-        let Ok(mut entity_mut) = world.get_entity_mut(entity) else {
-            continue;
-        };
-
-        if let Some(mut window) = entity_mut.get_mut::<Window>()
-            && window.title != desired_title
-        {
-            window.title = desired_title;
-        }
-
-        entity_mut.insert(ActiveSecondaryWindow);
-
-        let widget_id = format!("secondary_window_{}", id.0);
-        world.add_root_widget_with::<tiles::TileSystem, With<ActiveSecondaryWindow>>(
-            &widget_id,
-            Some(entity),
-        );
-        let palette_widget_id = format!("secondary_command_palette_{}", id.0);
-        world.add_root_widget_with::<command_palette::PaletteWindow, With<ActiveSecondaryWindow>>(
-            &palette_widget_id,
-            Some(entity),
-        );
-
-        if let Ok(mut entity_mut) = world.get_entity_mut(entity) {
-            entity_mut.remove::<ActiveSecondaryWindow>();
-        }
-    }
-}
 
 pub(crate) fn compute_secondary_window_title(state: &tiles::WindowState) -> String {
     state

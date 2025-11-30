@@ -283,6 +283,8 @@ impl LoadSchematicParams<'_, '_> {
 
                             for &graph in &graph_entities {
                                 if let Ok(mut camera) = self.cameras.get_mut(graph) {
+                                    // Why do we turn their cameras off?
+                                    // Oh, so we can set their `WindowRef` first.
                                     camera.is_active = false;
                                 }
                             }
