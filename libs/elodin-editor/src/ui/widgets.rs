@@ -10,7 +10,6 @@ use bevy::{
 use bevy_egui::{EguiContext, egui};
 use std::collections::HashMap;
 
-// TODO: Let's like we need an `add_root_widget_to(entity: Entity, id: &str)`
 pub trait RootWidgetSystemExt {
     fn add_root_widget<S: RootWidgetSystem<Args = ()> + 'static>(&mut self, id: &str) -> S::Output {
         self.add_root_widget_with::<S, With<PrimaryWindow>>(id, ())

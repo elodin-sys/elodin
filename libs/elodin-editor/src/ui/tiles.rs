@@ -127,15 +127,6 @@ impl WindowDescriptor {
     }
 }
 
-/// TODO: Remove this once `PrimaryWindowLayout` is gone.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum WindowRelayoutPhase {
-    #[default]
-    Idle,
-    NeedScreen,
-    NeedRect,
-}
-
 /// Events dealing with window layout
 #[derive(Event, Clone, Debug, PartialEq, Eq)]
 pub enum WindowRelayout {

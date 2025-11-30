@@ -258,21 +258,7 @@ pub struct TileParam<'w, 's> {
     primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
 }
 
-// impl<'w, 's> TileParam<'w, 's> {
-//     pub fn target(&mut self, target: Option<tiles::WindowId>)
-//               -> Option<&mut tiles::TileState> {
-//         match target {
-//             Some(target_id) => self.windows_state
-//                 .iter_mut()
-//                 .find(|(id, _state)| **id == target_id)
-//                 .map(|(_id, mut state)| &mut state.tile_state),
-//             None => Some(&mut self.windows.main),
-//         }
-//     }
-// }
-
 impl<'w, 's> TileParam<'w, 's> {
-    /// TODO: Switch from using `WindowId` to `Entity` for lookup.
     pub fn target(&mut self, target: Option<Entity>) -> Option<Mut<'_, tiles::TileState>> {
         let target_id = target.or_else(|| self.primary_window.iter().next());
         target_id.and_then(|target_id|

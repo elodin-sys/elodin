@@ -135,12 +135,6 @@ pub struct HdrEnabled(pub bool);
 #[derive(Resource, Default)]
 pub struct Paused(pub bool);
 
-// TODO: Try to remove this.
-#[derive(Resource, Default)]
-struct SecondaryLogState(
-    HashMap<tiles::WindowId, (Option<usize>, bool, tiles::WindowRelayoutPhase)>,
-);
-
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
 pub enum SelectedObject {
     #[default]
@@ -272,7 +266,6 @@ impl Plugin for UiPlugin {
             .init_resource::<SettingModalState>()
             .init_resource::<HdrEnabled>()
             .init_resource::<timeline_slider::UITick>()
-            .init_resource::<SecondaryLogState>()
             .init_resource::<timeline::StreamTickOrigin>()
             .init_resource::<command_palette::CommandPaletteState>()
             .add_event::<DialogEvent>()
@@ -682,7 +675,6 @@ fn sync_windows(
     mut windows_state: Query<(Entity, &WindowId, &mut tiles::WindowState, Option<&Window>)>,
     mut cameras: Query<&mut Camera>,
     winit_windows: NonSend<bevy::winit::WinitWindows>,
-    mut log_state: ResMut<SecondaryLogState>,
     mut existing_map: Local<HashMap<tiles::WindowId, Entity>>,
 ) {
     // existing_map.clear();
@@ -1008,7 +1000,7 @@ fn handle_window_relayout_events(
             WindowRelayout::UpdateDescriptors => {
                 // Instead of placing this system into the schedule and blocking
                 // it from running, let's run it only when necessary.
-                commands.run_system_cached(capture_secondary_window_screens_oneoff);
+                commands.run_system_cached(capture_window_screens_oneoff);
             }
         }
     }
@@ -1188,49 +1180,6 @@ fn assign_window_to_screen(
     window.set_outer_position(PhysicalPosition::new(x, y));
 }
 
-fn complete_primary_screen_assignment(
-    layout: &mut tiles::PrimaryWindowLayout,
-    _window: &WinitWindow,
-    reason: &'static str,
-) {
-    layout.awaiting_screen_confirmation = false;
-    layout.applied_screen = layout.screen;
-    layout.relayout_phase = if layout.screen_rect.is_some() {
-        tiles::WindowRelayoutPhase::NeedRect
-    } else {
-        tiles::WindowRelayoutPhase::Idle
-    };
-    layout.relayout_attempts = 0;
-    layout.relayout_started_at = None;
-    info!(
-        screen = layout.screen.map(|idx| idx as i32).unwrap_or(-1),
-        "{reason}"
-    );
-}
-
-fn assign_primary_window_to_screen(
-    _layout: &mut tiles::PrimaryWindowLayout,
-    window: &WinitWindow,
-    target_monitor: MonitorHandle,
-) {
-    let screen_pos = target_monitor.position();
-    let screen_size = target_monitor.size();
-    let window_size = window.outer_size();
-    let x = screen_pos.x + (screen_size.width as i32 - window_size.width as i32) / 2;
-    let y = screen_pos.y + (screen_size.height as i32 - window_size.height as i32) / 2;
-
-    if LINUX_MULTI_WINDOW {
-        window.set_fullscreen(None);
-        window.set_visible(true);
-        force_windowed(window);
-    } else {
-        // Align with Linux path: avoid fullscreen hops on macOS.
-        exit_fullscreen(window);
-        window.set_visible(true);
-    }
-    window.set_outer_position(PhysicalPosition::new(x, y));
-}
-
 fn recenter_window_on_screen(window: &WinitWindow, target_monitor: &MonitorHandle) {
     let screen_pos = target_monitor.position();
     let screen_size = target_monitor.size();
@@ -1254,112 +1203,10 @@ fn recenter_window_on_screen(window: &WinitWindow, target_monitor: &MonitorHandl
     let _ = window.request_inner_size(size);
 }
 
-fn apply_primary_window_rect(
-    layout: &mut tiles::PrimaryWindowLayout,
-    window: &WinitWindow,
-) -> bool {
-    let Some(rect) = layout.screen_rect else {
-        layout.applied_rect = None;
-        linux_clear_minimized(window);
-        return true;
-    };
-
-    if layout.applied_rect == Some(rect) {
-        return true;
-    }
-
-    if rect.width == 0 && rect.height == 0 {
-        linux_request_minimize(window);
-        layout.applied_rect = Some(rect);
-        return true;
-    }
-
-    let screen_handle = if let Some(idx) = layout.screen {
-        let screens = collect_sorted_screens(window);
-        screens
-            .get(idx)
-            .cloned()
-            .or_else(|| window.current_monitor())
-    } else {
-        window.current_monitor()
-    };
-    let Some(screen_handle) = screen_handle else {
-        return false;
-    };
-
-    let screen_pos = screen_handle.position();
-    let screen_size = screen_handle.size();
-    if screen_size.width == 0 || screen_size.height == 0 {
-        return false;
-    }
-
-    if window.fullscreen().is_some() {
-        exit_fullscreen(window);
-        force_windowed(window);
-    } else if LINUX_MULTI_WINDOW {
-        force_windowed(window);
-    } else {
-        window.set_maximized(false);
-        linux_clear_minimized(window);
-    }
-
-    let screen_width = screen_size.width as i32;
-    let screen_height = screen_size.height as i32;
-
-    let requested_width_px = ((rect.width as f64 / 100.0) * screen_width as f64).round() as i32;
-    let requested_height_px = ((rect.height as f64 / 100.0) * screen_height as f64).round() as i32;
-    let width_px = requested_width_px.clamp(1, screen_width.max(1));
-    let height_px = requested_height_px.clamp(1, screen_height.max(1));
-    if width_px != requested_width_px || height_px != requested_height_px {
-        warn!("Primary window rect exceeds screen bounds; clamping size (rect={rect:?})");
-    }
-
-    let requested_x = screen_pos.x + ((rect.x as f64 / 100.0) * screen_width as f64).round() as i32;
-    let requested_y =
-        screen_pos.y + ((rect.y as f64 / 100.0) * screen_height as f64).round() as i32;
-
-    let max_x = screen_pos.x + screen_width - width_px;
-    let max_y = screen_pos.y + screen_height - height_px;
-    let x = requested_x.clamp(screen_pos.x, max_x);
-    let y = requested_y.clamp(screen_pos.y, max_y);
-    if x != requested_x || y != requested_y {
-        warn!(
-            "Primary window rect origin exceeds screen bounds; clamping position (rect={rect:?})"
-        );
-    }
-
-    info!(
-        rect = ?rect,
-        width_px,
-        height_px,
-        x,
-        y,
-        "Applying primary window rect"
-    );
-
-    if let Ok(current_pos) = window.outer_position() {
-        let current_size = window.outer_size();
-        if current_pos.x == x
-            && current_pos.y == y
-            && current_size.width as i32 == width_px
-            && current_size.height as i32 == height_px
-        {
-            layout.applied_rect = Some(rect);
-            return true;
-        }
-    }
-    let _ = window.request_inner_size(PhysicalSize::new(
-        width_px.max(1) as u32,
-        height_px.max(1) as u32,
-    ));
-    window.set_outer_position(PhysicalPosition::new(x, y));
-    layout.applied_rect = Some(rect);
-    true
-}
 
 /// Runs as a one-off system to capture the window descriptor. Does not run
 /// every frameñ.
-fn capture_secondary_window_screens_oneoff(
+fn capture_window_screens_oneoff(
     winit_windows: NonSend<bevy::winit::WinitWindows>,
     mut window_query: Query<(Entity, &Window, &mut tiles::WindowState)>,
     screens: Query<(Entity, &Monitor)>,
@@ -1701,7 +1548,6 @@ fn friendly_title_from_stem(stem: &str) -> Option<String> {
     }
 }
 
-
 pub(crate) fn compute_secondary_window_title(state: &tiles::WindowState) -> String {
     state
         .descriptor
@@ -1989,7 +1835,7 @@ fn sync_camera_grid_cell(
         }
     }
 }
-fn sync_hdr(hdr_enabled: ResMut<HdrEnabled>, mut query: Query<&mut Camera>) {
+fn sync_hdr(hdr_enabled: Res<HdrEnabled>, mut query: Query<&mut Camera>) {
     for mut cam in query.iter_mut() {
         cam.hdr = hdr_enabled.0;
     }
