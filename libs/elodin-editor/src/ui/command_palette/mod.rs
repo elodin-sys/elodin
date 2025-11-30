@@ -4,7 +4,7 @@ use bevy::{
         world::World,
     },
     input::keyboard::Key,
-    prelude::{Resource, With},
+    prelude::{Entity, Resource, With},
     window::PrimaryWindow,
 };
 use bevy_egui::EguiContexts;
@@ -15,7 +15,7 @@ use crate::{
     plugins::LogicalKeyState,
     ui::{
         colors::{self, ColorExt, get_scheme, with_opacity},
-        images, theme, tiles,
+        images, theme,
         utils::{MarginSides, Shrink4},
     },
 };
@@ -38,7 +38,7 @@ pub struct CommandPaletteState {
     pub selected_index: usize,
     pub auto_open_item: Option<PaletteItem>,
     pub error: Option<String>,
-    pub target_window: Option<tiles::SecondaryWindowId>,
+    pub target_window: Option<Entity>,
 }
 
 impl CommandPaletteState {
@@ -157,7 +157,7 @@ pub struct PaletteWindow<'w, 's> {
 }
 
 impl RootWidgetSystem for PaletteWindow<'_, '_> {
-    type Args = Option<tiles::SecondaryWindowId>;
+    type Args = Option<Entity>;
     type Output = bool;
 
     fn ctx_system(
