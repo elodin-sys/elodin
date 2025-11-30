@@ -436,9 +436,20 @@ fn parse_object_3d_mesh(
                     node: "glb".to_string(),
                     src: src.to_string(),
                     span: node.span(),
-                })?;
+                })?
+                .to_string();
 
-            Ok(Object3DMesh::Glb(path.to_string()))
+            let scale = node.get("scale").and_then(|v| v.as_float()).unwrap_or(1.0) as f32;
+
+            let translate = parse_tuple_f32(node, "translate").unwrap_or((0.0, 0.0, 0.0));
+            let rotate = parse_tuple_f32(node, "rotate").unwrap_or((0.0, 0.0, 0.0));
+
+            Ok(Object3DMesh::Glb {
+                path,
+                scale,
+                translate,
+                rotate,
+            })
         }
         "sphere" => {
             let radius = node
@@ -735,6 +746,29 @@ fn parse_color_from_node_or_children(node: &KdlNode, color_tag: Option<&str>) ->
     }
 
     None
+}
+
+fn parse_tuple_f32(node: &KdlNode, property: &str) -> Option<(f32, f32, f32)> {
+    let value_str = node.get(property).and_then(|v| v.as_string())?;
+
+    // Parse string like "(1.0, 2.0, 3.0)" or "(1, 2, 3)"
+    let trimmed = value_str.trim();
+    if !trimmed.starts_with('(') || !trimmed.ends_with(')') {
+        return None;
+    }
+
+    let inner = &trimmed[1..trimmed.len() - 1];
+    let parts: Vec<&str> = inner.split(',').collect();
+
+    if parts.len() != 3 {
+        return None;
+    }
+
+    let x = parts[0].trim().parse::<f32>().ok()?;
+    let y = parts[1].trim().parse::<f32>().ok()?;
+    let z = parts[2].trim().parse::<f32>().ok()?;
+
+    Some((x, y, z))
 }
 
 fn color_component_from_integer(value: i64) -> Option<f32> {
@@ -1663,7 +1697,17 @@ object_3d "a.world_pos" {
         if let SchematicElem::Object3d(obj) = &schematic.elems[1] {
             assert_eq!(obj.eql, "a.world_pos");
             match &obj.mesh {
-                Object3DMesh::Glb(s) => assert_eq!(s.as_str(), "hi"),
+                Object3DMesh::Glb {
+                    path,
+                    scale,
+                    translate,
+                    rotate,
+                } => {
+                    assert_eq!(path.as_str(), "hi");
+                    assert_eq!(*scale, 1.0);
+                    assert_eq!(*translate, (0.0, 0.0, 0.0));
+                    assert_eq!(*rotate, (0.0, 0.0, 0.0));
+                }
                 _ => panic!("Expected glb"),
             }
         } else {

@@ -55,7 +55,7 @@ class Config:
     # Cascade PID controller gains
     control: Control
 
-    # Drone GLB asset
+    # drone GLB asset
     drone_glb: str
 
     # Mass in kg

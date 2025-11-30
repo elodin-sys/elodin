@@ -185,10 +185,17 @@ pub fn set_viewport_pos(
             continue;
         };
         if let Some(compiled_expr) = &viewport.pos.compiled_expr {
-            if let Ok(val) = compiled_expr.execute(&entity_map, &values)
-                && let Some(world_pos) = val.as_world_pos()
-            {
-                *pos = world_pos;
+            match compiled_expr.execute(&entity_map, &values) {
+                Ok(val) => {
+                    if let Some(world_pos) = val.as_world_pos() {
+                        *pos = world_pos;
+                    } else {
+                        bevy::log::warn!("viewport pos expression didn't produce a WorldPos");
+                    }
+                }
+                Err(e) => {
+                    bevy::log::error!("viewport pos formula execution error: {}", e);
+                }
             }
             if let Some(compiled_expr) = &viewport.look_at.compiled_expr
                 && let Ok(val) = compiled_expr.execute(&entity_map, &values)

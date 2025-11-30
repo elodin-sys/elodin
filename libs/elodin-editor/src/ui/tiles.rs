@@ -748,7 +748,17 @@ impl ViewportPane {
             .pos
             .as_ref()
             .map(|eql| {
-                let compiled_expr = eql_ctx.parse_str(eql).ok().map(compile_eql_expr);
+                let compiled_expr = match eql_ctx.parse_str(eql) {
+                    Ok(expr) => Some(compile_eql_expr(expr)),
+                    Err(e) => {
+                        bevy::log::error!(
+                            "Failed to parse viewport pos expression '{}': {}",
+                            eql,
+                            e
+                        );
+                        None
+                    }
+                };
                 EditableEQL {
                     eql: eql.to_string(),
                     compiled_expr,
@@ -759,7 +769,17 @@ impl ViewportPane {
             .look_at
             .as_ref()
             .map(|eql| {
-                let compiled_expr = eql_ctx.parse_str(eql).ok().map(compile_eql_expr);
+                let compiled_expr = match eql_ctx.parse_str(eql) {
+                    Ok(expr) => Some(compile_eql_expr(expr)),
+                    Err(e) => {
+                        bevy::log::error!(
+                            "Failed to parse viewport look_at expression '{}': {}",
+                            eql,
+                            e
+                        );
+                        None
+                    }
+                };
                 EditableEQL {
                     eql: eql.to_string(),
                     compiled_expr,
