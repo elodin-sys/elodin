@@ -251,10 +251,10 @@ impl LoadSchematicParams<'_, '_> {
             }
         }
 
-        let mut main_state = {
+        {
             let mut window_state = self.window_states.get_mut(*self.primary_window).expect("no primary window").2;
-            std::mem::replace(&mut window_state.tile_state, main_state)
-        };
+            let _ = std::mem::replace(&mut window_state.tile_state, main_state);
+        }
 
         for descriptor in secondary_descriptors {
             if let Some(path) = descriptor.path.as_ref() {
