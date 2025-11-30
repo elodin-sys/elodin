@@ -192,7 +192,6 @@ pub fn load_schematic_file(
 }
 
 impl LoadSchematicParams<'_, '_> {
-
     pub fn load_schematic(&mut self, schematic: &Schematic, base_dir: Option<&Path>) {
         self.render_layer_alloc.free_all();
         for (id, window_id, window_state) in &self.window_states {
@@ -209,7 +208,11 @@ impl LoadSchematicParams<'_, '_> {
 
         let primary_window = *self.primary_window;
         let mut main_state = {
-            let mut window_state = self.window_states.get_mut(primary_window).expect("no primary window").2;
+            let mut window_state = self
+                .window_states
+                .get_mut(primary_window)
+                .expect("no primary window")
+                .2;
             std::mem::take(&mut window_state.tile_state)
         };
         main_state.clear(&mut self.commands, &mut self.selected_object);
@@ -256,14 +259,18 @@ impl LoadSchematicParams<'_, '_> {
         }
 
         {
-            let mut window_state = self.window_states.get_mut(*self.primary_window).expect("no primary window").2;
+            let mut window_state = self
+                .window_states
+                .get_mut(*self.primary_window)
+                .expect("no primary window")
+                .2;
             if let Some(d) = main_window_descriptor {
                 window_state.descriptor.screen = d.screen;
                 window_state.descriptor.screen_rect = d.screen_rect;
             }
             let _ = std::mem::replace(&mut window_state.tile_state, main_state);
             // Resize if necessary.
-            // 
+            //
             if let Some(screen) = window_state.descriptor.screen.as_ref() {
                 self.commands.send_event(WindowRelayout::Screen {
                     window: primary_window,

@@ -1,10 +1,13 @@
 use bevy::{
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
-    ecs::{component::HookContext, system::{SystemParam, SystemState}},
+    ecs::{
+        component::HookContext,
+        system::{SystemParam, SystemState},
+    },
     input::keyboard::Key,
     log::info,
     prelude::*,
-    window::{Monitor, Window, WindowPosition, PrimaryWindow},
+    window::{Monitor, PrimaryWindow, Window, WindowPosition},
 };
 use bevy_editor_cam::prelude::{EditorCam, EnabledMotion, OrbitConstraint};
 use bevy_egui::{
@@ -62,28 +65,27 @@ use crate::{
 };
 
 pub(crate) fn plugin(app: &mut App) {
-    app
-        .register_type::<WindowId>()
+    app.register_type::<WindowId>()
         .add_event::<WindowRelayout>()
         .add_systems(Startup, setup_primary_window_state);
 }
 
-fn setup_primary_window_state(primary_window: Query<Entity, With<PrimaryWindow>>,
-                              mut commands: Commands) {
+fn setup_primary_window_state(
+    primary_window: Query<Entity, With<PrimaryWindow>>,
+    mut commands: Commands,
+) {
     let Some(id) = primary_window.iter().next() else {
         warn!("No primary window to setup");
         return;
     };
+    // TODO: Setup this descriptor with the path when its known.
     let descriptor = WindowDescriptor::default();
     let state = WindowState {
         descriptor,
         graph_entities: vec![],
         tile_state: TileState::new(egui::Id::new("main_tab_tree")),
     };
-    commands.entity(id)
-        .insert((state,
-                 WindowId(0)));
-
+    commands.entity(id).insert((state, WindowId(0)));
 }
 
 #[derive(Clone)]
@@ -1387,10 +1389,10 @@ impl<'w, 's> TileSystem<'w, 's> {
         let images = params.images;
         let target_id = target.unwrap_or_else(|| *params.primary_window);
         let is_empty = params
-                .window_states
-                .get(target_id)
-                .map(|(_, _, s)| s.tile_state.is_empty() && s.tile_state.tree_actions.is_empty())
-                .ok();
+            .window_states
+            .get(target_id)
+            .map(|(_, _, s)| s.tile_state.is_empty() && s.tile_state.tree_actions.is_empty())
+            .ok();
 
         let is_empty_tile_tree = is_empty?;
 
@@ -2088,9 +2090,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
     }
 }
 
-pub fn shortcuts(key_state: Res<LogicalKeyState>,
-                 primary_window: Single<Entity, With<PrimaryWindow>>,
-                 mut window_state: Query<&mut WindowState>,
+pub fn shortcuts(
+    key_state: Res<LogicalKeyState>,
+    primary_window: Single<Entity, With<PrimaryWindow>>,
+    mut window_state: Query<&mut WindowState>,
 ) {
     let Ok(window_state) = &mut window_state.get_mut(*primary_window) else {
         return;

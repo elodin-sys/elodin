@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
 use std::fmt::Write;
+use std::time::{Duration, Instant};
 
 use bevy::{
     app::AppExit,
@@ -275,17 +275,19 @@ impl Plugin for UiPlugin {
             .add_systems(First, warn_camera_order_ambiguities)
             .add_systems(
                 Update,
-                (handle_window_close,
-                 render_layout,
-                 sync_camera_grid_cell,
-                 sync_windows,
-                 handle_window_relayout_events,
-                 track_window_geometry,
-                 set_secondary_camera_viewport,
-                 set_camera_viewport,
-                 set_nav_gizmo_camera_orders,
-                 warn_camera_order_ambiguities,
-                 ).chain()
+                (
+                    handle_window_close,
+                    render_layout,
+                    sync_camera_grid_cell,
+                    sync_windows,
+                    handle_window_relayout_events,
+                    track_window_geometry,
+                    set_secondary_camera_viewport,
+                    set_camera_viewport,
+                    set_nav_gizmo_camera_orders,
+                    warn_camera_order_ambiguities,
+                )
+                    .chain(),
             )
             .add_systems(First, fix_visibility_hierarchy)
             .add_systems(Update, sync_hdr)
@@ -632,12 +634,19 @@ fn readable_label_color(color: Color) -> Color32 {
     Color32::from_rgba_unmultiplied(color32.r(), color32.g(), color32.b(), 255)
 }
 
-pub fn render_layout(world: &mut World,
-                     mut windows: Local<Vec<(Entity, WindowId)>>,
-                     mut widget_id: Local<String>,
+pub fn render_layout(
+    world: &mut World,
+    mut windows: Local<Vec<(Entity, WindowId)>>,
+    mut widget_id: Local<String>,
 ) {
-    windows.extend(world.query::<(Entity, &WindowId)>().iter(world).map(|(id, window_id)| (id, window_id.clone())));
-    let palette_window = world.get_resource_mut::<CommandPaletteState>()
+    windows.extend(
+        world
+            .query::<(Entity, &WindowId)>()
+            .iter(world)
+            .map(|(id, window_id)| (id, window_id.clone())),
+    );
+    let palette_window = world
+        .get_resource_mut::<CommandPaletteState>()
         .and_then(|palette_state| palette_state.target_window.clone());
     for (id, window_id) in windows.drain(..) {
         if window_id.is_primary() {
@@ -655,16 +664,13 @@ pub fn render_layout(world: &mut World,
             widget_id.clear();
             let _ = write!(widget_id, "secondary_window_{}", window_id.0);
             world.add_root_widget_to::<tiles::TileSystem>(id, &widget_id, Some(id));
+            // TODO: I don't think this has to run conditionally.
             // if palette_window.map(|window| window == id).unwrap_or(false) {
-                widget_id.clear();
-                let _ = write!(widget_id, "secondary_command_palette_{}", window_id.0);
-                // This doesn't seem to show anything.
-                // world.add_root_widget_to::<CommandPalette>(id, &widget_id, ());
-                world.add_root_widget_to::<command_palette::PaletteWindow>(
-                    id,
-                    &widget_id,
-                    Some(id),
-                );
+            widget_id.clear();
+            let _ = write!(widget_id, "secondary_command_palette_{}", window_id.0);
+            // This doesn't seem to show anything.
+            // world.add_root_widget_to::<CommandPalette>(id, &widget_id, ());
+            world.add_root_widget_to::<command_palette::PaletteWindow>(id, &widget_id, Some(id));
             // }
         }
     }
@@ -698,14 +704,12 @@ fn sync_windows(
     // }
 
     for (entity, marker, mut state, window_maybe) in &mut windows_state {
-        // let phase = crate::ui::tiles::WindowRelayoutPhase::Idle;
-        // let current_key = (state.descriptor.screen, false, phase);
+        // let current_key = (state.descriptor.screen, false);
         // let last = log_state.0.get(&marker).copied();
         // if last != Some(current_key) {
         //     info!(
         //         id = ?marker,
         //         screen = state.descriptor.screen.map(|s| s as i32).unwrap_or(-1),
-        //         relayout = ?phase,
         //         "window_state"
         //     );
         //     log_state.0.insert(*marker, current_key);
@@ -975,29 +979,23 @@ fn handle_window_relayout_events(
         match relayout_event {
             WindowRelayout::Screen { window, screen } => {
                 info!(
-                    // path = %state.descriptor.path.display(),
                     target_screen = screen,
-                    // relayout_phase = ?state.relayout_phase,
                     "Attempting secondary screen assignment"
                 );
 
                 // Let's spawn an asynchronous task instead of carrying a bunch
                 // state in our components.
                 commands.spawn_task(move || apply_window_screen(window, screen));
-                // state.relayout_phase = tiles::WindowRelayoutPhase::Idle;
             }
             WindowRelayout::Rect { window, rect } => {
                 commands.spawn_task(move || {
                     apply_window_rect(rect, window, Duration::from_millis(1000))
                 });
-                // let Some(window) = winit_windows.get_window(entity) else {
-                //     continue;
-                // };
-
-                // if ! apply_window_rect(rect, window) {
-                // }
             }
             WindowRelayout::UpdateDescriptors => {
+                // TODO: No one calls this event yet. Need to call it, or the
+                // cached system below and wait a frame.
+
                 // Instead of placing this system into the schedule and blocking
                 // it from running, let's run it only when necessary.
                 commands.run_system_cached(capture_window_screens_oneoff);
@@ -1203,7 +1201,6 @@ fn recenter_window_on_screen(window: &WinitWindow, target_monitor: &MonitorHandl
     let _ = window.request_inner_size(size);
 }
 
-
 /// Runs as a one-off system to capture the window descriptor. Does not run
 /// every frameñ.
 fn capture_window_screens_oneoff(
@@ -1256,14 +1253,11 @@ fn collect_sorted_screens(window: &WinitWindow) -> Vec<MonitorHandle> {
     screens.sort_by(|a, b| {
         let p_a = a.position();
         let p_b = b.position();
-        p_a.x.cmp(&p_b.x)
-             .then(p_a.y.cmp(&p_b.y))
-             .then_with(|| {
-                 
-                 let name_a = a.name();
-                 let name_b = b.name();
-                 name_a.cmp(&name_b)
-             })
+        p_a.x.cmp(&p_b.x).then(p_a.y.cmp(&p_b.y)).then_with(|| {
+            let name_a = a.name();
+            let name_b = b.name();
+            name_a.cmp(&name_b)
+        })
     });
     screens
 }

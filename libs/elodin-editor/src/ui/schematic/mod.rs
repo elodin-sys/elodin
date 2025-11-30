@@ -60,8 +60,9 @@ impl SchematicParam<'_, '_> {
         self.windows_state
             .get(*self.primary_window)
             .ok()
-            .and_then(|(window_state,_)|
-                 self.get_panel_from_state(&window_state.tile_state, tile_id))
+            .and_then(|(window_state, _)| {
+                self.get_panel_from_state(&window_state.tile_state, tile_id)
+            })
     }
 
     pub fn get_panel_from_state(
@@ -227,11 +228,12 @@ pub fn tiles_to_schematic(
 ) {
     schematic.elems.clear();
 
-    if let Some(tile_id) = param.windows_state
+    if let Some(tile_id) = param
+        .windows_state
         .get(*param.primary_window)
         .ok()
-        .and_then(|(window_state, _)|
-                  window_state.tile_state.tree.root()) {
+        .and_then(|(window_state, _)| window_state.tile_state.tree.root())
+    {
         schematic
             .elems
             .extend(param.get_panel(tile_id).map(SchematicElem::Panel))

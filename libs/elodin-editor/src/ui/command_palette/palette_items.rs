@@ -12,11 +12,11 @@ use bevy::{
         system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
         world::World,
     },
-    window::PrimaryWindow,
     log::{error, info, warn},
     pbr::{StandardMaterial, wireframe::WireframeConfig},
     prelude::{Deref, DerefMut, Entity, In, Mut, Resource},
     render::view::Visibility,
+    window::PrimaryWindow,
 };
 use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::TileId;
@@ -261,11 +261,12 @@ pub struct TileParam<'w, 's> {
 impl<'w, 's> TileParam<'w, 's> {
     pub fn target(&mut self, target: Option<Entity>) -> Option<Mut<'_, tiles::TileState>> {
         let target_id = target.or_else(|| self.primary_window.iter().next());
-        target_id.and_then(|target_id|
-                           self.windows_state
-                           .get_mut(target_id)
-                           .ok()
-                           .map(|s| s.map_unchanged(|s| &mut s.tile_state)))
+        target_id.and_then(|target_id| {
+            self.windows_state
+                .get_mut(target_id)
+                .ok()
+                .map(|s| s.map_unchanged(|s| &mut s.tile_state))
+        })
     }
 }
 

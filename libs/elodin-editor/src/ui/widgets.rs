@@ -106,7 +106,7 @@ impl RootWidgetSystemExt for World {
         let ctx = egui_ctx.get_mut().clone();
         Some(f(self, ctx))
     }
-    
+
     fn egui_context_scope_for<R>(
         &mut self,
         id: Entity,

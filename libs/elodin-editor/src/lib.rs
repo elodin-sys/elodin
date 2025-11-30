@@ -14,7 +14,7 @@ use bevy::{
         wireframe::{WireframeConfig, WireframePlugin},
     },
     prelude::*,
-    window::{PresentMode, WindowResolution, WindowTheme, PrimaryWindow},
+    window::{PresentMode, PrimaryWindow, WindowResolution, WindowTheme},
     winit::WinitSettings,
 };
 use bevy_editor_cam::{SyncCameraPosition, controller::component::EditorCam};
@@ -859,7 +859,10 @@ fn clear_state_new_connection(
     let Ok(mut primary_state) = windows_state.get_mut(primary_id) else {
         return;
     };
-    primary_state.1.tile_state.clear(&mut commands, &mut selected_object);
+    primary_state
+        .1
+        .tile_state
+        .clear(&mut commands, &mut selected_object);
     for (entity, secondary) in &windows_state {
         if entity == primary_id {
             // We don't despawn the primary window ever.
