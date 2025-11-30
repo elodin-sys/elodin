@@ -7,7 +7,7 @@ use bevy::{
     DefaultPlugins,
     asset::{UnapprovedPathMode, embedded_asset},
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
-    log::{LogPlugin, warn},
+    log::{Level, LogPlugin},
     math::{DQuat, DVec3},
     pbr::{
         DirectionalLightShadowMap,
@@ -47,6 +47,10 @@ mod offset_parse;
 mod plugins;
 pub mod ui;
 pub mod vector_arrow;
+
+const fn default_present_mode() -> PresentMode {
+    PresentMode::Fifo
+}
 
 #[cfg(not(target_family = "wasm"))]
 pub mod run;
@@ -144,7 +148,7 @@ impl Plugin for EditorPlugin {
                         primary_window: Some(Window {
                             window_theme: Some(WindowTheme::Dark),
                             title: "Elodin".into(),
-                            present_mode: PresentMode::AutoVsync,
+                            present_mode: default_present_mode(),
                             canvas: Some("#editor".to_string()),
                             resolution: self.window_resolution.clone(),
                             resize_constraints: WindowResizeConstraints {
@@ -154,7 +158,7 @@ impl Plugin for EditorPlugin {
                             },
                             composite_alpha_mode,
                             prevent_default_event_handling: true,
-                            decorations: cfg!(target_os = "macos"),
+                            decorations: true,
                             visible: cfg!(target_os = "linux"),
                             ..default()
                         }),
@@ -171,6 +175,12 @@ impl Plugin for EditorPlugin {
                     .disable::<LogPlugin>()
                     .build(),
             )
+            .add_plugins(LogPlugin {
+                level: Level::INFO,
+                filter: "info,wgpu=error,present_frames=error,wgpu_core=warn,wgpu_hal=warn"
+                    .to_string(),
+                ..Default::default()
+            })
             .insert_resource(winit_settings)
             .init_resource::<tiles::ViewportContainsPointer>()
             .add_plugins(bevy_framepace::FramepacePlugin)
@@ -381,15 +391,9 @@ fn setup_titlebar(
                 initWithIdentifier: &*identifier
             ];
 
-            window.setTitlebarAppearsTransparent(true);
-
-            // Create color with RGBA
-            let color = NSColor::colorWithRed_green_blue_alpha(
-                (0x0C as f64) / (0xFF as f64),
-                (0x0C as f64) / (0xFF as f64),
-                (0x0C as f64) / (0xFF as f64),
-                0.7,
-            );
+            // Keep the native titlebar visible and readable.
+            window.setTitlebarAppearsTransparent(false);
+            let color = NSColor::windowBackgroundColor();
             window.setBackgroundColor(Some(&color));
 
             window.setStyleMask(
@@ -401,7 +405,8 @@ fn setup_titlebar(
                     | NSWindowStyleMask::UnifiedTitleAndToolbar,
             );
             window.setToolbarStyle(NSWindowToolbarStyle::UnifiedCompact);
-            let _: () = msg_send![window, setTitleVisibility: 1u64]; // NSWindowTitleHidden = 1
+            // Keep the native title visible in the toolbar/titlebar area.
+            let _: () = msg_send![window, setTitleVisibility: 0u64]; // NSWindowTitleVisible = 0
             window.setToolbar(Some(&toolbar));
             commands.entity(id).insert(SetupTitlebar);
         }

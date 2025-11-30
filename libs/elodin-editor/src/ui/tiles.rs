@@ -1,16 +1,15 @@
-use bevy::log::info;
 use bevy::{
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     ecs::system::{SystemParam, SystemState},
     input::keyboard::Key,
+    log::info,
     prelude::*,
+    window::{Monitor, Window, WindowPosition},
 };
 use bevy_editor_cam::prelude::{EditorCam, EnabledMotion, OrbitConstraint};
 use bevy_egui::{
     EguiContexts,
-    egui::{
-        self, Color32, CornerRadius, Frame, Id, RichText, Stroke, TopBottomPanel, Ui, Visuals, vec2,
-    },
+    egui::{self, Color32, CornerRadius, Frame, Id, RichText, Stroke, Ui, Visuals, vec2},
 };
 use bevy_render::{
     camera::{Exposure, PhysicalCameraParameters},
@@ -18,10 +17,19 @@ use bevy_render::{
 };
 use egui::UiBuilder;
 use egui_tiles::{Container, Tile, TileId, Tiles};
-use impeller2_wkt::{Dashboard, Graph, Viewport};
+use impeller2_wkt::{Dashboard, Graph, Viewport, WindowRect};
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, HashMap};
-use std::{fmt::Write as _, path::PathBuf};
+use std::{
+    fmt::Write as _,
+    path::PathBuf,
+    time::{Duration, Instant},
+};
+use winit::{
+    dpi::{PhysicalPosition, PhysicalSize},
+    monitor::MonitorHandle,
+    window::Window as WinitWindow,
+};
 
 use super::{
     SelectedObject, ViewportRect,
@@ -41,7 +49,6 @@ use super::{
     video_stream::{IsTileVisible, VideoDecoderHandle},
     widgets::{RootWidgetSystem, WidgetSystem, WidgetSystemExt},
 };
-use crate::ui::compute_secondary_window_title;
 use crate::{
     EqlContext, GridHandle, MainCamera,
     object_3d::{EditableEQL, compile_eql_expr},
@@ -84,10 +91,34 @@ pub struct TileState {
 pub struct SecondaryWindowDescriptor {
     pub path: PathBuf,
     pub title: Option<String>,
+    pub screen: Option<usize>,
+    pub screen_rect: Option<WindowRect>,
+}
+
+impl SecondaryWindowDescriptor {
+    pub fn wants_explicit_layout(&self) -> bool {
+        self.screen.is_some() || self.screen_rect.is_some()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PrimaryWindowRelayoutPhase {
+    #[default]
+    Idle,
+    NeedScreen,
+    NeedRect,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SecondaryWindowId(pub u32);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SecondaryWindowRelayoutPhase {
+    #[default]
+    Idle,
+    NeedScreen,
+    NeedRect,
+}
 
 #[derive(Clone)]
 pub struct SecondaryWindowState {
@@ -96,11 +127,286 @@ pub struct SecondaryWindowState {
     pub tile_state: TileState,
     pub window_entity: Option<Entity>,
     pub graph_entities: Vec<Entity>,
+    pub applied_screen: Option<usize>,
+    pub applied_rect: Option<WindowRect>,
+    pub relayout_phase: SecondaryWindowRelayoutPhase,
+    pub relayout_attempts: u8,
+    pub relayout_started_at: Option<Instant>,
+    pub awaiting_screen_confirmation: bool,
+    pub skip_metadata_capture: bool,
+    pub metadata_capture_blocked_until: Option<Instant>,
+}
+
+#[derive(Clone, Default)]
+pub struct PrimaryWindowLayout {
+    pub screen: Option<usize>,
+    pub screen_rect: Option<WindowRect>,
+    pub relayout_phase: PrimaryWindowRelayoutPhase,
+    pub applied_screen: Option<usize>,
+    pub applied_rect: Option<WindowRect>,
+    pub relayout_attempts: u8,
+    pub relayout_started_at: Option<Instant>,
+    pub captured_screen: Option<usize>,
+    pub captured_rect: Option<WindowRect>,
+    pub requested_screen: Option<usize>,
+    pub requested_rect: Option<WindowRect>,
+    pub awaiting_screen_confirmation: bool,
+}
+
+impl PrimaryWindowLayout {
+    pub fn set(&mut self, screen: Option<usize>, rect: Option<WindowRect>) {
+        self.screen = screen;
+        self.screen_rect = rect;
+        self.applied_screen = None;
+        self.applied_rect = None;
+        self.relayout_attempts = 0;
+        self.relayout_started_at = None;
+        self.requested_screen = screen;
+        self.requested_rect = rect;
+        // One-shot relayout on explicit load if screen/rect is provided.
+        self.relayout_phase = if self.screen.is_some() {
+            PrimaryWindowRelayoutPhase::NeedScreen
+        } else if self.screen_rect.is_some() {
+            PrimaryWindowRelayoutPhase::NeedRect
+        } else {
+            PrimaryWindowRelayoutPhase::Idle
+        };
+        self.awaiting_screen_confirmation = false;
+    }
+}
+
+impl SecondaryWindowState {
+    pub fn relayout_phase_from_descriptor(
+        descriptor: &SecondaryWindowDescriptor,
+    ) -> SecondaryWindowRelayoutPhase {
+        if descriptor.screen.is_some() {
+            SecondaryWindowRelayoutPhase::NeedScreen
+        } else if descriptor.screen_rect.is_some() {
+            SecondaryWindowRelayoutPhase::NeedRect
+        } else {
+            SecondaryWindowRelayoutPhase::Idle
+        }
+    }
+
+    pub fn refresh_relayout_phase(&mut self) {
+        self.relayout_phase = Self::relayout_phase_from_descriptor(&self.descriptor);
+        self.relayout_attempts = 0;
+        self.relayout_started_at = None;
+        self.awaiting_screen_confirmation = false;
+    }
+
+    pub fn extend_metadata_capture_block(&mut self, duration: Duration) {
+        let candidate = Instant::now() + duration;
+        if self
+            .metadata_capture_blocked_until
+            .map(|current| candidate > current)
+            .unwrap_or(true)
+        {
+            self.metadata_capture_blocked_until = Some(candidate);
+        }
+    }
+
+    pub fn clear_metadata_capture_block(&mut self) {
+        self.metadata_capture_blocked_until = None;
+    }
+
+    pub fn is_metadata_capture_blocked(&mut self) -> bool {
+        if let Some(until) = self.metadata_capture_blocked_until {
+            if Instant::now() < until {
+                return true;
+            }
+            self.metadata_capture_blocked_until = None;
+        }
+        false
+    }
+
+    pub fn update_descriptor_from_window(
+        &mut self,
+        window: &Window,
+        screens: &Query<(Entity, &Monitor)>,
+    ) {
+        if self.is_metadata_capture_blocked() {
+            return;
+        }
+        if self.skip_metadata_capture {
+            self.skip_metadata_capture = false;
+            return;
+        }
+
+        let position = match window.position {
+            WindowPosition::At(pos) => pos,
+            WindowPosition::Centered(_) | WindowPosition::Automatic => IVec2::ZERO,
+        };
+        let size = window.resolution.physical_size();
+        let center = IVec2::new(
+            position.x + size.x as i32 / 2,
+            position.y + size.y as i32 / 2,
+        );
+
+        let mut best: Option<(usize, i32)> = None;
+        let mut best_bounds: Option<(IVec2, UVec2)> = None;
+        for (index, (_, screen)) in screens.iter().enumerate() {
+            let min = screen.physical_position;
+            let size = screen.physical_size();
+            let max = IVec2::new(min.x + size.x as i32, min.y + size.y as i32);
+            if center.x >= min.x && center.x < max.x && center.y >= min.y && center.y < max.y {
+                let distance = (center.x - min.x).abs() + (center.y - min.y).abs();
+                if best.map(|(_, d)| distance < d).unwrap_or(true) {
+                    best = Some((index, distance));
+                    best_bounds = Some((min, size));
+                }
+            }
+        }
+
+        if let Some((index, _)) = best {
+            self.descriptor.screen = Some(index);
+            if let Some((screen_pos, screen_size)) = best_bounds
+                && position_is_reliable_linux(position, (screen_pos.x, screen_pos.y))
+                && let Some(rect) = rect_from_bounds(
+                    (position.x, position.y),
+                    (size.x, size.y),
+                    (screen_pos.x, screen_pos.y),
+                    (screen_size.x, screen_size.y),
+                )
+            {
+                self.descriptor.screen_rect = Some(rect);
+            }
+        }
+    }
+
+    pub fn update_descriptor_from_winit_window(
+        &mut self,
+        window: &WinitWindow,
+        screens: &[MonitorHandle],
+    ) -> bool {
+        if self.is_metadata_capture_blocked() {
+            return false;
+        }
+        if self.skip_metadata_capture {
+            self.skip_metadata_capture = false;
+            return false;
+        }
+
+        let current_monitor = window.current_monitor();
+        let outer_position = window.outer_position().ok();
+        let outer_size = window.outer_size();
+        let mut updated = false;
+
+        let screen_index = current_monitor
+            .as_ref()
+            .and_then(|current| screens.iter().position(|screen| screen == current))
+            .or_else(|| {
+                outer_position
+                    .as_ref()
+                    .and_then(|position| screen_index_from_bounds(*position, outer_size, screens))
+            });
+
+        if let Some(index) = screen_index {
+            self.descriptor.screen = Some(index);
+            updated = true;
+        }
+
+        if let (Some(position), Some(screen_handle)) = (
+            outer_position,
+            screen_index
+                .and_then(|idx| screens.get(idx).cloned())
+                .or_else(|| current_monitor.clone()),
+        ) {
+            let screen_pos = screen_handle.position();
+            if position_is_reliable_linux(
+                IVec2::new(position.x, position.y),
+                (screen_pos.x, screen_pos.y),
+            ) && let Some(rect) = rect_from_bounds(
+                (position.x, position.y),
+                (outer_size.width, outer_size.height),
+                (screen_pos.x, screen_pos.y),
+                (screen_handle.size().width, screen_handle.size().height),
+            ) {
+                self.descriptor.screen_rect = Some(rect);
+                updated = true;
+            }
+        }
+
+        updated
+    }
+}
+
+pub(crate) fn screen_index_from_bounds(
+    position: PhysicalPosition<i32>,
+    size: PhysicalSize<u32>,
+    screens: &[MonitorHandle],
+) -> Option<usize> {
+    let center_x = position.x + size.width as i32 / 2;
+    let center_y = position.y + size.height as i32 / 2;
+
+    screens
+        .iter()
+        .enumerate()
+        .filter_map(|(index, screen)| {
+            let screen_pos = screen.position();
+            let screen_size = screen.size();
+            let min_x = screen_pos.x;
+            let max_x = screen_pos.x + screen_size.width as i32;
+            let min_y = screen_pos.y;
+            let max_y = screen_pos.y + screen_size.height as i32;
+
+            if center_x >= min_x && center_x < max_x && center_y >= min_y && center_y < max_y {
+                let distance = (center_x - screen_pos.x).abs() + (center_y - screen_pos.y).abs();
+                Some((index, distance))
+            } else {
+                None
+            }
+        })
+        .min_by_key(|(_, distance)| *distance)
+        .map(|(index, _)| index)
+}
+
+pub(crate) fn rect_from_bounds(
+    position: (i32, i32),
+    size: (u32, u32),
+    screen_position: (i32, i32),
+    screen_size: (u32, u32),
+) -> Option<WindowRect> {
+    if screen_size.0 == 0 || screen_size.1 == 0 {
+        return None;
+    }
+
+    let width_pct = (size.0 as f32 / screen_size.0 as f32) * 100.0;
+    let height_pct = (size.1 as f32 / screen_size.1 as f32) * 100.0;
+
+    let offset_x = position.0 - screen_position.0;
+    let offset_y = position.1 - screen_position.1;
+
+    let x_pct = (offset_x as f32 / screen_size.0 as f32) * 100.0;
+    let y_pct = (offset_y as f32 / screen_size.1 as f32) * 100.0;
+
+    Some(WindowRect {
+        x: clamp_percent(x_pct),
+        y: clamp_percent(y_pct),
+        width: clamp_percent(width_pct),
+        height: clamp_percent(height_pct),
+    })
+}
+
+fn position_is_reliable_linux(position: IVec2, screen_position: (i32, i32)) -> bool {
+    if !cfg!(target_os = "linux") {
+        return true;
+    }
+    if position.x == 0 && position.y == 0 {
+        screen_position.0 == 0 && screen_position.1 == 0
+    } else {
+        true
+    }
+}
+
+pub(crate) fn clamp_percent(value: f32) -> u32 {
+    value.round().clamp(0.0, 100.0) as u32
 }
 
 #[derive(Resource)]
 pub struct WindowManager {
     main: TileState,
+    primary: PrimaryWindowLayout,
     secondary: Vec<SecondaryWindowState>,
     next_id: u32,
 }
@@ -109,6 +415,7 @@ impl Default for WindowManager {
     fn default() -> Self {
         Self {
             main: TileState::new(Id::new("main_tab_tree")),
+            primary: PrimaryWindowLayout::default(),
             secondary: Vec::new(),
             next_id: 0,
         }
@@ -122,6 +429,18 @@ impl WindowManager {
 
     pub fn main_mut(&mut self) -> &mut TileState {
         &mut self.main
+    }
+
+    pub fn primary_layout(&self) -> &PrimaryWindowLayout {
+        &self.primary
+    }
+
+    pub fn primary_layout_mut(&mut self) -> &mut PrimaryWindowLayout {
+        &mut self.primary
+    }
+
+    pub fn clear_primary_layout(&mut self) {
+        self.primary = PrimaryWindowLayout::default();
     }
 
     pub fn take_main(&mut self) -> TileState {
@@ -196,7 +515,10 @@ impl WindowManager {
         let descriptor = SecondaryWindowDescriptor {
             path: PathBuf::from(path),
             title: cleaned_title.or_else(|| Some(format!("Window {}", id.0 + 1))),
+            screen: None,
+            screen_rect: None,
         };
+        let relayout_phase = SecondaryWindowState::relayout_phase_from_descriptor(&descriptor);
         let tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
         info!(
             id = id.0,
@@ -210,6 +532,14 @@ impl WindowManager {
             tile_state,
             window_entity: None,
             graph_entities: Vec::new(),
+            applied_screen: None,
+            applied_rect: None,
+            relayout_phase,
+            relayout_attempts: 0,
+            relayout_started_at: None,
+            awaiting_screen_confirmation: false,
+            skip_metadata_capture: false,
+            metadata_capture_blocked_until: None,
         });
         id
     }
@@ -421,6 +751,14 @@ impl TileState {
             };
             match tile {
                 Tile::Pane(Pane::Graph(graph)) => out.push(graph.id),
+                Tile::Pane(Pane::Viewport(viewport)) => {
+                    if let Some(cam) = viewport.camera {
+                        out.push(cam);
+                    }
+                    if let Some(nav_cam) = viewport.nav_gizmo_camera {
+                        out.push(nav_cam);
+                    }
+                }
                 Tile::Pane(_) => {}
                 Tile::Container(container) => {
                     for child in container.children() {
@@ -1340,34 +1678,27 @@ impl RootWidgetSystem for TileSystem<'_, '_> {
             colors::TRANSPARENT
         };
 
-        let header = target.and_then(|id| {
-            world
-                .get_resource::<WindowManager>()
-                .and_then(|windows| windows.get_secondary(id))
-                .map(|state| (id, compute_secondary_window_title(state)))
-        });
-
-        if let Some((id, title)) = header.as_ref() {
-            TopBottomPanel::top(format!("secondary_header_{:?}", id))
-                .exact_height(32.0)
-                .show(ctx, |ui| {
-                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                        // leave room for native window buttons on macOS
-                        ui.add_space(60.0);
-                        ui.label(RichText::new(title).color(Color32::WHITE).strong());
-                    });
-                });
-        }
-
-        let central = egui::CentralPanel::default().frame(Frame {
+        #[cfg(target_os = "macos")]
+        let frame = {
+            let mut frame = Frame {
+                fill: fill_color,
+                ..Default::default()
+            };
+            if target.is_some() {
+                // Leave room for the native titlebar controls on secondary windows.
+                frame.inner_margin.top = 32;
+            }
+            frame
+        };
+        #[cfg(not(target_os = "macos"))]
+        let frame = Frame {
             fill: fill_color,
             ..Default::default()
-        });
+        };
+
+        let central = egui::CentralPanel::default().frame(frame);
 
         central.show(ctx, |ui| {
-            if header.is_some() {
-                ui.add_space(6.0);
-            }
             Self::render_panel_contents(
                 world,
                 ui,

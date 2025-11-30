@@ -266,8 +266,27 @@ pub fn tiles_to_schematic(
             schematic: window_schematic,
         });
         window_elems.push(SchematicElem::Window(WindowSchematic {
-            title: state.descriptor.title.clone(),
-            path: file_name,
+            title: None,
+            path: Some(file_name),
+            screen: state.descriptor.screen.map(|idx| idx as u32),
+            screen_rect: state.descriptor.screen_rect,
+        }));
+    }
+
+    let primary_layout = param.windows.primary_layout();
+    let serialized_screen = primary_layout
+        .requested_screen
+        .or(primary_layout.captured_screen);
+    let serialized_rect = primary_layout
+        .requested_rect
+        .or(primary_layout.captured_rect);
+
+    if serialized_screen.is_some() || serialized_rect.is_some() {
+        window_elems.push(SchematicElem::Window(WindowSchematic {
+            title: None,
+            path: None,
+            screen: serialized_screen.map(|idx| idx as u32),
+            screen_rect: serialized_rect,
         }));
     }
 

@@ -9,18 +9,24 @@ use impeller2_wkt::{
     DbConfig, Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowSchematic,
 };
 use miette::{Diagnostic, miette};
-use std::time::Duration;
+#[cfg(target_os = "linux")]
+use std::time::{Instant, SystemTime};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
+    time::Duration,
 };
 
+#[cfg(target_os = "linux")]
+const NOTIFY_SILENCE: Duration = Duration::from_millis(3000);
+
+use super::super::SECONDARY_RECT_CAPTURE_LOAD_GUARD;
 use crate::{
     EqlContext, MainCamera,
     object_3d::Object3DState,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        HdrEnabled, SelectedObject,
+        DEFAULT_SECONDARY_RECT, HdrEnabled, SelectedObject,
         colors::{self, EColor},
         dashboard::{NodeUpdaterParams, spawn_dashboard},
         modal::ModalDialog,
@@ -104,11 +110,8 @@ fn resolve_window_descriptor(
     window: &WindowSchematic,
     base_dir: Option<&Path>,
 ) -> Option<SecondaryWindowDescriptor> {
-    let mut resolved = PathBuf::from(&window.path);
-
-    if resolved.as_os_str().is_empty() {
-        return None;
-    }
+    let path_str = window.path.as_ref()?;
+    let mut resolved = PathBuf::from(path_str);
 
     if resolved.is_relative() {
         if let Some(base) = base_dir {
@@ -121,6 +124,8 @@ fn resolve_window_descriptor(
     Some(SecondaryWindowDescriptor {
         path: resolved,
         title: window.title.clone(),
+        screen: window.screen.map(|idx| idx as usize),
+        screen_rect: window.screen_rect.or(Some(DEFAULT_SECONDARY_RECT)),
     })
 }
 
@@ -137,9 +142,12 @@ pub fn load_schematic_file(
     params: &mut LoadSchematicParams,
     mut live_reload_rx: ResMut<SchematicLiveReloadRx>,
 ) -> Result<(), KdlSchematicError> {
+    let resolved_path = impeller2_kdl::env::schematic_file(path);
+    let watch_path = resolved_path.clone();
     let (tx, rx) = flume::bounded(1);
-    live_reload_rx.0 = Some(rx);
-    let watch_path = path.to_path_buf();
+    live_reload_rx.set_receiver(rx);
+    #[cfg(target_os = "linux")]
+    live_reload_rx.guard_for(Duration::from_millis(2000));
     std::thread::spawn(move || {
         let cb_path = watch_path.clone();
         let mut debouncer = notify_debouncer_mini::new_debouncer(
@@ -149,12 +157,14 @@ pub fn load_schematic_file(
                     return;
                 }
 
-                info!(path = ?cb_path, "refreshing schematic");
                 if let Ok(kdl) = std::fs::read_to_string(&cb_path) {
                     let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(&kdl) else {
                         return;
                     };
-                    let _ = tx.send(schematic);
+                    let _ = tx.send(SchematicReloadEvent {
+                        path: cb_path.clone(),
+                        schematic,
+                    });
                 }
             },
         )
@@ -170,9 +180,11 @@ pub fn load_schematic_file(
             std::thread::park();
         }
     });
-    if let Ok(kdl) = std::fs::read_to_string(path) {
+    if let Ok(kdl) = std::fs::read_to_string(&resolved_path) {
         let schematic = impeller2_wkt::Schematic::from_kdl(&kdl)?;
-        params.load_schematic(&schematic, path.parent());
+        let base_dir_owned = resolved_path.parent().map(|p| p.to_path_buf());
+        params.load_schematic(&schematic, base_dir_owned.as_deref());
+        live_reload_rx.record_loaded(&resolved_path);
     }
     Ok(())
 }
@@ -201,6 +213,7 @@ impl LoadSchematicParams<'_, '_> {
         for entity in self.grid_lines.iter() {
             self.commands.entity(entity).despawn();
         }
+        self.windows.clear_primary_layout();
         let mut secondary_descriptors: Vec<SecondaryWindowDescriptor> = Vec::new();
 
         for elem in &schematic.elems {
@@ -220,6 +233,9 @@ impl LoadSchematicParams<'_, '_> {
                 impeller2_wkt::SchematicElem::Window(window) => {
                     if let Some(descriptor) = resolve_window_descriptor(window, base_dir) {
                         secondary_descriptors.push(descriptor);
+                    } else {
+                        let layout = self.windows.primary_layout_mut();
+                        layout.set(window.screen.map(|idx| idx as usize), window.screen_rect);
                     }
                 }
             }
@@ -258,13 +274,27 @@ impl LoadSchematicParams<'_, '_> {
                             }
                         }
 
-                        secondary_states.push(SecondaryWindowState {
+                        let relayout_phase =
+                            SecondaryWindowState::relayout_phase_from_descriptor(&descriptor);
+                        let mut state = SecondaryWindowState {
                             id,
                             descriptor,
                             tile_state,
                             window_entity: None,
                             graph_entities,
-                        });
+                            applied_screen: None,
+                            applied_rect: None,
+                            relayout_phase,
+                            relayout_attempts: 0,
+                            relayout_started_at: None,
+                            awaiting_screen_confirmation: false,
+                            skip_metadata_capture: true,
+                            metadata_capture_blocked_until: None,
+                        };
+                        if state.descriptor.screen_rect.is_some() {
+                            state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_LOAD_GUARD);
+                        }
+                        secondary_states.push(state);
                     }
                     Err(err) => {
                         let diag = render_diag(&err);
@@ -603,14 +633,159 @@ pub fn graph_label(graph: &Graph) -> String {
         .unwrap_or_else(|| "Graph".to_string())
 }
 
-#[derive(Default, Deref, DerefMut, Resource)]
-pub struct SchematicLiveReloadRx(pub Option<flume::Receiver<Schematic>>);
+#[derive(Debug)]
+pub struct SchematicReloadEvent {
+    pub path: PathBuf,
+    pub schematic: Schematic,
+}
+
+#[derive(Default, Resource)]
+pub struct SchematicLiveReloadRx {
+    receiver: Option<flume::Receiver<SchematicReloadEvent>>,
+    ignored_paths: HashMap<PathBuf, usize>,
+    #[cfg(target_os = "linux")]
+    load_guard_until: Option<Instant>,
+    #[cfg(target_os = "linux")]
+    last_loaded: HashMap<PathBuf, SystemTime>,
+}
+
+impl SchematicLiveReloadRx {
+    pub fn set_receiver(&mut self, receiver: flume::Receiver<SchematicReloadEvent>) {
+        self.receiver = Some(receiver);
+    }
+
+    pub fn clear(&mut self) {
+        self.receiver = None;
+        self.ignored_paths.clear();
+    }
+
+    pub fn ignore_path(&mut self, path: PathBuf) {
+        let canonical = canonicalize_for_ignore(path);
+        *self.ignored_paths.entry(canonical).or_insert(0) += 1;
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn guard_for(&mut self, _duration: Duration) {}
+
+    #[cfg(target_os = "linux")]
+    pub fn guard_for(&mut self, duration: Duration) {
+        let candidate = Instant::now() + duration;
+        self.load_guard_until = Some(
+            self.load_guard_until
+                .map(|current| current.max(candidate))
+                .unwrap_or(candidate),
+        );
+    }
+
+    fn should_ignore(&mut self, path: &Path) -> bool {
+        let canonical = canonicalize_for_ignore(path.to_path_buf());
+        if let Some(count) = self.ignored_paths.get_mut(&canonical) {
+            if *count > 1 {
+                *count -= 1;
+            } else {
+                self.ignored_paths.remove(&canonical);
+            }
+            return true;
+        }
+        false
+    }
+
+    #[cfg(target_os = "linux")]
+    fn guard_active(&mut self) -> bool {
+        let now = Instant::now();
+        let mut saw_event = false;
+        if let Some(receiver) = &mut self.receiver {
+            while receiver.try_recv().is_ok() {
+                saw_event = true;
+            }
+        }
+        if saw_event {
+            let deadline = now + NOTIFY_SILENCE;
+            self.load_guard_until = Some(
+                self.load_guard_until
+                    .map(|current| current.max(deadline))
+                    .unwrap_or(deadline),
+            );
+        }
+        if let Some(until) = self.load_guard_until
+            && now < until
+        {
+            return true;
+        }
+        self.load_guard_until = None;
+        false
+    }
+
+    #[cfg(target_os = "linux")]
+    fn has_changed(&mut self, path: &Path) -> bool {
+        let canonical = canonicalize_for_ignore(path.to_path_buf());
+        let metadata = match std::fs::metadata(&canonical) {
+            Ok(meta) => meta,
+            Err(_) => {
+                self.last_loaded.remove(&canonical);
+                return true;
+            }
+        };
+        let modified = match metadata.modified() {
+            Ok(ts) => ts,
+            Err(_) => {
+                self.last_loaded.remove(&canonical);
+                return true;
+            }
+        };
+        let last = self.last_loaded.get(&canonical).copied();
+        let changed = last.map(|ts| modified > ts).unwrap_or(true);
+        if changed {
+            self.last_loaded.insert(canonical, modified);
+        }
+        changed
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn record_loaded(&mut self, path: &Path) {
+        let canonical = canonicalize_for_ignore(path.to_path_buf());
+        if let Ok(meta) = std::fs::metadata(&canonical)
+            && let Ok(modified) = meta.modified()
+        {
+            self.last_loaded.insert(canonical, modified);
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn has_changed(&mut self, _path: &Path) -> bool {
+        true
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn record_loaded(&mut self, _path: &Path) {}
+}
+
+fn canonicalize_for_ignore(path: PathBuf) -> PathBuf {
+    std::fs::canonicalize(&path).unwrap_or(path)
+}
 
 pub fn schematic_live_reload(
     mut rx: ResMut<SchematicLiveReloadRx>,
     mut params: LoadSchematicParams,
 ) {
-    let Some(rx) = &mut rx.0 else { return };
-    let Ok(schematic) = rx.try_recv() else { return };
-    params.load_schematic(&schematic, None);
+    #[cfg(target_os = "linux")]
+    if rx.guard_active() {
+        return;
+    }
+    let Some(receiver) = &mut rx.receiver else {
+        return;
+    };
+    let Ok(event) = receiver.try_recv() else {
+        return;
+    };
+    if rx.should_ignore(&event.path) {
+        return;
+    }
+    if !rx.has_changed(&event.path) {
+        return;
+    }
+    info!(path = ?event.path, "refreshing schematic");
+    let base_dir = event.path.parent().map(|p| p.to_path_buf());
+    params.load_schematic(&event.schematic, base_dir.as_deref());
+    rx.record_loaded(&event.path);
 }

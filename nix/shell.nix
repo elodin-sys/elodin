@@ -151,6 +151,15 @@ in {
       doCheck = false;
 
       shellHook = ''
+        case "$(uname -s)" in
+          Linux*)
+            export DISPLAY=:0
+            export WINIT_UNIX_BACKEND=x11
+            unset WAYLAND_DISPLAY
+            export XDG_SESSION_TYPE=x11
+          ;;
+        esac
+
         # start the shell if we're in an interactive shell
         if [[ $- == *i* ]]; then
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
