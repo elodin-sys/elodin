@@ -824,7 +824,6 @@ pub fn setup_clear_state(mut packet_handlers: ResMut<PacketHandlers>, mut comman
 fn clear_state_new_connection(
     PacketHandlerInput { packet, .. }: PacketHandlerInput,
     mut entity_map: ResMut<EntityMap>,
-    mut windows: ResMut<tiles::WindowManager>,
     mut selected_object: ResMut<SelectedObject>,
     mut render_layer_alloc: ResMut<RenderLayerAlloc>,
     mut value_map: Query<&mut ComponentValueMap>,

@@ -65,38 +65,7 @@ pub(crate) fn plugin(app: &mut App) {
     app
         .register_type::<WindowId>()
         .add_event::<WindowRelayout>()
-        .add_systems(Startup, setup_primary_window_state)
-        ;
-    // app.world_mut()
-    //     .register_component_hooks::<WindowState>()
-    //     .on_insert(|mut world, HookContext {
-    //         entity,
-    //         ..
-    //     }| {
-    //         let Some(state) = world.get::<WindowState>(entity).cloned() else {
-    //             warn!("Could not get window state for {entity}.");
-    //             return;
-    //         };
-    //         if world.get::<Window>(entity).is_none() {
-    //             warn!("No window for entity {entity}");
-    //             // If there's no Window yet, don't try to resize
-    //             return;
-    //         }
-
-    //         if let Some(screen) = state.descriptor.screen.as_ref() {
-    //             world.send_event(WindowRelayout::Screen {
-    //                 window: entity,
-    //                 screen: screen.clone(),
-    //             });
-    //         }
-
-    //         if let Some(rect) = state.descriptor.screen_rect.as_ref() {
-    //             world.send_event(WindowRelayout::Rect {
-    //                 window: entity,
-    //                 rect: rect.clone(),
-    //             });
-    //         }
-    //     });
+        .add_systems(Startup, setup_primary_window_state);
 }
 
 fn setup_primary_window_state(primary_window: Query<Entity, With<PrimaryWindow>>,
@@ -203,52 +172,6 @@ pub struct WindowState {
     pub descriptor: WindowDescriptor,
     pub graph_entities: Vec<Entity>,
     pub tile_state: TileState,
-}
-
-// TOOD: Seek to remove this by using async and `WindowState` with the primary
-// window.
-//
-// The primary window ought to have a `WindowId(0)` component and a
-// `WindowState` component but otherwise be handled almost like a regular
-// window. For state-less distinctions use `window_id.is_primary()`. If state is
-// required only for the primary window, use a new or old component.
-#[derive(Clone, Default)]
-pub struct PrimaryWindowLayout {
-    pub screen: Option<usize>,
-    pub screen_rect: Option<WindowRect>,
-    pub captured_screen: Option<usize>,
-    pub captured_rect: Option<WindowRect>,
-    pub requested_screen: Option<usize>,
-    pub requested_rect: Option<WindowRect>,
-
-    pub relayout_phase: WindowRelayoutPhase,
-    pub relayout_attempts: u8,
-    pub relayout_started_at: Option<Instant>,
-    pub applied_screen: Option<usize>,
-    pub applied_rect: Option<WindowRect>,
-    pub awaiting_screen_confirmation: bool,
-}
-
-impl PrimaryWindowLayout {
-    pub fn set(&mut self, screen: Option<usize>, rect: Option<WindowRect>) {
-        self.screen = screen;
-        self.screen_rect = rect;
-        self.applied_screen = None;
-        self.applied_rect = None;
-        self.relayout_attempts = 0;
-        self.relayout_started_at = None;
-        self.requested_screen = screen;
-        self.requested_rect = rect;
-        // One-shot relayout on explicit load if screen/rect is provided.
-        self.relayout_phase = if self.screen.is_some() {
-            WindowRelayoutPhase::NeedScreen
-        } else if self.screen_rect.is_some() {
-            WindowRelayoutPhase::NeedRect
-        } else {
-            WindowRelayoutPhase::Idle
-        };
-        self.awaiting_screen_confirmation = false;
-    }
 }
 
 impl WindowState {
@@ -419,71 +342,50 @@ pub(crate) fn clamp_percent(value: f32) -> u32 {
     value.round().clamp(0.0, 100.0) as u32
 }
 
-// TODO: Remove this by making the primary window use `WindowState` too.
-#[derive(Resource)]
-pub struct WindowManager {
-    // TODO: Refactor and try to eliminate.
-    pub primary: PrimaryWindowLayout,
-}
-
-impl Default for WindowManager {
-    fn default() -> Self {
-        Self {
-            primary: PrimaryWindowLayout::default(),
+/// Creates a `WindowState`. Must be spawned with a `WindowId` to create an
+/// actual window.
+pub fn create_secondary_window(title: Option<String>) -> (WindowState, WindowId) {
+    let id = WindowId::default();
+    let cleaned_title = title.and_then(|t| {
+        let trimmed = t.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
         }
-    }
-}
-
-impl WindowManager {
-    pub fn clear_primary_layout(&mut self) {
-        self.primary = PrimaryWindowLayout::default();
-    }
-
-    /// Creates a `WindowState`. Must be spawned with a `WindowId` to create an
-    /// actual window.
-    pub fn create_secondary_window(&mut self, title: Option<String>) -> (WindowState, WindowId) {
-        let id = WindowId::default();
-        let cleaned_title = title.and_then(|t| {
-            let trimmed = t.trim();
-            if trimmed.is_empty() {
-                None
+    });
+    let path = cleaned_title
+        .as_deref()
+        .map(|title| {
+            let stem = super::schematic::sanitize_to_stem(title);
+            if stem.is_empty() {
+                format!("secondary-window-{}.kdl", id.0)
             } else {
-                Some(trimmed.to_string())
+                format!("{stem}.kdl")
             }
-        });
-        let path = cleaned_title
-            .as_deref()
-            .map(|title| {
-                let stem = super::schematic::sanitize_to_stem(title);
-                if stem.is_empty() {
-                    format!("secondary-window-{}.kdl", id.0)
-                } else {
-                    format!("{stem}.kdl")
-                }
-            })
-            .unwrap_or_else(|| format!("secondary-window-{}.kdl", id.0));
-        let descriptor = WindowDescriptor {
-            path: Some(PathBuf::from(path)),
-            title: cleaned_title.or_else(|| Some(format!("Window {}", id.0 + 1))),
-            screen: None,
-            screen_rect: None,
-        };
-        let tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
-        info!(
-            id = id.0,
-            title = descriptor.title.as_deref().unwrap_or(""),
-            path = ?descriptor.path,
-            "Created secondary window"
-        );
-        (
-            WindowState {
-                descriptor,
-                tile_state,
-                graph_entities: Vec::new(),
-            },
-            id,
-        )
-    }
+        })
+        .unwrap_or_else(|| format!("secondary-window-{}.kdl", id.0));
+    let descriptor = WindowDescriptor {
+        path: Some(PathBuf::from(path)),
+        title: cleaned_title.or_else(|| Some(format!("Window {}", id.0 + 1))),
+        screen: None,
+        screen_rect: None,
+    };
+    let tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
+    info!(
+        id = id.0,
+        title = descriptor.title.as_deref().unwrap_or(""),
+        path = ?descriptor.path,
+        "Created secondary window"
+    );
+    (
+        WindowState {
+            descriptor,
+            tile_state,
+            graph_entities: Vec::new(),
+        },
+        id,
+    )
 }
 
 #[derive(Resource, Default)]
@@ -1478,7 +1380,6 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 pub struct TileSystem<'w, 's> {
     contexts: EguiContexts<'w, 's>,
     images: Local<'s, images::Images>,
-    windows: Res<'w, WindowManager>,
     window_states: Query<'w, 's, (Entity, &'static WindowId, &'static WindowState)>,
     primary_window: Single<'w, Entity, With<PrimaryWindow>>,
 }
@@ -2197,7 +2098,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
 }
 
 pub fn shortcuts(key_state: Res<LogicalKeyState>,
-                 mut windows: ResMut<WindowManager>,
                  primary_window: Single<Entity, With<PrimaryWindow>>,
                  mut window_state: Query<&mut WindowState>,
 ) {

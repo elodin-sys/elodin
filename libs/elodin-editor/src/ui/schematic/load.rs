@@ -27,7 +27,7 @@ use crate::{
     object_3d::Object3DState,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        DEFAULT_SECONDARY_RECT, HdrEnabled, SelectedObject,
+        DEFAULT_SECONDARY_RECT, HdrEnabled, SelectedObject, WindowRelayout,
         colors::{self, EColor},
         dashboard::{NodeUpdaterParams, spawn_dashboard},
         modal::ModalDialog,
@@ -37,7 +37,7 @@ use crate::{
         schematic::EqlExt,
         tiles::{
             DashboardPane, GraphPane, Pane, TileState, TreePane, ViewportPane, WindowDescriptor,
-            WindowId, WindowManager, WindowState,
+            WindowId, WindowState,
         },
     },
     vector_arrow::VectorArrowState,
@@ -55,7 +55,6 @@ pub struct SyncedViewport;
 #[derive(SystemParam)]
 pub struct LoadSchematicParams<'w, 's> {
     pub commands: Commands<'w, 's>,
-    pub windows: ResMut<'w, WindowManager>,
     primary_window: Single<'w, Entity, With<PrimaryWindow>>,
     pub asset_server: Res<'w, AssetServer>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
@@ -193,6 +192,7 @@ pub fn load_schematic_file(
 }
 
 impl LoadSchematicParams<'_, '_> {
+
     pub fn load_schematic(&mut self, schematic: &Schematic, base_dir: Option<&Path>) {
         self.render_layer_alloc.free_all();
         for (id, window_id, window_state) in &self.window_states {
@@ -207,8 +207,9 @@ impl LoadSchematicParams<'_, '_> {
             self.commands.entity(id).despawn();
         }
 
+        let primary_window = *self.primary_window;
         let mut main_state = {
-            let mut window_state = self.window_states.get_mut(*self.primary_window).expect("no primary window").2;
+            let mut window_state = self.window_states.get_mut(primary_window).expect("no primary window").2;
             std::mem::take(&mut window_state.tile_state)
         };
         main_state.clear(&mut self.commands, &mut self.selected_object);
@@ -223,8 +224,8 @@ impl LoadSchematicParams<'_, '_> {
         for entity in self.grid_lines.iter() {
             self.commands.entity(entity).despawn();
         }
-        self.windows.clear_primary_layout();
         let mut secondary_descriptors: Vec<WindowDescriptor> = Vec::new();
+        let mut main_window_descriptor = None;
 
         for elem in &schematic.elems {
             match elem {
@@ -244,8 +245,11 @@ impl LoadSchematicParams<'_, '_> {
                     if let Some(descriptor) = resolve_window_descriptor(window, base_dir) {
                         secondary_descriptors.push(descriptor);
                     } else {
-                        let layout = &mut self.windows.primary;
-                        layout.set(window.screen.map(|idx| idx as usize), window.screen_rect);
+                        main_window_descriptor = Some(WindowDescriptor {
+                            screen: window.screen.map(|idx| idx as usize),
+                            screen_rect: window.screen_rect,
+                            ..default()
+                        });
                     }
                 }
             }
@@ -253,7 +257,26 @@ impl LoadSchematicParams<'_, '_> {
 
         {
             let mut window_state = self.window_states.get_mut(*self.primary_window).expect("no primary window").2;
+            if let Some(d) = main_window_descriptor {
+                window_state.descriptor.screen = d.screen;
+                window_state.descriptor.screen_rect = d.screen_rect;
+            }
             let _ = std::mem::replace(&mut window_state.tile_state, main_state);
+            // Resize if necessary.
+            // 
+            if let Some(screen) = window_state.descriptor.screen.as_ref() {
+                self.commands.send_event(WindowRelayout::Screen {
+                    window: primary_window,
+                    screen: screen.clone(),
+                });
+            }
+
+            if let Some(rect) = window_state.descriptor.screen_rect.as_ref() {
+                self.commands.send_event(WindowRelayout::Rect {
+                    window: primary_window,
+                    rect: rect.clone(),
+                });
+            }
         }
 
         for descriptor in secondary_descriptors {

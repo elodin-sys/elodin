@@ -253,7 +253,6 @@ const PRESETS_LABEL: &str = "Presets";
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct TileParam<'w, 's> {
-    windows: ResMut<'w, tiles::WindowManager>,
     windows_id: Query<'w, 's, (Entity, &'static tiles::WindowId)>,
     windows_state: Query<'w, 's, &'static mut tiles::WindowState>,
     primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
@@ -495,7 +494,6 @@ pub fn create_window() -> PaletteItem {
                 LabelSource::placeholder("Enter window title"),
                 "Leave blank for a default title",
                 move |In(title): In<String>,
-                      mut windows: ResMut<tiles::WindowManager>,
                       mut commands: Commands,
 
                       mut palette_state: ResMut<CommandPaletteState>| {
@@ -504,7 +502,7 @@ pub fn create_window() -> PaletteItem {
                     } else {
                         Some(title.trim().to_string())
                     };
-                    let (state, id) = windows.create_secondary_window(title_opt);
+                    let (state, id) = tiles::create_secondary_window(title_opt);
                     let entity = commands.spawn((id, state)).id();
                     palette_state.target_window = Some(entity);
                     PaletteEvent::Exit
@@ -626,7 +624,6 @@ pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
                     ),
                     "",
                     move |In(msg_name): In<String>,
-                          mut windows: ResMut<tiles::WindowManager>,
                           mut tile_param: TileParam,
                           palette_state: Res<CommandPaletteState>| {
                         let Some(mut tile_state) = tile_param.target(palette_state.target_window)
