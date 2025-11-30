@@ -43,6 +43,7 @@ Thrust = ty.Annotated[
     ),
 ]
 
+
 @el.map
 def extract_throttle_command(commands: ControlCommands) -> ThrottleCommand:
     """Extract throttle from control commands array."""
