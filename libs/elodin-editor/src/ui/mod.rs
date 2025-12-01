@@ -855,9 +855,10 @@ async fn wait_for_window_to_change_screens(
 
             let screens = collect_sorted_screens(window);
             if let Some(screen) = detect_window_screen(window, &screens)
-                && screen == target_screen {
-                    return Some(true);
-                }
+                && screen == target_screen
+            {
+                return Some(true);
+            }
             None
         }) {
             Ok(Some(result)) => {
