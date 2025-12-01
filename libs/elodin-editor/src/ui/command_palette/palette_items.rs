@@ -838,7 +838,6 @@ pub fn save_schematic() -> PaletteItem {
             // Refresh primary path + descriptors, rebuild schematics, then serialize in a dedicated system.
             commands.run_system_cached(crate::ui::update_primary_descriptor_path);
             commands.trigger(crate::ui::tiles::WindowRelayout::UpdateDescriptors);
-            commands.run_system_cached(crate::ui::capture_window_screens_oneoff);
             commands.run_system_cached(crate::ui::schematic::tiles_to_schematic);
             commands.run_system_cached(save_schematic_now);
             PaletteEvent::Exit
