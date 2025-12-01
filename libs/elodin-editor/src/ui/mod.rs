@@ -75,8 +75,8 @@ use self::{command_palette::CommandPaletteState, plot::GraphState, timeline::tim
 use impeller2::types::ComponentId;
 use impeller2_bevy::ComponentValueMap;
 use impeller2_wkt::{
-    ComponentMetadata, ComponentValue, ComponentValue as WktComponentValue, DbConfig, VectorArrow3d,
-    WindowRect,
+    ComponentMetadata, ComponentValue, ComponentValue as WktComponentValue, DbConfig,
+    VectorArrow3d, WindowRect,
 };
 
 use crate::{
@@ -1207,11 +1207,11 @@ fn capture_window_screens_oneoff(
             updated = state.update_descriptor_from_winit_window(window, &screens_sorted);
             let screen_seen = state.descriptor.screen;
             // Fallback: best-effort detection if current_monitor is not reliable.
-            if !updated || screen_seen.is_none() {
-                if let Some(idx) = detect_window_screen(window, &screens_sorted) {
-                    state.descriptor.screen = Some(idx);
-                    updated = true;
-                }
+            if (!updated || screen_seen.is_none())
+                && let Some(idx) = detect_window_screen(window, &screens_sorted)
+            {
+                state.descriptor.screen = Some(idx);
+                updated = true;
             }
         }
         if !updated {
@@ -1289,7 +1289,10 @@ fn fix_visibility_hierarchy(
     }
 }
 
-pub(crate) fn update_primary_descriptor_path(db_config: Res<DbConfig>, mut q: Query<(&tiles::WindowId, &mut tiles::WindowState)>) {
+pub(crate) fn update_primary_descriptor_path(
+    db_config: Res<DbConfig>,
+    mut q: Query<(&tiles::WindowId, &mut tiles::WindowState)>,
+) {
     let Some(path) = db_config.schematic_path() else {
         return;
     };
