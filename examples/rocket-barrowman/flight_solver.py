@@ -23,6 +23,7 @@ if ROCKETPY_VENDOR_PATH.exists():
 
 try:
     from calisto_drag_curve import get_calisto_cd
+
     USE_CALISTO_DRAG = True
 except ImportError:
     USE_CALISTO_DRAG = False
@@ -109,7 +110,9 @@ class MassInertiaModel:
 
         self.structural_mass = rocket.structural_mass()
         self.structural_cg = rocket.structural_cg()
-        self.structural_inertia = np.asarray(getattr(rocket, "structural_inertia", [0.0, 0.0, 0.0]), dtype=float)
+        self.structural_inertia = np.asarray(
+            getattr(rocket, "structural_inertia", [0.0, 0.0, 0.0]), dtype=float
+        )
 
         # Build time grid covering burn and post-burn plateau
         burn_time = max(float(motor.burn_time), 0.0)  # Ensure non-negative
@@ -122,11 +125,15 @@ class MassInertiaModel:
         # Motor properties over time
         self.motor_mass_values = np.array([motor.mass(t) for t in self.times], dtype=float)
         self.motor_mass_dot_values = np.gradient(self.motor_mass_values, self.times, edge_order=2)
-        self.motor_mass_ddot_values = np.gradient(self.motor_mass_dot_values, self.times, edge_order=2)
+        self.motor_mass_ddot_values = np.gradient(
+            self.motor_mass_dot_values, self.times, edge_order=2
+        )
 
         self.total_mass_values = self.structural_mass + self.motor_mass_values
         self.total_mass_dot_values = np.gradient(self.total_mass_values, self.times, edge_order=2)
-        self.total_mass_ddot_values = np.gradient(self.total_mass_dot_values, self.times, edge_order=2)
+        self.total_mass_ddot_values = np.gradient(
+            self.total_mass_dot_values, self.times, edge_order=2
+        )
 
         motor_front = rocket.motor_front_position()
         self.motor_cg_abs_values = np.array(
@@ -136,8 +143,10 @@ class MassInertiaModel:
 
         # Build total_cg_values - ensure arrays have same length
         if len(self.motor_cg_abs_values) != len(self.times):
-            raise ValueError(f"Motor CG values ({len(self.motor_cg_abs_values)}) and times ({len(self.times)}) must have same length")
-        
+            raise ValueError(
+                f"Motor CG values ({len(self.motor_cg_abs_values)}) and times ({len(self.times)}) must have same length"
+            )
+
         self.total_cg_values = np.array(
             [
                 rocket.total_cg_with_motor(motor, motor_cg_abs, t)
@@ -150,7 +159,9 @@ class MassInertiaModel:
 
         self.com_offset_values = self.total_cg_values - self.structural_cg
         self.com_offset_dot_values = np.gradient(self.com_offset_values, self.times, edge_order=2)
-        self.com_offset_ddot_values = np.gradient(self.com_offset_dot_values, self.times, edge_order=2)
+        self.com_offset_ddot_values = np.gradient(
+            self.com_offset_dot_values, self.times, edge_order=2
+        )
 
         # Inertia tensor relative to CDM (diagonal assumption)
         # RocketPy convention: I11=Ixx (yaw), I22=Iyy (pitch), I33=Izz (roll/forward)
@@ -289,6 +300,7 @@ class MassInertiaModel:
         else:
             return self._nozzle_gyration
 
+
 class FlightSolver:
     """RocketPy-inspired 6-DOF integrator scaffold."""
 
@@ -364,7 +376,9 @@ class FlightSolver:
             state.deploy_time = None
             state.trigger_time = None
 
-    def _update_parachute_states(self, time: float, altitude: float, vertical_velocity: float) -> None:
+    def _update_parachute_states(
+        self, time: float, altitude: float, vertical_velocity: float
+    ) -> None:
         for state in self.parachute_states:
             if state.deployed:
                 continue
@@ -375,27 +389,42 @@ class FlightSolver:
                     if False:  # Set to True to enable debug
                         print(f">>> {state.config.name} DEPLOYED at t={time:.2f}s")
                 continue
-            event = state.config.deployment_event.upper() if state.config.deployment_event else "TIME"
+            event = (
+                state.config.deployment_event.upper() if state.config.deployment_event else "TIME"
+            )
             if event == "APOGEE":
-                if self._prev_vertical_velocity is not None and self._prev_vertical_velocity > 0.0 and vertical_velocity <= 0.0:
+                if (
+                    self._prev_vertical_velocity is not None
+                    and self._prev_vertical_velocity > 0.0
+                    and vertical_velocity <= 0.0
+                ):
                     trigger_time = time
                     state.trigger_time = trigger_time
                     state.deploy_time = trigger_time + state.config.deployment_delay
                     # Don't deploy immediately - wait for deploy_time
                     # DEBUG: Print apogee detection
                     if False:  # Set to True to enable debug
-                        print(f">>> APOGEE DETECTED for {state.config.name} at t={time:.2f}s (ejection), inflation at t={state.deploy_time:.2f}s (prev_vz={self._prev_vertical_velocity:.2f}, vz={vertical_velocity:.2f})")
+                        print(
+                            f">>> APOGEE DETECTED for {state.config.name} at t={time:.2f}s (ejection), inflation at t={state.deploy_time:.2f}s (prev_vz={self._prev_vertical_velocity:.2f}, vz={vertical_velocity:.2f})"
+                        )
             elif event == "ALTITUDE":
                 # Trigger when descending through target altitude
                 target_alt = state.config.deployment_altitude
-                if self._prev_altitude is not None and self._prev_altitude > target_alt and altitude <= target_alt and vertical_velocity < 0.0:
+                if (
+                    self._prev_altitude is not None
+                    and self._prev_altitude > target_alt
+                    and altitude <= target_alt
+                    and vertical_velocity < 0.0
+                ):
                     trigger_time = time
                     state.trigger_time = trigger_time
                     state.deploy_time = trigger_time + state.config.deployment_delay
                     # Don't deploy immediately - wait for deploy_time
                     # DEBUG: Print altitude trigger
                     if False:  # Set to True to enable debug
-                        print(f">>> ALTITUDE TRIGGER for {state.config.name} at t={time:.2f}s (ejection), inflation at t={state.deploy_time:.2f}s (alt={altitude:.1f}m, target={target_alt:.1f}m)")
+                        print(
+                            f">>> ALTITUDE TRIGGER for {state.config.name} at t={time:.2f}s (ejection), inflation at t={state.deploy_time:.2f}s (alt={altitude:.1f}m, target={target_alt:.1f}m)"
+                        )
             elif event == "TIME":
                 deploy_time = state.config.deployment_delay
                 if time >= deploy_time:
@@ -408,7 +437,9 @@ class FlightSolver:
         self._prev_altitude = altitude
         self._prev_vertical_velocity = vertical_velocity
 
-    def _compute_aero_state(self, time: float, state: np.ndarray, allow_events: bool = False) -> dict:
+    def _compute_aero_state(
+        self, time: float, state: np.ndarray, allow_events: bool = False
+    ) -> dict:
         position = state[0:3]
         velocity = state[3:6]
         quaternion = state[6:10]
@@ -445,45 +476,59 @@ class FlightSolver:
         if Matrix is not None and Vector is not None:
             Kt = Matrix.transformation(quaternion).transpose
             velocity_body_cm_vec = Kt @ Vector(velocity_world)
-            vx_cm, vy_cm, vz_cm = velocity_body_cm_vec.x, velocity_body_cm_vec.y, velocity_body_cm_vec.z
+            vx_cm, vy_cm, vz_cm = (
+                velocity_body_cm_vec.x,
+                velocity_body_cm_vec.y,
+                velocity_body_cm_vec.z,
+            )
         else:
             velocity_body_local = self._rotate_world_to_body(quaternion, velocity_world)
-            vx_cm, vy_cm, vz_cm = velocity_body_local[2], velocity_body_local[1], velocity_body_local[0]
+            vx_cm, vy_cm, vz_cm = (
+                velocity_body_local[2],
+                velocity_body_local[1],
+                velocity_body_local[0],
+            )
         velocity_body_cm = np.array([vx_cm, vy_cm, vz_cm])
 
         # For now, use CM velocity only (not CP with rotation) to avoid feedback instability
         # TODO: Implement per-surface force calculation like RocketPy
         state_omega_rp = state[10:13]  # RocketPy convention [pitch, yaw, roll]
-        
+
         # Get CP position (for moment arm calculation)
         try:
             cp = float(self.rocket.aero.calculate_cp(mach))
         except Exception:
             cp = cg
-        
+
         # Stream velocity = -rocket velocity at CM (assuming no wind)
         # Note: air_velocity already accounts for wind, so we use it directly
         if Matrix is not None and Vector is not None:
             air_velocity_body_vec = Kt @ Vector(air_velocity)
             stream_velocity_vec = -air_velocity_body_vec
-            stream_velocity = np.array([stream_velocity_vec.x, stream_velocity_vec.y, stream_velocity_vec.z])
+            stream_velocity = np.array(
+                [stream_velocity_vec.x, stream_velocity_vec.y, stream_velocity_vec.z]
+            )
         else:
             air_velocity_body = self._rotate_world_to_body(quaternion, air_velocity)
-            air_velocity_body_rp = np.array([air_velocity_body[2], air_velocity_body[1], air_velocity_body[0]])
+            air_velocity_body_rp = np.array(
+                [air_velocity_body[2], air_velocity_body[1], air_velocity_body[0]]
+            )
             stream_velocity = -air_velocity_body_rp
-        
+
         stream_speed = np.linalg.norm(stream_velocity)
-        
+
         # Compute attack angle from stream velocity (RocketPy aero_surface.py line 137)
         stream_vx, stream_vy, stream_vz = stream_velocity
-        
+
         # For AoA/sideslip reporting, use CM velocity
         body_z = np.array([0.0, 0.0, 1.0])
         body_x = np.array([1.0, 0.0, 0.0])
         vel_parallel_mag = abs(np.dot(velocity_body_cm, body_z))
 
         if speed > 1e-6 and vel_parallel_mag > 1e-9:
-            alpha = math.atan2(np.dot(velocity_body_cm, np.array([0.0, 1.0, 0.0])), vel_parallel_mag)
+            alpha = math.atan2(
+                np.dot(velocity_body_cm, np.array([0.0, 1.0, 0.0])), vel_parallel_mag
+            )
             beta = math.atan2(np.dot(velocity_body_cm, body_x), vel_parallel_mag)
         else:
             alpha = 0.0
@@ -492,16 +537,16 @@ class FlightSolver:
         beta = float(np.clip(beta, -0.3, 0.3))
 
         # Drag coefficient (uses freestream speed, not stream speed at CP)
-        if USE_CALISTO_DRAG and hasattr(self.rocket, '_is_calisto'):
+        if USE_CALISTO_DRAG and hasattr(self.rocket, "_is_calisto"):
             cd = get_calisto_cd(mach, power_on=(time < self.motor.burn_time))
         else:
             cd = self.rocket.aero.calculate_cd(mach, max(speed, 1e-6), rho, mu, alpha)
-        
+
         dynamic_pressure = 0.5 * rho * speed**2
-        
+
         # Drag force (axial, along -z in body frame)
         drag_body_rp = np.array([0.0, 0.0, -cd * dynamic_pressure * self.rocket.reference_area])
-        
+
         # Parachute drag - must oppose velocity direction in world frame, not body frame
         # Calculate parachute drag in world frame first
         parachute_drag_world = np.zeros(3, dtype=np.float64)
@@ -512,15 +557,19 @@ class FlightSolver:
                 # = -0.5 * rho * v * Cd*A * v  (where v is velocity vector)
                 if speed > 1e-6:
                     parachute_drag_world -= 0.5 * rho * chute.config.cd_area * speed * air_velocity
-        
+
         # Transform parachute drag to body frame for force summation
         if Matrix is not None and Vector is not None:
             Kt = Matrix.transformation(quaternion).transpose
             chute_drag_body_vec = Kt @ Vector(parachute_drag_world)
-            chute_drag_body_rp = np.array([chute_drag_body_vec.x, chute_drag_body_vec.y, chute_drag_body_vec.z])
+            chute_drag_body_rp = np.array(
+                [chute_drag_body_vec.x, chute_drag_body_vec.y, chute_drag_body_vec.z]
+            )
         else:
             chute_drag_body_rp = self._rotate_world_to_body(quaternion, parachute_drag_world)
-            chute_drag_body_rp = np.array([chute_drag_body_rp[2], chute_drag_body_rp[1], chute_drag_body_rp[0]])
+            chute_drag_body_rp = np.array(
+                [chute_drag_body_rp[2], chute_drag_body_rp[1], chute_drag_body_rp[0]]
+            )
 
         # Lift force using stream velocity at CP (RocketPy aero_surface.py lines 130-149)
         R1, R2, R3 = 0.0, 0.0, 0.0
@@ -535,32 +584,36 @@ class FlightSolver:
                 if hasattr(self.rocket, "_is_calisto") and self.rocket._is_calisto:
                     cn_alpha_total *= 0.769
                 c_lift = cn_alpha_total * attack_angle  # Small angle: Cl ≈ CNα * α
-                
+
                 # Lift force magnitude
                 lift_mag = 0.5 * rho * (stream_speed**2) * self.rocket.reference_area * c_lift
-                
+
                 # Lift direction (perpendicular to stream, in x-y plane)
                 lift_dir_norm = math.sqrt(stream_vx**2 + stream_vy**2)
                 lift_xb = lift_mag * (stream_vx / lift_dir_norm)
                 lift_yb = lift_mag * (stream_vy / lift_dir_norm)
-                
+
                 R1, R2, R3 = lift_xb, lift_yb, 0.0
-        
+
         normal_force_body_rp = np.array([R1, R2, R3])
-        
+
         # Total aerodynamic force in RocketPy body frame
         aero_force_body_rp = drag_body_rp + chute_drag_body_rp + normal_force_body_rp
-        
+
         # Transform to world frame for total force calculation
         if Matrix is not None and Vector is not None:
             K = Matrix.transformation(quaternion)
             aero_force_world = K @ Vector(aero_force_body_rp)
-            aero_force_world = np.array([aero_force_world.x, aero_force_world.y, aero_force_world.z])
+            aero_force_world = np.array(
+                [aero_force_world.x, aero_force_world.y, aero_force_world.z]
+            )
         else:
             # Fallback: convert from our convention
-            aero_force_body_our = np.array([aero_force_body_rp[2], aero_force_body_rp[1], aero_force_body_rp[0]])
+            aero_force_body_our = np.array(
+                [aero_force_body_rp[2], aero_force_body_rp[1], aero_force_body_rp[0]]
+            )
             aero_force_world = self._rotate_vector(quaternion, aero_force_body_our)
-        
+
         # Thrust in RocketPy body frame (along +z)
         thrust_mag = self.motor.thrust(time)
         thrust_body_rp = np.array([0.0, 0.0, thrust_mag])
@@ -580,46 +633,36 @@ class FlightSolver:
         cpz = cp  # CP position along z-axis
         ref_length = self.rocket.reference_length
         ref_area = self.rocket.reference_area
-        
+
         M1 = -cpz * R2  # Pitch moment
-        M2 = cpz * R1   # Yaw moment
-        M3 = 0.0        # Roll moment
-        
+        M2 = cpz * R1  # Yaw moment
+        M3 = 0.0  # Roll moment
+
         # For simplified dynamics: scale down restoring moments to prevent instability
         # With proper Kane/RTT, this scaling wouldn't be needed
         # For vertical flight, weathercocking is gradual - moments settle to ~0 by t=5s
         restoring_scale = 0.01  # 1% of calculated moment (empirically tuned)
         M1 *= restoring_scale
         M2 *= restoring_scale
-        
+
         # Strong aerodynamic damping to prevent oscillation
         damping_coef = 0.5 * rho * speed * ref_area * ref_length**2 * 0.1
         M1 -= damping_coef * state_omega_rp[0]  # Pitch damping
         M2 -= damping_coef * state_omega_rp[1]  # Yaw damping
-        
+
         # Roll forcing and damping (RocketPy fins.py lines 411-426)
         clf_delta_sum, cld_omega_sum = self.rocket.roll_coefficients(mach)
         omega_roll = state_omega_rp[2]
 
         # Note: RocketPy uses stream_speed for roll, not freestream speed
-        M3_forcing = (
-            0.5 * rho * stream_speed**2
-            * ref_area
-            * ref_length
-            * clf_delta_sum
-        )
+        M3_forcing = 0.5 * rho * stream_speed**2 * ref_area * ref_length * clf_delta_sum
         M3_damping = (
-            0.5 * rho * stream_speed
-            * ref_area
-            * (ref_length ** 2)
-            * cld_omega_sum
-            * omega_roll
-            / 2.0
+            0.5 * rho * stream_speed * ref_area * (ref_length**2) * cld_omega_sum * omega_roll / 2.0
         )
         M3 = (M3_forcing - M3_damping) * 0.01  # Scale down for simplified dynamics
-        
+
         moment_body_rp = np.array([M1, M2, M3])
-        
+
         # Transform to world frame
         if Matrix is not None and Vector is not None:
             moment_world = K @ Vector(moment_body_rp)
@@ -627,7 +670,7 @@ class FlightSolver:
         else:
             moment_body_our = np.array([moment_body_rp[2], moment_body_rp[1], moment_body_rp[0]])
             moment_world = self._rotate_vector(quaternion, moment_body_our)
-        
+
         # Store forces for compatibility (compute world frame equivalents)
         # Drag is primarily along -z in body frame
         if Matrix is not None and Vector is not None:
@@ -709,16 +752,16 @@ class FlightSolver:
         # Kane/RTT implementation exists but needs debugging - moments are too strong
         # For now, use simplified dynamics which achieves 87.3% accuracy
         # TODO: Debug Kane/RTT - the T-matrix assembly or moment application is incorrect
-        
+
         if Matrix is None or Vector is None:
             # Fallback to simplified dynamics if RocketPy math utils unavailable
             return self._derivatives_simple(time, state)
-        
+
         # Use simplified dynamics for now (Kane/RTT disabled until debugging complete)
         # Uncomment below to enable Kane/RTT:
         # return self._derivatives_kane_rtt(time, state)
         return self._derivatives_simple(time, state)
-    
+
     def _derivatives_kane_rtt(self, time: float, state: np.ndarray) -> np.ndarray:
         """Kane/RTT equations with numerical safeguards."""
         # Extract state components
@@ -769,7 +812,7 @@ class FlightSolver:
 
         # Compute aerodynamic forces and moments
         aero = self._compute_aero_state(time, state, allow_events=False)
-        
+
         # Extract forces/moments from aero state (already in RocketPy body frame)
         aero_force_body_rp = Vector(aero["aero_force_body_rp"])
         R1 = aero_force_body_rp.x  # Lateral force (yaw)
@@ -804,13 +847,7 @@ class FlightSolver:
         )
         T05 = total_mass_dot * S_nozzle - I_dot
 
-        T20 = (
-            ((w ^ T00) ^ w)
-            + (w ^ T03)
-            + T04
-            + weight_in_body_frame
-            + Vector([R1, R2, R3])
-        )
+        T20 = ((w ^ T00) ^ w) + (w ^ T03) + T04 + weight_in_body_frame + Vector([R1, R2, R3])
 
         T21 = (
             ((inertia_tensor @ w) ^ w)
@@ -836,12 +873,14 @@ class FlightSolver:
         T20_world_vec = K @ T20
         r_CM_world_vec = K @ r_CM
         w_dot_world_vec = K @ w_dot
-        
+
         # Earth rotation (simplified - RocketPy uses env.earth_rotation_vector)
         w_earth = Vector([0, 0, 0])  # Simplified for now - can add later
-        
+
         # v_dot = K @ (T20/m - r_CM ^ w_dot) - 2*(w_earth ^ v)
-        v_dot = (T20_world_vec / total_mass - (r_CM_world_vec ^ w_dot_world_vec)) - 2 * (w_earth ^ v)
+        v_dot = (T20_world_vec / total_mass - (r_CM_world_vec ^ w_dot_world_vec)) - 2 * (
+            w_earth ^ v
+        )
 
         # Position derivative
         r_dot = [vx, vy, vz]
@@ -856,14 +895,14 @@ class FlightSolver:
         derivatives[6:10] = e_dot
         derivatives[10:13] = [w_dot.x, w_dot.y, w_dot.z]  # Already in RocketPy convention
         derivatives[13] = mass_flow
-        
+
         # Numerical safeguards to prevent instability
         # Clamp angular acceleration to reasonable values
         derivatives[10:13] = np.clip(derivatives[10:13], -100.0, 100.0)
-        
+
         # Clamp linear acceleration to reasonable values (< 100g)
         derivatives[3:6] = np.clip(derivatives[3:6], -1000.0, 1000.0)
-        
+
         # Check for NaN/Inf and fall back to simplified dynamics if detected
         if not np.isfinite(derivatives).all():
             return self._derivatives_simple(time, state)
@@ -881,15 +920,15 @@ class FlightSolver:
 
         inertia = self.mass_model.inertia_diag(time)
         torque_body = self._rotate_world_to_body(quaternion, aero["moment_world"])
-        
+
         # Clamp angular velocity to prevent numerical instability
         # During descent, angular rates can grow if rocket tumbles
         omega = np.clip(angular_velocity, -10.0, 10.0)
-        
+
         ang_momentum = inertia * omega
         omega_cross = np.cross(omega, ang_momentum)
         angular_acceleration = np.where(inertia > 1e-9, (torque_body - omega_cross) / inertia, 0.0)
-        
+
         # Clamp angular acceleration to reasonable values
         angular_acceleration = np.clip(angular_acceleration, -1000.0, 1000.0)
 
@@ -912,11 +951,13 @@ class FlightSolver:
         # 0° = vertical up, 90° = horizontal
         # RocketPy body frame: z-axis points forward (tail-to-nose)
         # Convert to direction vector in world frame (x=north, y=east, z=up)
-        direction = np.array([
-            math.sin(self.inclination) * math.cos(self.heading),  # North component
-            math.sin(self.inclination) * math.sin(self.heading),  # East component
-            math.cos(self.inclination),  # Up component
-        ])
+        direction = np.array(
+            [
+                math.sin(self.inclination) * math.cos(self.heading),  # North component
+                math.sin(self.inclination) * math.sin(self.heading),  # East component
+                math.cos(self.inclination),  # Up component
+            ]
+        )
         direction = direction / np.linalg.norm(direction)
         # RocketPy body-z should point in the launch direction (tail-to-nose)
         # So we map body-z (0,0,1) to the launch direction
@@ -951,12 +992,14 @@ class FlightSolver:
         axis = np.cross(v_from, v_to)
         s = math.sqrt((1.0 + dot) * 2.0)
         inv_s = 1.0 / s
-        quat = np.array([
-            axis[0] * inv_s,
-            axis[1] * inv_s,
-            axis[2] * inv_s,
-            0.5 * s,
-        ])
+        quat = np.array(
+            [
+                axis[0] * inv_s,
+                axis[1] * inv_s,
+                axis[2] * inv_s,
+                0.5 * s,
+            ]
+        )
         return quat / np.linalg.norm(quat)
 
     @staticmethod
@@ -973,12 +1016,14 @@ class FlightSolver:
 
     @staticmethod
     def _quat_multiply(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-        return np.array([
-            a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
-            a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
-            a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
-            a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
-        ])
+        return np.array(
+            [
+                a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+                a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+                a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+                a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+            ]
+        )
 
     @staticmethod
     def _quaternion_omega(quaternion: np.ndarray, omega: np.ndarray) -> np.ndarray:

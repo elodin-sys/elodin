@@ -1149,7 +1149,7 @@ $$
 C_f = \frac{1}{\left(1.50 \ln R - 5.6\right)^2}.
 $$
 
-The above formula assumes that the surface is \smooth" and the surface roughness is completely submerged in a thin, laminar sublayer. At sufficient speeds even slight roughness may have an e ect on the skin friction. The critical Reynolds number corresponding to the roughness is given by
+The above formula assumes that the surface is \smooth" and the surface roughness is completely submerged in a thin, laminar sublayer. At sufficient speeds even slight roughness may have an effect on the skin friction. The critical Reynolds number corresponding to the roughness is given by
 
 $$
 R_{\text{crit}} = 51 \left(\frac{R_s}{L}\right)^{-1.039},

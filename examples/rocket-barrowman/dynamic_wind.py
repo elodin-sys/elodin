@@ -23,13 +23,15 @@ from typing import Iterable, List, Sequence, Tuple
 class ProfilePoint:
     """Single profile point describing wind state at a given altitude."""
 
-    altitude: float              # metres
-    speed: float                 # m/s
-    direction_rad: float         # radians, 0 = north, pi/2 = east
-    vertical: float = 0.0        # optional up/downdraft (m/s)
+    altitude: float  # metres
+    speed: float  # m/s
+    direction_rad: float  # radians, 0 = north, pi/2 = east
+    vertical: float = 0.0  # optional up/downdraft (m/s)
 
 
-def _normalise_profile_point(point: Tuple[float, float, float] | dict | ProfilePoint) -> ProfilePoint:
+def _normalise_profile_point(
+    point: Tuple[float, float, float] | dict | ProfilePoint,
+) -> ProfilePoint:
     """Convert incoming tuple/dict/ProfilePoint into ProfilePoint."""
 
     if isinstance(point, ProfilePoint):
@@ -43,14 +45,18 @@ def _normalise_profile_point(point: Tuple[float, float, float] | dict | ProfileP
         else:
             direction = float(direction)
         vertical = float(point.get("vertical", 0.0))
-        return ProfilePoint(altitude=altitude, speed=speed, direction_rad=direction, vertical=vertical)
+        return ProfilePoint(
+            altitude=altitude, speed=speed, direction_rad=direction, vertical=vertical
+        )
     if isinstance(point, (list, tuple)):
         if len(point) == 3:
             altitude, speed, direction_deg = point
             return ProfilePoint(float(altitude), float(speed), math.radians(float(direction_deg)))
         if len(point) == 4:
             altitude, speed, direction_deg, vertical = point
-            return ProfilePoint(float(altitude), float(speed), math.radians(float(direction_deg)), float(vertical))
+            return ProfilePoint(
+                float(altitude), float(speed), math.radians(float(direction_deg)), float(vertical)
+            )
     raise TypeError(f"Unsupported profile point format: {point!r}")
 
 
@@ -102,7 +108,9 @@ class DynamicWindModel:
         self._profile_east: List[float] = []
         self._profile_up: List[float] = []
         if profile_points:
-            points = sorted((_normalise_profile_point(p) for p in profile_points), key=lambda p: p.altitude)
+            points = sorted(
+                (_normalise_profile_point(p) for p in profile_points), key=lambda p: p.altitude
+            )
             for point in points:
                 self._profile_alts.append(point.altitude)
                 self._profile_north.append(point.speed * math.cos(point.direction_rad))
@@ -149,15 +157,19 @@ class DynamicWindModel:
             next_idx = idx + 1
             span = self._profile_alts[next_idx] - self._profile_alts[idx]
             frac = (altitude - self._profile_alts[idx]) / span if span > 1e-6 else 0.0
-            north = self._profile_north[idx] + frac * (self._profile_north[next_idx] - self._profile_north[idx])
-            east = self._profile_east[idx] + frac * (self._profile_east[next_idx] - self._profile_east[idx])
+            north = self._profile_north[idx] + frac * (
+                self._profile_north[next_idx] - self._profile_north[idx]
+            )
+            east = self._profile_east[idx] + frac * (
+                self._profile_east[next_idx] - self._profile_east[idx]
+            )
             up = self._profile_up[idx] + frac * (self._profile_up[next_idx] - self._profile_up[idx])
             return north, east, up
 
         # Power law profile (1/7 rule by default)
         ref = self.reference_height
         scaled_alt = (altitude + ref) / ref
-        speed = self.surface_speed * scaled_alt ** self.shear_exponent
+        speed = self.surface_speed * scaled_alt**self.shear_exponent
         north = speed * math.cos(self.surface_direction)
         east = speed * math.sin(self.surface_direction)
         return north, east, 0.0
@@ -210,4 +222,3 @@ class DynamicWindModel:
         east = east_mean + along_gust * along_unit_e + cross_gust * cross_unit_e
         up = up_mean + vertical_gust
         return north, east, up
-

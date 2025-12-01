@@ -43,25 +43,25 @@ from calisto_builder import build_calisto
 
 def main():
     """Run Calisto rocket simulation and visualize in Elodin."""
-    
-    print("\n" + "="*70)
+
+    print("\n" + "=" * 70)
     print("CALISTO ROCKET SIMULATION - ELODIN")
-    print("="*70)
-    
+    print("=" * 70)
+
     # Build Calisto rocket
     rocket_raw, motor_raw = build_calisto()
     rocket = RocketModel(rocket_raw)
     motor = Motor.from_openrocket(motor_raw)
-    
+
     print(f"\n✓ Calisto loaded:")
     print(f"  Dry mass: {rocket.dry_mass:.3f} kg")
     print(f"  Dry CG: {rocket.dry_cg:.3f} m")
-    print(f"  Reference diameter: {rocket.reference_diameter*1000:.1f} mm")
+    print(f"  Reference diameter: {rocket.reference_diameter * 1000:.1f} mm")
     print(f"  Parachutes: {len(rocket.parachutes)}")
-    
+
     # Environment (Spaceport America: elevation=1400m, no wind)
     env = Environment(elevation=1400.0)
-    
+
     # Run simulation
     print(f"\nRunning simulation...")
     solver = FlightSolver(
@@ -72,30 +72,30 @@ def main():
         inclination_deg=5.0,  # degrees from vertical (0 = straight up, 90 = horizontal)
         heading_deg=0.0,  # degrees (north)
     )
-    
+
     result = solver.run(max_time=200.0)
-    
+
     # Print summary
     if len(result.history) == 0:
         print(f"\n❌ Simulation failed - no history recorded")
         return
-    
+
     max_alt = max(s.z for s in result.history)
     apogee_state = next((s for s in result.history if s.z == max_alt), result.history[-1])
     apogee_time = apogee_state.time
     max_v = max(np.linalg.norm(s.velocity) for s in result.history)
-    
+
     print(f"\n✓ Simulation complete:")
     print(f"  Max altitude: {max_alt:.1f} m (AGL)")
     print(f"  Apogee time: {apogee_time:.2f} s")
     print(f"  Max velocity: {max_v:.1f} m/s")
     print(f"  History length: {len(result.history)} snapshots")
-    
+
     # Debug: print first few states
     print(f"\nFirst 3 states:")
     for i, s in enumerate(result.history[:3]):
         print(f"  t={s.time:.2f}s: pos={s.position}, z={s.z:.2f}m")
-    
+
     visualize_in_elodin(result, solver)
 
 
@@ -156,8 +156,12 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     Speed = ty.Annotated[jax.Array, el.Component("speed_ms", el.ComponentType.F64)]
     Accel = ty.Annotated[jax.Array, el.Component("accel_ms2", el.ComponentType.F64)]
     MachComp = ty.Annotated[jax.Array, el.Component("mach", el.ComponentType.F64)]
-    AngleOfAttackComp = ty.Annotated[jax.Array, el.Component("angle_of_attack_deg", el.ComponentType.F64)]
-    DynamicPressureComp = ty.Annotated[jax.Array, el.Component("dynamic_pressure_pa", el.ComponentType.F64)]
+    AngleOfAttackComp = ty.Annotated[
+        jax.Array, el.Component("angle_of_attack_deg", el.ComponentType.F64)
+    ]
+    DynamicPressureComp = ty.Annotated[
+        jax.Array, el.Component("dynamic_pressure_pa", el.ComponentType.F64)
+    ]
     AeroForceMag = ty.Annotated[jax.Array, el.Component("aero_force_n", el.ComponentType.F64)]
     EulerAngles = ty.Annotated[
         jax.Array,
@@ -170,7 +174,9 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     BodyRates = ty.Annotated[
         jax.Array,
         el.Component(
-            "angular_rates_deg", el.ComponentType(el.PrimitiveType.F64, (3,)), metadata={"element_names": "p,q,r"}
+            "angular_rates_deg",
+            el.ComponentType(el.PrimitiveType.F64, (3,)),
+            metadata={"element_names": "p,q,r"},
         ),
     ]
 
@@ -380,16 +386,16 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
         max_ticks=frame_count,
     )
 
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print(f"Simulation + visualization complete!")
-    print(f"{'='*70}\n")
+    print(f"{'=' * 70}\n")
 
 
 if __name__ == "__main__":
     import pickle
     from pathlib import Path
     import tempfile
-    
+
     # Check if we should load saved visualization data
     # This happens when:
     # 1. ELODIN_VISUALIZE env var is set, OR
@@ -397,9 +403,9 @@ if __name__ == "__main__":
     temp_dir = Path(tempfile.gettempdir()) / "elodin_rocket_sim"
     result_file = temp_dir / "simulation_result.pkl"
     solver_file = temp_dir / "solver.pkl"
-    
+
     should_visualize = VISUALIZE_MODE or (result_file.exists() and solver_file.exists())
-    
+
     if should_visualize:
         # Load saved simulation data from Streamlit
         if not result_file.exists() or not solver_file.exists():
@@ -407,109 +413,132 @@ if __name__ == "__main__":
             print(f"   Result file: {result_file} (exists: {result_file.exists()})")
             print(f"   Solver file: {solver_file} (exists: {solver_file.exists()})")
             sys.exit(1)
-        
-        with open(result_file, 'rb') as f:
+
+        with open(result_file, "rb") as f:
             result_data = pickle.load(f)
-        with open(solver_file, 'rb') as f:
+        with open(solver_file, "rb") as f:
             solver_data = pickle.load(f)
-        
+
         # Reconstruct FlightResult from dict
         from flight_solver import FlightResult, StateSnapshot
         import numpy as np
-        
+
         history = []
-        for s_data in result_data['history']:
+        for s_data in result_data["history"]:
             # Get all required fields, with defaults for optional ones
-            history.append(StateSnapshot(
-                time=s_data['time'],
-                position=np.array(s_data['position']),
-                velocity=np.array(s_data['velocity']),
-                quaternion=np.array(s_data['quaternion']),
-                angular_velocity=np.array(s_data['angular_velocity']),
-                motor_mass=s_data['motor_mass'],
-                angle_of_attack=s_data['angle_of_attack'],
-                sideslip=s_data['sideslip'],
-                mach=s_data.get('mach', 0.0),
-                dynamic_pressure=s_data.get('dynamic_pressure', 0.0),
-                drag_force=np.array(s_data.get('drag_force', [0.0, 0.0, 0.0])),
-                lift_force=np.array(s_data.get('lift_force', [0.0, 0.0, 0.0])),
-                parachute_drag=np.array(s_data.get('parachute_drag', [0.0, 0.0, 0.0])),
-                moment_world=np.array(s_data.get('moment_world', [0.0, 0.0, 0.0])),
-                total_aero_force=np.array(s_data['total_aero_force']),
-            ))
-        
+            history.append(
+                StateSnapshot(
+                    time=s_data["time"],
+                    position=np.array(s_data["position"]),
+                    velocity=np.array(s_data["velocity"]),
+                    quaternion=np.array(s_data["quaternion"]),
+                    angular_velocity=np.array(s_data["angular_velocity"]),
+                    motor_mass=s_data["motor_mass"],
+                    angle_of_attack=s_data["angle_of_attack"],
+                    sideslip=s_data["sideslip"],
+                    mach=s_data.get("mach", 0.0),
+                    dynamic_pressure=s_data.get("dynamic_pressure", 0.0),
+                    drag_force=np.array(s_data.get("drag_force", [0.0, 0.0, 0.0])),
+                    lift_force=np.array(s_data.get("lift_force", [0.0, 0.0, 0.0])),
+                    parachute_drag=np.array(s_data.get("parachute_drag", [0.0, 0.0, 0.0])),
+                    moment_world=np.array(s_data.get("moment_world", [0.0, 0.0, 0.0])),
+                    total_aero_force=np.array(s_data["total_aero_force"]),
+                )
+            )
+
         # Create FlightResult with proper structure
         result = FlightResult(
             history=history,
             summary={
-                'max_altitude': result_data.get('max_altitude', 0.0),
-                'max_velocity': result_data.get('max_velocity', 0.0),
-                'apogee_time': result_data.get('apogee_time', 0.0),
-                'landing_time': result_data.get('landing_time', 0.0),
-            }
+                "max_altitude": result_data.get("max_altitude", 0.0),
+                "max_velocity": result_data.get("max_velocity", 0.0),
+                "apogee_time": result_data.get("apogee_time", 0.0),
+                "landing_time": result_data.get("landing_time", 0.0),
+            },
         )
-        
+
         # Reconstruct minimal solver for visualization
         from rocket_model import Rocket
         from motor_model import Motor
         from environment import Environment
         from flight_solver import MassInertiaModel
-        
+
         # Create minimal MassInertiaModel for visualization
         class MinimalMassModel:
             def __init__(self, mass_model_data):
-                self.times = np.array(mass_model_data.get('times', [0.0, 1.0]))
-                self.total_mass_values = np.array(mass_model_data.get('total_mass_values', [0.0, 0.0]))
-                self.inertia_values = np.array(mass_model_data.get('inertia_values', [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]))
-            
+                self.times = np.array(mass_model_data.get("times", [0.0, 1.0]))
+                self.total_mass_values = np.array(
+                    mass_model_data.get("total_mass_values", [0.0, 0.0])
+                )
+                self.inertia_values = np.array(
+                    mass_model_data.get("inertia_values", [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+                )
+
             def total_mass(self, time: float) -> float:
                 """Interpolate total mass at given time."""
                 if len(self.times) == 0:
                     return 0.0
                 clamped = np.clip(time, self.times[0], self.times[-1])
                 return float(np.interp(clamped, self.times, self.total_mass_values))
-            
+
             def inertia_diag(self, time: float) -> np.ndarray:
                 """Interpolate inertia diagonal at given time."""
                 if len(self.times) == 0 or self.inertia_values.shape[0] == 0:
                     return np.array([0.0, 0.0, 0.0])
                 clamped = np.clip(time, self.times[0], self.times[-1])
-                return np.array([
-                    np.interp(clamped, self.times, self.inertia_values[:, i])
-                    for i in range(self.inertia_values.shape[1])
-                ], dtype=float)
-        
+                return np.array(
+                    [
+                        np.interp(clamped, self.times, self.inertia_values[:, i])
+                        for i in range(self.inertia_values.shape[1])
+                    ],
+                    dtype=float,
+                )
+
         # Create minimal objects for visualization
         class MinimalSolver:
             def __init__(self, solver_data):
-                self.rocket = type('obj', (object,), {
-                    'dry_mass': solver_data['rocket']['dry_mass'],
-                    'dry_cg': solver_data['rocket']['dry_cg'],
-                    'reference_diameter': solver_data['rocket']['reference_diameter'],
-                })()
-                self.motor = type('obj', (object,), {
-                    'total_mass': solver_data['motor']['total_mass'],
-                    'propellant_mass': solver_data['motor']['propellant_mass'],
-                })()
-                self.environment = type('obj', (object,), {
-                    'elevation': solver_data['environment']['elevation'],
-                })()
+                self.rocket = type(
+                    "obj",
+                    (object,),
+                    {
+                        "dry_mass": solver_data["rocket"]["dry_mass"],
+                        "dry_cg": solver_data["rocket"]["dry_cg"],
+                        "reference_diameter": solver_data["rocket"]["reference_diameter"],
+                    },
+                )()
+                self.motor = type(
+                    "obj",
+                    (object,),
+                    {
+                        "total_mass": solver_data["motor"]["total_mass"],
+                        "propellant_mass": solver_data["motor"]["propellant_mass"],
+                    },
+                )()
+                self.environment = type(
+                    "obj",
+                    (object,),
+                    {
+                        "elevation": solver_data["environment"]["elevation"],
+                    },
+                )()
                 # Add mass_model
-                if 'mass_model' in solver_data:
-                    self.mass_model = MinimalMassModel(solver_data['mass_model'])
+                if "mass_model" in solver_data:
+                    self.mass_model = MinimalMassModel(solver_data["mass_model"])
                 else:
                     # Fallback: create minimal mass model with default values
-                    dry_mass = solver_data['rocket'].get('dry_mass', 0.0)
-                    motor_mass = solver_data['motor'].get('total_mass', 0.0)
+                    dry_mass = solver_data["rocket"].get("dry_mass", 0.0)
+                    motor_mass = solver_data["motor"].get("total_mass", 0.0)
                     total_mass = dry_mass + motor_mass
-                    self.mass_model = MinimalMassModel({
-                        'times': [0.0, 1.0],
-                        'total_mass_values': [total_mass, total_mass],
-                        'inertia_values': [[1.0, 1.0, 0.1], [1.0, 1.0, 0.1]],  # Default inertia
-                    })
-        
+                    self.mass_model = MinimalMassModel(
+                        {
+                            "times": [0.0, 1.0],
+                            "total_mass_values": [total_mass, total_mass],
+                            "inertia_values": [[1.0, 1.0, 0.1], [1.0, 1.0, 0.1]],  # Default inertia
+                        }
+                    )
+
         solver = MinimalSolver(solver_data)
-        
+
         visualize_in_elodin(result, solver)
     else:
         main()

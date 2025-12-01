@@ -59,11 +59,7 @@ class RollFinData:
 
     def _clalpha_single_fin(self, mach: float) -> float:
         """Lift-curve slope for a single fin (per rad)."""
-        if (
-            self.aspect_ratio <= 0.0
-            or self.fin_area <= 0.0
-            or self.reference_area <= 0.0
-        ):
+        if self.aspect_ratio <= 0.0 or self.fin_area <= 0.0 or self.reference_area <= 0.0:
             return 0.0
 
         beta = self._beta(mach)
@@ -73,23 +69,16 @@ class RollFinData:
         if abs(cos_gamma) < 1e-6:
             cos_gamma = 1e-6
 
-        planform_parameter = (
-            2.0 * math.pi * self.aspect_ratio / (clalpha2d * cos_gamma)
-        )
+        planform_parameter = 2.0 * math.pi * self.aspect_ratio / (clalpha2d * cos_gamma)
         # Avoid division by zero in subsequent computations
         planform_parameter = max(planform_parameter, 1e-6)
 
-        denominator = 2.0 + planform_parameter * math.sqrt(
-            1.0 + (2.0 / planform_parameter) ** 2
-        )
+        denominator = 2.0 + planform_parameter * math.sqrt(1.0 + (2.0 / planform_parameter) ** 2)
         if denominator == 0.0:
             denominator = 1e-6
 
         clalpha_single = (
-            clalpha2d
-            * planform_parameter
-            * (self.fin_area / self.reference_area)
-            * cos_gamma
+            clalpha2d * planform_parameter * (self.fin_area / self.reference_area) * cos_gamma
         ) / denominator
 
         return clalpha_single
@@ -115,8 +104,9 @@ class RollFinData:
             * clalpha_single
             * math.cos(self.cant_angle_rad)
             * self.roll_geometrical_constant
-            / (self.reference_area * (self.reference_length ** 2))
+            / (self.reference_area * (self.reference_length**2))
         )
+
 
 @dataclass
 class Rocket:
@@ -149,21 +139,25 @@ class Rocket:
             self.dry_mass = float(rocket.get_total_mass())
             self.dry_cg = float(rocket.get_total_cg())
             # Estimate inertia from mass and length
-            ref_length = float(rocket.reference_length) if hasattr(rocket, 'reference_length') and rocket.reference_length > 0 else 1.0
+            ref_length = (
+                float(rocket.reference_length)
+                if hasattr(rocket, "reference_length") and rocket.reference_length > 0
+                else 1.0
+            )
             ixx = self.dry_mass * (ref_length / 4.0) ** 2
             iyy = izz = self.dry_mass * (ref_length / 3.0) ** 2
-        
+
         # Override with RocketPy values for Calisto (dry mass, without motor)
         # RocketPy reports: I11=I22=7.864 kg·m², I33=0.036 kg·m² WITH UNLOADED MOTOR
         # We need structural-only inertia, so subtract motor contribution later
-        if hasattr(rocket, '_is_calisto') and rocket._is_calisto:
+        if hasattr(rocket, "_is_calisto") and rocket._is_calisto:
             # These are WITH unloaded motor case (dry mass 16.241kg), but we want structural only (14.426kg)
             # For now, use the reported values as-is since we'll add motor inertia dynamically
             # TODO: Separate structural vs motor inertia properly
             ixx = 7.864  # Pitch/yaw inertia (kg·m²)
             iyy = 7.864  # Pitch/yaw inertia (kg·m²)
             izz = 0.036  # Roll inertia (kg·m²)
-        
+
         self.reference_diameter = float(rocket.reference_diameter)
         self.reference_area = float(3.141592653589793 * (rocket.reference_diameter / 2.0) ** 2)
         self.reference_length = float(rocket.reference_length)
@@ -179,7 +173,6 @@ class Rocket:
 
     def get_total_mass_properties(self):  # pragma: no cover - passthrough
         return self._rocket.get_total_mass_properties()
-
 
     def get_parachutes(self) -> List[ParachuteConfig]:
         return list(self.parachutes)
@@ -197,14 +190,16 @@ class Rocket:
             if isinstance(component, ORParachute):
                 diameter = float(getattr(component, "diameter", 0.0))
                 area = math.pi * (diameter / 2.0) ** 2
-                configs.append(ParachuteConfig(
-                    name=str(getattr(component, "name", "parachute")),
-                    cd=float(getattr(component, "cd", 0.75)),
-                    area=area,
-                    deployment_event=str(getattr(component, "deployment_event", "APOGEE")),
-                    deployment_delay=float(getattr(component, "deployment_delay", 0.0)),
-                    deployment_altitude=float(getattr(component, "deployment_altitude", 0.0)),
-                ))
+                configs.append(
+                    ParachuteConfig(
+                        name=str(getattr(component, "name", "parachute")),
+                        cd=float(getattr(component, "cd", 0.75)),
+                        area=area,
+                        deployment_event=str(getattr(component, "deployment_event", "APOGEE")),
+                        deployment_delay=float(getattr(component, "deployment_delay", 0.0)),
+                        deployment_altitude=float(getattr(component, "deployment_altitude", 0.0)),
+                    )
+                )
             for child in getattr(component, "children", []):
                 traverse(child)
 
@@ -231,9 +226,7 @@ class Rocket:
 
         traverse(self._rocket)
 
-    def _build_roll_data(
-        self, fin: TrapezoidFinSet, rocket_radius: float
-    ) -> RollFinData | None:
+    def _build_roll_data(self, fin: TrapezoidFinSet, rocket_radius: float) -> RollFinData | None:
         """Construct RollFinData from an OpenRocket trapezoidal fin definition."""
         try:
             n = int(getattr(fin, "fin_count", 0))
@@ -260,25 +253,17 @@ class Rocket:
 
             gamma_c = 0.0
             if span > 0.0:
-                gamma_c = math.atan(
-                    (sweep_length + 0.5 * tip_chord - 0.5 * root_chord) / span
-                )
+                gamma_c = math.atan((sweep_length + 0.5 * tip_chord - 0.5 * root_chord) / span)
 
-            denom = (root_chord + tip_chord)
+            denom = root_chord + tip_chord
             y_ma = 0.0
             if denom != 0.0:
                 y_ma = (span / 3.0) * (root_chord + 2.0 * tip_chord) / denom
 
             roll_geometrical_constant = (
                 (root_chord + 3.0 * tip_chord) * span**3
-                + 4.0
-                * (root_chord + 2.0 * tip_chord)
-                * rocket_radius
-                * span**2
-                + 6.0
-                * (root_chord + tip_chord)
-                * span
-                * rocket_radius**2
+                + 4.0 * (root_chord + 2.0 * tip_chord) * rocket_radius * span**2
+                + 6.0 * (root_chord + tip_chord) * span * rocket_radius**2
             ) / 12.0
 
             # Interference factors (Barrowman / RocketPy)
@@ -293,11 +278,8 @@ class Rocket:
                 (1.0 - lambda_ratio) * math.log(max(tau, 1e-6)),
                 tau - 1.0,
             )
-            denominator = (
-                safe_div((tau + 1.0) * (tau - lambda_ratio), 2.0)
-                - safe_div(
-                    (1.0 - lambda_ratio) * (tau**3 - 1.0), 3.0 * (tau - 1.0)
-                )
+            denominator = safe_div((tau + 1.0) * (tau - lambda_ratio), 2.0) - safe_div(
+                (1.0 - lambda_ratio) * (tau**3 - 1.0), 3.0 * (tau - 1.0)
             )
             roll_damping_interference_factor = 1.0 + safe_div(numerator, denominator, 0.0)
 
@@ -312,16 +294,11 @@ class Rocket:
 
             roll_forcing_interference_factor = (1.0 / math.pi**2) * (
                 (math.pi**2 / 4.0) * ((tau + 1.0) ** 2 / tau**2)
-                + (math.pi * (tau**2 + 1.0) ** 2)
-                / (tau**2 * tau_minus_one**2)
-                * arcsin_value
+                + (math.pi * (tau**2 + 1.0) ** 2) / (tau**2 * tau_minus_one**2) * arcsin_value
                 - (2.0 * math.pi * (tau + 1.0)) / (tau * tau_minus_one)
-                + ((tau**2 + 1.0) ** 2)
-                / (tau**2 * tau_minus_one**2)
-                * (arcsin_value**2)
+                + ((tau**2 + 1.0) ** 2) / (tau**2 * tau_minus_one**2) * (arcsin_value**2)
                 - (4.0 * (tau + 1.0)) / (tau * tau_minus_one) * arcsin_value
-                + (8.0 / tau_minus_one**2)
-                * math.log((tau**2 + 1.0) / (2.0 * tau))
+                + (8.0 / tau_minus_one**2) * math.log((tau**2 + 1.0) / (2.0 * tau))
             )
 
             return RollFinData(
@@ -404,9 +381,15 @@ class Rocket:
         total_mass = self.structural_mass() + motor_mass
         if total_mass <= 1e-9:
             return self.structural_cg()
-        return (self.structural_mass() * self.structural_cg() + motor_mass * motor_cg_abs) / total_mass
+        return (
+            self.structural_mass() * self.structural_cg() + motor_mass * motor_cg_abs
+        ) / total_mass
 
     def inertia_tensor(self, motor, time: float) -> np.ndarray:
-        motor_inertia = np.array(motor.inertia(time), dtype=float) if hasattr(motor, "inertia") else np.zeros(3, dtype=float)
+        motor_inertia = (
+            np.array(motor.inertia(time), dtype=float)
+            if hasattr(motor, "inertia")
+            else np.zeros(3, dtype=float)
+        )
         total_inertia = self.structural_inertia + motor_inertia
         return total_inertia

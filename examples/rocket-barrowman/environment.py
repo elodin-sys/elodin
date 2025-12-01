@@ -44,10 +44,10 @@ class Environment:
 
     def air_properties(self, altitude: float) -> dict[str, float]:
         """Get air properties at altitude above ground level.
-        
+
         Args:
             altitude: Altitude above ground level (m)
-            
+
         Returns:
             Dictionary with density, pressure, temperature, viscosity, speed_of_sound
         """

@@ -27,7 +27,7 @@ Copyright 1970
 ESTES INDUSTRIES, INC.
 
 ![Estes Logo](logo-placeholder)
-*A SUBSIDIARY OF DAMON*
+*A SUBSIDIARY OF DAEMON*
 
 # TR-11 Model Rocket Technical Report
 

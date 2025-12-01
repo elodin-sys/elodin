@@ -28,43 +28,46 @@ import glob
 @dataclass
 class MotorData:
     """Complete motor specification"""
+
     # Identification
     manufacturer: str
     designation: str  # e.g., "C6-5"
     common_name: str  # e.g., "C6"
-    
+
     # Physical properties
     diameter: float  # mm
     length: float  # mm
     propellant_mass: float  # g
     total_mass: float  # kg (includes casing)
     casing_mass: float  # kg
-    
+
     # Performance
     delays: str  # Available delays, e.g., "5-7-9"
     total_impulse: float  # N·s
     average_thrust: float  # N
     max_thrust: float  # N
     burn_time: float  # s
-    
+
     # Thrust curve
     time_points: np.ndarray  # s
     thrust_points: np.ndarray  # N
-    
+
     # Metadata
     motor_class: str  # A, B, C, D, E, F, G, etc.
     data_source: str  # File path or source
-    
+
     def __repr__(self):
-        return (f"Motor({self.manufacturer} {self.designation}, "
-                f"{self.diameter}mm×{self.length}mm, "
-                f"{self.total_impulse:.1f}N·s, "
-                f"Iavg={self.average_thrust:.1f}N)")
-    
+        return (
+            f"Motor({self.manufacturer} {self.designation}, "
+            f"{self.diameter}mm×{self.length}mm, "
+            f"{self.total_impulse:.1f}N·s, "
+            f"Iavg={self.average_thrust:.1f}N)"
+        )
+
     def get_thrust(self, t: float) -> float:
         """Get thrust at time t using linear interpolation"""
         return float(np.interp(t, self.time_points, self.thrust_points))
-    
+
     def get_mass(self, t: float) -> float:
         """Get motor mass at time t (assumes linear propellant consumption)"""
         if t < 0:
@@ -76,15 +79,15 @@ class MotorData:
             burn_fraction = t / self.burn_time
             remaining_propellant = self.propellant_mass * (1.0 - burn_fraction)
             return self.casing_mass + remaining_propellant
-    
+
     def get_cg_offset(self, t: float, motor_mount_position: float) -> float:
         """
         Get CG offset from motor mount position due to propellant burn
-        
+
         Args:
             t: Time in seconds
             motor_mount_position: Position of motor mount from nose tip (m)
-        
+
         Returns:
             CG offset in meters (assumes propellant burns from aft to forward)
         """
@@ -99,7 +102,7 @@ class MotorData:
             burn_fraction = t / self.burn_time
             cg_shift = burn_fraction * (self.length / 10000.0)  # Small shift
             return motor_mount_position + self.length / 2000.0 - cg_shift
-    
+
     @property
     def impulse_class(self) -> str:
         """Get motor impulse class (A, B, C, etc.)"""
@@ -138,71 +141,71 @@ class MotorData:
 
 class MotorDatabase:
     """Motor database management"""
-    
+
     def __init__(self):
         self.motors: Dict[str, MotorData] = {}
         self._by_manufacturer: Dict[str, List[str]] = {}
         self._by_class: Dict[str, List[str]] = {}
-    
+
     def load_eng_file(self, filepath: str) -> MotorData:
         """
         Load a RASP .eng file
-        
+
         Args:
             filepath: Path to .eng file
-        
+
         Returns:
             MotorData object
         """
-        with open(filepath, 'r') as f:
-            lines = [line.strip() for line in f if line.strip() and not line.startswith(';')]
-        
+        with open(filepath, "r") as f:
+            lines = [line.strip() for line in f if line.strip() and not line.startswith(";")]
+
         if len(lines) < 2:
             raise ValueError(f"Invalid .eng file: {filepath}")
-        
+
         # Parse header line
         header = lines[0].split()
         if len(header) < 7:
             raise ValueError(f"Invalid header in {filepath}: {lines[0]}")
-        
+
         designation = header[0]
         diameter = float(header[1])  # mm
         length = float(header[2])  # mm
         delays = header[3]
         propellant_mass = float(header[4])  # g
         total_mass = float(header[5])  # g
-        manufacturer = ' '.join(header[6:])  # Handle multi-word manufacturers
-        
+        manufacturer = " ".join(header[6:])  # Handle multi-word manufacturers
+
         # Parse thrust curve data
         time_points = []
         thrust_points = []
-        
+
         for line in lines[1:]:
             parts = line.split()
             if len(parts) >= 2:
                 time_points.append(float(parts[0]))
                 thrust_points.append(float(parts[1]))
-        
+
         time_array = np.array(time_points)
         thrust_array = np.array(thrust_points)
-        
+
         # Calculate derived properties
         total_impulse = np.trapz(thrust_array, time_array)
         burn_time = time_array[-1] - time_array[0]
         average_thrust = total_impulse / burn_time if burn_time > 0 else 0.0
         max_thrust = np.max(thrust_array)
-        
+
         # Convert masses to kg
         propellant_mass_kg = propellant_mass / 1000.0
         total_mass_kg = total_mass / 1000.0
         casing_mass_kg = total_mass_kg - propellant_mass_kg
-        
+
         # Extract common name (remove delay designation)
-        common_name = designation.split('-')[0]
-        
+        common_name = designation.split("-")[0]
+
         # Determine motor class
         motor_class = common_name[0] if common_name else "?"
-        
+
         motor = MotorData(
             manufacturer=manufacturer,
             designation=designation,
@@ -220,33 +223,33 @@ class MotorDatabase:
             time_points=time_array,
             thrust_points=thrust_array,
             motor_class=motor_class,
-            data_source=filepath
+            data_source=filepath,
         )
-        
+
         return motor
-    
+
     def add_motor(self, motor: MotorData):
         """Add a motor to the database"""
         key = f"{motor.manufacturer}_{motor.designation}"
         self.motors[key] = motor
-        
+
         # Index by manufacturer
         if motor.manufacturer not in self._by_manufacturer:
             self._by_manufacturer[motor.manufacturer] = []
         self._by_manufacturer[motor.manufacturer].append(key)
-        
+
         # Index by class
         if motor.motor_class not in self._by_class:
             self._by_class[motor.motor_class] = []
         self._by_class[motor.motor_class].append(key)
-    
+
     def load_directory(self, directory: str, pattern: str = "*.eng"):
         """Load all .eng files from a directory"""
         eng_files = glob.glob(os.path.join(directory, pattern))
-        
+
         loaded = 0
         failed = []
-        
+
         for filepath in eng_files:
             try:
                 motor = self.load_eng_file(filepath)
@@ -254,20 +257,21 @@ class MotorDatabase:
                 loaded += 1
             except Exception as e:
                 failed.append((filepath, str(e)))
-        
+
         print(f"Loaded {loaded} motors from {directory}")
         if failed:
             print(f"Failed to load {len(failed)} files:")
             for filepath, error in failed[:5]:  # Show first 5 errors
                 print(f"  {os.path.basename(filepath)}: {error}")
-    
+
     def get_motor(self, manufacturer: str, designation: str) -> Optional[MotorData]:
         """Get a specific motor"""
         key = f"{manufacturer}_{designation}"
         return self.motors.get(key)
-    
-    def list_motors(self, manufacturer: Optional[str] = None, 
-                   motor_class: Optional[str] = None) -> List[MotorData]:
+
+    def list_motors(
+        self, manufacturer: Optional[str] = None, motor_class: Optional[str] = None
+    ) -> List[MotorData]:
         """List motors, optionally filtered by manufacturer or class"""
         if manufacturer:
             keys = self._by_manufacturer.get(manufacturer, [])
@@ -277,49 +281,50 @@ class MotorDatabase:
             return [self.motors[k] for k in keys]
         else:
             return list(self.motors.values())
-    
-    def find_motors(self, diameter_mm: float, max_length_mm: float = None,
-                   impulse_class: str = None) -> List[MotorData]:
+
+    def find_motors(
+        self, diameter_mm: float, max_length_mm: float = None, impulse_class: str = None
+    ) -> List[MotorData]:
         """
         Find motors matching physical constraints
-        
+
         Args:
             diameter_mm: Motor diameter in mm (e.g., 18, 24, 29)
             max_length_mm: Maximum motor length in mm
             impulse_class: Desired impulse class (A, B, C, etc.)
-        
+
         Returns:
             List of matching motors
         """
         results = []
-        
+
         for motor in self.motors.values():
             # Check diameter (allow 1mm tolerance)
             if abs(motor.diameter - diameter_mm) > 1.0:
                 continue
-            
+
             # Check length
             if max_length_mm and motor.length > max_length_mm:
                 continue
-            
+
             # Check impulse class
             if impulse_class and motor.impulse_class != impulse_class:
                 continue
-            
+
             results.append(motor)
-        
+
         # Sort by total impulse
         results.sort(key=lambda m: m.total_impulse)
-        
+
         return results
-    
+
     def print_summary(self):
         """Print database summary"""
         print(f"\nMotor Database Summary:")
         print(f"  Total motors: {len(self.motors)}")
         print(f"  Manufacturers: {len(self._by_manufacturer)}")
         print(f"  Impulse classes: {sorted(self._by_class.keys())}")
-        
+
         print(f"\nMotors by class:")
         for cls in sorted(self._by_class.keys()):
             count = len(self._by_class[cls])
@@ -329,7 +334,7 @@ class MotorDatabase:
 def create_sample_motors():
     """Create sample motors for testing (when no .eng files available)"""
     db = MotorDatabase()
-    
+
     # Estes C6-5 (Model rocket standard)
     c6 = MotorData(
         manufacturer="Estes",
@@ -348,9 +353,9 @@ def create_sample_motors():
         time_points=np.array([0.0, 0.02, 0.2, 1.5, 1.76]),
         thrust_points=np.array([0.0, 6.5, 5.5, 5.0, 0.0]),
         motor_class="C",
-        data_source="built-in"
+        data_source="built-in",
     )
-    
+
     # Aerotech F50-6T (Mid-power standard)
     f50 = MotorData(
         manufacturer="Aerotech",
@@ -369,9 +374,9 @@ def create_sample_motors():
         time_points=np.array([0.0, 0.05, 0.1, 0.9, 1.05, 1.15]),
         thrust_points=np.array([0.0, 60.0, 55.0, 48.0, 42.0, 0.0]),
         motor_class="F",
-        data_source="built-in"
+        data_source="built-in",
     )
-    
+
     # Cesaroni J450 (High power)
     j450 = MotorData(
         manufacturer="Cesaroni",
@@ -390,13 +395,13 @@ def create_sample_motors():
         time_points=np.array([0.0, 0.05, 0.2, 0.8, 1.0, 1.14]),
         thrust_points=np.array([0.0, 500.0, 480.0, 440.0, 380.0, 0.0]),
         motor_class="J",
-        data_source="built-in"
+        data_source="built-in",
     )
-    
+
     db.add_motor(c6)
     db.add_motor(f50)
     db.add_motor(j450)
-    
+
     return db
 
 
@@ -405,51 +410,56 @@ def main():
     print("=" * 60)
     print("ROCKET MOTOR DATABASE")
     print("=" * 60)
-    
+
     # Create sample database
     db = create_sample_motors()
     db.print_summary()
-    
+
     # Test motor lookup
     print(f"\n\nLooking up Estes C6-5:")
     c6 = db.get_motor("Estes", "C6-5")
     if c6:
         print(c6)
         print(f"  Thrust at t=0.5s: {c6.get_thrust(0.5):.2f}N")
-        print(f"  Mass at t=0.5s: {c6.get_mass(0.5)*1000:.2f}g")
-    
+        print(f"  Mass at t=0.5s: {c6.get_mass(0.5) * 1000:.2f}g")
+
     # Test motor search
     print(f"\n\n18mm diameter motors:")
     motors_18mm = db.find_motors(diameter_mm=18.0)
     for motor in motors_18mm:
         print(f"  {motor}")
-    
+
     print(f"\n\nF-class motors:")
     motors_f = db.list_motors(motor_class="F")
     for motor in motors_f:
         print(f"  {motor}")
-    
+
     # Plot thrust curves
     try:
         import matplotlib.pyplot as plt
-        
+
         fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-        
-        for idx, motor in enumerate([c6, db.get_motor("Aerotech", "F50-6T"), 
-                                     db.get_motor("Cesaroni", "J450-10A")]):
+
+        for idx, motor in enumerate(
+            [c6, db.get_motor("Aerotech", "F50-6T"), db.get_motor("Cesaroni", "J450-10A")]
+        ):
             if motor:
-                axes[idx].plot(motor.time_points, motor.thrust_points, 'b-', linewidth=2)
+                axes[idx].plot(motor.time_points, motor.thrust_points, "b-", linewidth=2)
                 axes[idx].fill_between(motor.time_points, motor.thrust_points, alpha=0.3)
-                axes[idx].set_xlabel('Time (s)')
-                axes[idx].set_ylabel('Thrust (N)')
-                axes[idx].set_title(f'{motor.manufacturer} {motor.designation}\n'
-                                  f'{motor.total_impulse:.1f}N·s total impulse')
+                axes[idx].set_xlabel("Time (s)")
+                axes[idx].set_ylabel("Thrust (N)")
+                axes[idx].set_title(
+                    f"{motor.manufacturer} {motor.designation}\n"
+                    f"{motor.total_impulse:.1f}N·s total impulse"
+                )
                 axes[idx].grid(True, alpha=0.3)
                 axes[idx].set_xlim(left=0)
                 axes[idx].set_ylim(bottom=0)
-        
+
         plt.tight_layout()
-        plt.savefig('/home/kush-mahajan/elodin/examples/rocket-barrowman/motor_thrust_curves.png', dpi=150)
+        plt.savefig(
+            "/home/kush-mahajan/elodin/examples/rocket-barrowman/motor_thrust_curves.png", dpi=150
+        )
         print(f"\n\nThrust curves saved to motor_thrust_curves.png")
         plt.show()
     except ImportError:
@@ -458,4 +468,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
