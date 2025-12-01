@@ -1174,7 +1174,6 @@ fn recenter_window_on_screen(window: &WinitWindow, target_monitor: &MonitorHandl
     let screen_pos = target_monitor.position();
     let screen_size = target_monitor.size();
     let window_size = window.outer_size();
-    // Recenter, puis nudge vers l'intérieur de l'écran pour aider winit à rafraîchir current_monitor().
     let center_x = screen_pos.x + (screen_size.width as i32 - window_size.width as i32) / 2;
     let center_y = screen_pos.y + (screen_size.height as i32 - window_size.height as i32) / 2;
     window.set_outer_position(PhysicalPosition::new(center_x, center_y));
@@ -1188,7 +1187,6 @@ fn recenter_window_on_screen(window: &WinitWindow, target_monitor: &MonitorHandl
         .saturating_add(10)
         .min(screen_pos.y + screen_size.height as i32 - 1);
     window.set_outer_position(PhysicalPosition::new(nudge_x, nudge_y));
-    // Secoue légèrement la taille pour forcer un rafraîchissement du monitor courant.
     let size = window.outer_size();
     let _ = window.request_inner_size(size);
 }
@@ -1200,15 +1198,27 @@ fn capture_window_screens_oneoff(
     mut window_query: Query<(Entity, &Window, &mut tiles::WindowState)>,
     screens: Query<(Entity, &Monitor)>,
 ) {
-    for (entity, window, mut state) in &mut window_query {
+    for (entity, window_component, mut state) in &mut window_query {
         let winit_window = winit_windows.get_window(entity);
         let mut updated = false;
         if let Some(window) = winit_window {
             let screens_sorted = collect_sorted_screens(window);
             updated = state.update_descriptor_from_winit_window(window, &screens_sorted);
+            let screen_seen = state.descriptor.screen;
+            // Fallback: best-effort detection if current_monitor is not reliable.
+            info!("[DBG] update screen={:?} rect={:?}", screen_seen, state.descriptor.screen_rect);
+
+            if !updated || screen_seen.is_none() {
+                info!("[DBG] update fallback");
+                if let Some(idx) = detect_window_screen(window, &screens_sorted) {
+                    info!("[DBG] update fallback -> screen {}", idx);
+                    state.descriptor.screen = Some(idx);
+                    updated = true;
+                }
+            }
         }
         if !updated {
-            state.update_descriptor_from_window(window, &screens);
+            state.update_descriptor_from_window(window_component, &screens);
         }
     }
 }

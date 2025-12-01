@@ -262,28 +262,31 @@ pub fn tiles_to_schematic(
     let mut window_elems = Vec::new();
     let mut name_counts: HashMap<String, usize> = HashMap::new();
     for (state, window_id) in &param.windows_state {
-        let base_stem = preferred_secondary_stem(state);
-        let unique_stem = ensure_unique_stem(&mut name_counts, &base_stem);
-        let file_name = format!("{unique_stem}.kdl");
+        let mut file_name: Option<String> = None;
 
-        let mut window_schematic = Schematic::default();
-        if let Some(root_id) = state.tile_state.tree.root()
-            && let Some(panel) = param.get_panel_from_state(&state.tile_state, root_id)
-        {
-            window_schematic.elems.push(SchematicElem::Panel(panel));
+        if !window_id.is_primary() {
+            let base_stem = preferred_secondary_stem(state);
+            let unique_stem = ensure_unique_stem(&mut name_counts, &base_stem);
+            file_name = Some(format!("{unique_stem}.kdl"));
+
+            let mut window_schematic = Schematic::default();
+            if let Some(root_id) = state.tile_state.tree.root()
+                && let Some(panel) = param.get_panel_from_state(&state.tile_state, root_id)
+            {
+                window_schematic.elems.push(SchematicElem::Panel(panel));
+            }
+            if let Some(file_name) = &file_name {
+                secondary.0.push(SecondarySchematic {
+                    file_name: file_name.clone(),
+                    title: state.descriptor.title.clone(),
+                    schematic: window_schematic,
+                });
+            }
         }
-        secondary.0.push(SecondarySchematic {
-            file_name: file_name.clone(),
-            title: state.descriptor.title.clone(),
-            schematic: window_schematic,
-        });
+
         window_elems.push(SchematicElem::Window(WindowSchematic {
             title: None,
-            path: if window_id.is_primary() {
-                None
-            } else {
-                Some(file_name)
-            },
+            path: file_name,
             screen: state.descriptor.screen.map(|idx| idx as u32),
             screen_rect: state.descriptor.screen_rect,
         }));
