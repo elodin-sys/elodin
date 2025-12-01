@@ -103,25 +103,21 @@ class MassInertiaModel:
     """Pre-compute mass, CG, and inertia functions mirroring RocketPy's API."""
 
     def __init__(self, rocket: Rocket, motor: Motor) -> None:
-        if Matrix is None or Vector is None:
-            raise RuntimeError(
-                "RocketPy math utilities are required for the Kane-based mass model. "
-                "Install RocketPy or provide compatible math utilities."
-            )
-
         self.rocket = rocket
         self.motor = motor
+        self._has_rocketpy = Matrix is not None and Vector is not None
 
         self.structural_mass = rocket.structural_mass()
         self.structural_cg = rocket.structural_cg()
         self.structural_inertia = np.asarray(getattr(rocket, "structural_inertia", [0.0, 0.0, 0.0]), dtype=float)
 
         # Build time grid covering burn and post-burn plateau
+        burn_time = max(float(motor.burn_time), 0.0)  # Ensure non-negative
         base_times = np.asarray(getattr(motor, "times", [0.0]), dtype=float)
-        times = np.concatenate(([0.0], base_times, [motor.burn_time], [motor.burn_time + 1.0]))
+        times = np.concatenate(([0.0], base_times, [burn_time], [burn_time + 1.0]))
         self.times = np.unique(np.clip(times, 0.0, None))
         if self.times.size < 3:
-            self.times = np.array([0.0, max(motor.burn_time * 0.5, 0.1), motor.burn_time, motor.burn_time + 1.0])
+            self.times = np.array([0.0, max(burn_time * 0.5, 0.1), burn_time, burn_time + 1.0])
 
         # Motor properties over time
         self.motor_mass_values = np.array([motor.mass(t) for t in self.times], dtype=float)
@@ -138,10 +134,14 @@ class MassInertiaModel:
             dtype=float,
         )
 
+        # Build total_cg_values - ensure arrays have same length
+        if len(self.motor_cg_abs_values) != len(self.times):
+            raise ValueError(f"Motor CG values ({len(self.motor_cg_abs_values)}) and times ({len(self.times)}) must have same length")
+        
         self.total_cg_values = np.array(
             [
                 rocket.total_cg_with_motor(motor, motor_cg_abs, t)
-                for motor_cg_abs, t in zip(self.motor_cg_abs_values, self.times, strict=False)
+                for motor_cg_abs, t in zip(self.motor_cg_abs_values, self.times)
             ],
             dtype=float,
         )
@@ -184,7 +184,12 @@ class MassInertiaModel:
         S_33 = 0.5 * nozzle_radius**2  # Forward axis (roll)
         S_11 = 0.5 * S_33 + 0.25 * self._nozzle_to_cdm**2  # Yaw axis
         S_22 = S_11  # Pitch axis (same as yaw for axisymmetric)
-        self._nozzle_gyration = Matrix([[S_11, 0, 0], [0, S_22, 0], [0, 0, S_33]])
+        # Store as numpy array (Matrix only needed for Kane/RTT which is disabled)
+        self._nozzle_gyration = np.array([[S_11, 0, 0], [0, S_22, 0], [0, 0, S_33]], dtype=float)
+        if self._has_rocketpy:
+            self._nozzle_gyration_matrix = Matrix([[S_11, 0, 0], [0, S_22, 0], [0, 0, S_33]])
+        else:
+            self._nozzle_gyration_matrix = None
 
     # ------------------------------------------------------------------
     # Interpolation helpers
@@ -244,13 +249,21 @@ class MassInertiaModel:
     def inertia_diag_dot(self, time: float) -> np.ndarray:
         return self._interp_vector(self.inertia_dot_values, time)
 
-    def inertia_matrix(self, time: float) -> Matrix:
+    def inertia_matrix(self, time: float):
+        """Return inertia matrix as Matrix (if RocketPy available) or numpy array."""
         Ixx, Iyy, Izz = self.inertia_diag(time)
-        return Matrix([[Ixx, 0, 0], [0, Iyy, 0], [0, 0, Izz]])
+        if self._has_rocketpy:
+            return Matrix([[Ixx, 0, 0], [0, Iyy, 0], [0, 0, Izz]])
+        else:
+            return np.array([[Ixx, 0, 0], [0, Iyy, 0], [0, 0, Izz]], dtype=float)
 
-    def inertia_matrix_dot(self, time: float) -> Matrix:
+    def inertia_matrix_dot(self, time: float):
+        """Return inertia matrix derivative as Matrix (if RocketPy available) or numpy array."""
         Ixx, Iyy, Izz = self.inertia_diag_dot(time)
-        return Matrix([[Ixx, 0, 0], [0, Iyy, 0], [0, 0, Izz]])
+        if self._has_rocketpy:
+            return Matrix([[Ixx, 0, 0], [0, Iyy, 0], [0, 0, Izz]])
+        else:
+            return np.array([[Ixx, 0, 0], [0, Iyy, 0], [0, 0, Izz]], dtype=float)
 
     # ------------------------------------------------------------------
     # Nozzle properties
@@ -260,13 +273,21 @@ class MassInertiaModel:
         return self._nozzle_to_cdm
 
     @property
-    def nozzle_vector(self) -> Vector:
+    def nozzle_vector(self):
+        """Return nozzle vector as Vector (if RocketPy available) or numpy array."""
         # Body frame: z-axis is longitudinal (tail to nose)
-        return Vector([0, 0, self._nozzle_to_cdm])
+        if self._has_rocketpy:
+            return Vector([0, 0, self._nozzle_to_cdm])
+        else:
+            return np.array([0, 0, self._nozzle_to_cdm], dtype=float)
 
     @property
-    def nozzle_gyration_tensor(self) -> Matrix:
-        return self._nozzle_gyration
+    def nozzle_gyration_tensor(self):
+        """Return nozzle gyration tensor as Matrix (if RocketPy available) or numpy array."""
+        if self._has_rocketpy:
+            return self._nozzle_gyration_matrix
+        else:
+            return self._nozzle_gyration
 
 class FlightSolver:
     """RocketPy-inspired 6-DOF integrator scaffold."""
@@ -276,7 +297,7 @@ class FlightSolver:
         rocket: Rocket,
         motor: Motor,
         environment: Environment,
-        parachutes: Optional[List[ParachuteConfig]] | None = None,
+        parachutes: Optional[List[ParachuteConfig]] = None,
         dt: float = 0.01,
         rail_length: float = 2.0,
         inclination_deg: float = 90.0,
@@ -675,8 +696,11 @@ class FlightSolver:
         next_state = state + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
         quat = next_state[6:10]
         norm = np.linalg.norm(quat)
-        if norm > 0:
+        if norm > 1e-10:
             next_state[6:10] = quat / norm
+        else:
+            # Reset to identity quaternion if norm is too small (numerical error)
+            next_state[6:10] = np.array([0.0, 0.0, 0.0, 1.0])
         next_state[13] = max(next_state[13], self.motor.dry_mass)
         return next_state
 
@@ -685,14 +709,15 @@ class FlightSolver:
         # Kane/RTT implementation exists but needs debugging - moments are too strong
         # For now, use simplified dynamics which achieves 87.3% accuracy
         # TODO: Debug Kane/RTT - the T-matrix assembly or moment application is incorrect
-        return self._derivatives_simple(time, state)
         
         if Matrix is None or Vector is None:
             # Fallback to simplified dynamics if RocketPy math utils unavailable
             return self._derivatives_simple(time, state)
         
-        # Use Kane/RTT for proper 6-DOF dynamics with weathercocking
-        return self._derivatives_kane_rtt(time, state)
+        # Use simplified dynamics for now (Kane/RTT disabled until debugging complete)
+        # Uncomment below to enable Kane/RTT:
+        # return self._derivatives_kane_rtt(time, state)
+        return self._derivatives_simple(time, state)
     
     def _derivatives_kane_rtt(self, time: float, state: np.ndarray) -> np.ndarray:
         """Kane/RTT equations with numerical safeguards."""

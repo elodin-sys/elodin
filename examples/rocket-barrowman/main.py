@@ -14,6 +14,9 @@ import os
 import typing as ty
 from dataclasses import dataclass, field
 
+# Check for visualize mode BEFORE importing elodin (which has its own CLI)
+VISUALIZE_MODE = os.getenv("ELODIN_VISUALIZE", "false").lower() == "true"
+
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -78,7 +81,8 @@ def main():
         return
     
     max_alt = max(s.z for s in result.history)
-    apogee_time = next(s.time for s in result.history if s.z == max_alt)
+    apogee_state = next((s for s in result.history if s.z == max_alt), result.history[-1])
+    apogee_time = apogee_state.time
     max_v = max(np.linalg.norm(s.velocity) for s in result.history)
     
     print(f"\n✓ Simulation complete:")
@@ -112,8 +116,15 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     downrange = jnp.linalg.norm(positions[:, :2], axis=1)
     speed = jnp.linalg.norm(velocities, axis=1)
 
-    accel_vec = (velocities[1:] - velocities[:-1]) / dt
-    accel_vec = jnp.concatenate((accel_vec[:1], accel_vec), axis=0)
+    # Calculate acceleration from velocity differences
+    # For first point, use forward difference; for others, use backward difference
+    if len(velocities) > 1:
+        accel_vec = (velocities[1:] - velocities[:-1]) / dt
+        # Prepend first acceleration (forward difference) to match array length
+        accel_vec = jnp.concatenate((accel_vec[:1], accel_vec), axis=0)
+    else:
+        # Single point: zero acceleration
+        accel_vec = jnp.zeros((1, 3))
     accel_mag = jnp.linalg.norm(accel_vec, axis=1)
 
     machs = jnp.nan_to_num(jnp.asarray([s.mach for s in history]))
@@ -168,7 +179,7 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
         altitude: Altitude = field(default_factory=lambda: jnp.float64(0.0))
         downrange: Downrange = field(default_factory=lambda: jnp.float64(0.0))
         speed: Speed = field(default_factory=lambda: jnp.float64(0.0))
-        acceleration: Accel = field(default_factory=lambda: jnp.float64(0.0))
+        accel_ms2: Accel = field(default_factory=lambda: jnp.float64(0.0))
         mach: MachComp = field(default_factory=lambda: jnp.float64(0.0))
         angle_of_attack: AngleOfAttackComp = field(default_factory=lambda: jnp.float64(0.0))
         dynamic_pressure: DynamicPressureComp = field(default_factory=lambda: jnp.float64(0.0))
@@ -195,7 +206,6 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
             PlaybackTelemetry(),
         ],
         name="rocket",
-        id="rocket",
     )
 
     schematic = """
@@ -204,7 +214,7 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
             viewport name=Viewport pos="rocket.world_pos + (0,0,0,0, 6,3,2)" look_at="rocket.world_pos" hdr=#true show_grid=#true active=#true
             vsplit share=0.45 {
                 graph "rocket.altitude_m,rocket.downrange_m" name="Altitude / Downrange"
-                graph "rocket.speed_ms,rocket.accel_ms2" name="Speed / Accel"
+                graph "rocket.speed_ms" name="Speed"
                 graph "rocket.dynamic_pressure_pa,rocket.mach,rocket.aero_force_n" name="Aero Loads"
             }
         }
@@ -214,22 +224,24 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
         }
     }
 
-    object_3d "(0,0,0,1, rocket.world_pos[4],rocket.world_pos[5],rocket.world_pos[6])" {
+    object_3d "(0,0,0,1)" {
         glb path="compass.glb"
     }
     object_3d rocket.world_pos {
-        glb path="assets/rocket.glb"
+        glb path="rocket.glb"
     }
     line_3d rocket.world_pos line_width=2.0 perspective=#false {
         color 255 223 0
     }
     """
 
+    # Pass schematic directly to editor - this avoids file watcher triggering reload loops
     if hasattr(world, "schematic"):
         world.schematic(schematic, "rocket.kdl")
-
-    with open("rocket.kdl", "w") as f:
-        f.write(schematic)
+    else:
+        # Fallback: write to file if schematic() method not available
+        with open("rocket.kdl", "w") as f:
+            f.write(schematic)
 
     frame_count = positions.shape[0]
     frame_max = float(frame_count - 1)
@@ -374,4 +386,130 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import pickle
+    from pathlib import Path
+    import tempfile
+    
+    # Check if we should load saved visualization data
+    # This happens when:
+    # 1. ELODIN_VISUALIZE env var is set, OR
+    # 2. Pickle files exist (meaning Streamlit saved simulation data)
+    temp_dir = Path(tempfile.gettempdir()) / "elodin_rocket_sim"
+    result_file = temp_dir / "simulation_result.pkl"
+    solver_file = temp_dir / "solver.pkl"
+    
+    should_visualize = VISUALIZE_MODE or (result_file.exists() and solver_file.exists())
+    
+    if should_visualize:
+        # Load saved simulation data from Streamlit
+        if not result_file.exists() or not solver_file.exists():
+            print("ERROR: Simulation data not found. Please run a simulation in Streamlit first.")
+            print(f"   Result file: {result_file} (exists: {result_file.exists()})")
+            print(f"   Solver file: {solver_file} (exists: {solver_file.exists()})")
+            sys.exit(1)
+        
+        with open(result_file, 'rb') as f:
+            result_data = pickle.load(f)
+        with open(solver_file, 'rb') as f:
+            solver_data = pickle.load(f)
+        
+        # Reconstruct FlightResult from dict
+        from flight_solver import FlightResult, StateSnapshot
+        import numpy as np
+        
+        history = []
+        for s_data in result_data['history']:
+            # Get all required fields, with defaults for optional ones
+            history.append(StateSnapshot(
+                time=s_data['time'],
+                position=np.array(s_data['position']),
+                velocity=np.array(s_data['velocity']),
+                quaternion=np.array(s_data['quaternion']),
+                angular_velocity=np.array(s_data['angular_velocity']),
+                motor_mass=s_data['motor_mass'],
+                angle_of_attack=s_data['angle_of_attack'],
+                sideslip=s_data['sideslip'],
+                mach=s_data.get('mach', 0.0),
+                dynamic_pressure=s_data.get('dynamic_pressure', 0.0),
+                drag_force=np.array(s_data.get('drag_force', [0.0, 0.0, 0.0])),
+                lift_force=np.array(s_data.get('lift_force', [0.0, 0.0, 0.0])),
+                parachute_drag=np.array(s_data.get('parachute_drag', [0.0, 0.0, 0.0])),
+                moment_world=np.array(s_data.get('moment_world', [0.0, 0.0, 0.0])),
+                total_aero_force=np.array(s_data['total_aero_force']),
+            ))
+        
+        # Create FlightResult with proper structure
+        result = FlightResult(
+            history=history,
+            summary={
+                'max_altitude': result_data.get('max_altitude', 0.0),
+                'max_velocity': result_data.get('max_velocity', 0.0),
+                'apogee_time': result_data.get('apogee_time', 0.0),
+                'landing_time': result_data.get('landing_time', 0.0),
+            }
+        )
+        
+        # Reconstruct minimal solver for visualization
+        from rocket_model import Rocket
+        from motor_model import Motor
+        from environment import Environment
+        from flight_solver import MassInertiaModel
+        
+        # Create minimal MassInertiaModel for visualization
+        class MinimalMassModel:
+            def __init__(self, mass_model_data):
+                self.times = np.array(mass_model_data.get('times', [0.0, 1.0]))
+                self.total_mass_values = np.array(mass_model_data.get('total_mass_values', [0.0, 0.0]))
+                self.inertia_values = np.array(mass_model_data.get('inertia_values', [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]))
+            
+            def total_mass(self, time: float) -> float:
+                """Interpolate total mass at given time."""
+                if len(self.times) == 0:
+                    return 0.0
+                clamped = np.clip(time, self.times[0], self.times[-1])
+                return float(np.interp(clamped, self.times, self.total_mass_values))
+            
+            def inertia_diag(self, time: float) -> np.ndarray:
+                """Interpolate inertia diagonal at given time."""
+                if len(self.times) == 0 or self.inertia_values.shape[0] == 0:
+                    return np.array([0.0, 0.0, 0.0])
+                clamped = np.clip(time, self.times[0], self.times[-1])
+                return np.array([
+                    np.interp(clamped, self.times, self.inertia_values[:, i])
+                    for i in range(self.inertia_values.shape[1])
+                ], dtype=float)
+        
+        # Create minimal objects for visualization
+        class MinimalSolver:
+            def __init__(self, solver_data):
+                self.rocket = type('obj', (object,), {
+                    'dry_mass': solver_data['rocket']['dry_mass'],
+                    'dry_cg': solver_data['rocket']['dry_cg'],
+                    'reference_diameter': solver_data['rocket']['reference_diameter'],
+                })()
+                self.motor = type('obj', (object,), {
+                    'total_mass': solver_data['motor']['total_mass'],
+                    'propellant_mass': solver_data['motor']['propellant_mass'],
+                })()
+                self.environment = type('obj', (object,), {
+                    'elevation': solver_data['environment']['elevation'],
+                })()
+                # Add mass_model
+                if 'mass_model' in solver_data:
+                    self.mass_model = MinimalMassModel(solver_data['mass_model'])
+                else:
+                    # Fallback: create minimal mass model with default values
+                    dry_mass = solver_data['rocket'].get('dry_mass', 0.0)
+                    motor_mass = solver_data['motor'].get('total_mass', 0.0)
+                    total_mass = dry_mass + motor_mass
+                    self.mass_model = MinimalMassModel({
+                        'times': [0.0, 1.0],
+                        'total_mass_values': [total_mass, total_mass],
+                        'inertia_values': [[1.0, 1.0, 0.1], [1.0, 1.0, 0.1]],  # Default inertia
+                    })
+        
+        solver = MinimalSolver(solver_data)
+        
+        visualize_in_elodin(result, solver)
+    else:
+        main()

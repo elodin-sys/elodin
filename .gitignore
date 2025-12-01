@@ -28,3 +28,14 @@ out-with-envs.yaml
 .buildkite/pipeline.json
 
 __pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+**/venv/
+**/.venv/
+
+# Rocket simulation specific
+examples/rocket-barrowman/motor_cache/
+examples/rocket-barrowman/*.log

@@ -201,12 +201,13 @@ def build_calisto_rocket():
     mass_diff = target_mass - current_mass
     
     if abs(mass_diff) > 0.1:
-        print(f"⚠️  Adjusting ballast: current={current_mass:.3f}kg, target={target_mass:.3f}kg, diff={mass_diff:.3f}kg")
         # Adjust ballast mass: start from initial ballast value + difference
         initial_ballast = 8.0  # Initial mass from MassComponent
         new_ballast = max(0.0, initial_ballast + mass_diff)  # Never negative
         ballast.override_mass = new_ballast
-        print(f"   Setting ballast to {new_ballast:.3f}kg (was {initial_ballast:.3f}kg)")
+        # Only print if adjustment is significant (>0.1kg)
+        if abs(mass_diff) > 0.1:
+            print(f"ℹ️  Adjusted ballast mass to match target: {new_ballast:.3f}kg (target: {target_mass:.3f}kg)")
     
     return rocket
 
