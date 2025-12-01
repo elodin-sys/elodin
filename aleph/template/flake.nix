@@ -45,6 +45,7 @@
 
         # default fsw
         mekf # a basic attitude mekf that runs on the sensor data from the expansion board
+        msp-osd # MSP DisplayPort OSD for FPV goggles, displays attitude from MEKF
       ];
 
       # overlays required to get elodin and nvidia packages
@@ -64,6 +65,43 @@
       };
       security.sudo.wheelNeedsPassword = false;
       nix.settings.trusted-users = ["@wheel"];
+
+      # Enable MSP OSD service (uses MEKF attitude output by default)
+      services.msp-osd = {
+        enable = true;
+
+        # Override input mappings for a different data source
+        inputs = {
+          position = {
+            component = "my.PositionComponent";
+            x = 0;
+            y = 1;
+            z = 2;
+          };
+          orientation = {
+            component = "my.OrientationComponent";
+            qx = 3;
+            qy = 4;
+            qz = 5;
+            qw = 6;
+          };
+          velocity = {
+            component = "my.VelocityComponent";
+            x = 0;
+            y = 1;
+            z = 2;
+          };
+        };
+
+        # Other overridable options:
+        # coordinateFrame = "enu";  # or "ned" (default)
+        # serialPort = "/dev/ttyTHS7";
+        # baudRate = 115200;
+        # mode = "serial";  # or "debug" for terminal output
+        # refreshRateHz = 20.0;
+        # osdRows = 18;
+        # osdCols = 50;
+      };
     };
     # sets up two different nixos systems default and installer
     # installer is setup to be flashed to a usb drive, and contains the

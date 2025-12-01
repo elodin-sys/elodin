@@ -119,78 +119,79 @@ in {
     };
 
     # Input mappings for extracting telemetry from Elodin-DB components
+    # Default mappings are configured for MEKF output (aleph.Output)
     inputs = {
       position = {
         component = mkOption {
           type = types.str;
-          default = "bdx.world_pos";
-          description = "Component name for position data (e.g., 'bdx.world_pos')";
+          default = "aleph.Output";
+          description = "Component name for position data (default: aleph.Output from MEKF)";
         };
         x = mkOption {
           type = types.int;
-          default = 4;
-          description = "Array index for X position";
+          default = 14;
+          description = "Array index for X position (world_pos.linear[0] in MEKF output)";
         };
         y = mkOption {
           type = types.int;
-          default = 5;
-          description = "Array index for Y position";
+          default = 15;
+          description = "Array index for Y position (world_pos.linear[1] in MEKF output)";
         };
         z = mkOption {
           type = types.int;
-          default = 6;
-          description = "Array index for Z position (altitude)";
+          default = 16;
+          description = "Array index for Z position/altitude (world_pos.linear[2] in MEKF output)";
         };
       };
 
       orientation = {
         component = mkOption {
           type = types.str;
-          default = "bdx.world_pos";
-          description = "Component name for orientation quaternion data";
+          default = "aleph.Output";
+          description = "Component name for orientation quaternion data (default: aleph.Output from MEKF)";
         };
         qx = mkOption {
           type = types.int;
           default = 0;
-          description = "Array index for quaternion X component";
+          description = "Array index for quaternion X component (q_hat[0] in MEKF output)";
         };
         qy = mkOption {
           type = types.int;
           default = 1;
-          description = "Array index for quaternion Y component";
+          description = "Array index for quaternion Y component (q_hat[1] in MEKF output)";
         };
         qz = mkOption {
           type = types.int;
           default = 2;
-          description = "Array index for quaternion Z component";
+          description = "Array index for quaternion Z component (q_hat[2] in MEKF output)";
         };
         qw = mkOption {
           type = types.int;
           default = 3;
-          description = "Array index for quaternion W (scalar) component";
+          description = "Array index for quaternion W (scalar) component (q_hat[3] in MEKF output)";
         };
       };
 
       velocity = {
         component = mkOption {
           type = types.str;
-          default = "bdx.world_vel";
-          description = "Component name for velocity data (e.g., 'bdx.world_vel')";
+          default = "aleph.Output";
+          description = "Component name for velocity data (default: aleph.Output, placeholder until GPS integration)";
         };
         x = mkOption {
           type = types.int;
-          default = 3;
-          description = "Array index for X velocity";
+          default = 7;
+          description = "Array index for X velocity (gyro_est[0] placeholder in MEKF output)";
         };
         y = mkOption {
           type = types.int;
-          default = 4;
-          description = "Array index for Y velocity";
+          default = 8;
+          description = "Array index for Y velocity (gyro_est[1] placeholder in MEKF output)";
         };
         z = mkOption {
           type = types.int;
-          default = 5;
-          description = "Array index for Z velocity";
+          default = 9;
+          description = "Array index for Z velocity (gyro_est[2] placeholder in MEKF output)";
         };
       };
     };
