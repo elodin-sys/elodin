@@ -834,8 +834,7 @@ pub fn save_schematic() -> PaletteItem {
     PaletteItem::new(
         "Save Schematic",
         PRESETS_LABEL,
-        |_name: In<String>,
-         mut commands: Commands| {
+        |_name: In<String>, mut commands: Commands| {
             // Refresh window descriptors, rebuild schematics, then serialize in a dedicated system.
             commands.run_system_cached(crate::ui::capture_window_screens_oneoff);
             commands.run_system_cached(crate::ui::schematic::tiles_to_schematic);

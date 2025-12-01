@@ -1206,12 +1206,8 @@ fn capture_window_screens_oneoff(
             updated = state.update_descriptor_from_winit_window(window, &screens_sorted);
             let screen_seen = state.descriptor.screen;
             // Fallback: best-effort detection if current_monitor is not reliable.
-            info!("[DBG] update screen={:?} rect={:?}", screen_seen, state.descriptor.screen_rect);
-
             if !updated || screen_seen.is_none() {
-                info!("[DBG] update fallback");
                 if let Some(idx) = detect_window_screen(window, &screens_sorted) {
-                    info!("[DBG] update fallback -> screen {}", idx);
                     state.descriptor.screen = Some(idx);
                     updated = true;
                 }
@@ -1224,30 +1220,14 @@ fn capture_window_screens_oneoff(
 }
 
 fn track_window_geometry(
-    mut moved_events: EventReader<WindowMoved>,
-    mut resized_events: EventReader<WindowResized>,
-    winit_windows: NonSend<bevy::winit::WinitWindows>,
-    mut windows_state: Query<(&Window, &tiles::WindowId, &mut tiles::WindowState)>,
+    _moved_events: EventReader<WindowMoved>,
+    _resized_events: EventReader<WindowResized>,
+    _winit_windows: NonSend<bevy::winit::WinitWindows>,
+    mut _windows_state: Query<(&Window, &tiles::WindowId, &mut tiles::WindowState)>,
     mut touched: Local<HashMap<Entity, Option<PhysicalPosition<i32>>>>,
 ) {
-    for evt in moved_events.read() {
-        let position = PhysicalPosition::new(evt.position.x, evt.position.y);
-        touched.insert(evt.window, Some(position));
-    }
-    for evt in resized_events.read() {
-        touched.entry(evt.window).or_insert(None);
-    }
-
-    for (entity, forced_position) in touched.drain() {
-        let Ok((_window, _id, mut state)) = windows_state.get_mut(entity) else {
-            continue;
-        };
-        let Some(window) = winit_windows.get_window(entity) else {
-            continue;
-        };
-        let screens_sorted = collect_sorted_screens(window);
-        record_window_rect_from_window(&mut state, window, &screens_sorted, forced_position);
-    }
+    // Disabled: descriptors are refreshed on-demand (e.g. before save) via capture_window_screens_oneoff.
+    touched.clear();
 }
 
 fn collect_sorted_screens(window: &WinitWindow) -> Vec<MonitorHandle> {
@@ -1308,60 +1288,7 @@ fn fix_visibility_hierarchy(
     }
 }
 
-fn record_window_rect_from_window(
-    state: &mut tiles::WindowState,
-    window: &WinitWindow,
-    screens: &[MonitorHandle],
-    forced_position: Option<PhysicalPosition<i32>>,
-) {
-    let size = window.outer_size();
-    if size.width == 0 || size.height == 0 {
-        return;
-    }
-    let position = forced_position.or_else(|| window.outer_position().ok());
-    let Some(position) = position else {
-        return;
-    };
-
-    let screen_index = state
-        .descriptor
-        .screen
-        .or_else(|| tiles::screen_index_from_bounds(position, size, screens));
-    let Some(idx) = screen_index else {
-        return;
-    };
-    let Some(screen_handle) = screens.get(idx).cloned() else {
-        return;
-    };
-    let screen_pos = screen_handle.position();
-    if !event_position_is_reliable(position, screen_pos) {
-        return;
-    }
-
-    if let Some(rect) = tiles::rect_from_bounds(
-        (position.x, position.y),
-        (size.width, size.height),
-        (screen_pos.x, screen_pos.y),
-        (screen_handle.size().width, screen_handle.size().height),
-    ) {
-        state.descriptor.screen = Some(idx);
-        state.descriptor.screen_rect = Some(rect);
-    }
-}
-
-fn event_position_is_reliable(
-    position: PhysicalPosition<i32>,
-    screen_position: PhysicalPosition<i32>,
-) -> bool {
-    if !LINUX_MULTI_WINDOW {
-        return true;
-    }
-    if position.x == 0 && position.y == 0 {
-        screen_position.x == 0 && screen_position.y == 0
-    } else {
-        true
-    }
-}
+// Unused (live tracking disabled).
 
 fn window_on_target_screen(
     state: &mut tiles::WindowState,
