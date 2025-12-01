@@ -8,9 +8,10 @@ use miette::miette;
 use nox_ecs::{ComponentSchema, IntoSystem, System as _, TimeStep, World, increment_sim_tick, nox};
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
 use pyo3::{
-    IntoPyObjectExt,
+    IntoPyObjectExt, Py, PyAny,
     types::{PyDict, PyList},
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::{HashMap, HashSet},
     iter,
@@ -20,6 +21,16 @@ use std::{
 };
 use tracing::{error, info};
 use zerocopy::{FromBytes, TryFromBytes};
+
+fn install_signal_handlers(terminate_flag: &Arc<AtomicBool>) {
+    use signal_hook::consts::signal::*;
+    use signal_hook::flag;
+
+    // Ignore errors for brevity; in real code, handle Result
+    flag::register(SIGINT, terminate_flag.clone()).expect("register SIGINT failed");
+    flag::register(SIGTERM, terminate_flag.clone()).expect("register SIGTERM failed");
+    // Add others if you want: SIGHUP, SIGQUIT, etc.
+}
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -190,6 +201,10 @@ impl WorldBuilder {
         default_playback_speed = 1.0,
         max_ticks = None,
         optimize = false,
+        is_canceled = None,
+        post_step = None,
+        db_path = None,
+        interactive = true,
     ))]
     pub fn run(
         &mut self,
@@ -200,6 +215,10 @@ impl WorldBuilder {
         default_playback_speed: f64,
         max_ticks: Option<u64>,
         optimize: bool,
+        is_canceled: Option<PyObject>,
+        post_step: Option<PyObject>,
+        db_path: Option<String>,
+        interactive: bool,
     ) -> Result<Option<String>, Error> {
         let _ = tracing_subscriber::fmt::fmt()
             .with_env_filter(
@@ -219,13 +238,14 @@ impl WorldBuilder {
         let path = args.first().ok_or(Error::MissingArg("path".to_string()))?;
         let path = PathBuf::from(path);
         let args = Args::parse_from(args);
-
         match args {
             Args::Run {
                 addr,
                 no_s10,
                 liveness_port,
             } => {
+                let terminate_flag = Arc::new(AtomicBool::new(false));
+                install_signal_handlers(&terminate_flag);
                 let exec = self.build_uncompiled(
                     py,
                     sys,
@@ -257,16 +277,43 @@ impl WorldBuilder {
                 if let Some(port) = liveness_port {
                     stellarator::struc_con::stellar(move || ::s10::liveness::monitor(port));
                 }
+
+                let db_path = match db_path {
+                    Some(p) => PathBuf::from(p),
+                    None => tempfile::tempdir()?.keep().join("db"),
+                };
                 py.allow_threads(|| {
                     stellarator::run(|| {
-                        let tmpfile = tempfile::tempdir().unwrap().keep();
                         nox_ecs::impeller2_server::Server::new(
-                            elodin_db::Server::new(tmpfile.join("db"), addr).unwrap(),
+                            // Here we start the DB with an address.
+                            elodin_db::Server::new(db_path, addr).unwrap(),
                             exec,
                         )
-                        .run_with_cancellation(|| {
-                            Python::with_gil(|py| py.check_signals().is_err())
-                        })
+                        .run_with_cancellation(
+                            move || {
+                                if let Some(ref func) = is_canceled {
+                                    Python::with_gil(|py| {
+                                        func.call0(py).and_then(|result| result.extract::<bool>(py))
+                                    })
+                                    .unwrap_or_else(|_| terminate_flag.load(Ordering::Relaxed))
+                                } else {
+                                    terminate_flag.load(Ordering::Relaxed)
+                                }
+                            },
+                            move |tick_count| {
+                                if let Some(ref func) = post_step {
+                                    Python::with_gil(|py| {
+                                        let tick_count_py = tick_count
+                                            .into_bound_py_any(py)
+                                            .unwrap_or_else(|_| py.None().into_bound(py));
+                                        if let Err(e) = func.call1(py, (tick_count_py,)) {
+                                            tracing::warn!("post_step error {e}");
+                                        }
+                                    });
+                                }
+                            },
+                            interactive,
+                        )
                     })?;
 
                     Ok(None)
@@ -294,8 +341,9 @@ impl WorldBuilder {
                         default_playback_speed,
                         max_ticks,
                         optimize,
+                        db_path,
                     )?;
-                    exec.run(py, ticks, true)?;
+                    exec.run(py, ticks, true, None)?;
                     let profile = exec.profile();
                     println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
                     println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
@@ -809,9 +857,9 @@ impl WorldBuilder {
 
                     let mut exec_with_db = Exec {
                         exec: compiled_exec,
-                        db,
+                        db: Box::new(db),
                     };
-                    exec_with_db.run(py, ticks, true)?;
+                    exec_with_db.run(py, ticks, true, None)?;
                     let profile = exec_with_db.profile();
 
                     println!("\n[Runtime Metrics]");
@@ -847,6 +895,7 @@ impl WorldBuilder {
         default_playback_speed = 1.0,
         max_ticks = None,
         optimize = false,
+        db_path = None,
     ))]
     pub fn build(
         &mut self,
@@ -857,6 +906,7 @@ impl WorldBuilder {
         default_playback_speed: f64,
         max_ticks: Option<u64>,
         optimize: bool,
+        db_path: Option<String>,
     ) -> Result<Exec, Error> {
         let exec = self.build_uncompiled(
             py,
@@ -871,11 +921,16 @@ impl WorldBuilder {
             client.disable_optimizations();
         }
         let mut exec = exec.compile(client.clone())?;
-        let db_dir = tempfile::tempdir()?;
-        let db_dir = db_dir.keep();
-        let db = elodin_db::DB::create(db_dir.join("db"))?;
+        let db_path = match db_path {
+            Some(p) => PathBuf::from(p),
+            None => tempfile::tempdir()?.keep().join("db"),
+        };
+        let db = elodin_db::DB::create(db_path)?;
         nox_ecs::impeller2_server::init_db(&db, &mut exec.world, Timestamp::now())?;
-        Ok(Exec { exec, db })
+        Ok(Exec {
+            exec,
+            db: Box::new(db),
+        })
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -610,10 +610,12 @@ impl Pane {
             }
             Pane::QueryPlot(pane) => {
                 pane.rect = Some(content_rect);
+                let mut pane_with_icon = pane.clone();
+                pane_with_icon.scrub_icon = Some(icons.scrub);
                 ui.add_widget_with::<super::query_plot::QueryPlotWidget>(
                     world,
                     "query_plot",
-                    pane.clone(),
+                    pane_with_icon,
                 );
                 egui_tiles::UiResponse::None
             }
@@ -1031,7 +1033,6 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                         .data_mut(|d| d.insert_temp(persist_id, new_title.clone()));
                     ui.memory_mut(|m| m.surrender_focus(resp.id));
 
-                    // Au lieu de toucher ui_state ici, on envoie une action qui sera traitée après.
                     if !self.read_only {
                         self.tree_actions
                             .push(TreeAction::RenameContainer(tile_id, new_title.clone()));
@@ -1787,6 +1788,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         let pane = Pane::QueryPlot(super::query_plot::QueryPlotPane {
                             entity,
                             rect: None,
+                            scrub_icon: None,
                         });
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)

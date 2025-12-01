@@ -28,7 +28,6 @@ extend-exclude = [
     "*.dts",
     "images/orin-nano/flake.nix",
     "**/simulink/**/*.xml",
-    "libs/basilisk-rs/basilisk/**/*",
     "libs/stellarator/maitake",
     "aleph/modules/*.nix",
     "*.age",

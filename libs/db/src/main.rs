@@ -76,7 +76,7 @@ async fn main() -> miette::Result<()> {
                 });
             }
             info!(?path, "starting db");
-            let server = Server::new(path, addr).into_diagnostic()?;
+            let server = Server::new(&path, addr).into_diagnostic()?;
             let axum_db = server.db.clone();
             let db = stellarator::spawn(server.run());
             if let Some(http_addr) = http_addr {
@@ -86,7 +86,9 @@ async fn main() -> miette::Result<()> {
             }
             if let Some(lua_config) = config {
                 let args = impeller2_cli::Args {
-                    path: Some(lua_config),
+                    config: Some(lua_config),
+                    db: Some(path.clone()),
+                    lua_args: vec![],
                 };
                 impeller2_cli::run(args)
                     .await

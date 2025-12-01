@@ -417,7 +417,6 @@ def calculate_speed(ang_momentum: RWAngMomentum) -> RWSpeed:
     return np.array(la.norm(ang_momentum) / i)
 
 
-# source: https://hanspeterschaub.info/basilisk/_downloads/17eeb82a3f1a8e0b8617c8b8284303ed/Basilisk-REACTIONWHEELSTATEEFFECTOR-20170816.pdf
 @el.map
 def rw_drag(speed: RWSpeed, force: RWForce, axis: RWAxis) -> tuple[RWForce, RWFriction]:
     static_fric = 0.0005

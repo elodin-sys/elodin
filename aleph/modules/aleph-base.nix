@@ -1,11 +1,11 @@
 {...}: {
   nix.settings.extra-substituters = [
     "https://cache.nixos.org"
-    "http://ci-arm1.elodin.dev:5000"
+    "s3://elodin-nix-cache?region=us-west-2"
   ];
   nix.settings.trusted-public-keys = [
     "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
-    "builder-cache-1:q7rDGIQgkg1nsxNEg7mHN1kEDuxPmJhQpuIXCCwLj8E="
+    "elodin-cache-1:vvbmIQvTOjcBjIs8Ri7xlT2I3XAmeJyF5mNlWB+fIwM="
   ];
   nix.settings.experimental-features = ["nix-command" "flakes"];
   nix.settings.trusted-users = ["@wheel"];

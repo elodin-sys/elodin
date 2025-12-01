@@ -121,18 +121,21 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             .entity(id)
             .try_insert(Projection::Orthographic(bounds.as_projection()));
 
-        TimeseriesPlot::from_bounds(
+        let plot = TimeseriesPlot::from_bounds(
             ui.max_rect(),
             bounds,
             selected_time_range.0.clone(),
             earliest_timestamp.0,
             current_timestamp.0,
-        )
-        .render(
+        );
+        let data_source = PlotDataSource::Timeseries {
+            lines: &lines,
+            line_handles: &line_query,
+            collected_graph_data: &collected_graph_data,
+        };
+        plot.render(
             ui,
-            &lines,
-            &line_query,
-            &collected_graph_data,
+            data_source,
             &mut graph_state,
             &scrub_icon,
             id,
@@ -140,6 +143,21 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             &mut time_range_behavior,
         );
     }
+}
+
+/// Data source for plot rendering - either timeseries (Line) or XY (XYLine) data
+pub enum PlotDataSource<'a> {
+    Timeseries {
+        lines: &'a Assets<Line>,
+        line_handles: &'a Query<'a, 'a, &'static LineHandle>,
+        collected_graph_data: &'a CollectedGraphData,
+    },
+    XY {
+        xy_lines: &'a Assets<XYLine>,
+        xy_line_handle: Handle<XYLine>,
+        query_label: String,
+        query_color: egui::Color32,
+    },
 }
 
 #[derive(Debug)]
@@ -152,6 +170,8 @@ pub struct TimeseriesPlot {
     inner_rect: egui::Rect,
     steps_x: usize,
     steps_y: usize,
+    // For XY plots, x values are already in relative seconds
+    is_relative_time: bool,
 }
 
 pub const MARGIN: egui::Margin = egui::Margin {
@@ -185,10 +205,29 @@ impl TimeseriesPlot {
     pub fn from_bounds(
         rect: egui::Rect,
         bounds: PlotBounds,
-        mut selected_range: Range<Timestamp>,
+        selected_range: Range<Timestamp>,
         earliest_timestamp: Timestamp,
         current_timestamp: Timestamp,
     ) -> Self {
+        Self::from_bounds_with_relative_time(
+            rect,
+            bounds,
+            selected_range,
+            earliest_timestamp,
+            current_timestamp,
+            false, // Default to absolute timestamps
+        )
+    }
+
+    pub fn from_bounds_with_relative_time(
+        rect: egui::Rect,
+        bounds: PlotBounds,
+        selected_range: Range<Timestamp>,
+        earliest_timestamp: Timestamp,
+        current_timestamp: Timestamp,
+        is_relative_time: bool,
+    ) -> Self {
+        let mut selected_range = selected_range;
         let inner_rect = get_inner_rect(rect);
 
         if selected_range.start == selected_range.end {
@@ -210,71 +249,126 @@ impl TimeseriesPlot {
             inner_rect,
             steps_x,
             steps_y,
+            is_relative_time,
         }
     }
 
     fn draw_x_axis(&self, ui: &mut egui::Ui, font_id: &egui::FontId) {
-        let step_size =
-            hifitime::Duration::from_microseconds(self.bounds.width() / self.steps_x as f64)
-                .segment_round();
-        let step_size_micro = step_size.total_nanoseconds() / 1000;
-        let step_size_float = step_size_micro as f64;
-        if step_size_micro <= 0 {
-            return;
-        }
-        let visible_time_range = self.visible_time_range();
-        let start = self.selected_range.start;
-        let end = visible_time_range.end;
-        let start_count = (visible_time_range.start.0 - start.0) / step_size_micro as i64 - 1;
-        let end_count = end.0.saturating_sub(start.0) / step_size_micro as i64 + 1;
+        if self.is_relative_time {
+            // For relative time (XYLine), x values are already in seconds
+            // Use segment_round() to round to nice time intervals like standard graphs
+            let step_size_seconds = self.bounds.width() / self.steps_x as f64;
+            let step_size = hifitime::Duration::from_seconds(step_size_seconds).segment_round();
+            let step_size_seconds = step_size.total_nanoseconds() as f64 / 1_000_000_000.0;
 
-        for i in start_count..=end_count {
-            let offset_float = step_size_float * i as f64;
-            let offset = hifitime::Duration::from_microseconds(offset_float);
+            if step_size_seconds <= 0.0 || !step_size_seconds.is_normal() {
+                return;
+            }
 
-            let x_pos = self
-                .bounds
-                .value_to_screen_pos(
-                    self.rect,
-                    (
-                        self.timestamp_to_x(Timestamp(start.0.saturating_add(offset_float as i64))),
-                        0.0,
+            // Calculate start and end positions aligned to step boundaries
+            let start_offset = (self.bounds.min_x / step_size_seconds).floor() * step_size_seconds;
+            let end_offset = (self.bounds.max_x / step_size_seconds).ceil() * step_size_seconds;
+
+            let mut i = start_offset;
+            while i <= end_offset {
+                // Skip if outside visible bounds
+                if i < self.bounds.min_x || i > self.bounds.max_x {
+                    i += step_size_seconds;
+                    continue;
+                }
+
+                let x_pos = self
+                    .bounds
+                    .value_to_screen_pos(self.rect, DVec2::new(i, 0.0))
+                    .x;
+
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(x_pos, self.inner_rect.max.y),
+                        egui::pos2(x_pos, self.inner_rect.max.y + (NOTCH_LENGTH)),
+                    ],
+                    egui::Stroke::new(1.0, get_scheme().border_primary),
+                );
+
+                // Convert seconds to Duration for PrettyDuration formatting
+                let duration = hifitime::Duration::from_seconds(i);
+                ui.painter().text(
+                    egui::pos2(
+                        x_pos,
+                        self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
+                    ),
+                    egui::Align2::CENTER_TOP,
+                    PrettyDuration(duration).to_string(),
+                    font_id.clone(),
+                    get_scheme().text_primary,
+                );
+
+                i += step_size_seconds;
+            }
+        } else {
+            // Original timestamp-based logic
+            let step_size =
+                hifitime::Duration::from_microseconds(self.bounds.width() / self.steps_x as f64)
+                    .segment_round();
+            let step_size_micro = step_size.total_nanoseconds() / 1000;
+            let step_size_float = step_size_micro as f64;
+            if step_size_micro <= 0 {
+                return;
+            }
+            let visible_time_range = self.visible_time_range();
+            let start = self.selected_range.start;
+            let end = visible_time_range.end;
+            let start_count = (visible_time_range.start.0 - start.0) / step_size_micro as i64 - 1;
+            let end_count = end.0.saturating_sub(start.0) / step_size_micro as i64 + 1;
+
+            for i in start_count..=end_count {
+                let offset_float = step_size_float * i as f64;
+                let offset = hifitime::Duration::from_microseconds(offset_float);
+
+                let x_pos = self
+                    .bounds
+                    .value_to_screen_pos(
+                        self.rect,
+                        (
+                            self.timestamp_to_x(Timestamp(
+                                start.0.saturating_add(offset_float as i64),
+                            )),
+                            0.0,
+                        )
+                            .into(),
                     )
-                        .into(),
-                )
-                .x;
+                    .x;
 
-            ui.painter().line_segment(
-                [
-                    egui::pos2(x_pos, self.inner_rect.max.y),
-                    egui::pos2(x_pos, self.inner_rect.max.y + (NOTCH_LENGTH)),
-                ],
-                egui::Stroke::new(1.0, get_scheme().border_primary),
-            );
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(x_pos, self.inner_rect.max.y),
+                        egui::pos2(x_pos, self.inner_rect.max.y + (NOTCH_LENGTH)),
+                    ],
+                    egui::Stroke::new(1.0, get_scheme().border_primary),
+                );
 
-            ui.painter().text(
-                egui::pos2(
-                    x_pos,
-                    self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
-                ),
-                egui::Align2::CENTER_TOP,
-                PrettyDuration(offset).to_string(),
-                font_id.clone(),
-                get_scheme().text_primary,
-            );
+                ui.painter().text(
+                    egui::pos2(
+                        x_pos,
+                        self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
+                    ),
+                    egui::Align2::CENTER_TOP,
+                    PrettyDuration(offset).to_string(),
+                    font_id.clone(),
+                    get_scheme().text_primary,
+                );
+            }
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn draw_modal(
         &self,
         ui: &mut egui::Ui,
-        lines: &Assets<Line>,
-        line_handles: &Query<&LineHandle>,
+        data_source: &PlotDataSource<'_>,
         graph_state: &GraphState,
-        collected_graph_data: &CollectedGraphData,
         pointer_pos: egui::Pos2,
         timestamp: Timestamp,
+        relative_seconds: Option<f64>,
     ) {
         let anchor_left = pointer_pos.x + MODAL_WIDTH + MODAL_MARGIN < self.rect.right();
 
@@ -310,76 +404,161 @@ impl TimeseriesPlot {
                     }),
             )
             .show(ui.ctx(), |ui| {
-                let time: hifitime::Epoch = timestamp.into();
-
-                ui.add(time_label(time));
-                let offset = hifitime::Duration::from_microseconds(
-                    (timestamp.0 - self.selected_range.start.0) as f64,
-                );
-                ui.label(PrettyDuration(offset).to_string());
-                let mut current_component_path: Option<&ComponentPath> = None;
-                for ((component_path, line_index), (entity, color)) in
-                    graph_state.enabled_lines.iter()
-                {
-                    let Ok(line_handle) = line_handles.get(*entity) else {
-                        continue;
-                    };
-                    let Some(line_handle) = line_handle.as_timeseries() else {
-                        continue;
-                    };
-                    let Some(line) = lines.get(line_handle) else {
-                        continue;
-                    };
-                    if current_component_path != Some(component_path) {
-                        ui.add_space(8.0);
-                        ui.add(egui::Separator::default().grow(16.0 * 2.0));
-                        ui.add_space(8.0);
-                        current_component_path = Some(component_path);
-                        if let Some(component_data) =
-                            collected_graph_data.get_component(&component_path.id)
+                match data_source {
+                    PlotDataSource::Timeseries {
+                        lines,
+                        line_handles,
+                        collected_graph_data,
+                    } => {
+                        let time: hifitime::Epoch = timestamp.into();
+                        ui.add(time_label(time));
+                        // Convert microseconds to nanoseconds for consistent precision
+                        let offset = hifitime::Duration::from_nanoseconds(
+                            ((timestamp.0 - self.selected_range.start.0) as f64) * 1_000.0,
+                        );
+                        ui.label(PrettyDuration(offset).to_string());
+                        let mut current_component_path: Option<&ComponentPath> = None;
+                        for ((component_path, line_index), (entity, color)) in
+                            graph_state.enabled_lines.iter()
                         {
-                            ui.add_space(8.0);
+                            let Ok(line_handle) = line_handles.get(*entity) else {
+                                continue;
+                            };
+                            let Some(line_handle) = line_handle.as_timeseries() else {
+                                continue;
+                            };
+                            let Some(line) = lines.get(line_handle) else {
+                                continue;
+                            };
+                            if current_component_path != Some(component_path) {
+                                ui.add_space(8.0);
+                                ui.add(egui::Separator::default().grow(16.0 * 2.0));
+                                ui.add_space(8.0);
+                                current_component_path = Some(component_path);
+                                if let Some(component_data) =
+                                    collected_graph_data.get_component(&component_path.id)
+                                {
+                                    ui.add_space(8.0);
+                                    ui.label(
+                                        egui::RichText::new(component_data.label.to_owned())
+                                            .size(11.0)
+                                            .color(with_opacity(get_scheme().text_primary, 0.6)),
+                                    );
+                                    ui.add_space(8.0);
+                                }
+                            }
+
+                            let Some(line_data) = collected_graph_data
+                                .get_line(&component_path.id, *line_index)
+                                .and_then(|h| lines.get(h))
+                            else {
+                                continue;
+                            };
+
+                            ui.horizontal(|ui| {
+                                ui.style_mut().override_font_id =
+                                    Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
+                                let (rect, _) = ui.allocate_exact_size(
+                                    egui::vec2(8.0, 8.0),
+                                    egui::Sense::click(),
+                                );
+                                ui.painter().rect(
+                                    rect,
+                                    egui::CornerRadius::same(2),
+                                    *color,
+                                    egui::Stroke::NONE,
+                                    egui::StrokeKind::Middle,
+                                );
+                                ui.add_space(6.);
+                                ui.label(RichText::new(line_data.label.clone()).size(11.0));
+                                let value = line
+                                    .data
+                                    .get_nearest(timestamp)
+                                    .map(|(_time, x)| format!("{:.2}", x))
+                                    .unwrap_or_else(|| "N/A".to_string());
+                                ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
+                                    ui.add_space(3.0);
+                                    ui.label(RichText::new(value).size(11.0));
+                                    ui.add_space(3.0);
+                                })
+                            });
+                        }
+                    }
+                    PlotDataSource::XY {
+                        xy_lines,
+                        xy_line_handle,
+                        query_label,
+                        query_color,
+                    } => {
+                        if let Some(xy_line) = xy_lines.get(xy_line_handle) {
+                            // Show query label
                             ui.label(
-                                egui::RichText::new(component_data.label.to_owned())
+                                egui::RichText::new(query_label.clone())
                                     .size(11.0)
                                     .color(with_opacity(get_scheme().text_primary, 0.6)),
                             );
                             ui.add_space(8.0);
+                            ui.add(egui::Separator::default().grow(16.0 * 2.0));
+                            ui.add_space(8.0);
+
+                            // Show time
+                            if let Some(relative_seconds) = relative_seconds {
+                                // Convert seconds to nanoseconds for consistent precision
+                                let duration = hifitime::Duration::from_nanoseconds(
+                                    relative_seconds * 1_000_000_000.0,
+                                );
+                                ui.label(PrettyDuration(duration).to_string());
+                            } else {
+                                let time: hifitime::Epoch = timestamp.into();
+                                ui.add(time_label(time));
+                            }
+
+                            // Find and show nearest value
+                            if let Some(relative_seconds) = relative_seconds {
+                                let mut nearest_value = None;
+                                let mut min_dist = f64::INFINITY;
+                                for (x_chunk, y_chunk) in
+                                    xy_line.x_values.iter().zip(xy_line.y_values.iter())
+                                {
+                                    for (x_val, y_val) in
+                                        x_chunk.cpu().iter().zip(y_chunk.cpu().iter())
+                                    {
+                                        let dist = (*x_val as f64 - relative_seconds).abs();
+                                        if dist < min_dist {
+                                            min_dist = dist;
+                                            nearest_value = Some(*y_val);
+                                        }
+                                    }
+                                }
+
+                                ui.horizontal(|ui| {
+                                    ui.style_mut().override_font_id =
+                                        Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
+                                    let (rect, _) = ui.allocate_exact_size(
+                                        egui::vec2(8.0, 8.0),
+                                        egui::Sense::click(),
+                                    );
+                                    ui.painter().rect(
+                                        rect,
+                                        egui::CornerRadius::same(2),
+                                        *query_color,
+                                        egui::Stroke::NONE,
+                                        egui::StrokeKind::Middle,
+                                    );
+                                    ui.add_space(6.);
+                                    ui.label(RichText::new(query_label.clone()).size(11.0));
+                                    let value = nearest_value
+                                        .map(|v| format!("{:.2}", v))
+                                        .unwrap_or_else(|| "N/A".to_string());
+                                    ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
+                                        ui.add_space(3.0);
+                                        ui.label(RichText::new(value).size(11.0));
+                                        ui.add_space(3.0);
+                                    })
+                                });
+                            }
                         }
                     }
-
-                    let Some(line_data) = collected_graph_data
-                        .get_line(&component_path.id, *line_index)
-                        .and_then(|h| lines.get(h))
-                    else {
-                        continue;
-                    };
-
-                    ui.horizontal(|ui| {
-                        ui.style_mut().override_font_id =
-                            Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
-                        let (rect, _) =
-                            ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::click());
-                        ui.painter().rect(
-                            rect,
-                            egui::CornerRadius::same(2),
-                            *color,
-                            egui::Stroke::NONE,
-                            egui::StrokeKind::Middle,
-                        );
-                        ui.add_space(6.);
-                        ui.label(RichText::new(line_data.label.clone()).size(11.0));
-                        let value = line
-                            .data
-                            .get_nearest(timestamp)
-                            .map(|(_time, x)| format!("{:.2}", x))
-                            .unwrap_or_else(|| "N/A".to_string());
-                        ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
-                            ui.add_space(3.0);
-                            ui.label(RichText::new(value).size(11.0));
-                            ui.add_space(3.0);
-                        })
-                    });
                 }
             });
     }
@@ -388,9 +567,7 @@ impl TimeseriesPlot {
     pub fn render(
         &self,
         ui: &mut egui::Ui,
-        lines: &Assets<Line>,
-        line_handles: &Query<&LineHandle>,
-        collected_graph_data: &CollectedGraphData,
+        data_source: PlotDataSource<'_>,
         graph_state: &mut GraphState,
         scrub_icon: &egui::TextureId,
         graph_entity: Entity,
@@ -441,8 +618,21 @@ impl TimeseriesPlot {
 
         response.context_menu(|ui| {
             if ui.button("Set Time Range to Viewport Bounds").clicked() {
-                let start = Timestamp((self.bounds.min_x as i64) + self.earliest_timestamp.0);
-                let end = Timestamp((self.bounds.max_x as i64) + self.earliest_timestamp.0);
+                let (start, end) = if self.is_relative_time {
+                    // For relative time plots, bounds.min_x/max_x are in seconds
+                    // Convert to microseconds before adding to earliest_timestamp
+                    let start_micros =
+                        (self.bounds.min_x * 1_000_000.0) as i64 + self.earliest_timestamp.0;
+                    let end_micros =
+                        (self.bounds.max_x * 1_000_000.0) as i64 + self.earliest_timestamp.0;
+                    (Timestamp(start_micros), Timestamp(end_micros))
+                } else {
+                    // For absolute time plots, bounds.min_x/max_x are already in microseconds
+                    (
+                        Timestamp((self.bounds.min_x as i64) + self.earliest_timestamp.0),
+                        Timestamp((self.bounds.max_x as i64) + self.earliest_timestamp.0),
+                    )
+                };
                 graph_state.zoom_factor = Vec2::new(1.0, 1.0);
                 graph_state.pan_offset = Vec2::ZERO;
                 *time_range_behavior = TimeRangeBehavior {
@@ -455,11 +645,24 @@ impl TimeseriesPlot {
 
         let mut font_id = egui::TextStyle::Monospace.resolve(ui.style());
 
-        if graph_state.components.is_empty() {
+        // Check if we have data
+        let has_data = match &data_source {
+            PlotDataSource::Timeseries { .. } => !graph_state.components.is_empty(),
+            PlotDataSource::XY {
+                xy_lines,
+                xy_line_handle,
+                ..
+            } => xy_lines.get(xy_line_handle).is_some(),
+        };
+
+        if !has_data {
             ui.painter().text(
                 self.rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "NO DATA POINTS SELECTED",
+                match &data_source {
+                    PlotDataSource::Timeseries { .. } => "NO DATA POINTS SELECTED",
+                    PlotDataSource::XY { .. } => "NO DATA",
+                },
                 font_id.clone(),
                 get_scheme().text_primary,
             );
@@ -479,64 +682,136 @@ impl TimeseriesPlot {
             let plot_point = self.bounds.screen_pos_to_value(self.rect, pointer_pos);
             draw_y_axis_flag(ui, pointer_pos, plot_point.y, self.inner_rect, font_id);
 
-            let inner_point_pos = pointer_pos - self.rect.min;
-            let timestamp = Timestamp(
-                (((inner_point_pos.x / self.rect.width()) as f64 * self.bounds.width()
-                    + self.bounds.min_x) as i64)
-                    + self.earliest_timestamp.0,
-            );
+            // Calculate timestamp or relative time based on data source
+            let (timestamp, relative_seconds) = if self.is_relative_time {
+                // For XYLine, x values are relative seconds
+                let relative_seconds = plot_point.x;
+                // Convert to timestamp for display purposes
+                let timestamp =
+                    Timestamp((relative_seconds * 1_000_000.0) as i64 + self.earliest_timestamp.0);
+                (timestamp, Some(relative_seconds))
+            } else {
+                let inner_point_pos = pointer_pos - self.rect.min;
+                let timestamp = Timestamp(
+                    (((inner_point_pos.x / self.rect.width()) as f64 * self.bounds.width()
+                        + self.bounds.min_x) as i64)
+                        + self.earliest_timestamp.0,
+                );
+                (timestamp, None)
+            };
 
             draw_cursor(
                 ui,
                 pointer_pos,
-                inner_point_pos.x,
+                (pointer_pos - self.rect.min).x,
                 self.rect,
                 self.inner_rect,
             );
 
-            for ((_, _), (entity, color)) in graph_state.enabled_lines.iter() {
-                let Ok(line_handle) = line_handles.get(*entity) else {
-                    continue;
-                };
-                let Some(line_handle) = line_handle.as_timeseries() else {
-                    continue;
-                };
-                let Some(line) = lines.get(line_handle) else {
-                    continue;
-                };
-                let Some((timestamp, y)) = line.data.get_nearest(timestamp) else {
-                    continue;
-                };
-                let value = DVec2::new(self.timestamp_to_x(timestamp), *y as f64);
-                let pos = self.bounds.value_to_screen_pos(self.rect, value);
-                ui.painter().circle(
-                    pos,
-                    4.5,
-                    get_scheme().bg_secondary,
-                    egui::Stroke::new(2.0, *color),
-                );
+            // Draw data point circles and modal based on data source
+            match &data_source {
+                PlotDataSource::Timeseries {
+                    lines,
+                    line_handles,
+                    ..
+                } => {
+                    for ((_, _), (entity, color)) in graph_state.enabled_lines.iter() {
+                        let Ok(line_handle) = line_handles.get(*entity) else {
+                            continue;
+                        };
+                        let Some(line_handle) = line_handle.as_timeseries() else {
+                            continue;
+                        };
+                        let Some(line) = lines.get(line_handle) else {
+                            continue;
+                        };
+                        let Some((timestamp, y)) = line.data.get_nearest(timestamp) else {
+                            continue;
+                        };
+                        let value = DVec2::new(self.timestamp_to_x(timestamp), *y as f64);
+                        let pos = self.bounds.value_to_screen_pos(self.rect, value);
+                        ui.painter().circle(
+                            pos,
+                            4.5,
+                            get_scheme().bg_secondary,
+                            egui::Stroke::new(2.0, *color),
+                        );
+                    }
+                }
+                PlotDataSource::XY {
+                    xy_lines,
+                    xy_line_handle,
+                    query_color,
+                    ..
+                } => {
+                    if let Some(xy_line) = xy_lines.get(xy_line_handle)
+                        && let Some(relative_seconds) = relative_seconds
+                    {
+                        // Find nearest point across all chunks
+                        let mut nearest_x = 0.0;
+                        let mut nearest_y = 0.0;
+                        let mut min_dist = f64::INFINITY;
+                        for (x_chunk, y_chunk) in
+                            xy_line.x_values.iter().zip(xy_line.y_values.iter())
+                        {
+                            for (x_val, y_val) in x_chunk.cpu().iter().zip(y_chunk.cpu().iter()) {
+                                let dist = (*x_val as f64 - relative_seconds).abs();
+                                if dist < min_dist {
+                                    min_dist = dist;
+                                    nearest_x = *x_val as f64;
+                                    nearest_y = *y_val as f64;
+                                }
+                            }
+                        }
+                        // Draw circle at nearest point
+                        if min_dist < f64::INFINITY {
+                            let value = DVec2::new(nearest_x, nearest_y);
+                            let pos = self.bounds.value_to_screen_pos(self.rect, value);
+                            ui.painter().circle(
+                                pos,
+                                4.5,
+                                get_scheme().bg_secondary,
+                                egui::Stroke::new(2.0, *query_color),
+                            );
+                        }
+                    }
+                }
             }
 
             self.draw_modal(
                 ui,
-                lines,
-                line_handles,
+                &data_source,
                 graph_state,
-                collected_graph_data,
                 pointer_pos,
                 timestamp,
+                relative_seconds,
             );
         }
 
-        if self.selected_range.contains(&self.current_timestamp) {
-            let tick_pos = self
-                .bounds
-                .value_to_screen_pos(
-                    self.rect,
-                    (self.timestamp_to_x(self.current_timestamp), 0.0).into(),
-                )
-                .x;
-            draw_tick_mark(ui, self.rect, self.inner_rect, tick_pos, *scrub_icon);
+        // Draw current timestamp indicator
+        if self.is_relative_time {
+            // For XYLine, convert current_timestamp to relative seconds
+            let relative_seconds =
+                (self.current_timestamp.0 - self.earliest_timestamp.0) as f64 / 1_000_000.0;
+            if relative_seconds >= self.bounds.min_x && relative_seconds <= self.bounds.max_x {
+                let tick_pos = self
+                    .bounds
+                    .value_to_screen_pos(self.rect, DVec2::new(relative_seconds, 0.0))
+                    .x;
+                draw_tick_mark(ui, self.rect, self.inner_rect, tick_pos, *scrub_icon);
+            }
+        } else {
+            // Original timestamp-based logic
+            if self.selected_range.contains(&self.current_timestamp) {
+                let tick_pos = self
+                    .bounds
+                    .value_to_screen_pos(
+                        self.rect,
+                        (self.timestamp_to_x(self.current_timestamp), 0.0).into(),
+                    )
+                    .x;
+                draw_tick_mark(ui, self.rect, self.inner_rect, tick_pos, *scrub_icon);
+            }
         }
     }
 
@@ -545,8 +820,16 @@ impl TimeseriesPlot {
     }
 
     fn visible_time_range(&self) -> Range<Timestamp> {
-        Timestamp((self.bounds.min_x as i64).saturating_add(self.earliest_timestamp.0))
-            ..Timestamp((self.bounds.max_x as i64).saturating_add(self.earliest_timestamp.0))
+        if self.is_relative_time {
+            // For relative time plots, bounds.min_x/max_x are in seconds
+            // Convert to microseconds before adding to earliest_timestamp
+            Timestamp((self.bounds.min_x * 1_000_000.0) as i64 + self.earliest_timestamp.0)
+                ..Timestamp((self.bounds.max_x * 1_000_000.0) as i64 + self.earliest_timestamp.0)
+        } else {
+            // For absolute time plots, bounds.min_x/max_x are already in microseconds
+            Timestamp((self.bounds.min_x as i64).saturating_add(self.earliest_timestamp.0))
+                ..Timestamp((self.bounds.max_x as i64).saturating_add(self.earliest_timestamp.0))
+        }
     }
 }
 

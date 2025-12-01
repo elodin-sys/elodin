@@ -154,7 +154,13 @@ impl Expr {
 
             Expr::Time(component) => Ok(component.name.replace(".", "_")),
             Expr::Formula(_, expr) => expr.to_table(),
-            Expr::BinaryOp(left, _, _) => left.to_table(),
+            Expr::BinaryOp(left, right, _) => {
+                // Try left first, fall back to right if left is a literal
+                match left.to_table() {
+                    Ok(table) => Ok(table),
+                    Err(_) => right.to_table(),
+                }
+            }
 
             Expr::ArrayAccess(inner_expr, _) => match inner_expr.as_ref() {
                 Expr::ComponentPart(_) => inner_expr.to_table(),
@@ -162,6 +168,18 @@ impl Expr {
                     "array access on non-component".to_string(),
                 )),
             },
+
+            Expr::Tuple(elements) => {
+                // For tuples, find the first element that has a table (skip literals)
+                for element in elements {
+                    if let Ok(table) = element.to_table() {
+                        return Ok(table);
+                    }
+                }
+                Err(Error::InvalidFieldAccess(
+                    "tuple contains no component references".to_string(),
+                ))
+            }
 
             expr => Err(Error::InvalidFieldAccess(format!(
                 "unsupported expression type for table {expr:?}"
@@ -220,7 +238,7 @@ impl Expr {
         }
     }
 
-    pub(crate) fn to_sql_time_field(&self) -> Result<String, Error> {
+    pub fn to_sql_time_field(&self) -> Result<String, Error> {
         match self {
             Expr::Tuple(elements) => {
                 let Some(first) = elements.first() else {
@@ -278,29 +296,68 @@ impl Expr {
                 }
             }
             Expr::BinaryOp(left, right, op) => {
-                let left_table_name = left.to_table()?;
-                let right_table_name = right.to_table()?;
-                let left_select_part = left.to_qualified_field()?;
-                let right_select_part = right.to_qualified_field()?;
-                if left_table_name == right_table_name {
-                    Ok(format!(
-                        "select {} {} {} from {}",
-                        left_select_part,
-                        op.to_str(),
-                        right_select_part,
-                        left_table_name
-                    ))
-                } else {
-                    Ok(format!(
-                        "select {} {} {} from {} join {} on {}.time = {}.time",
-                        left_select_part,
-                        op.to_str(),
-                        right_select_part,
-                        left_table_name,
-                        right_table_name,
-                        left_table_name,
-                        right_table_name
-                    ))
+                // Check if either operand is a literal
+                let left_is_literal = matches!(left.as_ref(), Expr::FloatLiteral(_));
+                let right_is_literal = matches!(right.as_ref(), Expr::FloatLiteral(_));
+
+                match (left_is_literal, right_is_literal) {
+                    // Both are literals - this doesn't make sense for a query
+                    (true, true) => Err(Error::InvalidFieldAccess(
+                        "cannot perform operations on two literals".to_string(),
+                    )),
+                    // Left is literal, right has table
+                    (true, false) => {
+                        let table = right.to_table()?;
+                        let left_value = left.to_qualified_field()?;
+                        let right_field = right.to_qualified_field()?;
+                        Ok(format!(
+                            "select {} {} {} from {}",
+                            left_value,
+                            op.to_str(),
+                            right_field,
+                            table
+                        ))
+                    }
+                    // Right is literal, left has table (most common case: formula - 90.0)
+                    (false, true) => {
+                        let table = left.to_table()?;
+                        let left_field = left.to_qualified_field()?;
+                        let right_value = right.to_qualified_field()?;
+                        Ok(format!(
+                            "select {} {} {} from {}",
+                            left_field,
+                            op.to_str(),
+                            right_value,
+                            table
+                        ))
+                    }
+                    // Both have tables (existing logic)
+                    (false, false) => {
+                        let left_table_name = left.to_table()?;
+                        let right_table_name = right.to_table()?;
+                        let left_select_part = left.to_qualified_field()?;
+                        let right_select_part = right.to_qualified_field()?;
+                        if left_table_name == right_table_name {
+                            Ok(format!(
+                                "select {} {} {} from {}",
+                                left_select_part,
+                                op.to_str(),
+                                right_select_part,
+                                left_table_name
+                            ))
+                        } else {
+                            Ok(format!(
+                                "select {} {} {} from {} join {} on {}.time = {}.time",
+                                left_select_part,
+                                op.to_str(),
+                                right_select_part,
+                                left_table_name,
+                                right_table_name,
+                                left_table_name,
+                                right_table_name
+                            ))
+                        }
+                    }
                 }
             }
 
@@ -981,7 +1038,8 @@ mod tests {
         assert!(suggestions.contains(&"time".to_string()));
         assert!(suggestions.contains(&"first(".to_string()));
         assert!(suggestions.contains(&"last(".to_string()));
-        assert_eq!(suggestions.len(), 4);
+        // New formulas: degrees(), sqrt() are also suggested for ComponentPart
+        assert!(suggestions.len() >= 4);
     }
 
     #[test]
@@ -1029,7 +1087,11 @@ mod tests {
         let context = create_test_context();
         let expr = context.parse_str("a.world_pos[0].fft()").unwrap();
         let suggestions = context.get_suggestions(&expr);
-        assert_eq!(suggestions, vec!["first", "last"]);
+        // After fft(), we can chain degrees() and sqrt() as well
+        assert!(suggestions.contains(&"first".to_string()));
+        assert!(suggestions.contains(&"last".to_string()));
+        assert!(suggestions.contains(&"degrees()".to_string()));
+        assert!(suggestions.contains(&"sqrt()".to_string()));
     }
 
     #[test]
@@ -1128,5 +1190,367 @@ mod tests {
                 0
             )
         );
+    }
+
+    // Integration tests for complex formula combinations
+    mod integration_tests {
+        use super::*;
+
+        fn create_rocket_context() -> Context {
+            // Create a 3D velocity vector component like rocket.v_body
+            let v_body_comp = Arc::new(Component::new(
+                "rocket.v_body".to_string(),
+                ComponentId::new("rocket.v_body"),
+                Schema::new(impeller2::types::PrimType::F64, vec![3u64]).unwrap(),
+            ));
+            Context::from_leaves([v_body_comp], Timestamp(0), Timestamp(1000))
+        }
+
+        #[test]
+        fn test_angle_of_attack_calculation() {
+            // Test the rocket angle-of-attack calculation pattern:
+            // ((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(min, max)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign()
+            let context = create_rocket_context();
+
+            let expr = context
+                .parse_str(
+                    "((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(0.000000001, 999999)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign()",
+                )
+                .unwrap();
+
+            let sql = expr.to_sql(&context).unwrap();
+
+            // Verify all formulas are present
+            assert!(sql.contains("degrees("), "Should contain degrees()");
+            assert!(sql.contains("acos("), "Should contain acos() from arccos()");
+            assert!(sql.contains("sqrt("), "Should contain sqrt() from norm()");
+            assert!(
+                sql.contains("GREATEST("),
+                "Should contain GREATEST from clip()"
+            );
+            assert!(sql.contains("LEAST("), "Should contain LEAST from clip()");
+            assert!(sql.contains("CASE WHEN"), "Should contain CASE from sign()");
+            assert!(
+                sql.contains("rocket_v_body"),
+                "Should reference rocket.v_body table"
+            );
+
+            // Verify the structure is correct (degrees wraps acos)
+            assert!(
+                sql.contains("degrees(acos("),
+                "degrees() should wrap acos()"
+            );
+        }
+
+        #[test]
+        fn test_complex_chained_formulas() {
+            // Test: (value).sqrt().abs().degrees()
+            let component = Arc::new(Component::new(
+                "a.value".to_string(),
+                ComponentId::new("a.value"),
+                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+            ));
+            let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+
+            let expr = context.parse_str("a.value.sqrt().abs().degrees()").unwrap();
+            let sql = expr.to_sql(&context).unwrap();
+
+            // Verify chaining order: degrees(abs(sqrt(value)))
+            assert!(sql.contains("sqrt("), "Should contain sqrt()");
+            assert!(sql.contains("abs("), "Should contain abs()");
+            assert!(sql.contains("degrees("), "Should contain degrees()");
+
+            // Verify proper nesting
+            assert!(
+                sql.contains("degrees(abs(sqrt("),
+                "Formulas should be properly nested"
+            );
+        }
+
+        #[test]
+        fn test_normalized_vector_with_clip() {
+            // Test: (v_body[0] / v_body.norm().clip(min, max))
+            // Note: EQL doesn't support scientific notation, so use full decimal
+            let context = create_rocket_context();
+
+            let expr = context
+                .parse_str("rocket.v_body[0] / rocket.v_body.norm().clip(0.000000000001, 999999)")
+                .unwrap();
+
+            let sql = expr.to_sql(&context).unwrap();
+
+            // Verify components
+            assert!(sql.contains("sqrt("), "norm() should generate sqrt()");
+            assert!(sql.contains("GREATEST("), "clip() should generate GREATEST");
+            assert!(sql.contains("LEAST("), "clip() should generate LEAST");
+            assert!(sql.contains(" / "), "Should contain division operator");
+        }
+
+        #[test]
+        fn test_atan2_degrees_pattern() {
+            // Test common pattern: y.atan2(x).degrees()
+            let y_comp = Arc::new(Component::new(
+                "a.y".to_string(),
+                ComponentId::new("a.y"),
+                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+            ));
+            let x_comp = Arc::new(Component::new(
+                "a.x".to_string(),
+                ComponentId::new("a.x"),
+                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+            ));
+            let context = Context::from_leaves([y_comp, x_comp], Timestamp(0), Timestamp(1000));
+
+            let expr = context.parse_str("a.y.atan2(a.x).degrees()").unwrap();
+            let sql = expr.to_sql(&context).unwrap();
+
+            // Verify structure
+            assert!(
+                sql.contains("degrees(atan2("),
+                "degrees() should wrap atan2()"
+            );
+            // Both components should be referenced
+            assert!(sql.contains("a_y"), "Should reference a.y component");
+            assert!(sql.contains("a_x"), "Should reference a.x component");
+        }
+
+        #[test]
+        fn test_sign_with_multiplication() {
+            // Test: (value * -1.0).sign()
+            let component = Arc::new(Component::new(
+                "a.value".to_string(),
+                ComponentId::new("a.value"),
+                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+            ));
+            let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+
+            let expr = context.parse_str("(a.value * -1.0).sign()").unwrap();
+            let sql = expr.to_sql(&context).unwrap();
+
+            // Verify CASE statement structure
+            assert!(sql.contains("CASE WHEN"), "Should contain CASE statement");
+            assert!(sql.contains(" * -1"), "Should contain multiplication by -1");
+        }
+
+        #[test]
+        fn test_arccos_clipping_integration() {
+            // Test that arccos automatically clips input to [-1, 1]
+            let component = Arc::new(Component::new(
+                "a.value".to_string(),
+                ComponentId::new("a.value"),
+                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+            ));
+            let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+
+            let expr = context
+                .parse_str("(a.value / 100.0).arccos().degrees()")
+                .unwrap();
+            let sql = expr.to_sql(&context).unwrap();
+
+            // Verify arccos includes clipping
+            assert!(
+                sql.contains("GREATEST(-1.0, LEAST(1.0"),
+                "arccos should clip input to [-1, 1]"
+            );
+            assert!(sql.contains("acos("), "Should contain acos function");
+            assert!(sql.contains("degrees("), "Should contain degrees function");
+        }
+
+        #[test]
+        fn test_angle_of_attack_sql_structure() {
+            // Diagnostic test for the rocket angle-of-attack calculation
+            // This test documents the exact SQL structure generated
+            let context = create_rocket_context();
+
+            let expr = context
+                .parse_str(
+                    "((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(0.000000001, 999999)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign()",
+                )
+                .unwrap();
+
+            let sql = expr.to_sql(&context).unwrap();
+
+            // Verify the mathematical structure:
+            // degrees(acos(GREATEST(-1, LEAST(1, -v[0] / GREATEST(min, LEAST(norm, max)))))) * CASE...
+
+            // Check for correct nesting of functions
+            assert!(
+                sql.contains("degrees("),
+                "Outermost function should be degrees()"
+            );
+            assert!(sql.contains("acos("), "Should use acos() for arccos");
+            assert!(sql.contains("sqrt("), "norm() should use sqrt()");
+            assert!(
+                sql.contains("CASE WHEN"),
+                "sign() should use CASE statement"
+            );
+
+            // Verify the clipping is present
+            assert!(
+                sql.contains("GREATEST(-1.0, LEAST(1.0"),
+                "arccos should clip to [-1, 1]"
+            );
+            assert!(
+                sql.contains("GREATEST(0.000000001"),
+                "Should clip norm to min value"
+            );
+
+            // Verify multiplication operator is present for final sign multiplication
+            assert!(
+                sql.contains(" * CASE"),
+                "Should multiply arccos result by sign"
+            );
+
+            // Note: If the angle-of-attack shows a +90° offset in the actual application,
+            // possible causes could be:
+            // 1. Coordinate system mismatch (the Python code uses thrust_vector = [-1,0,0])
+            // 2. The arccos clipping behavior differences between Python and SQL
+            // 3. Sign function behavior with zero values
+            //
+            // To debug further:
+            // - Run: cargo test -p eql --lib test_angle_of_attack_sql_structure -- --nocapture
+            // - This will print the generated SQL
+            // - Compare individual component values (v_body[0], norm, sign) in the database
+            //   vs Python to identify where the discrepancy occurs
+        }
+
+        #[test]
+        fn test_formula_minus_literal() {
+            // Test subtracting a literal from a formula result
+            let component = Arc::new(Component::new(
+                "a.value".to_string(),
+                ComponentId::new("a.value"),
+                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+            ));
+            let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+
+            let expr = context.parse_str("a.value.abs() - 90.0").unwrap();
+            let sql = expr.to_sql(&context).unwrap();
+
+            assert!(sql.contains("abs("), "Should contain abs function");
+            assert!(sql.contains("- 90"), "Should contain literal subtraction");
+            assert!(
+                sql.contains("from a_value"),
+                "Should query from a_value table"
+            );
+        }
+
+        #[test]
+        fn test_literal_plus_formula() {
+            // Test adding a literal to a formula (less common but should work)
+            let component = Arc::new(Component::new(
+                "a.value".to_string(),
+                ComponentId::new("a.value"),
+                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+            ));
+            let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+
+            let expr = context.parse_str("100.0 + a.value.abs()").unwrap();
+            let sql = expr.to_sql(&context).unwrap();
+
+            assert!(sql.contains("abs("), "Should contain abs function");
+            assert!(sql.contains("100"), "Should contain literal");
+            assert!(sql.contains(" + "), "Should contain addition operator");
+        }
+
+        #[test]
+        fn test_component_times_literal() {
+            // Test multiplying by a literal (unit conversion pattern)
+            let component = Arc::new(Component::new(
+                "a.temperature".to_string(),
+                ComponentId::new("a.temperature"),
+                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+            ));
+            let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+
+            let expr = context.parse_str("a.temperature * 1.8 + 32.0").unwrap();
+            let sql = expr.to_sql(&context).unwrap();
+
+            assert!(sql.contains("1.8"), "Should contain 1.8 multiplier");
+            assert!(sql.contains("32"), "Should contain 32 offset");
+            assert!(sql.contains(" * "), "Should contain multiplication");
+            assert!(sql.contains(" + "), "Should contain addition");
+        }
+
+        #[test]
+        fn test_angle_of_attack_with_offset() {
+            // The full angle-of-attack formula with 90° subtraction
+            let context = create_rocket_context();
+
+            let expr = context
+                .parse_str(
+                    "((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(0.000000001, 999999)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign() - 90.0"
+                )
+                .unwrap();
+
+            let sql = expr.to_sql(&context).unwrap();
+
+            // Should generate valid SQL with the literal subtraction
+            assert!(sql.contains("- 90"), "Should subtract 90 degrees");
+            assert!(
+                sql.contains("degrees(acos("),
+                "Should have degrees wrapping acos"
+            );
+            assert!(sql.contains("CASE WHEN"), "Should have sign CASE statement");
+            assert!(
+                sql.contains("from rocket_v_body"),
+                "Should query from rocket_v_body"
+            );
+
+            // Verify the subtraction comes at the end
+            assert!(
+                sql.find("- 90").unwrap() > sql.find("CASE").unwrap(),
+                "Subtraction should come after the sign correction"
+            );
+        }
+
+        #[test]
+        fn test_two_literals_error() {
+            // Operations on two literals should fail (no table reference)
+            let component = Arc::new(Component::new(
+                "a.value".to_string(),
+                ComponentId::new("a.value"),
+                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+            ));
+            let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+
+            // Parse will succeed, but to_sql should fail
+            let expr = context.parse_str("90.0 + 180.0").unwrap();
+            let result = expr.to_sql(&context);
+
+            assert!(result.is_err(), "Should error on two literals");
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("cannot perform operations on two literals"),
+                "Should have meaningful error message"
+            );
+        }
+
+        #[test]
+        fn test_exact_rocket_queries() {
+            // Test the EXACT queries from the rocket example
+            let context = create_rocket_context();
+
+            // Query WITHOUT -90
+            let query1 = "((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(0.000000001, 999999)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign()";
+            let expr1 = context.parse_str(query1).unwrap();
+            let sql1 = expr1.to_sql(&context).unwrap();
+            eprintln!("SQL WITHOUT -90:");
+            eprintln!("{}\n", sql1);
+
+            // Query WITH -90
+            let query2 = "((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(0.000000001, 999999)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign() - 90.0";
+            let expr2 = context.parse_str(query2).unwrap();
+            let sql2 = expr2.to_sql(&context).unwrap();
+            eprintln!("SQL WITH -90:");
+            eprintln!("{}\n", sql2);
+
+            // They MUST be different
+            assert_ne!(sql1, sql2, "SQL queries should be different!");
+            assert!(!sql1.contains("- 90"), "First query should NOT have '- 90'");
+            assert!(sql2.contains("- 90"), "Second query SHOULD have '- 90'");
+        }
     }
 }

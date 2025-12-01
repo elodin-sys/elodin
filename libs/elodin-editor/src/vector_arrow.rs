@@ -9,6 +9,15 @@ use crate::object_3d::CompiledExpr;
 pub struct VectorArrowState {
     pub vector_expr: Option<CompiledExpr>,
     pub origin_expr: Option<CompiledExpr>,
+    pub visual: Option<ArrowVisual>,
+    pub label: Option<Entity>,
+}
+
+#[derive(Clone)]
+pub struct ArrowVisual {
+    pub root: Entity,
+    pub shaft: Entity,
+    pub head: Entity,
 }
 
 pub fn component_value_tail_to_vec3(value: &ComponentValue) -> Option<DVec3> {

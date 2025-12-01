@@ -1200,23 +1200,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
-name = "basilisk"
-version = "0.15.4-alpha.0"
-dependencies = [
- "approx",
- "bindgen 0.70.1",
- "cc",
- "nox",
- "paste",
- "roci",
- "roci-macros",
- "serde",
- "spin 0.9.8",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "bbq2"
 version = "0.1.0"
 source = "git+https://github.com/elodin-sys/bbq2.git?rev=b6e36706a5549d770ebf2dc122b39cef1368b06d#b6e36706a5549d770ebf2dc122b39cef1368b06d"
@@ -1376,7 +1359,6 @@ dependencies = [
  "futures-io",
  "futures-lite",
  "js-sys",
- "notify-debouncer-full",
  "parking_lot",
  "ron 0.8.1",
  "serde",
@@ -1537,8 +1519,7 @@ dependencies = [
 [[package]]
 name = "bevy_editor_cam"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9af8d3356e79e205e9e907cffaaedddaddb61d5c97a56036d5ee0e6839eac8ce"
+source = "git+https://github.com/shanecelis/bevy_editor_cam.git?branch=feat%2Fsystem-set-0.6.0#eadbd54d21fab3918fa5daee748fb12ce7e48870"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -5341,15 +5322,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "file-id"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1fc6a637b6dc58414714eddd9170ff187ecb0933d4c7024d1abbd23a3cc26e9"
-dependencies = [
- "windows-sys 0.60.2",
-]
-
-[[package]]
 name = "filedescriptor"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8548,19 +8520,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "notify-debouncer-full"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2d88b1a7538054351c8258338df7c931a590513fb3745e8c15eb9ff4199b8d1"
-dependencies = [
- "file-id",
- "log",
- "notify 8.2.0",
- "notify-types",
- "walkdir",
-]
-
-[[package]]
 name = "notify-debouncer-mini"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8702,6 +8661,7 @@ dependencies = [
  "roci-adcs",
  "s10",
  "serde_json",
+ "signal-hook",
  "stellarator",
  "tempfile",
  "thiserror 2.0.17",
