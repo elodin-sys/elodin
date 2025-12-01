@@ -14,7 +14,7 @@ use bevy::{
         wireframe::{WireframeConfig, WireframePlugin},
     },
     prelude::*,
-    window::{PresentMode, WindowResolution, WindowTheme},
+    window::{PresentMode, PrimaryWindow, WindowResolution, WindowTheme},
     winit::WinitSettings,
 };
 use bevy_editor_cam::{SyncCameraPosition, controller::component::EditorCam};
@@ -826,7 +826,6 @@ pub fn setup_clear_state(mut packet_handlers: ResMut<PacketHandlers>, mut comman
 fn clear_state_new_connection(
     PacketHandlerInput { packet, .. }: PacketHandlerInput,
     mut entity_map: ResMut<EntityMap>,
-    mut windows: ResMut<tiles::WindowManager>,
     mut selected_object: ResMut<SelectedObject>,
     mut render_layer_alloc: ResMut<RenderLayerAlloc>,
     mut value_map: Query<&mut ComponentValueMap>,
@@ -835,6 +834,8 @@ fn clear_state_new_connection(
     mut synced_glbs: ResMut<SyncedObject3d>,
     mut eql_context: ResMut<EqlContext>,
     mut commands: Commands,
+    mut windows_state: Query<(Entity, &mut tiles::WindowState)>,
+    primary_window: Single<Entity, With<PrimaryWindow>>,
 ) {
     match packet {
         OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
@@ -856,18 +857,24 @@ fn clear_state_new_connection(
         }
     }
     synced_glbs.0.clear();
-    windows
-        .main_mut()
+    let primary_id: Entity = *primary_window;
+    let Ok(mut primary_state) = windows_state.get_mut(primary_id) else {
+        return;
+    };
+    primary_state
+        .1
+        .tile_state
         .clear(&mut commands, &mut selected_object);
-    for secondary in windows.take_secondary() {
-        for graph in secondary.graph_entities {
-            commands.entity(graph).despawn();
+    for (entity, secondary) in &windows_state {
+        if entity == primary_id {
+            // We don't despawn the primary window ever.
+            continue;
         }
-        if let Some(entity) = secondary.window_entity {
-            commands.entity(entity).despawn();
+        for graph in secondary.graph_entities.iter() {
+            commands.entity(*graph).despawn();
         }
+        commands.entity(entity).despawn();
     }
-    windows.replace_secondary(Vec::new());
     *graph_data = CollectedGraphData::default();
     render_layer_alloc.free_all();
 }

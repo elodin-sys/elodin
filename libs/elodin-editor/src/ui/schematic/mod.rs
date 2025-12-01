@@ -10,7 +10,7 @@ use crate::{
         tiles::{self, Pane},
     },
 };
-use bevy::{ecs::system::SystemParam, prelude::*};
+use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
 use egui_tiles::{Tile, TileId};
 use impeller2_bevy::ComponentMetadataRegistry;
 use impeller2_wkt::{
@@ -48,7 +48,8 @@ pub struct SchematicParam<'w, 's> {
     pub objects_3d: Query<'w, 's, (Entity, &'static Object3DState)>,
     pub lines_3d: Query<'w, 's, (Entity, &'static Line3d)>,
     pub vector_arrows: Query<'w, 's, (Entity, &'static VectorArrow3d)>,
-    pub windows: Res<'w, tiles::WindowManager>,
+    pub windows_state: Query<'w, 's, (&'static tiles::WindowState, &'static tiles::WindowId)>,
+    pub primary_window: Single<'w, Entity, With<PrimaryWindow>>,
     pub dashboards: Query<'w, 's, &'static Dashboard<Entity>>,
     pub hdr_enabled: Res<'w, HdrEnabled>,
     pub metadata: Res<'w, ComponentMetadataRegistry>,
@@ -56,7 +57,12 @@ pub struct SchematicParam<'w, 's> {
 
 impl SchematicParam<'_, '_> {
     pub fn get_panel(&self, tile_id: TileId) -> Option<Panel<Entity>> {
-        self.get_panel_from_state(self.windows.main(), tile_id)
+        self.windows_state
+            .get(*self.primary_window)
+            .ok()
+            .and_then(|(window_state, _)| {
+                self.get_panel_from_state(&window_state.tile_state, tile_id)
+            })
     }
 
     pub fn get_panel_from_state(
@@ -221,7 +227,13 @@ pub fn tiles_to_schematic(
     mut secondary: ResMut<CurrentSecondarySchematics>,
 ) {
     schematic.elems.clear();
-    if let Some(tile_id) = param.windows.main().tree.root() {
+
+    if let Some(tile_id) = param
+        .windows_state
+        .get(*param.primary_window)
+        .ok()
+        .and_then(|(window_state, _)| window_state.tile_state.tree.root())
+    {
         schematic
             .elems
             .extend(param.get_panel(tile_id).map(SchematicElem::Panel))
@@ -249,7 +261,7 @@ pub fn tiles_to_schematic(
     secondary.0.clear();
     let mut window_elems = Vec::new();
     let mut name_counts: HashMap<String, usize> = HashMap::new();
-    for state in param.windows.secondary() {
+    for (state, window_id) in &param.windows_state {
         let base_stem = preferred_secondary_stem(state);
         let unique_stem = ensure_unique_stem(&mut name_counts, &base_stem);
         let file_name = format!("{unique_stem}.kdl");
@@ -267,26 +279,13 @@ pub fn tiles_to_schematic(
         });
         window_elems.push(SchematicElem::Window(WindowSchematic {
             title: None,
-            path: Some(file_name),
+            path: if window_id.is_primary() {
+                None
+            } else {
+                Some(file_name)
+            },
             screen: state.descriptor.screen.map(|idx| idx as u32),
             screen_rect: state.descriptor.screen_rect,
-        }));
-    }
-
-    let primary_layout = param.windows.primary_layout();
-    let serialized_screen = primary_layout
-        .requested_screen
-        .or(primary_layout.captured_screen);
-    let serialized_rect = primary_layout
-        .requested_rect
-        .or(primary_layout.captured_rect);
-
-    if serialized_screen.is_some() || serialized_rect.is_some() {
-        window_elems.push(SchematicElem::Window(WindowSchematic {
-            title: None,
-            path: None,
-            screen: serialized_screen.map(|idx| idx as u32),
-            screen_rect: serialized_rect,
         }));
     }
 
@@ -306,14 +305,20 @@ impl Plugin for SchematicPlugin {
     }
 }
 
-fn preferred_secondary_stem(state: &tiles::SecondaryWindowState) -> String {
+fn preferred_secondary_stem(state: &tiles::WindowState) -> String {
     if let Some(title) = state.descriptor.title.as_deref() {
         let stem = sanitize_to_stem(title);
         if !stem.is_empty() {
             return stem;
         }
     }
-    if let Some(stem) = state.descriptor.path.file_stem().and_then(|s| s.to_str()) {
+    if let Some(stem) = state
+        .descriptor
+        .path
+        .as_ref()
+        .and_then(|p| p.file_stem())
+        .and_then(|s| s.to_str())
+    {
         let stem = sanitize_to_stem(stem);
         if !stem.is_empty() {
             return stem;

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write;
 use std::time::{Duration, Instant};
 
 use bevy::{
@@ -7,6 +8,7 @@ use bevy::{
         query::QueryData,
         system::{SystemParam, SystemState},
     },
+    // platform::collections::{HashMap, HashSet},
     input::keyboard::Key,
     log::{error, info, warn},
     prelude::*,
@@ -16,6 +18,7 @@ use bevy::{
         WindowCloseRequested, WindowMoved, WindowRef, WindowResized, WindowResolution,
     },
 };
+use bevy_defer::{AccessError, AsyncAccess, AsyncCommandsExtension, AsyncPlugin, AsyncWorld};
 use bevy_egui::{
     EguiContext, EguiContexts,
     egui::{self, Align2, Color32, Label, RichText},
@@ -35,9 +38,7 @@ pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
     width: 80,
     height: 80,
 };
-const SCREEN_RELAYOUT_MAX_ATTEMPTS: u8 = 5;
 const SECONDARY_RECT_CAPTURE_LOAD_GUARD: Duration = Duration::from_millis(2500);
-const SECONDARY_RECT_CAPTURE_STABILIZE_GUARD: Duration = Duration::from_millis(400);
 // Order ranges:
 // 0          -> UI/egui (Bevy default)
 // 10..        primary viewports (3D, gizmo/axes…)
@@ -52,21 +53,17 @@ const DEFAULT_PRESENT_MODE: PresentMode = PresentMode::Fifo;
 
 #[cfg(target_os = "linux")]
 mod platform {
-    use super::*;
     pub const LINUX_MULTI_WINDOW: bool = true;
-    pub const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(2000);
     pub const PRIMARY_ORDER_OFFSET: isize = 0;
 }
 
 #[cfg(not(target_os = "linux"))]
 mod platform {
-    use super::*;
     pub const LINUX_MULTI_WINDOW: bool = false;
-    pub const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(3500);
     pub const PRIMARY_ORDER_OFFSET: isize = 1000;
 }
 
-use platform::{LINUX_MULTI_WINDOW, PRIMARY_ORDER_OFFSET, SCREEN_RELAYOUT_TIMEOUT};
+use platform::{LINUX_MULTI_WINDOW, PRIMARY_ORDER_OFFSET};
 
 use big_space::{GridCell, precision::GridPrecision};
 use plot_3d::LinePlot3dPlugin;
@@ -88,6 +85,7 @@ use crate::{
         gizmos::{MIN_ARROW_LENGTH_SQUARED, evaluate_vector_arrow},
         navigation_gizmo::NavGizmoCamera,
     },
+    tiles::{WindowId, WindowRelayout},
     vector_arrow::VectorArrowState,
 };
 
@@ -131,11 +129,6 @@ pub struct HdrEnabled(pub bool);
 
 #[derive(Resource, Default)]
 pub struct Paused(pub bool);
-
-#[derive(Resource, Default)]
-struct SecondaryLogState(
-    HashMap<tiles::SecondaryWindowId, (Option<usize>, bool, tiles::SecondaryWindowRelayoutPhase)>,
-);
 
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
 pub enum SelectedObject {
@@ -194,14 +187,6 @@ pub struct EntityPair {
     pub bevy: Entity,
     pub impeller: ComponentId,
 }
-
-#[derive(Component)]
-struct SecondaryWindowMarker {
-    id: tiles::SecondaryWindowId,
-}
-
-#[derive(Component)]
-struct ActiveSecondaryWindow;
 
 pub fn shortcuts(
     mut paused: ResMut<Paused>,
@@ -273,85 +258,41 @@ impl Plugin for UiPlugin {
             .init_resource::<EntityFilter>()
             .init_resource::<ComponentFilter>()
             .init_resource::<InspectorAnchor>()
-            .init_resource::<tiles::WindowManager>()
             .init_resource::<SettingModalState>()
             .init_resource::<HdrEnabled>()
             .init_resource::<timeline_slider::UITick>()
-            .init_resource::<SecondaryLogState>()
             .init_resource::<timeline::StreamTickOrigin>()
             .init_resource::<command_palette::CommandPaletteState>()
             .add_event::<DialogEvent>()
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, shortcuts)
-            .add_systems(Update, handle_primary_close.before(render_layout))
-            .add_systems(Update, render_layout)
             .add_systems(First, warn_camera_order_ambiguities)
             .add_systems(
                 Update,
-                apply_primary_window_layout
-                    .after(render_layout)
-                    .before(sync_secondary_windows),
-            )
-            .add_systems(
-                Update,
-                confirm_primary_screen_assignment
-                    .after(apply_primary_window_layout)
-                    .before(sync_secondary_windows),
-            )
-            .add_systems(Update, sync_secondary_windows.after(render_layout))
-            .add_systems(
-                Update,
-                apply_secondary_window_screens.after(sync_secondary_windows),
-            )
-            .add_systems(
-                Update,
-                confirm_secondary_screen_assignment
-                    .after(apply_secondary_window_screens)
-                    .before(track_secondary_window_geometry),
-            )
-            .add_systems(
-                Update,
-                track_secondary_window_geometry.after(confirm_secondary_screen_assignment),
-            )
-            .add_systems(
-                Update,
-                capture_secondary_window_screens.after(track_secondary_window_geometry),
-            )
-            .add_systems(
-                Update,
-                capture_primary_window_layout.after(capture_secondary_window_screens),
-            )
-            .add_systems(Update, handle_secondary_close.after(sync_secondary_windows))
-            .add_systems(
-                Update,
-                set_secondary_camera_viewport.after(sync_secondary_windows),
-            )
-            .add_systems(
-                Update,
-                set_nav_gizmo_camera_orders
-                    .after(set_secondary_camera_viewport)
-                    .after(set_camera_viewport),
-            )
-            .add_systems(
-                Update,
-                warn_camera_order_ambiguities
-                    .after(set_secondary_camera_viewport)
-                    .after(set_camera_viewport),
-            )
-            .add_systems(
-                Update,
-                render_secondary_windows.after(handle_secondary_close),
+                (
+                    handle_window_close,
+                    render_layout,
+                    sync_camera_grid_cell,
+                    sync_windows,
+                    handle_window_relayout_events,
+                    track_window_geometry,
+                    set_secondary_camera_viewport,
+                    set_camera_viewport,
+                    set_nav_gizmo_camera_orders,
+                    warn_camera_order_ambiguities,
+                )
+                    .chain(),
             )
             .add_systems(First, fix_visibility_hierarchy)
             .add_systems(Update, sync_hdr)
             .add_systems(Update, tiles::shortcuts)
-            .add_systems(Update, set_camera_viewport.after(render_layout))
-            .add_systems(Update, sync_camera_grid_cell.after(render_layout))
             .add_systems(Update, query_plot::auto_bounds)
             .add_systems(Update, dashboard::update_nodes)
+            .add_plugins(tiles::plugin)
             .add_plugins(SchematicPlugin)
             .add_plugins(LinePlot3dPlugin)
+            .add_plugins(AsyncPlugin::default_settings())
             .add_plugins(command_palette::palette_items::plugin);
     }
 }
@@ -688,68 +629,99 @@ fn readable_label_color(color: Color) -> Color32 {
     Color32::from_rgba_unmultiplied(color32.r(), color32.g(), color32.b(), 255)
 }
 
-pub fn render_layout(world: &mut World) {
-    world.add_root_widget::<MainLayout>("main_layout");
+pub fn render_layout(
+    world: &mut World,
+    mut windows: Local<Vec<(Entity, WindowId)>>,
+    mut widget_id: Local<String>,
+) {
+    windows.extend(
+        world
+            .query::<(Entity, &WindowId)>()
+            .iter(world)
+            .map(|(id, window_id)| (id, *window_id)),
+    );
+    for (id, window_id) in windows.drain(..) {
+        if window_id.is_primary() {
+            world.add_root_widget_to::<MainLayout>(id, "main_layout", ());
 
-    world.add_root_widget::<ViewportOverlay>("viewport_overlay");
+            world.add_root_widget_to::<ViewportOverlay>(id, "viewport_overlay", ());
 
-    world.add_root_widget::<modal::ModalWithSettings>("modal_graph");
+            world.add_root_widget_to::<modal::ModalWithSettings>(id, "modal_graph", ());
 
-    world.add_root_widget::<CommandPalette>("command_palette");
+            world.add_root_widget_to::<CommandPalette>(id, "command_palette", ());
+
+            // BUG: This plus button is not working on the main window. I tried adding this but to no avail.
+            // world.add_root_widget_to::<command_palette::PaletteWindow>(id, "palette_window", None);
+        } else {
+            widget_id.clear();
+            let _ = write!(widget_id, "secondary_window_{}", window_id.0);
+            world.add_root_widget_to::<tiles::TileSystem>(id, &widget_id, Some(id));
+            // TODO: I don't think this has to run conditionally.
+            // if palette_window.map(|window| window == id).unwrap_or(false) {
+            widget_id.clear();
+            let _ = write!(widget_id, "secondary_command_palette_{}", window_id.0);
+            // This doesn't seem to show anything.
+            // world.add_root_widget_to::<CommandPalette>(id, &widget_id, ());
+            world.add_root_widget_to::<command_palette::PaletteWindow>(id, &widget_id, Some(id));
+            // }
+        }
+    }
 }
 
-fn sync_secondary_windows(
+fn sync_windows(
     mut commands: Commands,
-    mut windows: ResMut<tiles::WindowManager>,
-    existing: Query<(Entity, &SecondaryWindowMarker)>,
+    mut windows_state: Query<(Entity, &WindowId, &mut tiles::WindowState, Option<&Window>)>,
     mut cameras: Query<&mut Camera>,
     winit_windows: NonSend<bevy::winit::WinitWindows>,
-    mut log_state: ResMut<SecondaryLogState>,
+    mut existing_map: Local<HashMap<tiles::WindowId, Entity>>,
 ) {
-    let mut existing_map: HashMap<tiles::SecondaryWindowId, Entity> = HashMap::new();
-    for (entity, marker) in existing.iter() {
-        existing_map.insert(marker.id, entity);
-    }
+    // existing_map.clear();
+    // for (entity, marker, state) in existing.iter() {
+    //     // Add secondary windows.
+    //     if !marker.is_primary() {
+    //         existing_map.insert(*marker, entity);
+    //     }
+    // }
     let screens_any = collect_screens_from_any_window(&winit_windows);
     if screens_any.is_none() {
         warn!("No screen info available; secondary windows will use default sizing/position");
     }
 
-    for (id, entity) in existing_map.clone() {
-        if windows.get_secondary(id).is_none() {
-            commands.entity(entity).despawn();
-            existing_map.remove(&id);
-        }
-    }
+    // for (id, entity) in existing_map.drain() {
+    //     if windows.find_secondary(id).is_none() {
+    //         // Despawn windows not represented as secondary windows.
+    //         commands.entity(entity).despawn();
+    //         existing_map.remove(&id);
+    //     }
+    // }
 
-    for state in windows.secondary_mut().iter_mut() {
-        let current_key = (state.descriptor.screen, false, state.relayout_phase);
-        let last = log_state.0.get(&state.id).copied();
-        if last != Some(current_key) {
-            info!(
-                id = state.id.0,
-                screen = state.descriptor.screen.map(|s| s as i32).unwrap_or(-1),
-                relayout = ?state.relayout_phase,
-                "secondary_window_state"
-            );
-            log_state.0.insert(state.id, current_key);
-        }
+    for (entity, marker, mut state, window_maybe) in &mut windows_state {
+        // let current_key = (state.descriptor.screen, false);
+        // let last = log_state.0.get(&marker).copied();
+        // if last != Some(current_key) {
+        //     info!(
+        //         id = ?marker,
+        //         screen = state.descriptor.screen.map(|s| s as i32).unwrap_or(-1),
+        //         "window_state"
+        //     );
+        //     log_state.0.insert(*marker, current_key);
+        // }
         state.graph_entities = state.tile_state.collect_graph_entities();
 
-        if let Some(entity) = state.window_entity
-            && existing_map.get(&state.id).copied() != Some(entity)
-        {
-            state.window_entity = None;
-        }
+        // if let Some(entity) = state.window_entity
+        //     && existing_map.get(&state.id).copied() != Some(entity)
+        // {
+        //     state.window_entity = None;
+        // }
 
-        if let Some(entity) = state.window_entity {
-            existing_map.insert(state.id, entity);
+        if window_maybe.is_some() {
+            existing_map.insert(*marker, entity);
             let window_ref = WindowRef::Entity(entity);
             for (index, &graph) in state.graph_entities.iter().enumerate() {
                 if let Ok(mut camera) = cameras.get_mut(graph) {
                     camera.target = RenderTarget::Window(window_ref);
                     camera.is_active = true;
-                    let base_order = secondary_graph_order_base(state.id);
+                    let base_order = secondary_graph_order_base(*marker);
                     camera.order = base_order + index as isize;
                 }
             }
@@ -763,11 +735,11 @@ fn sync_secondary_windows(
             }
         }
 
-        let title = compute_secondary_window_title(state);
+        let title = compute_secondary_window_title(&state);
 
         // Try to pre-size and pre-position the window to its target rect to avoid an
         // extra resize pass (and the resulting swapchain churn).
-        let (resolution, position, pre_applied_screen) = if let Some(rect) =
+        let (resolution, position, _pre_applied_screen) = if let Some(rect) =
             state.descriptor.screen_rect
             && let Some(screen_idx) = state.descriptor.screen
             && let Some(screens) = screens_any.as_ref()
@@ -812,435 +784,371 @@ fn sync_secondary_windows(
         };
 
         let window_entity = commands
-            .spawn((window_component, SecondaryWindowMarker { id: state.id }))
+            .entity(entity)
+            .insert((window_component, *marker))
             .id();
 
-        state.window_entity = Some(window_entity);
-        state.applied_screen = pre_applied_screen;
-        state.applied_rect = None;
-        state.relayout_phase = if state.descriptor.screen.is_some() {
-            tiles::SecondaryWindowRelayoutPhase::NeedScreen
-        } else if state.descriptor.screen_rect.is_some() {
-            tiles::SecondaryWindowRelayoutPhase::NeedRect
-        } else {
-            tiles::SecondaryWindowRelayoutPhase::Idle
-        };
-        state.skip_metadata_capture = true;
-        existing_map.insert(state.id, window_entity);
+        if let Some(screen) = state.descriptor.screen.as_ref() {
+            commands.send_event(WindowRelayout::Screen {
+                window: window_entity,
+                screen: *screen,
+            });
+        }
+
+        if let Some(rect) = state.descriptor.screen_rect.as_ref() {
+            commands.send_event(WindowRelayout::Rect {
+                window: window_entity,
+                rect: *rect,
+            });
+        }
+        existing_map.insert(*marker, window_entity);
+        info!(
+            "Created window entity {window_entity} with window id {:?}",
+            marker
+        );
         let window_ref = WindowRef::Entity(window_entity);
         for (index, &graph) in state.graph_entities.iter().enumerate() {
             if let Ok(mut camera) = cameras.get_mut(graph) {
                 camera.target = RenderTarget::Window(window_ref);
                 camera.is_active = true;
-                let base_order = secondary_graph_order_base(state.id);
+                let base_order = secondary_graph_order_base(*marker);
                 camera.order = base_order + index as isize;
             }
         }
     }
 }
 
-fn apply_secondary_window_screens(
-    mut windows: ResMut<tiles::WindowManager>,
-    winit_windows: NonSend<bevy::winit::WinitWindows>,
-) {
-    for state in windows.secondary_mut().iter_mut() {
-        if matches!(
-            state.relayout_phase,
-            tiles::SecondaryWindowRelayoutPhase::Idle
-        ) {
-            continue;
+/// Wait until a winit window is created or timeout. Return true when found or
+/// false on timeout.
+async fn wait_for_winit_window(window_id: Entity, timeout: Duration) -> Result<bool, AccessError> {
+    let start = Instant::now();
+    let winit_windows_async = AsyncWorld.non_send_resource::<bevy::winit::WinitWindows>();
+    while start.elapsed() < timeout {
+        if winit_windows_async.get(|winit_windows| winit_windows.get_window(window_id).is_some())? {
+            return Ok(true);
         }
-        // layout locking removed; just proceed if we have the window.
-        let Some(entity) = state.window_entity else {
-            continue;
-        };
-        let Some(window) = winit_windows.get_window(entity) else {
-            continue;
-        };
-
-        match state.relayout_phase {
-            tiles::SecondaryWindowRelayoutPhase::NeedScreen => {
-                info!(
-                    path = %state.descriptor.path.display(),
-                    target_screen = state.descriptor.screen.map(|s| s as i32).unwrap_or(-1),
-                    relayout_phase = ?state.relayout_phase,
-                    "Attempting secondary screen assignment"
-                );
-                if state.awaiting_screen_confirmation {
-                    info!(
-                        path = %state.descriptor.path.display(),
-                        "Still awaiting secondary screen confirmation"
-                    );
-                    let still_waiting = state
-                        .relayout_started_at
-                        .map(|started| started.elapsed() <= SCREEN_RELAYOUT_TIMEOUT)
-                        .unwrap_or(false);
-                    if still_waiting {
-                        continue;
-                    }
-                    state.awaiting_screen_confirmation = false;
-                }
-
-                let screens = collect_sorted_screens(window);
-
-                if window_on_target_screen(state, window, &screens) {
-                    if LINUX_MULTI_WINDOW {
-                        exit_fullscreen(window);
-                        force_windowed(window);
-                    } else if window.fullscreen().is_some() {
-                        exit_fullscreen(window);
-                    }
-                    complete_screen_assignment(state, window, "Confirmed screen assignment (sync)");
-                    continue;
-                }
-
-                let Some(screen) = state.descriptor.screen else {
-                    complete_screen_assignment(
-                        state,
-                        window,
-                        "No screen provided; skipping screen alignment",
-                    );
-                    continue;
-                };
-
-                if let Some(target_monitor) = screens.get(screen).cloned() {
-                    assign_window_to_screen(state, window, target_monitor.clone());
-                    if detect_window_screen(window, &screens) != Some(screen) {
-                        recenter_window_on_screen(window, &target_monitor);
-                        #[cfg(target_os = "macos")]
-                        {
-                            window.set_fullscreen(Some(Fullscreen::Borderless(Some(
-                                target_monitor.clone(),
-                            ))));
-                            window.set_fullscreen(None);
-                            recenter_window_on_screen(window, &target_monitor);
-                        }
-                    }
-                    state.relayout_attempts = state.relayout_attempts.saturating_add(1);
-                    if state.relayout_started_at.is_none() {
-                        state.relayout_started_at = Some(Instant::now());
-                    }
-                    state.awaiting_screen_confirmation = true;
-                    if let Some(started) = state.relayout_started_at
-                        && started.elapsed() > SCREEN_RELAYOUT_TIMEOUT
-                        && state.relayout_attempts >= SCREEN_RELAYOUT_MAX_ATTEMPTS
-                    {
-                        warn!(
-                            attempts = state.relayout_attempts,
-                            elapsed_ms = started.elapsed().as_millis(),
-                            path = %state.descriptor.path.display(),
-                            "Timed out while assigning screen; continuing with current monitor"
-                        );
-                        complete_screen_assignment(state, window, "Screen assignment timed out");
-                    }
-                } else {
-                    warn!(
-                        screen,
-                        path = %state.descriptor.path.display(),
-                        "screen out of range; skipping screen assignment"
-                    );
-                    state.descriptor.screen = None;
-                    complete_screen_assignment(state, window, "screen out of range");
-                }
-            }
-            tiles::SecondaryWindowRelayoutPhase::NeedRect => {
-                if apply_secondary_window_rect(state, window) {
-                    state.relayout_phase = tiles::SecondaryWindowRelayoutPhase::Idle;
-                }
-            }
-            tiles::SecondaryWindowRelayoutPhase::Idle => {}
-        }
+        AsyncWorld.yield_now().await;
     }
+    Ok(false)
 }
 
-fn apply_primary_window_layout(
-    mut windows: ResMut<tiles::WindowManager>,
-    primary_query: Query<Entity, With<PrimaryWindow>>,
-    winit_windows: NonSend<bevy::winit::WinitWindows>,
-) {
-    #[allow(deprecated)]
-    let Ok(primary_entity) = primary_query.get_single() else {
-        return;
-    };
-    let Some(window) = winit_windows.get_window(primary_entity) else {
-        return;
-    };
-    let layout = windows.primary_layout_mut();
-    match layout.relayout_phase {
-        tiles::PrimaryWindowRelayoutPhase::Idle => {}
-        tiles::PrimaryWindowRelayoutPhase::NeedScreen => {
-            info!(
-                target_screen = layout.screen.map(|s| s as i32).unwrap_or(-1),
-                relayout_phase = ?layout.relayout_phase,
-                "Attempting primary screen assignment"
-            );
-
-            if layout.awaiting_screen_confirmation {
-                let still_waiting = layout
-                    .relayout_started_at
-                    .map(|started| started.elapsed() <= SCREEN_RELAYOUT_TIMEOUT)
-                    .unwrap_or(false);
-                if still_waiting {
-                    return;
-                }
-                layout.awaiting_screen_confirmation = false;
-            }
+/// Wait for a window to change to a target screen or timeout.
+///
+/// ```ignore
+/// set_screen_for_window(id, 2);
+/// let success = wait_for_window_to_change_screens(id, 2, Duration::millis(2000)).await?;
+/// ```
+async fn wait_for_window_to_change_screens(
+    window_id: Entity,
+    target_screen: usize,
+    timeout: Duration,
+) -> Result<bool, AccessError> {
+    let start = Instant::now();
+    let winit_windows_async = AsyncWorld.non_send_resource::<bevy::winit::WinitWindows>();
+    while start.elapsed() < timeout {
+        match winit_windows_async.get(|winit_windows| {
+            let Some(window) = winit_windows.get_window(window_id) else {
+                error!(%window_id, "No winit window in change screen");
+                return None;
+            };
 
             let screens = collect_sorted_screens(window);
-            if window_on_screen(layout.screen, window, &screens) {
-                // If rect already applied, proceed to Idle to avoid extra swapchain reconfig.
-                if let Some(rect) = layout.screen_rect
-                    && layout.applied_rect == Some(rect)
-                {
-                    layout.relayout_phase = tiles::PrimaryWindowRelayoutPhase::Idle;
-                    layout.awaiting_screen_confirmation = false;
-                    complete_primary_screen_assignment(
-                        layout,
-                        window,
-                        "Primary window confirmed on target screen",
-                    );
-                    return;
-                }
+            if let Some(screen) = detect_window_screen(window, &screens)
+                && screen == target_screen
+            {
+                return Some(true);
+            }
+            None
+        }) {
+            Ok(Some(result)) => {
+                return Ok(result);
+            }
+            Err(e) => {
+                return Err(e);
+            }
+            _ => {}
+        }
+
+        AsyncWorld.yield_now().await;
+    }
+    Ok(false)
+}
+
+async fn apply_window_screen(entity: Entity, screen: usize) -> Result<(), bevy_defer::AccessError> {
+    info!(
+        window = %entity,
+        %screen,
+        "apply_window_screen start"
+    );
+    if !wait_for_winit_window(entity, Duration::from_millis(2000)).await? {
+        error!(%entity, "Unable to apply window to screen: winit window not found.");
+        return Ok(());
+    }
+    let window_states = AsyncWorld.query::<&tiles::WindowState>();
+    let mut state = window_states
+        .entity(entity)
+        .get_mut(|state| state.clone())?;
+    let winit_windows_async = AsyncWorld.non_send_resource::<bevy::winit::WinitWindows>();
+    // This might need to loop.
+    let target_monitor_maybe = winit_windows_async.get(|winit_windows| {
+        let Some(window) = winit_windows.get_window(entity) else {
+            error!(%entity, "No winit window in apply window screen");
+            return None;
+        };
+
+        let screens = collect_sorted_screens(window);
+
+        if window_on_target_screen(&mut state, window, &screens) {
+            if LINUX_MULTI_WINDOW {
+                exit_fullscreen(window);
+                force_windowed(window);
+            } else if window.fullscreen().is_some() {
+                exit_fullscreen(window);
+            }
+            info!(%entity, "Confirmed screen assignment");
+            return None;
+        }
+
+        // let Some(screen) = state.descriptor.screen else {
+        //     complete_screen_assignment(
+        //         &mut state,
+        //         "No screen provided; skipping screen alignment",
+        //     );
+        //     return None;
+        // };
+
+        if let Some(target_monitor) = screens.get(screen).cloned() {
+            assign_window_to_screen(window, target_monitor.clone());
+            // We have to do some retries in an async context. Inside this
+            // `.get()` we're not in an async context.
+            Some(target_monitor)
+        } else {
+            warn!(
+                screen,
+                path = ?state.descriptor.path,
+                "screen out of range; skipping screen assignment"
+            );
+            state.descriptor.screen = None;
+            warn!(%entity, "screen out of range");
+            None
+        }
+    })?;
+    if let Some(target_monitor) = target_monitor_maybe {
+        // We can't do this await with the `winit_windows_async.get(|| {...})` block.
+        let success =
+            wait_for_window_to_change_screens(entity, 2, Duration::from_millis(1000)).await?;
+        winit_windows_async.get(|winit_windows| {
+            let Some(window) = winit_windows.get_window(entity) else {
+                error!(%entity, "No winit window in apply screen");
+                return;
+            };
+            if success {
                 if LINUX_MULTI_WINDOW {
-                    if window.fullscreen().is_some() {
-                        exit_fullscreen(window);
-                        return;
-                    }
+                    exit_fullscreen(window);
                     force_windowed(window);
                 } else if window.fullscreen().is_some() {
                     exit_fullscreen(window);
-                } else {
-                    window.set_maximized(false);
-                    linux_clear_minimized(window);
-                }
-                complete_primary_screen_assignment(
-                    layout,
-                    window,
-                    "Primary window confirmed on target screen",
-                );
-                return;
-            }
-            let Some(screen) = layout.screen else {
-                layout.awaiting_screen_confirmation = false;
-                layout.relayout_phase = if layout.screen_rect.is_some() {
-                    tiles::PrimaryWindowRelayoutPhase::NeedRect
-                } else {
-                    tiles::PrimaryWindowRelayoutPhase::Idle
-                };
-                return;
-            };
-            if let Some(target_monitor) = screens.get(screen).cloned() {
-                info!(
-                    screen = screen as i32,
-                    "Moving primary window to target screen"
-                );
-                assign_primary_window_to_screen(layout, window, target_monitor);
-                layout.awaiting_screen_confirmation = true;
-                layout.relayout_attempts = layout.relayout_attempts.saturating_add(1);
-                if layout.relayout_started_at.is_none() {
-                    layout.relayout_started_at = Some(Instant::now());
-                }
-                if let Some(started) = layout.relayout_started_at
-                    && started.elapsed() > SCREEN_RELAYOUT_TIMEOUT
-                    && layout.relayout_attempts >= SCREEN_RELAYOUT_MAX_ATTEMPTS
-                {
-                    warn!(
-                        screen = screen as i32,
-                        attempts = layout.relayout_attempts,
-                        elapsed_ms = started.elapsed().as_millis(),
-                        "Primary window screen assignment timed out"
-                    );
-                    layout.awaiting_screen_confirmation = false;
-                    layout.relayout_phase = if layout.screen_rect.is_some() {
-                        tiles::PrimaryWindowRelayoutPhase::NeedRect
-                    } else {
-                        tiles::PrimaryWindowRelayoutPhase::Idle
-                    };
                 }
             } else {
-                warn!(
-                    screen = screen as i32,
-                    "Primary window screen index out of range; skipping"
-                );
-                layout.screen = None;
-                layout.awaiting_screen_confirmation = false;
-                layout.relayout_phase = if layout.screen_rect.is_some() {
-                    tiles::PrimaryWindowRelayoutPhase::NeedRect
-                } else {
-                    tiles::PrimaryWindowRelayoutPhase::Idle
-                };
+                recenter_window_on_screen(window, &target_monitor);
+                #[cfg(target_os = "macos")]
+                {
+                    window
+                        .set_fullscreen(Some(Fullscreen::Borderless(Some(target_monitor.clone()))));
+                    window.set_fullscreen(None);
+                    recenter_window_on_screen(window, &target_monitor);
+                }
             }
-        }
-        tiles::PrimaryWindowRelayoutPhase::NeedRect => {
-            if apply_primary_window_rect(layout, window) {
-                layout.relayout_phase = tiles::PrimaryWindowRelayoutPhase::Idle;
+        })?;
+    }
+    Ok(())
+}
+fn handle_window_relayout_events(
+    mut relayout_events: EventReader<WindowRelayout>,
+    mut commands: Commands,
+) {
+    for relayout_event in relayout_events.read().cloned() {
+        match relayout_event {
+            WindowRelayout::Screen { window, screen } => {
+                info!(
+                    target_screen = screen,
+                    "Attempting secondary screen assignment"
+                );
+
+                // Let's spawn an asynchronous task instead of carrying a bunch
+                // state in our components.
+                commands.spawn_task(move || apply_window_screen(window, screen));
+            }
+            WindowRelayout::Rect { window, rect } => {
+                commands.spawn_task(move || {
+                    apply_window_rect(rect, window, Duration::from_millis(1000))
+                });
+            }
+            WindowRelayout::UpdateDescriptors => {
+                // TODO: No one calls this event yet. Need to call it, or the
+                // cached system below and wait a frame.
+
+                // Instead of placing this system into the schedule and blocking
+                // it from running, let's run it only when necessary.
+                commands.run_system_cached(capture_window_screens_oneoff);
             }
         }
     }
 }
 
-fn apply_secondary_window_rect(
-    state: &mut tiles::SecondaryWindowState,
-    window: &WinitWindow,
-) -> bool {
+async fn apply_window_rect(
+    rect: WindowRect,
+    entity: Entity,
+    timeout: Duration,
+) -> Result<(), AccessError> {
     info!(
-        path = %state.descriptor.path.display(),
-        applied_rect = ?state.applied_rect,
-        target_rect = ?state.descriptor.screen_rect,
-        size_w = window.outer_size().width,
-        size_h = window.outer_size().height,
-        pos_x = window.outer_position().map(|p| p.x).unwrap_or_default(),
-        pos_y = window.outer_position().map(|p| p.y).unwrap_or_default(),
-        "apply_secondary_window_rect start"
+        window = %entity,
+        ?rect,
+        "apply_window_rect start"
     );
-    if state.descriptor.screen_rect.is_some() {
-        state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_LOAD_GUARD);
-    }
 
-    let Some(rect) = state.descriptor.screen_rect else {
-        if state.applied_rect.is_some() {
-            state.applied_rect = None;
-            linux_clear_minimized(window);
-        }
-        return true;
-    };
+    let window_states = AsyncWorld.query::<&tiles::WindowState>();
+    let state = window_states.entity(entity).get(|state| state.clone())?;
 
-    if state.applied_rect == Some(rect) {
-        info!(
-            path = %state.descriptor.path.display(),
-            "Rect already applied"
-        );
-        return true;
-    }
+    let winit_windows_async = AsyncWorld.non_send_resource::<bevy::winit::WinitWindows>();
 
-    if rect.width == 0 && rect.height == 0 {
-        linux_request_minimize(window);
-        state.applied_rect = Some(rect);
-        state.skip_metadata_capture = true;
-        info!(
-            path = %state.descriptor.path.display(),
-            "Applied minimize rect"
-        );
-        return true;
-    }
+    let start = Instant::now();
+    let mut wait = true;
+    while wait && start.elapsed() < timeout {
+        AsyncWorld.yield_now().await;
+        wait = winit_windows_async.get(|winit_windows| {
+            let Some(window) = winit_windows.get_window(entity) else {
+                error!(%entity, "No winit window in apply rect");
+                return true;
+            };
 
-    let screen_handle = if let Some(idx) = state.descriptor.screen {
-        let screens = collect_sorted_screens(window);
-        screens
-            .get(idx)
-            .cloned()
-            .or_else(|| window.current_monitor())
-    } else {
-        window.current_monitor()
-    };
-    let Some(screen_handle) = screen_handle else {
-        return false;
-    };
+            if rect.width == 0 && rect.height == 0 {
+                linux_request_minimize(window);
+                info!(
+                    // path = %state.descriptor.path.display(),
+                    "Applied minimize rect"
+                );
+                return false;
+            }
 
-    let screen_pos = screen_handle.position();
-    let screen_size = screen_handle.size();
-    if screen_size.width == 0 || screen_size.height == 0 {
-        return false;
-    }
+            // XXX We may need this.
+            let screen_handle = if let Some(idx) = state.descriptor.screen {
+                let screens = collect_sorted_screens(window);
+                screens
+                    .get(idx)
+                    .cloned()
+                    .or_else(|| window.current_monitor())
+            } else {
+                window.current_monitor()
+            };
+            let Some(screen_handle) = screen_handle else {
+                return true;
+            };
+            let screen_pos = screen_handle.position();
+            let screen_size = screen_handle.size();
+            if screen_size.width == 0 || screen_size.height == 0 {
+                return true;
+            }
 
-    let is_full_rect =
-        LINUX_MULTI_WINDOW && rect.x == 0 && rect.y == 0 && rect.width == 100 && rect.height == 100;
+            let is_full_rect = LINUX_MULTI_WINDOW
+                && rect.x == 0
+                && rect.y == 0
+                && rect.width == 100
+                && rect.height == 100;
 
-    if window.fullscreen().is_some() {
-        exit_fullscreen(window);
-        if !is_full_rect {
-            force_windowed(window);
-        }
-        info!(
-            path = %state.descriptor.path.display(),
-            "Exited fullscreen before applying rect"
-        );
-    } else if LINUX_MULTI_WINDOW {
-        if !is_full_rect {
-            force_windowed(window);
-        }
-    } else if !is_full_rect {
-        window.set_maximized(false);
-        linux_clear_minimized(window);
-    }
-    let screen_width = screen_size.width as i32;
-    let screen_height = screen_size.height as i32;
+            if window.fullscreen().is_some() {
+                exit_fullscreen(window);
+                if !is_full_rect {
+                    force_windowed(window);
+                }
+                info!(
+                    // path = %state.descriptor.path.display(),
+                    "Exited fullscreen before applying rect"
+                );
+            } else if LINUX_MULTI_WINDOW {
+                if !is_full_rect {
+                    force_windowed(window);
+                }
+            } else if !is_full_rect {
+                window.set_maximized(false);
+                linux_clear_minimized(window);
+            }
+            let screen_width = screen_size.width as i32;
+            let screen_height = screen_size.height as i32;
 
-    let requested_width_px = ((rect.width as f64 / 100.0) * screen_width as f64).round() as i32;
-    let requested_height_px = ((rect.height as f64 / 100.0) * screen_height as f64).round() as i32;
-    let width_px = requested_width_px.clamp(1, screen_width.max(1));
-    let height_px = requested_height_px.clamp(1, screen_height.max(1));
-    if width_px != requested_width_px || height_px != requested_height_px {
-        warn!(
-            path = %state.descriptor.path.display(),
-            rect = ?rect,
-            "Window rect exceeds screen bounds; clamping size"
-        );
-    }
+            let requested_width_px =
+                ((rect.width as f64 / 100.0) * screen_width as f64).round() as i32;
+            let requested_height_px =
+                ((rect.height as f64 / 100.0) * screen_height as f64).round() as i32;
+            let width_px = requested_width_px.clamp(1, screen_width.max(1));
+            let height_px = requested_height_px.clamp(1, screen_height.max(1));
+            if width_px != requested_width_px || height_px != requested_height_px {
+                warn!(
+                    path = ?state.descriptor.path,
+                    rect = ?rect,
+                    "Window rect exceeds screen bounds; clamping size"
+                );
+            }
 
-    let requested_x = screen_pos.x + ((rect.x as f64 / 100.0) * screen_width as f64).round() as i32;
-    let requested_y =
-        screen_pos.y + ((rect.y as f64 / 100.0) * screen_height as f64).round() as i32;
+            let requested_x =
+                screen_pos.x + ((rect.x as f64 / 100.0) * screen_width as f64).round() as i32;
+            let requested_y =
+                screen_pos.y + ((rect.y as f64 / 100.0) * screen_height as f64).round() as i32;
 
-    let max_x = screen_pos.x + screen_width - width_px;
-    let max_y = screen_pos.y + screen_height - height_px;
-    let x = requested_x.clamp(screen_pos.x, max_x);
-    let y = requested_y.clamp(screen_pos.y, max_y);
-    if x != requested_x || y != requested_y {
-        warn!(
-            path = %state.descriptor.path.display(),
-            rect = ?rect,
-            "Window rect origin exceeds screen bounds; clamping position"
-        );
-    }
+            let max_x = screen_pos.x + screen_width - width_px;
+            let max_y = screen_pos.y + screen_height - height_px;
+            let x = requested_x.clamp(screen_pos.x, max_x);
+            let y = requested_y.clamp(screen_pos.y, max_y);
+            if x != requested_x || y != requested_y {
+                warn!(
+                    path = ?state.descriptor.path,
+                    rect = ?rect,
+                    "Window rect origin exceeds screen bounds; clamping position"
+                );
+            }
 
-    if let Ok(current_pos) = window.outer_position() {
-        let current_size = window.outer_size();
-        if current_pos.x == x
-            && current_pos.y == y
-            && current_size.width as i32 == width_px
-            && current_size.height as i32 == height_px
-        {
-            state.applied_rect = Some(rect);
-            state.skip_metadata_capture = true;
-            state.clear_metadata_capture_block();
-            state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_STABILIZE_GUARD);
+            if let Ok(current_pos) = window.outer_position() {
+                let current_size = window.outer_size();
+                if current_pos.x == x
+                    && current_pos.y == y
+                    && current_size.width as i32 == width_px
+                    && current_size.height as i32 == height_px
+                {
+                    info!(
+                        path = ?state.descriptor.path,
+                        rect = ?rect,
+                        size_w = width_px,
+                        size_h = height_px,
+                        pos_x = x,
+                        pos_y = y,
+                        "Rect already applied"
+                    );
+                    return false;
+                }
+            }
+
+            let _ = window.request_inner_size(PhysicalSize::new(
+                width_px.max(1) as u32,
+                height_px.max(1) as u32,
+            ));
+            window.set_outer_position(PhysicalPosition::new(x, y));
             info!(
-                path = %state.descriptor.path.display(),
+                // path = %state.descriptor.path.display(),
                 rect = ?rect,
                 size_w = width_px,
                 size_h = height_px,
                 pos_x = x,
                 pos_y = y,
-                "Rect already applied"
+                "Applied rect"
             );
-            return true;
-        }
+            false
+        })?;
     }
-
-    let _ = window.request_inner_size(PhysicalSize::new(
-        width_px.max(1) as u32,
-        height_px.max(1) as u32,
-    ));
-    window.set_outer_position(PhysicalPosition::new(x, y));
-    state.applied_rect = Some(rect);
-    state.skip_metadata_capture = true;
-    state.clear_metadata_capture_block();
-    state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_STABILIZE_GUARD);
-    info!(
-        path = %state.descriptor.path.display(),
-        rect = ?rect,
-        size_w = width_px,
-        size_h = height_px,
-        pos_x = x,
-        pos_y = y,
-        "Applied rect"
-    );
-    true
+    Ok(())
 }
 
 fn assign_window_to_screen(
-    state: &mut tiles::SecondaryWindowState,
+    // state: &mut tiles::WindowState,
     window: &WinitWindow,
     target_monitor: MonitorHandle,
 ) {
@@ -1250,91 +1158,15 @@ fn assign_window_to_screen(
     let x = screen_pos.x + (screen_size.width as i32 - window_size.width as i32) / 2;
     let y = screen_pos.y + (screen_size.height as i32 - window_size.height as i32) / 2;
 
-    info!(
-        path = %state.descriptor.path.display(),
-        screen = state.descriptor.screen.map(|idx| idx as i32).unwrap_or(-1),
-        "assign_window_to_screen"
-    );
+    // info!(
+    //     path = %state.descriptor.path.display(),
+    //     screen = state.descriptor.screen.map(|idx| idx as i32).unwrap_or(-1),
+    //     "assign_window_to_screen"
+    // );
     // Align with Linux path: avoid fullscreen hops on macOS and keep windowed positioning.
     exit_fullscreen(window);
     window.set_visible(true);
     force_windowed(window);
-    window.set_outer_position(PhysicalPosition::new(x, y));
-    state.skip_metadata_capture = true;
-}
-
-fn complete_screen_assignment(
-    state: &mut tiles::SecondaryWindowState,
-    _window: &WinitWindow,
-    reason: &'static str,
-) {
-    state.awaiting_screen_confirmation = false;
-    state.applied_screen = state.descriptor.screen;
-    state.relayout_attempts = 0;
-    state.relayout_started_at = None;
-    // If a rect was already applied, don't re-enter NeedRect and reconfigure swapchain.
-    state.relayout_phase = match state.descriptor.screen_rect {
-        Some(rect) if state.applied_rect != Some(rect) => {
-            state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_LOAD_GUARD);
-            tiles::SecondaryWindowRelayoutPhase::NeedRect
-        }
-        _ => {
-            state.clear_metadata_capture_block();
-            tiles::SecondaryWindowRelayoutPhase::Idle
-        }
-    };
-
-    info!(
-        screen = state
-            .descriptor
-            .screen
-            .map(|idx| idx as i32)
-            .unwrap_or(-1),
-        path = %state.descriptor.path.display(),
-        "{reason}"
-    );
-}
-
-fn complete_primary_screen_assignment(
-    layout: &mut tiles::PrimaryWindowLayout,
-    _window: &WinitWindow,
-    reason: &'static str,
-) {
-    layout.awaiting_screen_confirmation = false;
-    layout.applied_screen = layout.screen;
-    layout.relayout_phase = if layout.screen_rect.is_some() {
-        tiles::PrimaryWindowRelayoutPhase::NeedRect
-    } else {
-        tiles::PrimaryWindowRelayoutPhase::Idle
-    };
-    layout.relayout_attempts = 0;
-    layout.relayout_started_at = None;
-    info!(
-        screen = layout.screen.map(|idx| idx as i32).unwrap_or(-1),
-        "{reason}"
-    );
-}
-
-fn assign_primary_window_to_screen(
-    _layout: &mut tiles::PrimaryWindowLayout,
-    window: &WinitWindow,
-    target_monitor: MonitorHandle,
-) {
-    let screen_pos = target_monitor.position();
-    let screen_size = target_monitor.size();
-    let window_size = window.outer_size();
-    let x = screen_pos.x + (screen_size.width as i32 - window_size.width as i32) / 2;
-    let y = screen_pos.y + (screen_size.height as i32 - window_size.height as i32) / 2;
-
-    if LINUX_MULTI_WINDOW {
-        window.set_fullscreen(None);
-        window.set_visible(true);
-        force_windowed(window);
-    } else {
-        // Align with Linux path: avoid fullscreen hops on macOS.
-        exit_fullscreen(window);
-        window.set_visible(true);
-    }
     window.set_outer_position(PhysicalPosition::new(x, y));
 }
 
@@ -1361,189 +1193,33 @@ fn recenter_window_on_screen(window: &WinitWindow, target_monitor: &MonitorHandl
     let _ = window.request_inner_size(size);
 }
 
-fn apply_primary_window_rect(
-    layout: &mut tiles::PrimaryWindowLayout,
-    window: &WinitWindow,
-) -> bool {
-    let Some(rect) = layout.screen_rect else {
-        layout.applied_rect = None;
-        linux_clear_minimized(window);
-        return true;
-    };
-
-    if layout.applied_rect == Some(rect) {
-        return true;
-    }
-
-    if rect.width == 0 && rect.height == 0 {
-        linux_request_minimize(window);
-        layout.applied_rect = Some(rect);
-        return true;
-    }
-
-    let screen_handle = if let Some(idx) = layout.screen {
-        let screens = collect_sorted_screens(window);
-        screens
-            .get(idx)
-            .cloned()
-            .or_else(|| window.current_monitor())
-    } else {
-        window.current_monitor()
-    };
-    let Some(screen_handle) = screen_handle else {
-        return false;
-    };
-
-    let screen_pos = screen_handle.position();
-    let screen_size = screen_handle.size();
-    if screen_size.width == 0 || screen_size.height == 0 {
-        return false;
-    }
-
-    if window.fullscreen().is_some() {
-        exit_fullscreen(window);
-        force_windowed(window);
-    } else if LINUX_MULTI_WINDOW {
-        force_windowed(window);
-    } else {
-        window.set_maximized(false);
-        linux_clear_minimized(window);
-    }
-
-    let screen_width = screen_size.width as i32;
-    let screen_height = screen_size.height as i32;
-
-    let requested_width_px = ((rect.width as f64 / 100.0) * screen_width as f64).round() as i32;
-    let requested_height_px = ((rect.height as f64 / 100.0) * screen_height as f64).round() as i32;
-    let width_px = requested_width_px.clamp(1, screen_width.max(1));
-    let height_px = requested_height_px.clamp(1, screen_height.max(1));
-    if width_px != requested_width_px || height_px != requested_height_px {
-        warn!("Primary window rect exceeds screen bounds; clamping size (rect={rect:?})");
-    }
-
-    let requested_x = screen_pos.x + ((rect.x as f64 / 100.0) * screen_width as f64).round() as i32;
-    let requested_y =
-        screen_pos.y + ((rect.y as f64 / 100.0) * screen_height as f64).round() as i32;
-
-    let max_x = screen_pos.x + screen_width - width_px;
-    let max_y = screen_pos.y + screen_height - height_px;
-    let x = requested_x.clamp(screen_pos.x, max_x);
-    let y = requested_y.clamp(screen_pos.y, max_y);
-    if x != requested_x || y != requested_y {
-        warn!(
-            "Primary window rect origin exceeds screen bounds; clamping position (rect={rect:?})"
-        );
-    }
-
-    info!(
-        rect = ?rect,
-        width_px,
-        height_px,
-        x,
-        y,
-        "Applying primary window rect"
-    );
-
-    if let Ok(current_pos) = window.outer_position() {
-        let current_size = window.outer_size();
-        if current_pos.x == x
-            && current_pos.y == y
-            && current_size.width as i32 == width_px
-            && current_size.height as i32 == height_px
-        {
-            layout.applied_rect = Some(rect);
-            return true;
-        }
-    }
-    let _ = window.request_inner_size(PhysicalSize::new(
-        width_px.max(1) as u32,
-        height_px.max(1) as u32,
-    ));
-    window.set_outer_position(PhysicalPosition::new(x, y));
-    layout.applied_rect = Some(rect);
-    true
-}
-
-fn capture_secondary_window_screens(
-    mut windows: ResMut<tiles::WindowManager>,
+/// Runs as a one-off system to capture the window descriptor. Does not run
+/// every frameñ.
+fn capture_window_screens_oneoff(
     winit_windows: NonSend<bevy::winit::WinitWindows>,
-    window_query: Query<(Entity, &Window)>,
+    mut window_query: Query<(Entity, &Window, &mut tiles::WindowState)>,
     screens: Query<(Entity, &Monitor)>,
 ) {
-    for state in windows.secondary_mut().iter_mut() {
-        #[cfg(target_os = "macos")]
-        if matches!(
-            state.relayout_phase,
-            tiles::SecondaryWindowRelayoutPhase::NeedScreen
-        ) && state.awaiting_screen_confirmation
-        {
-            continue;
-        }
-
-        let Some(entity) = state.window_entity else {
-            continue;
-        };
+    for (entity, window, mut state) in &mut window_query {
         let winit_window = winit_windows.get_window(entity);
         let mut updated = false;
         if let Some(window) = winit_window {
             let screens_sorted = collect_sorted_screens(window);
             updated = state.update_descriptor_from_winit_window(window, &screens_sorted);
         }
-
-        if !updated && let Ok((_, window_component)) = window_query.get(entity) {
-            state.update_descriptor_from_window(window_component, &screens);
+        if !updated {
+            state.update_descriptor_from_window(window, &screens);
         }
     }
 }
 
-fn confirm_secondary_screen_assignment(
+fn track_window_geometry(
     mut moved_events: EventReader<WindowMoved>,
     mut resized_events: EventReader<WindowResized>,
-    mut windows: ResMut<tiles::WindowManager>,
     winit_windows: NonSend<bevy::winit::WinitWindows>,
+    mut windows_state: Query<(&Window, &tiles::WindowId, &mut tiles::WindowState)>,
+    mut touched: Local<HashMap<Entity, Option<PhysicalPosition<i32>>>>,
 ) {
-    let mut touched: Vec<Entity> = Vec::new();
-    touched.extend(moved_events.read().map(|evt| evt.window));
-    touched.extend(resized_events.read().map(|evt| evt.window));
-    touched.sort_unstable();
-    touched.dedup();
-
-    for entity in touched {
-        let Some(id) = windows.find_secondary_by_entity(entity) else {
-            continue;
-        };
-        let Some(state) = windows.get_secondary_mut(id) else {
-            continue;
-        };
-        if !matches!(
-            state.relayout_phase,
-            tiles::SecondaryWindowRelayoutPhase::NeedScreen
-        ) {
-            continue;
-        }
-        let Some(window) = winit_windows.get_window(entity) else {
-            continue;
-        };
-        let screens_sorted = collect_sorted_screens(window);
-        if window_on_target_screen(state, window, &screens_sorted) {
-            complete_screen_assignment(
-                state,
-                window,
-                "Confirmed screen assignment for secondary window",
-            );
-        }
-    }
-}
-
-fn track_secondary_window_geometry(
-    mut moved_events: EventReader<WindowMoved>,
-    mut resized_events: EventReader<WindowResized>,
-    mut windows: ResMut<tiles::WindowManager>,
-    winit_windows: NonSend<bevy::winit::WinitWindows>,
-) {
-    use std::collections::HashMap;
-
-    let mut touched: HashMap<Entity, Option<PhysicalPosition<i32>>> = HashMap::new();
     for evt in moved_events.read() {
         let position = PhysicalPosition::new(evt.position.x, evt.position.y);
         touched.insert(evt.window, Some(position));
@@ -1552,78 +1228,28 @@ fn track_secondary_window_geometry(
         touched.entry(evt.window).or_insert(None);
     }
 
-    for (entity, forced_position) in touched {
-        let Some(id) = windows.find_secondary_by_entity(entity) else {
-            continue;
-        };
-        let Some(state) = windows.get_secondary_mut(id) else {
+    for (entity, forced_position) in touched.drain() {
+        let Ok((_window, _id, mut state)) = windows_state.get_mut(entity) else {
             continue;
         };
         let Some(window) = winit_windows.get_window(entity) else {
             continue;
         };
         let screens_sorted = collect_sorted_screens(window);
-        record_window_rect_from_window(state, window, &screens_sorted, forced_position);
+        record_window_rect_from_window(&mut state, window, &screens_sorted, forced_position);
     }
-}
-
-fn confirm_primary_screen_assignment(
-    mut moved_events: EventReader<WindowMoved>,
-    mut resized_events: EventReader<WindowResized>,
-    mut windows: ResMut<tiles::WindowManager>,
-    primary_query: Query<Entity, With<PrimaryWindow>>,
-    winit_windows: NonSend<bevy::winit::WinitWindows>,
-) {
-    #[allow(deprecated)]
-    let Ok(primary_entity) = primary_query.get_single() else {
-        return;
-    };
-
-    let mut touched = false;
-    for evt in moved_events.read() {
-        if evt.window == primary_entity {
-            touched = true;
-        }
-    }
-    for evt in resized_events.read() {
-        if evt.window == primary_entity {
-            touched = true;
-        }
-    }
-
-    if !touched {
-        return;
-    }
-
-    let Some(window) = winit_windows.get_window(primary_entity) else {
-        return;
-    };
-    let screens_sorted = collect_sorted_screens(window);
-    let layout = windows.primary_layout_mut();
-    if matches!(
-        layout.relayout_phase,
-        tiles::PrimaryWindowRelayoutPhase::NeedScreen
-    ) {
-        layout.awaiting_screen_confirmation = false;
-    }
-    let _ = screens_sorted;
 }
 
 fn collect_sorted_screens(window: &WinitWindow) -> Vec<MonitorHandle> {
     let mut screens: Vec<MonitorHandle> = window.available_monitors().collect();
     screens.sort_by(|a, b| {
-        let result = a
-            .position()
-            .x
-            .cmp(&b.position().x)
-            .then(a.position().y.cmp(&b.position().y));
-        if result == std::cmp::Ordering::Equal {
+        let p_a = a.position();
+        let p_b = b.position();
+        p_a.x.cmp(&p_b.x).then(p_a.y.cmp(&p_b.y)).then_with(|| {
             let name_a = a.name();
             let name_b = b.name();
             name_a.cmp(&name_b)
-        } else {
-            result
-        }
+        })
     });
     screens
 }
@@ -1638,6 +1264,7 @@ fn screens_match(a: &MonitorHandle, b: &MonitorHandle) -> bool {
     }
 }
 
+// XXX: What does this do that's different from `collect_sorted_screens`?
 fn collect_screens_from_any_window(
     windows: &bevy::winit::WinitWindows,
 ) -> Option<Vec<MonitorHandle>> {
@@ -1672,18 +1299,11 @@ fn fix_visibility_hierarchy(
 }
 
 fn record_window_rect_from_window(
-    state: &mut tiles::SecondaryWindowState,
+    state: &mut tiles::WindowState,
     window: &WinitWindow,
     screens: &[MonitorHandle],
     forced_position: Option<PhysicalPosition<i32>>,
 ) {
-    if state.is_metadata_capture_blocked() {
-        return;
-    }
-    if state.skip_metadata_capture {
-        state.skip_metadata_capture = false;
-        return;
-    }
     let size = window.outer_size();
     if size.width == 0 || size.height == 0 {
         return;
@@ -1734,7 +1354,7 @@ fn event_position_is_reliable(
 }
 
 fn window_on_target_screen(
-    state: &mut tiles::SecondaryWindowState,
+    state: &mut tiles::WindowState,
     window: &WinitWindow,
     screens: &[MonitorHandle],
 ) -> bool {
@@ -1808,154 +1428,28 @@ fn detect_window_screen(window: &WinitWindow, screens: &[MonitorHandle]) -> Opti
         })
 }
 
-fn secondary_graph_order_base(id: tiles::SecondaryWindowId) -> isize {
+fn secondary_graph_order_base(id: tiles::WindowId) -> isize {
     SECONDARY_GRAPH_ORDER_BASE + SECONDARY_GRAPH_ORDER_STRIDE * id.0 as isize
 }
 
-fn capture_primary_window_layout(
-    mut windows: ResMut<tiles::WindowManager>,
-    primary_query: Query<(Entity, &Window), With<PrimaryWindow>>,
-    winit_windows: NonSend<bevy::winit::WinitWindows>,
-    screens: Query<(Entity, &Monitor)>,
-) {
-    #[allow(deprecated)]
-    let Ok((primary_entity, primary_window_component)) = primary_query.get_single() else {
-        return;
-    };
-    let Some(window) = winit_windows.get_window(primary_entity) else {
-        return;
-    };
-    let layout = windows.primary_layout_mut();
-    if !matches!(
-        layout.relayout_phase,
-        tiles::PrimaryWindowRelayoutPhase::Idle
-    ) {
-        return;
-    }
-
-    let screens_sorted = collect_sorted_screens(window);
-    let mut captured = false;
-    if let Ok(outer_pos) = window.outer_position() {
-        let outer_size = window.outer_size();
-        let screen_index = window
-            .current_monitor()
-            .as_ref()
-            .and_then(|current| {
-                screens_sorted
-                    .iter()
-                    .position(|screen| screens_match(screen, current))
-            })
-            .or_else(|| tiles::screen_index_from_bounds(outer_pos, outer_size, &screens_sorted));
-        if let Some(idx) = screen_index {
-            layout.captured_screen = Some(idx);
-            layout.requested_screen = Some(idx);
-            if let Some(screen_handle) = screens_sorted.get(idx) {
-                let screen_pos = screen_handle.position();
-                let screen_size = screen_handle.size();
-                if let Some(rect) = tiles::rect_from_bounds(
-                    (outer_pos.x, outer_pos.y),
-                    (outer_size.width, outer_size.height),
-                    (screen_pos.x, screen_pos.y),
-                    (screen_size.width, screen_size.height),
-                ) {
-                    layout.captured_rect = Some(rect);
-                    layout.requested_rect = Some(rect);
-                    captured = true;
-                }
-            }
-        }
-    }
-
-    if !captured {
-        let fallback_pos = match primary_window_component.position {
-            WindowPosition::At(pos) => pos,
-            WindowPosition::Centered(_) | WindowPosition::Automatic => IVec2::ZERO,
-        };
-        let fallback_size = primary_window_component.resolution.physical_size();
-
-        let mut best: Option<(usize, i32)> = None;
-        let mut best_bounds: Option<(IVec2, UVec2)> = None;
-        for (index, (_, screen)) in screens.iter().enumerate() {
-            let min = screen.physical_position;
-            let size = screen.physical_size();
-            let max = IVec2::new(min.x + size.x as i32, min.y + size.y as i32);
-            if fallback_pos.x >= min.x
-                && fallback_pos.x < max.x
-                && fallback_pos.y >= min.y
-                && fallback_pos.y < max.y
-            {
-                let distance = (fallback_pos.x - min.x).abs() + (fallback_pos.y - min.y).abs();
-                if best.map(|(_, d)| distance < d).unwrap_or(true) {
-                    best = Some((index, distance));
-                    best_bounds = Some((min, size));
-                }
-            }
-        }
-
-        if let Some((index, _)) = best {
-            layout.captured_screen = Some(index);
-            layout.requested_screen = Some(index);
-            if let Some((screen_pos, screen_size)) = best_bounds
-                && let Some(rect) = tiles::rect_from_bounds(
-                    (fallback_pos.x, fallback_pos.y),
-                    (fallback_size.x, fallback_size.y),
-                    (screen_pos.x, screen_pos.y),
-                    (screen_size.x, screen_size.y),
-                )
-            {
-                layout.captured_rect = Some(rect);
-                layout.requested_rect = Some(rect);
-            }
-        }
-    }
-}
-
-fn handle_secondary_close(
+fn handle_window_close(
     mut events: EventReader<WindowCloseRequested>,
-    mut windows: ResMut<tiles::WindowManager>,
-    window_query: Query<(Entity, &Window)>,
-    screens: Query<(Entity, &Monitor)>,
-) {
-    let mut to_remove = Vec::new();
-    for evt in events.read() {
-        if let Some(id) = windows.find_secondary_by_entity(evt.window) {
-            to_remove.push(id);
-        }
-    }
-
-    if !to_remove.is_empty() {
-        windows.secondary_mut().retain_mut(|state| {
-            let keep = !to_remove.contains(&state.id);
-            if !keep
-                && let Some((_, window)) = state
-                    .window_entity
-                    .and_then(|entity| window_query.get(entity).ok())
-            {
-                state.update_descriptor_from_window(window, &screens);
-            }
-            keep
-        });
-    }
-}
-
-fn handle_primary_close(
-    mut events: EventReader<WindowCloseRequested>,
-    primary: Query<Entity, With<PrimaryWindow>>,
+    primary: Query<&WindowId, With<PrimaryWindow>>,
     mut exit: EventWriter<AppExit>,
 ) {
-    let Some(primary_entity) = primary.iter().next() else {
-        return;
-    };
-
     for evt in events.read() {
         let entity = evt.window;
-        if entity == primary_entity {
+        if primary
+            .get(entity)
+            .map(|window_id| window_id.is_primary())
+            .unwrap_or(false)
+        {
             exit.write(AppExit::Success);
         }
     }
 }
 
-fn secondary_window_container_title(state: &tiles::SecondaryWindowState) -> Option<String> {
+fn secondary_window_container_title(state: &tiles::WindowState) -> Option<String> {
     let root = state.tile_state.tree.root()?;
     find_named_container_title(
         &state.tile_state.tree,
@@ -2040,63 +1534,7 @@ fn friendly_title_from_stem(stem: &str) -> Option<String> {
     }
 }
 
-fn render_secondary_windows(world: &mut World) {
-    let window_entries: Vec<(tiles::SecondaryWindowId, Entity, String)> = {
-        let windows = world.resource::<tiles::WindowManager>();
-        windows
-            .secondary()
-            .iter()
-            .filter_map(|state| {
-                state
-                    .window_entity
-                    .map(|entity| (state.id, entity, compute_secondary_window_title(state)))
-            })
-            .collect()
-    };
-
-    if let Some(mut palette_state) = world.get_resource_mut::<CommandPaletteState>()
-        && let Some(target) = palette_state.target_window
-        && !window_entries.iter().any(|(id, _, _)| *id == target)
-    {
-        palette_state.target_window = None;
-        if palette_state.auto_open_item.is_none() {
-            palette_state.show = false;
-            palette_state.filter.clear();
-            palette_state.page_stack.clear();
-        }
-    }
-
-    for (id, entity, desired_title) in window_entries {
-        let Ok(mut entity_mut) = world.get_entity_mut(entity) else {
-            continue;
-        };
-
-        if let Some(mut window) = entity_mut.get_mut::<Window>()
-            && window.title != desired_title
-        {
-            window.title = desired_title;
-        }
-
-        entity_mut.insert(ActiveSecondaryWindow);
-
-        let widget_id = format!("secondary_window_{}", id.0);
-        world.add_root_widget_with::<tiles::TileSystem, With<ActiveSecondaryWindow>>(
-            &widget_id,
-            Some(id),
-        );
-        let palette_widget_id = format!("secondary_command_palette_{}", id.0);
-        world.add_root_widget_with::<command_palette::PaletteWindow, With<ActiveSecondaryWindow>>(
-            &palette_widget_id,
-            Some(id),
-        );
-
-        if let Ok(mut entity_mut) = world.get_entity_mut(entity) {
-            entity_mut.remove::<ActiveSecondaryWindow>();
-        }
-    }
-}
-
-pub(crate) fn compute_secondary_window_title(state: &tiles::SecondaryWindowState) -> String {
+pub(crate) fn compute_secondary_window_title(state: &tiles::WindowState) -> String {
     state
         .descriptor
         .title
@@ -2106,7 +1544,8 @@ pub(crate) fn compute_secondary_window_title(state: &tiles::SecondaryWindowState
             state
                 .descriptor
                 .path
-                .file_stem()
+                .as_ref()
+                .and_then(|p| p.file_stem())
                 .and_then(|s| friendly_title_from_stem(&s.to_string_lossy()))
         })
         .filter(|title| !title.is_empty())
@@ -2146,23 +1585,26 @@ fn set_camera_viewport(
         (Entity, &ViewportRect, Option<&GraphState>, &mut Camera),
         With<MainCamera>,
     >,
+    mut entries: Local<Vec<(Entity, bool)>>,
 ) {
     let order_offset = PRIMARY_ORDER_OFFSET;
     let mut next_viewport_order = PRIMARY_VIEWPORT_ORDER_BASE;
     let mut next_graph_order = PRIMARY_GRAPH_ORDER_BASE;
-    let mut entries: Vec<_> = main_camera_query
-        .iter()
-        .map(|(entity, _, graph_state, _)| (entity, graph_state.is_some()))
-        .collect();
+    entries.clear();
+    entries.extend(
+        main_camera_query
+            .iter()
+            .map(|(entity, _, graph_state, _)| (entity, graph_state.is_some())),
+    );
     // Stable ordering: non-graph cameras first, then graphs; break ties by entity id.
     entries.sort_by_key(|(entity, is_graph)| (*is_graph, entity.index()));
 
-    for (entity, is_graph) in entries {
-        let Ok((_, viewport_rect, _graph_state, mut camera)) = main_camera_query.get_mut(entity)
+    for (entity, is_graph) in &entries {
+        let Ok((_, viewport_rect, _graph_state, mut camera)) = main_camera_query.get_mut(*entity)
         else {
             continue;
         };
-        let order = if is_graph {
+        let order = if *is_graph {
             let order = next_graph_order;
             next_graph_order += 1;
             order
@@ -2191,10 +1633,7 @@ fn set_camera_viewport(
         let viewport_size = available_rect.size() * scale_factor;
         let viewport_pos = Vec2::new(viewport_pos.x, viewport_pos.y);
         let viewport_size = Vec2::new(viewport_size.x, viewport_size.y);
-        let window_size = Vec2::new(
-            window.physical_width() as f32,
-            window.physical_height() as f32,
-        );
+        let window_size: Vec2 = window.physical_size().as_vec2();
         if let Some((clamped_pos, clamped_size)) =
             clamp_viewport_to_window(viewport_pos, viewport_size, window_size)
         {
@@ -2215,18 +1654,19 @@ fn set_camera_viewport(
 }
 
 fn set_secondary_camera_viewport(
-    windows: Res<tiles::WindowManager>,
     mut cameras: Query<(&mut Camera, &ViewportRect, Option<&NavGizmoCamera>)>,
-    window_query: Query<(&Window, &bevy_egui::EguiContextSettings)>,
+    window_query: Query<(
+        Entity,
+        &Window,
+        &tiles::WindowId,
+        &tiles::WindowState,
+        &bevy_egui::EguiContextSettings,
+    )>,
 ) {
-    for state in windows.secondary() {
-        let Some(window_entity) = state.window_entity else {
+    for (_window_entity, window, id, state, egui_settings) in &window_query {
+        if id.is_primary() {
             continue;
-        };
-
-        let Ok((window, egui_settings)) = window_query.get(window_entity) else {
-            continue;
-        };
+        }
         let scale_factor = window.scale_factor() * egui_settings.scale_factor;
 
         let mut next_order = 0;
@@ -2275,7 +1715,7 @@ fn set_secondary_camera_viewport(
                 camera.is_active = true;
                 // Offset secondary cameras to avoid colliding with primary orders.
                 let base_order =
-                    SECONDARY_GRAPH_ORDER_BASE + SECONDARY_GRAPH_ORDER_STRIDE * state.id.0 as isize;
+                    SECONDARY_GRAPH_ORDER_BASE + SECONDARY_GRAPH_ORDER_STRIDE * id.0 as isize;
                 let offset = base_order + next_order;
                 next_order += 1;
                 camera.order = offset;
@@ -2297,7 +1737,7 @@ fn set_secondary_camera_viewport(
 }
 
 fn set_nav_gizmo_camera_orders(
-    windows: Res<tiles::WindowManager>,
+    states: Query<(Entity, &tiles::WindowState, &tiles::WindowId)>,
     primary_query: Query<Entity, With<PrimaryWindow>>,
     mut cameras: Query<&mut Camera, With<NavGizmoCamera>>,
 ) {
@@ -2310,13 +1750,11 @@ fn set_nav_gizmo_camera_orders(
         );
     }
 
-    for state in windows.secondary() {
-        if let Some(window_entity) = state.window_entity {
-            let base = SECONDARY_GRAPH_ORDER_BASE
-                + SECONDARY_GRAPH_ORDER_STRIDE * state.id.0 as isize
-                + NAV_GIZMO_ORDER_OFFSET;
-            base_by_window.insert(window_entity, base);
-        }
+    for (window_entity, _state, id) in &states {
+        let base = SECONDARY_GRAPH_ORDER_BASE
+            + SECONDARY_GRAPH_ORDER_STRIDE * id.0 as isize
+            + NAV_GIZMO_ORDER_OFFSET;
+        base_by_window.insert(window_entity, base);
     }
 
     for mut camera in cameras.iter_mut() {
@@ -2383,7 +1821,7 @@ fn sync_camera_grid_cell(
         }
     }
 }
-fn sync_hdr(hdr_enabled: ResMut<HdrEnabled>, mut query: Query<&mut Camera>) {
+fn sync_hdr(hdr_enabled: Res<HdrEnabled>, mut query: Query<&mut Camera>) {
     for mut cam in query.iter_mut() {
         cam.hdr = hdr_enabled.0;
     }

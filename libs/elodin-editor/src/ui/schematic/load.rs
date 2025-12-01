@@ -1,4 +1,5 @@
-use bevy::{ecs::system::SystemParam, prelude::*};
+use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
+use bevy_defer::{AsyncCommandsExtension, AsyncWorld};
 use bevy_egui::egui::{Color32, Id};
 use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::{Container, Tile, TileId};
@@ -26,7 +27,7 @@ use crate::{
     object_3d::Object3DState,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        DEFAULT_SECONDARY_RECT, HdrEnabled, SelectedObject,
+        DEFAULT_SECONDARY_RECT, HdrEnabled, SelectedObject, WindowRelayout,
         colors::{self, EColor},
         dashboard::{NodeUpdaterParams, spawn_dashboard},
         modal::ModalDialog,
@@ -35,8 +36,8 @@ use crate::{
         query_plot::QueryPlotData,
         schematic::EqlExt,
         tiles::{
-            DashboardPane, GraphPane, Pane, SecondaryWindowDescriptor, SecondaryWindowId,
-            SecondaryWindowState, TileState, TreePane, ViewportPane, WindowManager,
+            DashboardPane, GraphPane, Pane, TileState, TreePane, ViewportPane, WindowDescriptor,
+            WindowId, WindowState,
         },
     },
     vector_arrow::VectorArrowState,
@@ -45,7 +46,7 @@ use crate::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PanelContext {
     Main,
-    Secondary(SecondaryWindowId),
+    Secondary(WindowId),
 }
 
 #[derive(Component)]
@@ -54,7 +55,7 @@ pub struct SyncedViewport;
 #[derive(SystemParam)]
 pub struct LoadSchematicParams<'w, 's> {
     pub commands: Commands<'w, 's>,
-    pub windows: ResMut<'w, WindowManager>,
+    primary_window: Single<'w, Entity, With<PrimaryWindow>>,
     pub asset_server: Res<'w, AssetServer>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub materials: ResMut<'w, Assets<StandardMaterial>>,
@@ -68,6 +69,7 @@ pub struct LoadSchematicParams<'w, 's> {
     objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
     vector_arrows: Query<'w, 's, Entity, With<VectorArrowState>>,
     grid_lines: Query<'w, 's, Entity, With<InfiniteGrid>>,
+    window_states: Query<'w, 's, (Entity, &'static WindowId, &'static mut WindowState)>,
 }
 
 pub fn sync_schematic(
@@ -109,7 +111,7 @@ pub fn sync_schematic(
 fn resolve_window_descriptor(
     window: &WindowSchematic,
     base_dir: Option<&Path>,
-) -> Option<SecondaryWindowDescriptor> {
+) -> Option<WindowDescriptor> {
     let path_str = window.path.as_ref()?;
     let mut resolved = PathBuf::from(path_str);
 
@@ -121,8 +123,8 @@ fn resolve_window_descriptor(
         }
     }
 
-    Some(SecondaryWindowDescriptor {
-        path: resolved,
+    Some(WindowDescriptor {
+        path: Some(resolved),
         title: window.title.clone(),
         screen: window.screen.map(|idx| idx as usize),
         screen_rect: window.screen_rect.or(Some(DEFAULT_SECONDARY_RECT)),
@@ -192,15 +194,27 @@ pub fn load_schematic_file(
 impl LoadSchematicParams<'_, '_> {
     pub fn load_schematic(&mut self, schematic: &Schematic, base_dir: Option<&Path>) {
         self.render_layer_alloc.free_all();
-        for secondary in self.windows.take_secondary() {
-            for graph in secondary.graph_entities {
-                self.commands.entity(graph).despawn();
+        for (id, window_id, window_state) in &self.window_states {
+            if window_id.is_primary() {
+                // We do not despawn the primary window ever.
+                continue;
             }
-            if let Some(entity) = secondary.window_entity {
-                self.commands.entity(entity).despawn();
+            // for secondary in self.windows.take_secondary() {
+            for graph in window_state.graph_entities.iter() {
+                self.commands.entity(*graph).despawn();
             }
+            self.commands.entity(id).despawn();
         }
-        let mut main_state = self.windows.take_main();
+
+        let primary_window = *self.primary_window;
+        let mut main_state = {
+            let mut window_state = self
+                .window_states
+                .get_mut(primary_window)
+                .expect("no primary window")
+                .2;
+            std::mem::take(&mut window_state.tile_state)
+        };
         main_state.clear(&mut self.commands, &mut self.selected_object);
         self.hdr_enabled.0 = false;
         for entity in self.objects_3d.iter() {
@@ -213,8 +227,8 @@ impl LoadSchematicParams<'_, '_> {
         for entity in self.grid_lines.iter() {
             self.commands.entity(entity).despawn();
         }
-        self.windows.clear_primary_layout();
-        let mut secondary_descriptors: Vec<SecondaryWindowDescriptor> = Vec::new();
+        let mut secondary_descriptors: Vec<WindowDescriptor> = Vec::new();
+        let mut main_window_descriptor = None;
 
         for elem in &schematic.elems {
             match elem {
@@ -234,89 +248,114 @@ impl LoadSchematicParams<'_, '_> {
                     if let Some(descriptor) = resolve_window_descriptor(window, base_dir) {
                         secondary_descriptors.push(descriptor);
                     } else {
-                        let layout = self.windows.primary_layout_mut();
-                        layout.set(window.screen.map(|idx| idx as usize), window.screen_rect);
+                        main_window_descriptor = Some(WindowDescriptor {
+                            screen: window.screen.map(|idx| idx as usize),
+                            screen_rect: window.screen_rect,
+                            ..default()
+                        });
                     }
                 }
             }
         }
 
-        self.windows.replace_main(main_state);
+        {
+            let mut window_state = self
+                .window_states
+                .get_mut(*self.primary_window)
+                .expect("no primary window")
+                .2;
+            if let Some(d) = main_window_descriptor {
+                window_state.descriptor.screen = d.screen;
+                window_state.descriptor.screen_rect = d.screen_rect;
+            }
+            let _ = std::mem::replace(&mut window_state.tile_state, main_state);
+            // Resize if necessary.
+            //
+            if let Some(screen) = window_state.descriptor.screen.as_ref() {
+                self.commands.send_event(WindowRelayout::Screen {
+                    window: primary_window,
+                    screen: *screen,
+                });
+            }
 
-        let mut secondary_states = Vec::new();
+            if let Some(rect) = window_state.descriptor.screen_rect.as_ref() {
+                self.commands.send_event(WindowRelayout::Rect {
+                    window: primary_window,
+                    rect: *rect,
+                });
+            }
+        }
 
         for descriptor in secondary_descriptors {
-            match std::fs::read_to_string(&descriptor.path) {
-                Ok(kdl) => match impeller2_wkt::Schematic::from_kdl(&kdl) {
-                    Ok(sec_schematic) => {
-                        let id = self.windows.alloc_id();
-                        let mut tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
-                        for elem in &sec_schematic.elems {
-                            if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
-                                self.spawn_panel(
-                                    &mut tile_state,
-                                    panel,
-                                    None,
-                                    PanelContext::Secondary(id),
-                                );
+            if let Some(path) = descriptor.path.as_ref() {
+                match std::fs::read_to_string(path) {
+                    Ok(kdl) => match impeller2_wkt::Schematic::from_kdl(&kdl) {
+                        Ok(sec_schematic) => {
+                            let id = WindowId::default();
+                            let mut tile_state =
+                                TileState::new(Id::new(("secondary_tab_tree", id.0)));
+                            for elem in &sec_schematic.elems {
+                                if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
+                                    self.spawn_panel(
+                                        &mut tile_state,
+                                        panel,
+                                        None,
+                                        PanelContext::Secondary(id),
+                                    );
+                                }
                             }
-                        }
 
-                        let graph_entities = tile_state.collect_graph_entities();
-                        info!(
-                            path = %descriptor.path.display(),
-                            "Loaded secondary schematic"
-                        );
+                            let graph_entities = tile_state.collect_graph_entities();
+                            info!(
+                                path = ?descriptor.path,
+                                "Loaded secondary schematic"
+                            );
 
-                        for &graph in &graph_entities {
-                            if let Ok(mut camera) = self.cameras.get_mut(graph) {
-                                camera.is_active = false;
+                            for &graph in &graph_entities {
+                                if let Ok(mut camera) = self.cameras.get_mut(graph) {
+                                    // Why do we turn their cameras off?
+                                    // Oh, so we can set their `WindowRef` first.
+                                    camera.is_active = false;
+                                }
                             }
-                        }
 
-                        let relayout_phase =
-                            SecondaryWindowState::relayout_phase_from_descriptor(&descriptor);
-                        let mut state = SecondaryWindowState {
-                            id,
-                            descriptor,
-                            tile_state,
-                            window_entity: None,
-                            graph_entities,
-                            applied_screen: None,
-                            applied_rect: None,
-                            relayout_phase,
-                            relayout_attempts: 0,
-                            relayout_started_at: None,
-                            awaiting_screen_confirmation: false,
-                            skip_metadata_capture: true,
-                            metadata_capture_blocked_until: None,
-                        };
-                        if state.descriptor.screen_rect.is_some() {
-                            state.extend_metadata_capture_block(SECONDARY_RECT_CAPTURE_LOAD_GUARD);
+                            let state = WindowState {
+                                descriptor,
+                                tile_state,
+                                graph_entities,
+                            };
+                            if state.descriptor.screen_rect.is_some() {
+                                self.commands.spawn_task(|| async move {
+                                    // Wait a bit then capture the window descriptor.
+                                    AsyncWorld.sleep(SECONDARY_RECT_CAPTURE_LOAD_GUARD).await;
+                                    AsyncWorld.send_event(
+                                        crate::ui::tiles::WindowRelayout::UpdateDescriptors,
+                                    )?;
+                                    Ok(())
+                                });
+                            }
+                            self.commands.spawn((id, state));
                         }
-                        secondary_states.push(state);
-                    }
+                        Err(err) => {
+                            let diag = render_diag(&err);
+                            let report = miette!(err.clone());
+                            warn!(
+                                ?report,
+                                path = ?descriptor.path,
+                                "Failed to parse secondary schematic: \n{diag}"
+                            );
+                        }
+                    },
                     Err(err) => {
-                        let diag = render_diag(&err);
-                        let report = miette!(err.clone());
                         warn!(
-                            ?report,
-                            path = %descriptor.path.display(),
-                            "Failed to parse secondary schematic: \n{diag}"
+                            ?err,
+                            path = ?descriptor.path,
+                            "Failed to read secondary schematic"
                         );
                     }
-                },
-                Err(err) => {
-                    warn!(
-                        ?err,
-                        path = %descriptor.path.display(),
-                        "Failed to read secondary schematic"
-                    );
                 }
             }
         }
-
-        self.windows.replace_secondary(secondary_states);
     }
 
     pub fn spawn_object_3d(&mut self, object_3d: Object3D) {
@@ -446,12 +485,15 @@ impl LoadSchematicParams<'_, '_> {
                     .inspect_err(|err| {
                         let (ctx, path) = match context {
                             PanelContext::Main => ("main".to_string(), None),
-                            PanelContext::Secondary(id) => {
+                            PanelContext::Secondary(target_id) => {
                                 let path = self
-                                    .windows
-                                    .get_secondary(id)
-                                    .map(|s| s.descriptor.path.display().to_string());
-                                (format!("secondary({})", id.0), path)
+                                    .window_states
+                                    .iter()
+                                    .find(|(_entity, id, _state)| **id == target_id)
+                                    .and_then(|(_, _, s)| {
+                                        s.descriptor.path.as_ref().map(|p| p.display().to_string())
+                                    });
+                                (format!("secondary({})", target_id.0), path)
                             }
                         };
                         if let Some(p) = path {
