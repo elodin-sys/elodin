@@ -53,6 +53,7 @@ const DEFAULT_PRESENT_MODE: PresentMode = PresentMode::Fifo;
 
 #[cfg(target_os = "linux")]
 mod platform {
+    use std::time::Duration;
     pub const LINUX_MULTI_WINDOW: bool = true;
     pub const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(2000);
     pub const PRIMARY_ORDER_OFFSET: isize = 0;
