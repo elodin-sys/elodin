@@ -21,7 +21,6 @@ use std::{
 
 use crate::{
     VERSION, dirs,
-    tiles::{TileState, WindowDescriptor, WindowState},
     ui::DEFAULT_PRESENT_MODE,
 };
 

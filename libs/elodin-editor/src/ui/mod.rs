@@ -38,7 +38,6 @@ pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
     width: 80,
     height: 80,
 };
-const SCREEN_RELAYOUT_MAX_ATTEMPTS: u8 = 5;
 const SECONDARY_RECT_CAPTURE_LOAD_GUARD: Duration = Duration::from_millis(2500);
 // Order ranges:
 // 0          -> UI/egui (Bevy default)
@@ -54,7 +53,6 @@ const DEFAULT_PRESENT_MODE: PresentMode = PresentMode::Fifo;
 
 #[cfg(target_os = "linux")]
 mod platform {
-    use super::*;
     pub const LINUX_MULTI_WINDOW: bool = true;
     pub const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(2000);
     pub const PRIMARY_ORDER_OFFSET: isize = 0;
@@ -62,13 +60,11 @@ mod platform {
 
 #[cfg(not(target_os = "linux"))]
 mod platform {
-    use super::*;
     pub const LINUX_MULTI_WINDOW: bool = false;
-    pub const SCREEN_RELAYOUT_TIMEOUT: Duration = Duration::from_millis(3500);
     pub const PRIMARY_ORDER_OFFSET: isize = 1000;
 }
 
-use platform::{LINUX_MULTI_WINDOW, PRIMARY_ORDER_OFFSET, SCREEN_RELAYOUT_TIMEOUT};
+use platform::{LINUX_MULTI_WINDOW, PRIMARY_ORDER_OFFSET};
 
 use big_space::{GridCell, precision::GridPrecision};
 use plot_3d::LinePlot3dPlugin;
@@ -643,11 +639,8 @@ pub fn render_layout(
         world
             .query::<(Entity, &WindowId)>()
             .iter(world)
-            .map(|(id, window_id)| (id, window_id.clone())),
+            .map(|(id, window_id)| (id, *window_id)),
     );
-    let palette_window = world
-        .get_resource_mut::<CommandPaletteState>()
-        .and_then(|palette_state| palette_state.target_window.clone());
     for (id, window_id) in windows.drain(..) {
         if window_id.is_primary() {
             world.add_root_widget_to::<MainLayout>(id, "main_layout", ());
@@ -799,14 +792,14 @@ fn sync_windows(
         if let Some(screen) = state.descriptor.screen.as_ref() {
             commands.send_event(WindowRelayout::Screen {
                 window: window_entity,
-                screen: screen.clone(),
+                screen: *screen,
             });
         }
 
         if let Some(rect) = state.descriptor.screen_rect.as_ref() {
             commands.send_event(WindowRelayout::Rect {
                 window: window_entity,
-                rect: rect.clone(),
+                rect: *rect,
             });
         }
         existing_map.insert(*marker, window_entity);
@@ -861,11 +854,10 @@ async fn wait_for_window_to_change_screens(
             };
 
             let screens = collect_sorted_screens(window);
-            if let Some(screen) = detect_window_screen(window, &screens) {
-                if screen == target_screen {
+            if let Some(screen) = detect_window_screen(window, &screens)
+                && screen == target_screen {
                     return Some(true);
                 }
-            }
             None
         }) {
             Ok(Some(result)) => {
@@ -945,7 +937,7 @@ async fn apply_window_screen(entity: Entity, screen: usize) -> Result<(), bevy_d
         // We can't do this await with the `winit_windows_async.get(|| {...})` block.
         let success =
             wait_for_window_to_change_screens(entity, 2, Duration::from_millis(1000)).await?;
-        let _ = winit_windows_async.get(|winit_windows| {
+        winit_windows_async.get(|winit_windows| {
             let Some(window) = winit_windows.get_window(entity) else {
                 error!(%entity, "No winit window in apply screen");
                 return;
@@ -1237,7 +1229,7 @@ fn track_window_geometry(
     }
 
     for (entity, forced_position) in touched.drain() {
-        let Ok((_window, id, mut state)) = windows_state.get_mut(entity) else {
+        let Ok((_window, _id, mut state)) = windows_state.get_mut(entity) else {
             continue;
         };
         let Some(window) = winit_windows.get_window(entity) else {
@@ -1671,7 +1663,7 @@ fn set_secondary_camera_viewport(
         &bevy_egui::EguiContextSettings,
     )>,
 ) {
-    for (window_entity, window, id, state, egui_settings) in &window_query {
+    for (_window_entity, window, id, state, egui_settings) in &window_query {
         if id.is_primary() {
             continue;
         }
@@ -1758,7 +1750,7 @@ fn set_nav_gizmo_camera_orders(
         );
     }
 
-    for (window_entity, state, id) in &states {
+    for (window_entity, _state, id) in &states {
         let base = SECONDARY_GRAPH_ORDER_BASE
             + SECONDARY_GRAPH_ORDER_STRIDE * id.0 as isize
             + NAV_GIZMO_ORDER_OFFSET;

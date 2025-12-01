@@ -222,7 +222,7 @@ impl SchematicParam<'_, '_> {
 }
 
 pub fn tiles_to_schematic(
-    mut param: SchematicParam,
+    param: SchematicParam,
     mut schematic: ResMut<CurrentSchematic>,
     mut secondary: ResMut<CurrentSecondarySchematics>,
 ) {

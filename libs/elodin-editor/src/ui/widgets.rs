@@ -112,9 +112,7 @@ impl RootWidgetSystemExt for World {
         id: Entity,
         f: impl FnOnce(&mut Self, egui::Context) -> R,
     ) -> Option<R> {
-        let Some(mut egui_ctx) = self.get_mut::<EguiContext>(id) else {
-            return None;
-        };
+        let mut egui_ctx = self.get_mut::<EguiContext>(id)?;
         let ctx = egui_ctx.get_mut().clone();
         Some(f(self, ctx))
     }

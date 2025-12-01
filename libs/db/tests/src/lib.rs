@@ -695,7 +695,7 @@ mod tests {
         // The client `send` completes when bytes are written to the socket, not
         // when the server has applied the write. Poll the DB briefly until the
         // late write becomes visible, then assert.
-        let mut latest_seen = f64::NAN;
+        let mut latest_seen;
         let start = std::time::Instant::now();
         let timeout = Duration::from_millis(500);
         loop {

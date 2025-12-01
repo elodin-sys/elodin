@@ -274,14 +274,14 @@ impl LoadSchematicParams<'_, '_> {
             if let Some(screen) = window_state.descriptor.screen.as_ref() {
                 self.commands.send_event(WindowRelayout::Screen {
                     window: primary_window,
-                    screen: screen.clone(),
+                    screen: *screen,
                 });
             }
 
             if let Some(rect) = window_state.descriptor.screen_rect.as_ref() {
                 self.commands.send_event(WindowRelayout::Rect {
                     window: primary_window,
-                    rect: rect.clone(),
+                    rect: *rect,
                 });
             }
         }

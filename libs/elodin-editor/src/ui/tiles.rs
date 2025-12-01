@@ -1,9 +1,6 @@
 use bevy::{
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
-    ecs::{
-        component::HookContext,
-        system::{SystemParam, SystemState},
-    },
+    ecs::system::{SystemParam, SystemState},
     input::keyboard::Key,
     log::info,
     prelude::*,
@@ -27,7 +24,6 @@ use std::{
     fmt::Write as _,
     path::PathBuf,
     sync::atomic::{AtomicU32, Ordering},
-    time::Instant,
 };
 use winit::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -1668,8 +1664,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
             window,
             read_only,
         } = args;
-
-        let icons = icons;
 
         let (tree, mut tree_actions) = {
             let (tab_diffs, container_titles, mut tree) = {

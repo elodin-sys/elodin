@@ -253,7 +253,6 @@ const PRESETS_LABEL: &str = "Presets";
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct TileParam<'w, 's> {
-    windows_id: Query<'w, 's, (Entity, &'static tiles::WindowId)>,
     windows_state: Query<'w, 's, &'static mut tiles::WindowState>,
     primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
 }
