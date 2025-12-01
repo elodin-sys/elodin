@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use bevy::{
@@ -74,7 +75,7 @@ use self::{command_palette::CommandPaletteState, plot::GraphState, timeline::tim
 use impeller2::types::ComponentId;
 use impeller2_bevy::ComponentValueMap;
 use impeller2_wkt::{
-    ComponentMetadata, ComponentValue, ComponentValue as WktComponentValue, VectorArrow3d,
+    ComponentMetadata, ComponentValue, ComponentValue as WktComponentValue, DbConfig, VectorArrow3d,
     WindowRect,
 };
 
@@ -1284,6 +1285,17 @@ fn fix_visibility_hierarchy(
             commands
                 .entity(parent_entity)
                 .insert(GlobalTransform::default());
+        }
+    }
+}
+
+pub(crate) fn update_primary_descriptor_path(db_config: Res<DbConfig>, mut q: Query<(&tiles::WindowId, &mut tiles::WindowState)>) {
+    let Some(path) = db_config.schematic_path() else {
+        return;
+    };
+    for (id, mut state) in q.iter_mut() {
+        if id.is_primary() {
+            state.descriptor.path = Some(PathBuf::from(path));
         }
     }
 }
