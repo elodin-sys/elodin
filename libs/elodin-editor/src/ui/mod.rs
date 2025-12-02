@@ -961,12 +961,8 @@ async fn apply_window_screen(entity: Entity, screen: usize) -> Result<(), bevy_d
     }
     #[cfg(target_os = "macos")]
     {
-        wait_for_window_settled_macos(
-            entity,
-            state.descriptor.screen,
-            Duration::from_millis(1000),
-        )
-        .await?;
+        wait_for_window_settled_macos(entity, state.descriptor.screen, Duration::from_millis(1000))
+            .await?;
     }
     Ok(())
 }
@@ -1021,12 +1017,8 @@ async fn apply_window_rect(
     if let Some(screen_idx) = state.descriptor.screen {
         // Allow fullscreen hops to complete before sizing/positioning.
         AsyncWorld.sleep(Duration::from_millis(2000)).await;
-        wait_for_window_settled_macos(
-            entity,
-            Some(screen_idx),
-            Duration::from_millis(1000),
-        )
-        .await?;
+        wait_for_window_settled_macos(entity, Some(screen_idx), Duration::from_millis(1000))
+            .await?;
     }
 
     let start = Instant::now();
