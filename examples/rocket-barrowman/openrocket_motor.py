@@ -4,7 +4,7 @@ Handles motor mass changes during burn, including propellant consumption.
 """
 
 from dataclasses import dataclass
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 import numpy as np
 
 

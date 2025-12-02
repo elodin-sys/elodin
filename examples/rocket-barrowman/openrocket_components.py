@@ -3,8 +3,8 @@ Complete OpenRocket component system reimplemented in Python.
 Matches OpenRocket's component hierarchy and mass/aerodynamic calculations exactly.
 """
 
-from dataclasses import dataclass, field
-from typing import Optional, List, Tuple, Dict
+from dataclasses import dataclass
+from typing import Optional, List
 from enum import Enum
 import math
 

@@ -30,7 +30,6 @@ def visualize_rocket_3d(config: Dict[str, Any], motor: Optional[Dict] = None) ->
     fin_tip_chord = config.get("fin_tip_chord", 0.06)
     fin_span = config.get("fin_span", 0.11)
     fin_sweep = config.get("fin_sweep", 0.06)
-    fin_thickness = config.get("fin_thickness", 0.005)
 
     # Motor dimensions
     motor_length = motor.get("length", 0.64) if motor else 0.64
@@ -38,7 +37,6 @@ def visualize_rocket_3d(config: Dict[str, Any], motor: Optional[Dict] = None) ->
     motor_radius = motor_diameter / 2.0
 
     # Calculate positions
-    total_length = nose_length + body_length
     fin_start_x = nose_length + body_length - fin_root_chord
 
     # Create figure
