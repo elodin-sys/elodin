@@ -1014,6 +1014,20 @@ async fn apply_window_rect(
         LINUX_MULTI_WINDOW && rect.x == 0 && rect.y == 0 && rect.width == 100 && rect.height == 100;
 
     #[cfg(target_os = "macos")]
+    if !is_full_rect {
+        // Work in borderless mode during rect application to avoid macOS Spaces oddities.
+        winit_windows_async.get(|winit_windows| {
+            if let Some(window) = winit_windows.get_window(entity) {
+                window.set_fullscreen(None);
+                window.set_maximized(false);
+                window.set_decorations(false);
+                window.set_visible(true);
+                window.set_minimized(false);
+            }
+        })?;
+    }
+
+    #[cfg(target_os = "macos")]
     if let Some(screen_idx) = state.descriptor.screen {
         // Allow fullscreen hops to complete before sizing/positioning.
         AsyncWorld.sleep(Duration::from_millis(2000)).await;
@@ -1161,6 +1175,20 @@ async fn apply_window_rect(
                 "Applied rect"
             );
             false
+        })?;
+    }
+
+    #[cfg(target_os = "macos")]
+    if !is_full_rect {
+        // Restore decorations after applying the rect.
+        AsyncWorld.sleep(Duration::from_millis(50)).await;
+        winit_windows_async.get(|winit_windows| {
+            if let Some(window) = winit_windows.get_window(entity) {
+                window.set_fullscreen(None);
+                window.set_maximized(false);
+                window.set_decorations(true);
+                window.set_visible(true);
+            }
         })?;
     }
 
