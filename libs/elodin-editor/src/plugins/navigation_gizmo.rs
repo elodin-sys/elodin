@@ -397,15 +397,28 @@ pub fn set_camera_viewport(
             (viewport_pos.x + viewport_size.x) - (side_length + margin),
             viewport_pos.y,
         );
-        let physical_size = if main.is_active {
-            UVec2::new(side_length as u32, side_length as u32)
+        // Clamp the gizmo viewport to the actual window surface to avoid invalid wgpu viewports
+        // when the target window is smaller than the desired overlay.
+        let window_size = window.physical_size();
+        let pos_x = nav_viewport_pos.x.max(0.0) as u32;
+        let pos_y = nav_viewport_pos.y.max(0.0) as u32;
+        let max_w = window_size.x.saturating_sub(pos_x);
+        let max_h = window_size.y.saturating_sub(pos_y);
+        let (physical_size, is_active) = if main.is_active && max_w > 0 && max_h > 0 {
+            (
+                UVec2::new(
+                    side_length.min(max_w as f32) as u32,
+                    side_length.min(max_h as f32) as u32,
+                ),
+                true,
+            )
         } else {
-            UVec2::new(1, 1)
+            (UVec2::new(1, 1), false)
         };
-        nav_camera.is_active = main.is_active;
+        nav_camera.is_active = is_active;
 
         let new_viewport = Viewport {
-            physical_position: UVec2::new(nav_viewport_pos.x as u32, nav_viewport_pos.y as u32),
+            physical_position: UVec2::new(pos_x, pos_y),
             physical_size,
             depth: 0.0..1.0,
         };
