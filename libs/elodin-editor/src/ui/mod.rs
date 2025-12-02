@@ -875,7 +875,7 @@ async fn wait_for_window_settled_macos(
         ?target_screen,
         "Timed out waiting for macOS window to settle on target screen without fullscreen"
     );
-    Ok(())
+    Err(AccessError::resource::<WinitWindow>())
 }
 
 async fn apply_window_screen(entity: Entity, screen: usize) -> Result<(), bevy_defer::AccessError> {
@@ -969,28 +969,47 @@ async fn apply_window_screen(entity: Entity, screen: usize) -> Result<(), bevy_d
 fn handle_window_relayout_events(
     mut relayout_events: EventReader<WindowRelayout>,
     mut commands: Commands,
+    mut per_window: Local<HashMap<Entity, Vec<WindowRelayout>>>,
 ) {
-    for relayout_event in relayout_events.read().cloned() {
+    if relayout_events.is_empty() {
+        return;
+    }
+    per_window.clear();
+    for relayout_event in relayout_events.read() {
         match relayout_event {
-            WindowRelayout::Screen { window, screen } => {
-                info!(
-                    target_screen = screen,
-                    "Attempting secondary screen assignment"
-                );
-
-                // Let's spawn an asynchronous task instead of carrying a bunch
-                // state in our components.
-                commands.spawn_task(move || apply_window_screen(window, screen));
+            e @ WindowRelayout::Screen { window, screen: _ } => {
+                per_window.entry(*window).or_default().push(e.clone());
             }
-            WindowRelayout::Rect { window, rect } => {
-                commands.spawn_task(move || {
-                    apply_window_rect(rect, window, Duration::from_millis(1000))
-                });
+            e @ WindowRelayout::Rect { window, rect: _ } => {
+                per_window.entry(*window).or_default().push(e.clone());
             }
             WindowRelayout::UpdateDescriptors => {
                 commands.run_system_cached(capture_window_screens_oneoff);
             }
         }
+    }
+
+    for (_id, relayout_events) in per_window.drain() {
+        commands.spawn_task(move || async {
+            for relayout_event in relayout_events {
+                match relayout_event {
+                    WindowRelayout::Screen { window, screen } => {
+                        info!(
+                            target_screen = screen,
+                            "Attempting secondary screen assignment"
+                        );
+                        apply_window_screen(window, screen).await?;
+                    }
+                    WindowRelayout::Rect { window, rect } => {
+                        apply_window_rect(rect, window, Duration::from_millis(1000)).await?;
+                    }
+                    WindowRelayout::UpdateDescriptors => {
+                        unreachable!();
+                    }
+                }
+            }
+            Ok(())
+        });
     }
 }
 
@@ -1019,6 +1038,31 @@ async fn apply_window_rect(
         AsyncWorld.sleep(Duration::from_millis(2000)).await;
         wait_for_window_settled_macos(entity, Some(screen_idx), Duration::from_millis(1000))
             .await?;
+
+        // If still fullscreen or off target, skip rect.
+        let skip_rect = winit_windows_async.get(|winit_windows| {
+            if let Some(window) = winit_windows.get_window(entity) {
+                if window.fullscreen().is_some() {
+                    return true;
+                }
+                let screens = collect_sorted_screens(window);
+                let detected = detect_window_screen(window, &screens);
+                match (Some(screen_idx), detected) {
+                    (Some(t), Some(cur)) => t != cur,
+                    _ => false,
+                }
+            } else {
+                true
+            }
+        })?;
+        if skip_rect {
+            warn!(
+                window = %entity,
+                target = screen_idx,
+                "macOS: skipping rect because window still fullscreen or off target screen"
+            );
+            return Ok(());
+        }
     }
 
     let start = Instant::now();
