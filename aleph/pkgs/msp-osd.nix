@@ -1,41 +1,44 @@
 {
-  lib,
   pkgs,
-  rustPlatform,
   rustToolchain,
+  lib,
   pkg-config,
   systemd,
-}:
-rustPlatform.buildRustPackage rec {
+  ...
+}: let
   pname = "msp-osd";
-  version = "0.1.0";
+  workspaceToml = builtins.fromTOML (builtins.readFile ../../Cargo.toml);
+  version = workspaceToml.workspace.package.version;
 
-  src = ../../fsw/msp-osd;
+  common = import ./common.nix {inherit lib;};
+  src = common.src;
+in
+  pkgs.rustPlatform.buildRustPackage {
+    inherit pname version src;
 
-  cargoLock = {
-    lockFile = ../../Cargo.lock;
-    allowBuiltinFetchGit = true;
-  };
+    cargoLock = {
+      lockFile = ../../Cargo.lock;
+      allowBuiltinFetchGit = true;
+    };
 
-  nativeBuildInputs = [
-    pkg-config
-    (rustToolchain pkgs)
-  ];
+    buildAndTestSubdir = "fsw/msp-osd";
 
-  buildInputs = [
-    systemd
-  ];
+    nativeBuildInputs = [
+      pkg-config
+      (rustToolchain pkgs)
+    ];
 
-  # Use the workspace's Cargo.lock
-  postPatch = ''
-    ln -sf ${../../Cargo.lock} Cargo.lock
-  '';
+    buildInputs = [
+      systemd
+    ];
 
-  meta = with lib; {
-    description = "MSP OSD Service - MSP DisplayPort OSD for VTX";
-    homepage = "https://github.com/elodin-sys/elodin";
-    license = licenses.mit;
-    maintainers = with maintainers; [];
-    mainProgram = "msp-osd";
-  };
-}
+    doCheck = false;
+
+    meta = with lib; {
+      description = "MSP OSD Service - MSP DisplayPort OSD for VTX";
+      homepage = "https://github.com/elodin-sys/elodin";
+      license = licenses.mit;
+      maintainers = with maintainers; [];
+      mainProgram = "msp-osd";
+    };
+  }
