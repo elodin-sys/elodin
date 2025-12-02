@@ -1837,48 +1837,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         ui_state.graphs.insert(tile_id, graph_id);
                     }
                 }
-                TreeAction::AddHierarchy(parent_tile_id) => {
-                    if read_only {
-                        continue;
-                    }
-                    if let Some(tile_id) =
-                        ui_state.insert_tile(Tile::Pane(Pane::Hierarchy), parent_tile_id, true)
-                    {
-                        ui_state.tree.make_active(|id, _| id == tile_id);
-                    }
-                }
-                TreeAction::AddInspector(parent_tile_id) => {
-                    if read_only {
-                        continue;
-                    }
-                    if let Some(tile_id) =
-                        ui_state.insert_tile(Tile::Pane(Pane::Inspector), parent_tile_id, true)
-                    {
-                        ui_state.tree.make_active(|id, _| id == tile_id);
-                    }
-                }
-                TreeAction::AddSchematicTree(parent_tile_id) => {
-                    if read_only {
-                        continue;
-                    }
-                    let entity = state_mut
-                        .commands
-                        .spawn(super::schematic::tree::TreeWidgetState::default())
-                        .id();
-                    let pane = Pane::SchematicTree(TreePane { entity });
-                    if let Some(tile_id) =
-                        ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
-                    {
-                        ui_state.tree.make_active(|id, _| id == tile_id);
-                    }
-                }
-                TreeAction::AddSidebars => {
-                    if read_only {
-                        continue;
-                    }
-                    let hierarchy = ui_state.tree.tiles.insert_new(Tile::Pane(Pane::Hierarchy));
-                    let inspector = ui_state.tree.tiles.insert_new(Tile::Pane(Pane::Inspector));
-                }
                 TreeAction::AddMonitor(parent_tile_id, eql) => {
                     if read_only {
                         continue;
@@ -2014,8 +1972,11 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         .spawn(QueryPlotData::default())
                         .insert(graph_bundle)
                         .id();
-                    let pane =
-                        Pane::QueryPlot(super::query_plot::QueryPlotPane { entity, rect: None });
+                    let pane = Pane::QueryPlot(super::query_plot::QueryPlotPane {
+                        entity,
+                        rect: None,
+                        scrub_icon: None,
+                    });
                     if let Some(tile_id) =
                         ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                     {
