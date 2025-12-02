@@ -1014,20 +1014,6 @@ async fn apply_window_rect(
         LINUX_MULTI_WINDOW && rect.x == 0 && rect.y == 0 && rect.width == 100 && rect.height == 100;
 
     #[cfg(target_os = "macos")]
-    if !is_full_rect {
-        // Work in borderless mode during rect application to avoid macOS Spaces oddities.
-        winit_windows_async.get(|winit_windows| {
-            if let Some(window) = winit_windows.get_window(entity) {
-                window.set_fullscreen(None);
-                window.set_maximized(false);
-                window.set_decorations(false);
-                window.set_visible(true);
-                window.set_minimized(false);
-            }
-        })?;
-    }
-
-    #[cfg(target_os = "macos")]
     if let Some(screen_idx) = state.descriptor.screen {
         // Allow fullscreen hops to complete before sizing/positioning.
         AsyncWorld.sleep(Duration::from_millis(2000)).await;
@@ -1179,27 +1165,17 @@ async fn apply_window_rect(
     }
 
     #[cfg(target_os = "macos")]
-    if !is_full_rect {
-        // Restore decorations after applying the rect.
-        AsyncWorld.sleep(Duration::from_millis(50)).await;
-        winit_windows_async.get(|winit_windows| {
-            if let Some(window) = winit_windows.get_window(entity) {
-                window.set_fullscreen(None);
-                window.set_maximized(false);
-                window.set_decorations(true);
-                window.set_visible(true);
-            }
-        })?;
-    }
-
     if is_full_rect {
         // After layout is applied, request a maximize to keep native decorations.
         // Small delay lets the WM settle before the maximize request.
         AsyncWorld.sleep(Duration::from_millis(100)).await;
         winit_windows_async.get(|winit_windows| {
             if let Some(window) = winit_windows.get_window(entity) {
-                window.set_fullscreen(None);
+                if window.fullscreen().is_some() {
+                    window.set_fullscreen(None);
+                }
                 window.set_visible(true);
+                #[cfg(not(target_os = "macos"))]
                 window.set_decorations(true);
                 window.set_maximized(true);
             }
@@ -1372,9 +1348,17 @@ fn window_on_screen(
 }
 
 fn exit_fullscreen(window: &WinitWindow) {
+    #[cfg(target_os = "macos")]
+    {
+        if window.fullscreen().is_some() {
+            window.set_fullscreen(None);
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
     window.set_fullscreen(None);
     window.set_maximized(false);
     linux_clear_minimized(window);
+    #[cfg(not(target_os = "macos"))]
     window.set_decorations(true);
 }
 
@@ -1383,6 +1367,7 @@ fn force_windowed(window: &WinitWindow) {
         return;
     }
     window.set_visible(true);
+    #[cfg(not(target_os = "macos"))]
     window.set_decorations(true);
     window.set_maximized(false);
 }
