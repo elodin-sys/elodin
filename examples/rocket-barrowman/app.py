@@ -17,8 +17,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Dict, Any
 
 # Import rocket simulation components
 from environment import Environment
@@ -32,10 +31,7 @@ from openrocket_components import (
     NoseCone,
     BodyTube,
     TrapezoidFinSet,
-    Transition,
     InnerTube,
-    CenteringRing,
-    MassComponent,
     Parachute,
     MATERIALS,
 )

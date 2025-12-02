@@ -446,7 +446,6 @@ def visualize_rocket_2d_side_view(
     body_radius = config.get("body_radius", 0.0635)
     fin_count = config.get("fin_count", 4)
     fin_root_chord = config.get("fin_root_chord", 0.12)
-    fin_tip_chord = config.get("fin_tip_chord", 0.06)
     fin_span = config.get("fin_span", 0.11)
     fin_sweep = config.get("fin_sweep", 0.06)
 

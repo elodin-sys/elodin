@@ -7,10 +7,9 @@ Comprehensive parameter support with robust error handling and spelling toleranc
 import re
 import os
 from typing import Dict, List, Optional, Tuple, Any, TYPE_CHECKING
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import math
 import json
-from difflib import get_close_matches
 
 if TYPE_CHECKING:
     from motor_scraper import MotorData
