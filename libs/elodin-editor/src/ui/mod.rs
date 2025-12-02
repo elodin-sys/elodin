@@ -834,6 +834,50 @@ async fn wait_for_window_to_change_screens(
     Ok(false)
 }
 
+#[cfg(target_os = "macos")]
+async fn wait_for_window_settled_macos(
+    window_id: Entity,
+    target_screen: Option<usize>,
+    timeout: Duration,
+) -> Result<(), AccessError> {
+    const STABLE_CHECKS: u32 = 3;
+    let start = Instant::now();
+    let winit_windows_async = AsyncWorld.non_send_resource::<bevy::winit::WinitWindows>();
+    let mut stable_count = 0;
+    while start.elapsed() < timeout {
+        let settled = winit_windows_async.get(|winit_windows| {
+            let Some(window) = winit_windows.get_window(window_id) else {
+                return false;
+            };
+            let screens = collect_sorted_screens(window);
+            let current_screen = detect_window_screen(window, &screens);
+            let on_target = match (target_screen, current_screen) {
+                (None, _) => true,
+                (Some(target), Some(current)) => target == current,
+                _ => false,
+            };
+            on_target && window.fullscreen().is_none()
+        })?;
+
+        if settled {
+            stable_count += 1;
+            if stable_count >= STABLE_CHECKS {
+                return Ok(());
+            }
+        } else {
+            stable_count = 0;
+        }
+
+        AsyncWorld.sleep(Duration::from_millis(50)).await;
+    }
+    warn!(
+        %window_id,
+        ?target_screen,
+        "Timed out waiting for macOS window to settle on target screen without fullscreen"
+    );
+    Ok(())
+}
+
 async fn apply_window_screen(entity: Entity, screen: usize) -> Result<(), bevy_defer::AccessError> {
     info!(
         window = %entity,
@@ -915,6 +959,15 @@ async fn apply_window_screen(entity: Entity, screen: usize) -> Result<(), bevy_d
             }
         })?;
     }
+    #[cfg(target_os = "macos")]
+    {
+        wait_for_window_settled_macos(
+            entity,
+            state.descriptor.screen,
+            Duration::from_millis(1000),
+        )
+        .await?;
+    }
     Ok(())
 }
 fn handle_window_relayout_events(
@@ -961,10 +1014,22 @@ async fn apply_window_rect(
 
     let winit_windows_async = AsyncWorld.non_send_resource::<bevy::winit::WinitWindows>();
 
-    let start = Instant::now();
     let is_full_rect =
         LINUX_MULTI_WINDOW && rect.x == 0 && rect.y == 0 && rect.width == 100 && rect.height == 100;
 
+    #[cfg(target_os = "macos")]
+    if let Some(screen_idx) = state.descriptor.screen {
+        // Allow fullscreen hops to complete before sizing/positioning.
+        AsyncWorld.sleep(Duration::from_millis(2000)).await;
+        wait_for_window_settled_macos(
+            entity,
+            Some(screen_idx),
+            Duration::from_millis(1000),
+        )
+        .await?;
+    }
+
+    let start = Instant::now();
     let mut wait = true;
     while wait && start.elapsed() < timeout {
         AsyncWorld.yield_now().await;
