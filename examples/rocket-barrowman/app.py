@@ -36,8 +36,8 @@ from openrocket_components import (
     MATERIALS,
 )
 from openrocket_motor import Motor as ORMotor
-from ai_rocket_builder import RocketDesigner, RocketRequirements
-from motor_scraper import ThrustCurveScraper, MotorData
+from ai_rocket_builder import RocketDesigner
+from motor_scraper import ThrustCurveScraper
 import os
 
 # Page config
@@ -431,10 +431,8 @@ def visualize_results(result: FlightResult):
 def launch_elodin_editor(result: FlightResult, solver: FlightSolver):
     """Launch Elodin editor with simulation results in a separate process."""
     import subprocess
-    import sys
     import tempfile
     import pickle
-    from pathlib import Path
 
     try:
         # Save the result and solver to temporary files so the subprocess can load them
@@ -574,7 +572,6 @@ def launch_elodin_editor(result: FlightResult, solver: FlightSolver):
         # Launch in a separate terminal window so we can see errors
         with st.spinner("Launching Elodin editor..."):
             import platform
-            import os
 
             # Build the command - use elodin editor CLI
             # The elodin module provides a CLI: elodin editor <file>
@@ -1139,8 +1136,6 @@ def main():
                             try:
                                 scraper = ThrustCurveScraper()
                                 # Clear old cache to ensure fresh data with calculated impulse
-                                import shutil
-
                                 if scraper.cache_dir.exists():
                                     # Clear individual motor caches but keep the database file
                                     for cache_file in scraper.cache_dir.glob("*.json"):
