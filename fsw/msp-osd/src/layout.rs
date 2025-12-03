@@ -62,7 +62,7 @@ fn render_compass(grid: &mut OsdGrid, heading: f32) {
             180 => 'S',
             270 => 'W',
             d if d % 30 == 0 => '|',
-            d if d % 10 == 0 => '·',
+            d if d % 10 == 0 => '.',
             _ => '-',
         };
         compass_line.push(ch);
@@ -72,7 +72,7 @@ fn render_compass(grid: &mut OsdGrid, heading: f32) {
     grid.write_text(0, start_col, &compass_line);
 
     // Draw heading indicator (center arrow pointing down)
-    grid.set_char(1, center_col, '▼');
+    grid.set_char(1, center_col, 'v');
 
     // Draw heading value
     let heading_text = format!("{:03.0}°", heading);
@@ -145,7 +145,7 @@ fn render_horizon(
             let d = roll_sin * rel_col - roll_cos * rel_row;
 
             let ch = if d < -0.5 {
-                '·' // Ground (minimal dot pattern for least camera occlusion)
+                '.' // Ground (minimal dot pattern for least camera occlusion)
             } else if d > 0.5 {
                 ' ' // Sky
             } else {
@@ -157,9 +157,9 @@ fn render_horizon(
     }
 
     // Draw aircraft reference symbol (stays centered)
-    grid.set_char(center_row, center_col.saturating_sub(3), '◄');
-    grid.set_char(center_row, center_col, '✈');
-    grid.set_char(center_row, center_col + 3, '►');
+    grid.set_char(center_row, center_col.saturating_sub(3), '<');
+    grid.set_char(center_row, center_col, '+');
+    grid.set_char(center_row, center_col + 3, '>');
 
     // Draw pitch ladder marks
     // Generate marks every 10 degrees, visible range depends on current pitch
