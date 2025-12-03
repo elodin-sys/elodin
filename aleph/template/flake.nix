@@ -1,9 +1,10 @@
 {
   nixConfig = {
-    extra-substituters = ["http://ci-arm1.elodin.dev:5000"];
+    extra-substituters = ["https://elodin-nix-cache.s3.us-west-2.amazonaws.com"];
     extra-trusted-public-keys = [
-      "builder-cache-1:q7rDGIQgkg1nsxNEg7mHN1kEDuxPmJhQpuIXCCwLj8E="
+      "elodin-cache-1:vvbmIQvTOjcBjIs8Ri7xlT2I3XAmeJyF5mNlWB+fIwM="
     ];
+    fallback = true;
   };
 
   inputs = {
@@ -63,6 +64,9 @@
       };
       security.sudo.wheelNeedsPassword = false;
       nix.settings.trusted-users = ["@wheel"];
+      
+      # Customize the kernel source (current options are default and no_otg)
+      aleph.kernel.source = "default";
     };
     # sets up two different nixos systems default and installer
     # installer is setup to be flashed to a usb drive, and contains the
