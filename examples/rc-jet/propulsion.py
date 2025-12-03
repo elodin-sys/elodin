@@ -63,7 +63,7 @@ def spool_dynamics(
 
     where n is normalized spool speed (0-1) and n_cmd is throttle command.
     """
-    config = BDXConfig.GLOBAL
+    config = BDXConfig.GLOBAL()
     dt = config.dt
     tau = config.propulsion.spool_tau
 
@@ -92,7 +92,7 @@ def compute_thrust(
 
     For simplicity, we use density correction but ignore Mach effects at low speeds.
     """
-    config = BDXConfig.GLOBAL
+    config = BDXConfig.GLOBAL()
 
     # Atmospheric density at current altitude
     altitude = pos.linear()[2]

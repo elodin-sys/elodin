@@ -82,7 +82,7 @@ def actuator_dynamics(
     Surfaces: [elevator, aileron, rudder] in radians
     Commands: [elevator_cmd, aileron_cmd, rudder_cmd, throttle_cmd]
     """
-    config = BDXConfig.GLOBAL
+    config = BDXConfig.GLOBAL()
     dt = config.dt
     tau = config.actuators.servo_tau
 

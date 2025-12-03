@@ -169,7 +169,6 @@ class BDXConfig:
         return np.array([self.initial_speed, 0.0, 0.0])
 
     @classmethod
-    @property
     def GLOBAL(cls) -> "BDXConfig":
         """Get global configuration instance."""
         if cls._GLOBAL is None:

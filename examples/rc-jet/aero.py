@@ -130,7 +130,7 @@ def compute_aero_coefs(
 
     Returns [CL, CD, CY, Cl, Cm, Cn] in body-axis form.
     """
-    config = BDXConfig.GLOBAL
+    config = BDXConfig.GLOBAL()
     aero = config.aero
 
     delta_e, delta_a, delta_r = control_surfaces
@@ -226,7 +226,7 @@ def aero_forces(
     - Pitch about Y: tau_y = Cm_moment
     - Yaw about Z: tau_z = Cn_moment
     """
-    config = BDXConfig.GLOBAL
+    config = BDXConfig.GLOBAL()
     CL, CD, CY, Cl, Cm, Cn = aero_coefs
 
     S = config.wing_area
