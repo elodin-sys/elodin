@@ -172,15 +172,15 @@ fn display_controls(input: &input::ControlInput) {
         format!("{:5.1}", input.throttle * 100.0).yellow()
     );
     print!(
-        "Elevator: {:+6.1}°  ",
+        "Elevator: {}°  ",
         format!("{:+6.1}", input.elevator.to_degrees()).cyan()
     );
     print!(
-        "Aileron: {:+6.1}°  ",
+        "Aileron: {}°  ",
         format!("{:+6.1}", input.aileron.to_degrees()).cyan()
     );
     print!(
-        "Rudder: {:+6.1}°",
+        "Rudder: {}°",
         format!("{:+6.1}", input.rudder.to_degrees()).cyan()
     );
     print!("     "); // Clear any trailing chars
