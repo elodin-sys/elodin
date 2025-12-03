@@ -151,7 +151,9 @@ fn extract_spatial(val: ComponentValue) -> Result<[f64; 7], String> {
     if data.len() < 7 {
         return Err(format!("requires 7-element array, got {}", data.len()));
     }
-    Ok([data[0], data[1], data[2], data[3], data[4], data[5], data[6]])
+    Ok([
+        data[0], data[1], data[2], data[3], data[4], data[5], data[6],
+    ])
 }
 
 /// Extract a scalar f64 from component value
@@ -234,8 +236,10 @@ fn compile_formula(formula_name: &str, inner_expr: eql::Expr) -> CompiledExpr {
                 return CompiledExpr::closure(move |_, _| Err(error.clone()));
             };
             if elements.len() != 4 {
-                let error =
-                    format!("{} requires receiver and three angles (x, y, z)", formula_name);
+                let error = format!(
+                    "{} requires receiver and three angles (x, y, z)",
+                    formula_name
+                );
                 return CompiledExpr::closure(move |_, _| Err(error.clone()));
             }
 
@@ -248,9 +252,12 @@ fn compile_formula(formula_name: &str, inner_expr: eql::Expr) -> CompiledExpr {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
                 let data = extract_spatial(spatial)?;
 
-                let x_deg = extract_scalar(x_angle_compiled.execute(entity_map, component_values)?)?;
-                let y_deg = extract_scalar(y_angle_compiled.execute(entity_map, component_values)?)?;
-                let z_deg = extract_scalar(z_angle_compiled.execute(entity_map, component_values)?)?;
+                let x_deg =
+                    extract_scalar(x_angle_compiled.execute(entity_map, component_values)?)?;
+                let y_deg =
+                    extract_scalar(y_angle_compiled.execute(entity_map, component_values)?)?;
+                let z_deg =
+                    extract_scalar(z_angle_compiled.execute(entity_map, component_values)?)?;
 
                 let mut q = (data[0], data[1], data[2], data[3]);
 
@@ -270,8 +277,8 @@ fn compile_formula(formula_name: &str, inner_expr: eql::Expr) -> CompiledExpr {
         }
 
         // Single-axis translation (body and world frame)
-        "translate_x" | "translate_y" | "translate_z" | "translate_world_x" | "translate_world_y"
-        | "translate_world_z" => {
+        "translate_x" | "translate_y" | "translate_z" | "translate_world_x"
+        | "translate_world_y" | "translate_world_z" => {
             let (axis, frame) = match formula_name {
                 "translate_x" => (0, Frame::Body),
                 "translate_y" => (1, Frame::Body),
@@ -314,7 +321,10 @@ fn compile_formula(formula_name: &str, inner_expr: eql::Expr) -> CompiledExpr {
                     Frame::World => offset_body,
                 };
 
-                Ok(build_spatial_result(q, (data[4] + dx, data[5] + dy, data[6] + dz)))
+                Ok(build_spatial_result(
+                    q,
+                    (data[4] + dx, data[5] + dy, data[6] + dz),
+                ))
             })
         }
 
@@ -359,7 +369,10 @@ fn compile_formula(formula_name: &str, inner_expr: eql::Expr) -> CompiledExpr {
                     Frame::World => (dx, dy, dz),
                 };
 
-                Ok(build_spatial_result(q, (data[4] + rx, data[5] + ry, data[6] + rz)))
+                Ok(build_spatial_result(
+                    q,
+                    (data[4] + rx, data[5] + ry, data[6] + rz),
+                ))
             })
         }
 
