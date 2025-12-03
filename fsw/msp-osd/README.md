@@ -155,6 +155,37 @@ For Walksnail Avatar connection on Aleph:
    cargo run -- --mode serial --serial-port /dev/ttyTHS7
    ```
 
+## Debugging on Aleph
+
+When deployed via NixOS, the msp-osd service runs in serial mode by default. For debugging:
+
+1. **SSH into the Aleph** and stop the running service:
+   ```bash
+   sudo systemctl stop msp-osd.service
+   ```
+
+2. **Run in debug mode** using the convenience wrapper:
+   ```bash
+   msp-osd-debug
+   ```
+   This runs msp-osd with the deployed config (`/etc/msp-osd/config.toml`) in terminal debug mode.
+
+3. **Additional debug options**:
+   ```bash
+   # Verbose logging
+   msp-osd-debug --verbose
+   
+   # Or run directly with custom options
+   msp-osd --config /etc/msp-osd/config.toml --mode debug --verbose
+   ```
+
+4. **Restart the service** when done:
+   ```bash
+   sudo systemctl start msp-osd.service
+   ```
+
+The config file at `/etc/msp-osd/config.toml` contains the NixOS-configured input mappings and settings.
+
 ## Architecture
 
 - `config.rs` - Declarative input mapping configuration

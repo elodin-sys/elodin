@@ -6,7 +6,8 @@
 }:
 with lib; let
   cfg = config.services.msp-osd;
-  configFile = pkgs.writeText "config.toml" ''
+  configPath = "/etc/msp-osd/config.toml";
+  configContents = ''
     [db]
     host = "${cfg.dbHost}"
     port = ${toString cfg.dbPort}
@@ -40,6 +41,15 @@ with lib; let
     x = ${toString cfg.inputs.velocity.x}
     y = ${toString cfg.inputs.velocity.y}
     z = ${toString cfg.inputs.velocity.z}
+  '';
+
+  # Wrapper script to run msp-osd in debug mode with the deployed config
+  mspOsdDebug = pkgs.writeShellScriptBin "msp-osd-debug" ''
+    echo "Running msp-osd in debug mode..."
+    echo "Config: ${configPath}"
+    echo "Press Ctrl+C to exit"
+    echo ""
+    exec ${cfg.package}/bin/msp-osd --config ${configPath} --mode debug "$@"
   '';
 in {
   options.services.msp-osd = {
@@ -198,6 +208,12 @@ in {
   };
 
   config = mkIf cfg.enable {
+    # Deploy config to /etc for easy access during debugging
+    environment.etc."msp-osd/config.toml".text = configContents;
+
+    # Add debug wrapper script to system packages
+    environment.systemPackages = [cfg.package mspOsdDebug];
+
     systemd.services.msp-osd = {
       description = "MSP DisplayPort OSD Service";
       wantedBy = ["multi-user.target"];
@@ -206,7 +222,7 @@ in {
 
       serviceConfig = {
         Type = "simple";
-        ExecStart = "${cfg.package}/bin/msp-osd --config ${configFile} --mode ${cfg.mode} ${concatStringsSep " " cfg.extraArgs}";
+        ExecStart = "${cfg.package}/bin/msp-osd --config ${configPath} --mode ${cfg.mode} ${concatStringsSep " " cfg.extraArgs}";
         Restart = "always";
         RestartSec = 5;
         StandardOutput = "journal";
