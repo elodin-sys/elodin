@@ -40,6 +40,26 @@ impl CoordinateFrame {
             }
         }
     }
+
+    /// Convert Z position to display altitude
+    /// ENU: Z is up, positive = altitude above reference
+    /// NED: Z is down, positive = depth below reference (must negate)
+    pub fn to_display_altitude(self, z_position: f32) -> f32 {
+        match self {
+            CoordinateFrame::Enu => z_position,
+            CoordinateFrame::Ned => -z_position,
+        }
+    }
+
+    /// Convert Z velocity to display climb rate
+    /// ENU: positive vz = climbing
+    /// NED: positive vz = descending (must negate)
+    pub fn to_display_climb_rate(self, z_velocity: f32) -> f32 {
+        match self {
+            CoordinateFrame::Enu => z_velocity,
+            CoordinateFrame::Ned => -z_velocity,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

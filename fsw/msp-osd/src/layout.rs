@@ -8,9 +8,12 @@ pub fn render(grid: &mut OsdGrid, state: &TelemetryState, coordinate_frame: Coor
     grid.clear();
 
     // Derive display values from core telemetry
-    let altitude_m = state.altitude_m() as f32;
+    // Altitude and climb rate need coordinate frame conversion:
+    // - ENU: Z is up, positive z = altitude, positive vz = climbing
+    // - NED: Z is down, positive z = depth, positive vz = descending
+    let altitude_m = coordinate_frame.to_display_altitude(state.altitude_m() as f32);
     let ground_speed_ms = state.ground_speed_ms() as f32;
-    let climb_rate_ms = state.climb_rate_ms() as f32;
+    let climb_rate_ms = coordinate_frame.to_display_climb_rate(state.climb_rate_ms() as f32);
     let heading_raw = state.heading_deg() as f32;
     let roll_deg = state.roll_deg() as f32;
     let pitch_deg = state.pitch_deg() as f32;
