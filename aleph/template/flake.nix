@@ -66,6 +66,9 @@
       security.sudo.wheelNeedsPassword = false;
       nix.settings.trusted-users = ["@wheel"];
 
+      # Customize the kernel source (current options are default and no_otg)
+      aleph.kernel.source = "default";
+
       # Enable MSP OSD service (uses MEKF attitude output by default)
       services.msp-osd = {
         enable = true;
