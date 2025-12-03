@@ -123,7 +123,7 @@ def world() -> tuple[el.World, el.EntityId]:
             mekf.MEKF(),
             telemetry.Telemetry(),
         ],
-        name="Drone",
+        name="drone",
     )
 
     object_mesh = f"""

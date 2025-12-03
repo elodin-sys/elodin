@@ -1,0 +1,42 @@
+[package]
+name = "rc-jet-controller"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+version.workspace = true
+repository.workspace = true
+description = "RC controller input for BDX jet simulation"
+publish = false
+
+[package.metadata.dist]
+dist = false
+
+[[bin]]
+name = "rc-jet-controller"
+path = "src/main.rs"
+
+[dependencies]
+# Core protocol
+impeller2 = { path = "../../../libs/impeller2", features = ["std"] }
+impeller2-stellar = { path = "../../../libs/impeller2/stellar" }
+impeller2-wkt = { path = "../../../libs/impeller2/wkt" }
+
+# Async runtime
+stellarator = { path = "../../../libs/stellarator", features = ["tokio"] }
+
+# Gamepad input
+gilrs = "0.11"
+
+# Keyboard input (without window focus requirement)
+device_query = "2"
+
+# Error handling
+anyhow = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+colored = "2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+

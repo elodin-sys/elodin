@@ -53,6 +53,7 @@
       aleph-serial-bridge = ./modules/aleph-serial-bridge.nix;
       tegrastats-bridge = ./modules/tegrastats-bridge.nix;
       mekf = ./modules/mekf.nix;
+      msp-osd = ./modules/msp-osd.nix;
     };
     devModules = {
       # Temporarily disabled for nixpkgs 25.05 compatibility (CUDA issues)

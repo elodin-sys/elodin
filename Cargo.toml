@@ -48,9 +48,11 @@ members = [
     "apps/inscriber",
     "fsw/video-streamer",
     "fsw/gstreamer",
+    "fsw/msp-osd",
     "libs/db/eql",
     "libs/impeller2/kdl",
-    "libs/db/examples/rust_client"
+    "libs/db/examples/rust_client",
+    "examples/rc-jet/controller"
  ]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 
