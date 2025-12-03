@@ -481,6 +481,18 @@ pub enum Object3DMesh {
     },
 }
 
+impl Object3DMesh {
+    /// Create a GLB mesh with default scale (1.0), translate (0,0,0), and rotate (0,0,0)
+    pub fn glb(path: impl Into<String>) -> Self {
+        Self::Glb {
+            path: path.into(),
+            scale: default_glb_scale(),
+            translate: default_glb_translate(),
+            rotate: default_glb_rotate(),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(bound = "T: Serialize + DeserializeOwned")]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]

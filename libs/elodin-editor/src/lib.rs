@@ -776,12 +776,7 @@ fn sync_object_3d(
             .and_then(|e| materials.get(*e).ok());
 
         let mesh_source = match (glb, mesh, material) {
-            (Some(glb), _, _) => impeller2_wkt::Object3DMesh::Glb {
-                path: glb.0.clone(),
-                scale: 1.0,
-                translate: (0.0, 0.0, 0.0),
-                rotate: (0.0, 0.0, 0.0),
-            },
+            (Some(glb), _, _) => impeller2_wkt::Object3DMesh::glb(glb.0.clone()),
             (_, Some(mesh), Some(mat)) => impeller2_wkt::Object3DMesh::Mesh {
                 mesh: mesh.clone(),
                 material: mat.clone(),

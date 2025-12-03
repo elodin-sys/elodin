@@ -160,12 +160,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                 changed = true;
                 match selected_mesh_type {
                     "GLB" => {
-                        object_3d_state.data.mesh = Object3DMesh::Glb {
-                            path: String::new(),
-                            scale: 1.0,
-                            translate: (0.0, 0.0, 0.0),
-                            rotate: (0.0, 0.0, 0.0),
-                        };
+                        object_3d_state.data.mesh = Object3DMesh::glb("");
                         object_3d_state.scale_expr = None;
                         object_3d_state.scale_error = None;
                     }
