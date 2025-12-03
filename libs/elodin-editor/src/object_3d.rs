@@ -88,669 +88,279 @@ impl CompiledExpr {
     }
 }
 
+// ============================================================================
+// Quaternion and transform helper functions
+// ============================================================================
+
+/// Reference frame for rotation/translation operations
+#[derive(Clone, Copy)]
+enum Frame {
+    Body,
+    World,
+}
+
+/// Hamilton product for quaternion multiplication: q1 * q2
+/// Quaternions are stored as (x, y, z, w) where w is the scalar component
+fn quat_multiply(q1: (f64, f64, f64, f64), q2: (f64, f64, f64, f64)) -> (f64, f64, f64, f64) {
+    let (x1, y1, z1, w1) = q1;
+    let (x2, y2, z2, w2) = q2;
+    (
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2, // x
+        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2, // y
+        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2, // z
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2, // w
+    )
+}
+
+/// Create rotation quaternion from axis index (0=X, 1=Y, 2=Z) and angle in radians
+fn axis_angle_to_quat(axis: usize, angle_rad: f64) -> (f64, f64, f64, f64) {
+    let half = angle_rad / 2.0;
+    let (s, c) = (half.sin(), half.cos());
+    match axis {
+        0 => (s, 0.0, 0.0, c),
+        1 => (0.0, s, 0.0, c),
+        2 => (0.0, 0.0, s, c),
+        _ => (0.0, 0.0, 0.0, 1.0),
+    }
+}
+
+/// Rotate vector by quaternion: q * v * q^-1
+fn rotate_vector_by_quat(q: (f64, f64, f64, f64), v: (f64, f64, f64)) -> (f64, f64, f64) {
+    let (qx, qy, qz, qw) = q;
+    let (vx, vy, vz) = v;
+    // t = q * v (treating v as quaternion with w=0)
+    let tw = -qx * vx - qy * vy - qz * vz;
+    let tx = qw * vx + qy * vz - qz * vy;
+    let ty = qw * vy + qz * vx - qx * vz;
+    let tz = qw * vz + qx * vy - qy * vx;
+    // result = t * q_conjugate
+    (
+        tw * (-qx) + tx * qw + ty * (-qz) - tz * (-qy),
+        tw * (-qy) - tx * (-qz) + ty * qw + tz * (-qx),
+        tw * (-qz) + tx * (-qy) - ty * (-qx) + tz * qw,
+    )
+}
+
+/// Extract spatial transform data (qx, qy, qz, qw, px, py, pz), validating it has 7 elements
+fn extract_spatial(val: ComponentValue) -> Result<[f64; 7], String> {
+    use nox::ArrayBuf;
+    let ComponentValue::F64(array) = val else {
+        return Err("requires a spatial transform".to_string());
+    };
+    let data = array.buf.as_buf();
+    if data.len() < 7 {
+        return Err(format!("requires 7-element array, got {}", data.len()));
+    }
+    Ok([data[0], data[1], data[2], data[3], data[4], data[5], data[6]])
+}
+
+/// Extract a scalar f64 from component value
+fn extract_scalar(val: ComponentValue) -> Result<f64, String> {
+    use nox::ArrayBuf;
+    let ComponentValue::F64(arr) = val else {
+        return Err("must be a number".to_string());
+    };
+    let d = arr.buf.as_buf();
+    if d.is_empty() {
+        return Err("cannot be empty".to_string());
+    }
+    Ok(d[0])
+}
+
+/// Build result array from quaternion and position
+fn build_spatial_result(q: (f64, f64, f64, f64), pos: (f64, f64, f64)) -> ComponentValue {
+    let result = vec![q.0, q.1, q.2, q.3, pos.0, pos.1, pos.2];
+    let result_array = Array::from_shape_vec(smallvec![7], result).unwrap();
+    ComponentValue::F64(result_array)
+}
+
 /// Compiles a formula expression into a runtime closure
 fn compile_formula(formula_name: &str, inner_expr: eql::Expr) -> CompiledExpr {
-    use nox::ArrayBuf;
-
     match formula_name {
-        // Rotation formulas
-        "rotate_x" | "rotate_y" | "rotate_z" => {
-            // Inner expr is Tuple(receiver, angle)
-            if let eql::Expr::Tuple(elements) = inner_expr {
-                if elements.len() != 2 {
-                    let error = format!("{} requires receiver and angle", formula_name);
-                    return CompiledExpr::closure(move |_, _| Err(error.clone()));
+        // Single-axis rotation formulas (body and world frame)
+        "rotate_x" | "rotate_y" | "rotate_z" | "rotate_world_x" | "rotate_world_y"
+        | "rotate_world_z" => {
+            let (axis, frame) = match formula_name {
+                "rotate_x" => (0, Frame::Body),
+                "rotate_y" => (1, Frame::Body),
+                "rotate_z" => (2, Frame::Body),
+                "rotate_world_x" => (0, Frame::World),
+                "rotate_world_y" => (1, Frame::World),
+                "rotate_world_z" => (2, Frame::World),
+                _ => unreachable!(),
+            };
+
+            let eql::Expr::Tuple(elements) = inner_expr else {
+                let error = format!("{} requires tuple expression", formula_name);
+                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+            };
+            if elements.len() != 2 {
+                let error = format!("{} requires receiver and angle", formula_name);
+                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+            }
+
+            let receiver_compiled = compile_eql_expr(elements[0].clone());
+            let angle_compiled = compile_eql_expr(elements[1].clone());
+
+            CompiledExpr::closure(move |entity_map, component_values| {
+                let spatial = receiver_compiled.execute(entity_map, component_values)?;
+                let data = extract_spatial(spatial)?;
+                let angle_val = angle_compiled.execute(entity_map, component_values)?;
+                let angle_deg = extract_scalar(angle_val)?;
+
+                let q_input = (data[0], data[1], data[2], data[3]);
+                let q_rot = axis_angle_to_quat(axis, angle_deg.to_radians());
+
+                // Body-frame: q_input * q_rot, World-frame: q_rot * q_input
+                let q_result = match frame {
+                    Frame::Body => quat_multiply(q_input, q_rot),
+                    Frame::World => quat_multiply(q_rot, q_input),
+                };
+
+                Ok(build_spatial_result(q_result, (data[4], data[5], data[6])))
+            })
+        }
+
+        // Multi-axis rotation (body and world frame)
+        "rotate" | "rotate_world" => {
+            let frame = if formula_name == "rotate" {
+                Frame::Body
+            } else {
+                Frame::World
+            };
+
+            let eql::Expr::Tuple(elements) = inner_expr else {
+                let error = format!("{} requires tuple expression", formula_name);
+                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+            };
+            if elements.len() != 4 {
+                let error =
+                    format!("{} requires receiver and three angles (x, y, z)", formula_name);
+                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+            }
+
+            let receiver_compiled = compile_eql_expr(elements[0].clone());
+            let x_angle_compiled = compile_eql_expr(elements[1].clone());
+            let y_angle_compiled = compile_eql_expr(elements[2].clone());
+            let z_angle_compiled = compile_eql_expr(elements[3].clone());
+
+            CompiledExpr::closure(move |entity_map, component_values| {
+                let spatial = receiver_compiled.execute(entity_map, component_values)?;
+                let data = extract_spatial(spatial)?;
+
+                let x_deg = extract_scalar(x_angle_compiled.execute(entity_map, component_values)?)?;
+                let y_deg = extract_scalar(y_angle_compiled.execute(entity_map, component_values)?)?;
+                let z_deg = extract_scalar(z_angle_compiled.execute(entity_map, component_values)?)?;
+
+                let mut q = (data[0], data[1], data[2], data[3]);
+
+                // Apply rotations in order: X, then Y, then Z
+                for (axis, deg) in [(0, x_deg), (1, y_deg), (2, z_deg)] {
+                    if deg.abs() > 1e-10 {
+                        let q_rot = axis_angle_to_quat(axis, deg.to_radians());
+                        q = match frame {
+                            Frame::Body => quat_multiply(q, q_rot),
+                            Frame::World => quat_multiply(q_rot, q),
+                        };
+                    }
                 }
 
-                let receiver_compiled = compile_eql_expr(elements[0].clone());
-                let angle_compiled = compile_eql_expr(elements[1].clone());
-                let axis_index = match formula_name {
-                    "rotate_x" => 0,
-                    "rotate_y" => 1,
-                    "rotate_z" => 2,
+                Ok(build_spatial_result(q, (data[4], data[5], data[6])))
+            })
+        }
+
+        // Single-axis translation (body and world frame)
+        "translate_x" | "translate_y" | "translate_z" | "translate_world_x" | "translate_world_y"
+        | "translate_world_z" => {
+            let (axis, frame) = match formula_name {
+                "translate_x" => (0, Frame::Body),
+                "translate_y" => (1, Frame::Body),
+                "translate_z" => (2, Frame::Body),
+                "translate_world_x" => (0, Frame::World),
+                "translate_world_y" => (1, Frame::World),
+                "translate_world_z" => (2, Frame::World),
+                _ => unreachable!(),
+            };
+
+            let eql::Expr::Tuple(elements) = inner_expr else {
+                let error = format!("{} requires tuple expression", formula_name);
+                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+            };
+            if elements.len() != 2 {
+                let error = format!("{} requires receiver and distance", formula_name);
+                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+            }
+
+            let receiver_compiled = compile_eql_expr(elements[0].clone());
+            let distance_compiled = compile_eql_expr(elements[1].clone());
+
+            CompiledExpr::closure(move |entity_map, component_values| {
+                let spatial = receiver_compiled.execute(entity_map, component_values)?;
+                let data = extract_spatial(spatial)?;
+                let dist_val = distance_compiled.execute(entity_map, component_values)?;
+                let dist = extract_scalar(dist_val)?;
+
+                let q = (data[0], data[1], data[2], data[3]);
+                let offset_body = match axis {
+                    0 => (dist, 0.0, 0.0),
+                    1 => (0.0, dist, 0.0),
+                    2 => (0.0, 0.0, dist),
                     _ => unreachable!(),
                 };
 
-                CompiledExpr::closure(move |entity_map, component_values| {
-                    // Get the spatial transform (7-element array: qx,qy,qz,qw,px,py,pz)
-                    let spatial = receiver_compiled.execute(entity_map, component_values)?;
-                    let ComponentValue::F64(array) = spatial else {
-                        return Err("rotate requires a spatial transform".to_string());
-                    };
-
-                    let data = array.buf.as_buf();
-                    if data.len() < 7 {
-                        return Err(format!(
-                            "rotate requires 7-element array, got {}",
-                            data.len()
-                        ));
-                    }
-
-                    // Get the angle in degrees
-                    let angle_val = angle_compiled.execute(entity_map, component_values)?;
-                    let ComponentValue::F64(angle_array) = angle_val else {
-                        return Err("angle must be a number".to_string());
-                    };
-                    let angle_data = angle_array.buf.as_buf();
-                    if angle_data.is_empty() {
-                        return Err("angle cannot be empty".to_string());
-                    }
-                    let angle_deg = angle_data[0];
-                    let angle_rad = angle_deg.to_radians();
-
-                    // Create rotation quaternion from axis-angle
-                    let half_angle = angle_rad / 2.0;
-                    let sin_half = half_angle.sin();
-                    let cos_half = half_angle.cos();
-
-                    let (rot_qx, rot_qy, rot_qz, rot_qw) = match axis_index {
-                        0 => (sin_half, 0.0, 0.0, cos_half), // X axis
-                        1 => (0.0, sin_half, 0.0, cos_half), // Y axis
-                        2 => (0.0, 0.0, sin_half, cos_half), // Z axis
-                        _ => unreachable!(),
-                    };
-
-                    // Extract input quaternion (stored as x,y,z,w)
-                    let qx = data[0];
-                    let qy = data[1];
-                    let qz = data[2];
-                    let qw = data[3];
-
-                    // Quaternion multiplication: q_result = q_input * q_rotation
-                    // Hamilton product: (w1*w2 - x1*x2 - y1*y2 - z1*z2,
-                    //                    w1*x2 + x1*w2 + y1*z2 - z1*y2,
-                    //                    w1*y2 - x1*z2 + y1*w2 + z1*x2,
-                    //                    w1*z2 + x1*y2 - y1*x2 + z1*w2)
-                    let new_qw = qw * rot_qw - qx * rot_qx - qy * rot_qy - qz * rot_qz;
-                    let new_qx = qw * rot_qx + qx * rot_qw + qy * rot_qz - qz * rot_qy;
-                    let new_qy = qw * rot_qy - qx * rot_qz + qy * rot_qw + qz * rot_qx;
-                    let new_qz = qw * rot_qz + qx * rot_qy - qy * rot_qx + qz * rot_qw;
-
-                    // Keep the same position
-                    let result = vec![new_qx, new_qy, new_qz, new_qw, data[4], data[5], data[6]];
-                    let result_array = Array::from_shape_vec(smallvec![7], result).unwrap();
-                    Ok(ComponentValue::F64(result_array))
-                })
-            } else {
-                let error = format!("{} requires tuple expression", formula_name);
-                CompiledExpr::closure(move |_, _| Err(error.clone()))
-            }
-        }
-
-        "rotate" => {
-            // Inner expr is Tuple(receiver, x_angle, y_angle, z_angle)
-            if let eql::Expr::Tuple(elements) = inner_expr {
-                if elements.len() != 4 {
-                    let error = "rotate requires receiver and three angles (x, y, z)".to_string();
-                    return CompiledExpr::closure(move |_, _| Err(error.clone()));
-                }
-
-                let receiver_compiled = compile_eql_expr(elements[0].clone());
-                let x_angle_compiled = compile_eql_expr(elements[1].clone());
-                let y_angle_compiled = compile_eql_expr(elements[2].clone());
-                let z_angle_compiled = compile_eql_expr(elements[3].clone());
-
-                CompiledExpr::closure(move |entity_map, component_values| {
-                    let spatial = receiver_compiled.execute(entity_map, component_values)?;
-                    let ComponentValue::F64(array) = spatial else {
-                        return Err("rotate requires a spatial transform".to_string());
-                    };
-
-                    let data = array.buf.as_buf();
-                    if data.len() < 7 {
-                        return Err(format!(
-                            "rotate requires 7-element array, got {}",
-                            data.len()
-                        ));
-                    }
-
-                    // Get angles
-                    let get_angle = |compiled: &CompiledExpr| -> Result<f64, String> {
-                        let val = compiled.execute(entity_map, component_values)?;
-                        let ComponentValue::F64(arr) = val else {
-                            return Err("angle must be a number".to_string());
-                        };
-                        let d = arr.buf.as_buf();
-                        if d.is_empty() {
-                            return Err("angle cannot be empty".to_string());
-                        }
-                        Ok(d[0])
-                    };
-
-                    let x_deg = get_angle(&x_angle_compiled)?;
-                    let y_deg = get_angle(&y_angle_compiled)?;
-                    let z_deg = get_angle(&z_angle_compiled)?;
-
-                    // Apply rotations in order: X, then Y, then Z
-                    let mut qx = data[0];
-                    let mut qy = data[1];
-                    let mut qz = data[2];
-                    let mut qw = data[3];
-
-                    // Helper to apply a rotation
-                    let apply_rot = |qx: f64,
-                                     qy: f64,
-                                     qz: f64,
-                                     qw: f64,
-                                     rx: f64,
-                                     ry: f64,
-                                     rz: f64,
-                                     rw: f64|
-                     -> (f64, f64, f64, f64) {
-                        let new_qw = qw * rw - qx * rx - qy * ry - qz * rz;
-                        let new_qx = qw * rx + qx * rw + qy * rz - qz * ry;
-                        let new_qy = qw * ry - qx * rz + qy * rw + qz * rx;
-                        let new_qz = qw * rz + qx * ry - qy * rx + qz * rw;
-                        (new_qx, new_qy, new_qz, new_qw)
-                    };
-
-                    // X rotation
-                    if x_deg.abs() > 1e-10 {
-                        let half = x_deg.to_radians() / 2.0;
-                        (qx, qy, qz, qw) =
-                            apply_rot(qx, qy, qz, qw, half.sin(), 0.0, 0.0, half.cos());
-                    }
-
-                    // Y rotation
-                    if y_deg.abs() > 1e-10 {
-                        let half = y_deg.to_radians() / 2.0;
-                        (qx, qy, qz, qw) =
-                            apply_rot(qx, qy, qz, qw, 0.0, half.sin(), 0.0, half.cos());
-                    }
-
-                    // Z rotation
-                    if z_deg.abs() > 1e-10 {
-                        let half = z_deg.to_radians() / 2.0;
-                        (qx, qy, qz, qw) =
-                            apply_rot(qx, qy, qz, qw, 0.0, 0.0, half.sin(), half.cos());
-                    }
-
-                    let result = vec![qx, qy, qz, qw, data[4], data[5], data[6]];
-                    let result_array = Array::from_shape_vec(smallvec![7], result).unwrap();
-                    Ok(ComponentValue::F64(result_array))
-                })
-            } else {
-                let error = "rotate requires tuple expression".to_string();
-                CompiledExpr::closure(move |_, _| Err(error.clone()))
-            }
-        }
-
-        // Translation formulas
-        "translate_x" | "translate_y" | "translate_z" => {
-            // Inner expr is Tuple(receiver, distance)
-            if let eql::Expr::Tuple(elements) = inner_expr {
-                if elements.len() != 2 {
-                    let error = format!("{} requires receiver and distance", formula_name);
-                    return CompiledExpr::closure(move |_, _| Err(error.clone()));
-                }
-
-                let receiver_compiled = compile_eql_expr(elements[0].clone());
-                let distance_compiled = compile_eql_expr(elements[1].clone());
-                let axis_index = match formula_name {
-                    "translate_x" => 0,
-                    "translate_y" => 1,
-                    "translate_z" => 2,
-                    _ => unreachable!(),
+                // Body-frame: rotate offset to world frame; World-frame: use directly
+                let (dx, dy, dz) = match frame {
+                    Frame::Body => rotate_vector_by_quat(q, offset_body),
+                    Frame::World => offset_body,
                 };
 
-                CompiledExpr::closure(move |entity_map, component_values| {
-                    let spatial = receiver_compiled.execute(entity_map, component_values)?;
-                    let ComponentValue::F64(array) = spatial else {
-                        return Err("translate requires a spatial transform".to_string());
-                    };
-
-                    let data = array.buf.as_buf();
-                    if data.len() < 7 {
-                        return Err(format!(
-                            "translate requires 7-element array, got {}",
-                            data.len()
-                        ));
-                    }
-
-                    // Get the distance
-                    let dist_val = distance_compiled.execute(entity_map, component_values)?;
-                    let ComponentValue::F64(dist_array) = dist_val else {
-                        return Err("distance must be a number".to_string());
-                    };
-                    let dist_data = dist_array.buf.as_buf();
-                    if dist_data.is_empty() {
-                        return Err("distance cannot be empty".to_string());
-                    }
-                    let dist = dist_data[0];
-
-                    // Create offset in body frame
-                    let offset_body = match axis_index {
-                        0 => (dist, 0.0, 0.0),
-                        1 => (0.0, dist, 0.0),
-                        2 => (0.0, 0.0, dist),
-                        _ => unreachable!(),
-                    };
-
-                    // Extract quaternion
-                    let qx = data[0];
-                    let qy = data[1];
-                    let qz = data[2];
-                    let qw = data[3];
-
-                    // Rotate offset from body frame to world frame
-                    // v' = q * v * q^-1
-                    // For unit quaternions, q^-1 = conjugate
-                    let (ox, oy, oz) = offset_body;
-
-                    // First: q * v (treating v as quaternion with w=0)
-                    let t_w = -qx * ox - qy * oy - qz * oz;
-                    let t_x = qw * ox + qy * oz - qz * oy;
-                    let t_y = qw * oy + qz * ox - qx * oz;
-                    let t_z = qw * oz + qx * oy - qy * ox;
-
-                    // Second: t * q_conjugate
-                    let rx = t_w * (-qx) + t_x * qw + t_y * (-qz) - t_z * (-qy);
-                    let ry = t_w * (-qy) - t_x * (-qz) + t_y * qw + t_z * (-qx);
-                    let rz = t_w * (-qz) + t_x * (-qy) - t_y * (-qx) + t_z * qw;
-
-                    // Add to existing position
-                    let new_px = data[4] + rx;
-                    let new_py = data[5] + ry;
-                    let new_pz = data[6] + rz;
-
-                    let result = vec![qx, qy, qz, qw, new_px, new_py, new_pz];
-                    let result_array = Array::from_shape_vec(smallvec![7], result).unwrap();
-                    Ok(ComponentValue::F64(result_array))
-                })
-            } else {
-                let error = format!("{} requires tuple expression", formula_name);
-                CompiledExpr::closure(move |_, _| Err(error.clone()))
-            }
+                Ok(build_spatial_result(q, (data[4] + dx, data[5] + dy, data[6] + dz)))
+            })
         }
 
-        // World-frame rotation formulas
-        "rotate_world_x" | "rotate_world_y" | "rotate_world_z" => {
-            // Inner expr is Tuple(receiver, angle)
-            if let eql::Expr::Tuple(elements) = inner_expr {
-                if elements.len() != 2 {
-                    let error = format!("{} requires receiver and angle", formula_name);
-                    return CompiledExpr::closure(move |_, _| Err(error.clone()));
-                }
+        // Multi-axis translation (body and world frame)
+        "translate" | "translate_world" => {
+            let frame = if formula_name == "translate" {
+                Frame::Body
+            } else {
+                Frame::World
+            };
 
-                let receiver_compiled = compile_eql_expr(elements[0].clone());
-                let angle_compiled = compile_eql_expr(elements[1].clone());
-                let axis_index = match formula_name {
-                    "rotate_world_x" => 0,
-                    "rotate_world_y" => 1,
-                    "rotate_world_z" => 2,
-                    _ => unreachable!(),
+            let eql::Expr::Tuple(elements) = inner_expr else {
+                let error = format!("{} requires tuple expression", formula_name);
+                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+            };
+            if elements.len() != 4 {
+                let error = format!(
+                    "{} requires receiver and three distances (x, y, z)",
+                    formula_name
+                );
+                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+            }
+
+            let receiver_compiled = compile_eql_expr(elements[0].clone());
+            let x_dist_compiled = compile_eql_expr(elements[1].clone());
+            let y_dist_compiled = compile_eql_expr(elements[2].clone());
+            let z_dist_compiled = compile_eql_expr(elements[3].clone());
+
+            CompiledExpr::closure(move |entity_map, component_values| {
+                let spatial = receiver_compiled.execute(entity_map, component_values)?;
+                let data = extract_spatial(spatial)?;
+
+                let dx = extract_scalar(x_dist_compiled.execute(entity_map, component_values)?)?;
+                let dy = extract_scalar(y_dist_compiled.execute(entity_map, component_values)?)?;
+                let dz = extract_scalar(z_dist_compiled.execute(entity_map, component_values)?)?;
+
+                let q = (data[0], data[1], data[2], data[3]);
+
+                // Body-frame: rotate offset to world frame; World-frame: use directly
+                let (rx, ry, rz) = match frame {
+                    Frame::Body => rotate_vector_by_quat(q, (dx, dy, dz)),
+                    Frame::World => (dx, dy, dz),
                 };
 
-                CompiledExpr::closure(move |entity_map, component_values| {
-                    // Get the spatial transform (7-element array: qx,qy,qz,qw,px,py,pz)
-                    let spatial = receiver_compiled.execute(entity_map, component_values)?;
-                    let ComponentValue::F64(array) = spatial else {
-                        return Err("rotate_world requires a spatial transform".to_string());
-                    };
-
-                    let data = array.buf.as_buf();
-                    if data.len() < 7 {
-                        return Err(format!(
-                            "rotate_world requires 7-element array, got {}",
-                            data.len()
-                        ));
-                    }
-
-                    // Get the angle in degrees
-                    let angle_val = angle_compiled.execute(entity_map, component_values)?;
-                    let ComponentValue::F64(angle_array) = angle_val else {
-                        return Err("angle must be a number".to_string());
-                    };
-                    let angle_data = angle_array.buf.as_buf();
-                    if angle_data.is_empty() {
-                        return Err("angle cannot be empty".to_string());
-                    }
-                    let angle_deg = angle_data[0];
-                    let angle_rad = angle_deg.to_radians();
-
-                    // Create rotation quaternion from axis-angle
-                    let half_angle = angle_rad / 2.0;
-                    let sin_half = half_angle.sin();
-                    let cos_half = half_angle.cos();
-
-                    let (rot_qx, rot_qy, rot_qz, rot_qw) = match axis_index {
-                        0 => (sin_half, 0.0, 0.0, cos_half), // X axis
-                        1 => (0.0, sin_half, 0.0, cos_half), // Y axis
-                        2 => (0.0, 0.0, sin_half, cos_half), // Z axis
-                        _ => unreachable!(),
-                    };
-
-                    // Extract input quaternion (stored as x,y,z,w)
-                    let qx = data[0];
-                    let qy = data[1];
-                    let qz = data[2];
-                    let qw = data[3];
-
-                    // World-frame rotation: q_result = q_rotation * q_input (reversed order)
-                    let new_qw = rot_qw * qw - rot_qx * qx - rot_qy * qy - rot_qz * qz;
-                    let new_qx = rot_qw * qx + rot_qx * qw + rot_qy * qz - rot_qz * qy;
-                    let new_qy = rot_qw * qy - rot_qx * qz + rot_qy * qw + rot_qz * qx;
-                    let new_qz = rot_qw * qz + rot_qx * qy - rot_qy * qx + rot_qz * qw;
-
-                    // Keep the same position
-                    let result = vec![new_qx, new_qy, new_qz, new_qw, data[4], data[5], data[6]];
-                    let result_array = Array::from_shape_vec(smallvec![7], result).unwrap();
-                    Ok(ComponentValue::F64(result_array))
-                })
-            } else {
-                let error = format!("{} requires tuple expression", formula_name);
-                CompiledExpr::closure(move |_, _| Err(error.clone()))
-            }
-        }
-
-        "rotate_world" => {
-            // Inner expr is Tuple(receiver, x_angle, y_angle, z_angle)
-            if let eql::Expr::Tuple(elements) = inner_expr {
-                if elements.len() != 4 {
-                    let error =
-                        "rotate_world requires receiver and three angles (x, y, z)".to_string();
-                    return CompiledExpr::closure(move |_, _| Err(error.clone()));
-                }
-
-                let receiver_compiled = compile_eql_expr(elements[0].clone());
-                let x_angle_compiled = compile_eql_expr(elements[1].clone());
-                let y_angle_compiled = compile_eql_expr(elements[2].clone());
-                let z_angle_compiled = compile_eql_expr(elements[3].clone());
-
-                CompiledExpr::closure(move |entity_map, component_values| {
-                    let spatial = receiver_compiled.execute(entity_map, component_values)?;
-                    let ComponentValue::F64(array) = spatial else {
-                        return Err("rotate_world requires a spatial transform".to_string());
-                    };
-
-                    let data = array.buf.as_buf();
-                    if data.len() < 7 {
-                        return Err(format!(
-                            "rotate_world requires 7-element array, got {}",
-                            data.len()
-                        ));
-                    }
-
-                    // Get angles
-                    let get_angle = |compiled: &CompiledExpr| -> Result<f64, String> {
-                        let val = compiled.execute(entity_map, component_values)?;
-                        let ComponentValue::F64(arr) = val else {
-                            return Err("angle must be a number".to_string());
-                        };
-                        let d = arr.buf.as_buf();
-                        if d.is_empty() {
-                            return Err("angle cannot be empty".to_string());
-                        }
-                        Ok(d[0])
-                    };
-
-                    let x_deg = get_angle(&x_angle_compiled)?;
-                    let y_deg = get_angle(&y_angle_compiled)?;
-                    let z_deg = get_angle(&z_angle_compiled)?;
-
-                    // Apply rotations in order: X, then Y, then Z (in world frame)
-                    let mut qx = data[0];
-                    let mut qy = data[1];
-                    let mut qz = data[2];
-                    let mut qw = data[3];
-
-                    // Helper to apply a world-frame rotation
-                    let apply_world_rot = |qx: f64,
-                                           qy: f64,
-                                           qz: f64,
-                                           qw: f64,
-                                           rx: f64,
-                                           ry: f64,
-                                           rz: f64,
-                                           rw: f64|
-                     -> (f64, f64, f64, f64) {
-                        // World-frame: q_rotation * q_input
-                        let new_qw = rw * qw - rx * qx - ry * qy - rz * qz;
-                        let new_qx = rw * qx + rx * qw + ry * qz - rz * qy;
-                        let new_qy = rw * qy - rx * qz + ry * qw + rz * qx;
-                        let new_qz = rw * qz + rx * qy - ry * qx + rz * qw;
-                        (new_qx, new_qy, new_qz, new_qw)
-                    };
-
-                    // X rotation
-                    if x_deg.abs() > 1e-10 {
-                        let half = x_deg.to_radians() / 2.0;
-                        (qx, qy, qz, qw) =
-                            apply_world_rot(qx, qy, qz, qw, half.sin(), 0.0, 0.0, half.cos());
-                    }
-
-                    // Y rotation
-                    if y_deg.abs() > 1e-10 {
-                        let half = y_deg.to_radians() / 2.0;
-                        (qx, qy, qz, qw) =
-                            apply_world_rot(qx, qy, qz, qw, 0.0, half.sin(), 0.0, half.cos());
-                    }
-
-                    // Z rotation
-                    if z_deg.abs() > 1e-10 {
-                        let half = z_deg.to_radians() / 2.0;
-                        (qx, qy, qz, qw) =
-                            apply_world_rot(qx, qy, qz, qw, 0.0, 0.0, half.sin(), half.cos());
-                    }
-
-                    let result = vec![qx, qy, qz, qw, data[4], data[5], data[6]];
-                    let result_array = Array::from_shape_vec(smallvec![7], result).unwrap();
-                    Ok(ComponentValue::F64(result_array))
-                })
-            } else {
-                let error = "rotate_world requires tuple expression".to_string();
-                CompiledExpr::closure(move |_, _| Err(error.clone()))
-            }
-        }
-
-        // World-frame translation formulas
-        "translate_world_x" | "translate_world_y" | "translate_world_z" => {
-            // Inner expr is Tuple(receiver, distance)
-            if let eql::Expr::Tuple(elements) = inner_expr {
-                if elements.len() != 2 {
-                    let error = format!("{} requires receiver and distance", formula_name);
-                    return CompiledExpr::closure(move |_, _| Err(error.clone()));
-                }
-
-                let receiver_compiled = compile_eql_expr(elements[0].clone());
-                let distance_compiled = compile_eql_expr(elements[1].clone());
-                let axis_index = match formula_name {
-                    "translate_world_x" => 0,
-                    "translate_world_y" => 1,
-                    "translate_world_z" => 2,
-                    _ => unreachable!(),
-                };
-
-                CompiledExpr::closure(move |entity_map, component_values| {
-                    let spatial = receiver_compiled.execute(entity_map, component_values)?;
-                    let ComponentValue::F64(array) = spatial else {
-                        return Err("translate_world requires a spatial transform".to_string());
-                    };
-
-                    let data = array.buf.as_buf();
-                    if data.len() < 7 {
-                        return Err(format!(
-                            "translate_world requires 7-element array, got {}",
-                            data.len()
-                        ));
-                    }
-
-                    // Get the distance
-                    let dist_val = distance_compiled.execute(entity_map, component_values)?;
-                    let ComponentValue::F64(dist_array) = dist_val else {
-                        return Err("distance must be a number".to_string());
-                    };
-                    let dist_data = dist_array.buf.as_buf();
-                    if dist_data.is_empty() {
-                        return Err("distance cannot be empty".to_string());
-                    }
-                    let dist = dist_data[0];
-
-                    // Apply offset directly in world frame (no rotation)
-                    let (dx, dy, dz) = match axis_index {
-                        0 => (dist, 0.0, 0.0),
-                        1 => (0.0, dist, 0.0),
-                        2 => (0.0, 0.0, dist),
-                        _ => unreachable!(),
-                    };
-
-                    // Keep quaternion, add offset to position
-                    let result = vec![
-                        data[0],
-                        data[1],
-                        data[2],
-                        data[3],
-                        data[4] + dx,
-                        data[5] + dy,
-                        data[6] + dz,
-                    ];
-                    let result_array = Array::from_shape_vec(smallvec![7], result).unwrap();
-                    Ok(ComponentValue::F64(result_array))
-                })
-            } else {
-                let error = format!("{} requires tuple expression", formula_name);
-                CompiledExpr::closure(move |_, _| Err(error.clone()))
-            }
-        }
-
-        "translate_world" => {
-            // Inner expr is Tuple(receiver, x, y, z)
-            if let eql::Expr::Tuple(elements) = inner_expr {
-                if elements.len() != 4 {
-                    let error = "translate_world requires receiver and three distances (x, y, z)"
-                        .to_string();
-                    return CompiledExpr::closure(move |_, _| Err(error.clone()));
-                }
-
-                let receiver_compiled = compile_eql_expr(elements[0].clone());
-                let x_dist_compiled = compile_eql_expr(elements[1].clone());
-                let y_dist_compiled = compile_eql_expr(elements[2].clone());
-                let z_dist_compiled = compile_eql_expr(elements[3].clone());
-
-                CompiledExpr::closure(move |entity_map, component_values| {
-                    let spatial = receiver_compiled.execute(entity_map, component_values)?;
-                    let ComponentValue::F64(array) = spatial else {
-                        return Err("translate_world requires a spatial transform".to_string());
-                    };
-
-                    let data = array.buf.as_buf();
-                    if data.len() < 7 {
-                        return Err(format!(
-                            "translate_world requires 7-element array, got {}",
-                            data.len()
-                        ));
-                    }
-
-                    // Get distances
-                    let get_dist = |compiled: &CompiledExpr| -> Result<f64, String> {
-                        let val = compiled.execute(entity_map, component_values)?;
-                        let ComponentValue::F64(arr) = val else {
-                            return Err("distance must be a number".to_string());
-                        };
-                        let d = arr.buf.as_buf();
-                        if d.is_empty() {
-                            return Err("distance cannot be empty".to_string());
-                        }
-                        Ok(d[0])
-                    };
-
-                    let dx = get_dist(&x_dist_compiled)?;
-                    let dy = get_dist(&y_dist_compiled)?;
-                    let dz = get_dist(&z_dist_compiled)?;
-
-                    // Apply offsets directly in world frame (no rotation)
-                    let result = vec![
-                        data[0],
-                        data[1],
-                        data[2],
-                        data[3],
-                        data[4] + dx,
-                        data[5] + dy,
-                        data[6] + dz,
-                    ];
-                    let result_array = Array::from_shape_vec(smallvec![7], result).unwrap();
-                    Ok(ComponentValue::F64(result_array))
-                })
-            } else {
-                let error = "translate_world requires tuple expression".to_string();
-                CompiledExpr::closure(move |_, _| Err(error.clone()))
-            }
-        }
-
-        "translate" => {
-            // Inner expr is Tuple(receiver, x, y, z)
-            if let eql::Expr::Tuple(elements) = inner_expr {
-                if elements.len() != 4 {
-                    let error =
-                        "translate requires receiver and three distances (x, y, z)".to_string();
-                    return CompiledExpr::closure(move |_, _| Err(error.clone()));
-                }
-
-                let receiver_compiled = compile_eql_expr(elements[0].clone());
-                let x_dist_compiled = compile_eql_expr(elements[1].clone());
-                let y_dist_compiled = compile_eql_expr(elements[2].clone());
-                let z_dist_compiled = compile_eql_expr(elements[3].clone());
-
-                CompiledExpr::closure(move |entity_map, component_values| {
-                    let spatial = receiver_compiled.execute(entity_map, component_values)?;
-                    let ComponentValue::F64(array) = spatial else {
-                        return Err("translate requires a spatial transform".to_string());
-                    };
-
-                    let data = array.buf.as_buf();
-                    if data.len() < 7 {
-                        return Err(format!(
-                            "translate requires 7-element array, got {}",
-                            data.len()
-                        ));
-                    }
-
-                    // Get distances
-                    let get_dist = |compiled: &CompiledExpr| -> Result<f64, String> {
-                        let val = compiled.execute(entity_map, component_values)?;
-                        let ComponentValue::F64(arr) = val else {
-                            return Err("distance must be a number".to_string());
-                        };
-                        let d = arr.buf.as_buf();
-                        if d.is_empty() {
-                            return Err("distance cannot be empty".to_string());
-                        }
-                        Ok(d[0])
-                    };
-
-                    let dx = get_dist(&x_dist_compiled)?;
-                    let dy = get_dist(&y_dist_compiled)?;
-                    let dz = get_dist(&z_dist_compiled)?;
-
-                    // Extract quaternion
-                    let qx = data[0];
-                    let qy = data[1];
-                    let qz = data[2];
-                    let qw = data[3];
-
-                    // Rotate offset from body frame to world frame
-                    // v' = q * v * q^-1
-                    let t_w = -qx * dx - qy * dy - qz * dz;
-                    let t_x = qw * dx + qy * dz - qz * dy;
-                    let t_y = qw * dy + qz * dx - qx * dz;
-                    let t_z = qw * dz + qx * dy - qy * dx;
-
-                    let rx = t_w * (-qx) + t_x * qw + t_y * (-qz) - t_z * (-qy);
-                    let ry = t_w * (-qy) - t_x * (-qz) + t_y * qw + t_z * (-qx);
-                    let rz = t_w * (-qz) + t_x * (-qy) - t_y * (-qx) + t_z * qw;
-
-                    let new_px = data[4] + rx;
-                    let new_py = data[5] + ry;
-                    let new_pz = data[6] + rz;
-
-                    let result = vec![qx, qy, qz, qw, new_px, new_py, new_pz];
-                    let result_array = Array::from_shape_vec(smallvec![7], result).unwrap();
-                    Ok(ComponentValue::F64(result_array))
-                })
-            } else {
-                let error = "translate requires tuple expression".to_string();
-                CompiledExpr::closure(move |_, _| Err(error.clone()))
-            }
+                Ok(build_spatial_result(q, (data[4] + rx, data[5] + ry, data[6] + rz)))
+            })
         }
 
         _ => {
