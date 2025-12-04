@@ -21,6 +21,8 @@ use std::{
 #[cfg(target_os = "linux")]
 const NOTIFY_SILENCE: Duration = Duration::from_millis(3000);
 
+#[cfg(not(target_os = "macos"))]
+use crate::ui::WindowRelayout;
 use crate::{
     EqlContext, MainCamera,
     object_3d::Object3DState,
