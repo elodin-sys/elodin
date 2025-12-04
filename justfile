@@ -55,9 +55,17 @@ public-changelog:
   sh -v ${DRY_RUN:+-n} <<EOF
     cd {{justfile_directory()}}
     ./scripts/public-changelog.sh CHANGELOG.md > docs/public/content/releases/changelog.md
-    old_version=$(cat ./docs/public/config.toml | yq -p toml '.extra.version')
-    new_version=$(just version)
-    sed -i "" "s/$old_version/$new_version/g" docs/public/config.toml
+  EOF
+  bash << 'EOF'
+    echo -n "Checking docs/public/config.toml for right version... "
+    new_version="$(just version)"
+    if ! grep "^version = \"$new_version\"" docs/public/config.toml >/dev/null; then
+       echo "NOT FOUND."
+       echo "error: version not set to $new_version in docs/public/config.toml" >&2;
+       exit 1
+    else
+       echo "FOUND."
+    fi
   EOF
 
 install:
