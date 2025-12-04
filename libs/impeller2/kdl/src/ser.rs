@@ -125,12 +125,39 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
 
 fn serialize_window(window: &WindowSchematic) -> KdlNode {
     let mut node = KdlNode::new("window");
-    node.entries_mut()
-        .push(KdlEntry::new_prop("path", window.path.clone()));
+    if let Some(path) = &window.path {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("path", path.clone()));
+    }
 
     if let Some(title) = &window.title {
         node.entries_mut()
             .push(KdlEntry::new_prop("title", title.clone()));
+    }
+
+    if let Some(idx) = window.screen {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("screen", i128::from(idx)));
+    }
+
+    if let Some(rect) = window.screen_rect {
+        let mut rect_node = KdlNode::new("rect");
+        rect_node
+            .entries_mut()
+            .push(KdlEntry::new(i128::from(rect.x)));
+        rect_node
+            .entries_mut()
+            .push(KdlEntry::new(i128::from(rect.y)));
+        rect_node
+            .entries_mut()
+            .push(KdlEntry::new(i128::from(rect.width)));
+        rect_node
+            .entries_mut()
+            .push(KdlEntry::new(i128::from(rect.height)));
+
+        let mut children = node.children().cloned().unwrap_or_else(KdlDocument::new);
+        children.nodes_mut().push(rect_node);
+        node.set_children(children);
     }
 
     node

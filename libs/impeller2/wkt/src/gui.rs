@@ -53,10 +53,22 @@ impl<T> SchematicElem<T> {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::TypePath))]
+pub struct WindowRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct WindowSchematic {
     pub title: Option<String>,
-    pub path: String,
+    pub path: Option<String>,
+    pub screen: Option<u32>,
+    #[serde(default)]
+    pub screen_rect: Option<WindowRect>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
