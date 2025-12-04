@@ -21,9 +21,9 @@ use bevy::{
         WindowCloseRequested, WindowRef, WindowResolution,
     },
 };
-use bevy_defer::{AccessError, AsyncAccess, AsyncPlugin, AsyncWorld};
 #[cfg(target_os = "macos")]
-use bevy_defer::{AccessResult, AsyncCommandsExtension};
+use bevy_defer::AccessResult;
+use bevy_defer::{AccessError, AsyncAccess, AsyncCommandsExtension, AsyncPlugin, AsyncWorld};
 use bevy_egui::{
     EguiContext, EguiContexts,
     egui::{self, Align2, Color32, Label, RichText},
