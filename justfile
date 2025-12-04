@@ -43,7 +43,7 @@ promote tag:
     echo "error: Set UV_PUBLISH_TOKEN to the token." >&2;
     exit 1;
   fi
-  sh -v ${DRY_RUN:+-n} <<EOF
+  sh -v ${DRY_RUN:+-n} <<'EOF'
     dir=$(mktemp -d)
     gh release download {{tag}} --pattern 'elodin-*.whl' --dir $dir
     uv publish "$dir/*.whl" --token "$UV_PUBLISH_TOKEN"
