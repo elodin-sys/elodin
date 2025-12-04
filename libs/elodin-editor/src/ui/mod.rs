@@ -852,9 +852,7 @@ pub(crate) async fn apply_physical_screen_rect(
             }
             let req_x = pos.x + (rect.x as f64 / 100.0) * size.width;
             let req_y = pos.y + (rect.y as f64 / 100.0) * size.height;
-            let req_w = ((rect.width as f64 / 100.0) * size.width)
-                .round()
-                .max(1.0);
+            let req_w = ((rect.width as f64 / 100.0) * size.width).round().max(1.0);
             let req_h = ((rect.height as f64 / 100.0) * size.height)
                 .round()
                 .max(1.0);
