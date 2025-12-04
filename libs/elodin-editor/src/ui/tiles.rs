@@ -234,28 +234,75 @@ impl WindowState {
             updated = true;
         }
 
-        if let (Some(position), Some(screen_handle)) = (
-            outer_position,
-            screen_index
-                .and_then(|idx| screens.get(idx).cloned())
-                .or_else(|| current_monitor.clone()),
-        ) {
-            let screen_pos = screen_handle.position();
-            if position_is_reliable_linux(
-                IVec2::new(position.x, position.y),
-                (screen_pos.x, screen_pos.y),
-            ) && let Some(rect) = rect_from_bounds(
-                (position.x, position.y),
-                (outer_size.width, outer_size.height),
-                (screen_pos.x, screen_pos.y),
-                (screen_handle.size().width, screen_handle.size().height),
+        #[cfg(target_os = "macos")]
+        {
+            if let (Some(position), Some(screen_handle)) = (
+                outer_position,
+                screen_index
+                    .and_then(|idx| screens.get(idx).cloned())
+                    .or_else(|| current_monitor.clone()),
             ) {
-                self.descriptor.screen_rect = Some(rect);
-                updated = true;
+                let scale = screen_handle.scale_factor().max(0.0001);
+                let screen_pos = screen_handle.position();
+                let screen_size = screen_handle.size();
+
+                // Convert window bounds to logical space to stay consistent with placement.
+                let window_pos_logical = (
+                    (position.x as f64 / scale).round() as i32,
+                    (position.y as f64 / scale).round() as i32,
+                );
+                let window_size_logical = (
+                    (outer_size.width as f64 / scale).round() as u32,
+                    (outer_size.height as f64 / scale).round() as u32,
+                );
+                let screen_pos_logical = (screen_pos.x, screen_pos.y);
+                let screen_size_logical = (
+                    (screen_size.width as f64 / scale).round() as u32,
+                    (screen_size.height as f64 / scale).round() as u32,
+                );
+
+                if let Some(rect) = rect_from_bounds(
+                    window_pos_logical,
+                    window_size_logical,
+                    screen_pos_logical,
+                    screen_size_logical,
+                ) {
+                    self.descriptor.screen_rect = Some(rect);
+                    updated = true;
+                }
             }
+            return updated;
         }
 
-        updated
+        #[cfg(not(target_os = "macos"))]
+        {
+            if let (Some(position), Some(screen_handle)) = (
+                outer_position,
+                screen_index
+                    .and_then(|idx| screens.get(idx).cloned())
+                    .or_else(|| current_monitor.clone()),
+            ) {
+                let screen_pos = screen_handle.position();
+                if position_is_reliable_linux(
+                    IVec2::new(position.x, position.y),
+                    (screen_pos.x, screen_pos.y),
+                ) && let Some(rect) = rect_from_bounds(
+                    (position.x, position.y),
+                    (outer_size.width, outer_size.height),
+                    (screen_pos.x, screen_pos.y),
+                    (screen_handle.size().width, screen_handle.size().height),
+                ) {
+                    self.descriptor.screen_rect = Some(rect);
+                    updated = true;
+                }
+            }
+            return updated;
+        }
+
+        #[allow(unreachable_code)]
+        {
+            updated
+        }
     }
 }
 

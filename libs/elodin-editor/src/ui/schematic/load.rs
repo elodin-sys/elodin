@@ -1,5 +1,5 @@
 use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
-use bevy_defer::{AsyncCommandsExtension, AsyncWorld};
+use bevy_defer::AsyncCommandsExtension;
 use bevy_egui::egui::{Color32, Id};
 use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::{Container, Tile, TileId};
@@ -21,13 +21,12 @@ use std::{
 #[cfg(target_os = "linux")]
 const NOTIFY_SILENCE: Duration = Duration::from_millis(3000);
 
-use super::super::SECONDARY_RECT_CAPTURE_LOAD_GUARD;
 use crate::{
     EqlContext, MainCamera,
     object_3d::Object3DState,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        DEFAULT_SECONDARY_RECT, HdrEnabled, SelectedObject, WindowRelayout,
+        DEFAULT_SECONDARY_RECT, HdrEnabled, SelectedObject,
         colors::{self, EColor},
         dashboard::{NodeUpdaterParams, spawn_dashboard},
         modal::ModalDialog,
@@ -264,25 +263,52 @@ impl LoadSchematicParams<'_, '_> {
                 .get_mut(*self.primary_window)
                 .expect("no primary window")
                 .2;
-            if let Some(d) = main_window_descriptor {
-                window_state.descriptor.screen = d.screen;
-                window_state.descriptor.screen_rect = d.screen_rect;
+            match main_window_descriptor {
+                Some(d) => {
+                    window_state.descriptor.screen = d.screen;
+                    window_state.descriptor.screen_rect = d.screen_rect;
+                }
+                None => {
+                    // No primary window entry in KDL: clear any stale placement to avoid
+                    // reapplying an old rect.
+                    window_state.descriptor.screen = None;
+                    window_state.descriptor.screen_rect = None;
+                }
             }
             let _ = std::mem::replace(&mut window_state.tile_state, main_state);
             // Resize if necessary.
             //
-            if let Some(screen) = window_state.descriptor.screen.as_ref() {
-                self.commands.send_event(WindowRelayout::Screen {
-                    window: primary_window,
-                    screen: *screen,
-                });
-            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                if let Some(screen) = window_state.descriptor.screen.as_ref() {
+                    self.commands.send_event(WindowRelayout::Screen {
+                        window: primary_window,
+                        screen: *screen,
+                    });
+                }
 
-            if let Some(rect) = window_state.descriptor.screen_rect.as_ref() {
-                self.commands.send_event(WindowRelayout::Rect {
-                    window: primary_window,
-                    rect: *rect,
-                });
+                if let Some(rect) = window_state.descriptor.screen_rect.as_ref() {
+                    self.commands.send_event(WindowRelayout::Rect {
+                        window: primary_window,
+                        rect: *rect,
+                    });
+                }
+            }
+            #[cfg(target_os = "macos")]
+            {
+                if let (Some(screen_idx), Some(rect)) = (
+                    window_state.descriptor.screen,
+                    window_state.descriptor.screen_rect,
+                ) {
+                    self.commands.spawn_task(move || async move {
+                        crate::ui::apply_physical_screen_rect(primary_window, screen_idx, rect)
+                            .await
+                            .ok();
+                        Ok(())
+                    });
+                } else {
+                    info!("mac primary: no screen/rect in KDL, skipping placement");
+                }
             }
         }
 
@@ -324,16 +350,6 @@ impl LoadSchematicParams<'_, '_> {
                                 tile_state,
                                 graph_entities,
                             };
-                            if state.descriptor.screen_rect.is_some() {
-                                self.commands.spawn_task(|| async move {
-                                    // Wait a bit then capture the window descriptor.
-                                    AsyncWorld.sleep(SECONDARY_RECT_CAPTURE_LOAD_GUARD).await;
-                                    AsyncWorld.send_event(
-                                        crate::ui::tiles::WindowRelayout::UpdateDescriptors,
-                                    )?;
-                                    Ok(())
-                                });
-                            }
                             self.commands.spawn((id, state));
                         }
                         Err(err) => {

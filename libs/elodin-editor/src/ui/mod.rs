@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::path::PathBuf;
+#[cfg(target_os = "macos")]
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use bevy::{
@@ -19,16 +21,23 @@ use bevy::{
         WindowCloseRequested, WindowRef, WindowResolution,
     },
 };
-use bevy_defer::{AccessError, AsyncAccess, AsyncCommandsExtension, AsyncPlugin, AsyncWorld};
+use bevy_defer::{
+    AccessError, AccessResult, AsyncAccess, AsyncCommandsExtension, AsyncPlugin, AsyncWorld,
+};
 use bevy_egui::{
     EguiContext, EguiContexts,
     egui::{self, Align2, Color32, Label, RichText},
 };
 use egui_tiles::{Container, Tile};
 #[cfg(target_os = "macos")]
-use winit::window::Fullscreen;
 use winit::{
-    dpi::{PhysicalPosition, PhysicalSize},
+    dpi::{LogicalPosition, LogicalSize},
+    monitor::MonitorHandle,
+    window::Window as WinitWindow,
+};
+#[cfg(not(target_os = "macos"))]
+use winit::{
+    dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize},
     monitor::MonitorHandle,
     window::Window as WinitWindow,
 };
@@ -39,7 +48,6 @@ pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
     width: 80,
     height: 80,
 };
-const SECONDARY_RECT_CAPTURE_LOAD_GUARD: Duration = Duration::from_millis(2500);
 // Order ranges:
 // 0          -> UI/egui (Bevy default)
 // 10..        primary viewports (3D, gizmo/axes…)
@@ -60,11 +68,14 @@ mod platform {
 
 #[cfg(not(target_os = "linux"))]
 mod platform {
+    #[allow(dead_code)]
     pub const LINUX_MULTI_WINDOW: bool = false;
     pub const PRIMARY_ORDER_OFFSET: isize = 1000;
 }
 
-use platform::{LINUX_MULTI_WINDOW, PRIMARY_ORDER_OFFSET};
+#[cfg(not(target_os = "macos"))]
+use platform::LINUX_MULTI_WINDOW;
+use platform::PRIMARY_ORDER_OFFSET;
 
 use big_space::{GridCell, precision::GridPrecision};
 use plot_3d::LinePlot3dPlugin;
@@ -766,6 +777,25 @@ fn sync_windows(
                 rect: *rect,
             });
         }
+        #[cfg(target_os = "macos")]
+        {
+            if let (Some(screen_idx), Some(rect)) =
+                (state.descriptor.screen, state.descriptor.screen_rect)
+            {
+                info!(
+                    window = %window_entity,
+                    target_screen = screen_idx,
+                    rect = ?rect,
+                    "mac spawn: apply physical rect"
+                );
+                commands.spawn_task(move || async move {
+                    apply_physical_screen_rect(window_entity, screen_idx, rect)
+                        .await
+                        .ok();
+                    Ok(())
+                });
+            }
+        }
         existing_map.insert(*marker, window_entity);
         info!(
             "Created window entity {window_entity} with window id {:?}",
@@ -797,7 +827,90 @@ async fn wait_for_winit_window(window_id: Entity, timeout: Duration) -> Result<b
     Ok(false)
 }
 
+#[cfg(target_os = "macos")]
+pub(crate) async fn apply_physical_screen_rect(
+    window_entity: Entity,
+    screen_index: usize,
+    rect: WindowRect,
+) -> AccessResult {
+    if !wait_for_winit_window(window_entity, Duration::from_millis(2000)).await? {
+        warn!(%window_entity, "apply_physical_screen_rect: winit window not ready");
+        return Ok(());
+    }
+
+    let target = AsyncWorld.run(
+        |world| -> Option<(LogicalPosition<f64>, LogicalSize<f64>)> {
+            let winit_windows = world.get_non_send_resource::<bevy::winit::WinitWindows>()?;
+            let any_window = winit_windows.windows.values().next()?;
+            let screens = collect_sorted_screens(any_window);
+            log_screens("macos.load.screens", &screens);
+            let screen = screens.get(screen_index)?;
+            let pos = screen_physical_position(screen);
+            let size = screen_physical_size(screen);
+            if size.width <= 0.0 || size.height <= 0.0 {
+                return None;
+            }
+            let req_x = pos.x + (rect.x as f64 / 100.0) * size.width;
+            let req_y = pos.y + (rect.y as f64 / 100.0) * size.height;
+            let req_w = ((rect.width as f64 / 100.0) * size.width)
+                .round()
+                .max(1.0);
+            let req_h = ((rect.height as f64 / 100.0) * size.height)
+                .round()
+                .max(1.0);
+
+            let max_x = pos.x + size.width - req_w;
+            let max_y = pos.y + size.height - req_h;
+            let clamped_x = req_x.clamp(pos.x, max_x.max(pos.x));
+            let clamped_y = req_y.clamp(pos.y, max_y.max(pos.y));
+            info!(
+                target_screen = screen_index,
+                screen_pos = ?pos,
+                screen_size = ?size,
+                req_pos = ?LogicalPosition::new(req_x, req_y),
+                req_size = ?LogicalSize::new(req_w, req_h),
+                clamped_pos = ?LogicalPosition::new(clamped_x, clamped_y),
+                "mac apply_physical_screen_rect request"
+            );
+
+            Some((
+                LogicalPosition::new(clamped_x, clamped_y),
+                LogicalSize::new(req_w, req_h),
+            ))
+        },
+    );
+
+    let Some((pos, size)) = target else {
+        warn!(
+            ?screen_index,
+            "apply_physical_screen_rect: no screen found for index"
+        );
+        return Ok(());
+    };
+
+    AsyncWorld.run(move |world| {
+        let Some(winit_windows) = world.get_non_send_resource::<bevy::winit::WinitWindows>() else {
+            return;
+        };
+        if let Some(window) = winit_windows.get_window(window_entity) {
+            window.set_visible(true);
+            window.set_outer_position(pos);
+            let _ = window.request_inner_size(size);
+            info!(
+                %window_entity,
+                target_screen = screen_index,
+                pos = ?pos,
+                size = ?size,
+                "mac apply_physical_screen_rect applied"
+            );
+        }
+    });
+
+    Ok(())
+}
+
 /// Wait for a window to change to a target screen or timeout.
+#[cfg(not(target_os = "macos"))]
 async fn wait_for_window_to_change_screens(
     window_id: Entity,
     target_screen: usize,
@@ -834,50 +947,9 @@ async fn wait_for_window_to_change_screens(
     Ok(false)
 }
 
-#[cfg(target_os = "macos")]
-async fn wait_for_window_settled_macos(
-    window_id: Entity,
-    target_screen: Option<usize>,
-    timeout: Duration,
-) -> Result<(), AccessError> {
-    const STABLE_CHECKS: u32 = 3;
-    let start = Instant::now();
-    let winit_windows_async = AsyncWorld.non_send_resource::<bevy::winit::WinitWindows>();
-    let mut stable_count = 0;
-    while start.elapsed() < timeout {
-        let settled = winit_windows_async.get(|winit_windows| {
-            let Some(window) = winit_windows.get_window(window_id) else {
-                return false;
-            };
-            let screens = collect_sorted_screens(window);
-            let current_screen = detect_window_screen(window, &screens);
-            let on_target = match (target_screen, current_screen) {
-                (None, _) => true,
-                (Some(target), Some(current)) => target == current,
-                _ => false,
-            };
-            on_target && window.fullscreen().is_none()
-        })?;
-
-        if settled {
-            stable_count += 1;
-            if stable_count >= STABLE_CHECKS {
-                return Ok(());
-            }
-        } else {
-            stable_count = 0;
-        }
-
-        AsyncWorld.sleep(Duration::from_millis(50)).await;
-    }
-    warn!(
-        %window_id,
-        ?target_screen,
-        "Timed out waiting for macOS window to settle on target screen without fullscreen"
-    );
-    Err(AccessError::resource::<WinitWindow>())
-}
-
+#[cfg(not(target_os = "macos"))]
+#[cfg(not(target_os = "macos"))]
+#[cfg(not(target_os = "macos"))]
 async fn apply_window_screen(entity: Entity, screen: usize) -> Result<(), bevy_defer::AccessError> {
     info!(
         window = %entity,
@@ -949,20 +1021,8 @@ async fn apply_window_screen(entity: Entity, screen: usize) -> Result<(), bevy_d
                 }
             } else {
                 recenter_window_on_screen(window, &target_monitor);
-                #[cfg(target_os = "macos")]
-                {
-                    window
-                        .set_fullscreen(Some(Fullscreen::Borderless(Some(target_monitor.clone()))));
-                    window.set_fullscreen(None);
-                    recenter_window_on_screen(window, &target_monitor);
-                }
             }
         })?;
-    }
-    #[cfg(target_os = "macos")]
-    {
-        wait_for_window_settled_macos(entity, state.descriptor.screen, Duration::from_millis(1000))
-            .await?;
     }
     Ok(())
 }
@@ -983,9 +1043,7 @@ fn handle_window_relayout_events(
             e @ WindowRelayout::Rect { window, rect: _ } => {
                 per_window.entry(*window).or_default().push(e.clone());
             }
-            WindowRelayout::UpdateDescriptors => {
-                commands.run_system_cached(capture_window_screens_oneoff);
-            }
+            WindowRelayout::UpdateDescriptors => {}
         }
     }
 
@@ -998,10 +1056,41 @@ fn handle_window_relayout_events(
                             target_screen = screen,
                             "Attempting secondary screen assignment"
                         );
-                        apply_window_screen(window, screen).await?;
+                        #[cfg(target_os = "macos")]
+                        {
+                            let window_states = AsyncWorld.query::<&tiles::WindowState>();
+                            if let Ok(Some(rect)) = window_states
+                                .entity(window)
+                                .get(|state| state.descriptor.screen_rect)
+                            {
+                                apply_physical_screen_rect(window, screen, rect).await.ok();
+                                continue;
+                            }
+                        }
+                        #[cfg(not(target_os = "macos"))]
+                        {
+                            apply_window_screen(window, screen).await?;
+                        }
                     }
                     WindowRelayout::Rect { window, rect } => {
-                        apply_window_rect(rect, window, Duration::from_millis(1000)).await?;
+                        #[cfg(target_os = "macos")]
+                        {
+                            if let Some(screen) = AsyncWorld
+                                .query::<&tiles::WindowState>()
+                                .entity(window)
+                                .get(|state| state.descriptor.screen)
+                                .ok()
+                                .flatten()
+                            {
+                                apply_physical_screen_rect(window, screen, rect).await.ok();
+                                continue;
+                            }
+                            apply_physical_screen_rect(window, 0, rect).await.ok();
+                        }
+                        #[cfg(not(target_os = "macos"))]
+                        {
+                            apply_window_rect(rect, window, Duration::from_millis(1000)).await?;
+                        }
                     }
                     WindowRelayout::UpdateDescriptors => {
                         unreachable!();
@@ -1013,6 +1102,7 @@ fn handle_window_relayout_events(
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 async fn apply_window_rect(
     rect: WindowRect,
     entity: Entity,
@@ -1031,39 +1121,6 @@ async fn apply_window_rect(
 
     let is_full_rect =
         LINUX_MULTI_WINDOW && rect.x == 0 && rect.y == 0 && rect.width == 100 && rect.height == 100;
-
-    #[cfg(target_os = "macos")]
-    if let Some(screen_idx) = state.descriptor.screen {
-        // Allow fullscreen hops to complete before sizing/positioning.
-        AsyncWorld.sleep(Duration::from_millis(2000)).await;
-        wait_for_window_settled_macos(entity, Some(screen_idx), Duration::from_millis(1000))
-            .await?;
-
-        // If still fullscreen or off target, skip rect.
-        let skip_rect = winit_windows_async.get(|winit_windows| {
-            if let Some(window) = winit_windows.get_window(entity) {
-                if window.fullscreen().is_some() {
-                    return true;
-                }
-                let screens = collect_sorted_screens(window);
-                let detected = detect_window_screen(window, &screens);
-                match (Some(screen_idx), detected) {
-                    (Some(t), Some(cur)) => t != cur,
-                    _ => false,
-                }
-            } else {
-                true
-            }
-        })?;
-        if skip_rect {
-            warn!(
-                window = %entity,
-                target = screen_idx,
-                "macOS: skipping rect because window still fullscreen or off target screen"
-            );
-            return Ok(());
-        }
-    }
 
     let start = Instant::now();
     let mut wait = true;
@@ -1228,6 +1285,7 @@ async fn apply_window_rect(
     Ok(())
 }
 
+#[cfg(not(target_os = "macos"))]
 fn assign_window_to_screen(
     // state: &mut tiles::WindowState,
     window: &WinitWindow,
@@ -1246,6 +1304,7 @@ fn assign_window_to_screen(
     window.set_outer_position(PhysicalPosition::new(x, y));
 }
 
+#[cfg(not(target_os = "macos"))]
 fn recenter_window_on_screen(window: &WinitWindow, target_monitor: &MonitorHandle) {
     let screen_pos = target_monitor.position();
     let screen_size = target_monitor.size();
@@ -1295,17 +1354,34 @@ pub(crate) fn capture_window_screens_oneoff(
     }
 }
 
+#[cfg(target_os = "macos")]
+static SCREEN_CACHE: OnceLock<Vec<MonitorHandle>> = OnceLock::new();
+
 fn collect_sorted_screens(window: &WinitWindow) -> Vec<MonitorHandle> {
     let mut screens: Vec<MonitorHandle> = window.available_monitors().collect();
+
     screens.sort_by(|a, b| {
-        let p_a = a.position();
-        let p_b = b.position();
-        p_a.x.cmp(&p_b.x).then(p_a.y.cmp(&p_b.y)).then_with(|| {
-            let name_a = a.name();
-            let name_b = b.name();
-            name_a.cmp(&name_b)
-        })
+        let p_a = screen_physical_position(a);
+        let p_b = screen_physical_position(b);
+        p_a.x
+            .partial_cmp(&p_b.x)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                p_a.y
+                    .partial_cmp(&p_b.y)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| {
+                let name_a = a.name();
+                let name_b = b.name();
+                name_a.cmp(&name_b)
+            })
     });
+
+    #[cfg(target_os = "macos")]
+    {
+        let _ = SCREEN_CACHE.set(screens.clone());
+    }
     screens
 }
 
@@ -1317,6 +1393,51 @@ fn screens_match(a: &MonitorHandle, b: &MonitorHandle) -> bool {
         (Some(an), Some(bn)) => an == bn && a.size() == b.size(),
         _ => false,
     }
+}
+
+#[cfg(target_os = "macos")]
+fn log_screens(label: &str, screens: &[MonitorHandle]) {
+    info!(log_label = label, count = screens.len(), "screen list");
+    for (idx, screen) in screens.iter().enumerate() {
+        let pos = screen_physical_position(screen);
+        let size = screen_physical_size(screen);
+        let scale = screen.scale_factor();
+        let name = screen.name().unwrap_or_else(|| "unknown".to_string());
+        info!(
+            log_label = label,
+            idx,
+            name,
+            pos = ?pos,
+            size = ?size,
+            scale,
+            "screen"
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn screen_physical_position(screen: &MonitorHandle) -> LogicalPosition<f64> {
+    let pos = screen.position();
+    LogicalPosition::new(pos.x as f64, pos.y as f64)
+}
+
+#[cfg(target_os = "macos")]
+fn screen_physical_size(screen: &MonitorHandle) -> LogicalSize<f64> {
+    let size = screen.size();
+    let scale = screen.scale_factor().max(0.0001);
+    LogicalSize::new(size.width as f64 / scale, size.height as f64 / scale)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn screen_physical_position(screen: &MonitorHandle) -> LogicalPosition<f64> {
+    let pos = screen.position();
+    LogicalPosition::new(pos.x as f64, pos.y as f64)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn screen_physical_size(screen: &MonitorHandle) -> LogicalSize<f64> {
+    let size = screen.size();
+    LogicalSize::new(size.width as f64, size.height as f64)
 }
 
 fn fix_visibility_hierarchy(
@@ -1359,6 +1480,7 @@ pub(crate) fn update_primary_descriptor_path(
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn window_on_target_screen(
     state: &mut tiles::WindowState,
     window: &WinitWindow,
@@ -1378,6 +1500,7 @@ fn window_on_target_screen(
     false
 }
 
+#[cfg(not(target_os = "macos"))]
 fn window_on_screen(
     screen: Option<usize>,
     window: &WinitWindow,
@@ -1391,6 +1514,7 @@ fn window_on_screen(
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn exit_fullscreen(window: &WinitWindow) {
     #[cfg(target_os = "macos")]
     {
@@ -1406,6 +1530,7 @@ fn exit_fullscreen(window: &WinitWindow) {
     window.set_decorations(true);
 }
 
+#[cfg(not(target_os = "macos"))]
 fn force_windowed(window: &WinitWindow) {
     if !LINUX_MULTI_WINDOW {
         return;
@@ -1416,12 +1541,14 @@ fn force_windowed(window: &WinitWindow) {
     window.set_maximized(false);
 }
 
+#[cfg(not(target_os = "macos"))]
 fn linux_clear_minimized(window: &WinitWindow) {
     if !LINUX_MULTI_WINDOW {
         window.set_minimized(false);
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn linux_request_minimize(window: &WinitWindow) {
     window.set_minimized(true);
 }
