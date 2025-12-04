@@ -15,6 +15,22 @@ order = 1
 
 ## v0.15
 
+### v0.15.4
+- **(feat)** Persist multi-window properties: physical screen, position, dimension. (#302)
+- **(feat)** Support SITL Python module. (#323)
+- **(feat)** Add MSP Displayport OSD service, RC jet simulation example, and schematic 3D transform support. (#330)
+- **(feat)** Add text labels, scaling, and use meshes for vector arrows. (#317)
+- **(feat)** Add cargo aliases for `elodin` and `elodin-db`. (#303)
+- **(feat:aleph)** Add option for alternate kernel configuration.
+- **(feat:aleph)** Add i2c-tools to aleph-dev.
+- **(feat:aleph)** Allow unique db save location.
+- **(fix:aleph)** Fix default elodin-db boot service.
+- **(fix)** Ctrl+C interrupts simulation properly. (#316, #329)
+- **(fix)** The axes widget no longer spins indefinitely. (#315)
+- **(fix)** Remove Bevy's "file_watcher" feature. (#311)
+- **(fix)** Fix flicker associated with `bevy_editor_cam`. (#310)
+- **(chore)** Remove Basilisk. (#326)
+
 ### v0.15.3
 - **(feat)** Add "Clear Schematic" to command palette. (#276)
 - **(feat)** Add "Create Window" to command palette. (#293)
