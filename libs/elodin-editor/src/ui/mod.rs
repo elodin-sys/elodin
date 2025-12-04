@@ -946,8 +946,6 @@ async fn wait_for_window_to_change_screens(
 }
 
 #[cfg(not(target_os = "macos"))]
-#[cfg(not(target_os = "macos"))]
-#[cfg(not(target_os = "macos"))]
 async fn apply_window_screen(entity: Entity, screen: usize) -> Result<(), bevy_defer::AccessError> {
     info!(
         window = %entity,
