@@ -1,4 +1,5 @@
 use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
+#[cfg(target_os = "macos")]
 use bevy_defer::AsyncCommandsExtension;
 use bevy_egui::egui::{Color32, Id};
 use bevy_infinite_grid::InfiniteGrid;
