@@ -1432,12 +1432,6 @@ fn screen_physical_position(screen: &MonitorHandle) -> LogicalPosition<f64> {
     LogicalPosition::new(pos.x as f64, pos.y as f64)
 }
 
-#[cfg(not(target_os = "macos"))]
-fn screen_physical_size(screen: &MonitorHandle) -> LogicalSize<f64> {
-    let size = screen.size();
-    LogicalSize::new(size.width as f64, size.height as f64)
-}
-
 fn fix_visibility_hierarchy(
     mut commands: Commands,
     inherited_with_parent: Query<&ChildOf, With<InheritedVisibility>>,
