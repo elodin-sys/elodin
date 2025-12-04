@@ -37,7 +37,7 @@ use winit::{
 };
 #[cfg(not(target_os = "macos"))]
 use winit::{
-    dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize},
+    dpi::{LogicalPosition, PhysicalPosition, PhysicalSize},
     monitor::MonitorHandle,
     window::Window as WinitWindow,
 };
