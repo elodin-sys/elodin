@@ -36,6 +36,7 @@ highlight_themes_css = [
     { theme = "solarized-dark", filename = "syntax-theme-dark.css" },
     { theme = "solarized-light", filename = "syntax-theme-light.css" },
 ]
+extra_syntaxes_and_themes = ["syntaxes"]
 
 [extra]
 # Put all your custom variables here
