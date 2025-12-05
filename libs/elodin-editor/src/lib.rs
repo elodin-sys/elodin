@@ -7,7 +7,7 @@ use bevy::{
     DefaultPlugins,
     asset::{UnapprovedPathMode, embedded_asset},
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
-    log::{Level, LogPlugin},
+    log::LogPlugin,
     math::{DQuat, DVec3},
     pbr::{
         DirectionalLightShadowMap,
@@ -175,12 +175,6 @@ impl Plugin for EditorPlugin {
                     .disable::<LogPlugin>()
                     .build(),
             )
-            .add_plugins(LogPlugin {
-                level: Level::INFO,
-                filter: "info,wgpu=error,present_frames=error,wgpu_core=warn,wgpu_hal=warn"
-                    .to_string(),
-                ..Default::default()
-            })
             .insert_resource(winit_settings)
             .init_resource::<tiles::ViewportContainsPointer>()
             .add_plugins(bevy_framepace::FramepacePlugin)
