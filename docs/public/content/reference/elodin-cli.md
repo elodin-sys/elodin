@@ -26,12 +26,12 @@ This document contains the help content for the `elodin` command-line program.
 
 **Usage:** `elodin [OPTIONS] [COMMAND]`
 
-###### **Subcommands:**
+###### **Subcommands**
 
 * `editor` — Launch the Elodin editor (default)
 * `run` — Run an Elodin simulation in headless mode
 
-###### **Options:**
+###### **Options**
 
 * `-u`, `--url <URL>`
 
@@ -45,7 +45,7 @@ Launch the Elodin editor (default)
 
 **Usage:** `elodin editor [addr/path]`
 
-###### **Arguments:**
+###### **Arguments**
 
 * `<addr/path>`
 
@@ -59,7 +59,7 @@ Run an Elodin simulation in headless mode
 
 **Usage:** `elodin run [addr/path]`
 
-###### **Arguments:**
+###### **Arguments**
 
 * `<addr/path>`
 
@@ -73,4 +73,3 @@ Run an Elodin simulation in headless mode
     This document was generated automatically by
     <a href="https://crates.io/crates/clap-markdown"><code>clap-markdown</code></a>.
 </i></small>
-
