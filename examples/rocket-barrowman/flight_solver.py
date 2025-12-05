@@ -312,7 +312,7 @@ class FlightSolver:
         parachutes: Optional[List[ParachuteConfig]] = None,
         dt: float = 0.01,
         rail_length: float = 2.0,
-        inclination_deg: float = 90.0,
+        inclination_deg: float = 0.0,  # 0° = vertical up (was 90° = horizontal, which was wrong)
         heading_deg: float = 0.0,
         max_time: Optional[float] = None,
     ) -> None:
@@ -364,7 +364,16 @@ class FlightSolver:
     # ------------------------------------------------------------------
     def _initial_state(self) -> np.ndarray:
         state = np.zeros(14, dtype=np.float64)
+        # Position: start at ground level (z=0)
+        state[0:3] = np.array([0.0, 0.0, 0.0])
+        # Velocity: initial velocity along rail direction (small positive to start motion)
+        # Get the direction from the initial quaternion
+        direction = self._rotate_vector(self.initial_orientation, np.array([0.0, 0.0, 1.0]))
+        # Small initial velocity to help numerical stability (0.1 m/s)
+        state[3:6] = 0.1 * direction
+        # Orientation
         state[6:10] = self.initial_orientation
+        # Motor mass
         state[13] = self.motor.mass(0.0)
         return state
 
@@ -566,10 +575,8 @@ class FlightSolver:
                 [chute_drag_body_vec.x, chute_drag_body_vec.y, chute_drag_body_vec.z]
             )
         else:
+            # Transform world to body without axis swap
             chute_drag_body_rp = self._rotate_world_to_body(quaternion, parachute_drag_world)
-            chute_drag_body_rp = np.array(
-                [chute_drag_body_rp[2], chute_drag_body_rp[1], chute_drag_body_rp[0]]
-            )
 
         # Lift force using stream velocity at CP (RocketPy aero_surface.py lines 130-149)
         R1, R2, R3 = 0.0, 0.0, 0.0
@@ -601,6 +608,7 @@ class FlightSolver:
         aero_force_body_rp = drag_body_rp + chute_drag_body_rp + normal_force_body_rp
 
         # Transform to world frame for total force calculation
+        # Body frame: x=lateral(yaw), y=lateral(pitch), z=longitudinal(forward)
         if Matrix is not None and Vector is not None:
             K = Matrix.transformation(quaternion)
             aero_force_world = K @ Vector(aero_force_body_rp)
@@ -608,21 +616,21 @@ class FlightSolver:
                 [aero_force_world.x, aero_force_world.y, aero_force_world.z]
             )
         else:
-            # Fallback: convert from our convention
-            aero_force_body_our = np.array(
-                [aero_force_body_rp[2], aero_force_body_rp[1], aero_force_body_rp[0]]
-            )
-            aero_force_world = self._rotate_vector(quaternion, aero_force_body_our)
+            # Use body frame directly: aero_force_body_rp is [x_lat, y_lat, z_axial]
+            # Our quaternion maps body-z to world launch direction
+            aero_force_world = self._rotate_vector(quaternion, aero_force_body_rp)
 
-        # Thrust in RocketPy body frame (along +z)
+        # Thrust in body frame (along +z, which is the rocket's longitudinal axis)
+        # The quaternion maps body-z to the launch direction, so thrust along body-z
         thrust_mag = self.motor.thrust(time)
-        thrust_body_rp = np.array([0.0, 0.0, thrust_mag])
         if Matrix is not None and Vector is not None:
+            thrust_body_rp = np.array([0.0, 0.0, thrust_mag])
             thrust_world = K @ Vector(thrust_body_rp)
             thrust_world = np.array([thrust_world.x, thrust_world.y, thrust_world.z])
         else:
-            thrust_body_our = np.array([thrust_mag, 0.0, 0.0])
-            thrust_world = self._rotate_vector(quaternion, thrust_body_our)
+            # In our convention: body-z is longitudinal (forward), same as initial quaternion setup
+            thrust_body = np.array([0.0, 0.0, thrust_mag])
+            thrust_world = self._rotate_vector(quaternion, thrust_body)
 
         gravity = np.array([0.0, 0.0, -mass_total * G0])
         total_force = thrust_world + aero_force_world + gravity
@@ -668,8 +676,8 @@ class FlightSolver:
             moment_world = K @ Vector(moment_body_rp)
             moment_world = np.array([moment_world.x, moment_world.y, moment_world.z])
         else:
-            moment_body_our = np.array([moment_body_rp[2], moment_body_rp[1], moment_body_rp[0]])
-            moment_world = self._rotate_vector(quaternion, moment_body_our)
+            # Use body frame directly without axis swap
+            moment_world = self._rotate_vector(quaternion, moment_body_rp)
 
         # Store forces for compatibility (compute world frame equivalents)
         # Drag is primarily along -z in body frame
