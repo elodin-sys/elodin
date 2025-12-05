@@ -1,6 +1,12 @@
 <!doctype html>
 <meta charset="utf-8">
-<link rel="canonical" href="/home/tao/introduction/">
-<meta http-equiv="refresh" content="0; url=/home/tao/introduction/">
 <title>Redirect</title>
+<script>
+  const target = "/home/tao/introduction/";
+  const hash = window.location.hash || "";
+  window.location.replace(target + hash);
+</script>
+<noscript>
+  <meta http-equiv="refresh" content="0; url=/home/tao/introduction/">
+</noscript>
 <p><a href="/home/tao/introduction/">Click here</a> to be redirected.</p>

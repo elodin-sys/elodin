@@ -202,8 +202,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.15.3" selected>
-                        v0.15.3
+                    <option value="v0.15.4" selected>
+                        v0.15.4
                     </option>
                 </select>
             </span>
@@ -341,6 +341,14 @@
                 >
             </li>
             
+            <li>
+                <a
+                    class="docs-link "
+                    href="/reference/schematic/"
+                    >Schematic KDL</a
+                >
+            </li>
+            
         </ul>
           
          
@@ -370,24 +378,58 @@
         <nav id="TableOfContents">
             <ul>
                 
-                <li><a href="/reference/elodin-cli/#command-line-help-for-elodin">Command-Line Help for elodin</a></li>
+                <li>
+                    <a href="/reference/elodin-cli/#command-line-help-for-elodin">Command-Line Help for elodin</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="/reference/elodin-cli/#elodin">elodin</a>
+                            
+                            <ul>
+                                
+                                <li>
+                                    <a href="/reference/elodin-cli/#subcommands">Subcommands</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="/reference/elodin-cli/#options">Options</a>
+                                </li>
+                                
+                            </ul>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/elodin-cli/#elodin-editor">elodin editor</a>
+                            
+                            <ul>
+                                
+                                <li>
+                                    <a href="/reference/elodin-cli/#arguments">Arguments</a>
+                                </li>
+                                
+                            </ul>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/elodin-cli/#elodin-run">elodin run</a>
+                            
+                            <ul>
+                                
+                                <li>
+                                    <a href="/reference/elodin-cli/#arguments-1">Arguments</a>
+                                </li>
+                                
+                            </ul>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
                 
-                <ul>
-                    
-                    <li>
-                        <a href="/reference/elodin-cli/#elodin">elodin</a>
-                    </li>
-                    
-                    <li>
-                        <a href="/reference/elodin-cli/#elodin-editor">elodin editor</a>
-                    </li>
-                    
-                    <li>
-                        <a href="/reference/elodin-cli/#elodin-run">elodin run</a>
-                    </li>
-                    
-                </ul>
-                 
             </ul>
         </nav>
     </div>
@@ -405,12 +447,12 @@
 </ul>
 <h2 id="elodin"><code>elodin</code></h2>
 <p><strong>Usage:</strong> <code>elodin [OPTIONS] [COMMAND]</code></p>
-<h6 id="subcommands"><strong>Subcommands:</strong></h6>
+<h6 id="subcommands"><strong>Subcommands</strong></h6>
 <ul>
 <li><code>editor</code> — Launch the Elodin editor (default)</li>
 <li><code>run</code> — Run an Elodin simulation in headless mode</li>
 </ul>
-<h6 id="options"><strong>Options:</strong></h6>
+<h6 id="options"><strong>Options</strong></h6>
 <ul>
 <li>
 <p><code>-u</code>, <code>--url &lt;URL&gt;</code></p>
@@ -420,7 +462,7 @@
 <h2 id="elodin-editor"><code>elodin editor</code></h2>
 <p>Launch the Elodin editor (default)</p>
 <p><strong>Usage:</strong> <code>elodin editor [addr/path]</code></p>
-<h6 id="arguments"><strong>Arguments:</strong></h6>
+<h6 id="arguments"><strong>Arguments</strong></h6>
 <ul>
 <li>
 <p><code>&lt;addr/path&gt;</code></p>
@@ -430,7 +472,7 @@
 <h2 id="elodin-run"><code>elodin run</code></h2>
 <p>Run an Elodin simulation in headless mode</p>
 <p><strong>Usage:</strong> <code>elodin run [addr/path]</code></p>
-<h6 id="arguments-1"><strong>Arguments:</strong></h6>
+<h6 id="arguments-1"><strong>Arguments</strong></h6>
 <ul>
 <li>
 <p><code>&lt;addr/path&gt;</code></p>
