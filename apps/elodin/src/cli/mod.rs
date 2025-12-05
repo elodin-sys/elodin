@@ -3,8 +3,7 @@ use miette::Context;
 use miette::IntoDiagnostic;
 use miette::miette;
 use stellarator::util::CancelToken;
-use tracing_subscriber::EnvFilter;
-
+use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal};
 mod editor;
 
 #[derive(Parser, Clone)]
@@ -38,20 +37,18 @@ impl Cli {
             std::process::exit(0);
         }
 
-        let filter = if std::env::var("RUST_LOG").is_ok() {
-            EnvFilter::builder().from_env_lossy()
-        } else {
-            EnvFilter::builder().parse_lossy(
-                "s10=info,elodin=info,impeller=info,nox_ecs=info,impeller::bevy=error,error",
-            )
-        };
+        let filter = EnvFilter::try_from_default_env()
+            .or_else(|_| {
+                EnvFilter::try_new(
+                    "s10=info,elodin=info,impeller=info,nox_ecs=info,impeller::bevy=error,error",
+                )
+            })
+            .unwrap_or_else(|_| EnvFilter::new("info"));
 
-        let _ = tracing_subscriber::fmt::fmt()
+        let _ = tracing_subscriber::fmt()
             .with_target(false)
             .with_env_filter(filter)
-            .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
-                "%Y-%m-%d %H:%M:%S%.3f".to_string(),
-            ))
+            .with_timer(ChronoLocal::new("%Y-%m-%d %H:%M:%S%.3f".to_string()))
             .try_init();
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
