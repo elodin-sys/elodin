@@ -199,8 +199,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.15.3" selected>
-                        v0.15.3
+                    <option value="v0.15.4" selected>
+                        v0.15.4
                     </option>
                 </select>
             </span>
@@ -324,6 +324,10 @@
                 <li><a href="https://docs.elodin.systems/preview/pr-274/releases/changelog/#v0-15">v0.15</a></li>
                 
                 <ul>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/releases/changelog/#v0-15-4">v0.15.4</a>
+                    </li>
                     
                     <li>
                         <a href="https://docs.elodin.systems/preview/pr-274/releases/changelog/#v0-15-3">v0.15.3</a>
@@ -587,6 +591,23 @@
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Changelog</h1>
                    <h2 id="v0-15">v0.15</h2>
+<h3 id="v0-15-4">v0.15.4</h3>
+<ul>
+<li><strong>(feat)</strong> Persist multi-window properties: physical screen, position, dimension. (#302)</li>
+<li><strong>(feat)</strong> Support SITL Python module. (#323)</li>
+<li><strong>(feat)</strong> Add MSP Displayport OSD service, RC jet simulation example, and schematic 3D transform support. (#330)</li>
+<li><strong>(feat)</strong> Add text labels, scaling, and use meshes for vector arrows. (#317)</li>
+<li><strong>(feat)</strong> Add cargo aliases for <code>elodin</code> and <code>elodin-db</code>. (#303)</li>
+<li><strong>(feat:aleph)</strong> Add option for alternate kernel configuration.</li>
+<li><strong>(feat:aleph)</strong> Add i2c-tools to aleph-dev.</li>
+<li><strong>(feat:aleph)</strong> Allow unique db save location.</li>
+<li><strong>(fix:aleph)</strong> Fix default elodin-db boot service.</li>
+<li><strong>(fix)</strong> Ctrl+C interrupts simulation properly. (#316, #329)</li>
+<li><strong>(fix)</strong> The axes widget no longer spins indefinitely. (#315)</li>
+<li><strong>(fix)</strong> Remove Bevy's "file_watcher" feature. (#311)</li>
+<li><strong>(fix)</strong> Fix flicker associated with <code>bevy_editor_cam</code>. (#310)</li>
+<li><strong>(chore)</strong> Remove Basilisk. (#326)</li>
+</ul>
 <h3 id="v0-15-3">v0.15.3</h3>
 <ul>
 <li><strong>(feat)</strong> Add "Clear Schematic" to command palette. (#276)</li>

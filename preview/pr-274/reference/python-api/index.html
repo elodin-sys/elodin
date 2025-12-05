@@ -202,8 +202,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.15.3" selected>
-                        v0.15.3
+                    <option value="v0.15.4" selected>
+                        v0.15.4
                     </option>
                 </select>
             </span>
@@ -500,6 +500,46 @@
                     
                     <li>
                         <a href="https://docs.elodin.systems/preview/pr-274/reference/python-api/#class-elodin-spatialinertia">class elodin.SpatialInertia</a>
+                    </li>
+                    
+                </ul>
+                 
+                <li><a href="https://docs.elodin.systems/preview/pr-274/reference/python-api/#schematic-syntax-for-3d-objects">Schematic Syntax for 3D Objects</a></li>
+                
+                <ul>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/reference/python-api/#basic-shapes">Basic Shapes</a>
+                    </li>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/reference/python-api/#ellipsoids-with-dynamic-scaling">Ellipsoids with Dynamic Scaling</a>
+                    </li>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/reference/python-api/#glb-models">GLB Models</a>
+                    </li>
+                    
+                </ul>
+                 
+                <li><a href="https://docs.elodin.systems/preview/pr-274/reference/python-api/#eql-viewport-formulas">EQL Viewport Formulas</a></li>
+                
+                <ul>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/reference/python-api/#rotation-formulas">Rotation Formulas</a>
+                    </li>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/reference/python-api/#translation-formulas">Translation Formulas</a>
+                    </li>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/reference/python-api/#chaining-formulas">Chaining Formulas</a>
+                    </li>
+                    
+                    <li>
+                        <a href="https://docs.elodin.systems/preview/pr-274/reference/python-api/#usage-notes">Usage Notes</a>
                     </li>
                     
                 </ul>
@@ -1156,6 +1196,172 @@ The semi-implicit integrator is a numerical method used to solve ordinary differ
 <li>
 <p><code>inertia_diag()</code> -&gt; <a href="https://jax.readthedocs.io/en/latest/_autosummary/jax.Array.html#jax.Array">jax.Array</a></p>
 <p>Get the inertia tensor diagonal of the spatial inertia with shape (3,).</p>
+</li>
+</ul>
+<p><br></br></p>
+<h2 id="schematic-syntax-for-3d-objects">Schematic Syntax for 3D Objects</h2>
+<p>When visualizing entities in the Elodin editor, you can define 3D objects using KDL schematic syntax. The <code>object_3d</code> declaration connects a visual representation to an entity's <code>world_pos</code> component.</p>
+<h3 id="basic-shapes">Basic Shapes</h3>
+<p>Create basic geometric shapes with customizable dimensions and colors:</p>
+<pre data-lang="kdl" class="language-kdl z-code"><code class="language-kdl" data-lang="kdl"><span class="z-text z-plain">object_3d ball.world_pos {
+</span><span class="z-text z-plain">    sphere radius=0.2 {
+</span><span class="z-text z-plain">        color 25 50 255  // RGB values (0-255), optional alpha
+</span><span class="z-text z-plain">    }
+</span><span class="z-text z-plain">}
+</span><span class="z-text z-plain">
+</span><span class="z-text z-plain">object_3d box.world_pos {
+</span><span class="z-text z-plain">    box x=1.0 y=1.0 z=1.0 {
+</span><span class="z-text z-plain">        color 255 128 0
+</span><span class="z-text z-plain">    }
+</span><span class="z-text z-plain">}
+</span><span class="z-text z-plain">
+</span><span class="z-text z-plain">object_3d ground.world_pos {
+</span><span class="z-text z-plain">    plane width=20 depth=20 {
+</span><span class="z-text z-plain">        color 32 128 32
+</span><span class="z-text z-plain">    }
+</span><span class="z-text z-plain">}
+</span><span class="z-text z-plain">
+</span><span class="z-text z-plain">object_3d cylinder.world_pos {
+</span><span class="z-text z-plain">    cylinder radius=0.5 height=2.0 {
+</span><span class="z-text z-plain">        color 100 100 200
+</span><span class="z-text z-plain">    }
+</span><span class="z-text z-plain">}
+</span></code></pre>
+<h3 id="ellipsoids-with-dynamic-scaling">Ellipsoids with Dynamic Scaling</h3>
+<p>Create ellipsoids that can dynamically change size based on component values:</p>
+<pre data-lang="kdl" class="language-kdl z-code"><code class="language-kdl" data-lang="kdl"><span class="z-text z-plain">object_3d satellite.world_pos {
+</span><span class="z-text z-plain">    ellipsoid scale=&quot;(1, 1, 2)&quot; {
+</span><span class="z-text z-plain">        color 200 200 0
+</span><span class="z-text z-plain">    }
+</span><span class="z-text z-plain">}
+</span></code></pre>
+<p>The <code>scale</code> parameter accepts an EQL expression for dynamic sizing.</p>
+<h3 id="glb-models">GLB Models</h3>
+<p>Load external 3D models from GLB files with optional transformations:</p>
+<pre data-lang="kdl" class="language-kdl z-code"><code class="language-kdl" data-lang="kdl"><span class="z-text z-plain">object_3d aircraft.world_pos {
+</span><span class="z-text z-plain">    glb path=&quot;f22.glb&quot; scale=0.01 translate=&quot;(0, 0, 1.5)&quot; rotate=&quot;(0, 90, 0)&quot;
+</span><span class="z-text z-plain">}
+</span></code></pre>
+<p><strong>GLB Parameters:</strong></p>
+<ul>
+<li><code>path</code> (required): Path or URL to the GLB file</li>
+<li><code>scale</code> (optional): Uniform scale multiplier (default: 1.0)</li>
+<li><code>translate</code> (optional): Translation offset as <code>"(x, y, z)"</code> tuple in meters (default: "(0, 0, 0)")</li>
+<li><code>rotate</code> (optional): Rotation as <code>"(x, y, z)"</code> Euler angles in degrees (default: "(0, 0, 0)")</li>
+</ul>
+<p><strong>Example use cases:</strong></p>
+<p>Scale down a large model:</p>
+<pre data-lang="kdl" class="language-kdl z-code"><code class="language-kdl" data-lang="kdl"><span class="z-text z-plain">object_3d rocket.world_pos {
+</span><span class="z-text z-plain">    glb path=&quot;rocket.glb&quot; scale=0.1
+</span><span class="z-text z-plain">}
+</span></code></pre>
+<p>Offset model origin to center of mass:</p>
+<pre data-lang="kdl" class="language-kdl z-code"><code class="language-kdl" data-lang="kdl"><span class="z-text z-plain">object_3d drone.world_pos {
+</span><span class="z-text z-plain">    glb path=&quot;drone.glb&quot; translate=&quot;(0, 0, -0.05)&quot;
+</span><span class="z-text z-plain">}
+</span></code></pre>
+<p>Rotate model to match simulation frame:</p>
+<pre data-lang="kdl" class="language-kdl z-code"><code class="language-kdl" data-lang="kdl"><span class="z-text z-plain">object_3d vehicle.world_pos {
+</span><span class="z-text z-plain">    glb path=&quot;car.glb&quot; rotate=&quot;(0, 0, 180)&quot;
+</span><span class="z-text z-plain">}
+</span></code></pre>
+<p>Combine all transformations:</p>
+<pre data-lang="kdl" class="language-kdl z-code"><code class="language-kdl" data-lang="kdl"><span class="z-text z-plain">object_3d jet.world_pos {
+</span><span class="z-text z-plain">    glb path=&quot;jet.glb&quot; scale=0.01 translate=&quot;(0, 0, 0.5)&quot; rotate=&quot;(0, 90, 0)&quot;
+</span><span class="z-text z-plain">}
+</span></code></pre>
+<p><strong>Notes:</strong></p>
+<ul>
+<li>Transformations are applied in order: scale → rotate → translate</li>
+<li>Rotations use XYZ Euler order</li>
+<li>Coordinates are in the simulation's coordinate frame</li>
+<li>The parent entity's <code>world_pos</code> determines the base position, and these transformations are applied as offsets</li>
+</ul>
+<p><br></br></p>
+<h2 id="eql-viewport-formulas">EQL Viewport Formulas</h2>
+<p>When defining viewport positions in schematics, you can use EQL (Elodin Query Language) formulas to apply rotations and translations to entity positions. These formulas are chainable and operate on <a href="https://docs.elodin.systems/preview/pr-274/reference/python-api/#class-elodin-worldpos">elodin.WorldPos</a> (SpatialTransform) data.</p>
+<h3 id="rotation-formulas">Rotation Formulas</h3>
+<p>Rotation formulas modify the orientation quaternion of a spatial transform. All angles are specified in degrees.</p>
+<h4 id="body-frame-rotations">Body-Frame Rotations</h4>
+<p>Body-frame rotations apply relative to the entity's local coordinate system (the axes rotate with the entity):</p>
+<ul>
+<li><code>rotate_x(angle)</code> - Rotate about the body X axis (roll)</li>
+<li><code>rotate_y(angle)</code> - Rotate about the body Y axis (pitch)</li>
+<li><code>rotate_z(angle)</code> - Rotate about the body Z axis (yaw)</li>
+<li><code>rotate(x, y, z)</code> - Apply combined XYZ Euler rotations in order</li>
+</ul>
+<p><strong>Example - FPV camera rotated 90° right:</strong></p>
+<pre data-lang="kdl" class="language-kdl z-code"><code class="language-kdl" data-lang="kdl"><span class="z-text z-plain">viewport name=FPVCamera pos=&quot;aircraft.world_pos.rotate_z(-90)&quot; show_grid=#true
+</span></code></pre>
+<h4 id="world-frame-rotations">World-Frame Rotations</h4>
+<p>World-frame rotations apply relative to the world coordinate system (independent of entity orientation):</p>
+<ul>
+<li><code>rotate_world_x(angle)</code> - Rotate about the world X axis</li>
+<li><code>rotate_world_y(angle)</code> - Rotate about the world Y axis</li>
+<li><code>rotate_world_z(angle)</code> - Rotate about the world Z axis</li>
+<li><code>rotate_world(x, y, z)</code> - Apply combined XYZ Euler rotations in world frame</li>
+</ul>
+<p><strong>Example - Camera tilted down 15° in world space:</strong></p>
+<pre data-lang="kdl" class="language-kdl z-code"><code class="language-kdl" data-lang="kdl"><span class="z-text z-plain">viewport name=TopView pos=&quot;satellite.world_pos.rotate_world_y(-15)&quot; look_at=&quot;earth.world_pos&quot;
+</span></code></pre>
+<h3 id="translation-formulas">Translation Formulas</h3>
+<p>Translation formulas modify the position component of a spatial transform.</p>
+<h4 id="body-frame-translations">Body-Frame Translations</h4>
+<p>Body-frame translations move the camera relative to the entity's local axes (the offset direction rotates with the entity):</p>
+<ul>
+<li><code>translate_x(distance)</code> - Translate along body X axis (forward/back)</li>
+<li><code>translate_y(distance)</code> - Translate along body Y axis (left/right)</li>
+<li><code>translate_z(distance)</code> - Translate along body Z axis (up/down)</li>
+<li><code>translate(x, y, z)</code> - Apply combined XYZ translation</li>
+</ul>
+<p><strong>Example - Camera 2m behind and 1m above in body frame:</strong></p>
+<pre data-lang="kdl" class="language-kdl z-code"><code class="language-kdl" data-lang="kdl"><span class="z-text z-plain">viewport name=ChaseCamera pos=&quot;car.world_pos.translate_x(-2.0).translate_z(1.0)&quot;
+</span></code></pre>
+<h4 id="world-frame-translations">World-Frame Translations</h4>
+<p>World-frame translations move the camera in world coordinates (the offset stays fixed regardless of entity orientation):</p>
+<ul>
+<li><code>translate_world_x(distance)</code> - Translate along world X axis (East in ENU)</li>
+<li><code>translate_world_y(distance)</code> - Translate along world Y axis (North in ENU)</li>
+<li><code>translate_world_z(distance)</code> - Translate along world Z axis (Up in ENU)</li>
+<li><code>translate_world(x, y, z)</code> - Apply combined XYZ translation</li>
+</ul>
+<p><strong>Example - Chase camera at fixed world offset:</strong></p>
+<pre data-lang="kdl" class="language-kdl z-code"><code class="language-kdl" data-lang="kdl"><span class="z-text z-plain">viewport name=Viewport pos=&quot;drone.world_pos.translate_world(-5, -5, 3)&quot; look_at=&quot;drone.world_pos&quot;
+</span></code></pre>
+<h3 id="chaining-formulas">Chaining Formulas</h3>
+<p>All rotation and translation formulas can be chained together to create complex camera behaviors:</p>
+<pre data-lang="kdl" class="language-kdl z-code"><code class="language-kdl" data-lang="kdl"><span class="z-text z-plain">// Rotate 90° right, then move 2m left in new orientation, then offset up 5m in world space
+</span><span class="z-text z-plain">viewport pos=&quot;jet.world_pos.rotate_z(-90).translate_y(-2.0).translate_world_z(5.0)&quot;
+</span><span class="z-text z-plain">
+</span><span class="z-text z-plain">// Multiple rotations
+</span><span class="z-text z-plain">viewport pos=&quot;satellite.world_pos.rotate_x(45).rotate_z(90)&quot;
+</span><span class="z-text z-plain">
+</span><span class="z-text z-plain">// Body-frame position then world-frame adjustment
+</span><span class="z-text z-plain">viewport pos=&quot;aircraft.world_pos.translate(1, 0, 0.5).translate_world(0, 0, 10)&quot;
+</span></code></pre>
+<h3 id="usage-notes">Usage Notes</h3>
+<ul>
+<li>
+<p><strong>Body-frame</strong> functions (<code>rotate</code>, <code>translate</code>) are ideal for:</p>
+<ul>
+<li>FPV cameras that move with the vehicle</li>
+<li>Wing-mounted or cockpit cameras</li>
+<li>Camera positions defined relative to vehicle geometry</li>
+</ul>
+</li>
+<li>
+<p><strong>World-frame</strong> functions (<code>rotate_world</code>, <code>translate_world</code>) are ideal for:</p>
+<ul>
+<li>Chase cameras that maintain fixed world offset</li>
+<li>Orbital cameras</li>
+<li>External tracking cameras</li>
+</ul>
+</li>
+<li>
+<p>Rotations are applied before translations when chained</p>
+</li>
+<li>
+<p>The old <code>+</code> operator for viewport positions is equivalent to <code>translate_world()</code></p>
 </li>
 </ul>
 
