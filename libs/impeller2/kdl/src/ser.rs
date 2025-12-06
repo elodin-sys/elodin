@@ -426,16 +426,12 @@ fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
             .push(KdlEntry::new_prop("display_name", false));
     }
 
-    match arrow.thickness {
-        ArrowThickness::Small => {}
-        ArrowThickness::Middle => {
-            node.entries_mut()
-                .push(KdlEntry::new_prop("arrow_thickness", "middle"));
-        }
-        ArrowThickness::Big => {
-            node.entries_mut()
-                .push(KdlEntry::new_prop("arrow_thickness", "big"));
-        }
+    let thickness = arrow.thickness.value();
+    if (thickness - ArrowThickness::default().value()).abs() > f32::EPSILON {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "arrow_thickness",
+            ArrowThickness::round_to_precision(thickness) as f64,
+        ));
     }
 
     if (arrow.label_position - 1.0).abs() > f32::EPSILON {
@@ -1084,12 +1080,16 @@ mod tests {
                 body_frame: true,
                 normalize: true,
                 display_name: false,
-                thickness: ArrowThickness::Small,
+                thickness: ArrowThickness::new(1.23456),
                 label_position: 1.0,
                 aux: (),
             }));
 
         let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("arrow_thickness=1.235"),
+            "arrow_thickness should serialize as a numeric value rounded to 3 decimals: {serialized}"
+        );
         let parsed = parse_schematic(&serialized).unwrap();
 
         assert_eq!(parsed.elems.len(), 1);
@@ -1104,6 +1104,11 @@ mod tests {
             assert!(arrow.body_frame);
             assert!(arrow.normalize);
             assert!(!arrow.display_name);
+            assert!(
+                (arrow.thickness.value() - 1.235).abs() < 1e-6,
+                "unexpected thickness after roundtrip {}",
+                arrow.thickness.value()
+            );
             assert_color_close(arrow.color, Color::BLUE);
         } else {
             panic!("Expected vector_arrow");

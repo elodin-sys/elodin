@@ -417,7 +417,7 @@ impl LoadSchematicParams<'_, '_> {
             VectorArrowState {
                 vector_expr,
                 origin_expr,
-                visual: None,
+                visuals: HashMap::new(),
                 label: None,
                 ..default()
             },

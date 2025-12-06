@@ -1,6 +1,7 @@
 use bevy::{math::DVec3, prelude::*};
 use impeller2_wkt::{ComponentValue, WorldPos};
 use nox::{ArrayBuf, Quaternion, Vector3};
+use std::collections::HashMap;
 
 use crate::WorldPosExt;
 use crate::object_3d::CompiledExpr;
@@ -9,7 +10,7 @@ use crate::object_3d::CompiledExpr;
 pub struct VectorArrowState {
     pub vector_expr: Option<CompiledExpr>,
     pub origin_expr: Option<CompiledExpr>,
-    pub visual: Option<ArrowVisual>,
+    pub visuals: HashMap<Entity, ArrowVisual>,
     pub label: Option<Entity>,
     /// Cached label data calculated in render_vector_arrow for UI sync.
     /// Stores (grid_cell_x, grid_cell_y, grid_cell_z, local_position) to handle big_space correctly.

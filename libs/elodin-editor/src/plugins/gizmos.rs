@@ -20,7 +20,7 @@ use big_space::FloatingOriginSettings;
 use impeller2::types::ComponentId;
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::{
-    ArrowThickness, BodyAxes, Color as WktColor, ComponentValue as WktComponentValue, VectorArrow3d,
+    BodyAxes, Color as WktColor, ComponentValue as WktComponentValue, VectorArrow3d,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -81,8 +81,7 @@ impl Plugin for GizmoPlugin {
     }
 }
 
-fn radius_for_target_pixels(
-    target_radius_px: f32,
+fn world_units_per_pixel(
     camera: &Camera,
     projection: &Projection,
     camera_transform: &GlobalTransform,
@@ -91,24 +90,23 @@ fn radius_for_target_pixels(
     let viewport = camera
         .physical_viewport_size()
         .unwrap_or_else(|| UVec2::new(1920, 1080));
-    let height_px = viewport.y.max(1) as f32;
+    let px_height = viewport.y.max(1) as f32;
 
     match projection {
         Projection::Perspective(persp) => {
             let view = camera_transform.compute_matrix().inverse();
             let cam_space = view.transform_point3(world_pos);
             let depth = (-cam_space.z).max(0.001);
-            let focal_px = height_px / (2.0 * (persp.fov * 0.5).tan());
-            (target_radius_px * depth / focal_px).max(0.001)
+            let focal_px = px_height / (2.0 * (persp.fov * 0.5).tan());
+            (depth / focal_px).max(0.001)
         }
         Projection::Orthographic(ortho) => {
             // In ortho, world units map linearly to pixels via scale.
-            let world_per_px = (2.0 * ortho.scale) / height_px;
-            (target_radius_px * world_per_px).max(0.001)
+            ((2.0 * ortho.scale) / px_height).max(0.001)
         }
         Projection::Custom(_) => {
             // Fallback: assume roughly perspective-like scaling using near plane as depth proxy.
-            target_radius_px * 0.001
+            0.001
         }
     }
 }
@@ -207,12 +205,19 @@ fn render_vector_arrow(
     floating_origin: Res<FloatingOriginSettings>,
     arrow_meshes: Res<ArrowMeshes>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    main_cameras: Query<(&Camera, &Projection, &GlobalTransform), With<crate::MainCamera>>,
+    main_cameras: Query<
+        (
+            Entity,
+            &Camera,
+            &Projection,
+            &GlobalTransform,
+            &RenderLayers,
+        ),
+        With<crate::MainCamera>,
+    >,
     mut logged_missing: Local<HashSet<Entity>>,
     mut logged_small: Local<HashSet<Entity>>,
 ) {
-    let active_cam = main_cameras.iter().next();
-
     for (entity, arrow, mut state) in vector_arrows.iter_mut() {
         let Some(result) = evaluate_vector_arrow(arrow, &state, &entity_map, &component_values)
         else {
@@ -223,18 +228,20 @@ fn render_vector_arrow(
                     "vector_arrow: evaluation failed (missing data or zero-length)"
                 );
             }
-            if let Some(visual) = state.visual.take() {
-                hide_arrow_visual(&mut commands, &visual);
+            for visual in state.visuals.values() {
+                hide_arrow_visual(&mut commands, visual);
             }
+            state.visuals.clear();
             continue;
         };
 
         let (start_cell, start) = floating_origin.translation_to_grid::<i128>(result.start);
 
         if !DRAW_RAW_ARROW_MESHES {
-            if let Some(visual) = state.visual.take() {
-                hide_arrow_visual(&mut commands, &visual);
+            for visual in state.visuals.values() {
+                hide_arrow_visual(&mut commands, visual);
             }
+            state.visuals.clear();
             continue;
         }
 
@@ -263,41 +270,32 @@ fn render_vector_arrow(
         // Ensure the head never exceeds the total length.
         head_length = head_length.min(draw_length);
         let shaft_length = (draw_length - head_length).max(0.0);
-        // Keep a roughly constant on-screen thickness by scaling radius from screen pixels.
-        let shaft_radius = if let Some((cam, proj, cam_tf)) = active_cam {
-            let radius =
-                radius_for_target_pixels(TARGET_DIAMETER_PX * 0.5, cam, proj, cam_tf, start);
-            radius.clamp(MIN_RADIUS_WORLD, MAX_RADIUS_WORLD)
-        } else {
-            0.03
-        };
-        let dimension_mult = match arrow.thickness {
-            ArrowThickness::Small => 1.0,
-            ArrowThickness::Middle => 1.5,
-            ArrowThickness::Big => 2.0,
-        };
-        let shaft_radius = shaft_radius * dimension_mult;
-        let head_radius = (shaft_radius * HEAD_RADIUS_FACTOR).min(draw_length * 0.75);
+        let mut seen_cameras: HashSet<Entity> = HashSet::new();
+        for (cam_entity, cam, proj, cam_tf, cam_layers) in main_cameras.iter() {
+            seen_cameras.insert(cam_entity);
 
-        if state.visual.is_none() {
-            state.visual = Some(spawn_arrow_visual(
-                &mut commands,
-                &arrow_meshes,
-                &mut materials,
-                base_color,
-                entity,
-            ));
-        }
+            let world_per_px = world_units_per_pixel(cam, proj, cam_tf, start);
+            let shaft_radius = (TARGET_DIAMETER_PX * 0.5 * world_per_px)
+                .clamp(MIN_RADIUS_WORLD, MAX_RADIUS_WORLD)
+                * arrow.thickness.value();
+            let head_radius = (shaft_radius * HEAD_RADIUS_FACTOR).min(draw_length * 0.75);
 
-        let _label_root;
-        {
-            let visual = state.visual.as_mut().unwrap();
+            let visual = state.visuals.entry(cam_entity).or_insert_with(|| {
+                spawn_arrow_visual(
+                    &mut commands,
+                    &arrow_meshes,
+                    &mut materials,
+                    base_color,
+                    entity,
+                    cam_layers.clone(),
+                )
+            });
 
             commands.entity(visual.root).insert((
                 Transform::from_translation(start).with_rotation(rotation),
                 start_cell,
                 Visibility::Visible,
-                RenderLayers::layer(GIZMO_RENDER_LAYER),
+                cam_layers.clone(),
             ));
 
             commands.entity(visual.shaft).insert(Transform {
@@ -311,8 +309,19 @@ fn render_vector_arrow(
                 rotation: Quat::IDENTITY,
                 scale: Vec3::new(head_radius, head_length, head_radius),
             });
+        }
 
-            _label_root = visual.root;
+        // Hide visuals for cameras that disappeared.
+        let mut to_remove = Vec::new();
+        for cam_entity in state.visuals.keys() {
+            if !seen_cameras.contains(cam_entity) {
+                to_remove.push(*cam_entity);
+            }
+        }
+        for cam_entity in to_remove {
+            if let Some(visual) = state.visuals.remove(&cam_entity) {
+                hide_arrow_visual(&mut commands, &visual);
+            }
         }
 
         // Calculate and cache label position for the UI system.
@@ -376,6 +385,7 @@ fn spawn_arrow_visual(
     materials: &mut ResMut<Assets<StandardMaterial>>,
     color: Color,
     owner: Entity,
+    render_layers: RenderLayers,
 ) -> ArrowVisual {
     let shaft_material = materials.add(StandardMaterial {
         base_color: color.with_alpha(0.65),
@@ -396,7 +406,7 @@ fn spawn_arrow_visual(
             Transform::default(),
             GlobalTransform::default(),
             Visibility::Hidden,
-            RenderLayers::layer(GIZMO_RENDER_LAYER),
+            render_layers.clone(),
             ArrowVisualOwner { owner },
             Name::new("vector_arrow_mesh"),
         ))
@@ -407,7 +417,7 @@ fn spawn_arrow_visual(
             Mesh3d(meshes.shaft.clone()),
             MeshMaterial3d(shaft_material),
             Transform::default(),
-            RenderLayers::layer(GIZMO_RENDER_LAYER),
+            render_layers.clone(),
             ChildOf(root),
         ))
         .id();
@@ -417,7 +427,7 @@ fn spawn_arrow_visual(
             Mesh3d(meshes.head.clone()),
             MeshMaterial3d(head_material),
             Transform::default(),
-            RenderLayers::layer(GIZMO_RENDER_LAYER),
+            render_layers,
             ChildOf(root),
         ))
         .id();
@@ -449,9 +459,10 @@ fn cleanup_removed_arrows(
     // If the state still exists, use it to clean up the associated visuals.
     for owner in owners.clone() {
         if let Ok(mut state) = states.get_mut(owner) {
-            if let Some(visual) = state.visual.take() {
+            for visual in state.visuals.values() {
                 commands.entity(visual.root).despawn();
             }
+            state.visuals.clear();
             if let Some(label) = state.label.take() {
                 commands.entity(label).despawn();
             }

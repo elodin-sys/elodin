@@ -658,6 +658,52 @@ fn parse_line_3d(node: &KdlNode, src: &str) -> Result<Line3d, KdlSchematicError>
     })
 }
 
+fn parse_arrow_thickness(node: &KdlNode, src: &str) -> Result<ArrowThickness, KdlSchematicError> {
+    let Some(entry) = node.entry("arrow_thickness") else {
+        return Ok(ArrowThickness::default());
+    };
+
+    let value = entry.value();
+    if let Some(value) = value.as_float() {
+        return Ok(ArrowThickness::new(value as f32));
+    }
+    if let Some(value) = value.as_integer() {
+        return Ok(ArrowThickness::new(value as f32));
+    }
+    if let Some(value) = value.as_string() {
+        let lower = value.to_lowercase();
+
+        if let Some(thickness) = ArrowThickness::from_legacy_label(&lower) {
+            warn!(
+                value = lower,
+                "arrow_thickness string values are deprecated; use numeric values (e.g. {:.3})",
+                thickness.value()
+            );
+            return Ok(thickness);
+        }
+
+        if let Ok(parsed) = lower.parse::<f32>() {
+            return Ok(ArrowThickness::new(parsed));
+        }
+
+        return Err(KdlSchematicError::InvalidValue {
+            property: "arrow_thickness".to_string(),
+            node: "vector_arrow".to_string(),
+            expected: "a numeric value for arrow_thickness (e.g. 1.000)".to_string(),
+            src: src.to_string(),
+            span: entry.span(),
+        });
+    }
+
+    Err(KdlSchematicError::InvalidValue {
+        property: "arrow_thickness".to_string(),
+        node: "vector_arrow".to_string(),
+        expected: "a numeric value for arrow_thickness (e.g. 1.000)".to_string(),
+        src: src.to_string(),
+        span: entry.span(),
+    })
+}
+
 fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSchematicError> {
     let vector = node
         .entries()
@@ -718,24 +764,7 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
-    let dimension = node
-        .get("arrow_thickness")
-        .and_then(|v| v.as_string())
-        .map(|s| s.to_string())
-        .map(|s| s.to_lowercase())
-        .map(|s| match s.as_str() {
-            "small" => ArrowThickness::Small,
-            "middle" => ArrowThickness::Middle,
-            "big" => ArrowThickness::Big,
-            other => {
-                warn!(
-                    value = other,
-                    "Unknown arrow_thickness '{}', defaulting to small", other
-                );
-                ArrowThickness::Small
-            }
-        })
-        .unwrap_or(ArrowThickness::Small);
+    let thickness = parse_arrow_thickness(node, src)?;
 
     let label_position = match node.entry("label_position") {
         None => 1.0,
@@ -769,7 +798,7 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         body_frame,
         normalize,
         display_name,
-        thickness: dimension,
+        thickness,
         label_position,
         aux: (),
     })
@@ -1542,7 +1571,7 @@ tabs {
     #[test]
     fn test_parse_vector_arrow() {
         let kdl = r#"
-vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="ball.world_pos" scale=1.5 name="Velocity" body_frame=#true normalize=#true display_name=#false {
+vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="ball.world_pos" scale=1.5 name="Velocity" body_frame=#true normalize=#true display_name=#false arrow_thickness=1.23456 {
     color 0 0 255
 }
 "#;
@@ -1560,6 +1589,11 @@ vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="bal
             assert!(arrow.body_frame);
             assert!(arrow.normalize);
             assert!(!arrow.display_name);
+            assert!(
+                (arrow.thickness.value() - 1.235).abs() < 1e-6,
+                "unexpected arrow_thickness {}",
+                arrow.thickness.value()
+            );
             assert_eq!(arrow.color.b, 1.0);
         } else {
             panic!("Expected vector_arrow");
@@ -1578,6 +1612,20 @@ vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" in_body_fra
             assert!(arrow.body_frame);
             assert!(!arrow.normalize);
             assert!(arrow.display_name);
+        } else {
+            panic!("Expected vector_arrow");
+        }
+    }
+
+    #[test]
+    fn test_parse_vector_arrow_legacy_thickness() {
+        let kdl = r#"vector_arrow "a.vector" arrow_thickness="middle""#;
+
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::VectorArrow(arrow) = &schematic.elems[0] {
+            assert!((arrow.thickness.value() - ArrowThickness::MIDDLE).abs() < f32::EPSILON);
         } else {
             panic!("Expected vector_arrow");
         }

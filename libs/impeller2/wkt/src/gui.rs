@@ -1,8 +1,9 @@
 use crate::Color;
 use impeller2::component::Asset;
 use impeller2::types::EntityId;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de, de::DeserializeOwned};
 use std::collections::HashMap;
+use std::fmt;
 use std::ops::Range;
 use std::time::Duration;
 use strum::{EnumString, IntoStaticStr, VariantNames};
@@ -322,15 +323,128 @@ pub struct VectorArrow3d<T = ()> {
     pub aux: T,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub enum ArrowThickness {
-    #[serde(alias = "small")]
-    Small,
-    #[serde(alias = "middle")]
-    Middle,
-    #[serde(alias = "big")]
-    Big,
+pub struct ArrowThickness(pub f32);
+
+impl ArrowThickness {
+    pub const DEFAULT: f32 = 0.1;
+    pub const MIDDLE: f32 = 1.5;
+    pub const BIG: f32 = 2.0;
+    const MIN: f32 = 0.001;
+
+    pub fn new(raw: f32) -> Self {
+        if !raw.is_finite() {
+            return Self(Self::DEFAULT);
+        }
+
+        Self(Self::round_to_precision(raw.max(Self::MIN)))
+    }
+
+    pub fn from_legacy_label(label: &str) -> Option<Self> {
+        match label {
+            "small" => Some(Self::new(Self::DEFAULT)),
+            "middle" => Some(Self::new(Self::MIDDLE)),
+            "big" => Some(Self::new(Self::BIG)),
+            _ => None,
+        }
+    }
+
+    pub fn value(self) -> f32 {
+        if !self.0.is_finite() {
+            return Self::DEFAULT;
+        }
+
+        Self::round_to_precision(self.0.max(Self::MIN))
+    }
+
+    pub fn round_to_precision(value: f32) -> f32 {
+        (value * 1000.0).round() / 1000.0
+    }
+}
+
+impl Serialize for ArrowThickness {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_f32(self.value())
+    }
+}
+
+impl<'de> Deserialize<'de> for ArrowThickness {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ThicknessVisitor;
+
+        impl<'de> de::Visitor<'de> for ThicknessVisitor {
+            type Value = ArrowThickness;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a numeric arrow thickness or legacy string value")
+            }
+
+            fn visit_f32<E>(self, value: f32) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(ArrowThickness::new(value))
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(ArrowThickness::new(value as f32))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(ArrowThickness::new(value as f32))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(ArrowThickness::new(value as f32))
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                let lower = v.to_lowercase();
+                if let Some(thickness) = ArrowThickness::from_legacy_label(&lower) {
+                    return Ok(thickness);
+                }
+
+                lower
+                    .parse::<f32>()
+                    .map(ArrowThickness::new)
+                    .map_err(|_| E::custom(format!("invalid arrow thickness '{v}'")))
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_str(&v)
+            }
+        }
+
+        deserializer.deserialize_any(ThicknessVisitor)
+    }
+}
+
+impl Default for ArrowThickness {
+    fn default() -> Self {
+        Self(Self::DEFAULT)
+    }
 }
 
 impl<T> VectorArrow3d<T> {
@@ -347,7 +461,7 @@ impl<T> VectorArrow3d<T> {
     }
 
     fn default_thickness() -> ArrowThickness {
-        ArrowThickness::Small
+        ArrowThickness::default()
     }
 
     fn default_label_position() -> f32 {
