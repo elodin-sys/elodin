@@ -99,6 +99,9 @@ pub struct InputMappings {
     pub position: Vec3Mapping,
     pub orientation: QuatMapping,
     pub velocity: Vec3Mapping,
+    /// Optional target position for OSD target tracking
+    #[serde(default)]
+    pub target: Option<Vec3Mapping>,
 }
 
 /// Mapping for a 3D vector (x, y, z) from a component
@@ -168,6 +171,7 @@ impl Default for Config {
                     y: 4,
                     z: 5,
                 },
+                target: None,
             },
         }
     }
@@ -192,6 +196,9 @@ impl Config {
             self.inputs.orientation.component.clone(),
             self.inputs.velocity.component.clone(),
         ];
+        if let Some(target) = &self.inputs.target {
+            components.push(target.component.clone());
+        }
         components.sort();
         components.dedup();
         components

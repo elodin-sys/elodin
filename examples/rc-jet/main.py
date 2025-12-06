@@ -26,12 +26,12 @@ config = BDXConfig()
 config.set_as_global()
 
 
-def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId]:
+def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
     """
-    Create and configure the simulation world with a BDX jet.
+    Create and configure the simulation world with a BDX jet and target drone.
 
     Returns:
-        tuple: (world, jet_entity_id)
+        tuple: (world, jet_entity_id, target_entity_id)
     """
     world = el.World()
 
@@ -60,6 +60,25 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId]:
             BDXJet(),
         ],
         name="bdx",
+    )
+
+    # Spawn target drone (stationary) - positioned ahead and slightly higher
+    # At ~250m away from initial jet position, good for OSD target tracking demo
+    target = world.spawn(
+        [
+            el.Body(
+                world_pos=el.SpatialTransform(
+                    angular=el.Quaternion.identity(),
+                    linear=jnp.array([200.0, 100.0, 60.0]),
+                ),
+                world_vel=el.SpatialMotion(
+                    linear=jnp.zeros(3),
+                    angular=jnp.zeros(3),
+                ),
+                inertia=el.SpatialInertia(mass=1.0, inertia=jnp.array([0.1, 0.1, 0.1])),
+            ),
+        ],
+        name="target",
     )
 
     # Create schematic for visualization
@@ -111,6 +130,10 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId]:
             glb path="f22.glb" scale=0.01 translate="(0.0, 0.0, 0.0)" rotate="(0.0, 0.0, 0.0)"
         }
         
+        object_3d target.world_pos {
+            glb path="edu-450-v2-drone.glb" scale=0.005
+        }
+        
         vector_arrow "(1, 0, 0)" origin="bdx.world_pos" scale=1.0 name="Forward (X)" display_name=#true body_frame=#true {
            color red 150
         }
@@ -128,11 +151,11 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId]:
         "bdx.kdl",
     )
 
-    return world, jet
+    return world, jet, target
 
 
 # Setup world
-world, jet = setup_world(config)
+world, jet, target = setup_world(config)
 
 # Build system
 sim_system = system()
@@ -144,6 +167,7 @@ print(f"Initial speed: {config.initial_speed:.1f} m/s")
 print(f"Initial heading: {config.initial_yaw_deg:.1f}° (0°=East, 90°=North)")
 print(f"Mass: {config.mass:.1f} kg")
 print(f"Max thrust: {config.propulsion.max_thrust:.1f} N")
+print(f"Target position: (200.0, 100.0, 60.0) m")
 print(f"Simulation time: {config.simulation_time:.1f} s")
 print(f"Time step: {config.dt:.6f} s ({1 / config.dt:.0f} Hz)")
 print(f"Total ticks: {config.total_ticks}")
