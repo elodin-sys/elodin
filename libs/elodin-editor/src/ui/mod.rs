@@ -95,7 +95,7 @@ use crate::{
     plugins::{
         LogicalKeyState,
         gizmos::{MIN_ARROW_LENGTH_SQUARED, evaluate_vector_arrow},
-        navigation_gizmo::NavGizmoCamera,
+        navigation_gizmo::{NavGizmoCamera, NavGizmoParent},
     },
     tiles::{WindowId, WindowRelayout},
     vector_arrow::VectorArrowState,
@@ -279,7 +279,6 @@ impl Plugin for UiPlugin {
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, shortcuts)
-            .add_systems(First, warn_camera_order_ambiguities)
             .add_systems(
                 Update,
                 (
@@ -1742,7 +1741,8 @@ fn set_camera_viewport(
             order
         } else {
             let order = next_viewport_order;
-            next_viewport_order += 1;
+            // Increment by 2 to leave room for nav gizmo camera (order + 1)
+            next_viewport_order += 2;
             order
         };
         camera.order = order + order_offset;
@@ -1849,7 +1849,8 @@ fn set_secondary_camera_viewport(
                 let base_order =
                     SECONDARY_GRAPH_ORDER_BASE + SECONDARY_GRAPH_ORDER_STRIDE * id.0 as isize;
                 let offset = base_order + next_order;
-                next_order += 1;
+                // Increment by 2 to leave room for nav gizmo camera (order + 1)
+                next_order += 2;
                 camera.order = offset;
                 camera.viewport = Some(Viewport {
                     physical_position: UVec2::new(clamped_pos.x as u32, clamped_pos.y as u32),
@@ -1869,43 +1870,12 @@ fn set_secondary_camera_viewport(
 }
 
 fn set_nav_gizmo_camera_orders(
-    states: Query<(Entity, &tiles::WindowState, &tiles::WindowId)>,
-    primary_query: Query<Entity, With<PrimaryWindow>>,
-    mut cameras: Query<&mut Camera, With<NavGizmoCamera>>,
+    mut cameras: Query<(&mut Camera, &NavGizmoParent), With<NavGizmoCamera>>,
+    main_cameras: Query<&Camera, Without<NavGizmoCamera>>,
 ) {
-    let mut base_by_window: HashMap<Entity, isize> = HashMap::new();
-
-    if let Ok(primary) = primary_query.single() {
-        base_by_window.insert(
-            primary,
-            PRIMARY_VIEWPORT_ORDER_BASE + PRIMARY_ORDER_OFFSET + NAV_GIZMO_ORDER_OFFSET,
-        );
-    }
-
-    for (window_entity, _state, id) in &states {
-        let base = SECONDARY_GRAPH_ORDER_BASE
-            + SECONDARY_GRAPH_ORDER_STRIDE * id.0 as isize
-            + NAV_GIZMO_ORDER_OFFSET;
-        base_by_window.insert(window_entity, base);
-    }
-
-    for mut camera in cameras.iter_mut() {
-        let RenderTarget::Window(window_ref) = &camera.target else {
-            continue;
-        };
-        match window_ref {
-            WindowRef::Primary => {
-                if let Ok(primary) = primary_query.single()
-                    && let Some(base) = base_by_window.get(&primary)
-                {
-                    camera.order = *base;
-                }
-            }
-            WindowRef::Entity(entity) => {
-                if let Some(base) = base_by_window.get(entity) {
-                    camera.order = *base;
-                }
-            }
+    for (mut camera, parent) in cameras.iter_mut() {
+        if let Ok(main) = main_cameras.get(parent.main_camera) {
+            camera.order = main.order + NAV_GIZMO_ORDER_OFFSET;
         }
     }
 }
