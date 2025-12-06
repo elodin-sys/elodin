@@ -274,6 +274,13 @@ fn render_vector_arrow(
         for (cam_entity, cam, proj, cam_tf, cam_layers) in main_cameras.iter() {
             seen_cameras.insert(cam_entity);
 
+            // Use a camera-unique layer if available (typically the grid layer); otherwise fall back to gizmo.
+            let arrow_layers = cam_layers
+                .iter()
+                .find(|layer| *layer != 0 && *layer != GIZMO_RENDER_LAYER)
+                .map(RenderLayers::layer)
+                .unwrap_or_else(|| RenderLayers::layer(GIZMO_RENDER_LAYER));
+
             let world_per_px = world_units_per_pixel(cam, proj, cam_tf, start);
             let shaft_radius = (TARGET_DIAMETER_PX * 0.5 * world_per_px)
                 .clamp(MIN_RADIUS_WORLD, MAX_RADIUS_WORLD)
@@ -287,7 +294,7 @@ fn render_vector_arrow(
                     &mut materials,
                     base_color,
                     entity,
-                    cam_layers.clone(),
+                    arrow_layers.clone(),
                 )
             });
 
@@ -295,7 +302,7 @@ fn render_vector_arrow(
                 Transform::from_translation(start).with_rotation(rotation),
                 start_cell,
                 Visibility::Visible,
-                cam_layers.clone(),
+                arrow_layers.clone(),
             ));
 
             commands.entity(visual.shaft).insert(Transform {
