@@ -12,10 +12,6 @@ icon = ""
 order = 6
 +++
 
-# Schematic KDL glossary
-
-This page summarizes every KDL node and property accepted by the schematic loader.
-
 ## Glossary
 
 - Top-level nodes: `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `window`.
@@ -67,7 +63,7 @@ This page summarizes every KDL node and property accepted by the schematic loade
 - `color`: arrow color (default white).
 - `name`: label text; used for legend/overlay (optional).
 - `display_name`: show/hide overlay label (default true).
-- `arrow_thickness`: `small` | `middle` | `big` (default `small`).
+- `arrow_thickness`: numeric thickness multiplier with 3-decimal precision (default `0.1`).
 - `label_position`: 0.0–1.0 along the arrow (0=base, 1=tip) for label anchor (default 1.0).
 
 ## Schema at a glance
@@ -176,7 +172,7 @@ vector_arrow = "vector_arrow"
              [color]
              [name=string]
              [display_name=bool]
-             [arrow_thickness=small|middle|big]
+             [arrow_thickness=float]
              [label_position=0..1]
 
 color = "color"
@@ -211,7 +207,7 @@ vector_arrow
   name="Velocity"
   normalize=#true
   body_frame=#true
-  arrow_thickness="middle"
+  arrow_thickness=1.500
   label_position=0.9 {
   color 64 128 255
 }
