@@ -49,7 +49,8 @@ const MAX_HEAD_PORTION: f32 = 0.5;
 const DRAW_RAW_ARROW_MESHES: bool = true;
 const TARGET_DIAMETER_PX: f32 = 7.0;
 const MIN_RADIUS_WORLD: f32 = 0.005;
-const MAX_RADIUS_WORLD: f32 = 0.25;
+const MAX_RADIUS_WORLD: f32 = 0.05;
+const MAX_FINAL_RADIUS_WORLD: f32 = 0.1;
 
 #[derive(Clone)]
 pub struct EvaluatedVectorArrow {
@@ -285,6 +286,7 @@ fn render_vector_arrow(
             let shaft_radius = (TARGET_DIAMETER_PX * 0.5 * world_per_px)
                 .clamp(MIN_RADIUS_WORLD, MAX_RADIUS_WORLD)
                 * arrow.thickness.value();
+            let shaft_radius = shaft_radius.clamp(MIN_RADIUS_WORLD, MAX_FINAL_RADIUS_WORLD);
             let head_radius = (shaft_radius * HEAD_RADIUS_FACTOR).min(draw_length * 0.75);
 
             let visual = state.visuals.entry(cam_entity).or_insert_with(|| {
