@@ -329,8 +329,6 @@ pub struct ArrowThickness(pub f32);
 
 impl ArrowThickness {
     pub const DEFAULT: f32 = 0.1;
-    pub const MIDDLE: f32 = 1.5;
-    pub const BIG: f32 = 2.0;
     const MIN: f32 = 0.001;
 
     pub fn new(raw: f32) -> Self {
@@ -339,15 +337,6 @@ impl ArrowThickness {
         }
 
         Self(Self::round_to_precision(raw.max(Self::MIN)))
-    }
-
-    pub fn from_legacy_label(label: &str) -> Option<Self> {
-        match label {
-            "small" => Some(Self::new(Self::DEFAULT)),
-            "middle" => Some(Self::new(Self::MIDDLE)),
-            "big" => Some(Self::new(Self::BIG)),
-            _ => None,
-        }
     }
 
     pub fn value(self) -> f32 {
@@ -383,7 +372,7 @@ impl<'de> Deserialize<'de> for ArrowThickness {
             type Value = ArrowThickness;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a numeric arrow thickness or legacy string value")
+                formatter.write_str("a numeric arrow thickness")
             }
 
             fn visit_f32<E>(self, value: f32) -> Result<Self::Value, E>
@@ -418,13 +407,7 @@ impl<'de> Deserialize<'de> for ArrowThickness {
             where
                 E: de::Error,
             {
-                let lower = v.to_lowercase();
-                if let Some(thickness) = ArrowThickness::from_legacy_label(&lower) {
-                    return Ok(thickness);
-                }
-
-                lower
-                    .parse::<f32>()
+                v.parse::<f32>()
                     .map(ArrowThickness::new)
                     .map_err(|_| E::custom(format!("invalid arrow thickness '{v}'")))
             }

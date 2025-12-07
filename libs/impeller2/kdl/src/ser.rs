@@ -883,6 +883,30 @@ mod tests {
     }
 
     #[test]
+    fn test_roundtrip_named_color_red_is_serialized() {
+        let original = r#"
+graph "value" {
+    color red
+}
+"#;
+
+        let parsed = parse_schematic(original).unwrap();
+        let serialized = serialize_schematic(&parsed);
+
+        assert!(
+            serialized.contains("color 255 0 0"),
+            "serialized output should emit red components, got:\n{serialized}"
+        );
+
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Panel(Panel::Graph(graph)) = &reparsed.elems[0] else {
+            panic!("Expected graph panel");
+        };
+        assert_eq!(graph.colors.len(), 1);
+        assert_eq!(graph.colors[0], Color::RED);
+    }
+
+    #[test]
     fn test_serialize_object_3d_sphere() {
         let mut schematic = Schematic::default();
         schematic.elems.push(SchematicElem::Object3d(Object3D {

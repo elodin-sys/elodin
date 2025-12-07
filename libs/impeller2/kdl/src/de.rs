@@ -5,7 +5,6 @@ use kdl::{KdlDocument, KdlNode};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
-use tracing::warn;
 
 use impeller2_wkt::*;
 
@@ -671,18 +670,7 @@ fn parse_arrow_thickness(node: &KdlNode, src: &str) -> Result<ArrowThickness, Kd
         return Ok(ArrowThickness::new(value as f32));
     }
     if let Some(value) = value.as_string() {
-        let lower = value.to_lowercase();
-
-        if let Some(thickness) = ArrowThickness::from_legacy_label(&lower) {
-            warn!(
-                value = lower,
-                "arrow_thickness string values are deprecated; use numeric values (e.g. {:.3})",
-                thickness.value()
-            );
-            return Ok(thickness);
-        }
-
-        if let Ok(parsed) = lower.parse::<f32>() {
+        if let Ok(parsed) = value.parse::<f32>() {
             return Ok(ArrowThickness::new(parsed));
         }
 
@@ -884,6 +872,7 @@ fn parse_named_color(name: &str) -> Option<Color> {
         "black" => Some(Color::BLACK),
         "white" => Some(Color::WHITE),
         "blue" => Some(Color::BLUE),
+        "red" => Some(Color::RED),
         "orange" => Some(Color::ORANGE),
         "yellow" => Some(Color::YELLOW),
         "yalk" => Some(Color::YALK),
@@ -1618,16 +1607,17 @@ vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" in_body_fra
     }
 
     #[test]
-    fn test_parse_vector_arrow_legacy_thickness() {
-        let kdl = r#"vector_arrow "a.vector" arrow_thickness="middle""#;
+    fn test_parse_vector_arrow_rejects_string_thickness() {
+        let kdl = r#"vector_arrow "a.vector" arrow_thickness="not_a_number""#;
 
-        let schematic = parse_schematic(kdl).unwrap();
+        let err = parse_schematic(kdl).unwrap_err();
 
-        assert_eq!(schematic.elems.len(), 1);
-        if let SchematicElem::VectorArrow(arrow) = &schematic.elems[0] {
-            assert!((arrow.thickness.value() - ArrowThickness::MIDDLE).abs() < f32::EPSILON);
-        } else {
-            panic!("Expected vector_arrow");
+        match err {
+            KdlSchematicError::InvalidValue { property, node, .. } => {
+                assert_eq!(property, "arrow_thickness");
+                assert_eq!(node, "vector_arrow");
+            }
+            _ => panic!("Expected InvalidValue error"),
         }
     }
 
@@ -1962,6 +1952,22 @@ graph "value" {
         assert_eq!(graph.colors.len(), 1);
         let color = graph.colors[0];
         assert_eq!(color, Color::YALK);
+    }
+
+    #[test]
+    fn test_parse_named_color_red() {
+        let kdl = r#"
+graph "value" {
+    color red
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        let SchematicElem::Panel(Panel::Graph(graph)) = &schematic.elems[0] else {
+            panic!("Expected graph panel");
+        };
+        assert_eq!(graph.colors.len(), 1);
+        assert_eq!(graph.colors[0], Color::RED);
     }
 
     #[test]

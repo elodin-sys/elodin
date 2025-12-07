@@ -16,7 +16,7 @@ order = 6
 
 - Top-level nodes: `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `window`.
 - EQL: expressions are evaluated in the runtime EQL context. Vector-like fields expect 3 components; `world_pos` is a 7-component array (quat + position).
-- Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional; can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
+- Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `red`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional; can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
 
 ### window
 - `path`/`file`/`name`: optional secondary schematic file. Relative paths resolve against the parent schematic directory (or CWD). If absent, the entry configures the primary window instead of loading a secondary file.
