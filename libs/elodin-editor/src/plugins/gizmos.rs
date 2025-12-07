@@ -482,33 +482,34 @@ fn readable_label_color(color: Color) -> Color {
 }
 
 /// Bevy UI system to render arrow labels as screen-space text nodes.
-/// Uses the arrow visual's Transform + GridCell for proper big_space handling.
+/// Spawns a label for each viewport where the arrow is visible.
 fn update_arrow_label_ui(
     mut commands: Commands,
     arrows: Query<(Entity, &VectorArrowState)>,
     arrow_transforms: Query<(&Transform, &big_space::GridCell<i128>)>,
-    cameras: Query<(&Camera, &GlobalTransform, &big_space::GridCell<i128>), With<MainCamera>>,
+    cameras: Query<(Entity, &Camera, &GlobalTransform, &big_space::GridCell<i128>), With<MainCamera>>,
     floating_origin: Res<FloatingOriginSettings>,
     mut labels: Query<(Entity, &ArrowLabelUI, &mut Node, &mut Text)>,
-    mut label_map: Local<HashMap<Entity, Entity>>, // arrow_entity -> label_entity
+    // Key: (arrow_entity, camera_entity) -> label_entity
+    mut label_map: Local<HashMap<(Entity, Entity), Entity>>,
 ) {
-    // Find an active camera
-    let Some((camera, camera_transform, cam_cell)) =
-        cameras.iter().find(|(cam, _, _)| cam.is_active)
-    else {
-        return;
-    };
-
     let edge = floating_origin.grid_edge_length();
 
-    let mut seen_arrows = HashSet::new();
+    // Collect all active cameras
+    let active_cameras: Vec<_> = cameras
+        .iter()
+        .filter(|(_, cam, _, _)| cam.is_active)
+        .collect();
+
+    if active_cameras.is_empty() {
+        return;
+    }
+
+    let mut seen_labels = HashSet::new();
 
     for (arrow_entity, arrow_state) in arrows.iter() {
         // Get the arrow visual's root entity
         let Some(ref visual) = arrow_state.visual else {
-            if let Some(label_entity) = label_map.remove(&arrow_entity) {
-                commands.entity(label_entity).despawn();
-            }
             continue;
         };
 
@@ -518,9 +519,6 @@ fn update_arrow_label_ui(
         };
 
         let Some(ref name) = arrow_state.label_name else {
-            if let Some(label_entity) = label_map.remove(&arrow_entity) {
-                commands.entity(label_entity).despawn();
-            }
             continue;
         };
 
@@ -528,8 +526,6 @@ fn update_arrow_label_ui(
             .label_color
             .map(readable_label_color)
             .unwrap_or(Color::WHITE);
-
-        seen_arrows.insert(arrow_entity);
 
         // Get the label offset from arrow root
         let label_offset = arrow_state
@@ -540,70 +536,96 @@ fn update_arrow_label_ui(
         // Calculate label position in arrow's local grid space
         let label_local = arrow_transform.translation + label_offset;
 
-        // Convert from arrow's grid cell to camera-relative position
-        let dx = (arrow_cell.x as f64 - cam_cell.x as f64) as f32 * edge;
-        let dy = (arrow_cell.y as f64 - cam_cell.y as f64) as f32 * edge;
-        let dz = (arrow_cell.z as f64 - cam_cell.z as f64) as f32 * edge;
-        let camera_relative_pos = label_local + Vec3::new(dx, dy, dz);
+        // Process each active camera/viewport
+        for (cam_entity, camera, camera_transform, cam_cell) in &active_cameras {
+            let key = (arrow_entity, *cam_entity);
 
-        // Project to screen space
-        let Ok(screen_pos) = camera.world_to_viewport(camera_transform, camera_relative_pos) else {
-            // Off-screen - hide label
-            if let Some(label_entity) = label_map.get(&arrow_entity) {
-                if let Ok((_, _, mut node, _)) = labels.get_mut(*label_entity) {
-                    node.display = bevy::ui::Display::None;
+            // Convert from arrow's grid cell to camera-relative position
+            let dx = (arrow_cell.x as f64 - cam_cell.x as f64) as f32 * edge;
+            let dy = (arrow_cell.y as f64 - cam_cell.y as f64) as f32 * edge;
+            let dz = (arrow_cell.z as f64 - cam_cell.z as f64) as f32 * edge;
+            let camera_relative_pos = label_local + Vec3::new(dx, dy, dz);
+
+            // Project to screen space
+            let Ok(screen_pos) = camera.world_to_viewport(camera_transform, camera_relative_pos)
+            else {
+                // Off-screen for this camera - hide label if it exists
+                if let Some(label_entity) = label_map.get(&key) {
+                    if let Ok((_, _, mut node, _)) = labels.get_mut(*label_entity) {
+                        node.display = bevy::ui::Display::None;
+                    }
+                }
+                continue;
+            };
+
+            // Check if screen position falls within this camera's viewport
+            let viewport = camera.logical_viewport_rect();
+            if let Some(rect) = viewport {
+                if screen_pos.x < rect.min.x
+                    || screen_pos.x > rect.max.x
+                    || screen_pos.y < rect.min.y
+                    || screen_pos.y > rect.max.y
+                {
+                    // Outside this viewport - hide label if exists
+                    if let Some(label_entity) = label_map.get(&key) {
+                        if let Ok((_, _, mut node, _)) = labels.get_mut(*label_entity) {
+                            node.display = bevy::ui::Display::None;
+                        }
+                    }
+                    continue;
                 }
             }
-            continue;
-        };
 
-        // Round to avoid sub-pixel jitter
-        let screen_x = screen_pos.x.round();
-        let screen_y = (screen_pos.y - 8.0).round(); // Slight vertical offset
+            seen_labels.insert(key);
 
-        // Check if label already exists
-        if let Some(&label_entity) = label_map.get(&arrow_entity) {
-            // Update existing label
-            if let Ok((_, _, mut node, mut text)) = labels.get_mut(label_entity) {
-                node.left = Val::Px(screen_x);
-                node.top = Val::Px(screen_y);
-                node.display = bevy::ui::Display::Flex;
-                *text = Text::new(name.clone());
+            // Round to avoid sub-pixel jitter
+            let screen_x = screen_pos.x.round();
+            let screen_y = (screen_pos.y - 8.0).round(); // Slight vertical offset
+
+            // Check if label already exists for this arrow+camera pair
+            if let Some(&label_entity) = label_map.get(&key) {
+                // Update existing label
+                if let Ok((_, _, mut node, mut text)) = labels.get_mut(label_entity) {
+                    node.left = Val::Px(screen_x);
+                    node.top = Val::Px(screen_y);
+                    node.display = bevy::ui::Display::Flex;
+                    *text = Text::new(name.clone());
+                }
+            } else {
+                // Spawn new label for this arrow+camera pair
+                let label_entity = commands
+                    .spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(screen_x),
+                            top: Val::Px(screen_y),
+                            ..default()
+                        },
+                        Text::new(name.clone()),
+                        TextFont {
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(label_color),
+                        ZIndex(1000), // Render above 3D content
+                        ArrowLabelUI { arrow_entity },
+                        Name::new(format!("arrow_label_{}_{:?}", name, cam_entity)),
+                    ))
+                    .id();
+                label_map.insert(key, label_entity);
             }
-        } else {
-            // Spawn new label
-            let label_entity = commands
-                .spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(screen_x),
-                        top: Val::Px(screen_y),
-                        ..default()
-                    },
-                    Text::new(name.clone()),
-                    TextFont {
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(label_color),
-                    ZIndex(1000), // Render above 3D content
-                    ArrowLabelUI { arrow_entity },
-                    Name::new(format!("arrow_label_{}", name)),
-                ))
-                .id();
-            label_map.insert(arrow_entity, label_entity);
         }
     }
 
-    // Clean up labels for arrows that no longer exist
-    let arrows_to_remove: Vec<Entity> = label_map
+    // Clean up labels that are no longer needed
+    let labels_to_remove: Vec<_> = label_map
         .keys()
-        .filter(|e| !seen_arrows.contains(e))
+        .filter(|key| !seen_labels.contains(key))
         .copied()
         .collect();
 
-    for arrow_entity in arrows_to_remove {
-        if let Some(label_entity) = label_map.remove(&arrow_entity) {
+    for key in labels_to_remove {
+        if let Some(label_entity) = label_map.remove(&key) {
             commands.entity(label_entity).despawn();
         }
     }
