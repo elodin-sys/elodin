@@ -26,16 +26,10 @@ elodin editor examples/rc-jet/main.py
 
 ### RC Controller Input
 
-The simulation supports real-time control input from an RC controller (like FrSky X20 R5) or keyboard.
+The simulation supports real-time control input from an RC controller (like FrSky X20 R5) or keyboard. The controller starts automatically with the simulation - no separate terminal needed!
 
-**Terminal 1 - Run the simulation:**
 ```bash
 elodin editor examples/rc-jet/main.py
-```
-
-**Terminal 2 - Run the controller:**
-```bash
-cargo run -p rc-jet-controller
 ```
 
 The controller automatically:

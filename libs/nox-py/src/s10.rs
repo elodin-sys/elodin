@@ -160,6 +160,39 @@ impl PyRecipe {
         Ok(PyRecipe { inner })
     }
 
+    /// Create a Cargo recipe to build and run a Rust project alongside the simulation.
+    ///
+    /// Args:
+    ///     name: Display name for the recipe (used in logs)
+    ///     path: Path to Cargo.toml or directory containing it
+    ///     package: Package name (if workspace has multiple packages)
+    ///     bin: Binary name (if package has multiple binaries)
+    ///     args: Command-line arguments to pass to the binary
+    ///     cwd: Working directory for the process
+    #[staticmethod]
+    #[pyo3(signature = (name, path, package=None, bin=None, args=None, cwd=None))]
+    fn cargo(
+        name: String,
+        path: String,
+        package: Option<String>,
+        bin: Option<String>,
+        args: Option<Vec<String>>,
+        cwd: Option<String>,
+    ) -> PyResult<Self> {
+        let inner = Recipe::Cargo {
+            name,
+            path: PathBuf::from(path),
+            package,
+            bin,
+            features: vec![],
+            args: args.unwrap_or_default(),
+            cwd,
+            env: HashMap::new(),
+            restart_policy: RestartPolicy::Never,
+        };
+        Ok(PyRecipe { inner })
+    }
+
     pub fn to_json(&self) -> PyResult<String> {
         let recipe = self.inner.to_rust()?;
         serde_json::to_string(&recipe).map_err(|err| PyValueError::new_err(err.to_string()))

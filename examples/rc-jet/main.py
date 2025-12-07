@@ -9,11 +9,11 @@ turbine propulsion, and control surface dynamics.
 Usage:
     elodin editor main.py       # Run with 3D visualization
 
-For RC controller input, run in a separate terminal:
-    cargo run -p rc-jet-controller
-
+The RC controller starts automatically with the simulation.
 WASD / Arrow keys for keyboard control.
 """
+
+from pathlib import Path
 
 import elodin as el
 import jax.numpy as jnp
@@ -173,8 +173,12 @@ print(f"Time step: {config.dt:.6f} s ({1 / config.dt:.0f} Hz)")
 print(f"Total ticks: {config.total_ticks}")
 print()
 
+# Register the RC controller to run alongside the simulation
+controller_path = Path(__file__).parent / "controller"
+controller = el.s10.PyRecipe.cargo(name="controller", path=str(controller_path))
+world.recipe(controller)
+
 # Run simulation in real-time mode for responsive RC control
-# When using RC controller, run: cargo run -p rc-jet-controller
 world.run(
     sim_system,
     sim_time_step=config.dt,
