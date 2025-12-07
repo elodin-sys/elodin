@@ -551,17 +551,29 @@ fn update_arrow_label_ui(
     // Rebuild ui_camera_map from scratch each frame to handle closed windows.
     // This prevents stale entries when window entities are recycled.
     {
-        // Clear and rebuild the map from actually existing UI cameras
+        // Collect windows that currently need UI cameras
+        let windows_needing_ui_cam: HashSet<_> =
+            active_cameras.iter().map(|(_, _, _, _, w)| *w).collect();
+
+        // Clear and rebuild the map from actually existing UI cameras,
+        // despawning any that target windows that no longer need labels
         ui_camera_map.clear();
         for (ui_cam_entity, ui_cam) in ui_cameras.iter() {
             if let Some(window) = window_from_camera_target(&ui_cam.target, primary) {
-                ui_camera_map.insert(window, ui_cam_entity);
+                if windows_needing_ui_cam.contains(&window) {
+                    // Window still exists and needs a UI camera - keep it
+                    ui_camera_map.insert(window, ui_cam_entity);
+                } else {
+                    // Window closed or no longer needs labels - despawn orphaned UI camera
+                    commands.entity(ui_cam_entity).despawn();
+                }
+            } else {
+                // UI camera targets a window entity that no longer exists - despawn it
+                commands.entity(ui_cam_entity).despawn();
             }
         }
 
-        // For each unique window in active_cameras, ensure we have a UI camera
-        let windows_needing_ui_cam: HashSet<_> =
-            active_cameras.iter().map(|(_, _, _, _, w)| *w).collect();
+        // For each unique window, ensure we have a UI camera (spawn if missing)
         for window in windows_needing_ui_cam {
             ui_camera_map.entry(window).or_insert_with(|| {
                 // Spawn a new Camera2d for this window
@@ -629,11 +641,12 @@ fn update_arrow_label_ui(
             // Project to screen space
             let Ok(screen_pos) = camera.world_to_viewport(camera_transform, camera_relative_pos)
             else {
-                // Off-screen for this camera - hide label if it exists
+                // Off-screen for this camera - hide label if it exists but keep it for reuse
                 if let Some(label_entity) = label_map.get(&key)
                     && let Ok((_, _, mut node, _, _)) = labels.get_mut(*label_entity)
                 {
                     node.display = bevy::ui::Display::None;
+                    seen_labels.insert(key); // Keep the label entity for reuse
                 }
                 continue;
             };
@@ -646,11 +659,12 @@ fn update_arrow_label_ui(
                     || screen_pos.y < rect.min.y
                     || screen_pos.y > rect.max.y)
             {
-                // Outside this viewport - hide label if exists
+                // Outside this viewport - hide label if exists but keep it for reuse
                 if let Some(label_entity) = label_map.get(&key)
                     && let Ok((_, _, mut node, _, _)) = labels.get_mut(*label_entity)
                 {
                     node.display = bevy::ui::Display::None;
+                    seen_labels.insert(key); // Keep the label entity for reuse
                 }
                 continue;
             }
