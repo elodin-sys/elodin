@@ -655,16 +655,17 @@ fn update_arrow_label_ui(
                 continue;
             }
 
+            // Get the UI camera for this window - check before marking as seen
+            // to ensure cleanup happens if the UI camera becomes unavailable
+            let Some(&ui_cam) = ui_camera_map.get(window) else {
+                continue;
+            };
+
             seen_labels.insert(key);
 
             // Round to avoid sub-pixel jitter
             let screen_x = screen_pos.x.round();
             let screen_y = (screen_pos.y - 8.0).round(); // Slight vertical offset
-
-            // Get the UI camera for this window
-            let Some(&ui_cam) = ui_camera_map.get(window) else {
-                continue;
-            };
 
             // Check if label already exists for this arrow+camera pair
             if let Some(&label_entity) = label_map.get(&key) {
