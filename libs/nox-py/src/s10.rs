@@ -193,6 +193,33 @@ impl PyRecipe {
         Ok(PyRecipe { inner })
     }
 
+    /// Create a Process recipe to run an arbitrary command alongside the simulation.
+    ///
+    /// Args:
+    ///     name: Display name for the recipe (used in logs)
+    ///     cmd: Command to execute (path to executable or command name)
+    ///     args: Command-line arguments to pass to the process
+    ///     cwd: Working directory for the process
+    #[staticmethod]
+    #[pyo3(signature = (name, cmd, args=None, cwd=None))]
+    fn process(
+        name: String,
+        cmd: String,
+        args: Option<Vec<String>>,
+        cwd: Option<String>,
+    ) -> PyResult<Self> {
+        let inner = Recipe::Process {
+            name,
+            cmd,
+            args: args.unwrap_or_default(),
+            cwd,
+            env: HashMap::new(),
+            restart_policy: RestartPolicy::Never,
+            no_watch: true,
+        };
+        Ok(PyRecipe { inner })
+    }
+
     pub fn to_json(&self) -> PyResult<String> {
         let recipe = self.inner.to_rust()?;
         serde_json::to_string(&recipe).map_err(|err| PyValueError::new_err(err.to_string()))
