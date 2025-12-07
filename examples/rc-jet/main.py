@@ -13,6 +13,7 @@ The RC controller starts automatically with the simulation.
 WASD / Arrow keys for keyboard control.
 """
 
+from dataclasses import field
 from pathlib import Path
 
 import elodin as el
@@ -20,6 +21,13 @@ import jax.numpy as jnp
 
 from config import BDXConfig
 from sim import BDXJet, system
+
+
+@el.dataclass
+class StaticMarker(el.Archetype):
+    """A static visual marker with no physics (no inertia, force, velocity)."""
+
+    world_pos: el.WorldPos = field(default_factory=el.SpatialTransform)
 
 # Create configuration
 config = BDXConfig()
@@ -62,22 +70,18 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
         name="bdx",
     )
 
-    # Spawn target drone (stationary) - positioned ahead and slightly higher
-    # At ~250m away from initial jet position, good for OSD target tracking demo
+    # Spawn target drone (static visual marker) - positioned along initial flight path
+    # Jet starts at [0,0,50] with heading 35° and speed 70 m/s
+    # World velocity ≈ [57.3, 40.2, 0] m/s, so target at ~6 seconds ahead
+    # Using StaticMarker (no Inertia/Force) makes it immune to physics systems
+    target_position = jnp.array([350.0, 245.0, 55.0])
     target = world.spawn(
-        [
-            el.Body(
-                world_pos=el.SpatialTransform(
-                    angular=el.Quaternion.identity(),
-                    linear=jnp.array([200.0, 100.0, 60.0]),
-                ),
-                world_vel=el.SpatialMotion(
-                    linear=jnp.zeros(3),
-                    angular=jnp.zeros(3),
-                ),
-                inertia=el.SpatialInertia(mass=1.0, inertia=jnp.array([0.1, 0.1, 0.1])),
+        StaticMarker(
+            world_pos=el.SpatialTransform(
+                angular=el.Quaternion.identity(),
+                linear=target_position,
             ),
-        ],
+        ),
         name="target",
     )
 
@@ -91,6 +95,7 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
                     vsplit {
                         graph "bdx.alpha" name="Angle of Attack (rad)"
                         graph "bdx.thrust" name="Thrust (N)"
+                        viewport name=TGTViewport pos="target.world_pos.translate_world(1,1,0.2)" look_at="bdx.world_pos" show_grid=#true
                         viewport name=FPVViewport pos="bdx.world_pos.rotate_z(-90).translate_y(-2.0)" show_grid=#true
                     }
                 }
@@ -131,7 +136,7 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
         }
         
         object_3d target.world_pos {
-            glb path="edu-450-v2-drone.glb" scale=0.005
+            glb path="edu-450-v2-drone.glb"
         }
         
         vector_arrow "(1, 0, 0)" origin="bdx.world_pos" scale=1.0 name="Forward (X)" display_name=#true body_frame=#true {
@@ -167,7 +172,7 @@ print(f"Initial speed: {config.initial_speed:.1f} m/s")
 print(f"Initial heading: {config.initial_yaw_deg:.1f}° (0°=East, 90°=North)")
 print(f"Mass: {config.mass:.1f} kg")
 print(f"Max thrust: {config.propulsion.max_thrust:.1f} N")
-print(f"Target position: (200.0, 100.0, 60.0) m")
+print("Target position: (350.0, 245.0, 55.0) m - along flight path at ~6s")
 print(f"Simulation time: {config.simulation_time:.1f} s")
 print(f"Time step: {config.dt:.6f} s ({1 / config.dt:.0f} Hz)")
 print(f"Total ticks: {config.total_ticks}")
