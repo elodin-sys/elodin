@@ -419,6 +419,7 @@ impl LoadSchematicParams<'_, '_> {
                 origin_expr,
                 visual: None,
                 label: None,
+                ..default()
             },
         ));
     }
