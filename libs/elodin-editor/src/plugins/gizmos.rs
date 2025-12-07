@@ -40,6 +40,9 @@ pub struct ArrowLabelUI;
 
 pub const GIZMO_RENDER_LAYER: usize = 30;
 pub(crate) const MIN_ARROW_LENGTH_SQUARED: f64 = 1.0e-6;
+/// Camera order for arrow label UI cameras. Must be higher than all viewport cameras
+/// (SECONDARY_GRAPH_ORDER_BASE=1000, stride=50 per window) to avoid order collisions.
+const ARROW_LABEL_UI_CAMERA_ORDER: isize = 100_000;
 const BASE_HEAD_LENGTH: f32 = 0.06;
 const HEAD_RADIUS_FACTOR: f32 = 1.6;
 const MAX_HEAD_PORTION: f32 = 0.5;
@@ -569,7 +572,7 @@ fn update_arrow_label_ui(
                             } else {
                                 WindowRef::Entity(window)
                             }),
-                            order: 1000, // High order to render after 3D
+                            order: ARROW_LABEL_UI_CAMERA_ORDER,
                             ..default()
                         },
                         ArrowLabelUiCamera,
