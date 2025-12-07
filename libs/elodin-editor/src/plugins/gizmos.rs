@@ -336,12 +336,11 @@ fn render_vector_arrow(
         // Calculate and cache label offset from arrow root for the UI system.
         // Store as offset from arrow start so UI can use arrow's GlobalTransform.
         if arrow.display_name && result.name.is_some() {
-            let label_t = result.label_position;
-            // Offset from arrow start (which is at the root's Transform position)
+            // Place the label near the arrow tip by biasing toward the end of the vector
+            let label_t = result.label_position.max(0.8);
             let label_offset = direction_world * label_t;
-            // Additional offset along the arrow direction
-            let along_offset = 0.3;
-            let total_offset = label_offset + dir_norm * along_offset;
+            // Keep a small separation to avoid overlapping the head
+            let total_offset = label_offset + dir_norm * 0.08;
 
             // Store just the offset from the arrow root
             state.label_grid_pos = Some((0, 0, 0, total_offset));
