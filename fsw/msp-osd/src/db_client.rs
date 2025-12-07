@@ -42,6 +42,10 @@ impl DbClient {
             self.mappings.orientation.component.clone(),
             self.mappings.velocity.component.clone(),
         ];
+        // Add target component if configured
+        if let Some(target) = &self.mappings.target {
+            components.push(target.component.clone());
+        }
         components.sort();
         components.dedup();
         components
@@ -318,6 +322,23 @@ impl Decomponentize for TelemetryExtractor {
                 stellarator::spawn(async move {
                     proc.update_velocity(vx, vy, vz).await;
                 });
+            }
+        }
+
+        // Check if this component is used for target position
+        if let Some(target_mapping) = &self.mappings.target {
+            if component_name == &target_mapping.component {
+                if let (Some(x), Some(y), Some(z)) = (
+                    Self::extract_f64(&values, target_mapping.x),
+                    Self::extract_f64(&values, target_mapping.y),
+                    Self::extract_f64(&values, target_mapping.z),
+                ) {
+                    debug!("Target position: x={:.3}, y={:.3}, z={:.3}", x, y, z);
+                    let proc = self.telemetry_processor.clone();
+                    stellarator::spawn(async move {
+                        proc.update_target_position(x, y, z).await;
+                    });
+                }
             }
         }
 

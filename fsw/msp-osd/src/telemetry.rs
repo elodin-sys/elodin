@@ -1,4 +1,4 @@
-use nalgebra::{Quaternion, Vector3};
+use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -14,6 +14,9 @@ pub struct TelemetryState {
 
     /// Velocity in world frame (x, y, z) in m/s
     pub velocity: Vector3<f64>,
+
+    /// Target position in world frame (x, y, z) in meters (optional)
+    pub target_position: Option<Vector3<f64>>,
 
     /// System status
     pub system_status: SystemStatus,
@@ -40,6 +43,7 @@ impl Default for TelemetryState {
             position: Vector3::zeros(),
             orientation: Quaternion::identity(),
             velocity: Vector3::zeros(),
+            target_position: None,
             system_status: SystemStatus::Initializing,
             db_connected: false,
             update_count: 0,
@@ -140,6 +144,32 @@ impl TelemetryState {
 
         (roll, pitch, yaw)
     }
+
+    /// Get distance to target in meters (if target is tracked)
+    pub fn target_distance_m(&self) -> Option<f64> {
+        self.target_position
+            .map(|target| (target - self.position).norm())
+    }
+
+    /// Get target position relative to aircraft in body frame
+    /// Returns (forward, right, up) in body coordinates
+    /// - forward (x): positive = target ahead, negative = target behind
+    /// - right (y): positive = target to the right, negative = target to the left
+    /// - up (z): positive = target above, negative = target below
+    pub fn target_relative_body_frame(&self) -> Option<Vector3<f64>> {
+        self.target_position.map(|target| {
+            // Compute relative position in world frame
+            let rel_world = target - self.position;
+
+            // Convert orientation to UnitQuaternion for rotation
+            let unit_quat = UnitQuaternion::from_quaternion(self.orientation);
+
+            // Transform world-frame vector to body-frame using inverse rotation
+            // Body frame uses: X=forward, Y=left, Z=up
+            // We want Y=right, so we negate it later in the caller if needed
+            unit_quat.inverse_transform_vector(&rel_world)
+        })
+    }
 }
 
 /// Thread-safe telemetry processor
@@ -179,6 +209,13 @@ impl TelemetryProcessor {
     pub async fn update_velocity(&self, vx: f64, vy: f64, vz: f64) {
         let mut state = self.state.write().await;
         state.velocity = Vector3::new(vx, vy, vz);
+        state.last_update = std::time::Instant::now();
+    }
+
+    /// Update target position (x, y, z) in world frame
+    pub async fn update_target_position(&self, x: f64, y: f64, z: f64) {
+        let mut state = self.state.write().await;
+        state.target_position = Some(Vector3::new(x, y, z));
         state.last_update = std::time::Instant::now();
     }
 

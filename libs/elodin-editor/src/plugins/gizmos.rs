@@ -315,18 +315,21 @@ fn render_vector_arrow(
             _label_root = visual.root;
         }
 
-        // Calculate and cache label offset from arrow root for the UI system.
-        // Store as offset from arrow start so UI can use arrow's GlobalTransform.
+        // Calculate and cache label position for the UI system.
+        // Must properly handle big_space by computing the label's actual grid cell.
         if arrow.display_name && result.name.is_some() {
             let label_t = result.label_position;
-            // Offset from arrow start (which is at the root's Transform position)
-            let label_offset = direction_world * label_t;
-            // Additional offset along the arrow direction
-            let along_offset = 0.3;
-            let total_offset = label_offset + dir_norm * along_offset;
+            // Calculate the label's world position along the arrow
+            let direction = result.end - result.start;
+            let dir_norm_d = direction.try_normalize().unwrap_or(DVec3::Y);
+            let along_offset = 0.3_f64;
+            let label_world_pos =
+                result.start + direction * label_t as f64 + dir_norm_d * along_offset;
 
-            // Store just the offset from the arrow root
-            state.label_grid_pos = Some((0, 0, 0, total_offset));
+            // Convert to grid cell + local position (handles arrows spanning multiple grid cells)
+            let (label_cell, label_local) =
+                floating_origin.translation_to_grid::<i128>(label_world_pos);
+            state.label_grid_pos = Some((label_cell.x, label_cell.y, label_cell.z, label_local));
             state.label_name = result.name.clone();
             state.label_color = Some(base_color);
         } else {
@@ -506,7 +509,6 @@ fn window_from_camera_target(
 fn update_arrow_label_ui(
     mut commands: Commands,
     arrows: Query<(Entity, &VectorArrowState)>,
-    arrow_transforms: Query<(&Transform, &big_space::GridCell<i128>)>,
     cameras: Query<
         (
             Entity,
@@ -600,15 +602,10 @@ fn update_arrow_label_ui(
     let mut seen_labels = HashSet::new();
 
     for (arrow_entity, arrow_state) in arrows.iter() {
-        // Get the arrow visual's root entity
-        let Some(ref visual) = arrow_state.visual else {
+        // Skip if no visual or no label name
+        if arrow_state.visual.is_none() {
             continue;
-        };
-
-        // Get arrow's Transform and GridCell
-        let Ok((arrow_transform, arrow_cell)) = arrow_transforms.get(visual.root) else {
-            continue;
-        };
+        }
 
         let Some(ref name) = arrow_state.label_name else {
             continue;
@@ -619,23 +616,22 @@ fn update_arrow_label_ui(
             .map(readable_label_color)
             .unwrap_or(Color::WHITE);
 
-        // Get the label offset from arrow root
-        let label_offset = arrow_state
-            .label_grid_pos
-            .map(|(_, _, _, offset)| offset)
-            .unwrap_or(Vec3::ZERO);
-
-        // Calculate label position in arrow's local grid space
-        let label_local = arrow_transform.translation + label_offset;
+        // Get the label's grid cell and local position (properly computed for big_space)
+        let Some((label_cell_x, label_cell_y, label_cell_z, label_local)) =
+            arrow_state.label_grid_pos
+        else {
+            continue;
+        };
 
         // Process each active camera/viewport
         for (cam_entity, camera, camera_transform, cam_cell, window) in &active_cameras {
             let key = (arrow_entity, *cam_entity);
 
-            // Convert from arrow's grid cell to camera-relative position
-            let dx = (arrow_cell.x as f64 - cam_cell.x as f64) as f32 * edge;
-            let dy = (arrow_cell.y as f64 - cam_cell.y as f64) as f32 * edge;
-            let dz = (arrow_cell.z as f64 - cam_cell.z as f64) as f32 * edge;
+            // Convert from label's grid cell to camera-relative position
+            // This correctly handles labels on arrows that span multiple grid cells
+            let dx = (label_cell_x as f64 - cam_cell.x as f64) as f32 * edge;
+            let dy = (label_cell_y as f64 - cam_cell.y as f64) as f32 * edge;
+            let dz = (label_cell_z as f64 - cam_cell.z as f64) as f32 * edge;
             let camera_relative_pos = label_local + Vec3::new(dx, dy, dz);
 
             // Project to screen space

@@ -50,3 +50,12 @@ component = "bdx.world_vel"
 x = 3
 y = 4
 z = 5
+
+# Target position in world frame (x, y, z) in meters (optional)
+# Used for OSD target tracking indicator
+# For rc-jet example: target.world_pos is [qx, qy, qz, qw, x, y, z]
+[inputs.target]
+component = "target.world_pos"
+x = 4
+y = 5
+z = 6
