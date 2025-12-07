@@ -507,7 +507,7 @@ fn update_arrow_label_ui(
     arrow_transforms: Query<(&Transform, &big_space::GridCell<i128>)>,
     cameras: Query<(Entity, &Camera, &GlobalTransform, &big_space::GridCell<i128>), With<MainCamera>>,
     floating_origin: Res<FloatingOriginSettings>,
-    mut labels: Query<(Entity, &ArrowLabelUI, &mut Node, &mut Text)>,
+    mut labels: Query<(Entity, &ArrowLabelUI, &mut Node, &mut Text, &mut TextColor)>,
     primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
     ui_cameras: Query<(Entity, &Camera), With<ArrowLabelUiCamera>>,
     // Key: (arrow_entity, camera_entity) -> label_entity
@@ -614,7 +614,7 @@ fn update_arrow_label_ui(
             else {
                 // Off-screen for this camera - hide label if it exists
                 if let Some(label_entity) = label_map.get(&key) {
-                    if let Ok((_, _, mut node, _)) = labels.get_mut(*label_entity) {
+                    if let Ok((_, _, mut node, _, _)) = labels.get_mut(*label_entity) {
                         node.display = bevy::ui::Display::None;
                     }
                 }
@@ -631,7 +631,7 @@ fn update_arrow_label_ui(
                 {
                     // Outside this viewport - hide label if exists
                     if let Some(label_entity) = label_map.get(&key) {
-                        if let Ok((_, _, mut node, _)) = labels.get_mut(*label_entity) {
+                        if let Ok((_, _, mut node, _, _)) = labels.get_mut(*label_entity) {
                             node.display = bevy::ui::Display::None;
                         }
                     }
@@ -653,11 +653,13 @@ fn update_arrow_label_ui(
             // Check if label already exists for this arrow+camera pair
             if let Some(&label_entity) = label_map.get(&key) {
                 // Update existing label
-                if let Ok((_, _, mut node, mut text)) = labels.get_mut(label_entity) {
+                if let Ok((_, _, mut node, mut text, mut text_color)) = labels.get_mut(label_entity)
+                {
                     node.left = Val::Px(screen_x);
                     node.top = Val::Px(screen_y);
                     node.display = bevy::ui::Display::Flex;
                     *text = Text::new(name.clone());
+                    *text_color = TextColor(label_color);
                 }
             } else {
                 // Spawn new label for this arrow+camera pair, targeting the correct UI camera
