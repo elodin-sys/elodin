@@ -315,7 +315,7 @@ fn render_vector_arrow(
             // Offset from arrow start (which is at the root's Transform position)
             let label_offset = direction_world * label_t;
             // Additional offset along the arrow direction
-            let along_offset = if label_t > 0.9 { 0.06 } else { 0.04 };
+            let along_offset = 0.3;
             let total_offset = label_offset + dir_norm * along_offset;
 
             // Store just the offset from the arrow root
