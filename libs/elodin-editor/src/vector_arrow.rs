@@ -11,6 +11,11 @@ pub struct VectorArrowState {
     pub origin_expr: Option<CompiledExpr>,
     pub visual: Option<ArrowVisual>,
     pub label: Option<Entity>,
+    /// Cached label data calculated in render_vector_arrow for UI sync.
+    /// Stores (grid_cell_x, grid_cell_y, grid_cell_z, local_position) to handle big_space correctly.
+    pub label_grid_pos: Option<(i128, i128, i128, Vec3)>,
+    pub label_name: Option<String>,
+    pub label_color: Option<Color>,
 }
 
 #[derive(Clone)]
