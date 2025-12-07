@@ -309,6 +309,7 @@ fn render_target(grid: &mut OsdGrid, state: &TelemetryState, coordinate_frame: C
 }
 
 /// Draw an off-screen indicator at the perimeter pointing toward the target
+#[allow(clippy::too_many_arguments)]
 fn draw_offscreen_indicator(
     grid: &mut OsdGrid,
     screen_x: f32,
@@ -347,14 +348,14 @@ fn draw_offscreen_indicator(
         // 0 = right, π/2 = down, π = left, -π/2 = up
         let angle_deg = angle.to_degrees();
         match angle_deg {
-            a if (-22.5..22.5).contains(&a) => '>',       // right
-            a if (22.5..67.5).contains(&a) => '\\',      // down-right
-            a if (67.5..112.5).contains(&a) => 'v',      // down
-            a if (112.5..157.5).contains(&a) => '/',     // down-left
-            a if a >= 157.5 || a < -157.5 => '<',        // left
-            a if (-157.5..-112.5).contains(&a) => '\\',  // up-left
-            a if (-112.5..-67.5).contains(&a) => '^',    // up
-            a if (-67.5..-22.5).contains(&a) => '/',     // up-right
+            a if (-22.5..22.5).contains(&a) => '>',     // right
+            a if (22.5..67.5).contains(&a) => '\\',     // down-right
+            a if (67.5..112.5).contains(&a) => 'v',     // down
+            a if (112.5..157.5).contains(&a) => '/',    // down-left
+            a if !(-157.5..157.5).contains(&a) => '<',  // left
+            a if (-157.5..-112.5).contains(&a) => '\\', // up-left
+            a if (-112.5..-67.5).contains(&a) => '^',   // up
+            a if (-67.5..-22.5).contains(&a) => '/',    // up-right
             _ => '*',
         }
     };
@@ -367,7 +368,8 @@ fn draw_offscreen_indicator(
     let label_col = if col < grid.cols / 2 {
         col.saturating_add(2).min(max_col)
     } else {
-        col.saturating_sub(distance_text.len() as u8 + 1).max(min_col)
+        col.saturating_sub(distance_text.len() as u8 + 1)
+            .max(min_col)
     };
 
     let label_row = if row < grid.rows / 2 {
@@ -380,6 +382,7 @@ fn draw_offscreen_indicator(
 }
 
 /// Clamp a point to the perimeter rectangle
+#[allow(clippy::too_many_arguments)]
 fn clamp_to_perimeter(
     x: f32,
     y: f32,

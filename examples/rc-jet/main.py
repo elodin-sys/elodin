@@ -29,6 +29,7 @@ class StaticMarker(el.Archetype):
 
     world_pos: el.WorldPos = field(default_factory=el.SpatialTransform)
 
+
 # Create configuration
 config = BDXConfig()
 config.set_as_global()
