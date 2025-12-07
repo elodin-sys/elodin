@@ -291,7 +291,9 @@ fn render_target(grid: &mut OsdGrid, state: &TelemetryState, coordinate_frame: C
         let angle = up.atan2(-left); // angle in screen space
 
         // Place at the back edge, but show direction
-        let screen_x = center_col as f32 - angle.cos() * (grid.cols as f32 / 2.0 - 2.0);
+        // Use addition for screen_x to match the "ahead" case convention:
+        // -left positive (target to right) → angle.cos() positive → screen_x > center (right side)
+        let screen_x = center_col as f32 + angle.cos() * (grid.cols as f32 / 2.0 - 2.0);
         let screen_y = center_row as f32 - angle.sin() * (grid.rows as f32 / 2.0 - 2.0);
 
         draw_offscreen_indicator(
