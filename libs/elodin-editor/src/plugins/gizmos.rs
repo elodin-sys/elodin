@@ -548,9 +548,11 @@ fn update_arrow_label_ui(
     }
 
     // Ensure we have a UI camera for each window that needs labels.
-    // Build/update the ui_camera_map.
+    // Rebuild ui_camera_map from scratch each frame to handle closed windows.
+    // This prevents stale entries when window entities are recycled.
     {
-        // First, update map with any existing UI cameras
+        // Clear and rebuild the map from actually existing UI cameras
+        ui_camera_map.clear();
         for (ui_cam_entity, ui_cam) in ui_cameras.iter() {
             if let Some(window) = window_from_camera_target(&ui_cam.target, primary) {
                 ui_camera_map.insert(window, ui_cam_entity);
