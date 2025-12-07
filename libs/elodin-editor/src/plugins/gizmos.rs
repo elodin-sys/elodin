@@ -529,6 +529,11 @@ fn update_arrow_label_ui(
         .collect();
 
     if active_cameras.is_empty() {
+        // Clean up all labels when there are no active cameras
+        // This prevents memory leaks if arrows are removed while cameras are inactive
+        for (_, label_entity) in label_map.drain() {
+            commands.entity(label_entity).despawn();
+        }
         return;
     }
 
