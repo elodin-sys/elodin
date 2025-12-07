@@ -36,9 +36,7 @@ pub struct ArrowLabelUiCamera;
 
 /// Marker component for Bevy UI arrow labels
 #[derive(Component)]
-pub struct ArrowLabelUI {
-    pub arrow_entity: Entity,
-}
+pub struct ArrowLabelUI;
 
 pub const GIZMO_RENDER_LAYER: usize = 30;
 pub(crate) const MIN_ARROW_LENGTH_SQUARED: f64 = 1.0e-6;
@@ -501,11 +499,20 @@ fn window_from_camera_target(
 
 /// Bevy UI system to render arrow labels as screen-space text nodes.
 /// Spawns a label for each viewport where the arrow is visible, targeting the correct window's UI camera.
+#[allow(clippy::too_many_arguments)]
 fn update_arrow_label_ui(
     mut commands: Commands,
     arrows: Query<(Entity, &VectorArrowState)>,
     arrow_transforms: Query<(&Transform, &big_space::GridCell<i128>)>,
-    cameras: Query<(Entity, &Camera, &GlobalTransform, &big_space::GridCell<i128>), With<MainCamera>>,
+    cameras: Query<
+        (
+            Entity,
+            &Camera,
+            &GlobalTransform,
+            &big_space::GridCell<i128>,
+        ),
+        With<MainCamera>,
+    >,
     floating_origin: Res<FloatingOriginSettings>,
     mut labels: Query<(Entity, &ArrowLabelUI, &mut Node, &mut Text, &mut TextColor)>,
     primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
@@ -548,11 +555,12 @@ fn update_arrow_label_ui(
         }
 
         // For each unique window in active_cameras, ensure we have a UI camera
-        let windows_needing_ui_cam: HashSet<_> = active_cameras.iter().map(|(_, _, _, _, w)| *w).collect();
+        let windows_needing_ui_cam: HashSet<_> =
+            active_cameras.iter().map(|(_, _, _, _, w)| *w).collect();
         for window in windows_needing_ui_cam {
-            if !ui_camera_map.contains_key(&window) {
+            ui_camera_map.entry(window).or_insert_with(|| {
                 // Spawn a new Camera2d for this window
-                let ui_cam = commands
+                commands
                     .spawn((
                         Camera2d,
                         Camera {
@@ -567,9 +575,8 @@ fn update_arrow_label_ui(
                         ArrowLabelUiCamera,
                         Name::new(format!("ArrowLabelUiCamera_{:?}", window)),
                     ))
-                    .id();
-                ui_camera_map.insert(window, ui_cam);
-            }
+                    .id()
+            });
         }
     }
 
@@ -618,30 +625,29 @@ fn update_arrow_label_ui(
             let Ok(screen_pos) = camera.world_to_viewport(camera_transform, camera_relative_pos)
             else {
                 // Off-screen for this camera - hide label if it exists
-                if let Some(label_entity) = label_map.get(&key) {
-                    if let Ok((_, _, mut node, _, _)) = labels.get_mut(*label_entity) {
-                        node.display = bevy::ui::Display::None;
-                    }
+                if let Some(label_entity) = label_map.get(&key)
+                    && let Ok((_, _, mut node, _, _)) = labels.get_mut(*label_entity)
+                {
+                    node.display = bevy::ui::Display::None;
                 }
                 continue;
             };
 
             // Check if screen position falls within this camera's viewport
             let viewport = camera.logical_viewport_rect();
-            if let Some(rect) = viewport {
-                if screen_pos.x < rect.min.x
+            if let Some(rect) = viewport
+                && (screen_pos.x < rect.min.x
                     || screen_pos.x > rect.max.x
                     || screen_pos.y < rect.min.y
-                    || screen_pos.y > rect.max.y
+                    || screen_pos.y > rect.max.y)
+            {
+                // Outside this viewport - hide label if exists
+                if let Some(label_entity) = label_map.get(&key)
+                    && let Ok((_, _, mut node, _, _)) = labels.get_mut(*label_entity)
                 {
-                    // Outside this viewport - hide label if exists
-                    if let Some(label_entity) = label_map.get(&key) {
-                        if let Ok((_, _, mut node, _, _)) = labels.get_mut(*label_entity) {
-                            node.display = bevy::ui::Display::None;
-                        }
-                    }
-                    continue;
+                    node.display = bevy::ui::Display::None;
                 }
+                continue;
             }
 
             seen_labels.insert(key);
@@ -683,7 +689,7 @@ fn update_arrow_label_ui(
                         },
                         TextColor(label_color),
                         ZIndex(1000), // Render above 3D content
-                        ArrowLabelUI { arrow_entity },
+                        ArrowLabelUI,
                         UiTargetCamera(ui_cam), // Target the correct window's UI camera
                         Name::new(format!("arrow_label_{}_{:?}", name, cam_entity)),
                     ))
