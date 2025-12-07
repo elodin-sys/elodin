@@ -1,5 +1,7 @@
+use bevy::render::camera::RenderTarget;
 use bevy::render::view::RenderLayers;
-use bevy::ui::{Node, PositionType, Val, ZIndex};
+use bevy::ui::{Node, PositionType, UiTargetCamera, Val, ZIndex};
+use bevy::window::WindowRef;
 use bevy::{
     app::{App, Plugin, PostUpdate, Startup, Update},
     ecs::system::{Query, Res, ResMut},
@@ -27,6 +29,10 @@ use crate::{
     object_3d::ComponentArrayExt,
     vector_arrow::{ArrowVisual, VectorArrowState, component_value_tail_to_vec3},
 };
+
+/// Marker for UI cameras spawned specifically for arrow labels per window.
+#[derive(Component)]
+pub struct ArrowLabelUiCamera;
 
 /// Marker component for Bevy UI arrow labels
 #[derive(Component)]
@@ -481,8 +487,20 @@ fn readable_label_color(color: Color) -> Color {
     Color::linear_rgba(r, g, b, 1.0)
 }
 
+/// Get the window entity from a camera's render target.
+fn window_from_camera_target(
+    target: &RenderTarget,
+    primary_window: Option<Entity>,
+) -> Option<Entity> {
+    match target {
+        RenderTarget::Window(WindowRef::Primary) => primary_window,
+        RenderTarget::Window(WindowRef::Entity(e)) => Some(*e),
+        _ => None,
+    }
+}
+
 /// Bevy UI system to render arrow labels as screen-space text nodes.
-/// Spawns a label for each viewport where the arrow is visible.
+/// Spawns a label for each viewport where the arrow is visible, targeting the correct window's UI camera.
 fn update_arrow_label_ui(
     mut commands: Commands,
     arrows: Query<(Entity, &VectorArrowState)>,
@@ -490,19 +508,64 @@ fn update_arrow_label_ui(
     cameras: Query<(Entity, &Camera, &GlobalTransform, &big_space::GridCell<i128>), With<MainCamera>>,
     floating_origin: Res<FloatingOriginSettings>,
     mut labels: Query<(Entity, &ArrowLabelUI, &mut Node, &mut Text)>,
+    primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
+    ui_cameras: Query<(Entity, &Camera), With<ArrowLabelUiCamera>>,
     // Key: (arrow_entity, camera_entity) -> label_entity
     mut label_map: Local<HashMap<(Entity, Entity), Entity>>,
+    // Cache of window entity -> UI camera entity
+    mut ui_camera_map: Local<HashMap<Entity, Entity>>,
 ) {
     let edge = floating_origin.grid_edge_length();
+    let primary = primary_window.iter().next();
 
-    // Collect all active cameras
+    // Collect all active cameras with their window entities
     let active_cameras: Vec<_> = cameras
         .iter()
         .filter(|(_, cam, _, _)| cam.is_active)
+        .filter_map(|(entity, cam, gt, cell)| {
+            let window = window_from_camera_target(&cam.target, primary)?;
+            Some((entity, cam, gt, cell, window))
+        })
         .collect();
 
     if active_cameras.is_empty() {
         return;
+    }
+
+    // Ensure we have a UI camera for each window that needs labels.
+    // Build/update the ui_camera_map.
+    {
+        // First, update map with any existing UI cameras
+        for (ui_cam_entity, ui_cam) in ui_cameras.iter() {
+            if let Some(window) = window_from_camera_target(&ui_cam.target, primary) {
+                ui_camera_map.insert(window, ui_cam_entity);
+            }
+        }
+
+        // For each unique window in active_cameras, ensure we have a UI camera
+        let windows_needing_ui_cam: HashSet<_> = active_cameras.iter().map(|(_, _, _, _, w)| *w).collect();
+        for window in windows_needing_ui_cam {
+            if !ui_camera_map.contains_key(&window) {
+                // Spawn a new Camera2d for this window
+                let ui_cam = commands
+                    .spawn((
+                        Camera2d,
+                        Camera {
+                            target: RenderTarget::Window(if Some(window) == primary {
+                                WindowRef::Primary
+                            } else {
+                                WindowRef::Entity(window)
+                            }),
+                            order: 1000, // High order to render after 3D
+                            ..default()
+                        },
+                        ArrowLabelUiCamera,
+                        Name::new(format!("ArrowLabelUiCamera_{:?}", window)),
+                    ))
+                    .id();
+                ui_camera_map.insert(window, ui_cam);
+            }
+        }
     }
 
     let mut seen_labels = HashSet::new();
@@ -537,7 +600,7 @@ fn update_arrow_label_ui(
         let label_local = arrow_transform.translation + label_offset;
 
         // Process each active camera/viewport
-        for (cam_entity, camera, camera_transform, cam_cell) in &active_cameras {
+        for (cam_entity, camera, camera_transform, cam_cell, window) in &active_cameras {
             let key = (arrow_entity, *cam_entity);
 
             // Convert from arrow's grid cell to camera-relative position
@@ -582,6 +645,11 @@ fn update_arrow_label_ui(
             let screen_x = screen_pos.x.round();
             let screen_y = (screen_pos.y - 8.0).round(); // Slight vertical offset
 
+            // Get the UI camera for this window
+            let Some(&ui_cam) = ui_camera_map.get(window) else {
+                continue;
+            };
+
             // Check if label already exists for this arrow+camera pair
             if let Some(&label_entity) = label_map.get(&key) {
                 // Update existing label
@@ -592,7 +660,7 @@ fn update_arrow_label_ui(
                     *text = Text::new(name.clone());
                 }
             } else {
-                // Spawn new label for this arrow+camera pair
+                // Spawn new label for this arrow+camera pair, targeting the correct UI camera
                 let label_entity = commands
                     .spawn((
                         Node {
@@ -609,6 +677,7 @@ fn update_arrow_label_ui(
                         TextColor(label_color),
                         ZIndex(1000), // Render above 3D content
                         ArrowLabelUI { arrow_entity },
+                        UiTargetCamera(ui_cam), // Target the correct window's UI camera
                         Name::new(format!("arrow_label_{}_{:?}", name, cam_entity)),
                     ))
                     .id();
