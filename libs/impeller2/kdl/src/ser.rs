@@ -1,3 +1,4 @@
+use crate::color_names::{color_to_ints, name_from_color};
 use impeller2_wkt::*;
 use kdl::{KdlDocument, KdlEntry, KdlNode};
 
@@ -466,21 +467,21 @@ fn serialize_color_to_node(node: &mut KdlNode, color: &Color) {
 fn serialize_color_to_node_named(node: &mut KdlNode, color: &Color, name: Option<&str>) {
     let mut color_node = KdlNode::new(name.unwrap_or("color"));
 
-    // Add r, g, b as positional arguments
-    let r = float_color_component_to_int(color.r);
-    let g = float_color_component_to_int(color.g);
-    let b = float_color_component_to_int(color.b);
-    color_node.entries_mut().push(KdlEntry::new(r));
-    color_node.entries_mut().push(KdlEntry::new(g));
-    color_node.entries_mut().push(KdlEntry::new(b));
-
-    // Add alpha if it's not 1.0 (default)
-    let a = float_color_component_to_int(color.a);
-    if a != 255 {
-        color_node.entries_mut().push(KdlEntry::new(a));
+    let (r, g, b, a) = color_to_ints(color);
+    if let Some(named) = name_from_color(color) {
+        color_node.entries_mut().push(KdlEntry::new(named));
+        if a != 255 {
+            color_node.entries_mut().push(KdlEntry::new(a));
+        }
+    } else {
+        color_node.entries_mut().push(KdlEntry::new(r));
+        color_node.entries_mut().push(KdlEntry::new(g));
+        color_node.entries_mut().push(KdlEntry::new(b));
+        if a != 255 {
+            color_node.entries_mut().push(KdlEntry::new(a));
+        }
     }
 
-    // Add the color node as a child
     if let Some(existing_children) = node.children_mut().as_mut() {
         existing_children.nodes_mut().push(color_node);
     } else {
@@ -488,11 +489,6 @@ fn serialize_color_to_node_named(node: &mut KdlNode, color: &Color, name: Option
         doc.nodes_mut().push(color_node);
         node.set_children(doc);
     }
-}
-
-fn float_color_component_to_int(component: f32) -> i128 {
-    let clamped = component.clamp(0.0, 1.0);
-    (clamped * 255.0).round() as i128
 }
 
 fn serialize_material_to_node(node: &mut KdlNode, material: &Material) {

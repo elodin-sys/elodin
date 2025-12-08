@@ -1,3 +1,4 @@
+use crate::color_names::color_from_name;
 use impeller2_wkt::{
     ArrowThickness, Color, Schematic, SchematicElem, VectorArrow3d, WindowSchematic,
 };
@@ -889,28 +890,7 @@ fn parse_color_component_str(value: &str) -> Option<f32> {
 }
 
 fn parse_named_color(name: &str) -> Option<Color> {
-    match name {
-        "black" => Some(Color::BLACK),
-        "white" => Some(Color::WHITE),
-        "blue" => Some(Color::BLUE),
-        "red" => Some(Color::RED),
-        "orange" => Some(Color::ORANGE),
-        "yellow" => Some(Color::YELLOW),
-        "yalk" => Some(Color::YALK),
-        "pink" => Some(Color::PINK),
-        "cyan" => Some(Color::CYAN),
-        "gray" => Some(Color::GRAY),
-        "green" => Some(Color::GREEN),
-        "mint" => Some(Color::MINT),
-        "turquoise" => Some(Color::TURQUOISE),
-        "slate" => Some(Color::SLATE),
-        "pumpkin" => Some(Color::PUMPKIN),
-        "yolk" => Some(Color::YOLK),
-        "peach" => Some(Color::PEACH),
-        "reddish" => Some(Color::REDDISH),
-        "hyperblue" => Some(Color::HYPERBLUE),
-        _ => None,
-    }
+    color_from_name(name)
 }
 
 fn parse_color_from_node(node: &KdlNode) -> Option<Color> {

@@ -686,20 +686,14 @@ fn update_arrow_label_ui(
 
         let label_color = arrow_state
             .label_color
-            .map(|color| match arrow_state.label_scope {
-                ArrowLabelScope::Viewport => readable_label_color(lighten_color(color, 1.2)),
-                ArrowLabelScope::Global => readable_label_color(color),
-            })
+            .map(readable_label_color)
             .unwrap_or(Color::WHITE);
         let label_offset = arrow_state
             .label_grid_pos
             .map(|(_, _, _, offset)| offset)
             .unwrap_or(Vec3::ZERO);
 
-        let label_text = match arrow_state.label_scope {
-            ArrowLabelScope::Global => name.clone(),
-            ArrowLabelScope::Viewport => format!("{} (local)", name),
-        };
+        let label_text = name.clone();
         let label_local = arrow_transform.translation + label_offset;
 
         for (window, cameras) in &window_cameras {
