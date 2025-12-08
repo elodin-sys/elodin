@@ -140,13 +140,13 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
             glb path="edu-450-v2-drone.glb"
         }
         
-        vector_arrow "(1, 0, 0)" origin="bdx.world_pos" scale=1.0 name="Forward (X)" display_name=#true body_frame=#true {
+        vector_arrow "(1, 0, 0)" origin="bdx.world_pos" scale=1.0 name="Forward (X)" show_name=#true body_frame=#true {
            color red 150
         }
-        vector_arrow "(0, 1, 0)" origin="bdx.world_pos" scale=1.0 name="Left (Y)" display_name=#true body_frame=#true {
+        vector_arrow "(0, 1, 0)" origin="bdx.world_pos" scale=1.0 name="Left (Y)" show_name=#true body_frame=#true {
            color green 150
         }
-        vector_arrow "(0, 0, 1)" origin="bdx.world_pos" scale=1.0 name="Up (Z)" display_name=#true body_frame=#true {
+        vector_arrow "(0, 0, 1)" origin="bdx.world_pos" scale=1.0 name="Up (Z)" show_name=#true body_frame=#true {
            color blue 150
         }
         

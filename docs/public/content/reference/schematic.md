@@ -62,7 +62,7 @@ order = 6
 - `body_frame` / `in_body_frame`: apply origin rotation to the vector (default false).
 - `color`: arrow color (default white).
 - `name`: label text; used for legend/overlay (optional).
-- `display_name`: show/hide overlay label (default true).
+- `show_name`: show/hide overlay label (default true).
 - `arrow_thickness`: numeric thickness multiplier with 3-decimal precision (default `0.1`).
 - `label_position`: 0.0–1.0 along the arrow (0=base, 1=tip) for label anchor (default 1.0).
 
@@ -171,7 +171,7 @@ vector_arrow = "vector_arrow"
              [body_frame|in_body_frame=bool]
              [color]
              [name=string]
-             [display_name=bool]
+             [show_name=bool]
              [arrow_thickness=float]
              [label_position=0..1]
 

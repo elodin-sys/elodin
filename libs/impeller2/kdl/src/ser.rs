@@ -421,9 +421,9 @@ fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
             .push(KdlEntry::new_prop("normalize", true));
     }
 
-    if !arrow.display_name {
+    if !arrow.show_name {
         node.entries_mut()
-            .push(KdlEntry::new_prop("display_name", false));
+            .push(KdlEntry::new_prop("show_name", false));
     }
 
     let thickness = arrow.thickness.value();
@@ -1103,7 +1103,7 @@ graph "value" {
                 color: Color::BLUE,
                 body_frame: true,
                 normalize: true,
-                display_name: false,
+                show_name: false,
                 thickness: ArrowThickness::new(1.23456),
                 label_position: 1.0,
                 aux: (),
@@ -1127,7 +1127,7 @@ graph "value" {
             assert_eq!(arrow.name.as_deref(), Some("Velocity"));
             assert!(arrow.body_frame);
             assert!(arrow.normalize);
-            assert!(!arrow.display_name);
+            assert!(!arrow.show_name);
             assert!(
                 (arrow.thickness.value() - 1.235).abs() < 1e-6,
                 "unexpected thickness after roundtrip {}",

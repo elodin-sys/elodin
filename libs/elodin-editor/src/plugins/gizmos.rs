@@ -335,7 +335,7 @@ fn render_vector_arrow(
 
         // Calculate and cache label offset from arrow root for the UI system.
         // Store as offset from arrow start so UI can use arrow's GlobalTransform.
-        if arrow.display_name && result.name.is_some() {
+        if arrow.show_name && result.name.is_some() {
             // Place the label near the arrow tip by biasing toward the end of the vector
             let label_t = result.label_position.max(0.8);
             let label_offset = direction_world * label_t;

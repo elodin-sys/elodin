@@ -747,8 +747,9 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let display_name = node
-        .get("display_name")
+    let show_name = node
+        .get("show_name")
+        .or_else(|| node.get("display_name"))
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
@@ -785,7 +786,7 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         color,
         body_frame,
         normalize,
-        display_name,
+        show_name,
         thickness,
         label_position,
         aux: (),
@@ -1560,7 +1561,7 @@ tabs {
     #[test]
     fn test_parse_vector_arrow() {
         let kdl = r#"
-vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="ball.world_pos" scale=1.5 name="Velocity" body_frame=#true normalize=#true display_name=#false arrow_thickness=1.23456 {
+vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="ball.world_pos" scale=1.5 name="Velocity" body_frame=#true normalize=#true show_name=#false arrow_thickness=1.23456 {
     color 0 0 255
 }
 "#;
@@ -1577,7 +1578,7 @@ vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="bal
             assert_eq!(arrow.name.as_deref(), Some("Velocity"));
             assert!(arrow.body_frame);
             assert!(arrow.normalize);
-            assert!(!arrow.display_name);
+            assert!(!arrow.show_name);
             assert!(
                 (arrow.thickness.value() - 1.235).abs() < 1e-6,
                 "unexpected arrow_thickness {}",
@@ -1600,7 +1601,7 @@ vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" in_body_fra
         if let SchematicElem::VectorArrow(arrow) = &schematic.elems[0] {
             assert!(arrow.body_frame);
             assert!(!arrow.normalize);
-            assert!(arrow.display_name);
+            assert!(arrow.show_name);
         } else {
             panic!("Expected vector_arrow");
         }

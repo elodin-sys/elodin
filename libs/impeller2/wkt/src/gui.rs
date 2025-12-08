@@ -314,8 +314,8 @@ pub struct VectorArrow3d<T = ()> {
     pub body_frame: bool,
     #[serde(default)]
     pub normalize: bool,
-    #[serde(default = "VectorArrow3d::<T>::default_display_name")]
-    pub display_name: bool,
+    #[serde(default = "VectorArrow3d::<T>::default_show_name")]
+    pub show_name: bool,
     #[serde(default = "VectorArrow3d::<T>::default_thickness")]
     pub thickness: ArrowThickness,
     #[serde(default = "VectorArrow3d::<T>::default_label_position")]
@@ -439,7 +439,7 @@ impl<T> VectorArrow3d<T> {
         Color::WHITE
     }
 
-    fn default_display_name() -> bool {
+    fn default_show_name() -> bool {
         true
     }
 
@@ -460,7 +460,7 @@ impl<T> VectorArrow3d<T> {
             color: self.color,
             body_frame: self.body_frame,
             normalize: self.normalize,
-            display_name: self.display_name,
+            show_name: self.show_name,
             thickness: self.thickness,
             label_position: self.label_position,
             aux: f(&self.aux),
