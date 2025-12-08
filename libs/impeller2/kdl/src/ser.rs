@@ -773,6 +773,7 @@ mod tests {
                 hdr: false,
                 pos: None,
                 look_at: None,
+                local_arrows: Vec::new(),
                 aux: (),
             })));
 
@@ -804,6 +805,7 @@ mod tests {
                 hdr: true,
                 pos: Some("(0,0,0,0, 1,2,3)".to_string()),
                 look_at: Some("(0,0,0,0, 0,0,0)".to_string()),
+                local_arrows: Vec::new(),
                 aux: (),
             })));
 
@@ -1041,6 +1043,7 @@ graph "value" {
                 hdr: false,
                 pos: None,
                 look_at: None,
+                local_arrows: Vec::new(),
                 aux: (),
             }),
             Panel::Graph(Graph {
