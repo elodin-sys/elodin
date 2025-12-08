@@ -43,6 +43,7 @@ pub struct SchematicParam<'w, 's> {
     pub graph_states: Query<'w, 's, &'static plot::GraphState>,
     pub query_plots: Query<'w, 's, &'static query_plot::QueryPlotData>,
     pub viewports: Query<'w, 's, &'static inspector::viewport::Viewport>,
+    pub viewport_configs: Query<'w, 's, &'static tiles::ViewportConfig>,
     pub camera_grids: Query<'w, 's, &'static GridHandle>,
     pub grid_visibility: Query<'w, 's, &'static Visibility>,
     pub objects_3d: Query<'w, 's, (Entity, &'static Object3DState)>,
@@ -86,10 +87,17 @@ impl SchematicParam<'_, '_> {
                         show_grid = matches!(*visibility, Visibility::Visible);
                     }
 
+                    let show_arrows = self
+                        .viewport_configs
+                        .get(cam_entity)
+                        .map(|config| config.show_arrows)
+                        .unwrap_or(true);
+
                     Some(Panel::Viewport(Viewport {
                         fov: 45.0,
                         active: false,
                         show_grid,
+                        show_arrows,
                         hdr: self.hdr_enabled.0,
                         name: Some(viewport.label.clone()),
                         pos: Some(viewport_data.pos.eql.clone()),

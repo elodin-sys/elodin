@@ -116,6 +116,11 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
             .push(KdlEntry::new_prop("show_grid", true));
     }
 
+    if !viewport.show_arrows {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("show_arrows", false));
+    }
+
     if viewport.active {
         node.entries_mut().push(KdlEntry::new_prop("active", true));
     }
@@ -760,6 +765,7 @@ mod tests {
                 fov: 60.0,
                 active: true,
                 show_grid: true,
+                show_arrows: true,
                 hdr: false,
                 pos: None,
                 look_at: None,
@@ -790,6 +796,7 @@ mod tests {
                 fov: 60.0,
                 active: true,
                 show_grid: true,
+                show_arrows: false,
                 hdr: true,
                 pos: Some("(0,0,0,0, 1,2,3)".to_string()),
                 look_at: Some("(0,0,0,0, 0,0,0)".to_string()),
@@ -809,6 +816,7 @@ mod tests {
             "look_at=",
             "hdr=",
             "show_grid=",
+            "show_arrows=",
             "active=",
         ];
         let mut indices = Vec::with_capacity(properties.len());
@@ -1025,6 +1033,7 @@ graph "value" {
                 fov: 45.0,
                 active: false,
                 show_grid: false,
+                show_arrows: true,
                 hdr: false,
                 pos: None,
                 look_at: None,

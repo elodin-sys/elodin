@@ -84,6 +84,11 @@ fn setup_primary_window_state(
     commands.entity(id).insert((state, WindowId(0)));
 }
 
+#[derive(Component)]
+pub struct ViewportConfig {
+    pub show_arrows: bool,
+}
+
 #[derive(Clone)]
 pub struct TileIcons {
     pub add: egui::TextureId,
@@ -1036,6 +1041,9 @@ impl ViewportPane {
                 ..Default::default()
             },
             GridHandle { grid: grid_id },
+            ViewportConfig {
+                show_arrows: viewport.show_arrows,
+            },
             crate::ui::inspector::viewport::Viewport::new(parent, pos, look_at),
             ChildOf(parent),
             Name::new("viewport camera3d"),

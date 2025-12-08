@@ -29,7 +29,7 @@ order = 6
 - `hsplit` / `vsplit`: children are panels. Child `share=<f32>` controls the weight within the split. `active` (bool) is parsed but not currently used. Optional `name`.
 
 ### panel content
-- `viewport`: `fov` (default 45.0), `active` (bool, default false), `show_grid` (default false), `hdr` (default false), `name` (optional label), camera `pos`/`look_at` (optional EQL).
+- `viewport`: `fov` (default 45.0), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `hdr` (default false), `name` (optional label), camera `pos`/`look_at` (optional EQL).
 - `graph`: positional `eql` (required), `name` (optional), `type` (`line`/`point`/`bar`, default `line`), `auto_y_range` (default true), `y_min`/`y_max` (default `0.0..1.0`), child `color` nodes (optional list; otherwise palette).
 - `component_monitor`: `component_name` (required).
 - `action_pane`: positional `label` (required), `lua` script (required).
@@ -110,6 +110,7 @@ viewport = "viewport"
          [fov=float]
          [active=bool]
          [show_grid=bool]
+         [show_arrows=bool]
          [hdr=bool]
          [name=string]
          [pos=eql]

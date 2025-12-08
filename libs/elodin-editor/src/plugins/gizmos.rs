@@ -27,6 +27,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     MainCamera, WorldPosExt,
     object_3d::ComponentArrayExt,
+    ui::tiles::ViewportConfig,
     vector_arrow::{ArrowVisual, VectorArrowState, component_value_tail_to_vec3},
 };
 
@@ -213,6 +214,7 @@ fn render_vector_arrow(
             &Projection,
             &GlobalTransform,
             &RenderLayers,
+            Option<&ViewportConfig>,
         ),
         With<crate::MainCamera>,
     >,
@@ -272,8 +274,18 @@ fn render_vector_arrow(
         head_length = head_length.min(draw_length);
         let shaft_length = (draw_length - head_length).max(0.0);
         let mut seen_cameras: HashSet<Entity> = HashSet::new();
-        for (cam_entity, cam, proj, cam_tf, cam_layers) in main_cameras.iter() {
+        for (cam_entity, cam, proj, cam_tf, cam_layers, viewport_config) in main_cameras.iter() {
             seen_cameras.insert(cam_entity);
+
+            let show_arrows = viewport_config
+                .map(|config| config.show_arrows)
+                .unwrap_or(true);
+            if !show_arrows {
+                if let Some(visual) = state.visuals.remove(&cam_entity) {
+                    hide_arrow_visual(&mut commands, &visual);
+                }
+                continue;
+            }
 
             // Use a camera-unique layer if available (typically the grid layer); otherwise fall back to gizmo.
             let arrow_layers = cam_layers

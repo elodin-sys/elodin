@@ -235,6 +235,11 @@ fn parse_viewport(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
+    let show_arrows = node
+        .get("show_arrows")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
     let hdr = node.get("hdr").and_then(|v| v.as_bool()).unwrap_or(false);
 
     let pos = node
@@ -251,6 +256,7 @@ fn parse_viewport(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
         fov,
         active,
         show_grid,
+        show_arrows,
         hdr,
         name,
         pos,
