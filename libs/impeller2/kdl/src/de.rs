@@ -146,44 +146,48 @@ fn clamp_percent(value: f64) -> u32 {
     value.round().clamp(0.0, 100.0) as u32
 }
 
-fn parse_panel(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
+fn parse_panel(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError> {
     match node.name().value() {
         "tabs" => {
             let mut panels = Vec::new();
             if let Some(children) = node.children() {
                 for child in children.nodes() {
-                    panels.push(parse_panel(child, src)?);
+                    panels.push(parse_panel(child, kdl_src)?);
                 }
             }
             Ok(Panel::Tabs(panels))
         }
-        "hsplit" => parse_split(node, src, true),
-        "vsplit" => parse_split(node, src, false),
-        "viewport" => parse_viewport(node),
-        "graph" => parse_graph(node, src),
-        "component_monitor" => parse_component_monitor(node, src),
-        "action_pane" => parse_action_pane(node, src),
+        "hsplit" => parse_split(node, kdl_src, true),
+        "vsplit" => parse_split(node, kdl_src, false),
+        "viewport" => parse_viewport(node, kdl_src),
+        "graph" => parse_graph(node, kdl_src),
+        "component_monitor" => parse_component_monitor(node, kdl_src),
+        "action_pane" => parse_action_pane(node, kdl_src),
         "query_table" => parse_query_table(node),
-        "query_plot" => parse_query_plot(node, src),
+        "query_plot" => parse_query_plot(node, kdl_src),
         "inspector" => Ok(Panel::Inspector),
         "hierarchy" => Ok(Panel::Hierarchy),
         "schematic_tree" => Ok(Panel::SchematicTree),
         "dashboard" => parse_dashboard(node),
         _ => Err(KdlSchematicError::UnknownNode {
             node_type: node.name().to_string(),
-            src: src.to_string(),
+            src: kdl_src.to_string(),
             span: node.span(),
         }),
     }
 }
 
-fn parse_split(node: &KdlNode, src: &str, is_horizontal: bool) -> Result<Panel, KdlSchematicError> {
+fn parse_split(
+    node: &KdlNode,
+    kdl_src: &str,
+    is_horizontal: bool,
+) -> Result<Panel, KdlSchematicError> {
     let mut panels = Vec::new();
     let mut shares = HashMap::new();
 
     if let Some(children) = node.children() {
         for (i, child) in children.nodes().iter().enumerate() {
-            panels.push(parse_panel(child, src)?);
+            panels.push(parse_panel(child, kdl_src)?);
 
             // Look for share property on child
             if let Some(share_val) = child.get("share")
@@ -218,7 +222,7 @@ fn parse_split(node: &KdlNode, src: &str, is_horizontal: bool) -> Result<Panel, 
     }
 }
 
-fn parse_viewport(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
+fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError> {
     let fov = node.get("fov").and_then(|v| v.as_float()).unwrap_or(45.0) as f32;
 
     let active = node
@@ -252,6 +256,15 @@ fn parse_viewport(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
         .and_then(|v| v.as_string())
         .map(|s| s.to_string());
 
+    let mut local_arrows = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "vector_arrow" {
+                local_arrows.push(parse_vector_arrow(child, kdl_src)?);
+            }
+        }
+    }
+
     Ok(Panel::Viewport(Viewport {
         fov,
         active,
@@ -261,6 +274,7 @@ fn parse_viewport(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
         name,
         pos,
         look_at,
+        local_arrows,
         aux: (),
     }))
 }

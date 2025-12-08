@@ -125,6 +125,14 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
         node.entries_mut().push(KdlEntry::new_prop("active", true));
     }
 
+    if !viewport.local_arrows.is_empty() {
+        let mut children = node.children().cloned().unwrap_or_else(KdlDocument::new);
+        for arrow in &viewport.local_arrows {
+            children.nodes_mut().push(serialize_vector_arrow(arrow));
+        }
+        node.set_children(children);
+    }
+
     node
 }
 

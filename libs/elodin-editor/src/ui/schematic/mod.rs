@@ -102,6 +102,7 @@ impl SchematicParam<'_, '_> {
                         name: Some(viewport.label.clone()),
                         pos: Some(viewport_data.pos.eql.clone()),
                         look_at: Some(viewport_data.look_at.eql.clone()),
+                        local_arrows: Vec::new(),
                         aux: cam_entity,
                     }))
                 }

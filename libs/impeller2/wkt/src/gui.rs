@@ -198,6 +198,8 @@ pub struct Viewport<T = ()> {
     pub name: Option<String>,
     pub pos: Option<String>,
     pub look_at: Option<String>,
+    #[serde(default)]
+    pub local_arrows: Vec<VectorArrow3d>,
     pub aux: T,
 }
 
@@ -212,6 +214,7 @@ impl<T> Viewport<T> {
             name: self.name.clone(),
             pos: self.pos.clone(),
             look_at: self.look_at.clone(),
+            local_arrows: self.local_arrows.clone(),
             aux: f(&self.aux),
         }
     }
@@ -228,6 +231,7 @@ impl Default for Viewport {
             name: None,
             pos: None,
             look_at: None,
+            local_arrows: Vec::new(),
             aux: (),
         }
     }
