@@ -31,6 +31,14 @@ use crate::{
     vector_arrow::{ArrowVisual, VectorArrowState, component_value_tail_to_vec3},
 };
 
+type MainCameraQueryItem<'w> = (
+    Entity,
+    &'w Camera,
+    &'w Projection,
+    &'w GlobalTransform,
+    Option<&'w ViewportConfig>,
+);
+
 /// Marker for UI cameras spawned specifically for arrow labels per window.
 #[derive(Component)]
 pub struct ArrowLabelUiCamera;
@@ -207,21 +215,23 @@ fn render_vector_arrow(
     floating_origin: Res<FloatingOriginSettings>,
     arrow_meshes: Res<ArrowMeshes>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    main_cameras: Query<
-        (
-            Entity,
-            &Camera,
-            &Projection,
-            &GlobalTransform,
-            &RenderLayers,
-            Option<&ViewportConfig>,
-        ),
-        With<crate::MainCamera>,
-    >,
+    main_cameras: Query<MainCameraQueryItem<'_>, With<crate::MainCamera>>,
     mut logged_missing: Local<HashSet<Entity>>,
     mut logged_small: Local<HashSet<Entity>>,
 ) {
     for (entity, arrow, mut state) in vector_arrows.iter_mut() {
+        let has_show_arrows = main_cameras
+            .iter()
+            .any(|(_, _, _, _, config)| config.as_ref().map(|c| c.show_arrows).unwrap_or(false));
+
+        if !has_show_arrows {
+            for visual in state.visuals.values() {
+                hide_arrow_visual(&mut commands, visual);
+            }
+            state.visuals.clear();
+            continue;
+        }
+
         let Some(result) = evaluate_vector_arrow(arrow, &state, &entity_map, &component_values)
         else {
             if logged_missing.insert(entity) {
@@ -274,7 +284,7 @@ fn render_vector_arrow(
         head_length = head_length.min(draw_length);
         let shaft_length = (draw_length - head_length).max(0.0);
         let mut seen_cameras: HashSet<Entity> = HashSet::new();
-        for (cam_entity, cam, proj, cam_tf, cam_layers, viewport_config) in main_cameras.iter() {
+        for (cam_entity, cam, proj, cam_tf, viewport_config) in main_cameras.iter() {
             seen_cameras.insert(cam_entity);
 
             let show_arrows = viewport_config
@@ -284,15 +294,24 @@ fn render_vector_arrow(
                 if let Some(visual) = state.visuals.remove(&cam_entity) {
                     hide_arrow_visual(&mut commands, &visual);
                 }
+                state.label_grid_pos = None;
+                state.label_name = None;
+                state.label_color = None;
+                if let Some(label_entity) = state.label.take() {
+                    hide_label(&mut commands, Some(label_entity));
+                }
                 continue;
             }
 
-            // Use a camera-unique layer if available (typically the grid layer); otherwise fall back to gizmo.
-            let arrow_layers = cam_layers
-                .iter()
-                .find(|layer| *layer != 0 && *layer != GIZMO_RENDER_LAYER)
-                .map(RenderLayers::layer)
-                .unwrap_or_else(|| RenderLayers::layer(GIZMO_RENDER_LAYER));
+            // Use the viewport's dedicated arrow layer if available; otherwise skip rendering arrows.
+            let Some(viewport_layer) = viewport_config.and_then(|config| config.viewport_layer)
+            else {
+                if let Some(visual) = state.visuals.remove(&cam_entity) {
+                    hide_arrow_visual(&mut commands, &visual);
+                }
+                continue;
+            };
+            let arrow_layers = RenderLayers::layer(viewport_layer);
 
             let world_per_px = world_units_per_pixel(cam, proj, cam_tf, start);
             let shaft_radius = (TARGET_DIAMETER_PX * 0.5 * world_per_px)
@@ -544,6 +563,7 @@ fn update_arrow_label_ui(
             &Camera,
             &GlobalTransform,
             &big_space::GridCell<i128>,
+            Option<&ViewportConfig>,
         ),
         With<MainCamera>,
     >,
@@ -560,10 +580,10 @@ fn update_arrow_label_ui(
     // Collect active cameras with their window entities
     let active_cameras: Vec<_> = cameras
         .iter()
-        .filter(|(_, cam, _, _)| cam.is_active)
-        .filter_map(|(entity, cam, gt, cell)| {
+        .filter(|(_, cam, _, _, _)| cam.is_active)
+        .filter_map(|(entity, cam, gt, cell, config)| {
             let window = window_from_camera_target(&cam.target, primary)?;
-            Some((entity, cam, gt, cell, window))
+            Some((entity, cam, gt, cell, config, window))
         })
         .collect();
 
@@ -579,11 +599,17 @@ fn update_arrow_label_ui(
     }
 
     // Use the main viewport: prefer the primary window, else the first active camera.
-    let Some((main_cam_entity, main_cam, main_cam_transform, main_cam_cell, main_window)) =
-        active_cameras
-            .iter()
-            .find(|(_, _, _, _, w)| Some(*w) == primary)
-            .or_else(|| active_cameras.first())
+    let Some((
+        main_cam_entity,
+        main_cam,
+        main_cam_transform,
+        main_cam_cell,
+        main_cam_config,
+        main_window,
+    )) = active_cameras
+        .iter()
+        .find(|(_, _, _, _, _, w)| Some(*w) == primary)
+        .or_else(|| active_cameras.first())
     else {
         return;
     };
@@ -615,6 +641,19 @@ fn update_arrow_label_ui(
             ))
             .id()
     });
+
+    let main_cam_show_arrows = main_cam_config
+        .map(|config| config.show_arrows)
+        .unwrap_or(true);
+
+    if !main_cam_show_arrows {
+        for label_entity in label_map.values() {
+            if let Ok((_, _, mut node, _, _)) = labels.get_mut(*label_entity) {
+                node.display = bevy::ui::Display::None;
+            }
+        }
+        return;
+    }
 
     let mut seen_labels = HashSet::new();
 

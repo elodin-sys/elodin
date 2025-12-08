@@ -217,7 +217,11 @@ impl LoadSchematicParams<'_, '_> {
                 .2;
             std::mem::take(&mut window_state.tile_state)
         };
-        main_state.clear(&mut self.commands, &mut self.selected_object);
+        main_state.clear(
+            &mut self.commands,
+            &mut self.selected_object,
+            &mut self.render_layer_alloc,
+        );
         self.hdr_enabled.0 = false;
         for entity in self.objects_3d.iter() {
             self.commands.entity(entity).despawn();

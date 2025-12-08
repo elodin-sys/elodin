@@ -87,6 +87,7 @@ fn setup_primary_window_state(
 #[derive(Component)]
 pub struct ViewportConfig {
     pub show_arrows: bool,
+    pub viewport_layer: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -667,10 +668,21 @@ impl TileState {
         self.tree.active_tiles().is_empty()
     }
 
-    pub fn clear(&mut self, commands: &mut Commands, _selected_object: &mut SelectedObject) {
+    pub fn clear(
+        &mut self,
+        commands: &mut Commands,
+        _selected_object: &mut SelectedObject,
+        render_layer_alloc: &mut RenderLayerAlloc,
+    ) {
         for (tile_id, tile) in self.tree.tiles.iter() {
             match tile {
                 Tile::Pane(Pane::Viewport(viewport)) => {
+                    if let Some(layer) = viewport.viewport_layer {
+                        render_layer_alloc.free(layer);
+                    }
+                    if let Some(layer) = viewport.grid_layer {
+                        render_layer_alloc.free(layer);
+                    }
                     if let Some(camera) = viewport.camera {
                         commands.entity(camera).despawn();
                     }
@@ -912,6 +924,8 @@ pub struct ViewportPane {
     pub nav_gizmo_camera: Option<Entity>,
     pub rect: Option<egui::Rect>,
     pub label: String,
+    pub grid_layer: Option<usize>,
+    pub viewport_layer: Option<usize>,
 }
 
 impl ViewportPane {
@@ -928,9 +942,14 @@ impl ViewportPane {
     ) -> Self {
         let mut main_camera_layers = RenderLayers::default().with(GIZMO_RENDER_LAYER);
         let mut grid_layers = RenderLayers::none();
-        if let Some(grid_layer) = render_layer_alloc.alloc() {
-            main_camera_layers = main_camera_layers.with(grid_layer);
-            grid_layers = grid_layers.with(grid_layer);
+        let grid_layer = render_layer_alloc.alloc();
+        if let Some(layer) = grid_layer {
+            main_camera_layers = main_camera_layers.with(layer);
+            grid_layers = grid_layers.with(layer);
+        }
+        let viewport_layer = render_layer_alloc.alloc();
+        if let Some(layer) = viewport_layer {
+            main_camera_layers = main_camera_layers.with(layer);
         }
 
         let grid_visibility = if viewport.show_grid {
@@ -1043,6 +1062,7 @@ impl ViewportPane {
             GridHandle { grid: grid_id },
             ViewportConfig {
                 show_arrows: viewport.show_arrows,
+                viewport_layer,
             },
             crate::ui::inspector::viewport::Viewport::new(parent, pos, look_at),
             ChildOf(parent),
@@ -1067,6 +1087,8 @@ impl ViewportPane {
             nav_gizmo_camera,
             rect: None,
             label,
+            grid_layer,
+            viewport_layer,
         }
     }
 }
@@ -1798,6 +1820,12 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     };
 
                     if let egui_tiles::Tile::Pane(Pane::Viewport(viewport)) = tile {
+                        if let Some(layer) = viewport.viewport_layer {
+                            state_mut.render_layer_alloc.free(layer);
+                        }
+                        if let Some(layer) = viewport.grid_layer {
+                            state_mut.render_layer_alloc.free(layer);
+                        }
                         if let Some(camera) = viewport.camera {
                             state_mut.commands.entity(camera).despawn();
                         }
