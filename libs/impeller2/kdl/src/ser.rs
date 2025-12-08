@@ -908,8 +908,8 @@ graph "value" {
         let serialized = serialize_schematic(&parsed);
 
         assert!(
-            serialized.contains("color 255 0 0"),
-            "serialized output should emit red components, got:\n{serialized}"
+            serialized.contains("color red"),
+            "serialized output should emit named red, got:\n{serialized}"
         );
 
         let reparsed = parse_schematic(&serialized).unwrap();
