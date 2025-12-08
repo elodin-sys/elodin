@@ -4,7 +4,6 @@ use bevy::ui::{Node, PositionType, UiTargetCamera, Val, ZIndex};
 use bevy::window::WindowRef;
 use bevy::{
     app::{App, Plugin, PostUpdate, Startup, Update},
-    ecs::system::SystemParam,
     ecs::system::{Query, Res, ResMut},
     gizmos::{
         config::{DefaultGizmoConfigGroup, GizmoConfigStore, GizmoLineJoint},
