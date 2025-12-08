@@ -28,7 +28,9 @@ use crate::{
     MainCamera, WorldPosExt,
     object_3d::ComponentArrayExt,
     ui::tiles::ViewportConfig,
-    vector_arrow::{ArrowVisual, VectorArrowState, component_value_tail_to_vec3},
+    vector_arrow::{
+        ArrowLabelScope, ArrowVisual, VectorArrowState, ViewportArrow, component_value_tail_to_vec3,
+    },
 };
 
 type ArrowLabelCameraItem<'w> = (
@@ -224,14 +226,20 @@ fn render_vector_arrow(
     arrow_meshes: Res<ArrowMeshes>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     main_cameras: Query<MainCameraQueryItem<'_>, With<crate::MainCamera>>,
+    viewport_arrows: Query<&ViewportArrow>,
     mut logged_missing: Local<HashSet<Entity>>,
     mut logged_small: Local<HashSet<Entity>>,
 ) {
-    for (entity, arrow, mut state) in vector_arrows.iter_mut() {
-        let has_show_arrows = main_cameras
-            .iter()
-            .any(|(_, _, _, _, config)| config.as_ref().map(|c| c.show_arrows).unwrap_or(false));
+    let main_camera_data: Vec<_> = main_cameras.iter().collect();
+    let mut camera_index: HashMap<Entity, usize> = HashMap::new();
+    for (idx, (entity, ..)) in main_camera_data.iter().enumerate() {
+        camera_index.insert(*entity, idx);
+    }
+    let has_show_arrows = main_camera_data
+        .iter()
+        .any(|(_, _, _, _, config)| config.as_ref().map(|c| c.show_arrows).unwrap_or(false));
 
+    for (entity, arrow, mut state) in vector_arrows.iter_mut() {
         if !has_show_arrows {
             for visual in state.visuals.values() {
                 hide_arrow_visual(&mut commands, visual);
@@ -292,7 +300,9 @@ fn render_vector_arrow(
         head_length = head_length.min(draw_length);
         let shaft_length = (draw_length - head_length).max(0.0);
         let mut seen_cameras: HashSet<Entity> = HashSet::new();
-        for (cam_entity, cam, proj, cam_tf, viewport_config) in main_cameras.iter() {
+
+        let mut render_for_camera = |idx: usize| {
+            let (cam_entity, cam, proj, cam_tf, viewport_config) = main_camera_data[idx];
             seen_cameras.insert(cam_entity);
 
             let show_arrows = viewport_config
@@ -308,16 +318,15 @@ fn render_vector_arrow(
                 if let Some(label_entity) = state.label.take() {
                     hide_label(&mut commands, Some(label_entity));
                 }
-                continue;
+                return;
             }
 
-            // Use the viewport's dedicated arrow layer if available; otherwise skip rendering arrows.
             let Some(viewport_layer) = viewport_config.and_then(|config| config.viewport_layer)
             else {
                 if let Some(visual) = state.visuals.remove(&cam_entity) {
                     hide_arrow_visual(&mut commands, &visual);
                 }
-                continue;
+                return;
             };
             let arrow_layers = RenderLayers::layer(viewport_layer);
 
@@ -357,6 +366,34 @@ fn render_vector_arrow(
                 rotation: Quat::IDENTITY,
                 scale: Vec3::new(head_radius, head_length, head_radius),
             });
+        };
+
+        let processed = if let Ok(viewport_arrow) = viewport_arrows.get(entity) {
+            if let Some(&idx) = camera_index.get(&viewport_arrow.camera) {
+                render_for_camera(idx);
+                true
+            } else {
+                for visual in state.visuals.values() {
+                    hide_arrow_visual(&mut commands, visual);
+                }
+                state.visuals.clear();
+                false
+            }
+        } else {
+            for idx in 0..main_camera_data.len() {
+                render_for_camera(idx);
+            }
+            true
+        };
+
+        let arrow_scope = if viewport_arrows.get(entity).is_ok() {
+            ArrowLabelScope::Viewport
+        } else {
+            ArrowLabelScope::Global
+        };
+
+        if !processed {
+            continue;
         }
 
         // Hide visuals for cameras that disappeared.
@@ -385,10 +422,12 @@ fn render_vector_arrow(
             state.label_grid_pos = Some((0, 0, 0, total_offset));
             state.label_name = result.name.clone();
             state.label_color = Some(base_color);
+            state.label_scope = arrow_scope;
         } else {
             state.label_grid_pos = None;
             state.label_name = None;
             state.label_color = None;
+            state.label_scope = ArrowLabelScope::Global;
         }
 
         // 3D labels disabled; rely on Bevy UI system instead
@@ -570,24 +609,27 @@ fn update_arrow_label_ui(
     mut labels: Query<(Entity, &ArrowLabelUI, &mut Node, &mut Text, &mut TextColor)>,
     primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
     ui_cameras: Query<(Entity, &Camera), With<ArrowLabelUiCamera>>,
-    // Key: arrow_entity -> label_entity (only main viewport)
-    mut label_map: Local<HashMap<Entity, Entity>>,
+    // Key: (arrow_entity, camera_entity) -> label_entity
+    mut label_map: Local<HashMap<(Entity, Entity), Entity>>,
 ) {
     let edge = floating_origin.grid_edge_length();
     let primary = primary_window.iter().next();
 
-    // Collect active cameras with their window entities
-    let active_cameras: Vec<_> = cameras
-        .iter()
-        .filter(|(_, cam, _, _, _)| cam.is_active)
-        .filter_map(|(entity, cam, gt, cell, config)| {
-            let window = window_from_camera_target(&cam.target, primary)?;
-            Some((entity, cam, gt, cell, config, window))
-        })
-        .collect();
+    let mut window_cameras: HashMap<Entity, Vec<_>> = HashMap::new();
+    for (entity, cam, gt, cell, config) in cameras.iter() {
+        if !cam.is_active {
+            continue;
+        }
+        let Some(window) = window_from_camera_target(&cam.target, primary) else {
+            continue;
+        };
+        window_cameras
+            .entry(window)
+            .or_default()
+            .push((entity, cam, gt, cell, config));
+    }
 
-    if active_cameras.is_empty() {
-        // Clean up all labels and UI cameras when there are no active cameras
+    if window_cameras.is_empty() {
         for (_, label_entity) in label_map.drain() {
             commands.entity(label_entity).despawn();
         }
@@ -597,170 +639,178 @@ fn update_arrow_label_ui(
         return;
     }
 
-    // Use the main viewport: prefer the primary window, else the first active camera.
-    let Some((
-        main_cam_entity,
-        main_cam,
-        main_cam_transform,
-        main_cam_cell,
-        main_cam_config,
-        main_window,
-    )) = active_cameras
-        .iter()
-        .find(|(_, _, _, _, _, w)| Some(*w) == primary)
-        .or_else(|| active_cameras.first())
-    else {
-        return;
-    };
-
-    // Keep exactly one UI camera targeting the main window
-    let mut ui_cam_entity = None;
-    for (ui_cam_e, ui_cam) in ui_cameras.iter() {
-        if window_from_camera_target(&ui_cam.target, primary) == Some(*main_window) {
-            ui_cam_entity = Some(ui_cam_e);
-        } else {
-            commands.entity(ui_cam_e).despawn();
+    let mut window_ui_camera: HashMap<Entity, Entity> = HashMap::new();
+    for (ui_cam_entity, ui_cam) in ui_cameras.iter() {
+        if let Some(window) = window_from_camera_target(&ui_cam.target, primary)
+            && window_cameras.contains_key(&window)
+        {
+            window_ui_camera.insert(window, ui_cam_entity);
+            continue;
         }
+        commands.entity(ui_cam_entity).despawn();
     }
-    let ui_cam_entity = ui_cam_entity.unwrap_or_else(|| {
-        commands
-            .spawn((
-                Camera2d,
-                Camera {
-                    target: RenderTarget::Window(if Some(*main_window) == primary {
-                        WindowRef::Primary
-                    } else {
-                        WindowRef::Entity(*main_window)
-                    }),
-                    order: ARROW_LABEL_UI_CAMERA_ORDER,
-                    ..default()
-                },
-                ArrowLabelUiCamera,
-                Name::new(format!("ArrowLabelUiCamera_{:?}", main_window)),
-            ))
-            .id()
-    });
 
-    let main_cam_show_arrows = main_cam_config
-        .map(|config| config.show_arrows)
-        .unwrap_or(true);
-
-    if !main_cam_show_arrows {
-        for label_entity in label_map.values() {
-            if let Ok((_, _, mut node, _, _)) = labels.get_mut(*label_entity) {
-                node.display = bevy::ui::Display::None;
-            }
-        }
-        return;
+    for window in window_cameras.keys() {
+        window_ui_camera.entry(*window).or_insert_with(|| {
+            commands
+                .spawn((
+                    Camera2d,
+                    Camera {
+                        target: RenderTarget::Window(if Some(*window) == primary {
+                            WindowRef::Primary
+                        } else {
+                            WindowRef::Entity(*window)
+                        }),
+                        order: ARROW_LABEL_UI_CAMERA_ORDER,
+                        ..default()
+                    },
+                    ArrowLabelUiCamera,
+                    Name::new(format!("ArrowLabelUiCamera_{:?}", window)),
+                ))
+                .id()
+        });
     }
 
     let mut seen_labels = HashSet::new();
 
     for (arrow_entity, arrow_state) in arrows.iter() {
-        // Pick any existing visual (arrows are duplicated per camera; one is enough to locate the label)
         let Some(visual) = arrow_state.visuals.values().next() else {
             continue;
         };
-
-        // Get arrow's Transform and GridCell
         let Ok((arrow_transform, arrow_cell)) = arrow_transforms.get(visual.root) else {
             continue;
         };
-
         let Some(ref name) = arrow_state.label_name else {
             continue;
         };
 
         let label_color = arrow_state
             .label_color
-            .map(readable_label_color)
+            .map(|color| match arrow_state.label_scope {
+                ArrowLabelScope::Viewport => readable_label_color(lighten_color(color, 1.2)),
+                ArrowLabelScope::Global => readable_label_color(color),
+            })
             .unwrap_or(Color::WHITE);
-
-        // Get the label offset from arrow root
         let label_offset = arrow_state
             .label_grid_pos
             .map(|(_, _, _, offset)| offset)
             .unwrap_or(Vec3::ZERO);
 
-        // Calculate label position in arrow's local grid space
+        let label_text = match arrow_state.label_scope {
+            ArrowLabelScope::Global => name.clone(),
+            ArrowLabelScope::Viewport => format!("{} (local)", name),
+        };
         let label_local = arrow_transform.translation + label_offset;
 
-        let key = arrow_entity;
+        for (window, cameras) in &window_cameras {
+            let Some(&ui_cam_entity) = window_ui_camera.get(window) else {
+                continue;
+            };
+            for (cam_entity, cam, cam_transform, cam_cell, config) in cameras {
+                let show_arrows = config.map(|config| config.show_arrows).unwrap_or(true);
+                let key = (arrow_entity, *cam_entity);
 
-        // Convert from arrow's grid cell to camera-relative position
-        let dx = (arrow_cell.x as f64 - main_cam_cell.x as f64) as f32 * edge;
-        let dy = (arrow_cell.y as f64 - main_cam_cell.y as f64) as f32 * edge;
-        let dz = (arrow_cell.z as f64 - main_cam_cell.z as f64) as f32 * edge;
-        let camera_relative_pos = label_local + Vec3::new(dx, dy, dz);
+                if !show_arrows {
+                    if let Some(&label_entity) = label_map.get(&key)
+                        && let Ok((_, _, mut node, _, _)) = labels.get_mut(label_entity)
+                    {
+                        node.display = bevy::ui::Display::None;
+                        commands
+                            .entity(label_entity)
+                            .insert(UiTargetCamera(ui_cam_entity));
+                        seen_labels.insert(key);
+                    }
+                    continue;
+                }
 
-        // Project to screen space
-        let Ok(screen_pos) = main_cam.world_to_viewport(main_cam_transform, camera_relative_pos)
-        else {
-            if let Some(label_entity) = label_map.get(&key)
-                && let Ok((_, _, mut node, _, _)) = labels.get_mut(*label_entity)
-            {
-                node.display = bevy::ui::Display::None;
+                if !arrow_state.visuals.contains_key(cam_entity) {
+                    continue;
+                }
+
+                let dx = (arrow_cell.x as f64 - cam_cell.x as f64) as f32 * edge;
+                let dy = (arrow_cell.y as f64 - cam_cell.y as f64) as f32 * edge;
+                let dz = (arrow_cell.z as f64 - cam_cell.z as f64) as f32 * edge;
+                let camera_relative_pos = label_local + Vec3::new(dx, dy, dz);
+
+                let Ok(screen_pos) = cam.world_to_viewport(cam_transform, camera_relative_pos)
+                else {
+                    if let Some(&label_entity) = label_map.get(&key)
+                        && let Ok((_, _, mut node, _, _)) = labels.get_mut(label_entity)
+                    {
+                        node.display = bevy::ui::Display::None;
+                        commands
+                            .entity(label_entity)
+                            .insert(UiTargetCamera(ui_cam_entity));
+                        seen_labels.insert(key);
+                    }
+                    continue;
+                };
+
+                if let Some(rect) = cam.logical_viewport_rect()
+                    && (screen_pos.x < rect.min.x
+                        || screen_pos.x > rect.max.x
+                        || screen_pos.y < rect.min.y
+                        || screen_pos.y > rect.max.y)
+                {
+                    if let Some(&label_entity) = label_map.get(&key)
+                        && let Ok((_, _, mut node, _, _)) = labels.get_mut(label_entity)
+                    {
+                        node.display = bevy::ui::Display::None;
+                        commands
+                            .entity(label_entity)
+                            .insert(UiTargetCamera(ui_cam_entity));
+                        seen_labels.insert(key);
+                    }
+                    continue;
+                }
+
+                let screen_x = screen_pos.x.round();
+                let screen_y = (screen_pos.y - 8.0).round();
+
+                if let Some(&label_entity) = label_map.get(&key)
+                    && let Ok((_, _, mut node, mut text, mut text_color)) =
+                        labels.get_mut(label_entity)
+                {
+                    node.left = Val::Px(screen_x);
+                    node.top = Val::Px(screen_y);
+                    node.display = bevy::ui::Display::Flex;
+                    *text = Text::new(label_text.clone());
+                    *text_color = TextColor(label_color);
+                    commands
+                        .entity(label_entity)
+                        .insert(UiTargetCamera(ui_cam_entity));
+                } else {
+                    let label_entity = commands
+                        .spawn((
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(screen_x),
+                                top: Val::Px(screen_y),
+                                ..default()
+                            },
+                            Text::new(label_text.clone()),
+                            TextFont {
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(label_color),
+                            ZIndex(1000), // Render above 3D content
+                            ArrowLabelUI,
+                            UiTargetCamera(ui_cam_entity),
+                            Name::new(format!(
+                                "arrow_label_{}_{:?}_{:?}",
+                                label_text, cam_entity, window
+                            )),
+                        ))
+                        .id();
+                    label_map.insert(key, label_entity);
+                }
+
                 seen_labels.insert(key);
             }
-            continue;
-        };
-
-        // Check if screen position falls within this camera's viewport
-        let viewport = main_cam.logical_viewport_rect();
-        if let Some(rect) = viewport
-            && (screen_pos.x < rect.min.x
-                || screen_pos.x > rect.max.x
-                || screen_pos.y < rect.min.y
-                || screen_pos.y > rect.max.y)
-        {
-            if let Some(label_entity) = label_map.get(&key)
-                && let Ok((_, _, mut node, _, _)) = labels.get_mut(*label_entity)
-            {
-                node.display = bevy::ui::Display::None;
-                seen_labels.insert(key);
-            }
-            continue;
-        }
-
-        seen_labels.insert(key);
-
-        let screen_x = screen_pos.x.round();
-        let screen_y = (screen_pos.y - 8.0).round(); // Slight vertical offset
-
-        if let Some(&label_entity) = label_map.get(&key) {
-            if let Ok((_, _, mut node, mut text, mut text_color)) = labels.get_mut(label_entity) {
-                node.left = Val::Px(screen_x);
-                node.top = Val::Px(screen_y);
-                node.display = bevy::ui::Display::Flex;
-                *text = Text::new(name.clone());
-                *text_color = TextColor(label_color);
-            }
-        } else {
-            let label_entity = commands
-                .spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(screen_x),
-                        top: Val::Px(screen_y),
-                        ..default()
-                    },
-                    Text::new(name.clone()),
-                    TextFont {
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(label_color),
-                    ZIndex(1000), // Render above 3D content
-                    ArrowLabelUI,
-                    UiTargetCamera(ui_cam_entity),
-                    Name::new(format!("arrow_label_{}_{:?}", name, main_cam_entity)),
-                ))
-                .id();
-            label_map.insert(key, label_entity);
         }
     }
 
-    // Clean up labels that are no longer needed
     let labels_to_remove: Vec<_> = label_map
         .keys()
         .filter(|key| !seen_labels.contains(key))

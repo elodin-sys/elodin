@@ -22,6 +22,7 @@ pub struct VectorArrowState {
     pub label_grid_pos: Option<(i128, i128, i128, Vec3)>,
     pub label_name: Option<String>,
     pub label_color: Option<Color>,
+    pub label_scope: ArrowLabelScope,
 }
 
 #[derive(Clone)]
@@ -29,6 +30,13 @@ pub struct ArrowVisual {
     pub root: Entity,
     pub shaft: Entity,
     pub head: Entity,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+pub enum ArrowLabelScope {
+    #[default]
+    Global,
+    Viewport,
 }
 
 pub fn component_value_tail_to_vec3(value: &ComponentValue) -> Option<DVec3> {
