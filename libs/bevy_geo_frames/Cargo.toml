@@ -1,0 +1,14 @@
+[package]
+name = "bevy_geo_frames"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "bevy_geo_frames"
+path = "src/lib.rs"
+
+[dependencies]
+bevy = "0.16"
+
+[dev-dependencies]
+bevy_editor_cam = "0.6"
