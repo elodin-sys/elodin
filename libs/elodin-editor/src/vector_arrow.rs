@@ -6,6 +6,11 @@ use std::collections::HashMap;
 use crate::WorldPosExt;
 use crate::object_3d::CompiledExpr;
 
+#[derive(Component)]
+pub struct ViewportArrow {
+    pub camera: Entity,
+}
+
 #[derive(Component, Default)]
 pub struct VectorArrowState {
     pub vector_expr: Option<CompiledExpr>,
