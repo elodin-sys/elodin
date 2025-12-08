@@ -1,0 +1,15 @@
+tabs {
+    hsplit name="Viewport" {
+        viewport name=Viewport pos="rocket.world_pos + (0,0,0, 0, -5, 2)" look_at="rocket.world_pos" show_grid=#true active=#true
+        vsplit share=0.38 {
+            graph "rocket.world_pos.z" name="Altitude"
+            graph "rocket.world_vel.z" name="Vertical Velocity"
+        }
+    }
+    vsplit name="Flight Data" {
+        graph "rocket.thrust" name="Thrust"
+        graph "rocket.total_mass" name="Mass"
+        graph "rocket.mach, rocket.dynamic_pressure" name="Mach & Dynamic Pressure"
+        graph "rocket.angle_of_attack, rocket.drag_coefficient" name="AoA & Cd"
+    }
+}
