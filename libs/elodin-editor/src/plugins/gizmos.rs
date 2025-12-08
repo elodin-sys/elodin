@@ -4,6 +4,7 @@ use bevy::ui::{Node, PositionType, UiTargetCamera, Val, ZIndex};
 use bevy::window::WindowRef;
 use bevy::{
     app::{App, Plugin, PostUpdate, Startup, Update},
+    ecs::system::SystemParam,
     ecs::system::{Query, Res, ResMut},
     gizmos::{
         config::{DefaultGizmoConfigGroup, GizmoConfigStore, GizmoLineJoint},
@@ -30,6 +31,14 @@ use crate::{
     ui::tiles::ViewportConfig,
     vector_arrow::{ArrowVisual, VectorArrowState, component_value_tail_to_vec3},
 };
+
+type ArrowLabelCameraItem<'w> = (
+    Entity,
+    &'w Camera,
+    &'w GlobalTransform,
+    &'w big_space::GridCell<i128>,
+    Option<&'w ViewportConfig>,
+);
 
 type MainCameraQueryItem<'w> = (
     Entity,
@@ -557,16 +566,7 @@ fn update_arrow_label_ui(
     mut commands: Commands,
     arrows: Query<(Entity, &VectorArrowState)>,
     arrow_transforms: Query<(&Transform, &big_space::GridCell<i128>)>,
-    cameras: Query<
-        (
-            Entity,
-            &Camera,
-            &GlobalTransform,
-            &big_space::GridCell<i128>,
-            Option<&ViewportConfig>,
-        ),
-        With<MainCamera>,
-    >,
+    cameras: Query<ArrowLabelCameraItem<'_>, With<MainCamera>>,
     floating_origin: Res<FloatingOriginSettings>,
     mut labels: Query<(Entity, &ArrowLabelUI, &mut Node, &mut Text, &mut TextColor)>,
     primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
