@@ -115,6 +115,7 @@ viewport = "viewport"
          [name=string]
          [pos=eql]
          [look_at=eql]
+         { vector_arrow }        ; optional local arrows render only in this viewport
 
 graph = "graph" eql
       [name=string]
