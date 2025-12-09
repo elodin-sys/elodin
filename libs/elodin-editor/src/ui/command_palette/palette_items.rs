@@ -14,12 +14,13 @@ use bevy::{
     },
     log::{error, info, warn},
     pbr::{StandardMaterial, wireframe::WireframeConfig},
-    prelude::{Deref, DerefMut, Entity, In, Mut, Resource},
+    prelude::{Deref, DerefMut, Entity, In, Mut, Resource, Transform},
     render::view::Visibility,
     window::PrimaryWindow,
 };
+use bevy_editor_cam::controller::{component::EditorCam, motion::CurrentMotion};
 use bevy_infinite_grid::InfiniteGrid;
-use egui_tiles::TileId;
+use egui_tiles::{Tile, TileId};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::{Timestamp, msg_id};
 use impeller2_bevy::{CommandsExt, ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
@@ -36,7 +37,7 @@ use miette::IntoDiagnostic;
 use nox::ArrayBuf;
 
 use crate::{
-    EqlContext, Offset, SelectedTimeRange, TimeRangeBehavior, TimeRangeError,
+    EqlContext, MainCamera, Offset, SelectedTimeRange, TimeRangeBehavior, TimeRangeError,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
         HdrEnabled, Paused, colors,
@@ -250,6 +251,75 @@ const SIMULATION_LABEL: &str = "Simulation";
 const TIME_LABEL: &str = "Time";
 const HELP_LABEL: &str = "Help";
 const PRESETS_LABEL: &str = "Presets";
+
+struct ViewportEntry {
+    label: String,
+    camera: Entity,
+}
+
+fn gather_viewport_entries(
+    window_states: &Query<(&tiles::WindowState, &tiles::WindowId)>,
+) -> Vec<ViewportEntry> {
+    let mut entries = Vec::new();
+    for (window_state, window_id) in window_states.iter() {
+        let window_label = window_state
+            .descriptor
+            .title
+            .clone()
+            .unwrap_or_else(|| format!("Window {}", window_id.0));
+        if let Some(root) = window_state.tile_state.tree.root() {
+            collect_viewport_entries(
+                &window_state.tile_state.tree,
+                root,
+                &window_label,
+                &mut entries,
+            );
+        }
+    }
+    entries
+}
+
+fn collect_viewport_entries(
+    tree: &egui_tiles::Tree<tiles::Pane>,
+    tile_id: TileId,
+    window_label: &str,
+    entries: &mut Vec<ViewportEntry>,
+) {
+    let Some(tile) = tree.tiles.get(tile_id) else {
+        return;
+    };
+    match tile {
+        Tile::Pane(tiles::Pane::Viewport(viewport)) => {
+            if let Some(camera) = viewport.camera {
+                entries.push(ViewportEntry {
+                    label: viewport_display_label(&viewport.label, window_label),
+                    camera,
+                });
+            }
+        }
+        Tile::Container(container) => {
+            for child in container.children() {
+                collect_viewport_entries(tree, *child, window_label, entries);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn viewport_display_label(label: &str, window_label: &str) -> String {
+    let base = if label.is_empty() { "Viewport" } else { label };
+    if window_label.is_empty() || window_label == base {
+        base.to_string()
+    } else {
+        format!("{base} ({window_label})")
+    }
+}
+
+fn reset_editor_cam(transform: &mut Transform, editor_cam: &mut EditorCam) {
+    *transform = Transform::IDENTITY;
+    editor_cam.current_motion = CurrentMotion::Stationary;
+    editor_cam.last_anchor_depth = -2.0;
+}
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct TileParam<'w, 's> {
@@ -1513,6 +1583,64 @@ impl Default for PalettePage {
                 },
             ),
             toggle_body_axes(),
+            PaletteItem::new(
+                "Reset Cameras",
+                VIEWPORT_LABEL,
+                |_: In<String>, window_states: Query<(&tiles::WindowState, &tiles::WindowId)>| {
+                    let entries = gather_viewport_entries(&window_states);
+                    if entries.is_empty() {
+                        return PalettePage::new(vec![PaletteItem::new(
+                            "No viewports available",
+                            VIEWPORT_LABEL,
+                            |_: In<String>| PaletteEvent::Exit,
+                        )])
+                        .into();
+                    }
+
+                    let all_cameras: Vec<_> = entries.iter().map(|entry| entry.camera).collect();
+                    let mut items = Vec::with_capacity(entries.len() + 1);
+                    items.push(PaletteItem::new(
+                        "Reset all viewports",
+                        VIEWPORT_LABEL,
+                        move |_: In<String>,
+                              mut query: Query<
+                            (&mut Transform, &mut EditorCam),
+                            With<MainCamera>,
+                        >| {
+                            for camera in &all_cameras {
+                                if let Ok((mut transform, mut editor_cam)) = query.get_mut(*camera)
+                                {
+                                    reset_editor_cam(&mut transform, &mut editor_cam);
+                                }
+                            }
+                            PaletteEvent::Exit
+                        },
+                    ));
+
+                    for entry in entries {
+                        let label = format!("Reset {}", entry.label);
+                        let camera = entry.camera;
+                        items.push(PaletteItem::new(
+                            label,
+                            VIEWPORT_LABEL,
+                            move |_: In<String>,
+                                  mut query: Query<
+                                (&mut Transform, &mut EditorCam),
+                                With<MainCamera>,
+                            >| {
+                                if let Ok((mut transform, mut editor_cam)) = query.get_mut(camera) {
+                                    reset_editor_cam(&mut transform, &mut editor_cam);
+                                }
+                                PaletteEvent::Exit
+                            },
+                        ));
+                    }
+
+                    PalettePage::new(items)
+                        .prompt("Select viewport to reset")
+                        .into()
+                },
+            ),
             PaletteItem::new(
                 "Toggle Recording",
                 SIMULATION_LABEL,
