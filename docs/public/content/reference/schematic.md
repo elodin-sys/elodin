@@ -12,15 +12,11 @@ icon = ""
 order = 6
 +++
 
-# Schematic KDL glossary
-
-This page summarizes every KDL node and property accepted by the schematic loader.
-
 ## Glossary
 
 - Top-level nodes: `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `window`.
 - EQL: expressions are evaluated in the runtime EQL context. Vector-like fields expect 3 components; `world_pos` is a 7-component array (quat + position).
-- Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional; can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
+- Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `red`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional; can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
 
 ### window
 - `path`/`file`/`name`: optional secondary schematic file. Relative paths resolve against the parent schematic directory (or CWD). If absent, the entry configures the primary window instead of loading a secondary file.
@@ -33,7 +29,7 @@ This page summarizes every KDL node and property accepted by the schematic loade
 - `hsplit` / `vsplit`: children are panels. Child `share=<f32>` controls the weight within the split. `active` (bool) is parsed but not currently used. Optional `name`.
 
 ### panel content
-- `viewport`: `fov` (default 45.0), `active` (bool, default false), `show_grid` (default false), `hdr` (default false), `name` (optional label), camera `pos`/`look_at` (optional EQL).
+- `viewport`: `fov` (default 45.0), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `hdr` (default false), `name` (optional label), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera.
 - `graph`: positional `eql` (required), `name` (optional), `type` (`line`/`point`/`bar`, default `line`), `auto_y_range` (default true), `y_min`/`y_max` (default `0.0..1.0`), child `color` nodes (optional list; otherwise palette).
 - `component_monitor`: `component_name` (required).
 - `action_pane`: positional `label` (required), `lua` script (required).
@@ -66,8 +62,8 @@ This page summarizes every KDL node and property accepted by the schematic loade
 - `body_frame` / `in_body_frame`: apply origin rotation to the vector (default false).
 - `color`: arrow color (default white).
 - `name`: label text; used for legend/overlay (optional).
-- `display_name`: show/hide overlay label (default true).
-- `arrow_thickness`: `small` | `middle` | `big` (default `small`).
+- `show_name`: show/hide overlay label (default true).
+- `arrow_thickness`: numeric thickness multiplier with 3-decimal precision (default `0.1`).
 - `label_position`: 0.0–1.0 along the arrow (0=base, 1=tip) for label anchor (default 1.0).
 
 ## Schema at a glance
@@ -114,10 +110,12 @@ viewport = "viewport"
          [fov=float]
          [active=bool]
          [show_grid=bool]
+         [show_arrows=bool]
          [hdr=bool]
          [name=string]
          [pos=eql]
          [look_at=eql]
+         { vector_arrow }        ; optional local arrows render only in this viewport
 
 graph = "graph" eql
       [name=string]
@@ -175,8 +173,8 @@ vector_arrow = "vector_arrow"
              [body_frame|in_body_frame=bool]
              [color]
              [name=string]
-             [display_name=bool]
-             [arrow_thickness=small|middle|big]
+             [show_name=bool]
+             [arrow_thickness=float]
              [label_position=0..1]
 
 color = "color"
@@ -211,7 +209,7 @@ vector_arrow
   name="Velocity"
   normalize=#true
   body_frame=#true
-  arrow_thickness="middle"
+  arrow_thickness=1.500
   label_position=0.9 {
   color 64 128 255
 }

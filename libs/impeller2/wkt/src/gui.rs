@@ -1,8 +1,9 @@
 use crate::Color;
 use impeller2::component::Asset;
 use impeller2::types::EntityId;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de, de::DeserializeOwned};
 use std::collections::HashMap;
+use std::fmt;
 use std::ops::Range;
 use std::time::Duration;
 use strum::{EnumString, IntoStaticStr, VariantNames};
@@ -192,10 +193,13 @@ pub struct Viewport<T = ()> {
     pub fov: f32,
     pub active: bool,
     pub show_grid: bool,
+    pub show_arrows: bool,
     pub hdr: bool,
     pub name: Option<String>,
     pub pos: Option<String>,
     pub look_at: Option<String>,
+    #[serde(default)]
+    pub local_arrows: Vec<VectorArrow3d>,
     pub aux: T,
 }
 
@@ -205,10 +209,12 @@ impl<T> Viewport<T> {
             fov: self.fov,
             active: self.active,
             show_grid: self.show_grid,
+            show_arrows: self.show_arrows,
             hdr: self.hdr,
             name: self.name.clone(),
             pos: self.pos.clone(),
             look_at: self.look_at.clone(),
+            local_arrows: self.local_arrows.clone(),
             aux: f(&self.aux),
         }
     }
@@ -220,10 +226,12 @@ impl Default for Viewport {
             fov: 45.0,
             active: false,
             show_grid: false,
+            show_arrows: true,
             hdr: false,
             name: None,
             pos: None,
             look_at: None,
+            local_arrows: Vec::new(),
             aux: (),
         }
     }
@@ -313,8 +321,8 @@ pub struct VectorArrow3d<T = ()> {
     pub body_frame: bool,
     #[serde(default)]
     pub normalize: bool,
-    #[serde(default = "VectorArrow3d::<T>::default_display_name")]
-    pub display_name: bool,
+    #[serde(default = "VectorArrow3d::<T>::default_show_name")]
+    pub show_name: bool,
     #[serde(default = "VectorArrow3d::<T>::default_thickness")]
     pub thickness: ArrowThickness,
     #[serde(default = "VectorArrow3d::<T>::default_label_position")]
@@ -322,15 +330,111 @@ pub struct VectorArrow3d<T = ()> {
     pub aux: T,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub enum ArrowThickness {
-    #[serde(alias = "small")]
-    Small,
-    #[serde(alias = "middle")]
-    Middle,
-    #[serde(alias = "big")]
-    Big,
+pub struct ArrowThickness(pub f32);
+
+impl ArrowThickness {
+    pub const DEFAULT: f32 = 0.1;
+    const MIN: f32 = 0.001;
+
+    pub fn new(raw: f32) -> Self {
+        if !raw.is_finite() {
+            return Self(Self::DEFAULT);
+        }
+
+        Self(Self::round_to_precision(raw.max(Self::MIN)))
+    }
+
+    pub fn value(self) -> f32 {
+        if !self.0.is_finite() {
+            return Self::DEFAULT;
+        }
+
+        Self::round_to_precision(self.0.max(Self::MIN))
+    }
+
+    pub fn round_to_precision(value: f32) -> f32 {
+        (value * 1000.0).round() / 1000.0
+    }
+}
+
+impl Serialize for ArrowThickness {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_f32(self.value())
+    }
+}
+
+impl<'de> Deserialize<'de> for ArrowThickness {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ThicknessVisitor;
+
+        impl<'de> de::Visitor<'de> for ThicknessVisitor {
+            type Value = ArrowThickness;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a numeric arrow thickness")
+            }
+
+            fn visit_f32<E>(self, value: f32) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(ArrowThickness::new(value))
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(ArrowThickness::new(value as f32))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(ArrowThickness::new(value as f32))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(ArrowThickness::new(value as f32))
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                v.parse::<f32>()
+                    .map(ArrowThickness::new)
+                    .map_err(|_| E::custom(format!("invalid arrow thickness '{v}'")))
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_str(&v)
+            }
+        }
+
+        deserializer.deserialize_any(ThicknessVisitor)
+    }
+}
+
+impl Default for ArrowThickness {
+    fn default() -> Self {
+        Self(Self::DEFAULT)
+    }
 }
 
 impl<T> VectorArrow3d<T> {
@@ -342,12 +446,12 @@ impl<T> VectorArrow3d<T> {
         Color::WHITE
     }
 
-    fn default_display_name() -> bool {
+    fn default_show_name() -> bool {
         true
     }
 
     fn default_thickness() -> ArrowThickness {
-        ArrowThickness::Small
+        ArrowThickness::default()
     }
 
     fn default_label_position() -> f32 {
@@ -363,7 +467,7 @@ impl<T> VectorArrow3d<T> {
             color: self.color,
             body_frame: self.body_frame,
             normalize: self.normalize,
-            display_name: self.display_name,
+            show_name: self.show_name,
             thickness: self.thickness,
             label_position: self.label_position,
             aux: f(&self.aux),

@@ -9,6 +9,7 @@ use crate::{
         inspector, plot, query_plot, query_table,
         tiles::{self, Pane},
     },
+    vector_arrow::ViewportArrow,
 };
 use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
 use egui_tiles::{Tile, TileId};
@@ -43,11 +44,20 @@ pub struct SchematicParam<'w, 's> {
     pub graph_states: Query<'w, 's, &'static plot::GraphState>,
     pub query_plots: Query<'w, 's, &'static query_plot::QueryPlotData>,
     pub viewports: Query<'w, 's, &'static inspector::viewport::Viewport>,
+    pub viewport_configs: Query<'w, 's, &'static tiles::ViewportConfig>,
     pub camera_grids: Query<'w, 's, &'static GridHandle>,
     pub grid_visibility: Query<'w, 's, &'static Visibility>,
     pub objects_3d: Query<'w, 's, (Entity, &'static Object3DState)>,
     pub lines_3d: Query<'w, 's, (Entity, &'static Line3d)>,
-    pub vector_arrows: Query<'w, 's, (Entity, &'static VectorArrow3d)>,
+    pub vector_arrows: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static VectorArrow3d,
+            Option<&'static ViewportArrow>,
+        ),
+    >,
     pub windows_state: Query<'w, 's, (&'static tiles::WindowState, &'static tiles::WindowId)>,
     pub primary_window: Single<'w, Entity, With<PrimaryWindow>>,
     pub dashboards: Query<'w, 's, &'static Dashboard<Entity>>,
@@ -86,14 +96,35 @@ impl SchematicParam<'_, '_> {
                         show_grid = matches!(*visibility, Visibility::Visible);
                     }
 
+                    let show_arrows = self
+                        .viewport_configs
+                        .get(cam_entity)
+                        .map(|config| config.show_arrows)
+                        .unwrap_or(true);
+
+                    let local_arrows: Vec<VectorArrow3d> = self
+                        .vector_arrows
+                        .iter()
+                        .filter(|(_, _, viewport_arrow)| {
+                            if let Some(viewport_arrow) = viewport_arrow {
+                                viewport_arrow.camera == cam_entity
+                            } else {
+                                false
+                            }
+                        })
+                        .map(|(_, arrow, _)| arrow.clone())
+                        .collect();
+
                     Some(Panel::Viewport(Viewport {
                         fov: 45.0,
                         active: false,
                         show_grid,
+                        show_arrows,
                         hdr: self.hdr_enabled.0,
                         name: Some(viewport.label.clone()),
                         pos: Some(viewport_data.pos.eql.clone()),
                         look_at: Some(viewport_data.look_at.eql.clone()),
+                        local_arrows,
                         aux: cam_entity,
                     }))
                 }
@@ -255,7 +286,8 @@ pub fn tiles_to_schematic(
         param
             .vector_arrows
             .iter()
-            .map(|(entity, arrow)| SchematicElem::VectorArrow(arrow.map_aux(|_| entity))),
+            .filter(|(_, _, viewport_arrow)| viewport_arrow.is_none())
+            .map(|(entity, arrow, _)| SchematicElem::VectorArrow(arrow.map_aux(|_| entity))),
     );
 
     secondary.0.clear();

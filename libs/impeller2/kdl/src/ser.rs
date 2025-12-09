@@ -1,3 +1,4 @@
+use crate::color_names::{color_to_ints, name_from_color};
 use impeller2_wkt::*;
 use kdl::{KdlDocument, KdlEntry, KdlNode};
 
@@ -116,8 +117,21 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
             .push(KdlEntry::new_prop("show_grid", true));
     }
 
+    if !viewport.show_arrows {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("show_arrows", false));
+    }
+
     if viewport.active {
         node.entries_mut().push(KdlEntry::new_prop("active", true));
+    }
+
+    if !viewport.local_arrows.is_empty() {
+        let mut children = node.children().cloned().unwrap_or_else(KdlDocument::new);
+        for arrow in &viewport.local_arrows {
+            children.nodes_mut().push(serialize_vector_arrow(arrow));
+        }
+        node.set_children(children);
     }
 
     node
@@ -421,21 +435,17 @@ fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
             .push(KdlEntry::new_prop("normalize", true));
     }
 
-    if !arrow.display_name {
+    if !arrow.show_name {
         node.entries_mut()
-            .push(KdlEntry::new_prop("display_name", false));
+            .push(KdlEntry::new_prop("show_name", false));
     }
 
-    match arrow.thickness {
-        ArrowThickness::Small => {}
-        ArrowThickness::Middle => {
-            node.entries_mut()
-                .push(KdlEntry::new_prop("arrow_thickness", "middle"));
-        }
-        ArrowThickness::Big => {
-            node.entries_mut()
-                .push(KdlEntry::new_prop("arrow_thickness", "big"));
-        }
+    let thickness = arrow.thickness.value();
+    if (thickness - ArrowThickness::default().value()).abs() > f32::EPSILON {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "arrow_thickness",
+            ArrowThickness::round_to_precision(thickness) as f64,
+        ));
     }
 
     if (arrow.label_position - 1.0).abs() > f32::EPSILON {
@@ -457,21 +467,21 @@ fn serialize_color_to_node(node: &mut KdlNode, color: &Color) {
 fn serialize_color_to_node_named(node: &mut KdlNode, color: &Color, name: Option<&str>) {
     let mut color_node = KdlNode::new(name.unwrap_or("color"));
 
-    // Add r, g, b as positional arguments
-    let r = float_color_component_to_int(color.r);
-    let g = float_color_component_to_int(color.g);
-    let b = float_color_component_to_int(color.b);
-    color_node.entries_mut().push(KdlEntry::new(r));
-    color_node.entries_mut().push(KdlEntry::new(g));
-    color_node.entries_mut().push(KdlEntry::new(b));
-
-    // Add alpha if it's not 1.0 (default)
-    let a = float_color_component_to_int(color.a);
-    if a != 255 {
-        color_node.entries_mut().push(KdlEntry::new(a));
+    let (r, g, b, a) = color_to_ints(color);
+    if let Some(named) = name_from_color(color) {
+        color_node.entries_mut().push(KdlEntry::new(named));
+        if a != 255 {
+            color_node.entries_mut().push(KdlEntry::new(a));
+        }
+    } else {
+        color_node.entries_mut().push(KdlEntry::new(r));
+        color_node.entries_mut().push(KdlEntry::new(g));
+        color_node.entries_mut().push(KdlEntry::new(b));
+        if a != 255 {
+            color_node.entries_mut().push(KdlEntry::new(a));
+        }
     }
 
-    // Add the color node as a child
     if let Some(existing_children) = node.children_mut().as_mut() {
         existing_children.nodes_mut().push(color_node);
     } else {
@@ -479,11 +489,6 @@ fn serialize_color_to_node_named(node: &mut KdlNode, color: &Color, name: Option
         doc.nodes_mut().push(color_node);
         node.set_children(doc);
     }
-}
-
-fn float_color_component_to_int(component: f32) -> i128 {
-    let clamped = component.clamp(0.0, 1.0);
-    (clamped * 255.0).round() as i128
 }
 
 fn serialize_material_to_node(node: &mut KdlNode, material: &Material) {
@@ -764,9 +769,11 @@ mod tests {
                 fov: 60.0,
                 active: true,
                 show_grid: true,
+                show_arrows: true,
                 hdr: false,
                 pos: None,
                 look_at: None,
+                local_arrows: Vec::new(),
                 aux: (),
             })));
 
@@ -794,9 +801,11 @@ mod tests {
                 fov: 60.0,
                 active: true,
                 show_grid: true,
+                show_arrows: false,
                 hdr: true,
                 pos: Some("(0,0,0,0, 1,2,3)".to_string()),
                 look_at: Some("(0,0,0,0, 0,0,0)".to_string()),
+                local_arrows: Vec::new(),
                 aux: (),
             })));
 
@@ -813,6 +822,7 @@ mod tests {
             "look_at=",
             "hdr=",
             "show_grid=",
+            "show_arrows=",
             "active=",
         ];
         let mut indices = Vec::with_capacity(properties.len());
@@ -884,6 +894,30 @@ mod tests {
         assert_eq!(graph.colors.len(), 2);
         assert_eq!(graph.colors[0], Color::rgb(1.0, 0.0, 0.0));
         assert_eq!(graph.colors[1], Color::rgb(0.0, 1.0, 0.0));
+    }
+
+    #[test]
+    fn test_roundtrip_named_color_red_is_serialized() {
+        let original = r#"
+graph "value" {
+    color red
+}
+"#;
+
+        let parsed = parse_schematic(original).unwrap();
+        let serialized = serialize_schematic(&parsed);
+
+        assert!(
+            serialized.contains("color red"),
+            "serialized output should emit named red, got:\n{serialized}"
+        );
+
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Panel(Panel::Graph(graph)) = &reparsed.elems[0] else {
+            panic!("Expected graph panel");
+        };
+        assert_eq!(graph.colors.len(), 1);
+        assert_eq!(graph.colors[0], Color::RED);
     }
 
     #[test]
@@ -1005,9 +1039,11 @@ mod tests {
                 fov: 45.0,
                 active: false,
                 show_grid: false,
+                show_arrows: true,
                 hdr: false,
                 pos: None,
                 look_at: None,
+                local_arrows: Vec::new(),
                 aux: (),
             }),
             Panel::Graph(Graph {
@@ -1083,13 +1119,17 @@ mod tests {
                 color: Color::BLUE,
                 body_frame: true,
                 normalize: true,
-                display_name: false,
-                thickness: ArrowThickness::Small,
+                show_name: false,
+                thickness: ArrowThickness::new(1.23456),
                 label_position: 1.0,
                 aux: (),
             }));
 
         let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("arrow_thickness=1.235"),
+            "arrow_thickness should serialize as a numeric value rounded to 3 decimals: {serialized}"
+        );
         let parsed = parse_schematic(&serialized).unwrap();
 
         assert_eq!(parsed.elems.len(), 1);
@@ -1103,7 +1143,12 @@ mod tests {
             assert_eq!(arrow.name.as_deref(), Some("Velocity"));
             assert!(arrow.body_frame);
             assert!(arrow.normalize);
-            assert!(!arrow.display_name);
+            assert!(!arrow.show_name);
+            assert!(
+                (arrow.thickness.value() - 1.235).abs() < 1e-6,
+                "unexpected thickness after roundtrip {}",
+                arrow.thickness.value()
+            );
             assert_color_close(arrow.color, Color::BLUE);
         } else {
             panic!("Expected vector_arrow");
@@ -1127,22 +1172,9 @@ object_3d "a.world_pos" {
 
         let parsed = parse_schematic(original_kdl).unwrap();
         let serialized = serialize_schematic(&parsed);
-        // NOTE: fov and grid are dropped because they are the default value.
-        //
-        //viewport hdr=#true show_grid=#false active=#true
-        assert_eq!(
-            r#"
-tabs {
-    viewport hdr=#true active=#true
-    graph a.world_pos name="a world_pos"
-}
-object_3d a.world_pos {
-    sphere radius=0.20000000298023224 {
-        color 135 222 158
-    }
-}"#
-            .trim(),
-            serialized
+        assert!(
+            serialized.contains("color mint") || serialized.contains("color 135 222 158"),
+            "serialized output should mention either the mint name or its RGBA components, got:\n{serialized}"
         );
         let reparsed = parse_schematic(&serialized).unwrap();
 

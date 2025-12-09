@@ -1,6 +1,9 @@
 use miette::{Diagnostic, Result, SourceSpan};
 use thiserror::Error;
 
+mod color_names;
+pub use color_names::*;
+
 mod ser;
 pub use ser::*;
 

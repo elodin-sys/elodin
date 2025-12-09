@@ -42,7 +42,7 @@ use crate::{
             WindowId, WindowState,
         },
     },
-    vector_arrow::VectorArrowState,
+    vector_arrow::{VectorArrowState, ViewportArrow},
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -217,7 +217,11 @@ impl LoadSchematicParams<'_, '_> {
                 .2;
             std::mem::take(&mut window_state.tile_state)
         };
-        main_state.clear(&mut self.commands, &mut self.selected_object);
+        main_state.clear(
+            &mut self.commands,
+            &mut self.selected_object,
+            &mut self.render_layer_alloc,
+        );
         self.hdr_enabled.0 = false;
         for entity in self.objects_3d.iter() {
             self.commands.entity(entity).despawn();
@@ -244,7 +248,7 @@ impl LoadSchematicParams<'_, '_> {
                     self.spawn_line_3d(line_3d.clone());
                 }
                 impeller2_wkt::SchematicElem::VectorArrow(vector_arrow) => {
-                    self.spawn_vector_arrow(vector_arrow.clone());
+                    self.spawn_vector_arrow(vector_arrow.clone(), None);
                 }
                 impeller2_wkt::SchematicElem::Window(window) => {
                     if let Some(descriptor) = resolve_window_descriptor(window, base_dir) {
@@ -396,7 +400,11 @@ impl LoadSchematicParams<'_, '_> {
         self.commands.spawn(line_3d);
     }
 
-    pub fn spawn_vector_arrow(&mut self, vector_arrow: VectorArrow3d) {
+    pub fn spawn_vector_arrow(
+        &mut self,
+        vector_arrow: VectorArrow3d,
+        viewport_camera: Option<Entity>,
+    ) {
         use crate::object_3d::compile_eql_expr;
 
         let vector_expr = self
@@ -412,16 +420,20 @@ impl LoadSchematicParams<'_, '_> {
             .and_then(|origin| self.eql.0.parse_str(origin).ok())
             .map(compile_eql_expr);
 
-        self.commands.spawn((
+        let mut spawn = self.commands.spawn((
             vector_arrow,
             VectorArrowState {
                 vector_expr,
                 origin_expr,
-                visual: None,
+                visuals: HashMap::new(),
                 label: None,
                 ..default()
             },
         ));
+
+        if let Some(camera) = viewport_camera {
+            spawn.insert(ViewportArrow { camera });
+        }
     }
 
     fn spawn_panel(
@@ -445,6 +457,11 @@ impl LoadSchematicParams<'_, '_> {
                     label,
                 );
                 self.hdr_enabled.0 |= viewport.hdr;
+                if let Some(camera) = pane.camera {
+                    for arrow in viewport.local_arrows.clone() {
+                        self.spawn_vector_arrow(arrow, Some(camera));
+                    }
+                }
                 tile_state.insert_tile(Tile::Pane(Pane::Viewport(pane)), parent_id, viewport.active)
             }
             Panel::HSplit(split) | Panel::VSplit(split) => {

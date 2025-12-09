@@ -1,3 +1,4 @@
+use crate::color_names::color_from_name;
 use impeller2_wkt::{
     ArrowThickness, Color, Schematic, SchematicElem, VectorArrow3d, WindowSchematic,
 };
@@ -5,7 +6,6 @@ use kdl::{KdlDocument, KdlNode};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
-use tracing::warn;
 
 use impeller2_wkt::*;
 
@@ -147,44 +147,48 @@ fn clamp_percent(value: f64) -> u32 {
     value.round().clamp(0.0, 100.0) as u32
 }
 
-fn parse_panel(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
+fn parse_panel(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError> {
     match node.name().value() {
         "tabs" => {
             let mut panels = Vec::new();
             if let Some(children) = node.children() {
                 for child in children.nodes() {
-                    panels.push(parse_panel(child, src)?);
+                    panels.push(parse_panel(child, kdl_src)?);
                 }
             }
             Ok(Panel::Tabs(panels))
         }
-        "hsplit" => parse_split(node, src, true),
-        "vsplit" => parse_split(node, src, false),
-        "viewport" => parse_viewport(node),
-        "graph" => parse_graph(node, src),
-        "component_monitor" => parse_component_monitor(node, src),
-        "action_pane" => parse_action_pane(node, src),
+        "hsplit" => parse_split(node, kdl_src, true),
+        "vsplit" => parse_split(node, kdl_src, false),
+        "viewport" => parse_viewport(node, kdl_src),
+        "graph" => parse_graph(node, kdl_src),
+        "component_monitor" => parse_component_monitor(node, kdl_src),
+        "action_pane" => parse_action_pane(node, kdl_src),
         "query_table" => parse_query_table(node),
-        "query_plot" => parse_query_plot(node, src),
+        "query_plot" => parse_query_plot(node, kdl_src),
         "inspector" => Ok(Panel::Inspector),
         "hierarchy" => Ok(Panel::Hierarchy),
         "schematic_tree" => Ok(Panel::SchematicTree),
         "dashboard" => parse_dashboard(node),
         _ => Err(KdlSchematicError::UnknownNode {
             node_type: node.name().to_string(),
-            src: src.to_string(),
+            src: kdl_src.to_string(),
             span: node.span(),
         }),
     }
 }
 
-fn parse_split(node: &KdlNode, src: &str, is_horizontal: bool) -> Result<Panel, KdlSchematicError> {
+fn parse_split(
+    node: &KdlNode,
+    kdl_src: &str,
+    is_horizontal: bool,
+) -> Result<Panel, KdlSchematicError> {
     let mut panels = Vec::new();
     let mut shares = HashMap::new();
 
     if let Some(children) = node.children() {
         for (i, child) in children.nodes().iter().enumerate() {
-            panels.push(parse_panel(child, src)?);
+            panels.push(parse_panel(child, kdl_src)?);
 
             // Look for share property on child
             if let Some(share_val) = child.get("share")
@@ -219,7 +223,7 @@ fn parse_split(node: &KdlNode, src: &str, is_horizontal: bool) -> Result<Panel, 
     }
 }
 
-fn parse_viewport(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
+fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError> {
     let fov = node.get("fov").and_then(|v| v.as_float()).unwrap_or(45.0) as f32;
 
     let active = node
@@ -236,6 +240,11 @@ fn parse_viewport(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
+    let show_arrows = node
+        .get("show_arrows")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
     let hdr = node.get("hdr").and_then(|v| v.as_bool()).unwrap_or(false);
 
     let pos = node
@@ -246,16 +255,35 @@ fn parse_viewport(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
     let look_at = node
         .get("look_at")
         .and_then(|v| v.as_string())
-        .map(|s| s.to_string());
+        .map(|s| s.to_string())
+        .and_then(|s| {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+
+    let mut local_arrows = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "vector_arrow" {
+                local_arrows.push(parse_vector_arrow(child, kdl_src)?);
+            }
+        }
+    }
 
     Ok(Panel::Viewport(Viewport {
         fov,
         active,
         show_grid,
+        show_arrows,
         hdr,
         name,
         pos,
         look_at,
+        local_arrows,
         aux: (),
     }))
 }
@@ -658,6 +686,41 @@ fn parse_line_3d(node: &KdlNode, src: &str) -> Result<Line3d, KdlSchematicError>
     })
 }
 
+fn parse_arrow_thickness(node: &KdlNode, src: &str) -> Result<ArrowThickness, KdlSchematicError> {
+    let Some(entry) = node.entry("arrow_thickness") else {
+        return Ok(ArrowThickness::default());
+    };
+
+    let value = entry.value();
+    if let Some(value) = value.as_float() {
+        return Ok(ArrowThickness::new(value as f32));
+    }
+    if let Some(value) = value.as_integer() {
+        return Ok(ArrowThickness::new(value as f32));
+    }
+    if let Some(value) = value.as_string() {
+        if let Ok(parsed) = value.parse::<f32>() {
+            return Ok(ArrowThickness::new(parsed));
+        }
+
+        return Err(KdlSchematicError::InvalidValue {
+            property: "arrow_thickness".to_string(),
+            node: "vector_arrow".to_string(),
+            expected: "a numeric value for arrow_thickness (e.g. 1.000)".to_string(),
+            src: src.to_string(),
+            span: entry.span(),
+        });
+    }
+
+    Err(KdlSchematicError::InvalidValue {
+        property: "arrow_thickness".to_string(),
+        node: "vector_arrow".to_string(),
+        expected: "a numeric value for arrow_thickness (e.g. 1.000)".to_string(),
+        src: src.to_string(),
+        span: entry.span(),
+    })
+}
+
 fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSchematicError> {
     let vector = node
         .entries()
@@ -713,29 +776,13 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let display_name = node
-        .get("display_name")
+    let show_name = node
+        .get("show_name")
+        .or_else(|| node.get("display_name"))
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
-    let dimension = node
-        .get("arrow_thickness")
-        .and_then(|v| v.as_string())
-        .map(|s| s.to_string())
-        .map(|s| s.to_lowercase())
-        .map(|s| match s.as_str() {
-            "small" => ArrowThickness::Small,
-            "middle" => ArrowThickness::Middle,
-            "big" => ArrowThickness::Big,
-            other => {
-                warn!(
-                    value = other,
-                    "Unknown arrow_thickness '{}', defaulting to small", other
-                );
-                ArrowThickness::Small
-            }
-        })
-        .unwrap_or(ArrowThickness::Small);
+    let thickness = parse_arrow_thickness(node, src)?;
 
     let label_position = match node.entry("label_position") {
         None => 1.0,
@@ -768,8 +815,8 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         color,
         body_frame,
         normalize,
-        display_name,
-        thickness: dimension,
+        show_name,
+        thickness,
         label_position,
         aux: (),
     })
@@ -851,27 +898,7 @@ fn parse_color_component_str(value: &str) -> Option<f32> {
 }
 
 fn parse_named_color(name: &str) -> Option<Color> {
-    match name {
-        "black" => Some(Color::BLACK),
-        "white" => Some(Color::WHITE),
-        "blue" => Some(Color::BLUE),
-        "orange" => Some(Color::ORANGE),
-        "yellow" => Some(Color::YELLOW),
-        "yalk" => Some(Color::YALK),
-        "pink" => Some(Color::PINK),
-        "cyan" => Some(Color::CYAN),
-        "gray" => Some(Color::GRAY),
-        "green" => Some(Color::GREEN),
-        "mint" => Some(Color::MINT),
-        "turquoise" => Some(Color::TURQUOISE),
-        "slate" => Some(Color::SLATE),
-        "pumpkin" => Some(Color::PUMPKIN),
-        "yolk" => Some(Color::YOLK),
-        "peach" => Some(Color::PEACH),
-        "reddish" => Some(Color::REDDISH),
-        "hyperblue" => Some(Color::HYPERBLUE),
-        _ => None,
-    }
+    color_from_name(name)
 }
 
 fn parse_color_from_node(node: &KdlNode) -> Option<Color> {
@@ -1542,7 +1569,7 @@ tabs {
     #[test]
     fn test_parse_vector_arrow() {
         let kdl = r#"
-vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="ball.world_pos" scale=1.5 name="Velocity" body_frame=#true normalize=#true display_name=#false {
+vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="ball.world_pos" scale=1.5 name="Velocity" body_frame=#true normalize=#true show_name=#false arrow_thickness=1.23456 {
     color 0 0 255
 }
 "#;
@@ -1559,7 +1586,12 @@ vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="bal
             assert_eq!(arrow.name.as_deref(), Some("Velocity"));
             assert!(arrow.body_frame);
             assert!(arrow.normalize);
-            assert!(!arrow.display_name);
+            assert!(!arrow.show_name);
+            assert!(
+                (arrow.thickness.value() - 1.235).abs() < 1e-6,
+                "unexpected arrow_thickness {}",
+                arrow.thickness.value()
+            );
             assert_eq!(arrow.color.b, 1.0);
         } else {
             panic!("Expected vector_arrow");
@@ -1577,9 +1609,24 @@ vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" in_body_fra
         if let SchematicElem::VectorArrow(arrow) = &schematic.elems[0] {
             assert!(arrow.body_frame);
             assert!(!arrow.normalize);
-            assert!(arrow.display_name);
+            assert!(arrow.show_name);
         } else {
             panic!("Expected vector_arrow");
+        }
+    }
+
+    #[test]
+    fn test_parse_vector_arrow_rejects_string_thickness() {
+        let kdl = r#"vector_arrow "a.vector" arrow_thickness="not_a_number""#;
+
+        let err = parse_schematic(kdl).unwrap_err();
+
+        match err {
+            KdlSchematicError::InvalidValue { property, node, .. } => {
+                assert_eq!(property, "arrow_thickness");
+                assert_eq!(node, "vector_arrow");
+            }
+            _ => panic!("Expected InvalidValue error"),
         }
     }
 
@@ -1914,6 +1961,22 @@ graph "value" {
         assert_eq!(graph.colors.len(), 1);
         let color = graph.colors[0];
         assert_eq!(color, Color::YALK);
+    }
+
+    #[test]
+    fn test_parse_named_color_red() {
+        let kdl = r#"
+graph "value" {
+    color red
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        let SchematicElem::Panel(Panel::Graph(graph)) = &schematic.elems[0] else {
+            panic!("Expected graph panel");
+        };
+        assert_eq!(graph.colors.len(), 1);
+        assert_eq!(graph.colors[0], Color::RED);
     }
 
     #[test]
