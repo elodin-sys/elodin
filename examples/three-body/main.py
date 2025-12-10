@@ -103,18 +103,18 @@ w.schematic("""
         }
     }
     object_3d a.world_pos {
-        sphere radius=0.2 {
-            color 255 255 0
+        sphere radius=0.2 emissivity=1.0 {
+            color yellow
         }
     }
     object_3d b.world_pos {
-        sphere radius=0.2 {
-            color 255 0 255
+        sphere radius=0.2 emissivity=1.0 {
+            color pink
         }
     }
     object_3d c.world_pos {
-        sphere radius=0.2 {
-            color 0 255 255
+        sphere radius=0.2 emissivity=1.0 {
+            color cyan
         }
     }
     line_3d b.world_pos line_width=10.0 perspective=#false {

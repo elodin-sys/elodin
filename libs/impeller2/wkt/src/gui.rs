@@ -249,6 +249,8 @@ pub struct Graph<T = ()> {
     pub name: Option<String>,
     #[serde(default)]
     pub graph_type: GraphType,
+    #[serde(default)]
+    pub locked: bool,
     pub auto_y_range: bool,
     pub y_range: Range<f64>,
     pub aux: T,
@@ -261,6 +263,7 @@ impl<T> Graph<T> {
             eql: self.eql.clone(),
             name: self.name.clone(),
             graph_type: self.graph_type,
+            locked: self.locked,
             auto_y_range: self.auto_y_range,
             y_range: self.y_range.clone(),
             aux: f(&self.aux),
@@ -529,22 +532,40 @@ impl Asset for Glb {
     const NAME: &'static str = "glb";
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Material {
     pub base_color: Color,
+    #[serde(default)]
+    pub emissivity: f32,
 }
 
 impl Material {
     pub fn color(r: f32, g: f32, b: f32) -> Self {
         Material {
             base_color: Color::rgb(r, g, b),
+            emissivity: 0.0,
         }
     }
 
     pub fn color_with_alpha(r: f32, g: f32, b: f32, a: f32) -> Self {
         Material {
             base_color: Color::rgba(r, g, b, a),
+            emissivity: 0.0,
+        }
+    }
+
+    pub fn color_with_emissivity(r: f32, g: f32, b: f32, emissivity: f32) -> Self {
+        Material {
+            base_color: Color::rgb(r, g, b),
+            emissivity,
+        }
+    }
+
+    pub fn with_color(color: Color) -> Self {
+        Material {
+            base_color: color,
+            emissivity: 0.0,
         }
     }
 }

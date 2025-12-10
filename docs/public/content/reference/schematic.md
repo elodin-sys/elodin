@@ -16,7 +16,7 @@ order = 6
 
 - Top-level nodes: `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `window`.
 - EQL: expressions are evaluated in the runtime EQL context. Vector-like fields expect 3 components; `world_pos` is a 7-component array (quat + position).
-- Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `red`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional; can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
+- Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `red`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional. Colors can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
 
 ### window
 - `path`/`file`/`name`: optional secondary schematic file. Relative paths resolve against the parent schematic directory (or CWD). If absent, the entry configures the primary window instead of loading a secondary file.
@@ -30,7 +30,7 @@ order = 6
 
 ### panel content
 - `viewport`: `fov` (default 45.0), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `hdr` (default false), `name` (optional label), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera.
-- `graph`: positional `eql` (required), `name` (optional), `type` (`line`/`point`/`bar`, default `line`), `auto_y_range` (default true), `y_min`/`y_max` (default `0.0..1.0`), child `color` nodes (optional list; otherwise palette).
+- `graph`: positional `eql` (required), `name` (optional), `type` (`line`/`point`/`bar`, default `line`), `lock` (default false), `auto_y_range` (default true), `y_min`/`y_max` (default `0.0..1.0`), child `color` nodes (optional list; otherwise palette).
 - `component_monitor`: `component_name` (required).
 - `action_pane`: positional `label` (required), `lua` script (required).
 - `query_table`: positional `query` (defaults to empty), `type` (`eql` default, or `sql`).
@@ -47,6 +47,8 @@ order = 6
   - `cylinder`: `radius`, `height` (both required); `color` (default white).
   - `plane`: `width`/`depth` (default `size` if set, else 10.0); optional `size` shorthand; `color` (default white).
   - `ellipsoid`: `scale` (EQL string, default `"(1, 1, 1)"`), `color` (default white).
+
+  Mesh nodes support an optional `emissivity=<value>` property (0.0–1.0) to make the material glow (e.g., `sphere radius=0.2 emissivity=0.25 { color yellow }`).
 
 ### line_3d
 - Positional `eql`: required; expects 3 values (or 7 where the last 3 are XYZ).
@@ -115,11 +117,12 @@ viewport = "viewport"
          [name=string]
          [pos=eql]
          [look_at=eql]
-         { vector_arrow }        ; optional local arrows render only in this viewport
+         { vector_arrow }
 
 graph = "graph" eql
       [name=string]
       [type=line|point|bar]
+      [lock=bool]
       [auto_y_range=bool]
       [y_min=float]
       [y_max=float]
@@ -158,6 +161,7 @@ object_3d = "object_3d"
           | plane
           | ellipsoid
           }
+          [emissivity=float]
 
 line_3d = "line_3d"
         <eql>

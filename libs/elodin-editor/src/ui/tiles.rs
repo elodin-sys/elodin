@@ -16,6 +16,7 @@ use bevy_render::{
     view::RenderLayers,
 };
 use egui::UiBuilder;
+use egui::response::Flags;
 use egui_tiles::{Container, Tile, TileId, Tiles};
 use impeller2_wkt::{Dashboard, Graph, Viewport, WindowRect};
 use smallvec::SmallVec;
@@ -1240,7 +1241,23 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         let text_rect = rect
             .shrink2(vec2(x_margin * 4.0, 0.0))
             .translate(vec2(-3.0 * x_margin, 0.0));
-        let response = ui.interact(rect, id, egui::Sense::click_and_drag());
+        let response = {
+            let mut resp = ui.interact(rect, id, egui::Sense::click_and_drag());
+            let drag_distance = ui.input(|i| {
+                let press = i.pointer.press_origin();
+                let latest = i.pointer.latest_pos();
+                press
+                    .zip(latest)
+                    .map(|(p, l)| p.distance(l))
+                    .unwrap_or_default()
+            });
+            const DRAG_SLOP: f32 = 12.0;
+            if drag_distance < DRAG_SLOP {
+                resp.flags
+                    .remove(Flags::DRAG_STARTED | Flags::DRAGGED | Flags::DRAG_STOPPED);
+            }
+            resp
+        };
 
         if !self.read_only && is_container && state.active && response.clicked() && !is_editing {
             ui.ctx()

@@ -585,6 +585,7 @@ impl LoadSchematicParams<'_, '_> {
                     components_tree,
                     graph_label.clone(),
                 );
+                bundle.graph_state.locked = graph.locked;
                 if matches!(context, PanelContext::Secondary(_)) {
                     bundle.camera.is_active = false;
                 }
