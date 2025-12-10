@@ -9,15 +9,13 @@ use bevy::{
 use bevy_editor_cam::prelude::{EditorCam, EnabledMotion, OrbitConstraint};
 use bevy_egui::{
     EguiContexts,
-    egui::{
-        self, Align, Color32, CornerRadius, Frame, Id, Layout, Pos2, Rect, RichText, Sense, Stroke,
-        Ui, Vec2, Visuals, vec2,
-    },
+    egui::{self, Color32, CornerRadius, Frame, Id, RichText, Stroke, Ui, Visuals, vec2},
 };
 use bevy_render::{
     camera::{Exposure, PhysicalCameraParameters},
     view::RenderLayers,
 };
+use egui::response::Flags;
 use egui::UiBuilder;
 use egui_tiles::{Container, Tile, TileId, Tiles};
 use impeller2_wkt::{Dashboard, Graph, Viewport, WindowRect};
@@ -112,31 +110,11 @@ pub struct TileIcons {
 }
 
 #[derive(Clone)]
-pub struct SidebarsState {
-    pub root: TileId,
-    pub hierarchy: TileId,
-    pub inspector: TileId,
-    pub main_content: Option<TileId>,
-    pub collapsed: bool,
-}
-
-const HIERARCHY_SHARE_EXPANDED: f32 = 0.2;
-const INSPECTOR_SHARE_EXPANDED: f32 = 0.2;
-const MAIN_SHARE_EXPANDED: f32 = 0.6;
-
-const HIERARCHY_SHARE_COLLAPSED: f32 = 0.15;
-const INSPECTOR_SHARE_COLLAPSED: f32 = 0.05;
-const MAIN_SHARE_COLLAPSED: f32 = 0.8;
-const INSPECTOR_COLLAPSED_WIDTH: f32 = 6.0;
-const INSPECTOR_COLLAPSED_ICON_SIZE: f32 = 4.0;
-
-#[derive(Clone)]
 pub struct TileState {
     pub tree: egui_tiles::Tree<Pane>,
     pub tree_actions: smallvec::SmallVec<[TreeAction; 4]>,
     pub graphs: HashMap<TileId, Entity>,
     pub container_titles: HashMap<TileId, String>,
-    pub sidebars: Option<SidebarsState>,
     tree_id: Id,
 }
 
@@ -473,51 +451,17 @@ pub struct DashboardPane {
 }
 
 impl TileState {
-    pub fn sidebars_pending(&self) -> bool {
+    pub fn has_inspector(&self) -> bool {
+        self.tree
+            .tiles
+            .iter()
+            .any(|(_, tile)| matches!(tile, Tile::Pane(Pane::Inspector)))
+    }
+
+    pub fn inspector_pending(&self) -> bool {
         self.tree_actions
             .iter()
-            .any(|action| matches!(action, TreeAction::AddSidebars))
-    }
-
-    pub fn create_sidebars_layout(&mut self) {
-        if self.sidebars.is_some() || self.sidebars_pending() {
-            return;
-        }
-        self.tree_actions.push(TreeAction::AddSidebars);
-    }
-
-    pub fn set_sidebars_collapsed(&mut self, collapsed: bool) {
-        if let Some(sidebars) = &mut self.sidebars {
-            if sidebars.collapsed == collapsed {
-                return;
-            }
-            if let Some(Tile::Container(Container::Linear(linear))) =
-                self.tree.tiles.get_mut(sidebars.root)
-            {
-                if collapsed {
-                    linear
-                        .shares
-                        .set_share(sidebars.hierarchy, HIERARCHY_SHARE_COLLAPSED);
-                    linear
-                        .shares
-                        .set_share(sidebars.inspector, INSPECTOR_SHARE_COLLAPSED);
-                    if let Some(main) = sidebars.main_content {
-                        linear.shares.set_share(main, MAIN_SHARE_COLLAPSED);
-                    }
-                } else {
-                    linear
-                        .shares
-                        .set_share(sidebars.hierarchy, HIERARCHY_SHARE_EXPANDED);
-                    linear
-                        .shares
-                        .set_share(sidebars.inspector, INSPECTOR_SHARE_EXPANDED);
-                    if let Some(main) = sidebars.main_content {
-                        linear.shares.set_share(main, MAIN_SHARE_EXPANDED);
-                    }
-                }
-            };
-            sidebars.collapsed = collapsed;
-        }
+            .any(|action| matches!(action, TreeAction::AddInspector(_)))
     }
 
     pub fn insert_tile(
@@ -629,8 +573,7 @@ impl TileState {
     }
 
     pub fn create_inspector_tile(&mut self, tile_id: Option<TileId>) {
-        let _ = tile_id;
-        self.create_sidebars_layout();
+        self.tree_actions.push(TreeAction::AddInspector(tile_id));
     }
 
     pub fn create_tree_tile(&mut self, tile_id: Option<TileId>) {
@@ -716,6 +659,10 @@ impl TileState {
             visit(&self.tree, root, &mut entities);
         }
         entities
+    }
+
+    pub fn create_sidebars_layout(&mut self) {
+        self.tree_actions.push(TreeAction::AddSidebars);
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1171,14 +1118,12 @@ impl TileState {
             tree_actions: SmallVec::new(),
             graphs: HashMap::new(),
             container_titles: HashMap::new(),
-            sidebars: None,
             tree_id,
         }
     }
 
     fn reset_tree(&mut self) {
         self.tree = egui_tiles::Tree::new_tabs(self.tree_id, vec![]);
-        self.sidebars = None;
     }
 }
 
@@ -1195,8 +1140,6 @@ struct TreeBehavior<'w> {
     container_titles: HashMap<TileId, String>,
     read_only: bool,
     target_window: Option<Entity>,
-    sidebars_active: bool,
-    sidebars_collapsed: bool,
 }
 
 #[derive(Clone)]
@@ -1210,9 +1153,9 @@ pub enum TreeAction {
     AddVideoStream(Option<TileId>, [u8; 2], String),
     AddDashboard(Option<TileId>, Box<impeller2_wkt::Dashboard>, String),
     AddHierarchy(Option<TileId>),
+    AddInspector(Option<TileId>),
     AddSchematicTree(Option<TileId>),
     AddSidebars,
-    SetInspectorCollapsed(bool),
     DeleteTab(TileId),
     SelectTile(TileId),
     RenameContainer(TileId, String),
@@ -1239,67 +1182,6 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         _tile_id: egui_tiles::TileId,
         pane: &mut Pane,
     ) -> egui_tiles::UiResponse {
-        if self.sidebars_active && matches!(pane, Pane::Inspector) {
-            let rect = ui.available_rect_before_wrap();
-            let strip_rect = Rect::from_min_max(
-                Pos2::new(rect.right() - INSPECTOR_COLLAPSED_WIDTH, rect.top()),
-                rect.right_bottom(),
-            );
-            if self.sidebars_collapsed {
-                let id = ui.make_persistent_id("inspector_collapsed");
-                let response = ui.interact(strip_rect, id, Sense::click());
-                ui.painter()
-                    .rect_filled(strip_rect, 0.0, get_scheme().bg_secondary);
-                let icon_rect = Rect::from_center_size(
-                    strip_rect.center(),
-                    Vec2::splat(INSPECTOR_COLLAPSED_ICON_SIZE),
-                );
-                ui.painter().image(
-                    self.icons.search,
-                    icon_rect,
-                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                    get_scheme().text_primary,
-                );
-                if response.clicked() {
-                    self.tree_actions
-                        .push(TreeAction::SetInspectorCollapsed(false));
-                }
-                return egui_tiles::UiResponse::None;
-            }
-            let handle_id = ui.make_persistent_id("inspector_handle");
-            let handle_response = ui.interact(strip_rect, handle_id, Sense::click());
-            ui.horizontal(|ui| {
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let resp = ui.add(
-                        EImageButton::new(self.icons.close)
-                            .scale(1.2, 1.2)
-                            .image_tint(get_scheme().text_primary)
-                            .bg_color(colors::TRANSPARENT)
-                            .hovered_bg_color(colors::TRANSPARENT),
-                    );
-                    if resp.clicked() {
-                        self.tree_actions
-                            .push(TreeAction::SetInspectorCollapsed(true));
-                    }
-                });
-            });
-            ui.add_space(2.0);
-            let response = pane.ui(ui, &self.icons, self.world, &mut self.tree_actions);
-            ui.painter()
-                .rect_filled(strip_rect, 0.0, get_scheme().bg_secondary);
-            let icon_rect = Rect::from_center_size(strip_rect.center(), Vec2::splat(10.0));
-            ui.painter().image(
-                self.icons.search,
-                icon_rect,
-                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                get_scheme().text_primary,
-            );
-            if handle_response.clicked() {
-                self.tree_actions
-                    .push(TreeAction::SetInspectorCollapsed(true));
-            }
-            return response;
-        }
         pane.ui(ui, &self.icons, self.world, &mut self.tree_actions)
     }
 
@@ -1359,9 +1241,8 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         let text_rect = rect
             .shrink2(vec2(x_margin * 4.0, 0.0))
             .translate(vec2(-3.0 * x_margin, 0.0));
-        let response = ui.interact(rect, id, egui::Sense::click_and_drag());
         let response = {
-            let mut resp = response;
+            let mut resp = ui.interact(rect, id, egui::Sense::click_and_drag());
             let drag_distance = ui.input(|i| {
                 let press = i.pointer.press_origin();
                 let latest = i.pointer.latest_pos();
@@ -1373,9 +1254,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             const DRAG_SLOP: f32 = 12.0;
             if drag_distance < DRAG_SLOP {
                 resp.flags.remove(
-                    egui::response::Flags::DRAG_STARTED
-                        | egui::response::Flags::DRAGGED
-                        | egui::response::Flags::DRAG_STOPPED,
+                    Flags::DRAG_STARTED | Flags::DRAGGED | Flags::DRAG_STOPPED,
                 );
             }
             resp
@@ -1904,21 +1783,18 @@ impl WidgetSystem for TileLayout<'_, '_> {
         } = args;
 
         let (tree, mut tree_actions) = {
-            let mut state_mut = state.get_mut(world);
-            let Some(mut ui_state) = state_mut.tile_param.target(window) else {
-                return;
+            let (tab_diffs, container_titles, mut tree) = {
+                let mut state_mut = state.get_mut(world);
+                let Some(mut ui_state) = state_mut.tile_param.target(window) else {
+                    return;
+                };
+                let empty_tree = egui_tiles::Tree::empty(ui_state.tree_id);
+                (
+                    std::mem::take(&mut ui_state.tree_actions),
+                    ui_state.container_titles.clone(),
+                    std::mem::replace(&mut ui_state.tree, empty_tree),
+                )
             };
-            let sidebars_active = ui_state.sidebars.is_some();
-            let sidebars_collapsed = ui_state
-                .sidebars
-                .as_ref()
-                .map(|sidebar| sidebar.collapsed)
-                .unwrap_or(false);
-            let empty_tree = egui_tiles::Tree::empty(ui_state.tree_id);
-            let tab_diffs = std::mem::take(&mut ui_state.tree_actions);
-            let container_titles = ui_state.container_titles.clone();
-            let mut tree = std::mem::replace(&mut ui_state.tree, empty_tree);
-
             let mut behavior = TreeBehavior {
                 icons,
                 // This world here makes getting ui_state difficult.
@@ -1927,8 +1803,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 container_titles,
                 read_only,
                 target_window: window,
-                sidebars_active,
-                sidebars_collapsed,
             };
             tree.ui(&mut behavior, ui);
             let TreeBehavior { tree_actions, .. } = behavior;
@@ -2138,15 +2012,17 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             Pane::Graph(graph) => {
                                 *state_mut.selected_object =
                                     SelectedObject::Graph { graph_id: graph.id };
-                                ui_state.create_sidebars_layout();
-                                ui_state.set_sidebars_collapsed(false);
+                                if !ui_state.has_inspector() && !ui_state.inspector_pending() {
+                                    ui_state.tree_actions.push(TreeAction::AddInspector(None));
+                                }
                             }
                             Pane::QueryPlot(plot) => {
                                 *state_mut.selected_object = SelectedObject::Graph {
                                     graph_id: plot.entity,
                                 };
-                                ui_state.create_sidebars_layout();
-                                ui_state.set_sidebars_collapsed(false);
+                                if !ui_state.has_inspector() && !ui_state.inspector_pending() {
+                                    ui_state.tree_actions.push(TreeAction::AddInspector(None));
+                                }
                             }
                             Pane::Viewport(viewport) => {
                                 if let Some(camera) = viewport.camera {
@@ -2219,6 +2095,16 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         ui_state.tree.make_active(|id, _| id == tile_id);
                     }
                 }
+                TreeAction::AddInspector(parent_tile_id) => {
+                    if read_only {
+                        continue;
+                    }
+                    if let Some(tile_id) =
+                        ui_state.insert_tile(Tile::Pane(Pane::Inspector), parent_tile_id, true)
+                    {
+                        ui_state.tree.make_active(|id, _| id == tile_id);
+                    }
+                }
                 TreeAction::AddSchematicTree(parent_tile_id) => {
                     if read_only {
                         continue;
@@ -2238,10 +2124,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     if read_only {
                         continue;
                     }
-                    if ui_state.sidebars.is_some() {
-                        continue;
-                    }
-                    let main_content = ui_state.tree.root();
                     let hierarchy = ui_state.tree.tiles.insert_new(Tile::Pane(Pane::Hierarchy));
                     let inspector = ui_state.tree.tiles.insert_new(Tile::Pane(Pane::Inspector));
 
@@ -2249,31 +2131,17 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         egui_tiles::LinearDir::Horizontal,
                         vec![hierarchy, inspector],
                     );
-                    if let Some(root) = main_content {
+                    if let Some(root) = ui_state.tree.root() {
                         linear.children.insert(1, root);
-                        linear.shares.set_share(hierarchy, HIERARCHY_SHARE_EXPANDED);
-                        linear.shares.set_share(root, MAIN_SHARE_EXPANDED);
-                        linear.shares.set_share(inspector, INSPECTOR_SHARE_EXPANDED);
+                        linear.shares.set_share(hierarchy, 0.2);
+                        linear.shares.set_share(root, 0.6);
+                        linear.shares.set_share(inspector, 0.2);
                     }
                     let root = ui_state
                         .tree
                         .tiles
                         .insert_new(Tile::Container(Container::Linear(linear)));
                     ui_state.tree.root = Some(root);
-                    ui_state.sidebars = Some(SidebarsState {
-                        root,
-                        hierarchy,
-                        inspector,
-                        main_content,
-                        collapsed: true,
-                    });
-                    ui_state.set_sidebars_collapsed(true);
-                }
-                TreeAction::SetInspectorCollapsed(collapsed) => {
-                    if read_only {
-                        continue;
-                    }
-                    ui_state.set_sidebars_collapsed(collapsed);
                 }
                 TreeAction::RenameContainer(tile_id, title) => {
                     if read_only {
