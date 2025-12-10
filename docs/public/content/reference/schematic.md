@@ -117,7 +117,7 @@ viewport = "viewport"
          [name=string]
          [pos=eql]
          [look_at=eql]
-         { vector_arrow }        ; optional local arrows render only in this viewport
+         { vector_arrow }
 
 graph = "graph" eql
       [name=string]
@@ -160,6 +160,7 @@ object_3d = "object_3d"
           | plane
           | ellipsoid
           }
+          [emissivity=float]
 
 line_3d = "line_3d"
         <eql>
