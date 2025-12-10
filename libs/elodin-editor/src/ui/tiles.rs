@@ -1360,6 +1360,26 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             .shrink2(vec2(x_margin * 4.0, 0.0))
             .translate(vec2(-3.0 * x_margin, 0.0));
         let response = ui.interact(rect, id, egui::Sense::click_and_drag());
+        let response = {
+            let mut resp = response;
+            let drag_distance = ui.input(|i| {
+                let press = i.pointer.press_origin();
+                let latest = i.pointer.latest_pos();
+                press
+                    .zip(latest)
+                    .map(|(p, l)| p.distance(l))
+                    .unwrap_or_default()
+            });
+            const DRAG_SLOP: f32 = 12.0;
+            if drag_distance < DRAG_SLOP {
+                resp.flags.remove(
+                    egui::response::Flags::DRAG_STARTED
+                        | egui::response::Flags::DRAGGED
+                        | egui::response::Flags::DRAG_STOPPED,
+                );
+            }
+            resp
+        };
 
         if !self.read_only && is_container && state.active && response.clicked() && !is_editing {
             ui.ctx()
