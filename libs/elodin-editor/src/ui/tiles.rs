@@ -15,8 +15,8 @@ use bevy_render::{
     camera::{Exposure, PhysicalCameraParameters},
     view::RenderLayers,
 };
-use egui::response::Flags;
 use egui::UiBuilder;
+use egui::response::Flags;
 use egui_tiles::{Container, Tile, TileId, Tiles};
 use impeller2_wkt::{Dashboard, Graph, Viewport, WindowRect};
 use smallvec::SmallVec;
@@ -1253,9 +1253,8 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             });
             const DRAG_SLOP: f32 = 12.0;
             if drag_distance < DRAG_SLOP {
-                resp.flags.remove(
-                    Flags::DRAG_STARTED | Flags::DRAGGED | Flags::DRAG_STOPPED,
-                );
+                resp.flags
+                    .remove(Flags::DRAG_STARTED | Flags::DRAGGED | Flags::DRAG_STOPPED);
             }
             resp
         };
