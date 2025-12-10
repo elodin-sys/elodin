@@ -318,6 +318,8 @@ fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
         })
         .unwrap_or(GraphType::Line);
 
+    let locked = node.get("lock").and_then(|v| v.as_bool()).unwrap_or(false);
+
     let auto_y_range = node
         .get("auto_y_range")
         .and_then(|v| v.as_bool())
@@ -337,6 +339,7 @@ fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
         eql,
         name,
         graph_type,
+        locked,
         auto_y_range,
         y_range,
         aux: (),

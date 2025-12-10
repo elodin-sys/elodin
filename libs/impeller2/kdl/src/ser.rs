@@ -203,6 +203,10 @@ fn serialize_graph<T>(graph: &Graph<T>) -> KdlNode {
             .push(KdlEntry::new_prop("auto_y_range", false));
     }
 
+    if graph.locked {
+        node.entries_mut().push(KdlEntry::new_prop("lock", true));
+    }
+
     // Only serialize y_range if auto_y_range is false and range is not default
     if !graph.auto_y_range && (graph.y_range.start != 0.0 || graph.y_range.end != 1.0) {
         node.entries_mut()

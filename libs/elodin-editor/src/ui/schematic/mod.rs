@@ -156,6 +156,7 @@ impl SchematicParam<'_, '_> {
                         eql,
                         name: Some(graph_state.label.clone()),
                         graph_type: graph_state.graph_type,
+                        locked: graph_state.locked,
                         auto_y_range: graph_state.auto_y_range,
                         y_range: graph_state.y_range.clone(),
                         aux: graph.id,
