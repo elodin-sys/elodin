@@ -30,7 +30,7 @@ order = 6
 
 ### panel content
 - `viewport`: `fov` (default 45.0), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `hdr` (default false), `name` (optional label), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera.
-- `graph`: positional `eql` (required), `name` (optional), `type` (`line`/`point`/`bar`, default `line`), `auto_y_range` (default true), `y_min`/`y_max` (default `0.0..1.0`), child `color` nodes (optional list; otherwise palette).
+- `graph`: positional `eql` (required), `name` (optional), `type` (`line`/`point`/`bar`, default `line`), `lock` (default false), `auto_y_range` (default true), `y_min`/`y_max` (default `0.0..1.0`), child `color` nodes (optional list; otherwise palette).
 - `component_monitor`: `component_name` (required).
 - `action_pane`: positional `label` (required), `lua` script (required).
 - `query_table`: positional `query` (defaults to empty), `type` (`eql` default, or `sql`).
@@ -122,6 +122,7 @@ viewport = "viewport"
 graph = "graph" eql
       [name=string]
       [type=line|point|bar]
+      [lock=bool]
       [auto_y_range=bool]
       [y_min=float]
       [y_max=float]

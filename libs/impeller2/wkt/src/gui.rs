@@ -249,6 +249,8 @@ pub struct Graph<T = ()> {
     pub name: Option<String>,
     #[serde(default)]
     pub graph_type: GraphType,
+    #[serde(default)]
+    pub locked: bool,
     pub auto_y_range: bool,
     pub y_range: Range<f64>,
     pub aux: T,
@@ -261,6 +263,7 @@ impl<T> Graph<T> {
             eql: self.eql.clone(),
             name: self.name.clone(),
             graph_type: self.graph_type,
+            locked: self.locked,
             auto_y_range: self.auto_y_range,
             y_range: self.y_range.clone(),
             aux: f(&self.aux),
