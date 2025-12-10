@@ -19,7 +19,7 @@ use egui::UiBuilder;
 use egui::response::Flags;
 use egui_tiles::{Container, Tile, TileId, Tiles};
 use impeller2_wkt::{Dashboard, Graph, Viewport, WindowRect};
-use smallvec::SmallVec;
+use smallvec::{smallvec, SmallVec};
 use std::collections::{BTreeMap, HashMap};
 use std::{
     fmt::Write as _,
@@ -1115,7 +1115,7 @@ impl TileState {
     pub fn new(tree_id: Id) -> Self {
         Self {
             tree: egui_tiles::Tree::new_tabs(tree_id, vec![]),
-            tree_actions: SmallVec::new(),
+            tree_actions: smallvec![TreeAction::AddSidebars],
             graphs: HashMap::new(),
             container_titles: HashMap::new(),
             tree_id,
@@ -1124,6 +1124,7 @@ impl TileState {
 
     fn reset_tree(&mut self) {
         self.tree = egui_tiles::Tree::new_tabs(self.tree_id, vec![]);
+        self.tree_actions = smallvec![TreeAction::AddSidebars];
     }
 }
 
@@ -2141,6 +2142,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         .tiles
                         .insert_new(Tile::Container(Container::Linear(linear)));
                     ui_state.tree.root = Some(root);
+                    ui_state.tree.make_active(|id, _| id == hierarchy);
                 }
                 TreeAction::RenameContainer(tile_id, title) => {
                     if read_only {
