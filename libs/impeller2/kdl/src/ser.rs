@@ -492,6 +492,11 @@ fn serialize_color_to_node_named(node: &mut KdlNode, color: &Color, name: Option
 }
 
 fn serialize_material_to_node(node: &mut KdlNode, material: &Material) {
+    let emissivity = material.emissivity.clamp(0.0, 1.0);
+    if emissivity > 0.0 {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("emissivity", emissivity as f64));
+    }
     serialize_color_to_node(node, &material.base_color);
 }
 
@@ -927,9 +932,7 @@ graph "value" {
             eql: "a.world_pos".to_string(),
             mesh: Object3DMesh::Mesh {
                 mesh: Mesh::Sphere { radius: 0.2 },
-                material: Material {
-                    base_color: Color::rgb(1.0, 0.0, 0.0),
-                },
+                material: Material::with_color(Color::rgb(1.0, 0.0, 0.0)),
             },
             aux: (),
         }));
@@ -967,9 +970,7 @@ graph "value" {
                     width: 15.0,
                     depth: 20.0,
                 },
-                material: Material {
-                    base_color: Color::rgb(0.0, 0.5, 1.0),
-                },
+                material: Material::with_color(Color::rgb(0.0, 0.5, 1.0)),
             },
             aux: (),
         }));
@@ -995,6 +996,34 @@ graph "value" {
         assert_eq!(material.base_color.r, 0.0);
         assert!((material.base_color.g - 128.0 / 255.0).abs() < f32::EPSILON);
         assert_eq!(material.base_color.b, 1.0);
+    }
+
+    #[test]
+    fn test_serialize_object_3d_material_emissivity() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "a.world_pos".to_string(),
+            mesh: Object3DMesh::Mesh {
+                mesh: Mesh::Sphere { radius: 0.2 },
+                material: Material::color_with_emissivity(1.0, 1.0, 0.0, 0.25),
+            },
+            aux: (),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("emissivity=0.25"),
+            "serialized output should expose emissivity on the mesh node, got:\n{serialized}"
+        );
+
+        let parsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Object3d(obj) = &parsed.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        let Object3DMesh::Mesh { material, .. } = &obj.mesh else {
+            panic!("Expected mesh object");
+        };
+        assert!((material.emissivity - 0.25).abs() < f32::EPSILON);
     }
 
     #[test]
