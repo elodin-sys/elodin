@@ -86,6 +86,40 @@ impl From<Integrator> for nox_ecs::Integrator {
     }
 }
 
+#[pyclass(eq, eq_int)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Frame {
+    ENU,
+    NED,
+    ECEF,
+    ECI,
+    GCRF,
+}
+
+impl From<Frame> for nox_ecs::FrameConvention {
+    fn from(frame: Frame) -> Self {
+        match frame {
+            Frame::ENU => nox_ecs::FrameConvention::ENU,
+            Frame::NED => nox_ecs::FrameConvention::NED,
+            Frame::ECEF => nox_ecs::FrameConvention::ECEF,
+            Frame::ECI => nox_ecs::FrameConvention::ECI,
+            Frame::GCRF => nox_ecs::FrameConvention::GCRF,
+        }
+    }
+}
+
+impl From<nox_ecs::FrameConvention> for Frame {
+    fn from(frame: nox_ecs::FrameConvention) -> Self {
+        match frame {
+            nox_ecs::FrameConvention::ENU => Frame::ENU,
+            nox_ecs::FrameConvention::NED => Frame::NED,
+            nox_ecs::FrameConvention::ECEF => Frame::ECEF,
+            nox_ecs::FrameConvention::ECI => Frame::ECI,
+            nox_ecs::FrameConvention::GCRF => Frame::GCRF,
+        }
+    }
+}
+
 #[pyfunction]
 #[pyo3(signature = (time_step = None, sys = None, integrator = Integrator::Rk4))]
 pub fn six_dof(time_step: Option<f64>, sys: Option<System>, integrator: Integrator) -> System {
@@ -137,6 +171,7 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Edge>()?;
     m.add_class::<Component>()?;
     m.add_class::<Integrator>()?;
+    m.add_class::<Frame>()?;
     m.add_class::<PyFnSystem>()?;
     m.add_class::<QueryMetadata>()?;
     m.add_class::<SystemBuilder>()?;

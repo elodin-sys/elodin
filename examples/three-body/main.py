@@ -6,7 +6,7 @@ SIM_TIME_STEP = 1.0 / 120.0
 # Set the gravitational constant for Newton's law of universal gravitation
 G = 6.6743e-11
 
-w = el.World()
+w = el.World(frame=el.Frame.GCRF)
 
 a = w.spawn(
     [
