@@ -137,8 +137,6 @@ fn panel(
         Panel::QueryTable(_) => icons.viewport,
         Panel::QueryPlot(_) => icons.plot,
         Panel::Tabs(_) => icons.container,
-        Panel::Inspector => icons.viewport,
-        Panel::Hierarchy => icons.viewport,
         Panel::SchematicTree => icons.viewport,
         Panel::Dashboard(_) => icons.viewport,
     };

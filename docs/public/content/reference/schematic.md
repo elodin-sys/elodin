@@ -35,7 +35,7 @@ order = 6
 - `action_pane`: positional `label` (required), `lua` script (required).
 - `query_table`: positional `query` (defaults to empty), `type` (`eql` default, or `sql`).
 - `query_plot`: positional `label` (required), `query` (required), `refresh_interval` in ms (default 1000), `auto_refresh` (default false), `color` (default white), `type` (`eql` default, or `sql`).
-- `inspector`, `hierarchy`, `schematic_tree`: no properties.
+- `schematic_tree`: no properties.
 - `dashboard`: layout node (Bevy UI style). Key properties: `label` (optional), `display` (`flex` default, or `grid`/`block`/`none`), `box_sizing` (`border-box` default or `content-box`), `position_type` (`relative` default or `absolute`), `overflow` (per-axis; defaults visible), `overflow_clip_margin` (visual_box + margin, defaults content-box / 0), sizing (`left`/`right`/`top`/`bottom`/`width`/`height`/`min_*`/`max_*` accept `auto`, `px`, `%`, `vw`, `vh`, `vmin`, `vmax`; default `auto`), `aspect_ratio` (optional f32), alignment (`align_items`/`justify_items`/`align_self`/`justify_self`/`align_content`/`justify_content`, all default to `default` variants), flex (`flex_direction`, `flex_wrap`, `flex_grow` default 0, `flex_shrink` default 1, `flex_basis` default `auto`, `row_gap`/`column_gap` default `auto`), `children` (nested dashboard nodes), colors via `bg`/`background` child (default transparent), `text` (optional), `font_size` (default 16), `text_color` child (default white), spacing via `margin`/`padding`/`border` children with `left`/`right`/`top`/`bottom`.
 
 ### object_3d
@@ -96,8 +96,6 @@ panel =
   | action_pane
   | query_table
   | query_plot
-  | inspector
-  | hierarchy
   | schematic_tree
   | dashboard
   | split
@@ -149,8 +147,6 @@ query_plot = "query_plot"
            [color]
            [type=eql|sql]
 
-inspector      = "inspector"
-hierarchy      = "hierarchy"
 schematic_tree = "schematic_tree"
 dashboard      = "dashboard" { dashboard_node }+
 

@@ -188,10 +188,8 @@ impl SchematicParam<'_, '_> {
 
                 // Not exported
                 Pane::VideoStream(_) => None,
-
-                // Structural panes
-                Pane::Hierarchy => Some(Panel::Hierarchy),
-                Pane::Inspector => Some(Panel::Inspector),
+                Pane::Inspector => None,
+                Pane::Hierarchy => None,
                 Pane::SchematicTree(_) => Some(Panel::SchematicTree),
 
                 // Dashboard

@@ -47,8 +47,6 @@ fn serialize_panel<T>(panel: &Panel<T>) -> KdlNode {
         Panel::ActionPane(action_pane) => serialize_action_pane(action_pane),
         Panel::QueryTable(query_table) => serialize_query_table(query_table),
         Panel::QueryPlot(query_plot) => serialize_query_plot(query_plot),
-        Panel::Inspector => KdlNode::new("inspector"),
-        Panel::Hierarchy => KdlNode::new("hierarchy"),
         Panel::SchematicTree => KdlNode::new("schematic_tree"),
         Panel::Dashboard(dashboard) => serialize_dashboard(dashboard),
     }
