@@ -167,9 +167,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     "Sphere" => {
                         object_3d_state.data.mesh = Object3DMesh::Mesh {
                             mesh: Mesh::Sphere { radius: 1.0 },
-                            material: Material {
-                                base_color: impeller2_wkt::Color::HYPERBLUE,
-                            },
+                            material: Material::with_color(impeller2_wkt::Color::HYPERBLUE),
                         };
                         object_3d_state.scale_expr = None;
                         object_3d_state.scale_error = None;
@@ -181,9 +179,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                                 y: 1.0,
                                 z: 1.0,
                             },
-                            material: Material {
-                                base_color: impeller2_wkt::Color::HYPERBLUE,
-                            },
+                            material: Material::with_color(impeller2_wkt::Color::HYPERBLUE),
                         };
                         object_3d_state.scale_expr = None;
                         object_3d_state.scale_error = None;
@@ -194,9 +190,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                                 radius: 0.5,
                                 height: 2.0,
                             },
-                            material: Material {
-                                base_color: impeller2_wkt::Color::HYPERBLUE,
-                            },
+                            material: Material::with_color(impeller2_wkt::Color::HYPERBLUE),
                         };
                         object_3d_state.scale_expr = None;
                         object_3d_state.scale_error = None;
@@ -207,9 +201,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                                 width: 10.0,
                                 depth: 10.0,
                             },
-                            material: Material {
-                                base_color: impeller2_wkt::Color::HYPERBLUE,
-                            },
+                            material: Material::with_color(impeller2_wkt::Color::HYPERBLUE),
                         };
                         object_3d_state.scale_expr = None;
                         object_3d_state.scale_error = None;
