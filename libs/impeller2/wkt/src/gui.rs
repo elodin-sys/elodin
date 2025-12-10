@@ -85,8 +85,6 @@ pub enum Panel<T = ()> {
     QueryTable(QueryTable),
     QueryPlot(QueryPlot<T>),
     Tabs(Vec<Panel<T>>),
-    Inspector,
-    Hierarchy,
     SchematicTree,
     Dashboard(Box<Dashboard<T>>),
 }
@@ -103,8 +101,6 @@ impl<T> Panel<T> {
             Panel::QueryTable(_) => "Query Table",
             Panel::QueryPlot(query_plot) => &query_plot.label,
             Panel::Tabs(_) => "Tabs",
-            Panel::Inspector => "Inspector",
-            Panel::Hierarchy => "Hierarchy",
             Panel::SchematicTree => "Tree",
             Panel::Dashboard(d) => d.root.label.as_deref().unwrap_or("Dashboard"),
         }
@@ -145,9 +141,7 @@ impl<T> Panel<T> {
             Panel::ActionPane(action_pane) => Panel::ActionPane(action_pane.clone()),
             Panel::QueryTable(query_table) => Panel::QueryTable(query_table.clone()),
             Panel::QueryPlot(query_plot) => Panel::QueryPlot(query_plot.map_aux(f)),
-            Panel::Hierarchy => Panel::Hierarchy,
             Panel::SchematicTree => Panel::SchematicTree,
-            Panel::Inspector => Panel::Inspector,
             Panel::Viewport(v) => Panel::Viewport(v.map_aux(f)),
             Panel::Dashboard(d) => Panel::Dashboard(Box::new(d.map_aux(f))),
         }

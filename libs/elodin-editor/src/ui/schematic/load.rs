@@ -629,12 +629,6 @@ impl LoadSchematicParams<'_, '_> {
                 };
                 tile_state.insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false)
             }
-            Panel::Inspector => {
-                tile_state.insert_tile(Tile::Pane(Pane::Inspector), parent_id, false)
-            }
-            Panel::Hierarchy => {
-                tile_state.insert_tile(Tile::Pane(Pane::Hierarchy), parent_id, false)
-            }
             Panel::SchematicTree => {
                 let entity = self.commands.spawn(super::TreeWidgetState::default()).id();
                 let pane = TreePane { entity };
