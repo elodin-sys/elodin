@@ -33,8 +33,9 @@ pub fn parse_schematic(input: &str) -> Result<Schematic, KdlSchematicError> {
 fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlSchematicError> {
     match node.name().value() {
         "tabs" | "hsplit" | "vsplit" | "viewport" | "graph" | "component_monitor"
-        | "action_pane" | "query_table" | "query_plot"
-        | "schematic_tree" | "dashboard" => Ok(SchematicElem::Panel(parse_panel(node, src)?)),
+        | "action_pane" | "query_table" | "query_plot" | "schematic_tree" | "dashboard" => {
+            Ok(SchematicElem::Panel(parse_panel(node, src)?))
+        }
         "window" => Ok(SchematicElem::Window(parse_window(node, src)?)),
         "object_3d" => Ok(SchematicElem::Object3d(parse_object_3d(node, src)?)),
         "line_3d" => Ok(SchematicElem::Line3d(parse_line_3d(node, src)?)),

@@ -19,7 +19,7 @@ use egui::UiBuilder;
 use egui::response::Flags;
 use egui_tiles::{Container, Tile, TileId, Tiles};
 use impeller2_wkt::{Dashboard, Graph, Viewport, WindowRect};
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 use std::collections::{BTreeMap, HashMap};
 use std::{
     fmt::Write as _,
@@ -1379,7 +1379,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
         egui_tiles::SimplificationOptions {
-            all_panes_must_have_tabs: true,
+            all_panes_must_have_tabs: self.target_window.is_none(),
             join_nested_linear_containers: true,
             ..Default::default()
         }
@@ -1740,7 +1740,6 @@ pub struct TileLayoutArgs {
 impl WidgetSystem for TileLayout<'_, '_> {
     type Args = TileLayoutArgs;
     type Output = ();
-
     fn ui_system(
         world: &mut World,
         state: &mut SystemState<Self>,
@@ -1759,6 +1758,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 let Some(mut ui_state) = state_mut.tile_param.target(window) else {
                     return;
                 };
+                let log_dump = !ui_state.tree_actions.is_empty();
+                let _ = log_dump;
                 let empty_tree = egui_tiles::Tree::empty(ui_state.tree_id);
                 (
                     std::mem::take(&mut ui_state.tree_actions),
@@ -2054,19 +2055,131 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     if read_only {
                         continue;
                     }
+                    let _ = window.map(|w| w.index());
+                    // Remove any existing sidebars from tab/linear containers to avoid nesting.
+                    let containers: Vec<TileId> = ui_state
+                        .tree
+                        .tiles
+                        .iter()
+                        .filter_map(|(id, tile)| matches!(tile, Tile::Container(_)).then_some(*id))
+                        .collect();
+
+                    for id in containers {
+                        let to_remove: Vec<TileId> =
+                            if let Some(Tile::Container(container)) = ui_state.tree.tiles.get(id) {
+                                match container {
+                                    Container::Tabs(tabs) => tabs
+                                        .children
+                                        .iter()
+                                        .filter_map(|child| {
+                                            matches!(
+                                                ui_state.tree.tiles.get(*child),
+                                                Some(Tile::Pane(Pane::Hierarchy | Pane::Inspector))
+                                            )
+                                            .then_some(*child)
+                                        })
+                                        .collect(),
+                                    Container::Linear(linear) => linear
+                                        .children
+                                        .iter()
+                                        .filter_map(|child| {
+                                            matches!(
+                                                ui_state.tree.tiles.get(*child),
+                                                Some(Tile::Pane(Pane::Hierarchy | Pane::Inspector))
+                                            )
+                                            .then_some(*child)
+                                        })
+                                        .collect(),
+                                    Container::Grid(_) => Vec::new(),
+                                }
+                            } else {
+                                Vec::new()
+                            };
+
+                        if to_remove.is_empty() {
+                            continue;
+                        }
+                        if let Some(Tile::Container(container)) = ui_state.tree.tiles.get_mut(id) {
+                            match container {
+                                Container::Tabs(tabs) => {
+                                    tabs.children.retain(|child| !to_remove.contains(child));
+                                    if let Some(active) = tabs.active
+                                        && !tabs.children.contains(&active)
+                                    {
+                                        tabs.active = tabs.children.first().copied();
+                                    }
+                                }
+                                Container::Linear(linear) => {
+                                    linear.children.retain(|child| !to_remove.contains(child));
+                                }
+                                Container::Grid(_) => {}
+                            }
+                        }
+                    }
+
+                    let mut main_content = ui_state.tree.root();
+                    if let Some(root) = ui_state.tree.root() {
+                        main_content = match ui_state.tree.tiles.get(root) {
+                            Some(Tile::Container(Container::Tabs(tabs))) => {
+                                if tabs.children.is_empty() {
+                                    None
+                                } else {
+                                    Some(root)
+                                }
+                            }
+                            Some(Tile::Container(Container::Linear(linear))) => {
+                                match linear.children.len() {
+                                    0 => None,
+                                    1 => Some(linear.children[0]),
+                                    _ => Some(root),
+                                }
+                            }
+                            Some(Tile::Container(Container::Grid(grid))) => {
+                                let children: Vec<_> = grid.children().copied().collect();
+                                match children.len() {
+                                    0 => None,
+                                    1 => Some(children[0]),
+                                    _ => Some(root),
+                                }
+                            }
+                            Some(Tile::Pane(_)) => Some(root),
+                            _ => None,
+                        };
+                    }
+
                     let hierarchy = ui_state.tree.tiles.insert_new(Tile::Pane(Pane::Hierarchy));
                     let inspector = ui_state.tree.tiles.insert_new(Tile::Pane(Pane::Inspector));
+
+                    let mut main_content = main_content.unwrap_or_else(|| {
+                        let tabs = egui_tiles::Tabs::new(Vec::new());
+                        ui_state
+                            .tree
+                            .tiles
+                            .insert_new(Tile::Container(Container::Tabs(tabs)))
+                    });
+
+                    let wrap_into_tabs = !matches!(
+                        ui_state.tree.tiles.get(main_content),
+                        Some(Tile::Container(Container::Tabs(_)))
+                    );
+                    if wrap_into_tabs {
+                        let mut tabs = egui_tiles::Tabs::new(vec![main_content]);
+                        tabs.set_active(main_content);
+                        main_content = ui_state
+                            .tree
+                            .tiles
+                            .insert_new(Tile::Container(Container::Tabs(tabs)));
+                    }
 
                     let mut linear = egui_tiles::Linear::new(
                         egui_tiles::LinearDir::Horizontal,
                         vec![hierarchy, inspector],
                     );
-                    if let Some(root) = ui_state.tree.root() {
-                        linear.children.insert(1, root);
-                        linear.shares.set_share(hierarchy, 0.2);
-                        linear.shares.set_share(root, 0.6);
-                        linear.shares.set_share(inspector, 0.2);
-                    }
+                    linear.children.insert(1, main_content);
+                    linear.shares.set_share(hierarchy, 0.2);
+                    linear.shares.set_share(main_content, 0.6);
+                    linear.shares.set_share(inspector, 0.2);
+
                     let root = ui_state
                         .tree
                         .tiles
