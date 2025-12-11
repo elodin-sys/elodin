@@ -555,15 +555,6 @@ impl TileState {
         ));
     }
 
-    pub fn create_hierarchy_tile(&mut self, tile_id: Option<TileId>) {
-        self.tree_actions.push(TreeAction::AddHierarchy(tile_id));
-    }
-
-    pub fn create_tree_tile(&mut self, tile_id: Option<TileId>) {
-        self.tree_actions
-            .push(TreeAction::AddSchematicTree(tile_id));
-    }
-
     pub fn debug_dump(&self) -> String {
         fn visit(
             tree: &egui_tiles::Tree<Pane>,
@@ -1136,8 +1127,6 @@ pub enum TreeAction {
     AddActionTile(Option<TileId>, String, String),
     AddVideoStream(Option<TileId>, [u8; 2], String),
     AddDashboard(Option<TileId>, Box<impeller2_wkt::Dashboard>, String),
-    AddHierarchy(Option<TileId>),
-    AddSchematicTree(Option<TileId>),
     AddSidebars,
     DeleteTab(TileId),
     SelectTile(TileId),
@@ -2058,31 +2047,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                     {
                         *state_mut.selected_object = SelectedObject::Graph { graph_id: entity };
-                        ui_state.tree.make_active(|id, _| id == tile_id);
-                    }
-                }
-                TreeAction::AddHierarchy(parent_tile_id) => {
-                    if read_only {
-                        continue;
-                    }
-                    if let Some(tile_id) =
-                        ui_state.insert_tile(Tile::Pane(Pane::Hierarchy), parent_tile_id, true)
-                    {
-                        ui_state.tree.make_active(|id, _| id == tile_id);
-                    }
-                }
-                TreeAction::AddSchematicTree(parent_tile_id) => {
-                    if read_only {
-                        continue;
-                    }
-                    let entity = state_mut
-                        .commands
-                        .spawn(super::schematic::tree::TreeWidgetState::default())
-                        .id();
-                    let pane = Pane::SchematicTree(TreePane { entity });
-                    if let Some(tile_id) =
-                        ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
-                    {
                         ui_state.tree.make_active(|id, _| id == tile_id);
                     }
                 }
