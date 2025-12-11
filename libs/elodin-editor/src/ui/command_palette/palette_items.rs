@@ -658,7 +658,6 @@ pub fn create_query_plot(tile_id: Option<TileId>) -> PaletteItem {
     )
 }
 
-
 pub fn create_dashboard(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Dashboard",
