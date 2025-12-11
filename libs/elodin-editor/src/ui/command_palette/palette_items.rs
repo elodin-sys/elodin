@@ -672,20 +672,6 @@ pub fn create_hierarchy(tile_id: Option<TileId>) -> PaletteItem {
     )
 }
 
-pub fn create_inspector(tile_id: Option<TileId>) -> PaletteItem {
-    PaletteItem::new(
-        "Create Inspector",
-        TILES_LABEL,
-        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
-            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
-                return PaletteEvent::Error("Secondary window unavailable".to_string());
-            };
-            tile_state.create_inspector_tile(tile_id);
-            PaletteEvent::Exit
-        },
-    )
-}
-
 pub fn create_schematic_tree(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Schematic Tree",
@@ -1598,7 +1584,6 @@ pub fn create_tiles(tile_id: TileId) -> PalettePage {
         create_hierarchy(Some(tile_id)),
         create_schematic_tree(Some(tile_id)),
         create_dashboard(Some(tile_id)),
-        create_inspector(Some(tile_id)),
         create_sidebars(),
     ])
 }
@@ -1668,7 +1653,6 @@ impl Default for PalettePage {
             create_query_plot(None),
             create_video_stream(None),
             create_hierarchy(None),
-            create_inspector(None),
             create_schematic_tree(None),
             create_dashboard(None),
             create_sidebars(),
