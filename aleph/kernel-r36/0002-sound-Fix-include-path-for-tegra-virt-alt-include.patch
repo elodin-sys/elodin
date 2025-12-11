@@ -1,0 +1,28 @@
+From 8ccff3029f2d8bf626adc1dcd44924e86ec91ba8 Mon Sep 17 00:00:00 2001
+From: Elliot Berman <eberman@anduril.com>
+Date: Fri, 25 Apr 2025 08:40:40 -0700
+Subject: [PATCH 2/2] sound: Fix include path for tegra-virt-alt/include
+
+overlay isn't defined.
+
+Signed-off-by: Elliot Berman <eberman@anduril.com>
+---
+ sound/soc/tegra-virt-alt/Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/sound/soc/tegra-virt-alt/Makefile b/sound/soc/tegra-virt-alt/Makefile
+index 77bad808..2853f096 100644
+--- a/sound/soc/tegra-virt-alt/Makefile
++++ b/sound/soc/tegra-virt-alt/Makefile
+@@ -4,7 +4,7 @@
+ GCOV_PROFILE := y
+ 
+ subdir-ccflags-y += -Werror
+-ccflags-y += -I$(overlay)/$(src)/../tegra-virt-alt/include/
++ccflags-y += -I$(srctree.nvidia-oot)/sound/soc/tegra-virt-alt/include/
+ ccflags-y += -I$(overlay)/$(src)/../codecs
+ ccflags-y += -I$(srctree.nvidia-oot)/sound/soc/tegra-virt-alt/nvaudio_ivc/
+ 
+-- 
+2.49.0
+

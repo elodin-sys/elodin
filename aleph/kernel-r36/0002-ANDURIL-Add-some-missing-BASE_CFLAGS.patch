@@ -1,0 +1,32 @@
+From 31473d1beb229e885073d17a4d547e3015fe2791 Mon Sep 17 00:00:00 2001
+From: Elliot Berman <eberman@anduril.com>
+Date: Tue, 20 May 2025 10:01:39 -0700
+Subject: [PATCH 2/4] ANDURIL: Add some missing BASE_CFLAGS
+
+After inspecting KBUILD_CFLAGS, observed some flags from the conftest
+were missing. Add -fshort-wchar to avoid the following conftest
+false-negative:
+
+/build/l4t-oot-sources/out/nvidia-linux-header/include/linux/efi.h:1122:17: error: passing argument 1 of 'get_var' from incompatible pointer type [8;;https://gcc.gnu.org/onlinedocs/gcc-14.2.0/gcc/Warning-Options.html#index-Wincompatible-pointer-types-Wincompatible-pointer-types8;;]
+
+Signed-off-by: Elliot Berman <eberman@anduril.com>
+---
+ kernel-open/conftest.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel-open/conftest.sh b/kernel-open/conftest.sh
+index 391374f..b89a15e 100644
+--- a/kernel-open/conftest.sh
++++ b/kernel-open/conftest.sh
+@@ -88,7 +88,7 @@ build_cflags() {
+     ISYSTEM=`$CC -print-file-name=include 2> /dev/null`
+     BASE_CFLAGS="-O2 -D__KERNEL__ \
+ -DKBUILD_BASENAME=\"#conftest$$\" -DKBUILD_MODNAME=\"#conftest$$\" \
+--nostdinc -isystem $ISYSTEM \
++-nostdinc -isystem $ISYSTEM -fshort-wchar -funsigned-char \
+ -Wno-implicit-function-declaration -Wno-strict-prototypes"
+ 
+     if [ "$OUTPUT" != "$SOURCES" ]; then
+-- 
+2.49.0
+

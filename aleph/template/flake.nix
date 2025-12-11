@@ -50,8 +50,8 @@
 
       # overlays required to get elodin and nvidia packages
       nixpkgs.overlays = [
-        aleph.overlays.default
         aleph.overlays.jetpack
+        aleph.overlays.default
       ];
 
       system.stateVersion = "25.05";

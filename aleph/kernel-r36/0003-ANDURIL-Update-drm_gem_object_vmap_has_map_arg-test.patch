@@ -1,0 +1,30 @@
+From f1a1f36fcac33d65488e63ad16ffa510553fb968 Mon Sep 17 00:00:00 2001
+From: Elliot Berman <eberman@anduril.com>
+Date: Tue, 20 May 2025 10:06:14 -0700
+Subject: [PATCH 3/4] ANDURIL: Update drm_gem_object_vmap_has_map_arg test
+
+Kernel has renamed "struct dma_buf_map" as "struct iosys_map" and GCC
+doesn't like the implicit cast. Use untyped pointer to make GCC fine
+with it.
+
+Signed-off-by: Elliot Berman <eberman@anduril.com>
+---
+ kernel-open/conftest.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel-open/conftest.sh b/kernel-open/conftest.sh
+index b89a15e..971acb3 100644
+--- a/kernel-open/conftest.sh
++++ b/kernel-open/conftest.sh
+@@ -5049,7 +5049,7 @@ compile_test() {
+             CODE="
+             #include <drm/drm_gem.h>
+             int conftest_drm_gem_object_vmap_has_map_arg(
+-                    struct drm_gem_object *obj, struct dma_buf_map *map) {
++                    struct drm_gem_object *obj, void *map) {
+                 return obj->funcs->vmap(obj, map);
+             }"
+ 
+-- 
+2.49.0
+

@@ -1,0 +1,38 @@
+diff --git a/source/Makefile b/source/Makefile
+index ad7dc07..602ddf0 100644
+--- a/source/Makefile
++++ b/source/Makefile
+@@ -112,25 +112,22 @@ define display-cmd
+ 		KERNELRELEASE="" \
+ 		SYSSRC=$(NVIDIA_HEADERS) \
+ 		SYSOUT=$(NVIDIA_HEADERS) \
+-		SYSSRCHOST1X=$(MAKEFILE_DIR)/nvidia-oot/drivers/gpu/host1x/include \
+-		CC=$(CROSS_COMPILE)gcc \
+-		LD=$(CROSS_COMPILE)ld.bfd \
+-		AR=$(CROSS_COMPILE)ar \
+-		CXX=$(CROSS_COMPILE)g++ \
+-		OBJCOPY=$(CROSS_COMPILE)objcopy
++		SYSSRCHOST1X=$(MAKEFILE_DIR)/nvidia-oot/drivers/gpu/host1x/include
+ endef
+ 
+ 
+ nvidia-headers: nvidia-oot
+ 	mkdir -p $(NVIDIA_HEADERS)
+-	cp -LR $(KERNEL_HEADERS)/* $(NVIDIA_HEADERS)
++	cp -HR $(KERNEL_HEADERS)/* $(NVIDIA_HEADERS)
++	chmod -R u+w $(NVIDIA_HEADERS)
+ 	if [ "$(KERNEL_HEADERS)" != "$(KERNEL_OUTPUT)" ] ; then \
+-		cp -LR $(KERNEL_OUTPUT)/include/* $(NVIDIA_HEADERS)/include/ ; \
+-		cp -LR $(KERNEL_OUTPUT)/arch/arm64/include/* $(NVIDIA_HEADERS)/arch/arm64/include/ ; \
+-		cp -LR $(KERNEL_OUTPUT)/scripts/* $(NVIDIA_HEADERS)/scripts/ ; \
++		cp -HR $(KERNEL_OUTPUT)/include/* $(NVIDIA_HEADERS)/include/ ; \
++		cp -HR $(KERNEL_OUTPUT)/arch/arm64/include/* $(NVIDIA_HEADERS)/arch/arm64/include/ ; \
++		cp -HR $(KERNEL_OUTPUT)/scripts/* $(NVIDIA_HEADERS)/scripts/ ; \
+ 		cp $(KERNEL_OUTPUT)/System.map $(NVIDIA_HEADERS)/ || true ; \
+ 	fi
+-	cp -LR $(MAKEFILE_DIR)/nvidia-oot/include/* $(NVIDIA_HEADERS)/include/
++	chmod -R u+w $(NVIDIA_HEADERS)
++	cp -HR $(MAKEFILE_DIR)/nvidia-oot/include/* $(NVIDIA_HEADERS)/include/
+ 	cat $(KERNEL_OUTPUT)/Module.symvers $(MAKEFILE_DIR)/nvidia-oot/Module.symvers > \
+ 		$(NVIDIA_HEADERS)/Module.symvers
+ 

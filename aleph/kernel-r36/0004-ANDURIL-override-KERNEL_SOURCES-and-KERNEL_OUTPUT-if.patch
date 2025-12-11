@@ -1,0 +1,49 @@
+From de52dbc1f5be7d08d75731c4e3175c961f954b9d Mon Sep 17 00:00:00 2001
+From: Elliot Berman <eberman@anduril.com>
+Date: Mon, 30 Jun 2025 17:42:17 -0700
+Subject: [PATCH 4/4] ANDURIL: override KERNEL_SOURCES and KERNEL_OUTPUT if
+ SYSSRC/SYSOUT set
+
+We set KERNEL_OUTPUT when calling the top level makefile to point to the
+base kernel derivation. This is expected/prescribed behavior for the top
+level makefile in Linux_for_Tegra/source/Makefile. This value, however,
+gets propagated into the display drivers. The display drivers depend on
+the other OOT modules and the top level makefile attempts to override
+this by setting SYSSRC and SYSOUT. The display driver Makefile attempts
+to set KERNEL_OUTPUT from SYSOUT/SYSSRC. This "fails" because it's been
+(technically) overridden from the command line at the top level
+Makefile. Add the override keyword to ensure KERNEL_OUTPUT and
+KERNEL_SOURCES are set appropriately if the SYSOUT/SYSSRC variables are
+set.
+
+Signed-off-by: Elliot Berman <eberman@anduril.com>
+---
+ kernel-open/Makefile | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/kernel-open/Makefile b/kernel-open/Makefile
+index d00c14b..e3b9e54 100644
+--- a/kernel-open/Makefile
++++ b/kernel-open/Makefile
+@@ -24,7 +24,7 @@ else
+   # NV_KERNEL_{SOURCES,OUTPUT}.
+ 
+   ifdef SYSSRC
+-    KERNEL_SOURCES := $(SYSSRC)
++    override KERNEL_SOURCES := $(SYSSRC)
+   else
+     KERNEL_UNAME ?= $(shell uname -r)
+     KERNEL_MODLIB := /lib/modules/$(KERNEL_UNAME)
+@@ -35,8 +35,8 @@ else
+   KBUILD_PARAMS :=
+ 
+   ifdef SYSOUT
++    override KERNEL_OUTPUT := $(SYSOUT)
+     ifneq ($(SYSOUT), $(KERNEL_SOURCES))
+-      KERNEL_OUTPUT := $(SYSOUT)
+       KBUILD_PARAMS := KBUILD_OUTPUT=$(KERNEL_OUTPUT)
+     endif
+   else
+-- 
+2.49.0
+

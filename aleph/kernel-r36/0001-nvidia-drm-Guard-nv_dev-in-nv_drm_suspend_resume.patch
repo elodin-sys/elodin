@@ -1,0 +1,29 @@
+From 751364b6b30105aca2d67e2d84252699c15bac96 Mon Sep 17 00:00:00 2001
+From: Elliot Berman <eberman@anduril.com>
+Date: Fri, 25 Apr 2025 14:25:29 -0700
+Subject: [PATCH 1/4] nvidia-drm: Guard nv_dev in nv_drm_suspend_resume
+
+All that code should be in a separate function :shrug:
+
+Signed-off-by: Elliot Berman <eberman@anduril.com>
+---
+ kernel-open/nvidia-drm/nvidia-drm-drv.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/kernel-open/nvidia-drm/nvidia-drm-drv.c b/kernel-open/nvidia-drm/nvidia-drm-drv.c
+index 61842e8..dd18e80 100644
+--- a/kernel-open/nvidia-drm/nvidia-drm-drv.c
++++ b/kernel-open/nvidia-drm/nvidia-drm-drv.c
+@@ -1861,7 +1861,9 @@ void nv_drm_suspend_resume(NvBool suspend)
+ {
+     static DEFINE_MUTEX(nv_drm_suspend_mutex);
+     static NvU32 nv_drm_suspend_count = 0;
++#if defined(NV_DRM_ATOMIC_MODESET_AVAILABLE)
+     struct nv_drm_device *nv_dev;
++#endif /* NV_DRM_ATOMIC_MODESET_AVAILABLE */
+ 
+     mutex_lock(&nv_drm_suspend_mutex);
+ 
+-- 
+2.49.0
+

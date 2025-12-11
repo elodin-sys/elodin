@@ -126,6 +126,7 @@ in {
     aleph-status
     video-streamer
     elodinsink
-    deepstreamer
+    i2c-tools
+    # deepstreamer
   ];
 }
