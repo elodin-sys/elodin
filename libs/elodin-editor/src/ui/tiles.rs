@@ -1949,9 +1949,9 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         .children
                         .iter()
                         .find_map(|child| sidebar_kind(tiles, *child)),
-                    Some(Tile::Container(Container::Grid(grid))) => {
-                        grid.children().find_map(|child| sidebar_kind(tiles, *child))
-                    }
+                    Some(Tile::Container(Container::Grid(grid))) => grid
+                        .children()
+                        .find_map(|child| sidebar_kind(tiles, *child)),
                     _ => None,
                 }
             }
@@ -2012,10 +2012,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     let sidebar_kind = left_kind.or(right_kind).unwrap();
                     let sidebar_on_left = left_sidebar;
                     let pair_width = left_rect.width() + right_rect.width();
-                    let Some((share_left, share_right)) = tree
-                        .tiles
-                        .get(container_id)
-                        .and_then(|tile| match tile {
+                    let Some((share_left, share_right)) =
+                        tree.tiles.get(container_id).and_then(|tile| match tile {
                             Tile::Container(Container::Linear(linear)) => {
                                 Some((linear.shares[left_id], linear.shares[right_id]))
                             }
@@ -2139,9 +2137,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             };
                             mask_state.set_last_share(sidebar_kind, Some(current_sidebar_share));
                             let max_sidebar_share = (pair_sum - min_other_share).max(0.01);
-                            let target_sidebar_share = min_sidebar_share
-                                .max(0.01)
-                                .min(max_sidebar_share);
+                            let target_sidebar_share =
+                                min_sidebar_share.max(0.01).min(max_sidebar_share);
                             let left_share = if sidebar_on_left {
                                 target_sidebar_share
                             } else {
@@ -2190,8 +2187,11 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             let share_left = linear.shares[left_id];
                             let share_right = linear.shares[right_id];
                             let share_sum = share_left + share_right;
-                            let current_sidebar_share =
-                                if sidebar_on_left { share_left } else { share_right };
+                            let current_sidebar_share = if sidebar_on_left {
+                                share_left
+                            } else {
+                                share_right
+                            };
 
                             let total = new_left + new_right;
                             let new_left_share = share_sum * new_left / total.max(1.0);
@@ -2207,8 +2207,11 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             ));
                             ui.ctx().request_repaint();
 
-                            let new_sidebar_share =
-                                if sidebar_on_left { new_left_share } else { new_right_share };
+                            let new_sidebar_share = if sidebar_on_left {
+                                new_left_share
+                            } else {
+                                new_right_share
+                            };
                             let mask_threshold = min_sidebar_share * 1.05;
                             if new_sidebar_share <= mask_threshold
                                 && !mask_state.masked(sidebar_kind)
@@ -2216,13 +2219,20 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 let prev_last = mask_state.last_share(sidebar_kind);
                                 let should_update_last =
                                     current_sidebar_share > min_sidebar_share * 1.5;
-                                let store_share =
-                                    if should_update_last { Some(current_sidebar_share) } else { prev_last };
+                                let store_share = if should_update_last {
+                                    Some(current_sidebar_share)
+                                } else {
+                                    prev_last
+                                };
                                 mask_state.set_last_share(sidebar_kind, store_share);
                                 mask_state.set_masked(sidebar_kind, true);
                                 info!(
                                     "[DBG] sidebar_mask_drag {:?} container={:?} share_new={:.4} share_prev={:.4} stored={:?}",
-                                    sidebar_kind, container_id, new_sidebar_share, current_sidebar_share, store_share
+                                    sidebar_kind,
+                                    container_id,
+                                    new_sidebar_share,
+                                    current_sidebar_share,
+                                    store_share
                                 );
                             }
                         }
@@ -2646,8 +2656,16 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     linear.children.insert(1, main_content);
                     let hier_default = 0.2;
                     let insp_default = 0.2;
-                    let hier_share = if ui_state.hierarchy_masked { 0.01 } else { hier_default };
-                    let insp_share = if ui_state.inspector_masked { 0.01 } else { insp_default };
+                    let hier_share = if ui_state.hierarchy_masked {
+                        0.01
+                    } else {
+                        hier_default
+                    };
+                    let insp_share = if ui_state.inspector_masked {
+                        0.01
+                    } else {
+                        insp_default
+                    };
                     let mut center_share = 1.0 - (hier_share + insp_share);
                     if center_share <= 0.0 {
                         center_share = 0.1;
@@ -2655,12 +2673,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     linear.shares.set_share(hierarchy, hier_share);
                     linear.shares.set_share(main_content, center_share);
                     linear.shares.set_share(inspector, insp_share);
-                    ui_state
-                        .last_hierarchy_share
-                        .get_or_insert(hier_default);
-                    ui_state
-                        .last_inspector_share
-                        .get_or_insert(insp_default);
+                    ui_state.last_hierarchy_share.get_or_insert(hier_default);
+                    ui_state.last_inspector_share.get_or_insert(insp_default);
 
                     let root = ui_state
                         .tree
@@ -2670,9 +2684,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     ui_state.tree.make_active(|id, _| id == hierarchy);
                     info!(
                         "[DBG] add_sidebars window={:?} masked=({},{}) shares=(hierarchy=0.2, center=0.6, inspector=0.2)",
-                        window_idx,
-                        ui_state.hierarchy_masked,
-                        ui_state.inspector_masked
+                        window_idx, ui_state.hierarchy_masked, ui_state.inspector_masked
                     );
                 }
                 TreeAction::RenameContainer(tile_id, title) => {
