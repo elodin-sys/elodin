@@ -42,6 +42,7 @@ use winit::{
     window::Window as WinitWindow,
 };
 
+#[allow(dead_code)]
 pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
     x: 10,
     y: 10,
