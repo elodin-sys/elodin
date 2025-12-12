@@ -1501,41 +1501,44 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
     fn top_bar_right_ui(
         &mut self,
-        tiles: &Tiles<Pane>,
+        _tiles: &Tiles<Pane>,
         ui: &mut Ui,
         tile_id: TileId,
-        tabs: &egui_tiles::Tabs,
+        _tabs: &egui_tiles::Tabs,
         _scroll_offset: &mut f32,
     ) {
         if self.read_only {
             return;
         }
-        let sidebar_only = tabs
-            .children
-            .iter()
-            .all(|child| matches!(self.tab_role(tiles, *child), TabRole::Super));
 
         let mut layout = SystemState::<TileLayout>::new(self.world);
         let mut layout = layout.get_mut(self.world);
 
         let top_bar_rect = ui.available_rect_before_wrap();
-        if !sidebar_only {
-            ui.painter().hline(
-                top_bar_rect.x_range(),
-                top_bar_rect.bottom(),
-                egui::Stroke::new(1.0, get_scheme().border_primary),
-            );
+        ui.painter().hline(
+            top_bar_rect.x_range(),
+            top_bar_rect.bottom(),
+            egui::Stroke::new(1.0, get_scheme().border_primary),
+        );
 
-            ui.style_mut().visuals.widgets.hovered.bg_stroke = Stroke::NONE;
-            ui.style_mut().visuals.widgets.active.bg_stroke = Stroke::NONE;
-            ui.add_space(5.0);
-            let resp = ui.add(EImageButton::new(self.icons.add).scale(1.4, 1.4));
-            if resp.clicked() {
-                layout
-                    .cmd_palette_state
-                    .open_page(move || palette_items::create_tiles(tile_id));
-                layout.cmd_palette_state.target_window = self.target_window;
-            }
+        ui.style_mut().visuals.widgets.hovered.bg_stroke = Stroke::NONE;
+        ui.style_mut().visuals.widgets.active.bg_stroke = Stroke::NONE;
+        ui.add_space(5.0);
+        let resp = ui.add(EImageButton::new(self.icons.add).scale(1.4, 1.4));
+        if resp.clicked() {
+            info!(
+                "tab_add_click container={:?} window={:?}",
+                tile_id, self.target_window
+            );
+            layout
+                .cmd_palette_state
+                .open_page(move || palette_items::create_tiles(tile_id));
+            layout.cmd_palette_state.target_window = self.target_window;
+        } else if resp.hovered() {
+            info!(
+                "tab_add_hover container={:?} window={:?}",
+                tile_id, self.target_window
+            );
         }
     }
 }
@@ -2141,7 +2144,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     painter.rect_stroke(gutter_rect, 0.0, stroke, egui::StrokeKind::Inside);
 
                     let id = ui.id().with(("sidebar_gutter", container_id, i));
-                    let hit_rect = gutter_rect.expand(32.0);
+                    let hit_rect = gutter_rect;
                     #[derive(Clone, Copy, Default)]
                     struct DragState {
                         left_width: f32,
