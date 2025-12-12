@@ -1721,6 +1721,88 @@ impl RootWidgetSystem for TileSystem<'_, '_> {
     }
 }
 
+fn unmask_sidebar_on_select(ui_state: &mut TileState, sidebar_tile: TileId, kind: SidebarKind) {
+    let target_frac = 0.2;
+    let min_share = 0.01;
+    fn contains_child(tiles: &Tiles<Pane>, haystack: TileId, needle: TileId) -> bool {
+        if haystack == needle {
+            return true;
+        }
+        match tiles.get(haystack) {
+            Some(Tile::Container(container)) => container
+                .children()
+                .any(|child| contains_child(tiles, *child, needle)),
+            _ => false,
+        }
+    }
+
+    let mut targets: Vec<(TileId, TileId)> = Vec::new();
+    for (cid, tile) in ui_state.tree.tiles.iter() {
+        if let Tile::Container(Container::Linear(linear)) = tile {
+            if let Some(child) = linear
+                .children
+                .iter()
+                .find(|child| contains_child(&ui_state.tree.tiles, **child, sidebar_tile))
+            {
+                targets.push((*cid, *child));
+            }
+        }
+    }
+
+    for (cid, target_child) in targets {
+        if let Some(Tile::Container(Container::Linear(linear))) = ui_state.tree.tiles.get_mut(cid) {
+            let share_sum: f32 = linear.shares.iter().map(|(_, s)| s).sum::<f32>().max(0.01);
+            let old = linear.shares[target_child];
+            let others_sum = (share_sum - old).max(0.0);
+            let mut target = (share_sum * target_frac).max(min_share);
+            let min_others = min_share * (linear.children.len().saturating_sub(1) as f32);
+            if target > share_sum - min_others {
+                target = (share_sum - min_others).max(min_share);
+            }
+            let factor = if others_sum > 0.0 {
+                (share_sum - target) / others_sum
+            } else {
+                0.0
+            };
+            let children = linear.children.clone();
+            for child in children {
+                if child == target_child {
+                    linear.shares.set_share(child, target.max(min_share));
+                } else {
+                    let new = (linear.shares[child] * factor).max(min_share);
+                    linear.shares.set_share(child, new);
+                }
+            }
+        }
+    }
+
+    match kind {
+        SidebarKind::Hierarchy => {
+            ui_state.hierarchy_masked = false;
+            ui_state.last_hierarchy_share = Some(target_frac);
+        }
+        SidebarKind::Inspector => {
+            ui_state.inspector_masked = false;
+            ui_state.last_inspector_share = Some(target_frac);
+        }
+    }
+}
+
+fn unmask_sidebar_by_kind(ui_state: &mut TileState, kind: SidebarKind) {
+    let target = ui_state
+        .tree
+        .tiles
+        .iter()
+        .find_map(|(id, tile)| match (kind, tile) {
+            (SidebarKind::Hierarchy, Tile::Pane(Pane::Hierarchy)) => Some(*id),
+            (SidebarKind::Inspector, Tile::Pane(Pane::Inspector)) => Some(*id),
+            _ => None,
+        });
+    if let Some(tile_id) = target {
+        unmask_sidebar_on_select(ui_state, tile_id, kind);
+    }
+}
+
 #[derive(SystemParam)]
 pub struct TileLayoutEmpty<'w> {
     cmd_palette_state: ResMut<'w, CommandPaletteState>,
@@ -2206,12 +2288,15 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 let prev_last = mask_state.last_share(sidebar_kind);
                                 let should_update_last =
                                     current_sidebar_share > min_sidebar_share * 1.5;
-                            let store_share =
-                                if should_update_last { Some(current_sidebar_share) } else { prev_last };
-                            mask_state.set_last_share(sidebar_kind, store_share);
-                            mask_state.set_masked(sidebar_kind, true);
+                                let store_share = if should_update_last {
+                                    Some(current_sidebar_share)
+                                } else {
+                                    prev_last
+                                };
+                                mask_state.set_last_share(sidebar_kind, store_share);
+                                mask_state.set_masked(sidebar_kind, true);
+                            }
                         }
-                    }
                     }
 
                     if drag_state.active && !pointer_down {
@@ -2450,8 +2535,16 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                         SelectedObject::Viewport { camera };
                                 }
                             }
+                            Pane::Hierarchy => {
+                                unmask_sidebar_by_kind(&mut ui_state, SidebarKind::Hierarchy);
+                            }
+                            Pane::Inspector => {
+                                unmask_sidebar_by_kind(&mut ui_state, SidebarKind::Inspector);
+                            }
                             _ => {}
                         }
+                        // Always ensure inspector is visible after a selection.
+                        unmask_sidebar_by_kind(&mut ui_state, SidebarKind::Inspector);
                     }
                 }
                 TreeAction::AddActionTile(parent_tile_id, button_name, lua_code) => {
@@ -2509,7 +2602,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     if read_only {
                         continue;
                     }
-                    let window_idx = window.map(|w| w.index());
+                    let _window_idx = window.map(|w| w.index());
                     // Remove any existing sidebars from tab/linear containers to avoid nesting.
                     let containers: Vec<TileId> = ui_state
                         .tree
