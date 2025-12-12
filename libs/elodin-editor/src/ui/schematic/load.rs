@@ -255,6 +255,7 @@ impl LoadSchematicParams<'_, '_> {
                         secondary_descriptors.push(descriptor);
                     } else {
                         main_window_descriptor = Some(WindowDescriptor {
+                            title: window.title.clone(),
                             screen: window.screen.map(|idx| idx as usize),
                             screen_rect: window.screen_rect,
                             ..default()
@@ -272,12 +273,14 @@ impl LoadSchematicParams<'_, '_> {
                 .2;
             match main_window_descriptor {
                 Some(d) => {
+                    window_state.descriptor.title = d.title;
                     window_state.descriptor.screen = d.screen;
                     window_state.descriptor.screen_rect = d.screen_rect;
                 }
                 None => {
                     // No primary window entry in KDL: clear any stale placement to avoid
                     // reapplying an old rect.
+                    window_state.descriptor.title = None;
                     window_state.descriptor.screen = None;
                     window_state.descriptor.screen_rect = None;
                 }
@@ -503,16 +506,30 @@ impl LoadSchematicParams<'_, '_> {
                 tile_id
             }
             Panel::Tabs(tabs) => {
-                let tile_id = tile_state.insert_tile(
-                    Tile::Container(Container::new_tabs(vec![])),
-                    parent_id,
-                    false,
-                );
+                // Top-level tabs are already provided by the default window layout.
+                // Flatten them into the root tabs container to avoid nesting and
+                // keep visible tab titles aligned with the loaded panes.
+                if parent_id.is_none() {
+                    let Some(root_tabs) = tile_state.tree.root() else {
+                        warn!("No root tabs available to attach panels");
+                        return None;
+                    };
+                    for panel in tabs {
+                        self.spawn_panel(tile_state, panel, Some(root_tabs), context);
+                    }
+                    Some(root_tabs)
+                } else {
+                    let tile_id = tile_state.insert_tile(
+                        Tile::Container(Container::new_tabs(vec![])),
+                        parent_id,
+                        false,
+                    );
 
-                tabs.iter().for_each(|panel| {
-                    self.spawn_panel(tile_state, panel, tile_id, context);
-                });
-                tile_id
+                    tabs.iter().for_each(|panel| {
+                        self.spawn_panel(tile_state, panel, tile_id, context);
+                    });
+                    tile_id
+                }
             }
             Panel::Graph(graph) => {
                 let eql = self

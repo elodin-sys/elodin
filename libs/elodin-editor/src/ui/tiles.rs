@@ -1138,6 +1138,25 @@ enum TabState {
     Inactive,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TabRole {
+    Super,
+    Normal,
+}
+
+impl<'w> TreeBehavior<'w> {
+    fn tab_role(&self, tiles: &Tiles<Pane>, tile_id: TileId) -> TabRole {
+        // Hide chrome for the static sidebars (Hierarchy/Inspector).
+        if let Some(Tile::Pane(pane)) = tiles.get(tile_id) {
+            return match pane {
+                Pane::Hierarchy | Pane::Inspector => TabRole::Super,
+                _ => TabRole::Normal,
+            };
+        }
+        TabRole::Normal
+    }
+}
+
 impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     fn on_edit(&mut self, _edit_action: egui_tiles::EditAction) {}
 
@@ -1166,6 +1185,10 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         tile_id: egui_tiles::TileId,
         state: &egui_tiles::TabState,
     ) -> egui::Response {
+        let role = self.tab_role(tiles, tile_id);
+        let hide_title = matches!(role, TabRole::Super);
+        let show_close = !hide_title;
+
         let tab_state = if state.active {
             TabState::Selected
         } else {
@@ -1182,7 +1205,9 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             .unwrap_or(false);
 
         let title_str: String = if is_container {
-            if let Some(custom) = ui.ctx().data(|d| d.get_temp::<String>(persist_id)) {
+            if hide_title {
+                String::new()
+            } else if let Some(custom) = ui.ctx().data(|d| d.get_temp::<String>(persist_id)) {
                 custom
             } else if let Some(t) = self.container_titles.get(&tile_id) {
                 t.clone()
@@ -1206,10 +1231,12 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         );
 
         let x_margin = self.tab_title_spacing(ui.visuals());
-        let (_, rect) = ui.allocate_space(vec2(
-            galley.size().x + x_margin * 4.0,
-            ui.available_height(),
-        ));
+        let tab_width = if hide_title {
+            0.0
+        } else {
+            galley.size().x + x_margin * 4.0
+        };
+        let (_, rect) = ui.allocate_space(vec2(tab_width, ui.available_height()));
         let text_rect = rect
             .shrink2(vec2(x_margin * 4.0, 0.0))
             .translate(vec2(-3.0 * x_margin, 0.0));
@@ -1231,14 +1258,20 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             resp
         };
 
-        if !self.read_only && is_container && state.active && response.clicked() && !is_editing {
+        if !self.read_only
+            && is_container
+            && !hide_title
+            && state.active
+            && response.clicked()
+            && !is_editing
+        {
             ui.ctx()
                 .data_mut(|d| d.insert_temp(edit_buf_id, title_str.clone()));
             ui.ctx().data_mut(|d| d.insert_temp(edit_flag_id, true));
             is_editing = true;
         }
 
-        if ui.is_rect_visible(rect) && !state.is_being_dragged {
+        if !hide_title && ui.is_rect_visible(rect) && !state.is_being_dragged {
             let scheme = get_scheme();
             let bg_color = match tab_state {
                 TabState::Selected => scheme.text_primary,
@@ -1252,55 +1285,70 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
             ui.painter().rect_filled(rect, 0.0, bg_color);
 
-            if !self.read_only && is_container && is_editing {
-                let label_rect =
-                    egui::Align2::LEFT_CENTER.align_size_within_rect(galley.size(), text_rect);
-                let edit_rect = label_rect.expand(1.0);
+            if !hide_title {
+                if !self.read_only && is_container && is_editing {
+                    let label_rect =
+                        egui::Align2::LEFT_CENTER.align_size_within_rect(galley.size(), text_rect);
+                    let edit_rect = label_rect.expand(1.0);
 
-                let mut buf = ui.ctx().data_mut(|d| {
-                    d.get_temp_mut_or::<String>(edit_buf_id, String::new())
-                        .clone()
-                });
+                    let mut buf = ui.ctx().data_mut(|d| {
+                        d.get_temp_mut_or::<String>(edit_buf_id, String::new())
+                            .clone()
+                    });
 
-                let resp = ui
-                    .scope(|ui| {
-                        ui.visuals_mut().override_text_color = Some(Color32::BLACK);
-                        ui.put(
-                            edit_rect,
-                            egui::TextEdit::singleline(&mut buf)
-                                .font(egui::TextStyle::Button)
-                                .clip_text(true)
-                                .desired_width(edit_rect.width())
-                                .frame(false),
-                        )
-                    })
-                    .inner;
+                    let resp = ui
+                        .scope(|ui| {
+                            ui.visuals_mut().override_text_color = Some(Color32::BLACK);
+                            ui.put(
+                                edit_rect,
+                                egui::TextEdit::singleline(&mut buf)
+                                    .font(egui::TextStyle::Button)
+                                    .clip_text(true)
+                                    .desired_width(edit_rect.width())
+                                    .frame(false),
+                            )
+                        })
+                        .inner;
 
-                let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                let lost_focus = resp.lost_focus();
+                    let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let lost_focus = resp.lost_focus();
 
-                if enter_pressed || lost_focus {
-                    let new_title = buf.trim().to_owned();
+                    if enter_pressed || lost_focus {
+                        let new_title = buf.trim().to_owned();
 
-                    ui.ctx().data_mut(|d| d.insert_temp(edit_flag_id, false));
-                    ui.ctx()
-                        .data_mut(|d| d.insert_temp(edit_buf_id, new_title.clone()));
-                    ui.ctx()
-                        .data_mut(|d| d.insert_temp(persist_id, new_title.clone()));
-                    ui.memory_mut(|m| m.surrender_focus(resp.id));
+                        ui.ctx().data_mut(|d| d.insert_temp(edit_flag_id, false));
+                        ui.ctx()
+                            .data_mut(|d| d.insert_temp(edit_buf_id, new_title.clone()));
+                        ui.ctx()
+                            .data_mut(|d| d.insert_temp(persist_id, new_title.clone()));
+                        ui.memory_mut(|m| m.surrender_focus(resp.id));
 
-                    if !self.read_only {
-                        self.tree_actions
-                            .push(TreeAction::RenameContainer(tile_id, new_title.clone()));
+                        if !self.read_only {
+                            self.tree_actions
+                                .push(TreeAction::RenameContainer(tile_id, new_title.clone()));
+                        }
+
+                        galley = egui::WidgetText::from(new_title).into_galley(
+                            ui,
+                            Some(egui::TextWrapMode::Extend),
+                            f32::INFINITY,
+                            font_id.clone(),
+                        );
+
+                        ui.painter().galley(
+                            egui::Align2::LEFT_CENTER
+                                .align_size_within_rect(galley.size(), text_rect)
+                                .min,
+                            galley.clone(),
+                            text_color,
+                        );
+                    } else {
+                        ui.ctx().data_mut(|d| d.insert_temp(edit_buf_id, buf));
+                        if !resp.has_focus() {
+                            resp.request_focus();
+                        }
                     }
-
-                    galley = egui::WidgetText::from(new_title).into_galley(
-                        ui,
-                        Some(egui::TextWrapMode::Extend),
-                        f32::INFINITY,
-                        font_id.clone(),
-                    );
-
+                } else {
                     ui.painter().galley(
                         egui::Align2::LEFT_CENTER
                             .align_size_within_rect(galley.size(), text_rect)
@@ -1308,35 +1356,24 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                         galley.clone(),
                         text_color,
                     );
-                } else {
-                    ui.ctx().data_mut(|d| d.insert_temp(edit_buf_id, buf));
-                    if !resp.has_focus() {
-                        resp.request_focus();
-                    }
                 }
-            } else {
-                ui.painter().galley(
-                    egui::Align2::LEFT_CENTER
-                        .align_size_within_rect(galley.size(), text_rect)
-                        .min,
-                    galley.clone(),
-                    text_color,
-                );
             }
 
-            ui.add_space(-3.0 * x_margin);
-            let close_response = ui.add(
-                EImageButton::new(self.icons.close)
-                    .scale(1.3, 1.3)
-                    .image_tint(match tab_state {
-                        TabState::Inactive => scheme.text_primary,
-                        TabState::Selected => scheme.bg_primary,
-                    })
-                    .bg_color(colors::TRANSPARENT)
-                    .hovered_bg_color(colors::TRANSPARENT),
-            );
-            if close_response.clicked() {
-                self.tree_actions.push(TreeAction::DeleteTab(tile_id));
+            if show_close {
+                ui.add_space(-3.0 * x_margin);
+                let close_response = ui.add(
+                    EImageButton::new(self.icons.close)
+                        .scale(1.3, 1.3)
+                        .image_tint(match tab_state {
+                            TabState::Inactive => scheme.text_primary,
+                            TabState::Selected => scheme.bg_primary,
+                        })
+                        .bg_color(colors::TRANSPARENT)
+                        .hovered_bg_color(colors::TRANSPARENT),
+                );
+                if close_response.clicked() {
+                    self.tree_actions.push(TreeAction::DeleteTab(tile_id));
+                }
             }
 
             ui.painter().hline(
@@ -1379,7 +1416,8 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
         egui_tiles::SimplificationOptions {
-            all_panes_must_have_tabs: self.target_window.is_none(),
+            // Keep tab bars visible (titles and "+" button) even in secondary windows.
+            all_panes_must_have_tabs: true,
             join_nested_linear_containers: true,
             ..Default::default()
         }
@@ -1421,34 +1459,41 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
     fn top_bar_right_ui(
         &mut self,
-        _tiles: &Tiles<Pane>,
+        tiles: &Tiles<Pane>,
         ui: &mut Ui,
         tile_id: TileId,
-        _tabs: &egui_tiles::Tabs,
+        tabs: &egui_tiles::Tabs,
         _scroll_offset: &mut f32,
     ) {
         if self.read_only {
             return;
         }
+        let sidebar_only = tabs
+            .children
+            .iter()
+            .all(|child| matches!(self.tab_role(tiles, *child), TabRole::Super));
+
         let mut layout = SystemState::<TileLayout>::new(self.world);
         let mut layout = layout.get_mut(self.world);
 
         let top_bar_rect = ui.available_rect_before_wrap();
-        ui.painter().hline(
-            top_bar_rect.x_range(),
-            top_bar_rect.bottom(),
-            egui::Stroke::new(1.0, get_scheme().border_primary),
-        );
+        if !sidebar_only {
+            ui.painter().hline(
+                top_bar_rect.x_range(),
+                top_bar_rect.bottom(),
+                egui::Stroke::new(1.0, get_scheme().border_primary),
+            );
 
-        ui.style_mut().visuals.widgets.hovered.bg_stroke = Stroke::NONE;
-        ui.style_mut().visuals.widgets.active.bg_stroke = Stroke::NONE;
-        ui.add_space(5.0);
-        let resp = ui.add(EImageButton::new(self.icons.add).scale(1.4, 1.4));
-        if resp.clicked() {
-            layout
-                .cmd_palette_state
-                .open_page(move || palette_items::create_tiles(tile_id));
-            layout.cmd_palette_state.target_window = self.target_window;
+            ui.style_mut().visuals.widgets.hovered.bg_stroke = Stroke::NONE;
+            ui.style_mut().visuals.widgets.active.bg_stroke = Stroke::NONE;
+            ui.add_space(5.0);
+            let resp = ui.add(EImageButton::new(self.icons.add).scale(1.4, 1.4));
+            if resp.clicked() {
+                layout
+                    .cmd_palette_state
+                    .open_page(move || palette_items::create_tiles(tile_id));
+                layout.cmd_palette_state.target_window = self.target_window;
+            }
         }
     }
 }

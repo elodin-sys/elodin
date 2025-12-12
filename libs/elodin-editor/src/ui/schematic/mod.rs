@@ -316,7 +316,7 @@ pub fn tiles_to_schematic(
         }
 
         window_elems.push(SchematicElem::Window(WindowSchematic {
-            title: None,
+            title: state.descriptor.title.clone(),
             path: file_name,
             screen: state.descriptor.screen.map(|idx| idx as u32),
             screen_rect: state.descriptor.screen_rect,
