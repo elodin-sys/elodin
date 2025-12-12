@@ -1096,10 +1096,10 @@ impl TileState {
             tree_actions: smallvec![TreeAction::AddSidebars],
             graphs: HashMap::new(),
             container_titles: HashMap::new(),
-            hierarchy_masked: false,
-            inspector_masked: false,
-            last_hierarchy_share: None,
-            last_inspector_share: None,
+            hierarchy_masked: true,
+            inspector_masked: true,
+            last_hierarchy_share: Some(0.2),
+            last_inspector_share: Some(0.2),
             tree_id,
         }
     }
@@ -1107,10 +1107,10 @@ impl TileState {
     fn reset_tree(&mut self) {
         self.tree = egui_tiles::Tree::new_tabs(self.tree_id, vec![]);
         self.tree_actions = smallvec![TreeAction::AddSidebars];
-        self.hierarchy_masked = false;
-        self.inspector_masked = false;
-        self.last_hierarchy_share = None;
-        self.last_inspector_share = None;
+        self.hierarchy_masked = true;
+        self.inspector_masked = true;
+        self.last_hierarchy_share = Some(0.2);
+        self.last_inspector_share = Some(0.2);
     }
 
     /// Returns true when there is any user-visible content beyond the built-in sidebars.
@@ -2506,7 +2506,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     if read_only {
                         continue;
                     }
-                    let _ = window.map(|w| w.index());
+                    let window_idx = window.map(|w| w.index());
                     // Remove any existing sidebars from tab/linear containers to avoid nesting.
                     let containers: Vec<TileId> = ui_state
                         .tree
@@ -2627,9 +2627,23 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         vec![hierarchy, inspector],
                     );
                     linear.children.insert(1, main_content);
-                    linear.shares.set_share(hierarchy, 0.2);
-                    linear.shares.set_share(main_content, 0.6);
-                    linear.shares.set_share(inspector, 0.2);
+                    let hier_default = 0.2;
+                    let insp_default = 0.2;
+                    let hier_share = if ui_state.hierarchy_masked { 0.01 } else { hier_default };
+                    let insp_share = if ui_state.inspector_masked { 0.01 } else { insp_default };
+                    let mut center_share = 1.0 - (hier_share + insp_share);
+                    if center_share <= 0.0 {
+                        center_share = 0.1;
+                    }
+                    linear.shares.set_share(hierarchy, hier_share);
+                    linear.shares.set_share(main_content, center_share);
+                    linear.shares.set_share(inspector, insp_share);
+                    ui_state
+                        .last_hierarchy_share
+                        .get_or_insert(hier_default);
+                    ui_state
+                        .last_inspector_share
+                        .get_or_insert(insp_default);
 
                     let root = ui_state
                         .tree
@@ -2637,6 +2651,12 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         .insert_new(Tile::Container(Container::Linear(linear)));
                     ui_state.tree.root = Some(root);
                     ui_state.tree.make_active(|id, _| id == hierarchy);
+                    info!(
+                        "[DBG] add_sidebars window={:?} masked=({},{}) shares=(hierarchy=0.2, center=0.6, inspector=0.2)",
+                        window_idx,
+                        ui_state.hierarchy_masked,
+                        ui_state.inspector_masked
+                    );
                 }
                 TreeAction::RenameContainer(tile_id, title) => {
                     if read_only {
