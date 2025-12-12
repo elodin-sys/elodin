@@ -580,7 +580,15 @@ impl LoadSchematicParams<'_, '_> {
                         self.spawn_vector_arrow(arrow, Some(camera));
                     }
                 }
-                tile_state.insert_tile(Tile::Pane(Pane::Viewport(pane)), parent_id, viewport.active)
+                let tile_id = tile_state.insert_tile(
+                    Tile::Pane(Pane::Viewport(pane)),
+                    parent_id,
+                    viewport.active,
+                );
+                if let (Some(tile_id), Some(name)) = (tile_id, viewport.name.clone()) {
+                    tile_state.container_titles.insert(tile_id, name);
+                }
+                tile_id
             }
             Panel::HSplit(split) | Panel::VSplit(split) => {
                 let linear = egui_tiles::Linear::new(
@@ -728,8 +736,13 @@ impl LoadSchematicParams<'_, '_> {
                 if matches!(context, PanelContext::Secondary(_)) {
                     self.commands.entity(graph_id).remove::<MainCamera>();
                 }
-                let graph = GraphPane::new(graph_id, graph_label);
-                tile_state.insert_tile(Tile::Pane(Pane::Graph(graph)), parent_id, false)
+                let graph_pane = GraphPane::new(graph_id, graph_label.clone());
+                let tile_id =
+                    tile_state.insert_tile(Tile::Pane(Pane::Graph(graph_pane)), parent_id, false);
+                if let (Some(tile_id), Some(name)) = (tile_id, graph.name.clone()) {
+                    tile_state.container_titles.insert(tile_id, name);
+                }
+                tile_id
             }
             Panel::ComponentMonitor(monitor) => {
                 let pane = MonitorPane::new("Monitor".to_string(), monitor.component_name.clone());
@@ -757,9 +770,16 @@ impl LoadSchematicParams<'_, '_> {
                     .id();
                 let pane = super::tiles::ActionTilePane {
                     entity,
-                    label: "Action".to_string(),
+                    label: action.label.clone(),
                 };
-                tile_state.insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false)
+                let tile_id =
+                    tile_state.insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false);
+                if let Some(tile_id) = tile_id {
+                    tile_state
+                        .container_titles
+                        .insert(tile_id, action.label.clone());
+                }
+                tile_id
             }
             Panel::SchematicTree => {
                 let entity = self.commands.spawn(super::TreeWidgetState::default()).id();
@@ -787,7 +807,13 @@ impl LoadSchematicParams<'_, '_> {
                     rect: None,
                     scrub_icon: None,
                 });
-                tile_state.insert_tile(Tile::Pane(pane), parent_id, false)
+                let tile_id = tile_state.insert_tile(Tile::Pane(pane), parent_id, false);
+                if let Some(tile_id) = tile_id {
+                    tile_state
+                        .container_titles
+                        .insert(tile_id, plot.label.clone());
+                }
+                tile_id
             }
             Panel::Dashboard(dashboard) => {
                 let Ok(dashboard) = spawn_dashboard(

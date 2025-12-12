@@ -82,6 +82,7 @@ impl SchematicParam<'_, '_> {
     ) -> Option<Panel<Entity>> {
         let tiles = &state.tree.tiles;
         let tile = tiles.get(tile_id)?;
+        let custom_title = state.get_container_title(tile_id).map(|s| s.to_string());
 
         match tile {
             Tile::Pane(pane) => match pane {
@@ -121,7 +122,9 @@ impl SchematicParam<'_, '_> {
                         show_grid,
                         show_arrows,
                         hdr: self.hdr_enabled.0,
-                        name: Some(viewport.label.clone()),
+                        name: custom_title
+                            .clone()
+                            .or_else(|| Some(viewport.label.clone())),
                         pos: Some(viewport_data.pos.eql.clone()),
                         look_at: Some(viewport_data.look_at.eql.clone()),
                         local_arrows,
@@ -154,7 +157,9 @@ impl SchematicParam<'_, '_> {
 
                     Some(Panel::Graph(impeller2_wkt::Graph {
                         eql,
-                        name: Some(graph_state.label.clone()),
+                        name: custom_title
+                            .clone()
+                            .or_else(|| Some(graph_state.label.clone())),
                         graph_type: graph_state.graph_type,
                         locked: graph_state.locked,
                         auto_y_range: graph_state.auto_y_range,
@@ -175,13 +180,20 @@ impl SchematicParam<'_, '_> {
 
                 Pane::QueryPlot(plot) => {
                     let query_plot = self.query_plots.get(plot.entity).ok()?;
-                    Some(Panel::QueryPlot(query_plot.data.map_aux(|_| plot.entity)))
+                    let mut data = query_plot.data.map_aux(|_| plot.entity);
+                    if let Some(title) = custom_title.clone() {
+                        data.label = title;
+                    }
+                    Some(Panel::QueryPlot(data))
                 }
 
                 Pane::ActionTile(action) => {
                     let action_tile = self.action_tiles.get(action.entity).ok()?;
+                    let label = custom_title
+                        .clone()
+                        .unwrap_or_else(|| action_tile.button_name.clone());
                     Some(Panel::ActionPane(ActionPane {
-                        label: action_tile.button_name.clone(),
+                        label,
                         lua: action_tile.lua.clone(),
                     }))
                 }
