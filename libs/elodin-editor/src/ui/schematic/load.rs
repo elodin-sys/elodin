@@ -8,7 +8,8 @@ use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
 use impeller2_kdl::FromKdl;
 use impeller2_kdl::KdlSchematicError;
 use impeller2_wkt::{
-    DbConfig, Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowSchematic,
+    DbConfig, Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowRect,
+    WindowSchematic,
 };
 use miette::{Diagnostic, miette};
 #[cfg(target_os = "linux")]
@@ -29,7 +30,7 @@ use crate::{
     object_3d::Object3DState,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        DEFAULT_SECONDARY_RECT, HdrEnabled, SelectedObject,
+        HdrEnabled, SelectedObject,
         colors::{self, EColor},
         dashboard::{NodeUpdaterParams, spawn_dashboard},
         modal::ModalDialog,
@@ -39,7 +40,7 @@ use crate::{
         schematic::EqlExt,
         tiles::{
             DashboardPane, GraphPane, Pane, TileState, TreePane, ViewportPane, WindowDescriptor,
-            WindowId, WindowState,
+            WindowId, WindowState, clamp_percent,
         },
     },
     vector_arrow::{VectorArrowState, ViewportArrow},
@@ -129,7 +130,7 @@ fn resolve_window_descriptor(
         path: Some(resolved),
         title: window.title.clone(),
         screen: window.screen.map(|idx| idx as usize),
-        screen_rect: window.screen_rect.or(Some(DEFAULT_SECONDARY_RECT)),
+        screen_rect: window.screen_rect,
     })
 }
 
@@ -263,6 +264,120 @@ impl LoadSchematicParams<'_, '_> {
                     }
                 }
             }
+        }
+
+        let primary_was_none = main_window_descriptor.is_none();
+        let primary_desc = main_window_descriptor.get_or_insert_with(WindowDescriptor::default);
+
+        #[derive(Clone, Copy)]
+        enum EntryId {
+            Primary,
+            Secondary(usize),
+        }
+
+        let mut group_entries: HashMap<usize, Vec<EntryId>> = HashMap::new();
+        let mut group_has_rect: HashMap<usize, bool> = HashMap::new();
+
+        let primary_screen = primary_desc.screen.unwrap_or(0);
+        group_entries
+            .entry(primary_screen)
+            .or_default()
+            .push(EntryId::Primary);
+        group_has_rect
+            .entry(primary_screen)
+            .and_modify(|v| *v |= primary_desc.screen_rect.is_some())
+            .or_insert(primary_desc.screen_rect.is_some());
+
+        for (idx, descriptor) in secondary_descriptors.iter().enumerate() {
+            let screen = descriptor.screen.unwrap_or(0);
+            group_entries
+                .entry(screen)
+                .or_default()
+                .push(EntryId::Secondary(idx));
+            group_has_rect
+                .entry(screen)
+                .and_modify(|v| *v |= descriptor.screen_rect.is_some())
+                .or_insert(descriptor.screen_rect.is_some());
+        }
+
+        for (screen, entries) in group_entries {
+            if group_has_rect.get(&screen).copied().unwrap_or(false) {
+                continue;
+            }
+            let has_primary = entries.iter().any(|e| matches!(e, EntryId::Primary));
+            if has_primary {
+                let other_count = entries.len().saturating_sub(1);
+                if other_count == 0 {
+                    if primary_desc.screen_rect.is_none() {
+                        primary_desc.screen_rect = Some(WindowRect {
+                            x: 0,
+                            y: 0,
+                            width: 100,
+                            height: 100,
+                        });
+                    }
+                    primary_desc.screen.get_or_insert(screen);
+                    continue;
+                }
+                let primary_width = clamp_percent(50.0);
+                let other_width = clamp_percent(50.0);
+                let other_height = clamp_percent(100.0 / other_count as f32);
+                primary_desc.screen_rect.get_or_insert(WindowRect {
+                    x: 0,
+                    y: 0,
+                    width: primary_width,
+                    height: 100,
+                });
+                primary_desc.screen.get_or_insert(screen);
+
+                let mut y_acc = 0.0;
+                for entry in entries {
+                    if let EntryId::Secondary(idx) = entry {
+                        if secondary_descriptors[idx].screen_rect.is_none() {
+                            let y = clamp_percent(y_acc);
+                            secondary_descriptors[idx].screen_rect = Some(WindowRect {
+                                x: primary_width,
+                                y,
+                                width: other_width,
+                                height: other_height,
+                            });
+                        }
+                        secondary_descriptors[idx].screen.get_or_insert(screen);
+                        y_acc += 100.0 / other_count as f32;
+                    }
+                }
+            } else {
+                let count = entries.len();
+                if count == 0 {
+                    continue;
+                }
+                let width = clamp_percent(100.0);
+                let height = clamp_percent(100.0 / count as f32);
+                let mut y_acc = 0.0;
+                for entry in entries {
+                    if let EntryId::Secondary(idx) = entry {
+                        if secondary_descriptors[idx].screen_rect.is_none() {
+                            let y = clamp_percent(y_acc);
+                            secondary_descriptors[idx].screen_rect = Some(WindowRect {
+                                x: 0,
+                                y,
+                                width,
+                                height,
+                            });
+                        }
+                        secondary_descriptors[idx].screen.get_or_insert(screen);
+                        y_acc += 100.0 / count as f32;
+                    }
+                }
+            }
+        }
+
+        if primary_was_none
+            && primary_desc.title.is_none()
+            && primary_desc.screen.is_none()
+            && primary_desc.screen_rect.is_none()
+        {
+            main_window_descriptor = None;
         }
 
         {
