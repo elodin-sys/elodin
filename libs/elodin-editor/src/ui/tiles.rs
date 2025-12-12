@@ -2093,7 +2093,13 @@ impl WidgetSystem for TileLayout<'_, '_> {
 
                     let mut sidebar_masked = mask_state.masked(sidebar_kind);
 
-                    if response.clicked() {
+                    let click_inside_gutter = response.clicked_by(egui::PointerButton::Primary)
+                        && ui
+                            .input(|i| i.pointer.interact_pos())
+                            .map(|p| gutter_rect.shrink(1.0).contains(p))
+                            .unwrap_or(false);
+
+                    if click_inside_gutter {
                         if sidebar_masked {
                             let default_px = (parent_rect.width() * 0.15).max(min_sidebar_px);
                             let restore_share = if share_per_px > 0.0 {
@@ -2114,10 +2120,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             apply_shares(left_share.max(0.01), right_share.max(0.01));
                             mask_state.set_masked(sidebar_kind, false);
                             sidebar_masked = false;
-                            info!(
-                                "[DBG] sidebar_unmask {:?} container={:?} shares=({:.4},{:.4})",
-                                sidebar_kind, container_id, left_share, right_share
-                            );
                         } else {
                             let current_sidebar_share = if sidebar_on_left {
                                 share_left
@@ -2137,10 +2139,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             apply_shares(left_share.max(0.01), right_share.max(0.01));
                             mask_state.set_masked(sidebar_kind, true);
                             sidebar_masked = true;
-                            info!(
-                                "[DBG] sidebar_mask {:?} container={:?} shares=({:.4},{:.4})",
-                                sidebar_kind, container_id, left_share, right_share
-                            );
                         }
                     }
 
@@ -2208,23 +2206,12 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 let prev_last = mask_state.last_share(sidebar_kind);
                                 let should_update_last =
                                     current_sidebar_share > min_sidebar_share * 1.5;
-                                let store_share = if should_update_last {
-                                    Some(current_sidebar_share)
-                                } else {
-                                    prev_last
-                                };
-                                mask_state.set_last_share(sidebar_kind, store_share);
-                                mask_state.set_masked(sidebar_kind, true);
-                                info!(
-                                    "[DBG] sidebar_mask_drag {:?} container={:?} share_new={:.4} share_prev={:.4} stored={:?}",
-                                    sidebar_kind,
-                                    container_id,
-                                    new_sidebar_share,
-                                    current_sidebar_share,
-                                    store_share
-                                );
-                            }
+                            let store_share =
+                                if should_update_last { Some(current_sidebar_share) } else { prev_last };
+                            mask_state.set_last_share(sidebar_kind, store_share);
+                            mask_state.set_masked(sidebar_kind, true);
                         }
+                    }
                     }
 
                     if drag_state.active && !pointer_down {
@@ -2671,10 +2658,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         .insert_new(Tile::Container(Container::Linear(linear)));
                     ui_state.tree.root = Some(root);
                     ui_state.tree.make_active(|id, _| id == hierarchy);
-                    info!(
-                        "[DBG] add_sidebars window={:?} masked=({},{}) shares=(hierarchy=0.2, center=0.6, inspector=0.2)",
-                        window_idx, ui_state.hierarchy_masked, ui_state.inspector_masked
-                    );
                 }
                 TreeAction::RenameContainer(tile_id, title) => {
                     if read_only {
