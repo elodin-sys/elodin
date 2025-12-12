@@ -115,6 +115,10 @@ pub struct TileState {
     pub tree_actions: smallvec::SmallVec<[TreeAction; 4]>,
     pub graphs: HashMap<TileId, Entity>,
     pub container_titles: HashMap<TileId, String>,
+    pub hierarchy_masked: bool,
+    pub inspector_masked: bool,
+    pub last_hierarchy_share: Option<f32>,
+    pub last_inspector_share: Option<f32>,
     tree_id: Id,
 }
 
@@ -1092,6 +1096,10 @@ impl TileState {
             tree_actions: smallvec![TreeAction::AddSidebars],
             graphs: HashMap::new(),
             container_titles: HashMap::new(),
+            hierarchy_masked: false,
+            inspector_masked: false,
+            last_hierarchy_share: None,
+            last_inspector_share: None,
             tree_id,
         }
     }
@@ -1099,6 +1107,10 @@ impl TileState {
     fn reset_tree(&mut self) {
         self.tree = egui_tiles::Tree::new_tabs(self.tree_id, vec![]);
         self.tree_actions = smallvec![TreeAction::AddSidebars];
+        self.hierarchy_masked = false;
+        self.inspector_masked = false;
+        self.last_hierarchy_share = None;
+        self.last_inspector_share = None;
     }
 
     /// Returns true when there is any user-visible content beyond the built-in sidebars.
@@ -1830,6 +1842,50 @@ pub struct TileLayoutArgs {
     pub read_only: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SidebarKind {
+    Hierarchy,
+    Inspector,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SidebarMaskState {
+    hierarchy_masked: bool,
+    inspector_masked: bool,
+    last_hierarchy_share: Option<f32>,
+    last_inspector_share: Option<f32>,
+}
+
+impl SidebarMaskState {
+    fn masked(&self, kind: SidebarKind) -> bool {
+        match kind {
+            SidebarKind::Hierarchy => self.hierarchy_masked,
+            SidebarKind::Inspector => self.inspector_masked,
+        }
+    }
+
+    fn set_masked(&mut self, kind: SidebarKind, masked: bool) {
+        match kind {
+            SidebarKind::Hierarchy => self.hierarchy_masked = masked,
+            SidebarKind::Inspector => self.inspector_masked = masked,
+        }
+    }
+
+    fn last_share(&self, kind: SidebarKind) -> Option<f32> {
+        match kind {
+            SidebarKind::Hierarchy => self.last_hierarchy_share,
+            SidebarKind::Inspector => self.last_inspector_share,
+        }
+    }
+
+    fn set_last_share(&mut self, kind: SidebarKind, share: Option<f32>) {
+        match kind {
+            SidebarKind::Hierarchy => self.last_hierarchy_share = share,
+            SidebarKind::Inspector => self.last_inspector_share = share,
+        }
+    }
+}
+
 impl WidgetSystem for TileLayout<'_, '_> {
     type Args = TileLayoutArgs;
     type Output = ();
@@ -1845,8 +1901,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
             read_only,
         } = args;
 
-        let (tree, mut tree_actions, share_updates) = {
-            let (tab_diffs, container_titles, mut tree) = {
+        let (tree, mut tree_actions, share_updates, mask_state) = {
+            let (tab_diffs, container_titles, mut tree, mut mask_state) = {
                 let mut state_mut = state.get_mut(world);
                 let Some(mut ui_state) = state_mut.tile_param.target(window) else {
                     return;
@@ -1858,6 +1914,12 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     std::mem::take(&mut ui_state.tree_actions),
                     ui_state.container_titles.clone(),
                     std::mem::replace(&mut ui_state.tree, empty_tree),
+                    SidebarMaskState {
+                        hierarchy_masked: ui_state.hierarchy_masked,
+                        inspector_masked: ui_state.inspector_masked,
+                        last_hierarchy_share: ui_state.last_hierarchy_share,
+                        last_inspector_share: ui_state.last_inspector_share,
+                    },
                 )
             };
             let mut behavior = TreeBehavior {
@@ -1875,21 +1937,22 @@ impl WidgetSystem for TileLayout<'_, '_> {
             let painter = ui.painter_at(ui.max_rect());
             let mut share_updates: Vec<(TileId, TileId, TileId, f32, f32)> = Vec::new();
 
-            fn is_sidebar_tile(tiles: &Tiles<Pane>, id: TileId) -> bool {
+            fn sidebar_kind(tiles: &Tiles<Pane>, id: TileId) -> Option<SidebarKind> {
                 match tiles.get(id) {
-                    Some(Tile::Pane(Pane::Hierarchy | Pane::Inspector)) => true,
+                    Some(Tile::Pane(Pane::Hierarchy)) => Some(SidebarKind::Hierarchy),
+                    Some(Tile::Pane(Pane::Inspector)) => Some(SidebarKind::Inspector),
                     Some(Tile::Container(Container::Tabs(tabs))) => tabs
                         .children
                         .iter()
-                        .any(|child| is_sidebar_tile(tiles, *child)),
+                        .find_map(|child| sidebar_kind(tiles, *child)),
                     Some(Tile::Container(Container::Linear(linear))) => linear
                         .children
                         .iter()
-                        .any(|child| is_sidebar_tile(tiles, *child)),
+                        .find_map(|child| sidebar_kind(tiles, *child)),
                     Some(Tile::Container(Container::Grid(grid))) => {
-                        grid.children().any(|child| is_sidebar_tile(tiles, *child))
+                        grid.children().find_map(|child| sidebar_kind(tiles, *child))
                     }
-                    _ => false,
+                    _ => None,
                 }
             }
 
@@ -1929,8 +1992,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 let mut child_data = Vec::new();
                 for &child in &visible_children {
                     if let Some(rect) = tree.tiles.rect(child) {
-                        let is_sidebar = is_sidebar_tile(&tree.tiles, child);
-                        child_data.push((child, rect, is_sidebar));
+                        let sidebar_kind = sidebar_kind(&tree.tiles, child);
+                        child_data.push((child, rect, sidebar_kind));
                     }
                 }
 
@@ -1939,11 +2002,49 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 }
 
                 for i in 0..child_data.len().saturating_sub(1) {
-                    let (left_id, left_rect, left_sidebar) = child_data[i];
-                    let (right_id, right_rect, right_sidebar) = child_data[i + 1];
+                    let (left_id, left_rect, left_kind) = child_data[i];
+                    let (right_id, right_rect, right_kind) = child_data[i + 1];
+                    let left_sidebar = left_kind.is_some();
+                    let right_sidebar = right_kind.is_some();
                     if left_sidebar == right_sidebar {
                         continue;
                     }
+                    let sidebar_kind = left_kind.or(right_kind).unwrap();
+                    let sidebar_on_left = left_sidebar;
+                    let pair_width = left_rect.width() + right_rect.width();
+                    let Some((share_left, share_right)) = tree
+                        .tiles
+                        .get(container_id)
+                        .and_then(|tile| match tile {
+                            Tile::Container(Container::Linear(linear)) => {
+                                Some((linear.shares[left_id], linear.shares[right_id]))
+                            }
+                            _ => None,
+                        })
+                    else {
+                        continue;
+                    };
+                    let pair_sum = share_left + share_right;
+                    if pair_sum <= 0.0 {
+                        continue;
+                    }
+                    let share_per_px = if pair_width > 0.0 {
+                        pair_sum / pair_width
+                    } else {
+                        0.0
+                    };
+                    let min_sidebar_px = gutter_width;
+                    let min_other_px = 32.0;
+                    let min_sidebar_share = if share_per_px > 0.0 {
+                        min_sidebar_px * share_per_px
+                    } else {
+                        pair_sum * 0.05
+                    };
+                    let min_other_share = if share_per_px > 0.0 {
+                        min_other_px * share_per_px
+                    } else {
+                        pair_sum * 0.05
+                    };
 
                     let gap = right_rect.min.x - left_rect.max.x;
                     let mut center_x = (left_rect.max.x + right_rect.min.x) * 0.5;
@@ -1990,6 +2091,82 @@ impl WidgetSystem for TileLayout<'_, '_> {
 
                     if response.hovered() {
                         ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::PointingHand);
+                    }
+
+                    let mut apply_shares = |left: f32, right: f32| {
+                        if let Some(Tile::Container(Container::Linear(linear))) =
+                            tree.tiles.get_mut(container_id)
+                        {
+                            linear.shares.set_share(left_id, left);
+                            linear.shares.set_share(right_id, right);
+                        }
+                        share_updates.push((container_id, left_id, right_id, left, right));
+                        ui.ctx().request_repaint();
+                    };
+
+                    let mut sidebar_masked = mask_state.masked(sidebar_kind);
+
+                    if response.clicked() {
+                        if sidebar_masked {
+                            let default_px = (parent_rect.width() * 0.15).max(min_sidebar_px);
+                            let restore_share = mask_state
+                                .last_share(sidebar_kind)
+                                .unwrap_or_else(|| {
+                                    if share_per_px > 0.0 {
+                                        default_px * share_per_px
+                                    } else {
+                                        pair_sum * 0.15
+                                    }
+                                });
+                            let max_sidebar_share = (pair_sum - min_other_share).max(0.01);
+                            let target_sidebar_share = restore_share
+                                .max(min_sidebar_share.max(0.01))
+                                .min(max_sidebar_share);
+                            let left_share = if sidebar_on_left {
+                                target_sidebar_share
+                            } else {
+                                pair_sum - target_sidebar_share
+                            };
+                            let right_share = pair_sum - left_share;
+                            apply_shares(left_share.max(0.01), right_share.max(0.01));
+                            mask_state.set_masked(sidebar_kind, false);
+                            sidebar_masked = false;
+                            info!(
+                                "[DBG] sidebar_unmask {:?} container={:?} shares=({:.4},{:.4})",
+                                sidebar_kind, container_id, left_share, right_share
+                            );
+                        } else {
+                            let current_sidebar_share = if sidebar_on_left {
+                                share_left
+                            } else {
+                                share_right
+                            };
+                            mask_state.set_last_share(sidebar_kind, Some(current_sidebar_share));
+                            let max_sidebar_share = (pair_sum - min_other_share).max(0.01);
+                            let target_sidebar_share = min_sidebar_share
+                                .max(0.01)
+                                .min(max_sidebar_share);
+                            let left_share = if sidebar_on_left {
+                                target_sidebar_share
+                            } else {
+                                pair_sum - target_sidebar_share
+                            };
+                            let right_share = pair_sum - left_share;
+                            apply_shares(left_share.max(0.01), right_share.max(0.01));
+                            mask_state.set_masked(sidebar_kind, true);
+                            sidebar_masked = true;
+                            info!(
+                                "[DBG] sidebar_mask {:?} container={:?} shares=({:.4},{:.4})",
+                                sidebar_kind, container_id, left_share, right_share
+                            );
+                        }
+                    }
+
+                    if sidebar_masked {
+                        if drag_state.active {
+                            ui.ctx().data_mut(|d| d.remove::<DragState>(id));
+                        }
+                        continue;
                     }
 
                     let pointer_pos = ui.input(|i| i.pointer.interact_pos());
@@ -2040,7 +2217,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 }
             }
             let TreeBehavior { tree_actions, .. } = behavior;
-            (tree, tree_actions, share_updates)
+            (tree, tree_actions, share_updates, mask_state)
         };
 
         let mut state_mut = state.get_mut(world);
@@ -2056,6 +2233,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 linear.shares.set_share(right_id, right_share);
             }
         }
+        ui_state.hierarchy_masked = mask_state.hierarchy_masked;
+        ui_state.inspector_masked = mask_state.inspector_masked;
+        ui_state.last_hierarchy_share = mask_state.last_hierarchy_share;
+        ui_state.last_inspector_share = mask_state.last_inspector_share;
         state_mut.viewport_contains_pointer.0 = ui.ui_contains_pointer();
 
         for mut editor_cam in state_mut.editor_cam.iter_mut() {
