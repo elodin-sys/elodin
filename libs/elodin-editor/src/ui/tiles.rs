@@ -1200,6 +1200,12 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         _tile_id: egui_tiles::TileId,
         pane: &mut Pane,
     ) -> egui_tiles::UiResponse {
+        // Hide sidebar content completely when collapsed to a thin slice.
+        if matches!(pane, Pane::Hierarchy | Pane::Inspector) && ui.available_size().x <= 20.0 {
+            let size = ui.available_size();
+            ui.allocate_space(size);
+            return egui_tiles::UiResponse::None;
+        }
         pane.ui(ui, &self.icons, self.world, &mut self.tree_actions)
     }
 
@@ -1864,9 +1870,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 target_window: window,
             };
             tree.ui(&mut behavior, ui);
-            // Paint wide orange gutters between sidebars (Hierarchy/Inspector) and the center area.
-            let gutter_width: f32 = 16.0;
-            let min_width: f32 = 32.0;
+            let window_width = ui.ctx().screen_rect().width();
+            let gutter_width: f32 = (window_width * 0.02).max(12.0);
             let painter = ui.painter_at(ui.max_rect());
             let mut share_updates: Vec<(TileId, TileId, TileId, f32, f32)> = Vec::new();
 
@@ -1940,19 +1945,33 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         continue;
                     }
 
-                    let center_x = (left_rect.max.x + right_rect.min.x) * 0.5;
+                    let gap = right_rect.min.x - left_rect.max.x;
+                    let mut center_x = (left_rect.max.x + right_rect.min.x) * 0.5;
+                    let local_width = gutter_width;
+                    if gap < gutter_width {
+                        let offset = (gutter_width - gap).max(0.0) * 0.5;
+                        if left_sidebar {
+                            center_x -= offset;
+                        } else {
+                            center_x += offset;
+                        }
+                    }
+                    let half = local_width * 0.5;
+                    center_x = center_x
+                        .max(parent_rect.left() + half)
+                        .min(parent_rect.right() - half);
                     let gutter_rect = egui::Rect::from_min_max(
-                        egui::pos2(center_x - gutter_width * 0.5, parent_rect.top()),
-                        egui::pos2(center_x + gutter_width * 0.5, parent_rect.bottom()),
+                        egui::pos2(center_x - half, parent_rect.top()),
+                        egui::pos2(center_x + half, parent_rect.bottom()),
                     );
 
-                    let fill = Color32::from_rgb(255, 140, 0);
-                    let stroke = Stroke::new(1.0, Color32::from_rgb(200, 110, 0));
+                    let fill = Color32::from_rgb(60, 60, 60);
+                    let stroke = Stroke::new(1.0, Color32::from_rgb(40, 40, 40));
                     painter.rect_filled(gutter_rect, 0.0, fill);
                     painter.rect_stroke(gutter_rect, 0.0, stroke, egui::StrokeKind::Inside);
 
                     let id = ui.id().with(("sidebar_gutter", container_id, i));
-                    let hit_rect = gutter_rect.expand(24.0);
+                    let hit_rect = gutter_rect.expand(32.0);
                     #[derive(Clone, Copy, Default)]
                     struct DragState {
                         left_width: f32,
@@ -1988,8 +2007,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
 
                     if drag_state.active && pointer_down {
                         let delta = pointer_pos.map(|p| p.x - drag_state.start_x).unwrap_or(0.0);
-                        let new_left = (drag_state.left_width + delta).max(min_width);
-                        let new_right = (drag_state.right_width - delta).max(min_width);
+                        let min_left = if left_sidebar { 4.0 } else { 32.0 };
+                        let min_right = if right_sidebar { 4.0 } else { 32.0 };
+                        let new_left = (drag_state.left_width + delta).max(min_left);
+                        let new_right = (drag_state.right_width - delta).max(min_right);
                         if let Some(Tile::Container(Container::Linear(linear))) =
                             tree.tiles.get_mut(container_id)
                         {
