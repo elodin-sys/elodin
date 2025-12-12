@@ -960,14 +960,11 @@ pub fn save_schematic_db() -> PaletteItem {
     PaletteItem::new(
         "Save Schematic To DB",
         PRESETS_LABEL,
-        |_name: In<String>, tx: Res<PacketTx>, schematic: Res<CurrentSchematic>| {
-            let kdl = schematic.0.to_kdl();
-            tx.send_msg(SetDbConfig {
-                metadata: [("schematic.content".to_string(), kdl)]
-                    .into_iter()
-                    .collect(),
-                ..Default::default()
-            });
+        |_name: In<String>, mut commands: Commands| {
+            commands.run_system_cached(crate::ui::update_primary_descriptor_path);
+            commands.run_system_cached(crate::ui::capture_window_screens_oneoff);
+            commands.run_system_cached(crate::ui::schematic::tiles_to_schematic);
+            commands.run_system_cached(save_schematic_db_apply);
             PaletteEvent::Exit
         },
     )
@@ -1114,26 +1111,48 @@ pub fn save_schematic_inner() -> PaletteItem {
     PaletteItem::new(
         LabelSource::placeholder("Enter a name for the schematic"),
         "",
-        move |In(name): In<String>,
-              schematic: Res<CurrentSchematic>,
-              secondary: Res<CurrentSecondarySchematics>,
-              mut live_reload: ResMut<SchematicLiveReloadRx>| {
-            let kdl = schematic.0.to_kdl();
+        move |In(name): In<String>, mut commands: Commands| {
             let path = PathBuf::from(name).with_extension("kdl");
-            let dest = schematic_file(&path);
-            live_reload.guard_for(Duration::from_millis(2000));
-            if let Err(e) = std::fs::write(&dest, kdl) {
-                error!(?e, "saving schematic");
-            } else {
-                info!("saved schematic to {:?}", dest.display());
-                live_reload.ignore_path(dest.clone());
-                let base_dir = dest.parent().unwrap_or_else(|| Path::new("."));
-                write_secondary_schematics(base_dir, &secondary, &mut live_reload);
-            }
+            commands.run_system_cached(crate::ui::update_primary_descriptor_path);
+            commands.run_system_cached(crate::ui::capture_window_screens_oneoff);
+            commands.run_system_cached(crate::ui::schematic::tiles_to_schematic);
+            commands.run_system_cached_with(save_schematic_inner_apply, path);
             PaletteEvent::Exit
         },
     )
     .default()
+}
+
+fn save_schematic_db_apply(schematic: Res<CurrentSchematic>, tx: Option<Res<PacketTx>>) {
+    let Some(tx) = tx else { return };
+    let kdl = schematic.0.to_kdl();
+    tx.send_msg(SetDbConfig {
+        metadata: [("schematic.content".to_string(), kdl)]
+            .into_iter()
+            .collect(),
+        ..Default::default()
+    });
+}
+
+fn save_schematic_inner_apply(
+    In(path): In<PathBuf>,
+    mut live_reload: ResMut<SchematicLiveReloadRx>,
+    schematic: Res<CurrentSchematic>,
+    secondary: Res<CurrentSecondarySchematics>,
+) {
+    let dest = schematic_file(&path);
+    live_reload.guard_for(Duration::from_millis(2000));
+    let kdl = schematic.0.to_kdl();
+    if let Err(e) = std::fs::write(&dest, kdl) {
+        error!(?e, "saving schematic");
+        return;
+    }
+
+    info!("saved schematic to {:?}", dest.display());
+    live_reload.ignore_path(dest.clone());
+    live_reload.record_loaded(&dest);
+    let base_dir = dest.parent().unwrap_or_else(|| Path::new("."));
+    write_secondary_schematics(base_dir, &secondary, &mut live_reload);
 }
 
 fn write_secondary_schematics(

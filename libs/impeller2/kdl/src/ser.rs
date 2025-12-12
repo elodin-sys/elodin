@@ -777,7 +777,7 @@ mod tests {
 
     #[test]
     fn test_serialize_simple_viewport() {
-        let mut schematic = Schematic::default();
+        let mut schematic = Schematic::<()>::default();
         schematic
             .elems
             .push(SchematicElem::Panel(Panel::Viewport(Viewport {
@@ -809,7 +809,7 @@ mod tests {
 
     #[test]
     fn test_viewport_property_order() {
-        let mut schematic = Schematic::default();
+        let mut schematic = Schematic::<()>::default();
         schematic
             .elems
             .push(SchematicElem::Panel(Panel::Viewport(Viewport {
@@ -855,6 +855,66 @@ mod tests {
                 "expected viewport properties in order name → fov → pos → look_at → hdr → show_grid → active: `{viewport_line}`"
             );
         }
+    }
+
+    #[test]
+    fn test_serialize_window_with_title_and_rect() {
+        let mut schematic = Schematic::<()>::default();
+        schematic.elems.push(SchematicElem::Window(WindowSchematic {
+            title: Some("Telemetry".to_string()),
+            path: Some("panels/telemetry.kdl".to_string()),
+            screen: Some(2),
+            screen_rect: Some(WindowRect {
+                x: 5,
+                y: 10,
+                width: 80,
+                height: 70,
+            }),
+        }));
+        schematic.elems.push(SchematicElem::Window(WindowSchematic {
+            title: Some("Primary".to_string()),
+            path: None,
+            screen: Some(0),
+            screen_rect: None,
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        let header_ok = serialized.contains(r#"window path="panels/telemetry.kdl""#)
+            && serialized.contains("title=Telemetry")
+            && serialized.contains("screen=2");
+        assert!(
+            header_ok,
+            "serialized window header missing expected fields:\n{serialized}"
+        );
+        assert!(
+            serialized.contains("rect 5 10 80 70"),
+            "missing rect in serialized window: {serialized}"
+        );
+
+        let parsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(parsed.elems.len(), 2);
+        let SchematicElem::Window(window) = &parsed.elems[0] else {
+            panic!("Expected window entry");
+        };
+        assert_eq!(window.title.as_deref(), Some("Telemetry"));
+        assert_eq!(window.path.as_deref(), Some("panels/telemetry.kdl"));
+        assert_eq!(window.screen, Some(2));
+        assert_eq!(
+            window.screen_rect,
+            Some(WindowRect {
+                x: 5,
+                y: 10,
+                width: 80,
+                height: 70
+            })
+        );
+
+        let SchematicElem::Window(primary) = &parsed.elems[1] else {
+            panic!("Expected second window entry");
+        };
+        assert_eq!(primary.title.as_deref(), Some("Primary"));
+        assert!(primary.path.is_none());
+        assert_eq!(primary.screen, Some(0));
     }
 
     #[test]
