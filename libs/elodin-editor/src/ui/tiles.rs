@@ -1484,6 +1484,14 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         });
     }
 
+    fn resize_stroke(
+        &self,
+        _style: &egui::Style,
+        _resize_state: egui_tiles::ResizeState,
+    ) -> Stroke {
+        Stroke::NONE
+    }
+
     fn top_bar_right_ui(
         &mut self,
         tiles: &Tiles<Pane>,
@@ -1831,7 +1839,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
             read_only,
         } = args;
 
-        let (tree, mut tree_actions) = {
+        let (tree, mut tree_actions, share_updates) = {
             let (tab_diffs, container_titles, mut tree) = {
                 let mut state_mut = state.get_mut(world);
                 let Some(mut ui_state) = state_mut.tile_param.target(window) else {
@@ -1856,8 +1864,162 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 target_window: window,
             };
             tree.ui(&mut behavior, ui);
+            // Paint wide orange gutters between sidebars (Hierarchy/Inspector) and the center area.
+            let gutter_width: f32 = 16.0;
+            let min_width: f32 = 32.0;
+            let painter = ui.painter_at(ui.max_rect());
+            let mut share_updates: Vec<(TileId, TileId, TileId, f32, f32)> = Vec::new();
+
+            fn is_sidebar_tile(tiles: &Tiles<Pane>, id: TileId) -> bool {
+                match tiles.get(id) {
+                    Some(Tile::Pane(Pane::Hierarchy | Pane::Inspector)) => true,
+                    Some(Tile::Container(Container::Tabs(tabs))) => tabs
+                        .children
+                        .iter()
+                        .any(|child| is_sidebar_tile(tiles, *child)),
+                    Some(Tile::Container(Container::Linear(linear))) => linear
+                        .children
+                        .iter()
+                        .any(|child| is_sidebar_tile(tiles, *child)),
+                    Some(Tile::Container(Container::Grid(grid))) => {
+                        grid.children().any(|child| is_sidebar_tile(tiles, *child))
+                    }
+                    _ => false,
+                }
+            }
+
+            let linear_ids: Vec<_> = tree
+                .tiles
+                .iter()
+                .filter_map(|(id, tile)| {
+                    matches!(tile, Tile::Container(Container::Linear(_))).then_some(*id)
+                })
+                .collect();
+
+            for container_id in linear_ids {
+                let Some(parent_rect) = tree.tiles.rect(container_id) else {
+                    continue;
+                };
+
+                let visible_children: Vec<TileId> = tree
+                    .tiles
+                    .get(container_id)
+                    .and_then(|tile| match tile {
+                        Tile::Container(Container::Linear(linear)) => Some(
+                            linear
+                                .children
+                                .iter()
+                                .copied()
+                                .filter(|child| tree.tiles.is_visible(*child))
+                                .collect(),
+                        ),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+
+                if visible_children.len() < 2 {
+                    continue;
+                }
+
+                let mut child_data = Vec::new();
+                for &child in &visible_children {
+                    if let Some(rect) = tree.tiles.rect(child) {
+                        let is_sidebar = is_sidebar_tile(&tree.tiles, child);
+                        child_data.push((child, rect, is_sidebar));
+                    }
+                }
+
+                if child_data.len() < 2 {
+                    continue;
+                }
+
+                for i in 0..child_data.len().saturating_sub(1) {
+                    let (left_id, left_rect, left_sidebar) = child_data[i];
+                    let (right_id, right_rect, right_sidebar) = child_data[i + 1];
+                    if left_sidebar == right_sidebar {
+                        continue;
+                    }
+
+                    let center_x = (left_rect.max.x + right_rect.min.x) * 0.5;
+                    let gutter_rect = egui::Rect::from_min_max(
+                        egui::pos2(center_x - gutter_width * 0.5, parent_rect.top()),
+                        egui::pos2(center_x + gutter_width * 0.5, parent_rect.bottom()),
+                    );
+
+                    let fill = Color32::from_rgb(255, 140, 0);
+                    let stroke = Stroke::new(1.0, Color32::from_rgb(200, 110, 0));
+                    painter.rect_filled(gutter_rect, 0.0, fill);
+                    painter.rect_stroke(gutter_rect, 0.0, stroke, egui::StrokeKind::Inside);
+
+                    let id = ui.id().with(("sidebar_gutter", container_id, i));
+                    let hit_rect = gutter_rect.expand(24.0);
+                    #[derive(Clone, Copy, Default)]
+                    struct DragState {
+                        left_width: f32,
+                        right_width: f32,
+                        start_x: f32,
+                        active: bool,
+                    }
+                    let mut drag_state = ui
+                        .ctx()
+                        .data(|d| d.get_temp::<DragState>(id))
+                        .unwrap_or_default();
+
+                    let response = ui
+                        .interact(hit_rect, id, egui::Sense::click_and_drag())
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+
+                    if response.hovered() {
+                        ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::PointingHand);
+                    }
+
+                    let pointer_pos = ui.input(|i| i.pointer.interact_pos());
+                    let pointer_down = ui.input(|i| i.pointer.primary_down());
+                    if !drag_state.active && pointer_down && response.hovered() {
+                        let start_x = pointer_pos.map(|p| p.x).unwrap_or(gutter_rect.center().x);
+                        drag_state = DragState {
+                            left_width: left_rect.width(),
+                            right_width: right_rect.width(),
+                            start_x,
+                            active: true,
+                        };
+                        ui.ctx().data_mut(|d| d.insert_temp(id, drag_state));
+                    }
+
+                    if drag_state.active && pointer_down {
+                        let delta = pointer_pos.map(|p| p.x - drag_state.start_x).unwrap_or(0.0);
+                        let new_left = (drag_state.left_width + delta).max(min_width);
+                        let new_right = (drag_state.right_width - delta).max(min_width);
+                        if let Some(Tile::Container(Container::Linear(linear))) =
+                            tree.tiles.get_mut(container_id)
+                        {
+                            let share_left = linear.shares[left_id];
+                            let share_right = linear.shares[right_id];
+                            let share_sum = share_left + share_right;
+
+                            let total = new_left + new_right;
+                            let new_left_share = share_sum * new_left / total.max(1.0);
+                            let new_right_share = share_sum - new_left_share;
+                            linear.shares.set_share(left_id, new_left_share.max(0.01));
+                            linear.shares.set_share(right_id, new_right_share.max(0.01));
+                            share_updates.push((
+                                container_id,
+                                left_id,
+                                right_id,
+                                new_left_share.max(0.01),
+                                new_right_share.max(0.01),
+                            ));
+                            ui.ctx().request_repaint();
+                        }
+                    }
+
+                    if drag_state.active && !pointer_down {
+                        ui.ctx().data_mut(|d| d.remove::<DragState>(id));
+                    }
+                }
+            }
             let TreeBehavior { tree_actions, .. } = behavior;
-            (tree, tree_actions)
+            (tree, tree_actions, share_updates)
         };
 
         let mut state_mut = state.get_mut(world);
@@ -1865,6 +2027,14 @@ impl WidgetSystem for TileLayout<'_, '_> {
             return;
         };
         let _ = std::mem::replace(&mut ui_state.tree, tree);
+        for (container_id, left_id, right_id, left_share, right_share) in share_updates {
+            if let Some(Tile::Container(Container::Linear(linear))) =
+                ui_state.tree.tiles.get_mut(container_id)
+            {
+                linear.shares.set_share(left_id, left_share);
+                linear.shares.set_share(right_id, right_share);
+            }
+        }
         state_mut.viewport_contains_pointer.0 = ui.ui_contains_pointer();
 
         for mut editor_cam in state_mut.editor_cam.iter_mut() {
