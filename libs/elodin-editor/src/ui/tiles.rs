@@ -1100,6 +1100,33 @@ impl TileState {
         self.tree = egui_tiles::Tree::new_tabs(self.tree_id, vec![]);
         self.tree_actions = smallvec![TreeAction::AddSidebars];
     }
+
+    /// Returns true when there is any user-visible content beyond the built-in sidebars.
+    fn has_non_sidebar_content(&self) -> bool {
+        fn visit(tree: &egui_tiles::Tree<Pane>, id: TileId) -> bool {
+            match tree.tiles.get(id) {
+                Some(Tile::Pane(Pane::Hierarchy | Pane::Inspector)) => false,
+                Some(Tile::Pane(_)) => true,
+                Some(Tile::Container(container)) => {
+                    let mut found = false;
+                    for child in container.children() {
+                        if visit(tree, *child) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    found
+                }
+                None => false,
+            }
+        }
+
+        if let Some(root) = self.tree.root() {
+            visit(&self.tree, root)
+        } else {
+            false
+        }
+    }
 }
 
 impl Default for TileState {
@@ -1520,7 +1547,14 @@ impl<'w, 's> TileSystem<'w, 's> {
         let is_empty = params
             .window_states
             .get(target_id)
-            .map(|(_, _, s)| s.tile_state.is_empty() && s.tile_state.tree_actions.is_empty())
+            .map(|(_, _, s)| {
+                let pending_non_sidebar = s
+                    .tile_state
+                    .tree_actions
+                    .iter()
+                    .any(|action| !matches!(action, TreeAction::AddSidebars));
+                !pending_non_sidebar && !s.tile_state.has_non_sidebar_content()
+            })
             .ok();
 
         let is_empty_tile_tree = is_empty?;
