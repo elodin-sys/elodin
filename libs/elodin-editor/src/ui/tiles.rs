@@ -1240,7 +1240,6 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             TabState::Inactive
         };
 
-        let is_container = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Container(_)));
         let persist_id = id.with(("rename_title", tile_id));
         let edit_flag_id = id.with(("rename_editing", tile_id));
         let edit_buf_id = id.with(("rename_buffer", tile_id));
@@ -1249,21 +1248,17 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             .data(|d| d.get_temp::<bool>(edit_flag_id))
             .unwrap_or(false);
 
-        let title_str: String = if is_container {
-            if hide_title {
-                String::new()
-            } else if let Some(custom) = ui.ctx().data(|d| d.get_temp::<String>(persist_id)) {
-                custom
-            } else if let Some(t) = self.container_titles.get(&tile_id) {
-                t.clone()
-            } else {
-                match tiles.get(tile_id) {
-                    Some(egui_tiles::Tile::Container(c)) => format!("{:?}", c.kind()),
-                    _ => "Container".to_owned(),
-                }
-            }
+        let title_str: String = if hide_title {
+            String::new()
+        } else if let Some(custom) = ui.ctx().data(|d| d.get_temp::<String>(persist_id)) {
+            custom
+        } else if let Some(t) = self.container_titles.get(&tile_id) {
+            t.clone()
         } else {
-            self.tab_title_for_tile(tiles, tile_id).text().to_string()
+            match tiles.get(tile_id) {
+                Some(egui_tiles::Tile::Container(c)) => format!("{:?}", c.kind()),
+                _ => self.tab_title_for_tile(tiles, tile_id).text().to_string(),
+            }
         };
 
         let mut font_id = egui::TextStyle::Button.resolve(ui.style());
@@ -1304,10 +1299,9 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         };
 
         if !self.read_only
-            && is_container
             && !hide_title
             && state.active
-            && response.clicked()
+            && response.double_clicked()
             && !is_editing
         {
             ui.ctx()
@@ -1331,7 +1325,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             ui.painter().rect_filled(rect, 0.0, bg_color);
 
             if !hide_title {
-                if !self.read_only && is_container && is_editing {
+                if !self.read_only && is_editing {
                     let label_rect =
                         egui::Align2::LEFT_CENTER.align_size_within_rect(galley.size(), text_rect);
                     let edit_rect = label_rect.expand(1.0);
@@ -1483,15 +1477,10 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         frame.stroke = Stroke::NONE;
         frame.shadow = egui::epaint::Shadow::NONE;
         frame.show(ui, |ui| {
-            let text = match tiles.get(tile_id) {
-                Some(Tile::Container(_)) => {
-                    if let Some(t) = self.container_titles.get(&tile_id) {
-                        egui::WidgetText::from(t.clone())
-                    } else {
-                        self.tab_title_for_tile(tiles, tile_id)
-                    }
-                }
-                _ => self.tab_title_for_tile(tiles, tile_id),
+            let text = if let Some(t) = self.container_titles.get(&tile_id) {
+                egui::WidgetText::from(t.clone())
+            } else {
+                self.tab_title_for_tile(tiles, tile_id)
             };
             let text = text.text();
             ui.label(
