@@ -773,6 +773,7 @@ async fn sender_thread_loop(addr: SocketAddr, rx: Receiver<SendCommand>) {
 }
 
 /// Send a single component, managing connection and vtable state
+#[allow(clippy::too_many_arguments)]
 async fn send_one_component(
     addr: SocketAddr,
     client: &mut Option<Client>,

@@ -64,6 +64,9 @@ impl TelemetryProcessor {
                     StreamReply::VTable(vtable_msg) => {
                         self.handle_vtable(vtable_msg);
                     }
+                    StreamReply::Timestamp(_) => {
+                        // Timestamp messages are used for fixed-rate streaming; ignore here
+                    }
                 },
                 Err(e) => {
                     debug!("Stream ended: {}", e);

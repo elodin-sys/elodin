@@ -80,8 +80,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Wall-clock timestamps from 2020+ are considered "good"
     // Timestamps before 2000 are considered "bad" (monotonic)
     // NOTE: Elodin timestamps are in MICROSECONDS, not nanoseconds
-    let cutoff_2000: i64 = 946684800_000_000; // 2000-01-01 in microseconds
-    let cutoff_2020: i64 = 1577836800_000_000; // 2020-01-01 in microseconds
+    let cutoff_2000: i64 = 946_684_800_000_000; // 2000-01-01 in microseconds
+    let cutoff_2020: i64 = 1_577_836_800_000_000; // 2020-01-01 in microseconds
 
     let mut good_components: Vec<(&PathBuf, &ComponentInfo)> = Vec::new();
     let mut bad_components: Vec<(&PathBuf, &ComponentInfo)> = Vec::new();
