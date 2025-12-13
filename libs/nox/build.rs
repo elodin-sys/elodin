@@ -66,4 +66,8 @@ fn main() {
 
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", python_lib.display());
     println!("cargo:rustc-link-search=native={}", python_dir.display());
+
+    // Link against the Python library for test binaries
+    // (extension modules don't need this as Python loads them)
+    println!("cargo:rustc-link-lib=dylib={}", lib_name);
 }
