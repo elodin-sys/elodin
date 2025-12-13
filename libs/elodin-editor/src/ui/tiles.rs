@@ -1623,7 +1623,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
         egui_tiles::SimplificationOptions {
-            // Keep tab bars visible (titles et "+") même avec un seul onglet.
+            // Keep tab bars visible (titles and "+") even with a single tab.
             prune_empty_tabs: false,
             prune_single_child_tabs: false,
             all_panes_must_have_tabs: true,
@@ -2710,6 +2710,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
             if read_only && !matches!(diff, TreeAction::SelectTile(_)) {
                 continue;
             }
+            let tree_is_empty = !ui_state.has_non_sidebar_content();
             match diff {
                 TreeAction::DeleteTab(tile_id) => {
                     if read_only {
@@ -2772,9 +2773,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     if read_only {
                         continue;
                     }
-                    let parent_tile_id = if parent_tile_id.is_none()
-                        && !ui_state.has_non_sidebar_content()
-                    {
+                    let parent_tile_id = if parent_tile_id.is_none() && tree_is_empty {
                         ui_state.apply_viewport_scaffold()
                     } else {
                         parent_tile_id
@@ -2804,9 +2803,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     if read_only {
                         continue;
                     }
-                    let parent_tile_id = if parent_tile_id.is_none()
-                        && !ui_state.has_non_sidebar_content()
-                    {
+                    let parent_tile_id = if parent_tile_id.is_none() && tree_is_empty {
                         ui_state.apply_scaffold_with_title("Graphs")
                     } else {
                         parent_tile_id
@@ -2838,9 +2835,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     if read_only {
                         continue;
                     }
-                    let parent_tile_id = if parent_tile_id.is_none()
-                        && !ui_state.has_non_sidebar_content()
-                    {
+                    let parent_tile_id = if parent_tile_id.is_none() && tree_is_empty {
                         ui_state.apply_scaffold_with_title("Monitors")
                     } else {
                         parent_tile_id
