@@ -248,10 +248,9 @@ impl super::Formula for Translate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Component, ComponentPart, Context};
+    use crate::{Component, Context};
     use impeller2::schema::Schema;
     use impeller2::types::{ComponentId, PrimType, Timestamp};
-    use std::collections::BTreeMap;
     use std::sync::Arc;
 
     fn create_test_world_pos_component() -> Arc<Component> {
