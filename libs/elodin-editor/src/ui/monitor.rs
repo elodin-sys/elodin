@@ -7,7 +7,7 @@ use impeller2_bevy::{ComponentMetadataRegistry, EntityMap};
 
 use super::{colors::get_scheme, widgets::WidgetSystem};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MonitorPane {
     pub label: String,
     pub component_name: String,
