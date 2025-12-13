@@ -40,7 +40,8 @@ fn main() {
         "so"
     };
 
-    let lib_name = pyo3_build_config::get().lib_name.as_ref().unwrap();
+    let pyo3_config = pyo3_build_config::get();
+    let lib_name = pyo3_config.lib_name.as_ref().unwrap();
     let shared_lib = python_lib.join(format!("lib{}.{}", lib_name, shared_lib_extension));
 
     // copy the shared library to the output python directory if it exists:
@@ -67,7 +68,11 @@ fn main() {
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", python_lib.display());
     println!("cargo:rustc-link-search=native={}", python_dir.display());
 
-    // Link against the Python library for test binaries
-    // (extension modules don't need this as Python loads them)
-    println!("cargo:rustc-link-lib=dylib={}", lib_name);
+    // Link against the Python library for test binaries only.
+    // Extension modules should NOT link against libpython - Python provides
+    // symbols at runtime. The suppress_build_script_link_lines flag is set
+    // to true by pyo3 when building extension modules.
+    if !pyo3_config.suppress_build_script_link_lines {
+        println!("cargo:rustc-link-lib=dylib={}", lib_name);
+    }
 }
