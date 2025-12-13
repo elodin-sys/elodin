@@ -36,7 +36,7 @@ use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp};
 
 use super::plot::{Line, gpu};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct QueryPlotPane {
     pub entity: Entity,
     pub rect: Option<egui::Rect>,

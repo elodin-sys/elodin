@@ -8,7 +8,8 @@ use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
 use impeller2_kdl::FromKdl;
 use impeller2_kdl::KdlSchematicError;
 use impeller2_wkt::{
-    DbConfig, Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowSchematic,
+    DbConfig, Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowRect,
+    WindowSchematic,
 };
 use miette::{Diagnostic, miette};
 #[cfg(target_os = "linux")]
@@ -29,7 +30,7 @@ use crate::{
     object_3d::Object3DState,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        DEFAULT_SECONDARY_RECT, HdrEnabled, SelectedObject,
+        HdrEnabled, SelectedObject,
         colors::{self, EColor},
         dashboard::{NodeUpdaterParams, spawn_dashboard},
         modal::ModalDialog,
@@ -39,7 +40,7 @@ use crate::{
         schematic::EqlExt,
         tiles::{
             DashboardPane, GraphPane, Pane, TileState, TreePane, ViewportPane, WindowDescriptor,
-            WindowId, WindowState,
+            WindowId, WindowState, clamp_percent,
         },
     },
     vector_arrow::{VectorArrowState, ViewportArrow},
@@ -129,7 +130,7 @@ fn resolve_window_descriptor(
         path: Some(resolved),
         title: window.title.clone(),
         screen: window.screen.map(|idx| idx as usize),
-        screen_rect: window.screen_rect.or(Some(DEFAULT_SECONDARY_RECT)),
+        screen_rect: window.screen_rect,
     })
 }
 
@@ -255,6 +256,7 @@ impl LoadSchematicParams<'_, '_> {
                         secondary_descriptors.push(descriptor);
                     } else {
                         main_window_descriptor = Some(WindowDescriptor {
+                            title: window.title.clone(),
                             screen: window.screen.map(|idx| idx as usize),
                             screen_rect: window.screen_rect,
                             ..default()
@@ -262,6 +264,120 @@ impl LoadSchematicParams<'_, '_> {
                     }
                 }
             }
+        }
+
+        let primary_was_none = main_window_descriptor.is_none();
+        let primary_desc = main_window_descriptor.get_or_insert_with(WindowDescriptor::default);
+
+        #[derive(Clone, Copy)]
+        enum EntryId {
+            Primary,
+            Secondary(usize),
+        }
+
+        let mut group_entries: HashMap<usize, Vec<EntryId>> = HashMap::new();
+        let mut group_has_rect: HashMap<usize, bool> = HashMap::new();
+
+        let primary_screen = primary_desc.screen.unwrap_or(0);
+        group_entries
+            .entry(primary_screen)
+            .or_default()
+            .push(EntryId::Primary);
+        group_has_rect
+            .entry(primary_screen)
+            .and_modify(|v| *v |= primary_desc.screen_rect.is_some())
+            .or_insert(primary_desc.screen_rect.is_some());
+
+        for (idx, descriptor) in secondary_descriptors.iter().enumerate() {
+            let screen = descriptor.screen.unwrap_or(0);
+            group_entries
+                .entry(screen)
+                .or_default()
+                .push(EntryId::Secondary(idx));
+            group_has_rect
+                .entry(screen)
+                .and_modify(|v| *v |= descriptor.screen_rect.is_some())
+                .or_insert(descriptor.screen_rect.is_some());
+        }
+
+        for (screen, entries) in group_entries {
+            if group_has_rect.get(&screen).copied().unwrap_or(false) {
+                continue;
+            }
+            let has_primary = entries.iter().any(|e| matches!(e, EntryId::Primary));
+            if has_primary {
+                let other_count = entries.len().saturating_sub(1);
+                if other_count == 0 {
+                    if primary_desc.screen_rect.is_none() {
+                        primary_desc.screen_rect = Some(WindowRect {
+                            x: 0,
+                            y: 0,
+                            width: 100,
+                            height: 100,
+                        });
+                    }
+                    primary_desc.screen.get_or_insert(screen);
+                    continue;
+                }
+                let primary_width = clamp_percent(50.0);
+                let other_width = clamp_percent(50.0);
+                let other_height = clamp_percent(100.0 / other_count as f32);
+                primary_desc.screen_rect.get_or_insert(WindowRect {
+                    x: 0,
+                    y: 0,
+                    width: primary_width,
+                    height: 100,
+                });
+                primary_desc.screen.get_or_insert(screen);
+
+                let mut y_acc = 0.0;
+                for entry in entries {
+                    if let EntryId::Secondary(idx) = entry {
+                        if secondary_descriptors[idx].screen_rect.is_none() {
+                            let y = clamp_percent(y_acc);
+                            secondary_descriptors[idx].screen_rect = Some(WindowRect {
+                                x: primary_width,
+                                y,
+                                width: other_width,
+                                height: other_height,
+                            });
+                        }
+                        secondary_descriptors[idx].screen.get_or_insert(screen);
+                        y_acc += 100.0 / other_count as f32;
+                    }
+                }
+            } else {
+                let count = entries.len();
+                if count == 0 {
+                    continue;
+                }
+                let width = clamp_percent(100.0);
+                let height = clamp_percent(100.0 / count as f32);
+                let mut y_acc = 0.0;
+                for entry in entries {
+                    if let EntryId::Secondary(idx) = entry {
+                        if secondary_descriptors[idx].screen_rect.is_none() {
+                            let y = clamp_percent(y_acc);
+                            secondary_descriptors[idx].screen_rect = Some(WindowRect {
+                                x: 0,
+                                y,
+                                width,
+                                height,
+                            });
+                        }
+                        secondary_descriptors[idx].screen.get_or_insert(screen);
+                        y_acc += 100.0 / count as f32;
+                    }
+                }
+            }
+        }
+
+        if primary_was_none
+            && primary_desc.title.is_none()
+            && primary_desc.screen.is_none()
+            && primary_desc.screen_rect.is_none()
+        {
+            main_window_descriptor = None;
         }
 
         {
@@ -272,12 +388,14 @@ impl LoadSchematicParams<'_, '_> {
                 .2;
             match main_window_descriptor {
                 Some(d) => {
+                    window_state.descriptor.title = d.title;
                     window_state.descriptor.screen = d.screen;
                     window_state.descriptor.screen_rect = d.screen_rect;
                 }
                 None => {
                     // No primary window entry in KDL: clear any stale placement to avoid
                     // reapplying an old rect.
+                    window_state.descriptor.title = None;
                     window_state.descriptor.screen = None;
                     window_state.descriptor.screen_rect = None;
                 }
@@ -320,65 +438,63 @@ impl LoadSchematicParams<'_, '_> {
         }
 
         for descriptor in secondary_descriptors {
-            if let Some(path) = descriptor.path.as_ref() {
-                match std::fs::read_to_string(path) {
-                    Ok(kdl) => match impeller2_wkt::Schematic::from_kdl(&kdl) {
-                        Ok(sec_schematic) => {
-                            let id = WindowId::default();
-                            let mut tile_state =
-                                TileState::new(Id::new(("secondary_tab_tree", id.0)));
-                            for elem in &sec_schematic.elems {
-                                if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
-                                    self.spawn_panel(
-                                        &mut tile_state,
-                                        panel,
-                                        None,
-                                        PanelContext::Secondary(id),
-                                    );
-                                }
-                            }
-
-                            let graph_entities = tile_state.collect_graph_entities();
-                            info!(
-                                path = ?descriptor.path,
-                                "Loaded secondary schematic"
-                            );
-
-                            for &graph in &graph_entities {
-                                if let Ok(mut camera) = self.cameras.get_mut(graph) {
-                                    // Why do we turn their cameras off?
-                                    // Oh, so we can set their `WindowRef` first.
-                                    camera.is_active = false;
-                                }
-                            }
-
-                            let state = WindowState {
-                                descriptor,
-                                tile_state,
-                                graph_entities,
-                            };
-                            self.commands.spawn((id, state));
-                        }
-                        Err(err) => {
-                            let diag = render_diag(&err);
-                            let report = miette!(err.clone());
-                            warn!(
-                                ?report,
-                                path = ?descriptor.path,
-                                "Failed to parse secondary schematic: \n{diag}"
-                            );
-                        }
-                    },
-                    Err(err) => {
-                        warn!(
-                            ?err,
-                            path = ?descriptor.path,
-                            "Failed to read secondary schematic"
-                        );
-                    }
-                }
+            let id = WindowId::default();
+            if let Some(state) = self.load_secondary_window_state(&descriptor, id) {
+                self.commands.spawn((id, state));
             }
         }
+    }
+
+    pub fn load_secondary_window_state(
+        &mut self,
+        descriptor: &WindowDescriptor,
+        id: WindowId,
+    ) -> Option<WindowState> {
+        let path = descriptor.path.as_ref()?;
+        let kdl = match std::fs::read_to_string(path) {
+            Ok(kdl) => kdl,
+            Err(err) => {
+                warn!(?err, path = ?descriptor.path, "Failed to read secondary schematic");
+                return None;
+            }
+        };
+
+        let schematic = match impeller2_wkt::Schematic::from_kdl(&kdl) {
+            Ok(sec) => sec,
+            Err(err) => {
+                let diag = render_diag(&err);
+                let report = miette!(err.clone());
+                warn!(
+                    ?report,
+                    path = ?descriptor.path,
+                    "Failed to parse secondary schematic: \n{diag}"
+                );
+                return None;
+            }
+        };
+
+        let mut tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
+        for elem in &schematic.elems {
+            if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
+                self.spawn_panel(&mut tile_state, panel, None, PanelContext::Secondary(id));
+            }
+        }
+
+        let graph_entities = tile_state.collect_graph_entities();
+        info!(path = ?descriptor.path, "Loaded secondary schematic");
+
+        for &graph in &graph_entities {
+            if let Ok(mut camera) = self.cameras.get_mut(graph) {
+                // Keep cameras inactive until they are assigned to the new window.
+                camera.is_active = false;
+            }
+        }
+
+        Some(WindowState {
+            descriptor: descriptor.clone(),
+            tile_state,
+            graph_entities,
+        })
     }
 
     pub fn spawn_object_3d(&mut self, object_3d: Object3D) {
@@ -462,7 +578,15 @@ impl LoadSchematicParams<'_, '_> {
                         self.spawn_vector_arrow(arrow, Some(camera));
                     }
                 }
-                tile_state.insert_tile(Tile::Pane(Pane::Viewport(pane)), parent_id, viewport.active)
+                let tile_id = tile_state.insert_tile(
+                    Tile::Pane(Pane::Viewport(pane)),
+                    parent_id,
+                    viewport.active,
+                );
+                if let (Some(tile_id), Some(name)) = (tile_id, viewport.name.clone()) {
+                    tile_state.container_titles.insert(tile_id, name);
+                }
+                tile_id
             }
             Panel::HSplit(split) | Panel::VSplit(split) => {
                 let linear = egui_tiles::Linear::new(
@@ -503,16 +627,30 @@ impl LoadSchematicParams<'_, '_> {
                 tile_id
             }
             Panel::Tabs(tabs) => {
-                let tile_id = tile_state.insert_tile(
-                    Tile::Container(Container::new_tabs(vec![])),
-                    parent_id,
-                    false,
-                );
+                // Top-level tabs are already provided by the default window layout.
+                // Flatten them into the root tabs container to avoid nesting and
+                // keep visible tab titles aligned with the loaded panes.
+                if parent_id.is_none() {
+                    let Some(root_tabs) = tile_state.tree.root() else {
+                        warn!("No root tabs available to attach panels");
+                        return None;
+                    };
+                    for panel in tabs {
+                        self.spawn_panel(tile_state, panel, Some(root_tabs), context);
+                    }
+                    Some(root_tabs)
+                } else {
+                    let tile_id = tile_state.insert_tile(
+                        Tile::Container(Container::new_tabs(vec![])),
+                        parent_id,
+                        false,
+                    );
 
-                tabs.iter().for_each(|panel| {
-                    self.spawn_panel(tile_state, panel, tile_id, context);
-                });
-                tile_id
+                    tabs.iter().for_each(|panel| {
+                        self.spawn_panel(tile_state, panel, tile_id, context);
+                    });
+                    tile_id
+                }
             }
             Panel::Graph(graph) => {
                 let eql = self
@@ -596,8 +734,13 @@ impl LoadSchematicParams<'_, '_> {
                 if matches!(context, PanelContext::Secondary(_)) {
                     self.commands.entity(graph_id).remove::<MainCamera>();
                 }
-                let graph = GraphPane::new(graph_id, graph_label);
-                tile_state.insert_tile(Tile::Pane(Pane::Graph(graph)), parent_id, false)
+                let graph_pane = GraphPane::new(graph_id, graph_label.clone());
+                let tile_id =
+                    tile_state.insert_tile(Tile::Pane(Pane::Graph(graph_pane)), parent_id, false);
+                if let (Some(tile_id), Some(name)) = (tile_id, graph.name.clone()) {
+                    tile_state.container_titles.insert(tile_id, name);
+                }
+                tile_id
             }
             Panel::ComponentMonitor(monitor) => {
                 let pane = MonitorPane::new("Monitor".to_string(), monitor.component_name.clone());
@@ -625,15 +768,16 @@ impl LoadSchematicParams<'_, '_> {
                     .id();
                 let pane = super::tiles::ActionTilePane {
                     entity,
-                    label: "Action".to_string(),
+                    label: action.label.clone(),
                 };
-                tile_state.insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false)
-            }
-            Panel::Inspector => {
-                tile_state.insert_tile(Tile::Pane(Pane::Inspector), parent_id, false)
-            }
-            Panel::Hierarchy => {
-                tile_state.insert_tile(Tile::Pane(Pane::Hierarchy), parent_id, false)
+                let tile_id =
+                    tile_state.insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false);
+                if let Some(tile_id) = tile_id {
+                    tile_state
+                        .container_titles
+                        .insert(tile_id, action.label.clone());
+                }
+                tile_id
             }
             Panel::SchematicTree => {
                 let entity = self.commands.spawn(super::TreeWidgetState::default()).id();
@@ -661,7 +805,13 @@ impl LoadSchematicParams<'_, '_> {
                     rect: None,
                     scrub_icon: None,
                 });
-                tile_state.insert_tile(Tile::Pane(pane), parent_id, false)
+                let tile_id = tile_state.insert_tile(Tile::Pane(pane), parent_id, false);
+                if let Some(tile_id) = tile_id {
+                    tile_state
+                        .container_titles
+                        .insert(tile_id, plot.label.clone());
+                }
+                tile_id
             }
             Panel::Dashboard(dashboard) => {
                 let Ok(dashboard) = spawn_dashboard(
@@ -692,7 +842,7 @@ pub fn viewport_label(viewport: &Viewport) -> String {
     viewport
         .name
         .clone()
-        .unwrap_or_else(|| "Viewport".to_string())
+        .unwrap_or_else(|| "viewport".to_string())
 }
 
 /// Prefer the explicit `name` when set (and not the generic "Graph").

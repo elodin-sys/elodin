@@ -550,17 +550,39 @@ pub fn create_window() -> PaletteItem {
                 LabelSource::placeholder("Enter window title"),
                 "Leave blank for a default title",
                 move |In(title): In<String>,
-                      mut commands: Commands,
-
+                      mut params: LoadSchematicParams,
                       mut palette_state: ResMut<CommandPaletteState>| {
                     let title_opt = if title.trim().is_empty() {
                         None
                     } else {
                         Some(title.trim().to_string())
                     };
-                    let (state, id) = tiles::create_secondary_window(title_opt);
-                    let entity = commands.spawn((id, state)).id();
+                    let (fallback_state, id) = tiles::create_secondary_window(title_opt);
+                    let descriptor = fallback_state.descriptor.clone();
+
+                    let state = if descriptor
+                        .path
+                        .as_ref()
+                        .map(|path| path.exists())
+                        .unwrap_or(false)
+                    {
+                        params
+                            .load_secondary_window_state(&descriptor, id)
+                            .unwrap_or(fallback_state)
+                    } else {
+                        fallback_state
+                    };
+
+                    let entity = params.commands.spawn((id, state)).id();
                     palette_state.target_window = Some(entity);
+                    palette_state.open_page(|| {
+                        PalettePage::new(vec![
+                            create_viewport(None),
+                            create_monitor(None),
+                            create_graph(None),
+                        ])
+                        .prompt("Choose the first tab for the new window")
+                    });
                     PaletteEvent::Exit
                 },
             )
@@ -594,48 +616,6 @@ pub fn create_query_plot(tile_id: Option<TileId>) -> PaletteItem {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
             tile_state.create_query_plot_tile(tile_id);
-            PaletteEvent::Exit
-        },
-    )
-}
-
-pub fn create_hierarchy(tile_id: Option<TileId>) -> PaletteItem {
-    PaletteItem::new(
-        "Create Hierarchy",
-        TILES_LABEL,
-        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
-            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
-                return PaletteEvent::Error("Secondary window unavailable".to_string());
-            };
-            tile_state.create_hierarchy_tile(tile_id);
-            PaletteEvent::Exit
-        },
-    )
-}
-
-pub fn create_inspector(tile_id: Option<TileId>) -> PaletteItem {
-    PaletteItem::new(
-        "Create Inspector",
-        TILES_LABEL,
-        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
-            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
-                return PaletteEvent::Error("Secondary window unavailable".to_string());
-            };
-            tile_state.create_inspector_tile(tile_id);
-            PaletteEvent::Exit
-        },
-    )
-}
-
-pub fn create_schematic_tree(tile_id: Option<TileId>) -> PaletteItem {
-    PaletteItem::new(
-        "Create Schematic Tree",
-        TILES_LABEL,
-        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
-            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
-                return PaletteEvent::Error("Secondary window unavailable".to_string());
-            };
-            tile_state.create_tree_tile(tile_id);
             PaletteEvent::Exit
         },
     )
@@ -943,14 +923,11 @@ pub fn save_schematic_db() -> PaletteItem {
     PaletteItem::new(
         "Save Schematic To DB",
         PRESETS_LABEL,
-        |_name: In<String>, tx: Res<PacketTx>, schematic: Res<CurrentSchematic>| {
-            let kdl = schematic.0.to_kdl();
-            tx.send_msg(SetDbConfig {
-                metadata: [("schematic.content".to_string(), kdl)]
-                    .into_iter()
-                    .collect(),
-                ..Default::default()
-            });
+        |_name: In<String>, mut commands: Commands| {
+            commands.run_system_cached(crate::ui::update_primary_descriptor_path);
+            commands.run_system_cached(crate::ui::capture_window_screens_oneoff);
+            commands.run_system_cached(crate::ui::schematic::tiles_to_schematic);
+            commands.run_system_cached(save_schematic_db_apply);
             PaletteEvent::Exit
         },
     )
@@ -1097,26 +1074,48 @@ pub fn save_schematic_inner() -> PaletteItem {
     PaletteItem::new(
         LabelSource::placeholder("Enter a name for the schematic"),
         "",
-        move |In(name): In<String>,
-              schematic: Res<CurrentSchematic>,
-              secondary: Res<CurrentSecondarySchematics>,
-              mut live_reload: ResMut<SchematicLiveReloadRx>| {
-            let kdl = schematic.0.to_kdl();
+        move |In(name): In<String>, mut commands: Commands| {
             let path = PathBuf::from(name).with_extension("kdl");
-            let dest = schematic_file(&path);
-            live_reload.guard_for(Duration::from_millis(2000));
-            if let Err(e) = std::fs::write(&dest, kdl) {
-                error!(?e, "saving schematic");
-            } else {
-                info!("saved schematic to {:?}", dest.display());
-                live_reload.ignore_path(dest.clone());
-                let base_dir = dest.parent().unwrap_or_else(|| Path::new("."));
-                write_secondary_schematics(base_dir, &secondary, &mut live_reload);
-            }
+            commands.run_system_cached(crate::ui::update_primary_descriptor_path);
+            commands.run_system_cached(crate::ui::capture_window_screens_oneoff);
+            commands.run_system_cached(crate::ui::schematic::tiles_to_schematic);
+            commands.run_system_cached_with(save_schematic_inner_apply, path);
             PaletteEvent::Exit
         },
     )
     .default()
+}
+
+fn save_schematic_db_apply(schematic: Res<CurrentSchematic>, tx: Option<Res<PacketTx>>) {
+    let Some(tx) = tx else { return };
+    let kdl = schematic.0.to_kdl();
+    tx.send_msg(SetDbConfig {
+        metadata: [("schematic.content".to_string(), kdl)]
+            .into_iter()
+            .collect(),
+        ..Default::default()
+    });
+}
+
+fn save_schematic_inner_apply(
+    In(path): In<PathBuf>,
+    mut live_reload: ResMut<SchematicLiveReloadRx>,
+    schematic: Res<CurrentSchematic>,
+    secondary: Res<CurrentSecondarySchematics>,
+) {
+    let dest = schematic_file(&path);
+    live_reload.guard_for(Duration::from_millis(2000));
+    let kdl = schematic.0.to_kdl();
+    if let Err(e) = std::fs::write(&dest, kdl) {
+        error!(?e, "saving schematic");
+        return;
+    }
+
+    info!("saved schematic to {:?}", dest.display());
+    live_reload.ignore_path(dest.clone());
+    live_reload.record_loaded(&dest);
+    let base_dir = dest.parent().unwrap_or_else(|| Path::new("."));
+    write_secondary_schematics(base_dir, &secondary, &mut live_reload);
 }
 
 fn write_secondary_schematics(
@@ -1536,10 +1535,7 @@ pub fn create_tiles(tile_id: TileId) -> PalettePage {
         create_query_table(Some(tile_id)),
         create_query_plot(Some(tile_id)),
         create_video_stream(Some(tile_id)),
-        create_hierarchy(Some(tile_id)),
-        create_schematic_tree(Some(tile_id)),
         create_dashboard(Some(tile_id)),
-        create_inspector(Some(tile_id)),
         create_sidebars(),
     ])
 }
@@ -1665,9 +1661,6 @@ impl Default for PalettePage {
             create_query_table(None),
             create_query_plot(None),
             create_video_stream(None),
-            create_hierarchy(None),
-            create_inspector(None),
-            create_schematic_tree(None),
             create_dashboard(None),
             create_sidebars(),
             create_3d_object(),

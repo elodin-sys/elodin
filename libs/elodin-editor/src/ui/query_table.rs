@@ -25,7 +25,7 @@ use super::{
     widgets::WidgetSystem,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct QueryTablePane {
     pub entity: Entity,
 }
