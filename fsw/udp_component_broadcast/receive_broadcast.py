@@ -116,7 +116,7 @@ class ComponentReceiver:
 
     def start(self) -> bool:
         """Start the receiver.
-        
+
         Starts immediately regardless of DB availability. DB writes will
         be attempted with automatic reconnection.
         """
@@ -259,7 +259,7 @@ class ComponentReceiver:
 
     def _write_to_db(self, component_name: str, values: np.ndarray, msg: pb.ComponentBroadcast):
         """Write component data to Elodin-DB.
-        
+
         Uses persistent connection with automatic reconnection on failure.
         Silently drops writes if DB is unavailable (acceptable for real-time data).
         """

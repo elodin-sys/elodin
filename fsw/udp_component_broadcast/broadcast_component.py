@@ -180,7 +180,7 @@ class ComponentBroadcaster:
 
     def start(self) -> bool:
         """Start the broadcaster.
-        
+
         Starts immediately regardless of DB availability. The subscription
         thread will automatically retry connecting to the DB.
         """
