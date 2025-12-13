@@ -41,6 +41,15 @@ with lib; let
     x = ${toString cfg.inputs.velocity.x}
     y = ${toString cfg.inputs.velocity.y}
     z = ${toString cfg.inputs.velocity.z}
+  ''
+  + lib.optionalString (cfg.inputs.target != null) ''
+
+    # Target position for OSD target tracking indicator
+    [inputs.target]
+    component = "${cfg.inputs.target.component}"
+    x = ${toString cfg.inputs.target.x}
+    y = ${toString cfg.inputs.target.y}
+    z = ${toString cfg.inputs.target.z}
   '';
 
   # Wrapper script to run msp-osd in debug mode with the deployed config
@@ -54,6 +63,16 @@ with lib; let
 in {
   options.services.msp-osd = {
     enable = mkEnableOption "MSP OSD service for MSP DisplayPort";
+
+    autostart = mkOption {
+      type = types.bool;
+      default = true;
+      description = ''
+        Whether to auto-start the MSP OSD service.
+        When false, the service is configured but not started automatically.
+        Use `systemctl start msp-osd` to start manually.
+      '';
+    };
 
     package = mkOption {
       type = types.package;
@@ -204,6 +223,35 @@ in {
           description = "Array index for Z velocity (gyro_est[2] placeholder in MEKF output)";
         };
       };
+
+      target = mkOption {
+        type = types.nullOr (types.submodule {
+          options = {
+            component = mkOption {
+              type = types.str;
+              description = "Component name for target position data";
+            };
+            x = mkOption {
+              type = types.int;
+              description = "Array index for target X position";
+            };
+            y = mkOption {
+              type = types.int;
+              description = "Array index for target Y position";
+            };
+            z = mkOption {
+              type = types.int;
+              description = "Array index for target Z position";
+            };
+          };
+        });
+        default = null;
+        description = ''
+          Optional target position for OSD target tracking indicator.
+          When set, displays direction and distance to target on the OSD.
+          Used for tracking another aircraft or a waypoint.
+        '';
+      };
     };
   };
 
@@ -216,7 +264,7 @@ in {
 
     systemd.services.msp-osd = {
       description = "MSP DisplayPort OSD Service";
-      wantedBy = ["multi-user.target"];
+      wantedBy = mkIf cfg.autostart ["multi-user.target"];
       after = ["network.target" "elodin-db.service"];
       wants = ["elodin-db.service"];
 

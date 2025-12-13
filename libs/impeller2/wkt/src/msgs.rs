@@ -41,6 +41,7 @@ impl Request for VTableStream {
 pub enum StreamReply<B: IoBuf> {
     Table(OwnedTable<B>),
     VTable(VTableMsg),
+    Timestamp(StreamTimestamp),
 }
 
 impl<B: IoBuf + Clone> TryFromPacket<B> for StreamReply<B> {
@@ -51,6 +52,10 @@ impl<B: IoBuf + Clone> TryFromPacket<B> for StreamReply<B> {
             impeller2::types::OwnedPacket::Msg(m) if m.id == VTableMsg::ID => {
                 let msg = m.parse::<VTableMsg>()?;
                 Ok(Self::VTable(msg))
+            }
+            impeller2::types::OwnedPacket::Msg(m) if m.id == StreamTimestamp::ID => {
+                let msg = m.parse::<StreamTimestamp>()?;
+                Ok(Self::Timestamp(msg))
             }
             impeller2::types::OwnedPacket::Table(table) => Ok(Self::Table(table.clone())),
             _ => Err(impeller2::error::Error::InvalidPacket),

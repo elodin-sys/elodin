@@ -285,6 +285,7 @@ impl Client {
                 StreamReply::VTable(msg) => {
                     vtable.insert(msg.id, msg.vtable);
                 }
+                StreamReply::Timestamp(_) => {}
             }
         }
         Ok(())
@@ -312,6 +313,7 @@ impl Client {
                     vtable_msg.vtable.apply(&table.buf[..], &mut DebugSink)??;
                 }
                 StreamReply::VTable(_) => {}
+                StreamReply::Timestamp(_) => {}
             }
         }
         Ok(())
