@@ -15,11 +15,11 @@ use impeller2_wkt::{
 };
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
-use stellarator::struc_con::{stellar, Joinable, Thread};
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
-use std::sync::mpsc::{self, Sender, Receiver};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use stellarator::struc_con::{Joinable, Thread, stellar};
 use tracing::{debug, info, warn};
 
 /// Command sent to the sender thread
@@ -161,11 +161,11 @@ impl ImpellerClient {
         // Start the sender thread with its own stellarator executor
         let (tx, rx) = mpsc::channel::<SendCommand>();
         let addr = self.addr;
-        
+
         let sender_thread = std::thread::spawn(move || {
             run_sender_thread(addr, rx);
         });
-        
+
         self.sender_tx = Some(tx);
         self.sender_thread = Some(sender_thread);
         self.connected = true;
@@ -190,7 +190,7 @@ impl ImpellerClient {
 
         // Stop sender thread by dropping the channel
         drop(self.sender_tx.take());
-        
+
         // Wait for sender thread to finish
         if let Some(handle) = self.sender_thread.take() {
             let _ = handle.join();
@@ -288,12 +288,7 @@ impl ImpellerClient {
     }
 
     /// Send component data to the database (uses persistent connection)
-    fn send_component(
-        &mut self,
-        name: &str,
-        values: Vec<f64>,
-        timestamp_us: i64,
-    ) -> PyResult<()> {
+    fn send_component(&mut self, name: &str, values: Vec<f64>, timestamp_us: i64) -> PyResult<()> {
         self.send_component_fast(name, values, timestamp_us)
     }
 
@@ -314,7 +309,9 @@ impl ImpellerClient {
         let num_values = values.len();
 
         // Now get sender_tx (immutable borrow)
-        let sender_tx = self.sender_tx.as_ref()
+        let sender_tx = self
+            .sender_tx
+            .as_ref()
             .ok_or_else(|| PyRuntimeError::new_err("Sender thread not running"))?;
 
         // Create a channel for the result
@@ -331,13 +328,17 @@ impl ImpellerClient {
             result_tx,
         };
 
-        sender_tx.send(cmd)
+        sender_tx
+            .send(cmd)
             .map_err(|_| PyRuntimeError::new_err("Sender thread died"))?;
 
         // Wait for result (with timeout)
         match result_rx.recv_timeout(std::time::Duration::from_secs(10)) {
             Ok(Ok(())) => Ok(()),
-            Ok(Err(e)) => Err(PyRuntimeError::new_err(format!("Failed to send component: {}", e))),
+            Ok(Err(e)) => Err(PyRuntimeError::new_err(format!(
+                "Failed to send component: {}",
+                e
+            ))),
             Err(_) => Err(PyRuntimeError::new_err("Send timeout")),
         }
     }
@@ -354,14 +355,14 @@ impl ImpellerClient {
         // Start a new sender thread
         let (tx, rx) = mpsc::channel::<SendCommand>();
         let addr = self.addr;
-        
+
         let sender_thread = std::thread::spawn(move || {
             run_sender_thread(addr, rx);
         });
-        
+
         self.sender_tx = Some(tx);
         self.sender_thread = Some(sender_thread);
-        
+
         info!("Reset sender connection");
         Ok(())
     }
@@ -399,7 +400,7 @@ async fn discover_components_async(
     addr: SocketAddr,
 ) -> Result<(HashMap<String, ComponentInfo>, HashMap<ComponentId, String>)> {
     debug!("Discovering components from {}", addr);
-    
+
     let mut client = Client::connect(addr)
         .await
         .context("Failed to connect for discovery")?;
@@ -521,10 +522,7 @@ async fn subscribe_with_reconnect(
                     break;
                 }
 
-                warn!(
-                    "Subscription error: {}. Retrying in {:?}...",
-                    e, backoff
-                );
+                warn!("Subscription error: {}. Retrying in {:?}...", e, backoff);
                 stellarator::sleep(backoff).await;
 
                 // Exponential backoff with cap
@@ -552,7 +550,7 @@ async fn subscribe_and_receive_once(
     let mut client = Client::connect(addr)
         .await
         .with_context(|| format!("Failed to connect to {}", addr))?;
-    
+
     info!("TCP connection established to {}", addr);
 
     // Subscribe to real-time stream
@@ -566,7 +564,7 @@ async fn subscribe_and_receive_once(
         .stream(&stream)
         .await
         .context("Failed to create stream subscription")?;
-    
+
     info!("Stream subscription established");
 
     // VTable registry
@@ -580,7 +578,7 @@ async fn subscribe_and_receive_once(
     info!("Subscribed to real-time stream");
 
     // Reset backoff on successful connection (for next failure)
-    
+
     loop {
         // Check if we should stop
         let should_run = running.lock().map(|r| *r).unwrap_or(false);
@@ -592,7 +590,7 @@ async fn subscribe_and_receive_once(
         // Process next packet
         // Use a short timeout via select with sleep to check running flag periodically
         let timeout = stellarator::sleep(std::time::Duration::from_millis(100));
-        
+
         futures_lite::future::or(
             async {
                 match sub_stream.next().await {
@@ -720,16 +718,14 @@ impl Decomponentize for ValueExtractor<'_> {
 }
 
 /// Run the sender thread with its own stellarator executor
-/// 
+///
 /// This thread maintains a persistent connection to the DB and processes
 /// send commands from the channel. The stellarator executor stays alive
 /// for the lifetime of the thread.
 fn run_sender_thread(addr: SocketAddr, rx: Receiver<SendCommand>) {
     // Use stellar() to create a thread with a persistent stellarator executor
-    let handle = stellar(move || async move {
-        sender_thread_loop(addr, rx).await
-    });
-    
+    let handle = stellar(move || async move { sender_thread_loop(addr, rx).await });
+
     // Wait for the thread to complete (when channel is closed)
     // The result is wrapped in Option due to how stellar() works
     let _ = stellarator::struc_con::thread(|_| {
@@ -743,7 +739,7 @@ fn run_sender_thread(addr: SocketAddr, rx: Receiver<SendCommand>) {
 async fn sender_thread_loop(addr: SocketAddr, rx: Receiver<SendCommand>) {
     let mut client: Option<Client> = None;
     let mut sent_vtables: HashSet<[u8; 2]> = HashSet::new();
-    
+
     loop {
         // Try to receive a command (blocking in a way that plays nice with async)
         let cmd = match rx.recv() {
@@ -754,7 +750,7 @@ async fn sender_thread_loop(addr: SocketAddr, rx: Receiver<SendCommand>) {
                 break;
             }
         };
-        
+
         // Process the send command
         let result = send_one_component(
             addr,
@@ -766,12 +762,13 @@ async fn sender_thread_loop(addr: SocketAddr, rx: Receiver<SendCommand>) {
             cmd.values,
             cmd.timestamp_us,
             cmd.num_values,
-        ).await;
-        
+        )
+        .await;
+
         // Send result back
         let _ = cmd.result_tx.send(result);
     }
-    
+
     debug!("Sender thread exiting");
 }
 
@@ -797,9 +794,9 @@ async fn send_one_component(
         sent_vtables.clear(); // New connection needs fresh vtables
         info!("Sender thread: connected to {}", addr);
     }
-    
+
     let c = client.as_mut().unwrap();
-    
+
     // Send VTable and component metadata if needed
     if !sent_vtables.contains(&vtable_id) {
         // First, register the component metadata (name mapping)
@@ -840,7 +837,7 @@ async fn send_one_component(
             sent_vtables.clear();
             return Err(anyhow::anyhow!("Failed to send VTable: {}", e));
         }
-        
+
         sent_vtables.insert(vtable_id);
         info!("Sent VTable definition for '{}'", component_name);
     }

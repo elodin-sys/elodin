@@ -1669,14 +1669,16 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
     let mut visited_ids = HashSet::new();
     loop {
         // Collect new components along with their metadata and schema
-        let new_components: Vec<(Component, Option<ComponentMetadata>, Schema<Vec<u64>>)> =
-            db.with_state(|state| {
+        let new_components: Vec<(Component, Option<ComponentMetadata>, Schema<Vec<u64>>)> = db
+            .with_state(|state| {
                 let mut new_comps = Vec::new();
                 for component in state.components.values() {
                     if visited_ids.contains(&component.component_id) {
                         continue;
                     }
-                    let metadata = state.get_component_metadata(component.component_id).cloned();
+                    let metadata = state
+                        .get_component_metadata(component.component_id)
+                        .cloned();
                     let schema = component.schema.to_schema();
                     new_comps.push((component.clone(), metadata, schema));
                 }

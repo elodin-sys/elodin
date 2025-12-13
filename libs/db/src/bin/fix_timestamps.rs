@@ -91,7 +91,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if info.count == 0 || info.min_timestamp == i64::MAX {
             continue;
         }
-        
+
         if info.min_timestamp > cutoff_2020 {
             good_components.push((path, info));
         } else if info.min_timestamp < cutoff_2000 {
@@ -104,8 +104,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("Components with wall-clock timestamps (2020+): {}", good_components.len());
-    println!("Components with monotonic timestamps (pre-2000): {}", bad_components.len());
+    println!(
+        "Components with wall-clock timestamps (2020+): {}",
+        good_components.len()
+    );
+    println!(
+        "Components with monotonic timestamps (pre-2000): {}",
+        bad_components.len()
+    );
     println!();
 
     if bad_components.is_empty() {
@@ -135,9 +141,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let offset = wall_clock_min - monotonic_min;
 
     println!("Calculated offset:");
-    println!("  Wall-clock min: {} ({:.3}s since epoch)", wall_clock_min, wall_clock_min as f64 / 1e6);
-    println!("  Monotonic min:  {} ({:.3}s since epoch)", monotonic_min, monotonic_min as f64 / 1e6);
-    println!("  Offset:         {} ({:.3} days)", offset, offset as f64 / 1e6 / 86400.0);
+    println!(
+        "  Wall-clock min: {} ({:.3}s since epoch)",
+        wall_clock_min,
+        wall_clock_min as f64 / 1e6
+    );
+    println!(
+        "  Monotonic min:  {} ({:.3}s since epoch)",
+        monotonic_min,
+        monotonic_min as f64 / 1e6
+    );
+    println!(
+        "  Offset:         {} ({:.3} days)",
+        offset,
+        offset as f64 / 1e6 / 86400.0
+    );
     println!();
 
     // Apply the offset to bad components
@@ -145,11 +163,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (path, info) in &bad_components {
         let metadata_path = path.join("metadata");
         let name = if metadata_path.exists() {
-            read_component_name(&metadata_path).unwrap_or_else(|_| path.file_name().unwrap().to_string_lossy().to_string())
+            read_component_name(&metadata_path)
+                .unwrap_or_else(|_| path.file_name().unwrap().to_string_lossy().to_string())
         } else {
             path.file_name().unwrap().to_string_lossy().to_string()
         };
-        
+
         println!(
             "  {} ({} entries, min: {:.3}s -> {:.3}s)",
             name,
@@ -240,7 +259,11 @@ fn analyze_component(index_path: &Path) -> Result<ComponentInfo, Box<dyn std::er
     })
 }
 
-fn apply_offset(index_path: &Path, offset: i64, count: usize) -> Result<(), Box<dyn std::error::Error>> {
+fn apply_offset(
+    index_path: &Path,
+    offset: i64,
+    count: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut file = OpenOptions::new().read(true).write(true).open(index_path)?;
 
     // Read header
@@ -277,25 +300,25 @@ fn read_component_name(metadata_path: &Path) -> Result<String, Box<dyn std::erro
     // The metadata is stored as postcard-serialized ComponentMetadata
     // For simplicity, we'll just try to extract the name string
     let data = fs::read(metadata_path)?;
-    
+
     // ComponentMetadata has component_id (u64), then name (String), then metadata
     // postcard encodes String as varint length + utf8 bytes
     if data.len() < 9 {
         return Err("metadata too short".into());
     }
-    
+
     // Skip component_id (8 bytes)
     let name_data = &data[8..];
-    
+
     // Read varint length
     let (len, bytes_read) = decode_varint(name_data)?;
     let name_start = bytes_read;
     let name_end = name_start + len as usize;
-    
+
     if name_end > name_data.len() {
         return Err("name length exceeds data".into());
     }
-    
+
     let name = String::from_utf8(name_data[name_start..name_end].to_vec())?;
     Ok(name)
 }
@@ -303,7 +326,7 @@ fn read_component_name(metadata_path: &Path) -> Result<String, Box<dyn std::erro
 fn decode_varint(data: &[u8]) -> Result<(u64, usize), Box<dyn std::error::Error>> {
     let mut result: u64 = 0;
     let mut shift = 0;
-    
+
     for (i, &byte) in data.iter().enumerate() {
         result |= ((byte & 0x7F) as u64) << shift;
         if byte & 0x80 == 0 {
@@ -314,7 +337,6 @@ fn decode_varint(data: &[u8]) -> Result<(u64, usize), Box<dyn std::error::Error>
             return Err("varint too long".into());
         }
     }
-    
+
     Err("incomplete varint".into())
 }
-
