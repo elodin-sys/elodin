@@ -36,7 +36,7 @@ use super::{
     SelectedObject, ViewportRect,
     actions::ActionTileWidget,
     button::{EImageButton, ETileButton},
-    colors::{self, get_scheme, with_opacity},
+    colors::{self, get_scheme},
     command_palette::{CommandPaletteState, palette_items},
     dashboard::{DashboardWidget, spawn_dashboard},
     hierarchy::{Hierarchy, HierarchyContent},
@@ -1177,7 +1177,7 @@ enum TabState {
     Inactive,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum TabRole {
     Super,
     Normal,
@@ -1230,6 +1230,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         tile_id: egui_tiles::TileId,
         state: &egui_tiles::TabState,
     ) -> egui::Response {
+        let tab_role = self.tab_role(tiles, tile_id);
         let role = self.tab_role(tiles, tile_id);
         let hide_title = matches!(role, TabRole::Super);
         let show_close = !hide_title;
@@ -1260,6 +1261,19 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                 _ => self.tab_title_for_tile(tiles, tile_id).text().to_string(),
             }
         };
+        if !hide_title {
+            info!(
+                "[tabs_ui] tab_id={:?} role={:?} title_len={} title='{}' active={} state_active={} editing={} window={:?}",
+                tile_id,
+                tab_role,
+                title_str.len(),
+                title_str,
+                state.active,
+                state.is_being_dragged,
+                is_editing,
+                self.target_window.map(|w| w.index())
+            );
+        }
 
         let mut font_id = egui::TextStyle::Button.resolve(ui.style());
         font_id.size = 11.0;
@@ -1314,15 +1328,28 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             let scheme = get_scheme();
             let bg_color = match tab_state {
                 TabState::Selected => scheme.text_primary,
-                TabState::Inactive => scheme.bg_secondary,
+                TabState::Inactive => Color32::from_rgb(0, 0, 0),
             };
 
             let text_color = match tab_state {
                 TabState::Selected => scheme.bg_secondary,
-                TabState::Inactive => with_opacity(scheme.text_primary, 0.6),
+                TabState::Inactive => Color32::from_rgb(230, 230, 230),
             };
 
             ui.painter().rect_filled(rect, 0.0, bg_color);
+            info!(
+                "[tabs_paint] window={:?} tab_id={:?} rect=({:.1},{:.1},{:.1},{:.1}) bg=({},{},{},{})",
+                self.target_window.map(|w| w.index()),
+                tile_id,
+                rect.left(),
+                rect.top(),
+                rect.right(),
+                rect.bottom(),
+                bg_color.r(),
+                bg_color.g(),
+                bg_color.b(),
+                bg_color.a()
+            );
 
             if !hide_title {
                 if !self.read_only && is_editing {
@@ -1446,16 +1473,22 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     }
 
     fn tab_bar_height(&self, _style: &egui::Style) -> f32 {
+        info!(
+            "[tabs_bar] height=32 window={:?}",
+            self.target_window.map(|w| w.index())
+        );
         32.0
     }
 
     fn tab_bar_color(&self, _visuals: &egui::Visuals) -> Color32 {
-        get_scheme().bg_secondary
+        Color32::from_rgb(0, 0, 0)
     }
 
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
         egui_tiles::SimplificationOptions {
-            // Keep tab bars visible (titles and "+" button) even in secondary windows.
+            // Keep tab bars visible (titles et "+") même avec un seul onglet.
+            prune_empty_tabs: false,
+            prune_single_child_tabs: false,
             all_panes_must_have_tabs: true,
             join_nested_linear_containers: true,
             ..Default::default()
@@ -1651,11 +1684,23 @@ impl WidgetSystem for TileSystem<'_, '_> {
             colors::TRANSPARENT
         };
 
-        egui::CentralPanel::default()
-            .frame(Frame {
+        #[cfg(target_os = "macos")]
+        let frame = {
+            let mut frame = Frame {
                 fill: fill_color,
                 ..Default::default()
-            })
+            };
+            frame.inner_margin.top = 32;
+            frame
+        };
+        #[cfg(not(target_os = "macos"))]
+        let frame = Frame {
+            fill: fill_color,
+            ..Default::default()
+        };
+
+        egui::CentralPanel::default()
+            .frame(frame)
             .show_inside(ui, |ui| {
                 Self::render_panel_contents(
                     world,
@@ -1697,10 +1742,8 @@ impl RootWidgetSystem for TileSystem<'_, '_> {
                 fill: fill_color,
                 ..Default::default()
             };
-            if target.is_some() {
-                // Leave room for the native titlebar controls on secondary windows.
-                frame.inner_margin.top = 32;
-            }
+            // Leave room for the native titlebar controls on all windows.
+            frame.inner_margin.top = 32;
             frame
         };
         #[cfg(not(target_os = "macos"))]
@@ -1741,14 +1784,13 @@ fn unmask_sidebar_on_select(ui_state: &mut TileState, sidebar_tile: TileId, kind
 
     let mut targets: Vec<(TileId, TileId)> = Vec::new();
     for (cid, tile) in ui_state.tree.tiles.iter() {
-        if let Tile::Container(Container::Linear(linear)) = tile {
-            if let Some(child) = linear
+        if let Tile::Container(Container::Linear(linear)) = tile
+            && let Some(child) = linear
                 .children
                 .iter()
                 .find(|child| contains_child(&ui_state.tree.tiles, **child, sidebar_tile))
-            {
-                targets.push((*cid, *child));
-            }
+        {
+            targets.push((*cid, *child));
         }
     }
 
@@ -2005,6 +2047,61 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 read_only,
                 target_window: window,
             };
+            let mut logged_diag = ui
+                .ctx()
+                .data(|d| d.get_temp::<bool>(egui::Id::new(("center_tabs_diag", window))))
+                .unwrap_or(false);
+            if let Some(root_id) = tree.root()
+                && let Some(Tile::Container(Container::Linear(linear))) = tree.tiles.get(root_id)
+                && linear.children.len() == 3
+            {
+                let center_id = linear.children[1];
+                let is_tabs = matches!(
+                    tree.tiles.get(center_id),
+                    Some(Tile::Container(Container::Tabs(_)))
+                );
+                if !logged_diag {
+                    let center_kind = match tree.tiles.get(center_id) {
+                        Some(Tile::Pane(_)) => "Pane",
+                        Some(Tile::Container(Container::Tabs(_))) => "Tabs",
+                        Some(Tile::Container(Container::Linear(_))) => "Linear",
+                        Some(Tile::Container(Container::Grid(_))) => "Grid",
+                        None => "None",
+                    };
+                    info!(
+                        "[tabs_diag] root_linear children={:?} center_is_tabs={} center_kind={}",
+                        linear.children, is_tabs, center_kind
+                    );
+                    if is_tabs
+                        && let Some(Tile::Container(Container::Tabs(t))) = tree.tiles.get(center_id)
+                    {
+                        info!(
+                            "[tabs_diag] center_tabs children={:?} active={:?}",
+                            t.children, t.active
+                        );
+                    }
+                    logged_diag = true;
+                }
+                if !is_tabs {
+                    let center_share = linear.shares[center_id];
+                    let mut tabs = egui_tiles::Tabs::new(vec![center_id]);
+                    tabs.set_active(center_id);
+                    let tabs_id = tree
+                        .tiles
+                        .insert_new(Tile::Container(Container::Tabs(tabs)));
+                    if let Some(Tile::Container(Container::Linear(linear_mut))) =
+                        tree.tiles.get_mut(root_id)
+                    {
+                        linear_mut.children[1] = tabs_id;
+                        linear_mut.shares.set_share(tabs_id, center_share);
+                    }
+                }
+            }
+            if logged_diag {
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp::<bool>(egui::Id::new(("center_tabs_diag", window)), true)
+                });
+            }
             tree.ui(&mut behavior, ui);
             let window_width = ui.ctx().screen_rect().width();
             let gutter_width: f32 = (window_width * 0.02).max(12.0);
@@ -2138,8 +2235,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         egui::pos2(center_x + half, parent_rect.bottom()),
                     );
 
-                    let fill = Color32::from_rgb(60, 60, 60);
-                    let stroke = Stroke::new(1.0, Color32::from_rgb(40, 40, 40));
+                    let fill = Color32::from_rgb(0, 0, 0);
+                    let stroke = Stroke::new(1.0, Color32::from_rgb(0, 0, 0));
                     painter.rect_filled(gutter_rect, 0.0, fill);
                     painter.rect_stroke(gutter_rect, 0.0, stroke, egui::StrokeKind::Inside);
 
