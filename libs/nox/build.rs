@@ -68,11 +68,11 @@ fn main() {
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", python_lib.display());
     println!("cargo:rustc-link-search=native={}", python_dir.display());
 
-    // Link against the Python library for test binaries only.
-    // Extension modules should NOT link against libpython - Python provides
-    // symbols at runtime. The suppress_build_script_link_lines flag is set
-    // to true by pyo3 when building extension modules.
-    if !pyo3_config.suppress_build_script_link_lines {
-        println!("cargo:rustc-link-lib=dylib={}", lib_name);
-    }
+    // NOTE: We intentionally do NOT emit `cargo:rustc-link-lib=dylib=python*` here.
+    // The pyo3-ffi crate handles Python linking automatically:
+    // - When building extension modules (with `extension-module` feature), pyo3-ffi
+    //   does NOT link against libpython (Python provides symbols at runtime)
+    // - When building standalone binaries/tests, pyo3-ffi DOES link against libpython
+    // Adding it here would break extension module builds in environments where
+    // libpython isn't available as a shared library (like Nix).
 }
