@@ -49,6 +49,7 @@ members = [
     "fsw/video-streamer",
     "fsw/gstreamer",
     "fsw/msp-osd",
+    "fsw/udp_component_broadcast/impeller_py",
     "libs/db/eql",
     "libs/impeller2/kdl",
     "libs/db/examples/rust_client",

@@ -147,6 +147,15 @@ fn sink_inner(
             }
             OwnedPacket::Msg(m) if m.id == ComponentMetadata::ID => {
                 let metadata = m.parse::<ComponentMetadata>()?;
+                // Create entity and register path so the component appears in UI
+                let path = ComponentPath::from_name(&metadata.name);
+                try_insert_entity(
+                    &mut world_sink.entity_map,
+                    &mut world_sink.metadata_reg,
+                    &mut world_sink.commands,
+                    path.path.last().unwrap(),
+                );
+                world_sink.path_reg.0.insert(metadata.component_id, path);
                 world_sink
                     .metadata_reg
                     .insert(metadata.component_id, metadata);

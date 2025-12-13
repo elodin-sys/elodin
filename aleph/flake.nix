@@ -54,6 +54,8 @@
       tegrastats-bridge = ./modules/tegrastats-bridge.nix;
       mekf = ./modules/mekf.nix;
       msp-osd = ./modules/msp-osd.nix;
+      udp-component-broadcast = ./modules/udp-component-broadcast.nix;
+      udp-component-receive = ./modules/udp-component-receive.nix;
     };
     devModules = {
       # Temporarily disabled for nixpkgs 25.05 compatibility (CUDA issues)

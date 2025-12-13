@@ -1,0 +1,34 @@
+[package]
+name = "impeller_py"
+version.workspace = true
+edition.workspace = true
+description = "Python bindings for Elodin-DB impeller2 protocol"
+publish = false  # Deployed via Aleph, not cargo-dist
+
+[lib]
+name = "impeller_py"
+crate-type = ["cdylib"]
+
+[dependencies]
+# PyO3 for Python bindings
+pyo3 = { version = "0.23", features = ["extension-module"] }
+
+# Impeller2 protocol
+impeller2 = { path = "../../../libs/impeller2", features = ["std"] }
+impeller2-stellar = { path = "../../../libs/impeller2/stellar" }
+impeller2-wkt = { path = "../../../libs/impeller2/wkt" }
+
+# Async runtime
+stellarator = { path = "../../../libs/stellarator", features = ["std", "derive"] }
+futures-lite = "2.5"
+
+# Serialization
+postcard = "1.1"
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -1,0 +1,21 @@
+[build-system]
+requires = ["maturin>=1.4,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "impeller_py"
+# Version is read from Cargo.toml (workspace version)
+dynamic = ["version"]
+description = "Python bindings for Elodin-DB impeller2 protocol"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "impeller_py"
