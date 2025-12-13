@@ -79,7 +79,9 @@ fn main() {
     // Python because the test/binary executables need the Python symbols.
     let is_maturin_build = std::env::var("MATURIN_PYTHON").is_ok()
         || std::env::var("MATURIN_TARGET").is_ok()
-        || std::env::var("PYO3_CONFIG_FILE").map(|f| f.contains("maturin")).unwrap_or(false);
+        || std::env::var("PYO3_CONFIG_FILE")
+            .map(|f| f.contains("maturin"))
+            .unwrap_or(false);
 
     if !is_maturin_build {
         println!("cargo:rustc-link-lib=dylib={}", lib_name);
