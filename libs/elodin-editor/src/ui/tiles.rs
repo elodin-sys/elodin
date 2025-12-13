@@ -1357,6 +1357,13 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             clip.right(),
             clip.bottom()
         );
+
+        if matches!(tab_role, TabRole::Super) {
+            // Hide sidebar tabs completely: no title, no background, no "+" chrome.
+            let (_, rect) = ui.allocate_space(vec2(0.0, ui.available_height()));
+            return ui.interact(rect, id, egui::Sense::hover());
+        }
+
         let role = self.tab_role(tiles, tile_id);
         let hide_title = matches!(role, TabRole::Super);
         let show_close = !hide_title;
