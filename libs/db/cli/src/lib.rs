@@ -286,6 +286,8 @@ impl Client {
                     vtable.insert(msg.id, msg.vtable);
                 }
                 StreamReply::Timestamp(_) => {}
+                StreamReply::ComponentMetadata(_) => {}
+                StreamReply::Schema(_) => {}
             }
         }
         Ok(())
@@ -314,6 +316,8 @@ impl Client {
                 }
                 StreamReply::VTable(_) => {}
                 StreamReply::Timestamp(_) => {}
+                StreamReply::ComponentMetadata(_) => {}
+                StreamReply::Schema(_) => {}
             }
         }
         Ok(())

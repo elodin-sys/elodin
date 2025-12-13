@@ -613,6 +613,12 @@ async fn subscribe_and_receive_once(
                         StreamReply::Timestamp(_) => {
                             // Timestamp messages are informational, ignore them
                         }
+                        StreamReply::ComponentMetadata(_) => {
+                            // Component metadata for dynamic discovery, ignore here
+                        }
+                        StreamReply::Schema(_) => {
+                            // Schema updates for dynamic discovery, ignore here
+                        }
                     },
                     Err(e) => {
                         debug!("Stream error: {}", e);

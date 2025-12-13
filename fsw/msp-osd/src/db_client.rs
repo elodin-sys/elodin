@@ -159,6 +159,12 @@ impl DbClient {
                     StreamReply::Timestamp(ts) => {
                         debug!("Stream timestamp: {:?}", ts.timestamp);
                     }
+                    StreamReply::ComponentMetadata(metadata) => {
+                        debug!("Received component metadata: {}", metadata.name);
+                    }
+                    StreamReply::Schema(_) => {
+                        debug!("Received schema update");
+                    }
                 },
                 Err(e) => {
                     warn!("Stream error: {}", e);

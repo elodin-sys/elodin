@@ -67,6 +67,12 @@ impl TelemetryProcessor {
                     StreamReply::Timestamp(_) => {
                         // Timestamp messages are used for fixed-rate streaming; ignore here
                     }
+                    StreamReply::ComponentMetadata(_) => {
+                        // Component metadata for dynamic discovery; ignore here
+                    }
+                    StreamReply::Schema(_) => {
+                        // Schema updates for dynamic discovery; ignore here
+                    }
                 },
                 Err(e) => {
                     debug!("Stream ended: {}", e);
