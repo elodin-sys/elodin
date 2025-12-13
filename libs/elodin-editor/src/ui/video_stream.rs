@@ -26,7 +26,7 @@ use std::time::Instant;
 
 use super::colors::{ColorExt, get_scheme};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct VideoStreamPane {
     pub entity: Entity,
     pub label: String,

@@ -609,17 +609,39 @@ pub fn create_window() -> PaletteItem {
                 LabelSource::placeholder("Enter window title"),
                 "Leave blank for a default title",
                 move |In(title): In<String>,
-                      mut commands: Commands,
-
+                      mut params: LoadSchematicParams,
                       mut palette_state: ResMut<CommandPaletteState>| {
                     let title_opt = if title.trim().is_empty() {
                         None
                     } else {
                         Some(title.trim().to_string())
                     };
-                    let (state, id) = tiles::create_secondary_window(title_opt);
-                    let entity = commands.spawn((id, state)).id();
+                    let (fallback_state, id) = tiles::create_secondary_window(title_opt);
+                    let descriptor = fallback_state.descriptor.clone();
+
+                    let state = if descriptor
+                        .path
+                        .as_ref()
+                        .map(|path| path.exists())
+                        .unwrap_or(false)
+                    {
+                        params
+                            .load_secondary_window_state(&descriptor, id)
+                            .unwrap_or(fallback_state)
+                    } else {
+                        fallback_state
+                    };
+
+                    let entity = params.commands.spawn((id, state)).id();
                     palette_state.target_window = Some(entity);
+                    palette_state.open_page(|| {
+                        PalettePage::new(vec![
+                            create_viewport(None),
+                            create_monitor(None),
+                            create_graph(None),
+                        ])
+                        .prompt("Choose the first tab for the new window")
+                    });
                     PaletteEvent::Exit
                 },
             )

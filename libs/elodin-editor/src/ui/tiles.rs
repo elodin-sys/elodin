@@ -437,30 +437,99 @@ pub fn create_secondary_window(title: Option<String>) -> (WindowState, WindowId)
 
 #[derive(Resource, Default)]
 pub struct ViewportContainsPointer(pub bool);
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ActionTilePane {
     pub entity: Entity,
     pub label: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TreePane {
     pub entity: Entity,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DashboardPane {
     pub entity: Entity,
     pub label: String,
 }
 
 impl TileState {
+    fn apply_scaffold_with_title(&mut self, title: &str) -> Option<TileId> {
+        let mut tree = egui_tiles::Tree::empty(self.tree_id);
+        self.container_titles.clear();
+        self.tree_actions.clear();
+        self.graphs.clear();
+        self.hierarchy_masked = true;
+        self.inspector_masked = true;
+        self.last_hierarchy_share = Some(0.2);
+        self.last_inspector_share = Some(0.2);
+
+        let tabs_left = tree
+            .tiles
+            .insert_new(Tile::Container(Container::Tabs(egui_tiles::Tabs::new(vec![]))));
+        let tabs_right = tree
+            .tiles
+            .insert_new(Tile::Container(Container::Tabs(egui_tiles::Tabs::new(vec![]))));
+
+        let tabs_inner_left = tree
+            .tiles
+            .insert_new(Tile::Container(Container::Tabs(egui_tiles::Tabs::new(vec![]))));
+        let tabs_inner_center = tree
+            .tiles
+            .insert_new(Tile::Container(Container::Tabs(egui_tiles::Tabs::new(vec![]))));
+        let tabs_inner_right = tree
+            .tiles
+            .insert_new(Tile::Container(Container::Tabs(egui_tiles::Tabs::new(vec![]))));
+
+        let mut inner_linear = egui_tiles::Linear::new(
+            egui_tiles::LinearDir::Horizontal,
+            vec![tabs_inner_left, tabs_inner_center, tabs_inner_right],
+        );
+        inner_linear.shares.set_share(tabs_inner_left, 0.001);
+        inner_linear.shares.set_share(tabs_inner_center, 0.98);
+        inner_linear.shares.set_share(tabs_inner_right, 0.001);
+        let inner_linear_id =
+            tree.tiles
+                .insert_new(Tile::Container(Container::Linear(inner_linear)));
+
+        let mut outer_linear =
+            egui_tiles::Linear::new(egui_tiles::LinearDir::Horizontal, vec![]);
+        outer_linear.children.push(tabs_left);
+        outer_linear.children.push(inner_linear_id);
+        outer_linear.children.push(tabs_right);
+        outer_linear.shares.set_share(tabs_left, 0.001);
+        outer_linear.shares.set_share(inner_linear_id, 0.98);
+        outer_linear.shares.set_share(tabs_right, 0.001);
+        let root_id = tree
+            .tiles
+            .insert_new(Tile::Container(Container::Linear(outer_linear)));
+        tree.root = Some(root_id);
+        tree.make_active(|id, _| id == tabs_inner_center);
+
+        self.tree = tree;
+        self.set_container_title(inner_linear_id, title);
+        self.set_container_title(tabs_inner_center, title);
+
+        Some(tabs_inner_center)
+    }
+
+    fn default_tabs_title_for_tile(tile: &Tile<Pane>) -> Option<&'static str> {
+        match tile {
+            Tile::Pane(Pane::Viewport(_)) => Some("Viewports"),
+            Tile::Pane(Pane::Monitor(_)) => Some("Monitors"),
+            Tile::Pane(Pane::Graph(_)) => Some("Graphs"),
+            _ => None,
+        }
+    }
+
     pub fn insert_tile(
         &mut self,
         tile: Tile<Pane>,
         parent_id: Option<TileId>,
         active: bool,
     ) -> Option<TileId> {
+        let tabs_title_hint = Self::default_tabs_title_for_tile(&tile);
         let parent_id = if let Some(id) = parent_id {
             id
         } else {
@@ -470,10 +539,19 @@ impl TileState {
             })?;
 
             if let Some(Tile::Container(Container::Linear(linear))) = self.tree.tiles.get(root_id) {
-                if let Some(center) = linear.children.get(linear.children.len() / 2) {
-                    *center
-                } else {
-                    root_id
+                let center = linear
+                    .children
+                    .get(linear.children.len() / 2)
+                    .copied()
+                    .unwrap_or(root_id);
+                match self.tree.tiles.get(center) {
+                    Some(Tile::Container(Container::Tabs(_))) => center,
+                    Some(Tile::Container(Container::Linear(inner))) => inner
+                        .children
+                        .get(inner.children.len() / 2)
+                        .copied()
+                        .unwrap_or(center),
+                    _ => center,
                 }
             } else {
                 root_id
@@ -481,16 +559,32 @@ impl TileState {
         };
 
         let tile_id = self.tree.tiles.insert_new(tile);
-        let parent_tile = self.tree.tiles.get_mut(parent_id)?;
+        let is_tabs_container = {
+            let parent_tile = self.tree.tiles.get_mut(parent_id)?;
+            let Tile::Container(container) = parent_tile else {
+                return None;
+            };
 
-        let Tile::Container(container) = parent_tile else {
-            return None;
+            let is_tabs = matches!(container, Container::Tabs(_));
+            container.add_child(tile_id);
+
+            if active {
+                if let Container::Tabs(tabs) = container {
+                    tabs.set_active(tile_id);
+                }
+            }
+            is_tabs
         };
 
-        container.add_child(tile_id);
-
-        if active && let Container::Tabs(tabs) = container {
-            tabs.set_active(tile_id);
+        if is_tabs_container
+            && !self.container_titles.contains_key(&parent_id)
+            && let Some(title) = tabs_title_hint
+        {
+            info!(
+                "[tabs_title_autoset] container={:?} title='{}' tile={:?}",
+                parent_id, title, tile_id
+            );
+            self.set_container_title(parent_id, title);
         }
 
         Some(tile_id)
@@ -557,6 +651,12 @@ impl TileState {
             Box::new(dashboard),
             label,
         ));
+    }
+
+    /// Build a viewport-centric scaffold for new secondary windows when no KDL exists.
+    /// Returns the tabs container where the primary viewport pane should be inserted.
+    pub fn apply_viewport_scaffold(&mut self) -> Option<TileId> {
+        self.apply_scaffold_with_title("Viewports")
     }
 
     pub fn debug_dump(&self) -> String {
@@ -736,7 +836,7 @@ impl TileState {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Pane {
     Viewport(ViewportPane),
     Graph(GraphPane),
@@ -752,6 +852,15 @@ pub enum Pane {
 }
 
 impl Pane {
+    fn fallback_label(label: &str, default: &str) -> String {
+        let trimmed = label.trim();
+        if trimmed.is_empty() {
+            default.to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+
     fn title(
         &self,
         graph_states: &Query<&GraphState>,
@@ -760,29 +869,29 @@ impl Pane {
         match self {
             Pane::Graph(pane) => {
                 if let Ok(graph_state) = graph_states.get(pane.id) {
-                    return graph_state.label.to_string();
+                    return Self::fallback_label(&graph_state.label, "Graph");
                 }
-                pane.label.to_string()
+                Self::fallback_label(&pane.label, "Graph")
             }
-            Pane::Viewport(viewport) => viewport.label.to_string(),
-            Pane::Monitor(monitor) => monitor.label.to_string(),
+            Pane::Viewport(viewport) => Self::fallback_label(&viewport.label, "viewport"),
+            Pane::Monitor(monitor) => Self::fallback_label(&monitor.label, "Monitor"),
             Pane::QueryTable(..) => "Query".to_string(),
             Pane::QueryPlot(query_plot) => {
                 if let Ok(graph_state) = graph_states.get(query_plot.entity) {
-                    return graph_state.label.to_string();
+                    return Self::fallback_label(&graph_state.label, "Query Plot");
                 }
                 "Query Plot".to_string()
             }
-            Pane::ActionTile(action) => action.label.to_string(),
-            Pane::VideoStream(video_stream) => video_stream.label.to_string(),
+            Pane::ActionTile(action) => Self::fallback_label(&action.label, "Action"),
+            Pane::VideoStream(video_stream) => {
+                Self::fallback_label(&video_stream.label, "Video Stream")
+            }
             Pane::Dashboard(dashboard) => {
                 if let Ok(dash) = dashboards.get(dashboard.entity) {
-                    return dash
-                        .root
-                        .label
-                        .as_deref()
-                        .unwrap_or("Dashboard")
-                        .to_string();
+                    return Self::fallback_label(
+                        dash.root.label.as_deref().unwrap_or(""),
+                        "Dashboard",
+                    );
                 }
                 "Dashboard".to_string()
             }
@@ -896,7 +1005,7 @@ impl Pane {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct ViewportPane {
     pub camera: Option<Entity>,
     pub nav_gizmo: Option<Entity>,
@@ -1072,7 +1181,7 @@ impl ViewportPane {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct GraphPane {
     pub id: Entity,
     pub label: String,
@@ -1154,6 +1263,7 @@ struct TreeBehavior<'w> {
     container_titles: HashMap<TileId, String>,
     read_only: bool,
     target_window: Option<Entity>,
+    target_is_primary: bool,
 }
 
 #[derive(Clone)]
@@ -1231,6 +1341,22 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         state: &egui_tiles::TabState,
     ) -> egui::Response {
         let tab_role = self.tab_role(tiles, tile_id);
+        let clip = ui.clip_rect();
+        let avail = ui.available_rect_before_wrap();
+        info!(
+            "[tabs_avail] window={:?} tab_id={:?} role={:?} avail=({:.1},{:.1},{:.1},{:.1}) clip=({:.1},{:.1},{:.1},{:.1})",
+            self.target_window.map(|w| w.index()),
+            tile_id,
+            tab_role,
+            avail.left(),
+            avail.top(),
+            avail.right(),
+            avail.bottom(),
+            clip.left(),
+            clip.top(),
+            clip.right(),
+            clip.bottom()
+        );
         let role = self.tab_role(tiles, tile_id);
         let hide_title = matches!(role, TabRole::Super);
         let show_close = !hide_title;
@@ -1474,14 +1600,25 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
     fn tab_bar_height(&self, _style: &egui::Style) -> f32 {
         info!(
-            "[tabs_bar] height=32 window={:?}",
-            self.target_window.map(|w| w.index())
+            "[tabs_bar] height=32 window={:?} primary={}",
+            self.target_window.map(|w| w.index()),
+            self.target_is_primary
         );
         32.0
     }
 
     fn tab_bar_color(&self, _visuals: &egui::Visuals) -> Color32 {
-        Color32::from_rgb(0, 0, 0)
+        let color = Color32::from_rgb(0, 0, 0);
+        info!(
+            "[tabs_bar_color] window={:?} primary={} color=({},{},{},{})",
+            self.target_window.map(|w| w.index()),
+            self.target_is_primary,
+            color.r(),
+            color.g(),
+            color.b(),
+            color.a()
+        );
+        color
     }
 
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
@@ -1534,13 +1671,28 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
     fn top_bar_right_ui(
         &mut self,
-        _tiles: &Tiles<Pane>,
+        tiles: &Tiles<Pane>,
         ui: &mut Ui,
         tile_id: TileId,
         _tabs: &egui_tiles::Tabs,
         _scroll_offset: &mut f32,
     ) {
         if self.read_only {
+            return;
+        }
+
+        let is_sidebar_tabs =
+            if let Some(Tile::Container(Container::Tabs(tabs))) = tiles.get(tile_id) {
+                tabs.children.iter().all(|child| {
+                    matches!(
+                        tiles.get(*child),
+                        Some(Tile::Pane(Pane::Hierarchy | Pane::Inspector))
+                    )
+                })
+            } else {
+                false
+            };
+        if is_sidebar_tabs {
             return;
         }
 
@@ -1595,20 +1747,22 @@ impl<'w, 's> TileSystem<'w, 's> {
         let mut contexts = params.contexts;
         let images = params.images;
         let target_id = target.unwrap_or_else(|| *params.primary_window);
-        let is_empty = params
-            .window_states
-            .get(target_id)
-            .map(|(_, _, s)| {
-                let pending_non_sidebar = s
-                    .tile_state
-                    .tree_actions
-                    .iter()
-                    .any(|action| !matches!(action, TreeAction::AddSidebars));
-                !pending_non_sidebar && !s.tile_state.has_non_sidebar_content()
-            })
-            .ok();
-
-        let is_empty_tile_tree = is_empty?;
+        let (window_entity, window_id, window_state) = params.window_states.get(target_id).ok()?;
+        let pending_non_sidebar = window_state
+            .tile_state
+            .tree_actions
+            .iter()
+            .any(|action| !matches!(action, TreeAction::AddSidebars));
+        let is_empty_tile_tree =
+            !pending_non_sidebar && !window_state.tile_state.has_non_sidebar_content();
+        info!(
+            "[tabs_panel] window_entity={:?} window_id={} primary={} target_arg={:?} is_empty_tile_tree={}",
+            window_entity,
+            window_id.0,
+            window_id.is_primary(),
+            target,
+            is_empty_tile_tree
+        );
 
         let icons = TileIcons {
             add: contexts.add_image(images.icon_add.clone_weak()),
@@ -1684,24 +1838,33 @@ impl WidgetSystem for TileSystem<'_, '_> {
             colors::TRANSPARENT
         };
 
-        #[cfg(target_os = "macos")]
-        let frame = {
-            let mut frame = Frame {
-                fill: fill_color,
-                ..Default::default()
-            };
-            frame.inner_margin.top = 32;
-            frame
-        };
-        #[cfg(not(target_os = "macos"))]
         let frame = Frame {
             fill: fill_color,
+            inner_margin: egui::Margin {
+                top: 32,
+                ..Default::default()
+            },
             ..Default::default()
         };
 
         egui::CentralPanel::default()
             .frame(frame)
             .show_inside(ui, |ui| {
+                ui.set_clip_rect(ui.max_rect());
+                let max = ui.max_rect();
+                let clip = ui.clip_rect();
+                info!(
+                    "[tabs_panel_inside] window={:?} max=({:.1},{:.1},{:.1},{:.1}) clip=({:.1},{:.1},{:.1},{:.1})",
+                    target,
+                    max.left(),
+                    max.top(),
+                    max.right(),
+                    max.bottom(),
+                    clip.left(),
+                    clip.top(),
+                    clip.right(),
+                    clip.bottom()
+                );
                 Self::render_panel_contents(
                     world,
                     ui,
@@ -1736,25 +1899,33 @@ impl RootWidgetSystem for TileSystem<'_, '_> {
             colors::TRANSPARENT
         };
 
-        #[cfg(target_os = "macos")]
-        let frame = {
-            let mut frame = Frame {
-                fill: fill_color,
-                ..Default::default()
-            };
-            // Leave room for the native titlebar controls on all windows.
-            frame.inner_margin.top = 32;
-            frame
-        };
-        #[cfg(not(target_os = "macos"))]
         let frame = Frame {
             fill: fill_color,
+            inner_margin: egui::Margin {
+                top: 32,
+                ..Default::default()
+            },
             ..Default::default()
         };
 
         let central = egui::CentralPanel::default().frame(frame);
 
         central.show(ctx, |ui| {
+            ui.set_clip_rect(ui.max_rect());
+            let max = ui.max_rect();
+            let clip = ui.clip_rect();
+            info!(
+                "[tabs_panel_root] window={:?} max=({:.1},{:.1},{:.1},{:.1}) clip=({:.1},{:.1},{:.1},{:.1})",
+                target,
+                max.left(),
+                max.top(),
+                max.right(),
+                max.bottom(),
+                clip.left(),
+                clip.top(),
+                clip.right(),
+                clip.bottom()
+            );
             Self::render_panel_contents(
                 world,
                 ui,
@@ -2038,6 +2209,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     },
                 )
             };
+            let target_is_primary = window
+                .and_then(|w| world.get::<WindowId>(w))
+                .map(|id| id.is_primary())
+                .unwrap_or(true);
             let mut behavior = TreeBehavior {
                 icons,
                 // This world here makes getting ui_state difficult.
@@ -2046,11 +2221,107 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 container_titles,
                 read_only,
                 target_window: window,
+                target_is_primary,
             };
             let mut logged_diag = ui
                 .ctx()
                 .data(|d| d.get_temp::<bool>(egui::Id::new(("center_tabs_diag", window))))
                 .unwrap_or(false);
+            let window_id = window.and_then(|w| behavior.world.get::<WindowId>(w));
+            let max_rect = ui.max_rect();
+            let clip = ui.clip_rect();
+            info!(
+                "[tabs_panel_rect] window={:?} primary={} max=({:.1},{:.1},{:.1},{:.1}) clip=({:.1},{:.1},{:.1},{:.1})",
+                window.map(|w| w.index()),
+                window_id.map(|id| id.is_primary()).unwrap_or(true),
+                max_rect.left(),
+                max_rect.top(),
+                max_rect.right(),
+                max_rect.bottom(),
+                clip.left(),
+                clip.top(),
+                clip.right(),
+                clip.bottom()
+            );
+            let layer = ui.layer_id();
+            info!(
+                "[tabs_layer] window={:?} layer={:?}",
+                window.map(|w| w.index()),
+                layer
+            );
+            info!(
+                "[tabs_start] window={:?} primary={} root={:?}",
+                window.map(|w| w.index()),
+                window_id.map(|id| id.is_primary()).unwrap_or(true),
+                tree.root()
+            );
+            for (id, tile) in tree.tiles.iter() {
+                if let Tile::Container(Container::Tabs(t)) = tile {
+                    if let Some(rect) = tree.tiles.rect(*id) {
+                        info!(
+                            "[tabs_rect] window={:?} tabs_id={:?} rect=({:.1},{:.1},{:.1},{:.1}) children={:?} active={:?}",
+                            window.map(|w| w.index()),
+                            id,
+                            rect.left(),
+                            rect.top(),
+                            rect.right(),
+                            rect.bottom(),
+                            t.children,
+                            t.active
+                        );
+                    } else {
+                        info!(
+                            "[tabs_rect] window={:?} tabs_id={:?} rect=None children={:?} active={:?}",
+                            window.map(|w| w.index()),
+                            id,
+                            t.children,
+                            t.active
+                        );
+                    }
+                }
+            }
+            if let Some(root_id) = tree.root() {
+                fn log_container(tree: &egui_tiles::Tree<Pane>, id: TileId, depth: usize) {
+                    let prefix = "  ".repeat(depth);
+                    match tree.tiles.get(id) {
+                        Some(Tile::Container(Container::Tabs(t))) => {
+                            info!(
+                                "[tabs_tree]{} tabs id={:?} children={:?} active={:?}",
+                                prefix, id, t.children, t.active
+                            );
+                            for child in &t.children {
+                                log_container(tree, *child, depth + 1);
+                            }
+                        }
+                        Some(Tile::Container(Container::Linear(l))) => {
+                            info!(
+                                "[tabs_tree]{} linear id={:?} children={:?}",
+                                prefix, id, l.children
+                            );
+                            for child in &l.children {
+                                log_container(tree, *child, depth + 1);
+                            }
+                        }
+                        Some(Tile::Container(Container::Grid(g))) => {
+                            let children: Vec<_> = g.children().copied().collect();
+                            info!(
+                                "[tabs_tree]{} grid id={:?} children={:?}",
+                                prefix, id, children
+                            );
+                            for child in children {
+                                log_container(tree, child, depth + 1);
+                            }
+                        }
+                        Some(Tile::Pane(p)) => {
+                            info!("[tabs_tree]{} pane id={:?} kind={:?}", prefix, id, p);
+                        }
+                        None => {
+                            info!("[tabs_tree]{} missing id={:?}", prefix, id);
+                        }
+                    }
+                }
+                log_container(&tree, root_id, 0);
+            }
             if let Some(root_id) = tree.root()
                 && let Some(Tile::Container(Container::Linear(linear))) = tree.tiles.get(root_id)
                 && linear.children.len() == 3
@@ -2501,6 +2772,13 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     if read_only {
                         continue;
                     }
+                    let parent_tile_id = if parent_tile_id.is_none()
+                        && !ui_state.has_non_sidebar_content()
+                    {
+                        ui_state.apply_viewport_scaffold()
+                    } else {
+                        parent_tile_id
+                    };
                     let viewport = Viewport::default();
                     let label = viewport_label(&viewport);
                     let viewport_pane = ViewportPane::spawn(
@@ -2526,6 +2804,13 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     if read_only {
                         continue;
                     }
+                    let parent_tile_id = if parent_tile_id.is_none()
+                        && !ui_state.has_non_sidebar_content()
+                    {
+                        ui_state.apply_scaffold_with_title("Graphs")
+                    } else {
+                        parent_tile_id
+                    };
                     let graph_label = graph_label(&Graph::default());
 
                     let graph_bundle = if let Some(graph_bundle) = *graph_bundle {
@@ -2553,6 +2838,13 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     if read_only {
                         continue;
                     }
+                    let parent_tile_id = if parent_tile_id.is_none()
+                        && !ui_state.has_non_sidebar_content()
+                    {
+                        ui_state.apply_scaffold_with_title("Monitors")
+                    } else {
+                        parent_tile_id
+                    };
                     let monitor = MonitorPane::new("Monitor".to_string(), eql);
 
                     let pane = Pane::Monitor(monitor);

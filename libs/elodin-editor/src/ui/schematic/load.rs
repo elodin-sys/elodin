@@ -438,65 +438,63 @@ impl LoadSchematicParams<'_, '_> {
         }
 
         for descriptor in secondary_descriptors {
-            if let Some(path) = descriptor.path.as_ref() {
-                match std::fs::read_to_string(path) {
-                    Ok(kdl) => match impeller2_wkt::Schematic::from_kdl(&kdl) {
-                        Ok(sec_schematic) => {
-                            let id = WindowId::default();
-                            let mut tile_state =
-                                TileState::new(Id::new(("secondary_tab_tree", id.0)));
-                            for elem in &sec_schematic.elems {
-                                if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
-                                    self.spawn_panel(
-                                        &mut tile_state,
-                                        panel,
-                                        None,
-                                        PanelContext::Secondary(id),
-                                    );
-                                }
-                            }
-
-                            let graph_entities = tile_state.collect_graph_entities();
-                            info!(
-                                path = ?descriptor.path,
-                                "Loaded secondary schematic"
-                            );
-
-                            for &graph in &graph_entities {
-                                if let Ok(mut camera) = self.cameras.get_mut(graph) {
-                                    // Why do we turn their cameras off?
-                                    // Oh, so we can set their `WindowRef` first.
-                                    camera.is_active = false;
-                                }
-                            }
-
-                            let state = WindowState {
-                                descriptor,
-                                tile_state,
-                                graph_entities,
-                            };
-                            self.commands.spawn((id, state));
-                        }
-                        Err(err) => {
-                            let diag = render_diag(&err);
-                            let report = miette!(err.clone());
-                            warn!(
-                                ?report,
-                                path = ?descriptor.path,
-                                "Failed to parse secondary schematic: \n{diag}"
-                            );
-                        }
-                    },
-                    Err(err) => {
-                        warn!(
-                            ?err,
-                            path = ?descriptor.path,
-                            "Failed to read secondary schematic"
-                        );
-                    }
-                }
+            let id = WindowId::default();
+            if let Some(state) = self.load_secondary_window_state(&descriptor, id) {
+                self.commands.spawn((id, state));
             }
         }
+    }
+
+    pub fn load_secondary_window_state(
+        &mut self,
+        descriptor: &WindowDescriptor,
+        id: WindowId,
+    ) -> Option<WindowState> {
+        let path = descriptor.path.as_ref()?;
+        let kdl = match std::fs::read_to_string(path) {
+            Ok(kdl) => kdl,
+            Err(err) => {
+                warn!(?err, path = ?descriptor.path, "Failed to read secondary schematic");
+                return None;
+            }
+        };
+
+        let schematic = match impeller2_wkt::Schematic::from_kdl(&kdl) {
+            Ok(sec) => sec,
+            Err(err) => {
+                let diag = render_diag(&err);
+                let report = miette!(err.clone());
+                warn!(
+                    ?report,
+                    path = ?descriptor.path,
+                    "Failed to parse secondary schematic: \n{diag}"
+                );
+                return None;
+            }
+        };
+
+        let mut tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
+        for elem in &schematic.elems {
+            if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
+                self.spawn_panel(&mut tile_state, panel, None, PanelContext::Secondary(id));
+            }
+        }
+
+        let graph_entities = tile_state.collect_graph_entities();
+        info!(path = ?descriptor.path, "Loaded secondary schematic");
+
+        for &graph in &graph_entities {
+            if let Ok(mut camera) = self.cameras.get_mut(graph) {
+                // Keep cameras inactive until they are assigned to the new window.
+                camera.is_active = false;
+            }
+        }
+
+        Some(WindowState {
+            descriptor: descriptor.clone(),
+            tile_state,
+            graph_entities,
+        })
     }
 
     pub fn spawn_object_3d(&mut self, object_3d: Object3D) {
@@ -844,7 +842,7 @@ pub fn viewport_label(viewport: &Viewport) -> String {
     viewport
         .name
         .clone()
-        .unwrap_or_else(|| "Viewport".to_string())
+        .unwrap_or_else(|| "viewport".to_string())
 }
 
 /// Prefer the explicit `name` when set (and not the generic "Graph").
