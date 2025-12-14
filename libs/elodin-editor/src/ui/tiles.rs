@@ -2371,6 +2371,20 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             .unwrap_or(false);
 
                     if click_inside_gutter {
+                        let compute_sidebar_shares = |target_sidebar_share: f32| -> (f32, f32) {
+                            let max_sidebar_share = (pair_sum - min_other_share).max(0.01);
+                            let clamped = target_sidebar_share
+                                .max(min_sidebar_share.max(0.01))
+                                .min(max_sidebar_share);
+                            let left_share = if sidebar_on_left {
+                                clamped
+                            } else {
+                                pair_sum - clamped
+                            };
+                            let right_share = pair_sum - left_share;
+                            (left_share.max(0.01), right_share.max(0.01))
+                        };
+
                         if sidebar_masked {
                             let default_px = (parent_rect.width() * 0.15).max(min_sidebar_px);
                             let restore_share = if share_per_px > 0.0 {
@@ -2378,17 +2392,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             } else {
                                 pair_sum * 0.15
                             };
-                            let max_sidebar_share = (pair_sum - min_other_share).max(0.01);
-                            let target_sidebar_share = restore_share
-                                .max(min_sidebar_share.max(0.01))
-                                .min(max_sidebar_share);
-                            let left_share = if sidebar_on_left {
-                                target_sidebar_share
-                            } else {
-                                pair_sum - target_sidebar_share
-                            };
-                            let right_share = pair_sum - left_share;
-                            apply_shares(left_share.max(0.01), right_share.max(0.01));
+                            let (left_share, right_share) = compute_sidebar_shares(restore_share);
+                            apply_shares(left_share, right_share);
                             mask_state.set_masked(sidebar_kind, false);
                             sidebar_masked = false;
                         } else {
@@ -2398,16 +2403,9 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 share_right
                             };
                             mask_state.set_last_share(sidebar_kind, Some(current_sidebar_share));
-                            let max_sidebar_share = (pair_sum - min_other_share).max(0.01);
-                            let target_sidebar_share =
-                                min_sidebar_share.max(0.01).min(max_sidebar_share);
-                            let left_share = if sidebar_on_left {
-                                target_sidebar_share
-                            } else {
-                                pair_sum - target_sidebar_share
-                            };
-                            let right_share = pair_sum - left_share;
-                            apply_shares(left_share.max(0.01), right_share.max(0.01));
+                            let (left_share, right_share) =
+                                compute_sidebar_shares(min_sidebar_share);
+                            apply_shares(left_share, right_share);
                             mask_state.set_masked(sidebar_kind, true);
                             sidebar_masked = true;
                         }
@@ -2454,14 +2452,16 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             let total = new_left + new_right;
                             let new_left_share = share_sum * new_left / total.max(1.0);
                             let new_right_share = share_sum - new_left_share;
-                            linear.shares.set_share(left_id, new_left_share.max(0.01));
-                            linear.shares.set_share(right_id, new_right_share.max(0.01));
+                            let left_clamped = new_left_share.max(0.01);
+                            let right_clamped = new_right_share.max(0.01);
+                            linear.shares.set_share(left_id, left_clamped);
+                            linear.shares.set_share(right_id, right_clamped);
                             share_updates.push((
                                 container_id,
                                 left_id,
                                 right_id,
-                                new_left_share.max(0.01),
-                                new_right_share.max(0.01),
+                                left_clamped,
+                                right_clamped,
                             ));
                             ui.ctx().request_repaint();
 
