@@ -220,11 +220,10 @@ impl SchematicParam<'_, '_> {
                             tabs.push(tab)
                         }
                     }
-                    // Drop empty tabs containers; flatten single-child tabs.
-                    match tabs.len() {
-                        0 => None,
-                        1 => Some(tabs.remove(0)),
-                        _ => Some(Panel::Tabs(tabs)),
+                    if tabs.is_empty() {
+                        None
+                    } else {
+                        Some(Panel::Tabs(tabs))
                     }
                 }
 
