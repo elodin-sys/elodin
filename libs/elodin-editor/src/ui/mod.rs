@@ -18,7 +18,7 @@ use bevy::{
     render::camera::{RenderTarget, Viewport},
     window::{
         EnabledButtons, Monitor, NormalizedWindowRef, PresentMode, PrimaryWindow,
-        WindowCloseRequested, WindowRef, WindowResolution,
+        WindowCloseRequested, WindowRef, WindowResolution, WindowTheme,
     },
 };
 #[cfg(target_os = "macos")]
@@ -560,6 +560,7 @@ fn sync_windows(
             resolution,
             position: position.unwrap_or(WindowPosition::Automatic),
             present_mode: DEFAULT_PRESENT_MODE,
+            window_theme: Some(WindowTheme::Dark),
             enabled_buttons: EnabledButtons {
                 close: true,
                 minimize: true,
