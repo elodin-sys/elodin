@@ -138,11 +138,13 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                             let mut visibility = grid_visibility.get_mut(grid).unwrap();
                             let mut visible = *visibility == Visibility::Visible;
                             theme::configure_input_with_border(ui.style_mut());
-                            ui.checkbox(&mut visible, "");
-                            if visible {
-                                *visibility = Visibility::Visible;
-                            } else {
-                                *visibility = Visibility::Hidden;
+                            let changed = ui.checkbox(&mut visible, "").changed();
+                            if changed {
+                                if visible {
+                                    *visibility = Visibility::Visible;
+                                } else {
+                                    *visibility = Visibility::Hidden;
+                                }
                             }
                         });
                     });

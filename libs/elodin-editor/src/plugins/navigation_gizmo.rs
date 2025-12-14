@@ -115,20 +115,40 @@ impl RenderLayerAlloc {
         for i in 0..32 {
             if (bits & mask) != 0 {
                 self.0 &= !mask;
+                bevy::log::info!(
+                    layer = i,
+                    bits_before = format!("{bits:032b}"),
+                    "render_layer_alloc.alloc success"
+                );
                 return Some(i);
             }
             mask <<= 1;
         }
+        bevy::log::warn!(
+            bits = format!("{bits:032b}"),
+            "render_layer_alloc.alloc exhausted"
+        );
         None
     }
 
     #[allow(dead_code)]
     pub fn free(&mut self, layer: usize) {
         self.0 |= 1 << layer;
+        bevy::log::info!(
+            layer,
+            bits_after = format!("{:032b}", self.0),
+            "render_layer_alloc.free"
+        );
     }
 
     pub fn free_all(&mut self) {
+        let bits_before = self.0;
         self.0 = !0;
+        bevy::log::info!(
+            bits_before = format!("{bits_before:032b}"),
+            bits_after = format!("{:032b}", self.0),
+            "render_layer_alloc.free_all"
+        );
     }
 }
 

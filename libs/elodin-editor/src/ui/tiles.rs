@@ -794,6 +794,12 @@ impl TileState {
         for (tile_id, tile) in self.tree.tiles.iter() {
             match tile {
                 Tile::Pane(Pane::Viewport(viewport)) => {
+                    bevy::log::info!(
+                        grid_layer = ?viewport.grid_layer,
+                        viewport_layer = ?viewport.viewport_layer,
+                        camera = ?viewport.camera,
+                        "clear: free viewport layers"
+                    );
                     if let Some(layer) = viewport.viewport_layer {
                         render_layer_alloc.free(layer);
                     }
@@ -1068,15 +1074,20 @@ impl ViewportPane {
         label: String,
     ) -> Self {
         let mut main_camera_layers = RenderLayers::default().with(GIZMO_RENDER_LAYER);
-        let mut grid_layers = RenderLayers::none();
         let grid_layer = render_layer_alloc.alloc();
+        let mut grid_layers = RenderLayers::none();
         if let Some(layer) = grid_layer {
             main_camera_layers = main_camera_layers.with(layer);
-            grid_layers = grid_layers.with(layer);
+            grid_layers = RenderLayers::layer(layer);
+        } else {
+            bevy::log::error!("grid layer allocation failed; grid will not render");
         }
+
         let viewport_layer = render_layer_alloc.alloc();
         if let Some(layer) = viewport_layer {
             main_camera_layers = main_camera_layers.with(layer);
+        } else {
+            bevy::log::warn!("viewport layer allocation failed; arrows will not render");
         }
 
         let grid_visibility = if viewport.show_grid {
@@ -1084,30 +1095,36 @@ impl ViewportPane {
         } else {
             Visibility::Hidden
         };
+        let grid_settings = bevy_infinite_grid::InfiniteGridSettings {
+            minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
+            major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
+            z_axis_color: crate::ui::colors::bevy::GREEN,
+            x_axis_color: crate::ui::colors::bevy::RED,
+            fadeout_distance: 50_000.0,
+            scale: 0.1,
+            ..Default::default()
+        };
         let grid_id = commands
             .spawn((
                 bevy_infinite_grid::InfiniteGridBundle {
-                    settings: bevy_infinite_grid::InfiniteGridSettings {
-                        minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
-                        major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
-                        z_axis_color: crate::ui::colors::bevy::GREEN,
-                        x_axis_color: crate::ui::colors::bevy::RED,
-                        fadeout_distance: 50_000.0,
-                        scale: 0.1,
-                        ..Default::default()
-                    },
+                    settings: grid_settings,
                     visibility: grid_visibility,
                     ..Default::default()
                 },
                 grid_layers,
             ))
             .id();
+        let perspective = PerspectiveProjection {
+            fov: viewport.fov.to_radians(),
+            ..Default::default()
+        };
 
+        let parent_transform =
+            Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)).looking_at(Vec3::ZERO, Vec3::Y);
         let parent = commands
             .spawn((
                 GlobalTransform::default(),
-                Transform::from_translation(Vec3::new(5.0, 5.0, 10.0))
-                    .looking_at(Vec3::ZERO, Vec3::Y),
+                parent_transform,
                 impeller2_wkt::WorldPos::default(),
                 Name::new("viewport"),
             ))
@@ -1164,10 +1181,7 @@ impl ViewportPane {
                 order: 1,
                 ..Default::default()
             },
-            Projection::Perspective(PerspectiveProjection {
-                fov: viewport.fov.to_radians(),
-                ..Default::default()
-            }),
+            Projection::Perspective(perspective),
             Tonemapping::TonyMcMapface,
             Exposure::from_physical_camera(PhysicalCameraParameters {
                 aperture_f_stops: 2.8,

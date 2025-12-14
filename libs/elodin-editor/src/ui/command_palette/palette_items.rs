@@ -1626,12 +1626,14 @@ impl Default for PalettePage {
                         .iter()
                         .all(|grid_visibility| grid_visibility == Visibility::Hidden);
 
+                    let new_visibility = if all_hidden {
+                        Visibility::Visible
+                    } else {
+                        Visibility::Hidden
+                    };
+
                     for mut grid_visibility in grid_visibility.iter_mut() {
-                        *grid_visibility = if all_hidden {
-                            Visibility::Visible
-                        } else {
-                            Visibility::Hidden
-                        };
+                        *grid_visibility = new_visibility;
                     }
 
                     PaletteEvent::Exit
