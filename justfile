@@ -32,9 +32,24 @@ tag new_tag:
   fi
   echo "🏷️ Tagging HEAD with '$new_tag'"
   sh -v ${DRY_RUN:+-n} <<EOF
-    git tag -a $new_tag -m "Elodin $new_tag"
+    git tag -a $new_tag origin/main -m "Elodin $new_tag"
     git push origin $new_tag
   EOF
+
+wait-for-release tag:
+  #!/usr/bin/env sh
+  tag="{{tag}}"
+  start=$(date +%s)
+  max_wait=45; # minutes
+  while ! (gh release list | egrep "^v${tag}[[:space:]]"); do
+        sleep $((5 * 60)); # Sleep for 5 minutes.
+        now=$(date +%s)
+        if $((now - start)) -gt $((max_wait * 60)); then
+           echo "error: Timed out waiting for release ${tag}." >&2;
+           exit 3;
+        fi
+  done
+  echo "Release ${tag} is available for download.";
 
 promote tag:
   #!/usr/bin/env sh
