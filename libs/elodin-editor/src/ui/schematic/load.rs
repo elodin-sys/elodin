@@ -210,18 +210,29 @@ impl LoadSchematicParams<'_, '_> {
         }
 
         let primary_window = *self.primary_window;
-        let mut main_state = {
+        let (mut main_state, tree_id) = {
             let mut window_state = self
                 .window_states
                 .get_mut(primary_window)
                 .expect("no primary window")
                 .2;
-            std::mem::take(&mut window_state.tile_state)
+            let state = std::mem::take(&mut window_state.tile_state);
+            (state, window_state.tile_state.tree_id())
         };
+        let before_titles = main_state.container_titles.len();
         main_state.clear(
             &mut self.commands,
             &mut self.selected_object,
             &mut self.render_layer_alloc,
+        );
+        // Start from a fresh tile state to avoid carrying any stale titles/UI state
+        // between reloads. We keep the same tree_id so existing widgets keep using
+        // the primary tree namespace.
+        main_state = TileState::new(tree_id);
+        bevy::log::info!(
+            cleared = before_titles,
+            after = main_state.container_titles.len(),
+            "load_schematic: cleared primary container_titles"
         );
         self.hdr_enabled.0 = false;
         for entity in self.objects_3d.iter() {
@@ -474,6 +485,8 @@ impl LoadSchematicParams<'_, '_> {
         };
 
         let mut tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
+        tile_state.container_titles.clear();
+        bevy::log::info!("load_secondary_window_state: cleared container_titles");
         for elem in &schematic.elems {
             if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
                 self.spawn_panel(&mut tile_state, panel, None, PanelContext::Secondary(id));

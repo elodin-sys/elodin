@@ -220,7 +220,12 @@ impl SchematicParam<'_, '_> {
                             tabs.push(tab)
                         }
                     }
-                    Some(Panel::Tabs(tabs))
+                    // Drop empty tabs containers; flatten single-child tabs.
+                    match tabs.len() {
+                        0 => None,
+                        1 => Some(tabs.remove(0)),
+                        _ => Some(Panel::Tabs(tabs)),
+                    }
                 }
 
                 egui_tiles::Container::Linear(linear) => {
@@ -240,6 +245,10 @@ impl SchematicParam<'_, '_> {
 
                     if panels.is_empty() {
                         return None;
+                    }
+                    // Flatten single-child splits; otherwise keep the split.
+                    if panels.len() == 1 {
+                        return panels.into_iter().next();
                     }
 
                     let name = state.get_container_title(tile_id).map(|s| s.to_string());

@@ -17,7 +17,7 @@ use bevy_render::{
 };
 use egui::UiBuilder;
 use egui::response::Flags;
-use egui_tiles::{Container, Tile, TileId, Tiles};
+use egui_tiles::{Behavior, Container, Tile, TileId, Tiles};
 use impeller2_wkt::{Dashboard, Graph, Viewport, WindowRect};
 use smallvec::{SmallVec, smallvec};
 use std::collections::{BTreeMap, HashMap};
@@ -1252,6 +1252,10 @@ impl GraphPane {
 }
 
 impl TileState {
+    pub fn tree_id(&self) -> Id {
+        self.tree_id
+    }
+
     pub fn new(tree_id: Id) -> Self {
         Self {
             tree: egui_tiles::Tree::new_tabs(tree_id, vec![]),
@@ -1326,6 +1330,33 @@ enum TabRole {
 }
 
 impl<'w> TreeBehavior<'w> {
+    fn container_fallback_title(&mut self, tiles: &Tiles<Pane>, id: TileId) -> String {
+        if let Some(egui_tiles::Tile::Container(container)) = tiles.get(id) {
+            match container {
+                Container::Tabs(tabs) => {
+                    if let Some(active) = tabs.active {
+                        let text = self.tab_title_for_tile(tiles, active).text().to_string();
+                        return text;
+                    }
+                }
+                Container::Linear(linear) => {
+                    if linear.children.len() == 1
+                        && let Some(child) = linear.children.first().copied()
+                    {
+                        let text = self.tab_title_for_tile(tiles, child).text().to_string();
+                        return text;
+                    }
+                    // Multiple children without an explicit title: hide the container label.
+                    return String::new();
+                }
+                _ => {}
+            }
+            format!("{:?}", container.kind())
+        } else {
+            "Container".to_owned()
+        }
+    }
+
     fn tab_role(&self, tiles: &Tiles<Pane>, tile_id: TileId) -> TabRole {
         // Hide chrome for the static sidebars (Hierarchy/Inspector).
         if let Some(Tile::Pane(pane)) = tiles.get(tile_id) {
@@ -1404,7 +1435,9 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                 t.clone()
             } else {
                 match tiles.get(tile_id) {
-                    Some(egui_tiles::Tile::Container(c)) => format!("{:?}", c.kind()),
+                    Some(egui_tiles::Tile::Container(_)) => {
+                        self.container_fallback_title(tiles, tile_id)
+                    }
                     _ => self.tab_title_for_tile(tiles, tile_id).text().to_string(),
                 }
             };
@@ -1669,6 +1702,16 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                 false
             };
         if is_sidebar_tabs {
+            return;
+        }
+
+        let title = self
+            .container_titles
+            .get(&tile_id)
+            .cloned()
+            .unwrap_or_else(|| self.container_fallback_title(tiles, tile_id));
+        // Hide the top bar (and "+") for tabs with no visible title.
+        if title.is_empty() {
             return;
         }
 
@@ -2904,6 +2947,15 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             .tree
                             .tiles
                             .insert_new(Tile::Container(Container::Tabs(tabs)));
+                        // Do not assign a wrapper title (“Horizontal”); keep only child/pane titles.
+                        if let Some(wrapped_id) = ui_state.tree.root()
+                            && let Some(Tile::Container(Container::Linear(linear))) =
+                                ui_state.tree.tiles.get(wrapped_id)
+                            && linear.children.len() == 3
+                        {
+                            // Clear any accidental title on the new tabs wrapper.
+                            ui_state.clear_container_title(main_content);
+                        }
                     }
 
                     let mut linear = egui_tiles::Linear::new(
