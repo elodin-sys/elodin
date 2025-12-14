@@ -1871,57 +1871,67 @@ impl RootWidgetSystem for TileSystem<'_, '_> {
 }
 
 fn unmask_sidebar_on_select(ui_state: &mut TileState, sidebar_tile: TileId, kind: SidebarKind) {
-    let target_frac = 0.2;
-    let min_share = 0.01;
-    fn contains_child(tiles: &Tiles<Pane>, haystack: TileId, needle: TileId) -> bool {
-        if haystack == needle {
-            return true;
-        }
-        match tiles.get(haystack) {
-            Some(Tile::Container(container)) => container
-                .children()
-                .any(|child| contains_child(tiles, *child, needle)),
-            _ => false,
-        }
-    }
-
-    let mut targets: Vec<(TileId, TileId)> = Vec::new();
-    for (cid, tile) in ui_state.tree.tiles.iter() {
-        if let Tile::Container(Container::Linear(linear)) = tile
-            && let Some(child) = linear
-                .children
-                .iter()
-                .find(|child| contains_child(&ui_state.tree.tiles, **child, sidebar_tile))
-        {
-            targets.push((*cid, *child));
-        }
-    }
-
-    for (cid, target_child) in targets {
-        if let Some(Tile::Container(Container::Linear(linear))) = ui_state.tree.tiles.get_mut(cid) {
-            let share_sum: f32 = linear.shares.iter().map(|(_, s)| s).sum::<f32>().max(0.01);
-            let old = linear.shares[target_child];
-            let others_sum = (share_sum - old).max(0.0);
-            let mut target = (share_sum * target_frac).max(min_share);
-            let min_others = min_share * (linear.children.len().saturating_sub(1) as f32);
-            if target > share_sum - min_others {
-                target = (share_sum - min_others).max(min_share);
-            }
-            let factor = if others_sum > 0.0 {
-                (share_sum - target) / others_sum
-            } else {
-                0.0
-            };
-            let children = linear.children.clone();
-            for child in children {
-                if child == target_child {
-                    linear.shares.set_share(child, target.max(min_share));
-                } else {
-                    let new = (linear.shares[child] * factor).max(min_share);
-                    linear.shares.set_share(child, new);
+    fn build_parent_map(tiles: &Tiles<Pane>) -> HashMap<TileId, TileId> {
+        let mut parents = HashMap::new();
+        for (id, tile) in tiles.iter() {
+            if let Tile::Container(container) = tile {
+                for child in container.children() {
+                    parents.insert(*child, *id);
                 }
             }
         }
+        parents
+    }
+
+    fn rebalance_linear_shares(
+        linear: &mut egui_tiles::Linear,
+        target_child: TileId,
+        target_frac: f32,
+        min_share: f32,
+    ) {
+        let share_sum: f32 = linear
+            .shares
+            .iter()
+            .map(|(_, s)| s)
+            .sum::<f32>()
+            .max(min_share);
+        let old = linear.shares[target_child];
+        let others_sum = (share_sum - old).max(0.0);
+        let mut target = (share_sum * target_frac).max(min_share);
+        let min_others = min_share * (linear.children.len().saturating_sub(1) as f32);
+        if target > share_sum - min_others {
+            target = (share_sum - min_others).max(min_share);
+        }
+        let factor = if others_sum > 0.0 {
+            (share_sum - target) / others_sum
+        } else {
+            0.0
+        };
+        let children = linear.children.clone();
+        for child in children {
+            if child == target_child {
+                linear.shares.set_share(child, target.max(min_share));
+            } else {
+                let new = (linear.shares[child] * factor).max(min_share);
+                linear.shares.set_share(child, new);
+            }
+        }
+    }
+
+    let target_frac = 0.2;
+    let min_share = 0.01;
+    let parents = build_parent_map(&ui_state.tree.tiles);
+    let mut current = Some(sidebar_tile);
+    while let Some(child) = current {
+        let Some(parent) = parents.get(&child).copied() else {
+            break;
+        };
+        if let Some(Tile::Container(Container::Linear(linear))) =
+            ui_state.tree.tiles.get_mut(parent)
+        {
+            rebalance_linear_shares(linear, child, target_frac, min_share);
+        }
+        current = Some(parent);
     }
 
     match kind {
