@@ -195,7 +195,7 @@
       packages.x86_64-linux = {
         flash-uefi = nixpkgs.legacyPackages.x86_64-linux.runCommand "flash-uefi" {} ''
           mkdir -p $out
-          cp ${jetpack.outputs.packages.x86_64-linux.flash-orin-nx-devkit}/bin/flash-orin-nx-devkit $out/flash-uefi
+          cp ${jetpack.outputs.packages.x86_64-linux.flash-orin-nx-devkit}/bin/flash-orin-nx-devkit-cross $out/flash-uefi
           sed -i '46i\cp ${./tegra234-mb2-bct-misc-p3767-0000.dts} bootloader/generic/BCT/tegra234-mb2-bct-misc-p3767-0000.dts' $out/flash-uefi
           chmod +x $out/flash-uefi
         '';
