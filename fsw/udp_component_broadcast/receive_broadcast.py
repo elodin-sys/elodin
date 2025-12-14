@@ -244,8 +244,8 @@ class ComponentReceiver:
                 last_received=time.time(),
             )
 
-        # Write to Elodin-DB if connected
-        if self.client:
+        # Write to Elodin-DB (handles reconnection if client was unavailable at startup)
+        if IMPELLER_AVAILABLE:
             self._write_to_db(component_name, values.astype(np.float64), msg)
 
     def _handle_heartbeat(self, msg: pb.BroadcastHeartbeat, addr: tuple):
