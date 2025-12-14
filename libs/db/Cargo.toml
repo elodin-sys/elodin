@@ -100,3 +100,7 @@ tokio.optional = true
 postcard-c-codegen.path = "../postcard-c/codegen"
 hostname = "0.4.1"
 reflink-copy = "0.1.28"
+
+[[bin]]
+name = "fix_timestamps"
+path = "src/bin/fix_timestamps.rs"

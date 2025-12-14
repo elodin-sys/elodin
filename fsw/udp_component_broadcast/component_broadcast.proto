@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package elodin.broadcast;
+
+// Primitive data types matching impeller2 PrimType
+enum PrimType {
+    PRIM_TYPE_UNSPECIFIED = 0;
+    PRIM_TYPE_U8 = 1;
+    PRIM_TYPE_U16 = 2;
+    PRIM_TYPE_U32 = 3;
+    PRIM_TYPE_U64 = 4;
+    PRIM_TYPE_I8 = 5;
+    PRIM_TYPE_I16 = 6;
+    PRIM_TYPE_I32 = 7;
+    PRIM_TYPE_I64 = 8;
+    PRIM_TYPE_F32 = 9;
+    PRIM_TYPE_F64 = 10;
+    PRIM_TYPE_BOOL = 11;
+}
+
+// Component data broadcast message
+message ComponentBroadcast {
+    // Source identifier (e.g., "bdx", "rocket")
+    string source_id = 1;
+    
+    // Original component name from the source database
+    string component_name = 2;
+    
+    // Optional renamed component name for the destination
+    // If empty, component_name is used
+    string renamed_component = 3;
+    
+    // Timestamp in microseconds since epoch
+    int64 timestamp_us = 4;
+    
+    // Data type of the component values
+    PrimType data_type = 5;
+    
+    // Shape of the tensor (e.g., [7] for world_pos quaternion+position)
+    repeated int32 shape = 6;
+    
+    // Raw component data bytes (little-endian)
+    bytes data = 7;
+    
+    // Sequence number for detecting packet loss
+    uint64 sequence = 8;
+}
+
+// Heartbeat message for connection monitoring
+message BroadcastHeartbeat {
+    // Source identifier
+    string source_id = 1;
+    
+    // List of components being broadcast
+    repeated string components = 2;
+    
+    // Broadcast rate in Hz
+    float broadcast_rate_hz = 3;
+    
+    // Timestamp in microseconds since epoch
+    int64 timestamp_us = 4;
+}

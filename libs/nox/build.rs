@@ -40,7 +40,8 @@ fn main() {
         "so"
     };
 
-    let lib_name = pyo3_build_config::get().lib_name.as_ref().unwrap();
+    let pyo3_config = pyo3_build_config::get();
+    let lib_name = pyo3_config.lib_name.as_ref().unwrap();
     let shared_lib = python_lib.join(format!("lib{}.{}", lib_name, shared_lib_extension));
 
     // copy the shared library to the output python directory if it exists:
@@ -66,4 +67,23 @@ fn main() {
 
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", python_lib.display());
     println!("cargo:rustc-link-search=native={}", python_dir.display());
+
+    // Link against Python library for test binaries and standalone executables.
+    // We check for maturin-specific environment variables to detect extension module builds.
+    // When maturin builds an extension module, it sets these variables, and we should NOT
+    // link against libpython because:
+    // 1. Python provides symbols at runtime for extension modules
+    // 2. In Nix builds, libpython may not be available as a shared library
+    //
+    // For regular builds (cargo test, cargo build --bin, etc.), we MUST link against
+    // Python because the test/binary executables need the Python symbols.
+    let is_maturin_build = std::env::var("MATURIN_PYTHON").is_ok()
+        || std::env::var("MATURIN_TARGET").is_ok()
+        || std::env::var("PYO3_CONFIG_FILE")
+            .map(|f| f.contains("maturin"))
+            .unwrap_or(false);
+
+    if !is_maturin_build {
+        println!("cargo:rustc-link-lib=dylib={}", lib_name);
+    }
 }
