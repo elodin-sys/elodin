@@ -309,8 +309,6 @@ impl Plugin for UiPlugin {
 
 #[derive(Clone, Debug)]
 pub enum SettingModal {
-    Graph(Entity, Option<ComponentId>),
-    GraphRename(Entity, String),
     Dialog(Dialog),
 }
 

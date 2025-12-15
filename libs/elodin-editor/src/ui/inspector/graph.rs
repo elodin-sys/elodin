@@ -2,7 +2,7 @@ use std::{ops::Range, time::Duration};
 
 use bevy::ecs::{
     entity::Entity,
-    system::{Query, Res, ResMut, SystemParam, SystemState},
+    system::{Query, Res, SystemParam, SystemState},
     world::World,
 };
 use bevy_egui::egui;
@@ -15,7 +15,6 @@ use impeller2_bevy::ComponentMetadataRegistry;
 use crate::{
     EqlContext,
     ui::{
-        SettingModal, SettingModalState,
         button::{EButton, ECheckboxButton},
         colors::{EColor, get_scheme},
         inspector::{color_popup, eql_autocomplete, query},
@@ -32,7 +31,6 @@ use super::InspectorIcons;
 
 #[derive(SystemParam)]
 pub struct InspectorGraph<'w, 's> {
-    setting_modal_state: ResMut<'w, SettingModalState>,
     metadata_store: Res<'w, ComponentMetadataRegistry>,
     graph_states: Query<'w, 's, &'static mut GraphState>,
     query_plots: Query<'w, 's, &'static mut QueryPlotData>,
@@ -54,7 +52,6 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         let (icons, graph_id) = args;
 
         let InspectorGraph {
-            mut setting_modal_state,
             metadata_store,
             mut graph_states,
             mut query_plots,
@@ -68,26 +65,13 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         let graph_state = &mut *graph_state;
         let query_plot = query_plots.get_mut(graph_id);
 
-        if query_plot.is_ok() {
-            label::editable_label_with_buttons(
-                ui,
-                [],
-                &mut graph_state.label,
-                get_scheme().text_primary,
-                graph_label_margin,
-            );
-        } else {
-            let [add_clicked] = label::editable_label_with_buttons(
-                ui,
-                [icons.add],
-                &mut graph_state.label,
-                get_scheme().text_primary,
-                graph_label_margin,
-            );
-            if add_clicked {
-                setting_modal_state.0 = Some(SettingModal::Graph(graph_id, None));
-            }
-        }
+        label::editable_label_with_buttons(
+            ui,
+            [],
+            &mut graph_state.label,
+            get_scheme().text_primary,
+            graph_label_margin,
+        );
 
         ui.separator();
 
