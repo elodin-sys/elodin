@@ -2084,10 +2084,10 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         let (_parent_tabs_id, is_first_child) = tiles
             .iter()
             .find_map(|(id, tile)| {
-                if let Tile::Container(Container::Tabs(tabs)) = tile {
-                    if let Some(idx) = tabs.children.iter().position(|c| *c == tile_id) {
-                        return Some((*id, idx == 0));
-                    }
+                if let Tile::Container(Container::Tabs(tabs)) = tile
+                    && let Some(idx) = tabs.children.iter().position(|c| *c == tile_id)
+                {
+                    return Some((*id, idx == 0));
                 }
                 None
             })

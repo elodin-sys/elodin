@@ -18,7 +18,7 @@ use smallvec::SmallVec;
 use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        EntityPair,
+        EntityPair, SelectedObject,
         colors::get_scheme,
         inspector::search,
         label,
@@ -41,6 +41,7 @@ pub struct InspectorEntity<'w, 's> {
     path_reg: Res<'w, ComponentPathRegistry>,
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     filter: ResMut<'w, ComponentFilter>,
+    selected_object: ResMut<'w, SelectedObject>,
 }
 
 impl WidgetSystem for InspectorEntity<'_, '_> {
@@ -64,6 +65,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
             path_reg,
             mut render_layer_alloc,
             mut filter,
+            mut selected_object,
         } = state.get_mut(world);
 
         let (icons, pair) = args;
@@ -72,6 +74,9 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
             ui.add(empty_inspector());
             return tree_actions;
         };
+        if !matches!(*selected_object, SelectedObject::Entity(p) if p == pair) {
+            *selected_object = SelectedObject::Entity(pair);
+        }
 
         let icon_chart = icons.chart;
         egui::Frame::NONE
