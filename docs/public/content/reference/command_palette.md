@@ -12,8 +12,6 @@ icon = ""
 order = 7
 +++
 
-## Command palette
-
 ### Create
 - `Window`: prompts for a title, then prompts for the first tab (viewport/monitor/graph). Creates a secondary window when a path is provided in the schematic, otherwise configures the primary window.
 - `Viewport`: inserts a 3D viewport tile.
