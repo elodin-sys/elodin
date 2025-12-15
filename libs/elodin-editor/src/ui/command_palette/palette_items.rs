@@ -1591,12 +1591,6 @@ pub fn create_3d_object() -> PaletteItem {
 }
 
 pub fn create_tiles(tile_id: TileId, new_tab: bool) -> PalettePage {
-    info!(
-        target: "tabs.palette",
-        ?tile_id,
-        new_tab,
-        "opening tile creation palette"
-    );
     PalettePage::new(vec![
         create_graph(Some(tile_id), new_tab),
         create_action(Some(tile_id), new_tab),

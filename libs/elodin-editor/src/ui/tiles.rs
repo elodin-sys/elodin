@@ -1364,51 +1364,12 @@ impl TileState {
         new_tab: bool,
     ) -> Option<TileId> {
         let parent_tabs_id = if let Some(id) = parent_tile_id {
-            info!(
-                target: "tabs.insert_pane",
-                ?parent_tile_id,
-                "using explicit parent_tabs_id"
-            );
             id
         } else if !self.has_non_sidebar_content() {
-            let scaffold = self.apply_scaffold("New tab")?;
-            info!(
-                target: "tabs.insert_pane",
-                ?scaffold,
-                "scaffold applied because tree was empty"
-            );
-            scaffold
+            self.apply_scaffold("New tab")?
         } else {
-            let fallback = self.default_parent_center()?;
-            info!(
-                target: "tabs.insert_pane",
-                ?fallback,
-                "default_parent_center used"
-            );
-            fallback
+            self.default_parent_center()?
         };
-
-        info!(
-            target: "tabs.insert_pane",
-            ?parent_tabs_id,
-            ?parent_tile_id,
-            new_tab,
-            active,
-            pane = %match &pane {
-                Pane::Viewport(_) => "Viewport",
-                Pane::Graph(_) => "Graph",
-                Pane::Monitor(_) => "Monitor",
-                Pane::QueryTable(_) => "QueryTable",
-                Pane::QueryPlot(_) => "QueryPlot",
-                Pane::ActionTile(_) => "ActionTile",
-                Pane::VideoStream(_) => "VideoStream",
-                Pane::Dashboard(_) => "Dashboard",
-                Pane::Hierarchy => "Hierarchy",
-                Pane::Inspector => "Inspector",
-                Pane::SchematicTree(_) => "SchematicTree",
-            },
-            "insert_pane_in_tabs start"
-        );
 
         if new_tab {
             if let Some(Tile::Container(Container::Tabs(parent_tabs))) =
@@ -1567,35 +1528,8 @@ impl TileState {
                     ) {
                         self.has_non_sidebar = true;
                     }
-                    info!(
-                        target: "tabs.insert_pane",
-                        ?parent_tabs_id,
-                        ?active_child,
-                        ?linear_id,
-                        ?pane_id,
-                        pane_kind = match self.tree.tiles.get(pane_id) {
-                            Some(Tile::Pane(Pane::Viewport(_))) => "Viewport",
-                            Some(Tile::Pane(Pane::Graph(_))) => "Graph",
-                            Some(Tile::Pane(Pane::Monitor(_))) => "Monitor",
-                            Some(Tile::Pane(Pane::QueryTable(_))) => "QueryTable",
-                            Some(Tile::Pane(Pane::QueryPlot(_))) => "QueryPlot",
-                            Some(Tile::Pane(Pane::ActionTile(_))) => "ActionTile",
-                            Some(Tile::Pane(Pane::VideoStream(_))) => "VideoStream",
-                            Some(Tile::Pane(Pane::Dashboard(_))) => "Dashboard",
-                            Some(Tile::Pane(Pane::Hierarchy)) => "Hierarchy",
-                            Some(Tile::Pane(Pane::Inspector)) => "Inspector",
-                            Some(Tile::Pane(Pane::SchematicTree(_))) => "SchematicTree",
-                            _ => "Unknown",
-                        },
-                        "wrap active pane into Linear (all children were panes)"
-                    );
                     return Some(pane_id);
                 }
-                info!(
-                    target: "tabs.insert_pane",
-                    ?parent_tabs_id,
-                    "all children panes but no active child found"
-                );
                 Some(parent_tabs_id)
             }
             Some(Tile::Container(Container::Tabs(tabs))) => {
@@ -2395,13 +2329,6 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         );
         if resp.clicked() {
             let tabs_id = tile_id;
-            info!(
-                target: "tabs.plus",
-                role = "top_bar",
-                ?tabs_id,
-                new_tab = true,
-                "clicked + to add a new tab"
-            );
             layout
                 .cmd_palette_state
                 .open_page(move || palette_items::create_tiles(tabs_id, true));
