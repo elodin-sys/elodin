@@ -51,8 +51,6 @@ fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlS
 fn parse_window(node: &KdlNode, src: &str) -> Result<WindowSchematic, KdlSchematicError> {
     let path = node
         .get("path")
-        .or_else(|| node.get("file"))
-        .or_else(|| node.get("name"))
         .and_then(|v| v.as_string())
         .map(|raw| {
             let path = raw.trim();
@@ -79,8 +77,8 @@ fn parse_window(node: &KdlNode, src: &str) -> Result<WindowSchematic, KdlSchemat
         .transpose()?;
 
     let title = node
-        .get("title")
-        .or_else(|| node.get("display"))
+        .get("name")
+        .or_else(|| node.get("title"))
         .and_then(|v| v.as_string())
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty());
@@ -151,13 +149,18 @@ fn clamp_percent(value: f64) -> u32 {
 fn parse_panel(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError> {
     match node.name().value() {
         "tabs" => {
+            let title = node
+                .get("name")
+                .and_then(|v| v.as_string())
+                .map(|s| s.to_string())
+                .filter(|s| !s.is_empty());
             let mut panels = Vec::new();
             if let Some(children) = node.children() {
                 for child in children.nodes() {
                     panels.push(parse_panel(child, kdl_src)?);
                 }
             }
-            Ok(Panel::Tabs(panels))
+            Ok(Panel::Tabs(Tabs { panels, title }))
         }
         "hsplit" => parse_split(node, kdl_src, true),
         "vsplit" => parse_split(node, kdl_src, false),
@@ -206,7 +209,8 @@ fn parse_split(
     let name = node
         .get("name")
         .and_then(|v| v.as_string())
-        .map(|s| s.to_string());
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty());
 
     let split = Split {
         panels,
@@ -1654,15 +1658,15 @@ tabs {
 
         assert_eq!(schematic.elems.len(), 1);
         if let SchematicElem::Panel(Panel::Tabs(tabs)) = &schematic.elems[0] {
-            assert_eq!(tabs.len(), 2);
+            assert_eq!(tabs.panels.len(), 2);
 
-            if let Panel::Viewport(viewport) = &tabs[0] {
+            if let Panel::Viewport(viewport) = &tabs.panels[0] {
                 assert_eq!(viewport.name, Some("camera1".to_string()));
             } else {
                 panic!("Expected viewport in first tab");
             }
 
-            if let Panel::Graph(graph) = &tabs[1] {
+            if let Panel::Graph(graph) = &tabs.panels[1] {
                 assert_eq!(graph.eql, "data.position");
                 assert_eq!(graph.name, Some("Position".to_string()));
             } else {
@@ -1670,6 +1674,23 @@ tabs {
             }
         } else {
             panic!("Expected tabs panel");
+        }
+    }
+
+    #[test]
+    fn test_parse_split_name() {
+        let kdl = r#"
+hsplit name="Main Split" {
+    viewport
+    graph "data.position"
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        if let SchematicElem::Panel(Panel::HSplit(split)) = &schematic.elems[0] {
+            assert_eq!(split.name.as_deref(), Some("Main Split"));
+            assert_eq!(split.panels.len(), 2);
+        } else {
+            panic!("Expected hsplit panel");
         }
     }
 
@@ -1805,7 +1826,7 @@ object_3d "a.world_pos" {
 
         // Check tabs panel
         if let SchematicElem::Panel(Panel::Tabs(tabs)) = &schematic.elems[0] {
-            assert_eq!(tabs.len(), 2);
+            assert_eq!(tabs.panels.len(), 2);
         } else {
             panic!("Expected tabs panel");
         }
@@ -1913,7 +1934,7 @@ object_3d "a.world_pos" {
 
         // Check tabs panel
         if let SchematicElem::Panel(Panel::Tabs(tabs)) = &schematic.elems[0] {
-            assert_eq!(tabs.len(), 2);
+            assert_eq!(tabs.panels.len(), 2);
         } else {
             panic!("Expected tabs panel");
         }

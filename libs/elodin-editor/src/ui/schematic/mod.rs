@@ -16,7 +16,7 @@ use egui_tiles::{Tile, TileId};
 use impeller2_bevy::ComponentMetadataRegistry;
 use impeller2_wkt::{
     ActionPane, ComponentMonitor, ComponentPath, Dashboard, Line3d, Panel, Schematic,
-    SchematicElem, Split, VectorArrow3d, Viewport, WindowSchematic,
+    SchematicElem, Split, Tabs, VectorArrow3d, Viewport, WindowSchematic,
 };
 
 pub mod tree;
@@ -82,7 +82,6 @@ impl SchematicParam<'_, '_> {
     ) -> Option<Panel<Entity>> {
         let tiles = &state.tree.tiles;
         let tile = tiles.get(tile_id)?;
-        let custom_title = state.get_container_title(tile_id).map(|s| s.to_string());
 
         match tile {
             Tile::Pane(pane) => match pane {
@@ -122,9 +121,7 @@ impl SchematicParam<'_, '_> {
                         show_grid,
                         show_arrows,
                         hdr: self.hdr_enabled.0,
-                        name: custom_title
-                            .clone()
-                            .or_else(|| Some(viewport.label.clone())),
+                        name: Some(viewport.label.clone()),
                         pos: Some(viewport_data.pos.eql.clone()),
                         look_at: Some(viewport_data.look_at.eql.clone()),
                         local_arrows,
@@ -157,9 +154,7 @@ impl SchematicParam<'_, '_> {
 
                     Some(Panel::Graph(impeller2_wkt::Graph {
                         eql,
-                        name: custom_title
-                            .clone()
-                            .or_else(|| Some(graph_state.label.clone())),
+                        name: Some(graph_state.label.clone()),
                         graph_type: graph_state.graph_type,
                         locked: graph_state.locked,
                         auto_y_range: graph_state.auto_y_range,
@@ -180,18 +175,12 @@ impl SchematicParam<'_, '_> {
 
                 Pane::QueryPlot(plot) => {
                     let query_plot = self.query_plots.get(plot.entity).ok()?;
-                    let mut data = query_plot.data.map_aux(|_| plot.entity);
-                    if let Some(title) = custom_title.clone() {
-                        data.label = title;
-                    }
-                    Some(Panel::QueryPlot(data))
+                    Some(Panel::QueryPlot(query_plot.data.map_aux(|_| plot.entity)))
                 }
 
                 Pane::ActionTile(action) => {
                     let action_tile = self.action_tiles.get(action.entity).ok()?;
-                    let label = custom_title
-                        .clone()
-                        .unwrap_or_else(|| action_tile.button_name.clone());
+                    let label = action_tile.button_name.clone();
                     Some(Panel::ActionPane(ActionPane {
                         label,
                         lua: action_tile.lua.clone(),
@@ -214,6 +203,7 @@ impl SchematicParam<'_, '_> {
             // ---- Containers ----
             Tile::Container(container) => match container {
                 egui_tiles::Container::Tabs(t) => {
+                    let title = state.get_container_title(tile_id).map(|s| s.to_string());
                     let mut tabs = vec![];
                     for tile_id in &t.children {
                         if let Some(tab) = self.get_panel_from_state(state, *tile_id) {
@@ -223,7 +213,10 @@ impl SchematicParam<'_, '_> {
                     if tabs.is_empty() {
                         None
                     } else {
-                        Some(Panel::Tabs(tabs))
+                        Some(Panel::Tabs(Tabs {
+                            panels: tabs,
+                            title,
+                        }))
                     }
                 }
 
@@ -245,11 +238,6 @@ impl SchematicParam<'_, '_> {
                     if panels.is_empty() {
                         return None;
                     }
-                    // Flatten single-child splits; otherwise keep the split.
-                    if panels.len() == 1 {
-                        return panels.into_iter().next();
-                    }
-
                     let name = state.get_container_title(tile_id).map(|s| s.to_string());
 
                     let split = Split {

@@ -84,7 +84,7 @@ pub enum Panel<T = ()> {
     ActionPane(ActionPane),
     QueryTable(QueryTable),
     QueryPlot(QueryPlot<T>),
-    Tabs(Vec<Panel<T>>),
+    Tabs(Tabs<T>),
     SchematicTree,
     Dashboard(Box<Dashboard<T>>),
 }
@@ -100,7 +100,7 @@ impl<T> Panel<T> {
             Panel::ActionPane(_) => "Action Pane",
             Panel::QueryTable(_) => "Query Table",
             Panel::QueryPlot(query_plot) => &query_plot.label,
-            Panel::Tabs(_) => "Tabs",
+            Panel::Tabs(tabs) => tabs.title.as_deref().unwrap_or("Tabs"),
             Panel::SchematicTree => "Tree",
             Panel::Dashboard(d) => d.root.label.as_deref().unwrap_or("Dashboard"),
         }
@@ -108,7 +108,7 @@ impl<T> Panel<T> {
 
     pub fn collapse(&self) -> &Panel<T> {
         match self {
-            Panel::Tabs(panels) if panels.len() == 1 => panels[0].collapse(),
+            Panel::Tabs(tabs) if tabs.panels.len() == 1 => tabs.panels[0].collapse(),
             this => this,
         }
     }
@@ -116,7 +116,7 @@ impl<T> Panel<T> {
     pub fn children(&self) -> &[Panel<T>] {
         match self {
             Panel::HSplit(split) | Panel::VSplit(split) => &split.panels,
-            Panel::Tabs(panels) => panels,
+            Panel::Tabs(tabs) => &tabs.panels,
             _ => &[],
         }
     }
@@ -124,7 +124,7 @@ impl<T> Panel<T> {
     pub fn children_mut(&mut self) -> &mut [Panel<T>] {
         match self {
             Panel::HSplit(split) | Panel::VSplit(split) => &mut split.panels,
-            Panel::Tabs(panels) => panels,
+            Panel::Tabs(tabs) => &mut tabs.panels,
             _ => &mut [],
         }
     }
@@ -133,7 +133,7 @@ impl<T> Panel<T> {
         match self {
             Panel::HSplit(split) => Panel::HSplit(split.map_aux(f)),
             Panel::VSplit(split) => Panel::VSplit(split.map_aux(f)),
-            Panel::Tabs(panels) => Panel::Tabs(panels.iter().map(|p| p.map_aux(&f)).collect()),
+            Panel::Tabs(tabs) => Panel::Tabs(tabs.map_aux(&f)),
             Panel::Graph(graph) => Panel::Graph(graph.map_aux(f)),
             Panel::ComponentMonitor(component_monitor) => {
                 Panel::ComponentMonitor(component_monitor.clone())
@@ -176,6 +176,24 @@ impl<T> Split<T> {
             shares: self.shares.clone(),
             active: self.active,
             name: self.name.clone(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(bound = "T: Serialize + DeserializeOwned")]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct Tabs<T = ()> {
+    pub panels: Vec<Panel<T>>,
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+impl<T> Tabs<T> {
+    pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> Tabs<U> {
+        Tabs {
+            panels: self.panels.iter().map(|p| p.map_aux(&f)).collect(),
+            title: self.title.clone(),
         }
     }
 }

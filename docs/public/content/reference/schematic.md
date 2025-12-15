@@ -19,8 +19,8 @@ order = 6
 - Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `red`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional. Colors can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
 
 ### window
-- `path`/`file`/`name`: optional secondary schematic file. Relative paths resolve against the parent schematic directory (or CWD). If absent, the entry configures the primary window instead of loading a secondary file.
-- `title`/`display`: optional window title.
+- `path`: optional secondary schematic file. Relative paths resolve against the parent schematic directory (or CWD). If absent, the entry configures the primary window instead of loading a secondary file.
+- `name`: optional window title (legacy `title` still read).
 - `screen`: optional zero-based display index.
 - `rect { x y width height }`: optional child; four percentages (clamped 0–100). Used for placement of primary or secondary windows. Secondary windows default to `DEFAULT_SECONDARY_RECT` when unset.
 
@@ -83,8 +83,8 @@ schematic =
   )*
 
 window = "window"
-       [path|file|name=string]
-       [title=string]
+       [path=string]
+       [name=string]
        [screen=int]
        [rect x y w h]
 

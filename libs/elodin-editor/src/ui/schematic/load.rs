@@ -591,15 +591,7 @@ impl LoadSchematicParams<'_, '_> {
                         self.spawn_vector_arrow(arrow, Some(camera));
                     }
                 }
-                let tile_id = tile_state.insert_tile(
-                    Tile::Pane(Pane::Viewport(pane)),
-                    parent_id,
-                    viewport.active,
-                );
-                if let (Some(tile_id), Some(name)) = (tile_id, viewport.name.clone()) {
-                    tile_state.container_titles.insert(tile_id, name);
-                }
-                tile_id
+                tile_state.insert_tile(Tile::Pane(Pane::Viewport(pane)), parent_id, viewport.active)
             }
             Panel::HSplit(split) | Panel::VSplit(split) => {
                 let linear = egui_tiles::Linear::new(
@@ -610,13 +602,34 @@ impl LoadSchematicParams<'_, '_> {
                     },
                     vec![],
                 );
-                let tile_id = tile_state.insert_tile(
-                    Tile::Container(Container::Linear(linear)),
-                    parent_id,
-                    false,
-                );
+                let tile_id = if parent_id.is_none() {
+                    Some(tile_state.insert_root_tile(Tile::Container(Container::Linear(linear))))
+                } else {
+                    tile_state.insert_tile(
+                        Tile::Container(Container::Linear(linear)),
+                        parent_id,
+                        false,
+                    )
+                };
                 if let (Some(tile_id), Some(name)) = (tile_id, split.name.clone()) {
+                    bevy::log::info!(
+                        target: "tiles.title",
+                        ?tile_id,
+                        title = %name,
+                        parent = ?parent_id,
+                        "load::split set_container_title"
+                    );
                     tile_state.container_titles.insert(tile_id, name);
+                } else if let Some(tile_id) = tile_id {
+                    bevy::log::info!(
+                        target: "tiles.load",
+                        ?tile_id,
+                        parent = ?parent_id,
+                        title = split.name.as_deref().unwrap_or(""),
+                        kind = match panel { Panel::HSplit(_) => "HSplit", _ => "VSplit" },
+                        children = split.panels.len(),
+                        "load::split inserted"
+                    );
                 }
                 for (i, panel) in split.panels.iter().enumerate() {
                     let child_id = self.spawn_panel(tile_state, panel, tile_id, context);
@@ -640,30 +653,40 @@ impl LoadSchematicParams<'_, '_> {
                 tile_id
             }
             Panel::Tabs(tabs) => {
-                // Top-level tabs are already provided by the default window layout.
-                // Flatten them into the root tabs container to avoid nesting and
-                // keep visible tab titles aligned with the loaded panes.
-                if parent_id.is_none() {
-                    let Some(root_tabs) = tile_state.tree.root() else {
-                        warn!("No root tabs available to attach panels");
-                        return None;
-                    };
-                    for panel in tabs {
-                        self.spawn_panel(tile_state, panel, Some(root_tabs), context);
-                    }
-                    Some(root_tabs)
+                let tile_id = if parent_id.is_none() {
+                    Some(tile_state.insert_root_tile(Tile::Container(Container::new_tabs(vec![]))))
                 } else {
-                    let tile_id = tile_state.insert_tile(
+                    tile_state.insert_tile(
                         Tile::Container(Container::new_tabs(vec![])),
                         parent_id,
                         false,
-                    );
+                    )
+                };
 
-                    tabs.iter().for_each(|panel| {
-                        self.spawn_panel(tile_state, panel, tile_id, context);
-                    });
-                    tile_id
+                if let (Some(tile_id), Some(title)) = (tile_id, tabs.title.clone()) {
+                    tile_state.set_container_title(tile_id, title);
+                    bevy::log::info!(
+                        target: "tiles.title",
+                        ?tile_id,
+                        parent = ?parent_id,
+                        title = %tabs.title.as_deref().unwrap_or(""),
+                        "load::tabs set_container_title"
+                    );
+                } else if let Some(tile_id) = tile_id {
+                    bevy::log::info!(
+                        target: "tiles.load",
+                        ?tile_id,
+                        parent = ?parent_id,
+                        title = tabs.title.as_deref().unwrap_or(""),
+                        children = tabs.panels.len(),
+                        "load::tabs inserted"
+                    );
                 }
+
+                tabs.panels.iter().for_each(|panel| {
+                    self.spawn_panel(tile_state, panel, tile_id, context);
+                });
+                tile_id
             }
             Panel::Graph(graph) => {
                 let eql = self

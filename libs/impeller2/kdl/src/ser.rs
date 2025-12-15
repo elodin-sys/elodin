@@ -1,6 +1,8 @@
 use crate::color_names::{color_to_ints, name_from_color};
 use impeller2_wkt::*;
 use kdl::{KdlDocument, KdlEntry, KdlNode};
+#[cfg(test)]
+use std::collections::HashMap;
 
 pub fn serialize_schematic<T>(schematic: &Schematic<T>) -> String {
     let mut doc = KdlDocument::new();
@@ -28,11 +30,15 @@ fn serialize_schematic_elem<T>(elem: &SchematicElem<T>) -> KdlNode {
 
 fn serialize_panel<T>(panel: &Panel<T>) -> KdlNode {
     match panel {
-        Panel::Tabs(panels) => {
+        Panel::Tabs(tabs) => {
             let mut node = KdlNode::new("tabs");
+            if let Some(title) = &tabs.title {
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("name", title.clone()));
+            }
             let mut children = KdlDocument::new();
 
-            for panel in panels {
+            for panel in &tabs.panels {
                 children.nodes_mut().push(serialize_panel(panel));
             }
 
@@ -144,7 +150,7 @@ fn serialize_window(window: &WindowSchematic) -> KdlNode {
 
     if let Some(title) = &window.title {
         node.entries_mut()
-            .push(KdlEntry::new_prop("title", title.clone()));
+            .push(KdlEntry::new_prop("name", title.clone()));
     }
 
     if let Some(idx) = window.screen {
@@ -880,7 +886,7 @@ mod tests {
 
         let serialized = serialize_schematic(&schematic);
         let header_ok = serialized.contains(r#"window path="panels/telemetry.kdl""#)
-            && serialized.contains("title=Telemetry")
+            && serialized.contains("name=Telemetry")
             && serialized.contains("screen=2");
         assert!(
             header_ok,
@@ -1135,8 +1141,63 @@ graph "value" {
     #[test]
     fn test_serialize_tabs_with_children() {
         let mut schematic = Schematic::default();
-        schematic.elems.push(SchematicElem::Panel(Panel::Tabs(vec![
-            Panel::Viewport(Viewport {
+        schematic.elems.push(SchematicElem::Panel(Panel::Tabs(Tabs {
+            panels: vec![
+                Panel::Viewport(Viewport {
+                    name: Some("camera1".to_string()),
+                    fov: 45.0,
+                    active: false,
+                    show_grid: false,
+                    show_arrows: true,
+                    hdr: false,
+                    pos: None,
+                    look_at: None,
+                    local_arrows: Vec::new(),
+                    aux: (),
+                }),
+                Panel::Graph(Graph {
+                    eql: "data.position".to_string(),
+                    name: Some("Position".to_string()),
+                    graph_type: GraphType::Line,
+                    locked: false,
+                    auto_y_range: true,
+                    y_range: 0.0..1.0,
+                    aux: (),
+                    colors: vec![],
+                }),
+            ],
+            title: None,
+        })));
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert_eq!(parsed.elems.len(), 1);
+        if let SchematicElem::Panel(Panel::Tabs(tabs)) = &parsed.elems[0] {
+            assert_eq!(tabs.panels.len(), 2);
+
+            if let Panel::Viewport(viewport) = &tabs.panels[0] {
+                assert_eq!(viewport.name, Some("camera1".to_string()));
+            } else {
+                panic!("Expected viewport in first tab");
+            }
+
+            if let Panel::Graph(graph) = &tabs.panels[1] {
+                assert_eq!(graph.eql, "data.position");
+                assert_eq!(graph.name, Some("Position".to_string()));
+            } else {
+                panic!("Expected graph in second tab");
+            }
+        } else {
+            panic!("Expected tabs panel");
+        }
+    }
+
+    #[test]
+    fn test_serialize_tabs_with_name() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Panel(Panel::Tabs(Tabs {
+            panels: vec![Panel::Viewport(Viewport {
                 name: Some("camera1".to_string()),
                 fov: 45.0,
                 active: false,
@@ -1147,40 +1208,71 @@ graph "value" {
                 look_at: None,
                 local_arrows: Vec::new(),
                 aux: (),
-            }),
-            Panel::Graph(Graph {
-                eql: "data.position".to_string(),
-                name: Some("Position".to_string()),
-                graph_type: GraphType::Line,
-                locked: false,
-                auto_y_range: true,
-                y_range: 0.0..1.0,
-                aux: (),
-                colors: vec![],
-            }),
-        ])));
+            })],
+            title: Some("Main Tab".to_string()),
+        })));
 
         let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains(r#"name="Main Tab""#),
+            "serialized tabs should use name property"
+        );
+
         let parsed = parse_schematic(&serialized).unwrap();
-
-        assert_eq!(parsed.elems.len(), 1);
         if let SchematicElem::Panel(Panel::Tabs(tabs)) = &parsed.elems[0] {
-            assert_eq!(tabs.len(), 2);
-
-            if let Panel::Viewport(viewport) = &tabs[0] {
-                assert_eq!(viewport.name, Some("camera1".to_string()));
-            } else {
-                panic!("Expected viewport in first tab");
-            }
-
-            if let Panel::Graph(graph) = &tabs[1] {
-                assert_eq!(graph.eql, "data.position");
-                assert_eq!(graph.name, Some("Position".to_string()));
-            } else {
-                panic!("Expected graph in second tab");
-            }
+            assert_eq!(tabs.title.as_deref(), Some("Main Tab"));
+            assert_eq!(tabs.panels.len(), 1);
         } else {
             panic!("Expected tabs panel");
+        }
+    }
+
+    #[test]
+    fn test_serialize_split_with_name() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::Panel(Panel::HSplit(Split {
+                panels: vec![
+                    Panel::Viewport(Viewport {
+                        name: Some("camera1".to_string()),
+                        fov: 45.0,
+                        active: false,
+                        show_grid: false,
+                        show_arrows: true,
+                        hdr: false,
+                        pos: None,
+                        look_at: None,
+                        local_arrows: Vec::new(),
+                        aux: (),
+                    }),
+                    Panel::Graph(Graph {
+                        eql: "data.position".to_string(),
+                        name: Some("Position".to_string()),
+                        graph_type: GraphType::Line,
+                        locked: false,
+                        auto_y_range: true,
+                        y_range: 0.0..1.0,
+                        aux: (),
+                        colors: vec![],
+                    }),
+                ],
+                shares: HashMap::new(),
+                active: false,
+                name: Some("Split Title".to_string()),
+            })));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains(r#"name="Split Title""#),
+            "serialized split should use name property"
+        );
+        let parsed = parse_schematic(&serialized).unwrap();
+        if let SchematicElem::Panel(Panel::HSplit(split)) = &parsed.elems[0] {
+            assert_eq!(split.name.as_deref(), Some("Split Title"));
+            assert_eq!(split.panels.len(), 2);
+        } else {
+            panic!("Expected hsplit panel");
         }
     }
 

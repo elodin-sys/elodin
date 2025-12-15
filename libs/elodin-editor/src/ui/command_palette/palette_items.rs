@@ -339,7 +339,7 @@ impl<'w, 's> TileParam<'w, 's> {
     }
 }
 
-pub fn create_action(tile_id: Option<TileId>) -> PaletteItem {
+pub fn create_action(tile_id: Option<TileId>, new_tab: bool) -> PaletteItem {
     PaletteItem::new("Create Action", TILES_LABEL, move |_: In<String>| {
         PalettePage::new(vec![
                     PaletteItem::new(
@@ -372,6 +372,7 @@ pub fn create_action(tile_id: Option<TileId>) -> PaletteItem {
                                                         msg_label.clone(),
                                                         format!("client:send_msg({name:?}, {msg})"),
                                                         tile_id,
+                                                        new_tab,
                                                     );
                                                     PaletteEvent::Exit
                                                 },
@@ -393,7 +394,12 @@ pub fn create_action(tile_id: Option<TileId>) -> PaletteItem {
                                                 "Secondary window unavailable".to_string(),
                                             );
                                         };
-                                        tile_state.create_action_tile(label.clone(), lua.0, tile_id);
+                                        tile_state.create_action_tile(
+                                            label.clone(),
+                                            lua.0,
+                                            tile_id,
+                                            new_tab,
+                                        );
                                         PaletteEvent::Exit
                                     },
                                 )
@@ -409,12 +415,12 @@ pub fn create_action(tile_id: Option<TileId>) -> PaletteItem {
     })
 }
 
-pub fn create_graph(tile_id: Option<TileId>) -> PaletteItem {
+pub fn create_graph(tile_id: Option<TileId>, new_tab: bool) -> PaletteItem {
     PaletteItem::new(
         "Create Graph",
         TILES_LABEL,
         move |_: In<String>, context: Res<EqlContext>| {
-            PalettePage::new(graph_parts(&context.0.component_parts, tile_id))
+            PalettePage::new(graph_parts(&context.0.component_parts, tile_id, new_tab))
                 .prompt("Select a component to graph")
                 .into()
         },
@@ -424,6 +430,7 @@ pub fn create_graph(tile_id: Option<TileId>) -> PaletteItem {
 fn graph_parts(
     parts: &BTreeMap<String, eql::ComponentPart>,
     tile_id: Option<TileId>,
+    new_tab: bool,
 ) -> Vec<PaletteItem> {
     parts
         .iter()
@@ -466,10 +473,10 @@ fn graph_parts(
                             components,
                             "Graph".to_string(),
                         );
-                        tile_state.create_graph_tile(tile_id, bundle);
+                        tile_state.create_graph_tile(tile_id, bundle, new_tab);
                         PaletteEvent::Exit
                     } else {
-                        PalettePage::new(graph_parts(&part.children, tile_id)).into()
+                        PalettePage::new(graph_parts(&part.children, tile_id, new_tab)).into()
                     }
                 },
             )
@@ -477,12 +484,12 @@ fn graph_parts(
         .collect()
 }
 
-pub fn create_monitor(tile_id: Option<TileId>) -> PaletteItem {
+pub fn create_monitor(tile_id: Option<TileId>, new_tab: bool) -> PaletteItem {
     PaletteItem::new(
         "Create Monitor",
         TILES_LABEL,
         move |_: In<String>, eql: Res<EqlContext>| {
-            PalettePage::new(monitor_parts(&eql.0.component_parts, tile_id))
+            PalettePage::new(monitor_parts(&eql.0.component_parts, tile_id, new_tab))
                 .prompt("Select a component to monitor")
                 .into()
         },
@@ -492,6 +499,7 @@ pub fn create_monitor(tile_id: Option<TileId>) -> PaletteItem {
 fn monitor_parts(
     parts: &BTreeMap<String, eql::ComponentPart>,
     tile_id: Option<TileId>,
+    new_tab: bool,
 ) -> Vec<PaletteItem> {
     parts
         .iter()
@@ -508,10 +516,10 @@ fn monitor_parts(
                         return PaletteEvent::Error("Secondary window unavailable".to_string());
                     };
                     if let Some(component) = &part.component {
-                        tile_state.create_monitor_tile(component.name.clone(), tile_id);
+                        tile_state.create_monitor_tile(component.name.clone(), tile_id, new_tab);
                         PaletteEvent::Exit
                     } else {
-                        PalettePage::new(monitor_parts(&part.children, tile_id)).into()
+                        PalettePage::new(monitor_parts(&part.children, tile_id, new_tab)).into()
                     }
                 },
             )
@@ -588,7 +596,7 @@ fn reset_cameras() -> PaletteItem {
     )
 }
 
-pub fn create_viewport(tile_id: Option<TileId>) -> PaletteItem {
+pub fn create_viewport(tile_id: Option<TileId>, new_tab: bool) -> PaletteItem {
     PaletteItem::new(
         "Create Viewport",
         TILES_LABEL,
@@ -596,7 +604,7 @@ pub fn create_viewport(tile_id: Option<TileId>) -> PaletteItem {
             let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
-            tile_state.create_viewport_tile(tile_id);
+            tile_state.create_viewport_tile(tile_id, new_tab);
             PaletteEvent::Exit
         },
     )
@@ -636,9 +644,9 @@ pub fn create_window() -> PaletteItem {
                     palette_state.target_window = Some(entity);
                     palette_state.open_page(|| {
                         PalettePage::new(vec![
-                            create_viewport(None),
-                            create_monitor(None),
-                            create_graph(None),
+                            create_viewport(None, false),
+                            create_monitor(None, false),
+                            create_graph(None, false),
                         ])
                         .prompt("Choose the first tab for the new window")
                     });
@@ -652,7 +660,7 @@ pub fn create_window() -> PaletteItem {
     })
 }
 
-pub fn create_query_table(tile_id: Option<TileId>) -> PaletteItem {
+pub fn create_query_table(tile_id: Option<TileId>, new_tab: bool) -> PaletteItem {
     PaletteItem::new(
         "Create Query Table",
         TILES_LABEL,
@@ -660,13 +668,13 @@ pub fn create_query_table(tile_id: Option<TileId>) -> PaletteItem {
             let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
-            tile_state.create_query_table_tile(tile_id);
+            tile_state.create_query_table_tile(tile_id, new_tab);
             PaletteEvent::Exit
         },
     )
 }
 
-pub fn create_query_plot(tile_id: Option<TileId>) -> PaletteItem {
+pub fn create_query_plot(tile_id: Option<TileId>, new_tab: bool) -> PaletteItem {
     PaletteItem::new(
         "Create Query Plot",
         TILES_LABEL,
@@ -674,13 +682,13 @@ pub fn create_query_plot(tile_id: Option<TileId>) -> PaletteItem {
             let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
-            tile_state.create_query_plot_tile(tile_id);
+            tile_state.create_query_plot_tile(tile_id, new_tab);
             PaletteEvent::Exit
         },
     )
 }
 
-pub fn create_dashboard(tile_id: Option<TileId>) -> PaletteItem {
+pub fn create_dashboard(tile_id: Option<TileId>, new_tab: bool) -> PaletteItem {
     PaletteItem::new(
         "Create Dashboard",
         TILES_LABEL,
@@ -688,7 +696,12 @@ pub fn create_dashboard(tile_id: Option<TileId>) -> PaletteItem {
             let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
-            tile_state.create_dashboard_tile(Default::default(), "Dashboard".to_string(), tile_id);
+            tile_state.create_dashboard_tile(
+                Default::default(),
+                "Dashboard".to_string(),
+                tile_id,
+                new_tab,
+            );
             PaletteEvent::Exit
         },
     )
@@ -707,7 +720,7 @@ pub fn create_sidebars() -> PaletteItem {
         },
     )
 }
-pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
+pub fn create_video_stream(tile_id: Option<TileId>, new_tab: bool) -> PaletteItem {
     PaletteItem::new(
         "Create Video Stream",
         TILES_LABEL,
@@ -727,7 +740,12 @@ pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
                         };
                         let msg_name = msg_name.trim();
                         let label = format!("Video Stream {}", msg_name);
-                        tile_state.create_video_stream_tile(msg_id(msg_name), label, tile_id);
+                        tile_state.create_video_stream_tile(
+                            msg_id(msg_name),
+                            label,
+                            tile_id,
+                            new_tab,
+                        );
                         PaletteEvent::Exit
                     },
                 )
@@ -1585,16 +1603,22 @@ pub fn create_3d_object() -> PaletteItem {
     })
 }
 
-pub fn create_tiles(tile_id: TileId) -> PalettePage {
+pub fn create_tiles(tile_id: TileId, new_tab: bool) -> PalettePage {
+    info!(
+        target: "tabs.palette",
+        ?tile_id,
+        new_tab,
+        "opening tile creation palette"
+    );
     PalettePage::new(vec![
-        create_graph(Some(tile_id)),
-        create_action(Some(tile_id)),
-        create_monitor(Some(tile_id)),
-        create_viewport(Some(tile_id)),
-        create_query_table(Some(tile_id)),
-        create_query_plot(Some(tile_id)),
-        create_video_stream(Some(tile_id)),
-        create_dashboard(Some(tile_id)),
+        create_graph(Some(tile_id), new_tab),
+        create_action(Some(tile_id), new_tab),
+        create_monitor(Some(tile_id), new_tab),
+        create_viewport(Some(tile_id), new_tab),
+        create_query_table(Some(tile_id), new_tab),
+        create_query_plot(Some(tile_id), new_tab),
+        create_video_stream(Some(tile_id), new_tab),
+        create_dashboard(Some(tile_id), new_tab),
         create_sidebars(),
     ])
 }
@@ -1658,14 +1682,14 @@ impl Default for PalettePage {
             fix_current_time_range(),
             set_time_range_behavior(),
             create_window(),
-            create_graph(None),
-            create_action(None),
-            create_monitor(None),
-            create_viewport(None),
-            create_query_table(None),
-            create_query_plot(None),
-            create_video_stream(None),
-            create_dashboard(None),
+            create_graph(None, false),
+            create_action(None, false),
+            create_monitor(None, false),
+            create_viewport(None, false),
+            create_query_table(None, false),
+            create_query_plot(None, false),
+            create_video_stream(None, false),
+            create_dashboard(None, false),
             create_sidebars(),
             create_3d_object(),
             save_db_native(),
