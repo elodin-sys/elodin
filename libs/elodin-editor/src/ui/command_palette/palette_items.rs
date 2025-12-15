@@ -707,19 +707,6 @@ pub fn create_dashboard(tile_id: Option<TileId>, new_tab: bool) -> PaletteItem {
     )
 }
 
-pub fn create_sidebars() -> PaletteItem {
-    PaletteItem::new(
-        "Create Sidebars",
-        TILES_LABEL,
-        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
-            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
-                return PaletteEvent::Error("Secondary window unavailable".to_string());
-            };
-            tile_state.create_sidebars_layout();
-            PaletteEvent::Exit
-        },
-    )
-}
 pub fn create_video_stream(tile_id: Option<TileId>, new_tab: bool) -> PaletteItem {
     PaletteItem::new(
         "Create Video Stream",
@@ -1619,7 +1606,6 @@ pub fn create_tiles(tile_id: TileId, new_tab: bool) -> PalettePage {
         create_query_plot(Some(tile_id), new_tab),
         create_video_stream(Some(tile_id), new_tab),
         create_dashboard(Some(tile_id), new_tab),
-        create_sidebars(),
     ])
 }
 
@@ -1689,8 +1675,7 @@ impl Default for PalettePage {
             create_query_table(None, false),
             create_query_plot(None, false),
             create_video_stream(None, false),
-            create_dashboard(None, false),
-            create_sidebars(),
+            create_dashboard(None, true),
             create_3d_object(),
             save_db_native(),
             save_schematic(),

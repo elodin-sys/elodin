@@ -23,7 +23,6 @@ order = 7
 - `Action`: inserts an action tile (prompts for label and Lua payload).
 - `Video Stream`: inserts a video stream tile (prompts for message name).
 - `Dashboard`: inserts a dashboard tile (empty layout).
-- `Sidebars`: restores the Hierarchy and Inspector sidebars if missing.
 
 ### Viewport & render toggles
 - `Toggle Wireframe`
