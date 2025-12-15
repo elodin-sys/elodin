@@ -45,5 +45,3 @@ order = 7
 
 ### 3D objects
 - `Create 3D Object`: create a basic mesh driven by an EQL expression; supports sphere/box/cylinder/plane/ellipsoid/GLB with optional emissivity and color.
-
-+++

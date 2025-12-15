@@ -2970,8 +2970,9 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         egui::pos2(center_x + half, parent_rect.bottom()),
                     );
 
-                    let fill = Color32::from_rgb(0, 0, 0);
-                    let stroke = Stroke::new(1.0, Color32::from_rgb(0, 0, 0));
+                    let gutter_color = get_scheme().bg_secondary;
+                    let fill = gutter_color;
+                    let stroke = Stroke::new(1.0, gutter_color);
                     painter.rect_filled(gutter_rect, 0.0, fill);
                     painter.rect_stroke(gutter_rect, 0.0, stroke, egui::StrokeKind::Inside);
 

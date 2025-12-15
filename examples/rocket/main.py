@@ -509,7 +509,7 @@ rocket = w.spawn(
 )
 w.schematic(
     """
-    hsplit {
+    hsplit name=Display {
         tabs share=0.8 {
             viewport name=Viewport pos="rocket.world_pos + (0.0,0.0,0.0,0.0, 5.0, 0.0, 1.0)" look_at="rocket.world_pos" hdr=#true
         }

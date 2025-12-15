@@ -633,7 +633,7 @@ w.spawn(CSSRel(el.Edge(css_5, sat)), name="CSS 5 -> Sat")
 
 w.schematic(
     """
-    vsplit {
+    vsplit name="Cube-sat" {
         hsplit share=0.6 {
             tabs {
                 viewport name=Viewport pos="ore_sat.world_pos + (0,0,0,0, 5,0,0)" look_at="earth.world_pos" hdr=#true

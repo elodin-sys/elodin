@@ -90,16 +90,9 @@ w.spawn(GravityConstraint(c, b), name="C -> B")
 
 w.schematic("""
     hsplit {
-        tabs share=0.2 {
-            hierarchy
-            schematic_tree
-        }
-        tabs share=0.6 {
+        tabs share=1.0 {
             viewport name=Viewport pos="(0,0,0,0,0,0,3)" look_at="(0,0,0,0,0,0,0)" hdr=#true
             graph "a.world_pos" name=Graph
-        }
-        tabs share=0.2 {
-            inspector
         }
     }
     object_3d a.world_pos {
