@@ -37,3 +37,24 @@ nix.settings.trusted-users = ["root" "@wheel"];
 9. Next `sudo ssh -i ~/.orbstack/ssh/id_ed25519 user@orb` on macOS replacing user with your username. If everything work this should drop you into your vm.
 14. Test your build by running `nix build --impure --expr '(with import <nixpkgs> { system = "x86_64-linux"; }; runCommand "foo" {} "uname > $out")'` in macOS
 11. Profit!
+
+## OrbStack disk exhaustion
+
+Qt builds (e.g. `qtdeclarative`) can overflow the default `/build` tmpfs inside the OrbStack VM and fail with `No space left on device` while writing assembler output. Move the build dir to disk instead of tmpfs:
+
+1. In `/etc/nixos/configuration.nix` on the VM add:
+   ```
+   nix.settings.build-dir = "/var/cache/nix-build";
+   systemd.tmpfiles.rules = [ "d /var/cache/nix-build 1777 root root -" ];
+   ```
+2. Create the directory once (until the tmpfiles rule is active):
+   ```
+   sudo install -d -m 1777 /var/cache/nix-build
+   ```
+3. Rebuild the VM configuration and retry your build:
+   ```
+   sudo nixos-rebuild switch
+   nix build …
+   ```
+
+If you prefer tmpfs, increase it instead via `tmpfsSize` on the build machine, but the disk-backed `build-dir` above is usually simpler.
