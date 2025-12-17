@@ -52,11 +52,12 @@ pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
 // 10..        primary viewports (3D, gizmo/axes…)
 // 100..       primary graphs
 // 1000..      secondary windows (stride by window id)
-// 2000..      -> UI/egui (on top of everything)
+// 100,000..   -> Gizmo arrow labels
+// 200,000..   -> UI/egui (on top of everything)
 const PRIMARY_VIEWPORT_ORDER_BASE: isize = 10;
 const PRIMARY_GRAPH_ORDER_BASE: isize = 100;
 const SECONDARY_GRAPH_ORDER_BASE: isize = 1000;
-pub const UI_ORDER_BASE: isize = 2000;
+pub const UI_ORDER_BASE: isize = 200_000;
 const SECONDARY_GRAPH_ORDER_STRIDE: isize = 50;
 const NAV_GIZMO_ORDER_OFFSET: isize = 1;
 const DEFAULT_PRESENT_MODE: PresentMode = PresentMode::Fifo;
