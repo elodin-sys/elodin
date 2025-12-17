@@ -124,6 +124,13 @@
         # refreshRateHz = 20.0;
         # osdRows = 18;
         # osdCols = 50;
+
+        # Horizon display calibration:
+        # charAspectRatio = 1.5;    # Character height/width ratio (1.5 for Walksnail Avatar)
+        # pitchScale = 5.0;         # Degrees per row (~camera_vfov / osd_rows)
+
+        # Auto-recording (Walksnail Avatar):
+        # autoRecord = true;        # Start VTX recording when service starts
       };
 
       # UDP Component Broadcast service - broadcasts component data to other flight computers
