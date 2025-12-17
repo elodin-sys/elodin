@@ -14,15 +14,15 @@ This enables distributed simulation scenarios like having a target drone chase a
 ## Architecture
 
 ```
-┌─────────────────────┐         UDP Broadcast         ┌─────────────────────┐
-│  BDX Simulation     │  ────────────────────────────▶│  Target Simulation  │
-│  (Elodin Editor)    │                               │  (Elodin Editor)    │
-│                     │                               │                     │
-│  ┌───────────────┐  │         ┌───────────┐         │  ┌───────────────┐  │
-│  │  Elodin-DB    │──┼────────▶│ Broadcast │────────▶│  │  Elodin-DB    │  │
+┌─────────────────────┐         UDP Broadcast         ┌──────────────────────┐
+│  BDX Simulation     │  ────────────────────────────▶│  Target Simulation   │
+│  (Elodin Editor)    │                               │  (Elodin Editor)     │
+│                     │                               │                      │
+│  ┌───────────────┐  │         ┌───────────┐         │  ┌────────────────┐  │
+│  │  Elodin-DB    │──┼────────▶│ Broadcast │────────▶│  │  Elodin-DB     │  │
 │  │  bdx.world_pos│  │         │  Script   │         │  │target.world_pos│  │
-│  └───────────────┘  │         └───────────┘         │  └───────────────┘  │
-└─────────────────────┘                               └─────────────────────┘
+│  └───────────────┘  │         └───────────┘         │  └────────────────┘  │
+└─────────────────────┘                               └──────────────────────┘
         Machine A                                            Machine B
 ```
 
@@ -133,7 +133,15 @@ python3 receive_broadcast.py --help
 | `--listen-port` | 41235 | UDP listen port |
 | `--db-addr` | `127.0.0.1:2240` | Elodin-DB address for writing |
 | `--filter` | (none) | Only accept specific components (repeatable) |
+| `--timestamp-mode` | `sender` | Timestamp mode: `sender`, `local`, or `monotonic` |
 | `-v, --verbose` | | Enable verbose logging |
+
+**Timestamp Modes:**
+| Mode | Description |
+|------|-------------|
+| `sender` | Use timestamp from broadcaster (default) |
+| `local` | Use local wall-clock time |
+| `monotonic` | Use Linux monotonic clock (relative to system boot) |
 
 **Examples:**
 
@@ -146,6 +154,12 @@ python3 receive_broadcast.py --filter target.world_pos
 
 # Custom port
 python3 receive_broadcast.py --listen-port 41300
+
+# Use local wall-clock time instead of sender timestamp
+python3 receive_broadcast.py --timestamp-mode local
+
+# Use monotonic clock (useful for consistent timing)
+python3 receive_broadcast.py --timestamp-mode monotonic
 ```
 
 ## Protocol

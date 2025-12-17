@@ -86,10 +86,12 @@ class ComponentReceiver:
         db_addr: str = "127.0.0.1:2240",
         listen_port: int = 41235,
         component_filter: Optional[Set[str]] = None,
+        timestamp_mode: str = "sender",
     ):
         self.db_addr = db_addr
         self.listen_port = listen_port
         self.component_filter = component_filter
+        self.timestamp_mode = timestamp_mode
 
         self.running = False
 
@@ -281,7 +283,17 @@ class ComponentReceiver:
             # Values are already f64, convert to list
             values_list = values.flatten().tolist()
 
-            self.client.send_component(component_name, values_list, msg.timestamp_us)
+            # Determine timestamp based on mode
+            if self.timestamp_mode == "sender":
+                timestamp_us = msg.timestamp_us
+            elif self.timestamp_mode == "local":
+                timestamp_us = int(time.time() * 1_000_000)
+            elif self.timestamp_mode == "monotonic":
+                timestamp_us = int(time.monotonic_ns() / 1000)
+            else:
+                timestamp_us = msg.timestamp_us  # Fallback to sender
+
+            self.client.send_component(component_name, values_list, timestamp_us)
             self.writes_sent += 1
 
         except Exception as e:
@@ -347,6 +359,12 @@ Examples:
         help="Only accept specific component names (can be repeated)",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging")
+    parser.add_argument(
+        "--timestamp-mode",
+        choices=["sender", "local", "monotonic"],
+        default="sender",
+        help="Timestamp mode: sender (from broadcaster), local (wall-clock), monotonic (Linux monotonic clock)",
+    )
 
     args = parser.parse_args()
 
@@ -376,6 +394,7 @@ Examples:
         db_addr=args.db_addr,
         listen_port=args.listen_port,
         component_filter=component_filter,
+        timestamp_mode=args.timestamp_mode,
     )
 
     # Start receiver
@@ -384,6 +403,7 @@ Examples:
         sys.exit(1)
 
     print(f"\nListening for broadcasts on UDP port {args.listen_port}")
+    print(f"Timestamp mode: {args.timestamp_mode}")
     if component_filter:
         print(f"Filtering: {component_filter}")
     print("Press Ctrl+C to stop...\n")

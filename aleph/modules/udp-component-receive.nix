@@ -51,6 +51,17 @@ in {
       description = "Enable verbose logging";
     };
 
+    timestampMode = mkOption {
+      type = types.enum ["sender" "local" "monotonic"];
+      default = "sender";
+      description = ''
+        Timestamp mode for received components:
+        - sender: Use timestamp from broadcaster (default)
+        - local: Use local wall-clock time
+        - monotonic: Use Linux monotonic clock
+      '';
+    };
+
     extraArgs = mkOption {
       type = types.listOf types.str;
       default = [];
@@ -76,7 +87,8 @@ in {
         ExecStart = let
           filterArgs = concatMapStringsSep " " (f: "--filter ${f}") cfg.filter;
           verboseArg = optionalString cfg.verbose "-v";
-        in "${cfg.package}/bin/udp-receive --db-addr ${cfg.dbAddr} --listen-port ${toString cfg.listenPort} ${filterArgs} ${verboseArg} ${concatStringsSep " " cfg.extraArgs}";
+          timestampArg = "--timestamp-mode ${cfg.timestampMode}";
+        in "${cfg.package}/bin/udp-receive --db-addr ${cfg.dbAddr} --listen-port ${toString cfg.listenPort} ${timestampArg} ${filterArgs} ${verboseArg} ${concatStringsSep " " cfg.extraArgs}";
         Restart = "always";
         RestartSec = 5;
         StandardOutput = "journal";
