@@ -46,6 +46,7 @@ pitch_scale = 5.0        # Degrees per row (~90° VFOV camera)
 [serial]
 port = "/dev/ttyTHS7"
 baud = 115200
+auto_record = false  # Set true to start VTX recording on service start
 
 # Position from world_pos indices 4,5,6
 [inputs.position]
@@ -156,6 +157,30 @@ For Walksnail Avatar connection on Aleph:
    ```bash
    cargo run -- --mode serial --serial-port /dev/ttyTHS7
    ```
+
+## Auto Recording
+
+The msp-osd service can automatically start DVR recording on the Walksnail Avatar VTX when the service starts. This is useful for ensuring all flights are recorded without manual intervention.
+
+To enable auto-recording, set `auto_record = true` in the `[serial]` section of your config:
+
+```toml
+[serial]
+port = "/dev/ttyTHS7"
+baud = 115200
+auto_record = true
+```
+
+Or via NixOS module:
+
+```nix
+services.msp-osd = {
+  enable = true;
+  autoRecord = true;
+};
+```
+
+This sends the `MSP2_COMMON_SET_RECORDING` command to the VTX during service initialization. The command is compatible with Walksnail Avatar VTX systems.
 
 ## Debugging on Aleph
 

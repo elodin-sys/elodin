@@ -114,6 +114,11 @@ fn default_pitch_scale() -> f32 {
 pub struct SerialConfig {
     pub port: String,
     pub baud: u32,
+    /// Automatically start DVR recording on the VTX when msp-osd starts.
+    /// Uses MSP2_COMMON_SET_RECORDING command (Walksnail Avatar compatible).
+    /// Only applies when running in serial mode.
+    #[serde(default)]
+    pub auto_record: bool,
 }
 
 /// Input mappings declare how to extract OSD telemetry from Elodin-DB components
@@ -174,6 +179,7 @@ impl Default for Config {
             serial: SerialConfig {
                 port: "/dev/ttyTHS7".to_string(),
                 baud: 115200,
+                auto_record: false,
             },
             inputs: InputMappings {
                 // Default to rc jet example mappings

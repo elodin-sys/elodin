@@ -24,6 +24,7 @@ with lib; let
       [serial]
       port = "${cfg.serialPort}"
       baud = ${toString cfg.baudRate}
+      auto_record = ${boolToString cfg.autoRecord}
 
       # Input mappings for extracting telemetry from Elodin-DB components
       [inputs.position]
@@ -176,6 +177,16 @@ in {
       type = types.int;
       default = 115200;
       description = "Serial baud rate";
+    };
+
+    autoRecord = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Automatically start DVR recording on the VTX when msp-osd starts.
+        Uses MSP2_COMMON_SET_RECORDING command (Walksnail Avatar compatible).
+        Only applies when running in serial mode.
+      '';
     };
 
     extraArgs = mkOption {

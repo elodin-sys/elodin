@@ -46,6 +46,11 @@ pitch_scale = 5.0
 port = "/dev/ttyTHS7"
 baud = 115200
 
+# Automatically start DVR recording on the VTX when msp-osd starts.
+# Uses MSP2_COMMON_SET_RECORDING command (Walksnail Avatar compatible).
+# Only applies when running in serial mode.
+auto_record = false
+
 # Input mappings define how to extract OSD telemetry from Elodin-DB components.
 # Each mapping specifies a component name and the array indices for each value.
 
