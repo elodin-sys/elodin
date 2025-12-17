@@ -91,10 +91,23 @@ pub struct OsdConfig {
     /// matches the actual aircraft roll angle.
     #[serde(default = "default_char_aspect_ratio")]
     pub char_aspect_ratio: f32,
+    /// Pitch scale in degrees per row for the artificial horizon.
+    /// Lower values = more sensitive pitch response (horizon moves more per degree).
+    /// Should be calibrated to match camera vertical FOV for accurate overlay.
+    /// Formula: pitch_scale ≈ camera_vertical_fov / osd_rows
+    /// Example: 90° VFOV / 18 rows ≈ 5° per row
+    #[serde(default = "default_pitch_scale")]
+    pub pitch_scale: f32,
 }
 
 fn default_char_aspect_ratio() -> f32 {
     1.5
+}
+
+fn default_pitch_scale() -> f32 {
+    // Default to 5 degrees per row, suitable for ~90° VFOV cameras
+    // on an 18-row OSD grid
+    5.0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,6 +169,7 @@ impl Default for Config {
                 refresh_rate_hz: 20.0,
                 coordinate_frame: CoordinateFrame::Enu,
                 char_aspect_ratio: 1.5,
+                pitch_scale: 5.0,
             },
             serial: SerialConfig {
                 port: "/dev/ttyTHS7".to_string(),

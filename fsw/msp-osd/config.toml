@@ -29,6 +29,19 @@ coordinate_frame = "enu"
 #   1.0 - Square characters (no compensation)
 char_aspect_ratio = 1.5
 
+# Pitch scale in degrees per row for the artificial horizon.
+# Lower values = more sensitive pitch response (horizon moves more per degree).
+# Should be calibrated to match camera vertical FOV for accurate overlay.
+#
+# Formula: pitch_scale ≈ camera_vertical_fov / osd_rows
+# Example: 90° VFOV / 18 rows ≈ 5° per row
+#
+# Common values:
+#   5.0 - ~90° VFOV camera (default, good for Walksnail Avatar)
+#   6.0 - ~108° VFOV camera
+#   4.0 - ~72° VFOV camera (narrower FOV)
+pitch_scale = 5.0
+
 [serial]
 port = "/dev/ttyTHS7"
 baud = 115200

@@ -120,7 +120,10 @@ fn render_horizon(grid: &mut OsdGrid, roll_deg: f32, pitch_deg: f32, osd_config:
 
     // Calculate horizon line position based on pitch
     // Negative sign: pitch up → horizon moves down (higher row number) → more sky above
-    let pitch_offset = (-pitch_deg / 10.0).clamp(-3.0, 3.0);
+    // pitch_scale is degrees per row (lower = more sensitive)
+    // Max offset is half the horizon height to keep horizon visible
+    let max_pitch_offset = (horizon_height as f32) / 2.0;
+    let pitch_offset = (-pitch_deg / osd_config.pitch_scale).clamp(-max_pitch_offset, max_pitch_offset);
 
     // Calculate roll angle based on coordinate frame:
     // - ENU (Elodin): positive roll = left wing up, needs negation for OSD
@@ -171,8 +174,7 @@ fn render_horizon(grid: &mut OsdGrid, roll_deg: f32, pitch_deg: f32, osd_config:
 
     // Draw pitch ladder marks
     // Generate marks every 10 degrees, visible range depends on current pitch
-    // Scale: approximately 2-3 rows per 10 degrees for better spacing
-    let rows_per_10deg = 2.5;
+    // Use the same pitch_scale as the horizon for consistency
     let pitch_range = 50; // Show marks from -50 to +50 degrees relative to current pitch
 
     for pitch_mark in (-pitch_range..=pitch_range).step_by(10) {
@@ -184,7 +186,7 @@ fn render_horizon(grid: &mut OsdGrid, roll_deg: f32, pitch_deg: f32, osd_config:
         // Positive pitch marks appear ABOVE center (lower row numbers)
         // Sign matches the horizon movement direction
         let pitch_diff = pitch_mark as f32 - pitch_deg;
-        let row_offset = pitch_diff / 10.0 * rows_per_10deg;
+        let row_offset = -pitch_diff / osd_config.pitch_scale;
         let ladder_row = center_row as f32 + row_offset;
 
         // Only draw if within visible area
