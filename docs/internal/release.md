@@ -17,7 +17,7 @@
 12. Once the release artifacts are built successfully, a new release will be published to GitHub at https://github.com/elodin-sys/elodin/releases. After the release is published, run `just promote v$VERSION` to promote the artifacts from GitHub to S3 and PyPi. This is what enables end-users to download and install both the new CLI and Python packages. You may want to do some local testing of the release artifacts before promoting them to production.
 13. Once released, we want to bump the version as an alpha so that what was just released and what's on the 'main' branch will not be easily confused. If the version released was `0.1.2` then the next version would be `0.1.3-alpha.0`. We can do this with the [semver-cli](https://crates.io/crates/semver-cli) tool. 
 ```sh
-export NEXT_VERSION="$(semver-cli $VERSION --increment)-dev"
+export NEXT_VERSION="$(semver-cli $VERSION --increment)-alpha.0"
 echo $NEXT_VERSION
 
 git checkout -b chore/v$NEXT_VERSION
@@ -38,9 +38,17 @@ Doing a pre-release should be quick-and-dirty on-demand operation without any of
 0. Define the versions, e.g., run `export VERSION=0.1.2-alpha.0`.
 1. Run `just tag v$VERSION` on the updated `main` branch. 
 2. Run `just promote v$VERSION` to promote the artifacts from GitHub to S3 and PyPi. 
-13. Once released, we want to bump the version of alpha so that what was just released and what's on the 'main' branch will not be easily confused. If the version released was `0.1.2-alpha.0` then the next version would be `0.1.2-alpha.1`. 
-
 ```sh
 export VERSION=0.15.5-alpha.0
-just tag v$VERSION origin/main && just wait-for-release v$VERSION && just promote v$VERSION
+just tag v$VERSION origin/main && sleep $((40 * 60)) && just promote v$VERSION
 ``` 
+3. Once released, we want to bump the version of alpha so that what was just released and what's on the 'main' branch will not be easily confused. If the version released was `0.1.2-alpha.0` then the next version would be `0.1.2-alpha.1`. 
+
+```sh
+export VERSION="0.1.2-alpha.1"; # The next alpha version.
+git checkout -b release/v$VERSION
+$EDITOR Cargo.toml; # Update to the next alpha version.
+git commit -m "chore: release v$VERSION"
+git push -u origin release/v$VERSION
+gh pr create --base main --head release/v$VERSION --title "Release v$VERSION"
+```
