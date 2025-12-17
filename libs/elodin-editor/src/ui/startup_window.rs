@@ -1,9 +1,10 @@
 use bevy::{
     ecs::system::SystemParam,
     prelude::*,
-    window::{EnabledButtons, PrimaryWindow, WindowResolution, WindowTheme},
+    window::{EnabledButtons, PrimaryWindow, WindowResolution, WindowTheme, WindowRef},
+    render::camera::RenderTarget,
 };
-use bevy_egui::EguiContexts;
+use bevy_egui::{EguiContext, EguiContexts};
 use egui::{Color32, CornerRadius, RichText, Stroke, load::SizedTexture};
 use hifitime::Epoch;
 use impeller2_bevy::{
@@ -45,7 +46,9 @@ fn create_startup_window(
             bevy::window::CompositeAlphaMode::Opaque
         };
 
-        commands.spawn((
+        let egui_context = EguiContext::default();
+
+        let mut window = commands.spawn((
             Window {
                 title: "Elodin".to_owned(),
                 resolution: WindowResolution::new(730.0, 470.0),
@@ -66,7 +69,17 @@ fn create_startup_window(
                 ..Default::default()
             },
             StartupWindow,
+            egui_context,
+            Camera2d,
         ));
+
+        let camera = Camera {
+            target: RenderTarget::Window(WindowRef::Entity(window.id())),
+            ..Default::default()
+        };
+
+        window.insert(camera);
+
     } else if let Ok(mut primary) = primary.single_mut() {
         primary.visible = true
     }
