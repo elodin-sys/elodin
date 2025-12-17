@@ -1,8 +1,8 @@
 use bevy::{
     ecs::system::SystemParam,
     prelude::*,
-    window::{EnabledButtons, PrimaryWindow, WindowResolution, WindowTheme, WindowRef},
     render::camera::RenderTarget,
+    window::{EnabledButtons, PrimaryWindow, WindowRef, WindowResolution, WindowTheme},
 };
 use bevy_egui::{EguiContext, EguiContexts};
 use egui::{Color32, CornerRadius, RichText, Stroke, load::SizedTexture};
@@ -79,7 +79,6 @@ fn create_startup_window(
         };
 
         window.insert(camera);
-
     } else if let Ok(mut primary) = primary.single_mut() {
         primary.visible = true
     }

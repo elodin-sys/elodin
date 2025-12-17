@@ -14,12 +14,12 @@ use bevy::{
         wireframe::{WireframeConfig, WireframePlugin},
     },
     prelude::*,
-    window::{PresentMode, PrimaryWindow, WindowResolution, WindowTheme, WindowRef},
-    winit::WinitSettings,
     render::camera::RenderTarget,
+    window::{PresentMode, PrimaryWindow, WindowRef, WindowResolution, WindowTheme},
+    winit::WinitSettings,
 };
 use bevy_editor_cam::{SyncCameraPosition, controller::component::EditorCam};
-use bevy_egui::{EguiContextSettings, EguiPlugin, EguiGlobalSettings, EguiContext};
+use bevy_egui::{EguiContext, EguiContextSettings, EguiGlobalSettings, EguiPlugin};
 use bevy_render::alpha::AlphaMode;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use impeller2::types::{ComponentId, OwnedPacket};
@@ -35,12 +35,12 @@ use object_3d::create_object_3d_entity;
 use plugins::gizmos::GizmoPlugin;
 use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc};
 use ui::{
-    SelectedObject,
+    SelectedObject, UI_ORDER_BASE,
     colors::{ColorExt, get_scheme},
     inspector::viewport::set_viewport_pos,
     plot::{CollectedGraphData, gpu::LineHandle},
     tiles,
-    utils::FriendlyEpoch, UI_ORDER_BASE
+    utils::FriendlyEpoch,
 };
 
 pub mod object_3d;
@@ -279,10 +279,7 @@ fn setup_egui_inspector(mut commands: Commands) {
         ..Default::default()
     };
 
-    let window_ent = commands.spawn((
-        window,
-        InspectorWindow,
-    ));
+    let window_ent = commands.spawn((window, InspectorWindow));
     let window_id = window_ent.id();
 
     let egui_context = EguiContext::default();
@@ -308,18 +305,15 @@ fn run_egui_inspector(world: &mut World) {
     };
     let mut egui_context = egui_context.clone();
 
-    egui::CentralPanel::default()
-        .show(egui_context.get_mut(), |ui| {
-            egui::ScrollArea::both().show(ui, |ui| {
-                bevy_inspector_egui::bevy_inspector::ui_for_world(world, ui);
-                ui.allocate_space(ui.available_size());
-            });
+    egui::CentralPanel::default().show(egui_context.get_mut(), |ui| {
+        egui::ScrollArea::both().show(ui, |ui| {
+            bevy_inspector_egui::bevy_inspector::ui_for_world(world, ui);
+            ui.allocate_space(ui.available_size());
         });
+    });
 }
 
-fn setup_egui_global_system(
-    mut egui_global_settings: ResMut<EguiGlobalSettings>
-) {
+fn setup_egui_global_system(mut egui_global_settings: ResMut<EguiGlobalSettings>) {
     egui_global_settings.auto_create_primary_context = false;
 }
 
@@ -345,11 +339,10 @@ fn setup_floating_origin(mut commands: Commands) {
     ));
 }
 
-fn spawn_ui_cam(
-    mut commands: Commands,
-    mut query: Query<Entity, With<PrimaryWindow>>,
-) {
-    let primary_window_ent = query.single_mut().expect("failed to get single primary window");
+fn spawn_ui_cam(mut commands: Commands, mut query: Query<Entity, With<PrimaryWindow>>) {
+    let primary_window_ent = query
+        .single_mut()
+        .expect("failed to get single primary window");
 
     let egui_context = EguiContext::default();
 

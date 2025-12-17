@@ -557,7 +557,7 @@ fn sync_windows(
                 maximize: true,
             },
             ..Default::default()
-        }; 
+        };
 
         let window_entity = commands
             .entity(entity)
@@ -571,7 +571,6 @@ fn sync_windows(
         };
 
         commands.entity(entity).insert(camera);
-
 
         if let Some(screen) = state.descriptor.screen.as_ref() {
             commands.send_event(WindowRelayout::Screen {
