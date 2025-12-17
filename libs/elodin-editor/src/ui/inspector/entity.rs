@@ -252,10 +252,10 @@ fn inspector_item_multi(
         let line_height = ui.spacing().interact_size.y * 1.4;
 
         let item_width_min = ui.spacing().interact_size.x * 2.4;
-        let items_per_line = (line_width / item_width_min).floor();
+        let items_per_line = (line_width / item_width_min).max(1.0).floor().max(1.0);
 
         let necessary_spacing = (items_per_line - 1.0) * item_spacing.x;
-        let item_width = (line_width - necessary_spacing) / items_per_line;
+        let item_width = ((line_width - necessary_spacing) / items_per_line).max(1.0);
 
         let desired_size = egui::vec2(item_width - 1.0, line_height);
 
