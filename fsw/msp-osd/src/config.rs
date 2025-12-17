@@ -85,6 +85,16 @@ pub struct OsdConfig {
     /// Defaults to ENU for Elodin simulations, use NED for real aviation hardware
     #[serde(default)]
     pub coordinate_frame: CoordinateFrame,
+    /// Character aspect ratio (height/width) for horizon line rendering.
+    /// HD OSD systems like Walksnail Avatar use ~12x18 pixel characters (ratio 1.5).
+    /// This compensates for non-square characters so the horizon tilt angle
+    /// matches the actual aircraft roll angle.
+    #[serde(default = "default_char_aspect_ratio")]
+    pub char_aspect_ratio: f32,
+}
+
+fn default_char_aspect_ratio() -> f32 {
+    1.5
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -145,6 +155,7 @@ impl Default for Config {
                 cols: 50,
                 refresh_rate_hz: 20.0,
                 coordinate_frame: CoordinateFrame::Enu,
+                char_aspect_ratio: 1.5,
             },
             serial: SerialConfig {
                 port: "/dev/ttyTHS7".to_string(),

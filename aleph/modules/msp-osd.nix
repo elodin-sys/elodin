@@ -18,6 +18,7 @@ with lib; let
       cols = ${toString cfg.osdCols}
       refresh_rate_hz = ${toString cfg.refreshRateHz}
       coordinate_frame = "${cfg.coordinateFrame}"
+      char_aspect_ratio = ${toString cfg.charAspectRatio}
 
       [serial]
       port = "${cfg.serialPort}"
@@ -127,6 +128,22 @@ in {
 
         Defaults to "ned" for real aviation hardware. Use "enu" when testing
         with Elodin simulations.
+      '';
+    };
+
+    charAspectRatio = mkOption {
+      type = types.float;
+      default = 1.5;
+      description = ''
+        Character aspect ratio (height/width) for horizon line rendering.
+        HD OSD systems like Walksnail Avatar use ~12x18 pixel characters (ratio 1.5).
+        This compensates for non-square characters so the horizon tilt angle
+        matches the actual aircraft roll angle.
+
+        Common values:
+        - 1.5: Walksnail Avatar, DJI HD (default)
+        - 2.0: Standard SD analog OSD
+        - 1.0: Square characters (no compensation)
       '';
     };
 

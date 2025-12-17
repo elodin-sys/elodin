@@ -40,6 +40,7 @@ port = 2240
 rows = 18
 cols = 50
 refresh_rate_hz = 20.0
+char_aspect_ratio = 1.5  # Walksnail Avatar/DJI HD character aspect ratio
 
 [serial]
 port = "/dev/ttyTHS7"
