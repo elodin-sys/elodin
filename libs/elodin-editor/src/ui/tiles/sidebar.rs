@@ -1,8 +1,52 @@
-use super::*;
+use super::{Pane, ShareUpdate, SidebarKind, TileId};
 use egui::{Color32, Stroke};
+use egui_tiles::{Container, Tile};
+
+pub const MIN_SIDEBAR_FRACTION: f32 = 0.05;
+pub const MIN_SIDEBAR_PX: f32 = 16.0;
+pub const MIN_SIDEBAR_MASKED_PX: f32 = 4.0;
+pub const MIN_OTHER_PX: f32 = 32.0;
+
+#[derive(Clone, Copy, Debug)]
+pub struct SidebarMaskState {
+    pub hierarchy_masked: bool,
+    pub inspector_masked: bool,
+    pub last_hierarchy_share: Option<f32>,
+    pub last_inspector_share: Option<f32>,
+}
+
+impl SidebarMaskState {
+    pub fn masked(&self, kind: SidebarKind) -> bool {
+        match kind {
+            SidebarKind::Hierarchy => self.hierarchy_masked,
+            SidebarKind::Inspector => self.inspector_masked,
+        }
+    }
+
+    pub fn set_masked(&mut self, kind: SidebarKind, masked: bool) {
+        match kind {
+            SidebarKind::Hierarchy => self.hierarchy_masked = masked,
+            SidebarKind::Inspector => self.inspector_masked = masked,
+        }
+    }
+
+    pub fn last_share(&self, kind: SidebarKind) -> Option<f32> {
+        match kind {
+            SidebarKind::Hierarchy => self.last_hierarchy_share,
+            SidebarKind::Inspector => self.last_inspector_share,
+        }
+    }
+
+    pub fn set_last_share(&mut self, kind: SidebarKind, share: Option<f32>) {
+        match kind {
+            SidebarKind::Hierarchy => self.last_hierarchy_share = share,
+            SidebarKind::Inspector => self.last_inspector_share = share,
+        }
+    }
+}
 
 // Compute sidebar gutter interactions and return share updates to apply.
-pub(super) fn collect_sidebar_gutter_updates(
+pub fn collect_sidebar_gutter_updates(
     tree: &mut egui_tiles::Tree<Pane>,
     ui: &mut egui::Ui,
     painter: egui::Painter,
@@ -112,6 +156,7 @@ pub(super) fn collect_sidebar_gutter_updates(
                 (_, Some(k)) => k,
                 _ => return,
             };
+            let gutter_draw_width = self.gutter_width.max(MIN_SIDEBAR_MASKED_PX);
             let sidebar_on_left = left_sidebar;
             let pair_width = left_rect.width() + right_rect.width();
             let (share_left, share_right) = match self.tree.tiles.get(container_id) {
@@ -129,30 +174,30 @@ pub(super) fn collect_sidebar_gutter_updates(
             } else {
                 0.0
             };
-            let min_sidebar_px = self.gutter_width + 4.0;
-            let min_other_px = 32.0;
+            let min_sidebar_px = (parent_rect.width() * MIN_SIDEBAR_FRACTION).max(MIN_SIDEBAR_PX);
+            let min_other_px = MIN_OTHER_PX;
             let min_sidebar_share = if share_per_px > 0.0 {
                 min_sidebar_px * share_per_px
             } else {
-                pair_sum * 0.05
+                pair_sum * MIN_SIDEBAR_FRACTION
             };
             let min_other_share = if share_per_px > 0.0 {
                 min_other_px * share_per_px
             } else {
-                pair_sum * 0.05
+                pair_sum * MIN_SIDEBAR_FRACTION
             };
 
             let gap = right_rect.min.x - left_rect.max.x;
             let mut center_x = (left_rect.max.x + right_rect.min.x) * 0.5;
-            if gap < self.gutter_width {
-                let offset = (self.gutter_width - gap).max(0.0) * 0.5;
+            if gap < gutter_draw_width {
+                let offset = (gutter_draw_width - gap).max(0.0) * 0.5;
                 if left_sidebar {
                     center_x -= offset;
                 } else {
                     center_x += offset;
                 }
             }
-            let half = self.gutter_width * 0.5;
+            let half = gutter_draw_width * 0.5;
             center_x = center_x
                 .max(parent_rect.left() + half)
                 .min(parent_rect.right() - half);
@@ -227,11 +272,19 @@ pub(super) fn collect_sidebar_gutter_updates(
                     };
                     self.mask_state
                         .set_last_share(sidebar_kind, Some(current_sidebar_share));
+
+                    let collapsed_px = gutter_draw_width;
+                    let collapsed_share = if share_per_px > 0.0 {
+                        collapsed_px * share_per_px
+                    } else {
+                        pair_sum * 0.01
+                    };
+
                     self.compute_sidebar_shares(
                         pair_sum,
                         min_other_share,
-                        min_sidebar_share,
-                        min_sidebar_share,
+                        collapsed_share,
+                        collapsed_share,
                         sidebar_on_left,
                     )
                 };
@@ -262,8 +315,16 @@ pub(super) fn collect_sidebar_gutter_updates(
 
             if drag_state.active && pointer_down {
                 let delta = pointer_pos.map(|p| p.x - drag_state.start_x).unwrap_or(0.0);
-                let min_left = if left_sidebar { 4.0 } else { 32.0 };
-                let min_right = if right_sidebar { 4.0 } else { 32.0 };
+                let min_left = if left_sidebar {
+                    MIN_SIDEBAR_MASKED_PX
+                } else {
+                    MIN_OTHER_PX
+                };
+                let min_right = if right_sidebar {
+                    MIN_SIDEBAR_MASKED_PX
+                } else {
+                    MIN_OTHER_PX
+                };
                 let new_left = (drag_state.left_width + delta).max(min_left);
                 let new_right = (drag_state.right_width - delta).max(min_right);
                 if let Some(Tile::Container(Container::Linear(linear))) =

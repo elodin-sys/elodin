@@ -1,5 +1,8 @@
 use super::{
-    behavior::TreeBehavior, gutters::collect_sidebar_gutter_updates, tile_actions::TreeAction, *,
+    behavior::TreeBehavior,
+    sidebar::{SidebarMaskState, collect_sidebar_gutter_updates},
+    tile_actions::TreeAction,
+    *,
 };
 
 // Run the egui tiles UI and capture resulting actions plus share updates from gutter drags.

@@ -61,13 +61,21 @@ use crate::{
 };
 
 mod behavior;
-mod gutters;
 mod render;
+mod sidebar;
 mod tile_actions;
+mod types;
+mod util;
 
 use render::{apply_share_updates, render_tree_and_collect_updates};
+use sidebar::SidebarMaskState;
 use tile_actions::ActionContext;
 pub use tile_actions::TreeAction;
+pub use types::{
+    ActionTilePane, DashboardPane, GraphPane, Pane, TileIcons, TreePane, ViewportContainsPointer,
+    ViewportPane,
+};
+use util::{describe_tile, is_content_tile};
 
 pub(crate) fn plugin(app: &mut App) {
     app.register_type::<WindowId>()
@@ -97,24 +105,6 @@ fn setup_primary_window_state(
 pub struct ViewportConfig {
     pub show_arrows: bool,
     pub viewport_layer: Option<usize>,
-}
-
-#[derive(Clone)]
-pub struct TileIcons {
-    pub add: egui::TextureId,
-    pub close: egui::TextureId,
-    pub scrub: egui::TextureId,
-    pub tile_3d_viewer: egui::TextureId,
-    pub tile_graph: egui::TextureId,
-    pub subtract: egui::TextureId,
-    pub setting: egui::TextureId,
-    pub search: egui::TextureId,
-    pub chart: egui::TextureId,
-    pub chevron: egui::TextureId,
-    pub plot: egui::TextureId,
-    pub viewport: egui::TextureId,
-    pub container: egui::TextureId,
-    pub entity: egui::TextureId,
 }
 
 #[derive(Clone)]
@@ -447,25 +437,6 @@ pub fn create_secondary_window(title: Option<String>) -> (WindowState, WindowId)
     )
 }
 
-#[derive(Resource, Default)]
-pub struct ViewportContainsPointer(pub bool);
-#[derive(Clone, Debug)]
-pub struct ActionTilePane {
-    pub entity: Entity,
-    pub label: String,
-}
-
-#[derive(Clone, Debug)]
-pub struct TreePane {
-    pub entity: Entity,
-}
-
-#[derive(Clone, Debug)]
-pub struct DashboardPane {
-    pub entity: Entity,
-    pub label: String,
-}
-
 impl TileState {
     fn recompute_has_non_sidebar(&mut self) {
         fn visit(tree: &egui_tiles::Tree<Pane>, id: TileId) -> bool {
@@ -597,27 +568,6 @@ impl TileState {
 
         let tile_id = self.tree.tiles.insert_new(tile);
         let is_tabs_container = {
-            let describe_tile = |tile: &Tile<Pane>| -> (String, Option<String>) {
-                match tile {
-                    Tile::Pane(pane) => {
-                        let (kind, label) = match pane {
-                            Pane::Viewport(v) => ("Viewport", Some(v.label.clone())),
-                            Pane::Graph(g) => ("Graph", Some(g.label.clone())),
-                            Pane::Monitor(m) => ("Monitor", Some(m.label.clone())),
-                            Pane::QueryTable(_) => ("QueryTable", None),
-                            Pane::QueryPlot(_) => ("QueryPlot", None),
-                            Pane::ActionTile(a) => ("ActionTile", Some(a.label.clone())),
-                            Pane::VideoStream(vs) => ("VideoStream", Some(vs.label.clone())),
-                            Pane::Dashboard(d) => ("Dashboard", Some(d.label.clone())),
-                            Pane::Hierarchy => ("Hierarchy", None),
-                            Pane::Inspector => ("Inspector", None),
-                            Pane::SchematicTree(_) => ("SchematicTree", None),
-                        };
-                        (kind.to_string(), label)
-                    }
-                    Tile::Container(container) => (format!("{:?}", container.kind()), None),
-                }
-            };
             let parent_tile = self.tree.tiles.get_mut(parent_id)?;
             let Tile::Container(container) = parent_tile else {
                 return None;
@@ -970,21 +920,6 @@ impl TileState {
     }
 }
 
-#[derive(Clone, Debug)]
-pub enum Pane {
-    Viewport(ViewportPane),
-    Graph(GraphPane),
-    Monitor(MonitorPane),
-    QueryTable(QueryTablePane),
-    QueryPlot(super::query_plot::QueryPlotPane),
-    ActionTile(ActionTilePane),
-    VideoStream(super::video_stream::VideoStreamPane),
-    Dashboard(DashboardPane),
-    Hierarchy,
-    Inspector,
-    SchematicTree(TreePane),
-}
-
 impl Pane {
     fn fallback_label(label: &str, default: &str) -> String {
         let trimmed = label.trim();
@@ -1137,37 +1072,6 @@ impl Pane {
             }
         }
     }
-}
-
-// Returns true for user-visible content panes (excluding fixed sidebars).
-fn is_content_pane(pane: &Pane) -> bool {
-    matches!(
-        pane,
-        Pane::Viewport(_)
-            | Pane::Graph(_)
-            | Pane::Monitor(_)
-            | Pane::QueryTable(_)
-            | Pane::QueryPlot(_)
-            | Pane::ActionTile(_)
-            | Pane::VideoStream(_)
-            | Pane::Dashboard(_)
-            | Pane::SchematicTree(_)
-    )
-}
-
-fn is_content_tile(tile: &Tile<Pane>) -> bool {
-    matches!(tile, Tile::Pane(pane) if is_content_pane(pane))
-}
-
-#[derive(Default, Clone, Debug)]
-pub struct ViewportPane {
-    pub camera: Option<Entity>,
-    pub nav_gizmo: Option<Entity>,
-    pub nav_gizmo_camera: Option<Entity>,
-    pub rect: Option<egui::Rect>,
-    pub label: String,
-    pub grid_layer: Option<usize>,
-    pub viewport_layer: Option<usize>,
 }
 
 impl ViewportPane {
@@ -1341,13 +1245,6 @@ impl ViewportPane {
             viewport_layer,
         }
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct GraphPane {
-    pub id: Entity,
-    pub label: String,
-    pub rect: Option<egui::Rect>,
 }
 
 impl GraphPane {
@@ -2030,44 +1927,7 @@ enum SidebarKind {
     Inspector,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct SidebarMaskState {
-    hierarchy_masked: bool,
-    inspector_masked: bool,
-    last_hierarchy_share: Option<f32>,
-    last_inspector_share: Option<f32>,
-}
-
-impl SidebarMaskState {
-    fn masked(&self, kind: SidebarKind) -> bool {
-        match kind {
-            SidebarKind::Hierarchy => self.hierarchy_masked,
-            SidebarKind::Inspector => self.inspector_masked,
-        }
-    }
-
-    fn set_masked(&mut self, kind: SidebarKind, masked: bool) {
-        match kind {
-            SidebarKind::Hierarchy => self.hierarchy_masked = masked,
-            SidebarKind::Inspector => self.inspector_masked = masked,
-        }
-    }
-
-    fn last_share(&self, kind: SidebarKind) -> Option<f32> {
-        match kind {
-            SidebarKind::Hierarchy => self.last_hierarchy_share,
-            SidebarKind::Inspector => self.last_inspector_share,
-        }
-    }
-
-    fn set_last_share(&mut self, kind: SidebarKind, share: Option<f32>) {
-        match kind {
-            SidebarKind::Hierarchy => self.last_hierarchy_share = share,
-            SidebarKind::Inspector => self.last_inspector_share = share,
-        }
-    }
-}
-
+#[derive(Clone)]
 struct UiFrameState {
     tree: egui_tiles::Tree<Pane>,
     container_titles: HashMap<TileId, String>,
