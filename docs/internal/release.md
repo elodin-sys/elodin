@@ -42,5 +42,5 @@ Doing a pre-release should be quick-and-dirty on-demand operation without any of
 
 ```sh
 export VERSION=0.15.5-alpha.0
-just tag v$VERSION && just wait-for-release v$VERSION && just promote v$VERSION
+just tag v$VERSION origin/main && just wait-for-release v$VERSION && just promote v$VERSION
 ``` 

@@ -18,21 +18,22 @@ default:
 version:
   @echo "v$(cargo metadata --format-version 1 | jq -r '.packages[] | select(.name == "elodin") | .version')"
 
-tag new_tag:
+tag new_tag commit="":
   #!/usr/bin/env sh
   [ -n "$DRY_RUN" ] && echo "DRY_RUN enabled."
   current_tag=$(git describe --tags --abbrev=0)
+  commit="{{commit}}"
   new_tag="{{new_tag}}"
   if [ "$current_tag" = "$new_tag" ]; then
     echo "error: Latest tag is already '$new_tag'" >&2; exit 1;
   fi
   current_branch=$(git branch --show-current);
-  if [ "$current_branch" != "main" ]; then
+  if [ -z "$commit" ] && [ "$current_branch" != "main" ]; then
     echo "error: Expected 'main' branch but was '$current_branch'." >&2; exit 2;
   fi
   echo "🏷️ Tagging HEAD with '$new_tag'"
   sh -v ${DRY_RUN:+-n} <<EOF
-    git tag -a $new_tag origin/main -m "Elodin $new_tag"
+    git tag -a $new_tag $commit -m "Elodin $new_tag"
     git push origin $new_tag
   EOF
 
