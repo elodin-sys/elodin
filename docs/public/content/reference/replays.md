@@ -118,7 +118,7 @@ In this simplified example, there is a single entity with two components: `world
 
 ### Material
 
-`Material` assets describe the color and texture of a body. Currently, the material must be a solid color.
+`Material` assets describe the color, texture, and optional `emissivity` property (0.0–1.0) that makes simple meshes glow; the property can be emitted directly from the schematic’s mesh node.
 
 ### GLB
 

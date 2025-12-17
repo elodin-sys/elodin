@@ -318,6 +318,8 @@ fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
         })
         .unwrap_or(GraphType::Line);
 
+    let locked = node.get("lock").and_then(|v| v.as_bool()).unwrap_or(false);
+
     let auto_y_range = node
         .get("auto_y_range")
         .and_then(|v| v.as_bool())
@@ -337,6 +339,7 @@ fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
         eql,
         name,
         graph_type,
+        locked,
         auto_y_range,
         y_range,
         aux: (),
@@ -970,8 +973,34 @@ fn parse_color_children_from_node(node: &KdlNode) -> impl Iterator<Item = Color>
         .filter_map(parse_color_from_node)
 }
 
+fn parse_emissivity_value(value: &kdl::KdlValue) -> Option<f32> {
+    let parsed = if let Some(number) = value.as_float() {
+        number as f32
+    } else if let Some(integer) = value.as_integer() {
+        let Ok(integer) = i64::try_from(integer) else {
+            return None;
+        };
+        integer as f32
+    } else if let Some(text) = value.as_string() {
+        text.parse::<f32>().ok()?
+    } else {
+        return None;
+    };
+
+    Some(parsed.clamp(0.0, 1.0))
+}
+
 fn parse_material_from_node(node: &KdlNode) -> Option<Material> {
-    parse_color_from_node_or_children(node, None).map(|color| Material { base_color: color })
+    parse_color_from_node_or_children(node, None).map(|color| {
+        let emissivity = node
+            .get("emissivity")
+            .and_then(parse_emissivity_value)
+            .unwrap_or(0.0);
+        Material {
+            base_color: color,
+            emissivity,
+        }
+    })
 }
 
 fn parse_dashboard(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
@@ -1488,6 +1517,33 @@ object_3d "a.world_pos" {
     }
 
     #[test]
+    fn test_parse_object_3d_material_emissivity() {
+        let kdl = r#"
+object_3d "a.world_pos" {
+    sphere radius=0.2 emissivity=0.25 {
+        color yellow 128
+    }
+}
+"#;
+
+        let schematic = parse_schematic(kdl).unwrap();
+        assert_eq!(schematic.elems.len(), 1);
+
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            let Object3DMesh::Mesh { material, .. } = &obj.mesh else {
+                panic!("Expected mesh object");
+            };
+            assert!((material.base_color.r - Color::YELLOW.r).abs() < f32::EPSILON);
+            assert!((material.base_color.g - Color::YELLOW.g).abs() < f32::EPSILON);
+            assert!((material.base_color.b - Color::YELLOW.b).abs() < f32::EPSILON);
+            assert!((material.base_color.a - 128.0 / 255.0).abs() < f32::EPSILON);
+            assert!((material.emissivity - 0.25).abs() < f32::EPSILON);
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
     fn test_parse_object_3d_ellipsoid() {
         let kdl = r#"
 object_3d "rocket.world_pos" {
@@ -1512,6 +1568,30 @@ object_3d "rocket.world_pos" {
                 }
                 _ => panic!("Expected ellipsoid mesh"),
             }
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_object_3d_material_emissivity_property() {
+        let kdl = r#"
+object_3d "a.world_pos" {
+    sphere radius=0.2 emissivity=0.5 {
+        color 255 0 0
+    }
+}
+"#;
+
+        let schematic = parse_schematic(kdl).unwrap();
+        assert_eq!(schematic.elems.len(), 1);
+
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            let Object3DMesh::Mesh { material, .. } = &obj.mesh else {
+                panic!("Expected mesh object");
+            };
+            assert!((material.base_color.r - 1.0).abs() < f32::EPSILON);
+            assert!((material.emissivity - 0.5).abs() < f32::EPSILON);
         } else {
             panic!("Expected object_3d");
         }

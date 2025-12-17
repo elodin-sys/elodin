@@ -719,10 +719,28 @@ impl BevyExt for impeller2_wkt::Material {
         } else {
             AlphaMode::Opaque
         };
+        let emissivity = self.emissivity.clamp(0.0, 1.0);
+        let boost = 4.0 * emissivity;
+        let boosted_color = Color::srgba(
+            self.base_color.r * boost,
+            self.base_color.g * boost,
+            self.base_color.b * boost,
+            self.base_color.a,
+        );
+        let emissive = if emissivity > 0.0 {
+            boosted_color
+        } else {
+            Color::BLACK
+        };
 
         bevy::prelude::StandardMaterial {
-            base_color,
+            base_color: if emissivity > 0.0 {
+                boosted_color
+            } else {
+                base_color
+            },
             alpha_mode,
+            emissive: emissive.into(),
             ..Default::default()
         }
     }
