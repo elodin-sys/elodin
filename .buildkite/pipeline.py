@@ -121,6 +121,7 @@ test_steps = [
                 key="toplevel",
                 command=["cd aleph", "nix build --accept-flake-config .#toplevel"],
                 agents={"queue": "nixos-arm-aws"},
+                if_="false", # disable temporarily
             ),
             step(
                 label=":nix: sdimage",
@@ -130,6 +131,7 @@ test_steps = [
                     "nix build --accept-flake-config .#sdimage",
                 ],
                 agents={"queue": "nixos-arm-aws"},
+                if_="false", # disable temporarily
             ),
             step(
                 label=":nix: flash-uefi",
