@@ -529,6 +529,65 @@ fn toggle_body_axes() -> PaletteItem {
     })
 }
 
+fn reset_cameras() -> PaletteItem {
+    PaletteItem::new(
+        "Reset Cameras",
+        VIEWPORT_LABEL,
+        |_: In<String>, window_states: Query<(&tiles::WindowState, &tiles::WindowId)>| {
+            let entries = gather_viewport_entries(&window_states);
+            if entries.is_empty() {
+                return PalettePage::new(vec![PaletteItem::new(
+                    "No viewports available",
+                    VIEWPORT_LABEL,
+                    |_: In<String>| PaletteEvent::Exit,
+                )])
+                .into();
+            }
+
+            let all_cameras: Vec<_> = entries.iter().map(|entry| entry.camera).collect();
+            let mut items = Vec::with_capacity(entries.len() + 1);
+            items.push(PaletteItem::new(
+                "Reset all viewports",
+                VIEWPORT_LABEL,
+                move |_: In<String>,
+                      mut query: Query<(&mut Transform, &mut EditorCam), With<MainCamera>>| {
+                    for camera in &all_cameras {
+                        if let Ok((mut transform, mut editor_cam)) = query.get_mut(*camera) {
+                            reset_editor_cam(&mut transform, &mut editor_cam);
+                        }
+                    }
+                    PaletteEvent::Exit
+                },
+            ));
+
+            for entry in entries {
+                let label = format!("Reset {}", entry.label);
+                let camera = entry.camera;
+                items.push(
+                    PaletteItem::new(
+                        label,
+                        VIEWPORT_LABEL,
+                        move |_: In<String>,
+                              mut query: Query<
+                            (&mut Transform, &mut EditorCam),
+                            With<MainCamera>,
+                        >| {
+                            if let Ok((mut transform, mut editor_cam)) = query.get_mut(camera) {
+                                reset_editor_cam(&mut transform, &mut editor_cam);
+                            }
+                            PaletteEvent::Exit
+                        },
+                    ),
+                );
+            }
+
+            PalettePage::new(items)
+                .prompt("Select viewport to reset")
+                .into()
+        },
+    )
+}
+
 pub fn create_viewport(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Viewport",
@@ -1583,64 +1642,7 @@ impl Default for PalettePage {
                 },
             ),
             toggle_body_axes(),
-            PaletteItem::new(
-                "Reset Cameras",
-                VIEWPORT_LABEL,
-                |_: In<String>, window_states: Query<(&tiles::WindowState, &tiles::WindowId)>| {
-                    let entries = gather_viewport_entries(&window_states);
-                    if entries.is_empty() {
-                        return PalettePage::new(vec![PaletteItem::new(
-                            "No viewports available",
-                            VIEWPORT_LABEL,
-                            |_: In<String>| PaletteEvent::Exit,
-                        )])
-                        .into();
-                    }
-
-                    let all_cameras: Vec<_> = entries.iter().map(|entry| entry.camera).collect();
-                    let mut items = Vec::with_capacity(entries.len() + 1);
-                    items.push(PaletteItem::new(
-                        "Reset all viewports",
-                        VIEWPORT_LABEL,
-                        move |_: In<String>,
-                              mut query: Query<
-                            (&mut Transform, &mut EditorCam),
-                            With<MainCamera>,
-                        >| {
-                            for camera in &all_cameras {
-                                if let Ok((mut transform, mut editor_cam)) = query.get_mut(*camera)
-                                {
-                                    reset_editor_cam(&mut transform, &mut editor_cam);
-                                }
-                            }
-                            PaletteEvent::Exit
-                        },
-                    ));
-
-                    for entry in entries {
-                        let label = format!("Reset {}", entry.label);
-                        let camera = entry.camera;
-                        items.push(PaletteItem::new(
-                            label,
-                            VIEWPORT_LABEL,
-                            move |_: In<String>,
-                                  mut query: Query<
-                                (&mut Transform, &mut EditorCam),
-                                With<MainCamera>,
-                            >| {
-                                if let Ok((mut transform, mut editor_cam)) = query.get_mut(camera) {
-                                    reset_editor_cam(&mut transform, &mut editor_cam);
-                                }
-                                PaletteEvent::Exit
-                            },
-                        ));
-                    }
-
-                    PalettePage::new(items)
-                        .prompt("Select viewport to reset")
-                        .into()
-                },
-            ),
+            reset_cameras(),
             PaletteItem::new(
                 "Toggle Recording",
                 SIMULATION_LABEL,
