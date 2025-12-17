@@ -152,10 +152,11 @@
       # services.udp-component-receive = {
       #   enable = true;
       #   listenPort = 41235;               # UDP port to listen on
-      #   # autostart = true;                # Set to false to configure but not auto-start
+      #   # autostart = true;               # Set to false to configure but not auto-start
       #   # filter = ["target.world_pos"];  # Only accept specific components (empty = all)
       #   # dbAddr = "127.0.0.1:2240";      # Elodin-DB address to write to
-      #   # verbose = false;                 # Enable verbose logging
+      #   # timestampMode = "sender";       # Timestamp mode: "sender", "local", or "monotonic"
+      #   # verbose = false;                # Enable verbose logging
       # };
     };
     # sets up two different nixos systems default and installer
