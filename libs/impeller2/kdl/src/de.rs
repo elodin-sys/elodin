@@ -792,8 +792,8 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         Some(entry) => {
             let value = entry.value();
             if let Some(s) = value.as_string() {
-                if s.ends_with("m") {
-                    match s[..s.len() - 1].parse() {
+                if let Some(prior) = s.strip_suffix("m") {
+                    match prior.parse() {
                         Ok(v) => LabelPosition::Absolute(v),
                         Err(e) => {
                             return Err(KdlSchematicError::InvalidValue {
@@ -810,7 +810,7 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
                 } else {
                     match s.parse::<f32>() {
                         Ok(v) => {
-                            if v <= 1.0 && v >= 0.0 {
+                            if (0.0..=1.0).contains(&v) {
                                 LabelPosition::Proportionate(v)
                             } else {
                                 return Err(KdlSchematicError::InvalidValue {

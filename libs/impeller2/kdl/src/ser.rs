@@ -1166,7 +1166,7 @@ graph "value" {
                 normalize: true,
                 show_name: false,
                 thickness: ArrowThickness::new(1.23456),
-                label_position: 1.0,
+                label_position: LabelPosition::None,
                 aux: (),
             }));
 
