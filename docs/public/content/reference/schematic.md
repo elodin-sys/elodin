@@ -66,7 +66,9 @@ order = 6
 - `name`: label text; used for legend/overlay (optional).
 - `show_name`: show/hide overlay label (default true).
 - `arrow_thickness`: numeric thickness multiplier with 3-decimal precision (default `0.1`).
-- `label_position`: 0.0–1.0 along the arrow (0=base, 1=tip) for label anchor (default 1.0).
+- `label_position`: proportionately 0.0–1.0 along the arrow (0=base, 1=tip) for
+   label anchor, or absolutely by specifying a number in a string with an 'm'
+   suffix, .e.g., "0.3m" for 0.3 meters from origin (default "0.1m").
 
 ## Schema at a glance
 
