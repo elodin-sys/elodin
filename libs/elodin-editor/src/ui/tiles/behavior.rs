@@ -28,13 +28,6 @@ pub(super) struct TreeBehavior<'w> {
 impl<'w> TreeBehavior<'w> {
     fn container_fallback_title(&mut self, tiles: &Tiles<Pane>, id: TileId) -> String {
         if let Some(title) = self.container_titles.get(&id) {
-            info!(
-                target: "tabs.title",
-                ?id,
-                root = Some(id) == self.root_id,
-                source = "container_titles",
-                title = %title
-            );
             return title.clone();
         }
         if let Some(egui_tiles::Tile::Container(container)) = tiles.get(id) {
@@ -46,13 +39,6 @@ impl<'w> TreeBehavior<'w> {
                     } else {
                         "New tab".to_string()
                     };
-                    info!(
-                        target: "tabs.title",
-                        ?id,
-                        root = Some(id) == self.root_id,
-                        source = "fallback_tabs",
-                        title = %title
-                    );
                     return title;
                 }
                 Container::Linear(linear) => {
@@ -60,53 +46,17 @@ impl<'w> TreeBehavior<'w> {
                         && let Some(child) = linear.children.first().copied()
                     {
                         let text = self.tab_title_for_tile(tiles, child).text().to_string();
-                        if Some(id) == self.root_id {
-                            info!(
-                                target: "tabs.title",
-                                ?id,
-                                root = true,
-                                source = "fallback_linear_single",
-                                title = %text
-                            );
-                        }
                         return text;
                     }
                     // Default fallback label when no explicit title is set.
                     let title = "New tab".to_string();
-                    if Some(id) == self.root_id {
-                        info!(
-                            target: "tabs.title",
-                            ?id,
-                            root = true,
-                            source = "fallback_linear_multi",
-                            title = %title
-                        );
-                    }
                     return title;
                 }
                 _ => {}
             }
             let derived = format!("{:?}", container.kind());
-            if Some(id) == self.root_id {
-                info!(
-                    target: "tabs.title",
-                    ?id,
-                    root = true,
-                    source = "fallback_kind",
-                    title = %derived
-                );
-            }
             derived
         } else {
-            if Some(id) == self.root_id {
-                info!(
-                    target: "tabs.title",
-                    ?id,
-                    root = true,
-                    source = "fallback_missing",
-                    title = "Container"
-                );
-            }
             "Container".to_owned()
         }
     }
@@ -195,36 +145,6 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                     _ => self.tab_title_for_tile(tiles, tile_id).text().to_string(),
                 }
             };
-        if title_str.trim().is_empty() {
-            let kind = match tiles.get(tile_id) {
-                Some(Tile::Pane(p)) => match p {
-                    Pane::Viewport(_) => "Viewport",
-                    Pane::Graph(_) => "Graph",
-                    Pane::Monitor(_) => "Monitor",
-                    Pane::QueryTable(_) => "QueryTable",
-                    Pane::QueryPlot(_) => "QueryPlot",
-                    Pane::ActionTile(_) => "ActionTile",
-                    Pane::VideoStream(_) => "VideoStream",
-                    Pane::Dashboard(_) => "Dashboard",
-                    Pane::Hierarchy => "Hierarchy",
-                    Pane::Inspector => "Inspector",
-                    Pane::SchematicTree(_) => "SchematicTree",
-                },
-                Some(Tile::Container(c)) => match c {
-                    Container::Tabs(_) => "Tabs",
-                    Container::Linear(_) => "Linear",
-                    Container::Grid(_) => "Grid",
-                },
-                None => "Unknown",
-            };
-            info!(
-                target: "tabs.title",
-                ?tile_id,
-                kind,
-                has_custom_title = self.container_titles.contains_key(&tile_id),
-                "tab title resolved to empty string"
-            );
-        }
         let mut font_id = egui::TextStyle::Button.resolve(ui.style());
         font_id.size = 11.0;
         let mut galley = egui::WidgetText::from(title_str.clone()).into_galley(

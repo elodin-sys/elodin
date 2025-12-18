@@ -2,7 +2,6 @@ use bevy::{
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     ecs::system::{SystemParam, SystemState},
     input::keyboard::Key,
-    log::info,
     prelude::*,
     window::{Monitor, PrimaryWindow, Window, WindowPosition},
 };
@@ -75,7 +74,7 @@ pub use types::{
     ActionTilePane, DashboardPane, GraphPane, Pane, TileIcons, TreePane, ViewportContainsPointer,
     ViewportPane,
 };
-use util::{describe_tile, is_content_tile};
+use util::is_content_tile;
 
 pub(crate) fn plugin(app: &mut App) {
     app.register_type::<WindowId>()
@@ -420,12 +419,6 @@ pub fn create_secondary_window(title: Option<String>) -> (WindowState, WindowId)
         screen_rect: None,
     };
     let tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
-    info!(
-        id = id.0,
-        title = descriptor.title.as_deref().unwrap_or(""),
-        path = ?descriptor.path,
-        "Created secondary window"
-    );
     (
         WindowState {
             descriptor,
@@ -577,19 +570,6 @@ impl TileState {
 
             if active && let Container::Tabs(tabs) = container {
                 tabs.set_active(tile_id);
-            }
-            if is_tabs && let Some(tile) = self.tree.tiles.get(tile_id) {
-                let (kind, label) = describe_tile(tile);
-                info!(
-                    target: "tabs.insert",
-                    ?parent_id,
-                    tile_id = ?tile_id,
-                    kind = %kind,
-                    label = %label.unwrap_or_default(),
-                    tabs_title_hint = tabs_title_hint.unwrap_or(""),
-                    parent_title = %self.container_titles.get(&parent_id).map(String::as_str).unwrap_or(""),
-                    "insert_tile: added child to Tabs"
-                );
             }
             is_tabs
         };
@@ -814,12 +794,6 @@ impl TileState {
         for (tile_id, tile) in self.tree.tiles.iter() {
             match tile {
                 Tile::Pane(Pane::Viewport(viewport)) => {
-                    bevy::log::info!(
-                        grid_layer = ?viewport.grid_layer,
-                        viewport_layer = ?viewport.viewport_layer,
-                        camera = ?viewport.camera,
-                        "clear: free viewport layers"
-                    );
                     if let Some(layer) = viewport.viewport_layer {
                         render_layer_alloc.free(layer);
                     }
@@ -878,17 +852,10 @@ impl TileState {
 
     pub fn set_container_title(&mut self, id: TileId, title: impl Into<String>) {
         let title = title.into();
-        bevy::log::info!(
-            target: "tiles.title",
-            ?id,
-            title = %title,
-            "set_container_title"
-        );
         self.container_titles.insert(id, title);
     }
 
     pub fn clear_container_title(&mut self, id: TileId) {
-        bevy::log::info!(target: "tiles.title", ?id, "clear_container_title");
         self.container_titles.remove(&id);
     }
 
@@ -1339,17 +1306,6 @@ impl TileState {
             if let Some(Tile::Container(Container::Tabs(parent_tabs))) =
                 self.tree.tiles.get(parent_tabs_id)
             {
-                let child_kinds: SmallVec<[String; 8]> = parent_tabs
-                    .children
-                    .iter()
-                    .map(|child| {
-                        self.tree
-                            .tiles
-                            .get(*child)
-                            .map(|tile| format!("{tile:?}"))
-                            .unwrap_or_else(|| "Missing".to_string())
-                    })
-                    .collect();
                 let all_panes = parent_tabs
                     .children
                     .iter()
@@ -1365,16 +1321,6 @@ impl TileState {
                         }
                     }
                     self.update_has_non_sidebar_for(pane_id);
-                    info!(
-                        target: "tabs.insert_pane",
-                        ?window_entity,
-                        ?parent_tabs_id,
-                        ?pane_id,
-                        children_before = child_kinds.len(),
-                        child_kinds = ?child_kinds,
-                        pane_kind = "new_tab_direct",
-                        "inserted pane as sibling tab"
-                    );
                     return Some(pane_id);
                 }
             }
@@ -1387,12 +1333,7 @@ impl TileState {
             let Some(Tile::Container(Container::Tabs(parent_tabs))) =
                 self.tree.tiles.get_mut(parent_tabs_id)
             else {
-                warn!(
-                    target: "tabs.insert_pane",
-                    ?window_entity,
-                    ?parent_tabs_id,
-                    "new_tab: parent is not Tabs"
-                );
+                let _ = window_entity;
                 return None;
             };
 
@@ -1401,28 +1342,8 @@ impl TileState {
                 parent_tabs.set_active(inner_tabs_id);
             }
 
-            let pane_id = self
-                .insert_tile(Tile::Pane(pane), Some(inner_tabs_id), true)
-                .or_else(|| {
-                    warn!(
-                        target: "tabs.insert_pane",
-                        ?window_entity,
-                        ?parent_tabs_id,
-                        ?inner_tabs_id,
-                        "new_tab: failed to insert pane into inner tabs"
-                    );
-                    None
-                })?;
+            let pane_id = self.insert_tile(Tile::Pane(pane), Some(inner_tabs_id), true)?;
 
-            info!(
-                target: "tabs.insert_pane",
-                ?window_entity,
-                ?parent_tabs_id,
-                ?inner_tabs_id,
-                ?pane_id,
-                pane_kind = "new_tab",
-                "inserted pane into freshly created tab"
-            );
             return Some(pane_id);
         }
 
@@ -1470,14 +1391,6 @@ impl TileState {
                 if let Some(active_child) = tabs.active.or_else(|| tabs.children.first().copied()) {
                     match self.tree.tiles.get(active_child) {
                         Some(Tile::Container(Container::Tabs(_))) => {
-                            info!(
-                                target: "tabs.insert_pane",
-                                ?window_entity,
-                                ?parent_tabs_id,
-                                active_child = ?active_child,
-                                pane = %pane.kind(),
-                                "insert_pane_in_tabs: descending into nested Tabs"
-                            );
                             return self.insert_pane_in_tabs(
                                 pane,
                                 Some(active_child),
@@ -1487,14 +1400,6 @@ impl TileState {
                             );
                         }
                         Some(Tile::Container(Container::Linear(_))) => {
-                            info!(
-                                target: "tabs.insert_pane",
-                                ?window_entity,
-                                ?parent_tabs_id,
-                                active_child = ?active_child,
-                                pane = %pane.kind(),
-                                "insert_pane_in_tabs: append to active Linear"
-                            );
                             let pane_id = self.tree.tiles.insert_new(Tile::Pane(pane));
                             if let Some(Tile::Container(Container::Linear(linear_mut))) =
                                 self.tree.tiles.get_mut(active_child)
@@ -1510,14 +1415,6 @@ impl TileState {
                             return Some(pane_id);
                         }
                         Some(Tile::Pane(_)) => {
-                            info!(
-                                target: "tabs.insert_pane",
-                                ?window_entity,
-                                ?parent_tabs_id,
-                                active_child = ?active_child,
-                                pane = %pane.kind(),
-                                "insert_pane_in_tabs: wrap active pane into Linear with new pane"
-                            );
                             let pane_id = self.tree.tiles.insert_new(Tile::Pane(pane));
                             let mut linear = egui_tiles::Linear::new(
                                 egui_tiles::LinearDir::Vertical,
@@ -1576,39 +1473,10 @@ impl TileState {
 
                 Some(inner_tabs)
             }
-            other => {
-                warn!(
-                    target: "tabs.insert_pane",
-                    ?window_entity,
-                    ?parent_tabs_id,
-                    tile_kind = ?other.map(|t| format!("{t:?}")),
-                    "insert_pane_in_tabs: parent is not Tabs"
-                );
-                None
-            }
+            _ => None,
         }?;
 
-        let inserted = self.insert_tile(Tile::Pane(pane), Some(target_tabs), active);
-        if let Some(tile_id) = inserted {
-            info!(
-                target: "tabs.insert_pane",
-                ?window_entity,
-                ?parent_tabs_id,
-                ?target_tabs,
-                ?tile_id,
-                pane_kind = self
-                    .tree
-                    .tiles
-                    .get(tile_id)
-                    .and_then(|tile| match tile {
-                        Tile::Pane(pane) => Some(pane.kind()),
-                        _ => None,
-                    })
-                    .unwrap_or("Unknown"),
-                "inserted pane into tabs"
-            );
-        }
-        inserted
+        self.insert_tile(Tile::Pane(pane), Some(target_tabs), active)
     }
 }
 
