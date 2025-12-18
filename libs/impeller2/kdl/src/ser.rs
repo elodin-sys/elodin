@@ -453,7 +453,7 @@ fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
     }
 
     match arrow.label_position {
-        LabelPosition::None => {},
+        LabelPosition::None => {}
         LabelPosition::Proportionate(label_position) => {
             node.entries_mut().push(KdlEntry::new_prop(
                 "label_position",

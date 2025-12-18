@@ -799,7 +799,9 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
                             return Err(KdlSchematicError::InvalidValue {
                                 property: "label_position".to_string(),
                                 node: "vector_arrow".to_string(),
-                                expected: format!("a numeric value before the meter marker 'm' but had error: {e}"),
+                                expected: format!(
+                                    "a numeric value before the meter marker 'm' but had error: {e}"
+                                ),
                                 src: src.to_string(),
                                 span: entry.span(),
                             });
@@ -807,17 +809,21 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
                     }
                 } else {
                     match s.parse::<f32>() {
-                        Ok(v) => if v <= 1.0 && v >= 0.0 {
-                            LabelPosition::Proportionate(v)
-                        } else {
-                            return Err(KdlSchematicError::InvalidValue {
-                                property: "label_position".to_string(),
-                                node: "vector_arrow".to_string(),
-                                expected: format!("a numeric value between [0,1] but was {v:.2}"),
-                                src: src.to_string(),
-                                span: entry.span(),
-                            });
-                        },
+                        Ok(v) => {
+                            if v <= 1.0 && v >= 0.0 {
+                                LabelPosition::Proportionate(v)
+                            } else {
+                                return Err(KdlSchematicError::InvalidValue {
+                                    property: "label_position".to_string(),
+                                    node: "vector_arrow".to_string(),
+                                    expected: format!(
+                                        "a numeric value between [0,1] but was {v:.2}"
+                                    ),
+                                    src: src.to_string(),
+                                    span: entry.span(),
+                                });
+                            }
+                        }
                         Err(e) => {
                             return Err(KdlSchematicError::InvalidValue {
                                 property: "label_position".to_string(),
