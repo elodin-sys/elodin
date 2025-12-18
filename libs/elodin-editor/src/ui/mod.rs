@@ -25,7 +25,7 @@ use bevy::{
 use bevy_defer::AccessResult;
 use bevy_defer::{AccessError, AsyncAccess, AsyncCommandsExtension, AsyncPlugin, AsyncWorld};
 use bevy_egui::{
-    EguiContext, EguiContexts,
+    EguiContext, EguiContexts, EguiPreUpdateSet,
     egui::{self, Color32, Label, RichText},
 };
 use egui_tiles::{Container, Tile};
@@ -49,13 +49,15 @@ pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
     height: 80,
 };
 // Order ranges:
-// 0          -> UI/egui (Bevy default)
 // 10..        primary viewports (3D, gizmo/axes…)
 // 100..       primary graphs
 // 1000..      secondary windows (stride by window id)
+// 100,000..   -> Gizmo arrow labels
+// 200,000..   -> UI/egui (on top of everything)
 const PRIMARY_VIEWPORT_ORDER_BASE: isize = 10;
 const PRIMARY_GRAPH_ORDER_BASE: isize = 100;
 const SECONDARY_GRAPH_ORDER_BASE: isize = 1000;
+pub const UI_ORDER_BASE: isize = 200_000;
 const SECONDARY_GRAPH_ORDER_STRIDE: isize = 50;
 const NAV_GIZMO_ORDER_OFFSET: isize = 1;
 const DEFAULT_PRESENT_MODE: PresentMode = PresentMode::Fifo;
@@ -266,13 +268,13 @@ impl Plugin for UiPlugin {
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, shortcuts)
+            .add_systems(PreUpdate, sync_windows.before(EguiPreUpdateSet::BeginPass))
             .add_systems(
                 Update,
                 (
                     handle_window_close,
                     render_layout,
                     sync_camera_grid_cell,
-                    sync_windows,
                     handle_window_relayout_events,
                     set_secondary_camera_viewport,
                     set_camera_viewport,
@@ -542,6 +544,8 @@ fn sync_windows(
             )
         };
 
+        let egui_context = EguiContext::default();
+
         let window_component = Window {
             title,
             resolution,
@@ -557,8 +561,16 @@ fn sync_windows(
 
         let window_entity = commands
             .entity(entity)
-            .insert((window_component, *marker))
+            .insert((window_component, *marker, egui_context, Camera2d))
             .id();
+
+        let camera = Camera {
+            order: UI_ORDER_BASE,
+            target: RenderTarget::Window(WindowRef::Entity(window_entity)),
+            ..Default::default()
+        };
+
+        commands.entity(entity).insert(camera);
 
         if let Some(screen) = state.descriptor.screen.as_ref() {
             commands.send_event(WindowRelayout::Screen {

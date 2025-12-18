@@ -1,4 +1,3 @@
-use bevy_egui::EguiContexts;
 pub mod data;
 pub use data::{
     BufferShardAlloc, CHUNK_COUNT, CHUNK_LEN, CollectedGraphData, Line, PlotDataComponent, XYLine,
@@ -27,11 +26,6 @@ use bevy::{
     ecs::schedule::IntoScheduleConfigs,
 };
 
-fn load_material_icons(mut egui_contexts: EguiContexts) {
-    let ctx = egui_contexts.ctx_mut();
-    egui_material_icons::initialize(ctx);
-}
-
 pub struct PlotPlugin;
 impl Plugin for PlotPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
@@ -39,7 +33,6 @@ impl Plugin for PlotPlugin {
             .init_resource::<LockTracker>()
             .init_resource::<XSyncClock>()
             .add_systems(Startup, setup_pkt_handler)
-            .add_systems(Startup, load_material_icons)
             .add_systems(Update, zoom_graph)
             .add_systems(Update, graph_touch)
             .add_systems(Update, pan_graph)

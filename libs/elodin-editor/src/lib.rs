@@ -14,11 +14,12 @@ use bevy::{
         wireframe::{WireframeConfig, WireframePlugin},
     },
     prelude::*,
-    window::{PresentMode, PrimaryWindow, WindowResolution, WindowTheme},
+    render::camera::RenderTarget,
+    window::{PresentMode, PrimaryWindow, WindowRef, WindowResolution, WindowTheme},
     winit::WinitSettings,
 };
 use bevy_editor_cam::{SyncCameraPosition, controller::component::EditorCam};
-use bevy_egui::{EguiContextSettings, EguiPlugin};
+use bevy_egui::{EguiContext, EguiContextSettings, EguiGlobalSettings, EguiPlugin};
 use bevy_render::alpha::AlphaMode;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use impeller2::types::{ComponentId, OwnedPacket};
@@ -34,7 +35,7 @@ use object_3d::create_object_3d_entity;
 use plugins::gizmos::GizmoPlugin;
 use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc};
 use ui::{
-    SelectedObject,
+    SelectedObject, UI_ORDER_BASE,
     colors::{ColorExt, get_scheme},
     inspector::viewport::set_viewport_pos,
     plot::{CollectedGraphData, gpu::LineHandle},
@@ -56,6 +57,10 @@ const fn default_present_mode() -> PresentMode {
 pub mod run;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[cfg(feature = "inspector")]
+#[derive(Component)]
+struct InspectorWindow;
 
 struct EmbeddedAssetPlugin;
 
@@ -182,9 +187,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
             .add_plugins(big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
             .add_plugins(EmbeddedAssetPlugin)
-            .add_plugins(EguiPlugin {
-                enable_multipass_for_primary_context: false,
-            })
+            .add_plugins(EguiPlugin::default())
             .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
             .add_plugins(NavigationGizmoPlugin)
             .add_plugins(impeller2_bevy::Impeller2Plugin)
@@ -195,6 +198,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(editor_cam_touch::EditorCamTouchPlugin)
             .add_plugins(crate::ui::plot::PlotPlugin)
             .add_plugins(crate::plugins::LogicalKeyPlugin)
+            .add_systems(Startup, setup_egui_global_system)
             .add_systems(Startup, setup_floating_origin)
             .add_systems(Startup, setup_window_icon)
             //.add_systems(Startup, spawn_clear_bg)
@@ -249,7 +253,10 @@ impl Plugin for EditorPlugin {
         app.add_systems(Update, setup_titlebar);
 
         #[cfg(feature = "inspector")]
-        app.add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new());
+        app.add_systems(Startup, setup_egui_inspector);
+
+        #[cfg(feature = "inspector")]
+        app.add_systems(Update, run_egui_inspector);
 
         // For adding features incompatible with wasm:
         embedded_asset!(app, "./assets/diffuse.ktx2");
@@ -262,6 +269,52 @@ impl Plugin for EditorPlugin {
             PositionSync.before(bevy_editor_cam::SyncCameraPosition),
         );
     }
+}
+
+#[cfg(feature = "inspector")]
+fn setup_egui_inspector(mut commands: Commands) {
+    let window = Window {
+        title: "World Inspector".to_string(),
+        resolution: WindowResolution::new(640.0, 480.0),
+        ..Default::default()
+    };
+
+    let window_ent = commands.spawn((window, InspectorWindow));
+    let window_id = window_ent.id();
+
+    let egui_context = EguiContext::default();
+
+    commands.entity(window_id).insert((
+        Camera2d,
+        Camera {
+            target: RenderTarget::Window(WindowRef::Entity(window_id)),
+            ..Default::default()
+        },
+        egui_context,
+    ));
+}
+
+#[cfg(feature = "inspector")]
+fn run_egui_inspector(world: &mut World) {
+    let egui_context = world
+        .query_filtered::<&mut EguiContext, With<InspectorWindow>>()
+        .single(world);
+
+    let Ok(egui_context) = egui_context else {
+        return;
+    };
+    let mut egui_context = egui_context.clone();
+
+    egui::CentralPanel::default().show(egui_context.get_mut(), |ui| {
+        egui::ScrollArea::both().show(ui, |ui| {
+            bevy_inspector_egui::bevy_inspector::ui_for_world(world, ui);
+            ui.allocate_space(ui.available_size());
+        });
+    });
+}
+
+fn setup_egui_global_system(mut egui_global_settings: ResMut<EguiGlobalSettings>) {
+    egui_global_settings.auto_create_primary_context = false;
 }
 
 fn setup_egui_context(mut contexts: Query<&mut EguiContextSettings>) {
@@ -286,8 +339,22 @@ fn setup_floating_origin(mut commands: Commands) {
     ));
 }
 
-fn spawn_ui_cam(mut commands: Commands) {
-    commands.spawn((Camera2d, IsDefaultUiCamera));
+fn spawn_ui_cam(mut commands: Commands, mut query: Query<Entity, With<PrimaryWindow>>) {
+    let primary_window_ent = query
+        .single_mut()
+        .expect("failed to get single primary window");
+
+    let egui_context = EguiContext::default();
+
+    commands.entity(primary_window_ent).insert((
+        Camera2d,
+        Camera {
+            order: UI_ORDER_BASE,
+            target: RenderTarget::Window(WindowRef::Entity(primary_window_ent)),
+            ..Default::default()
+        },
+        egui_context,
+    ));
 }
 
 fn set_clear_color(mut clear_color: ResMut<ClearColor>) {
