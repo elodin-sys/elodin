@@ -729,6 +729,16 @@ impl TileState {
         ));
     }
 
+    pub fn create_hierarchy_tile(&mut self, tile_id: Option<TileId>, new_tab: bool) {
+        self.tree_actions
+            .push(TreeAction::AddHierarchy(tile_id, new_tab));
+    }
+
+    pub fn create_tree_tile(&mut self, tile_id: Option<TileId>, new_tab: bool) {
+        self.tree_actions
+            .push(TreeAction::AddSchematicTree(tile_id, new_tab));
+    }
+
     pub fn debug_dump(&self) -> String {
         fn visit(
             tree: &egui_tiles::Tree<Pane>,

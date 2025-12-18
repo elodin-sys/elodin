@@ -11,6 +11,8 @@ pub enum TreeAction {
     AddActionTile(Option<TileId>, String, String, bool),
     AddVideoStream(Option<TileId>, [u8; 2], String, bool),
     AddDashboard(Option<TileId>, Box<Dashboard>, String, bool),
+    AddHierarchy(Option<TileId>, bool),
+    AddSchematicTree(Option<TileId>, bool),
     AddSidebars,
     DeleteTab(TileId),
     SelectTile(TileId),
@@ -115,6 +117,12 @@ impl<'a, 'w, 's> ActionContext<'a, 'w, 's> {
             }
             TreeAction::AddDashboard(parent_tile_id, dashboard, label, new_tab) => {
                 self.add_dashboard(parent_tile_id, dashboard, label, new_tab)
+            }
+            TreeAction::AddHierarchy(parent_tile_id, new_tab) => {
+                self.add_hierarchy(parent_tile_id, new_tab)
+            }
+            TreeAction::AddSchematicTree(parent_tile_id, new_tab) => {
+                self.add_schematic_tree(parent_tile_id, new_tab)
             }
             TreeAction::SelectTile(tile_id) => self.select_tile(tile_id),
             TreeAction::AddActionTile(parent_tile_id, button_name, lua_code, new_tab) => {
@@ -267,6 +275,34 @@ impl<'a, 'w, 's> ActionContext<'a, 'w, 's> {
             Err(_) => self.commands.spawn(bevy::ui::Node::default()).id(),
         };
         let pane = Pane::Dashboard(DashboardPane { entity, label });
+        if let Some(tile_id) =
+            self.ui_state
+                .insert_pane_in_tabs(pane, parent_tile_id, true, self.window, new_tab)
+        {
+            self.ui_state.tree.make_active(|id, _| id == tile_id);
+        }
+    }
+
+    // Insert a hierarchy pane into tabs.
+    fn add_hierarchy(&mut self, parent_tile_id: Option<TileId>, new_tab: bool) {
+        if let Some(tile_id) = self.ui_state.insert_pane_in_tabs(
+            Pane::Hierarchy,
+            parent_tile_id,
+            true,
+            self.window,
+            new_tab,
+        ) {
+            self.ui_state.tree.make_active(|id, _| id == tile_id);
+        }
+    }
+
+    // Spawn a schematic tree widget and insert it.
+    fn add_schematic_tree(&mut self, parent_tile_id: Option<TileId>, new_tab: bool) {
+        let entity = self
+            .commands
+            .spawn(super::schematic::TreeWidgetState::default())
+            .id();
+        let pane = Pane::SchematicTree(TreePane { entity });
         if let Some(tile_id) =
             self.ui_state
                 .insert_pane_in_tabs(pane, parent_tile_id, true, self.window, new_tab)
