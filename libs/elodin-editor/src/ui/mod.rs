@@ -288,6 +288,7 @@ impl Plugin for UiPlugin {
             .add_systems(Update, tiles::shortcuts)
             .add_systems(Update, query_plot::auto_bounds)
             .add_systems(Update, dashboard::update_nodes)
+            .add_plugins(timeline::plugin)
             .add_plugins(tiles::plugin)
             .add_plugins(SchematicPlugin)
             .add_plugins(LinePlot3dPlugin)
@@ -1708,7 +1709,7 @@ fn warn_camera_order_ambiguities(
             if let Some(prev) = seen.insert(key, entity)
                 && warned.insert(norm)
             {
-                warn!(
+                warn_once!(
                     window = ?norm,
                     order = camera.order,
                     first = ?prev,

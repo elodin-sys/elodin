@@ -2,6 +2,7 @@ use bevy::ecs::{
     system::{Local, Res, SystemParam, SystemState},
     world::World,
 };
+use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 use impeller2_wkt::{SimulationTimeStep, StreamId};
 use timeline_controls::TimelineControls;
@@ -18,6 +19,10 @@ use super::widgets::{WidgetSystem, WidgetSystemExt};
 
 pub mod timeline_controls;
 pub mod timeline_slider;
+
+pub(crate) fn plugin(app: &mut App) {
+    app.add_plugins(timeline_controls::plugin);
+}
 
 #[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug)]
 pub struct StreamTickOrigin {
