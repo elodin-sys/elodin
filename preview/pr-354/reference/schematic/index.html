@@ -503,7 +503,9 @@
 <li><code>name</code>: label text; used for legend/overlay (optional).</li>
 <li><code>show_name</code>: show/hide overlay label (default true).</li>
 <li><code>arrow_thickness</code>: numeric thickness multiplier with 3-decimal precision (default <code>0.1</code>).</li>
-<li><code>label_position</code>: 0.0–1.0 along the arrow (0=base, 1=tip) for label anchor (default 1.0).</li>
+<li><code>label_position</code>: proportionately 0.0–1.0 along the arrow (0=base, 1=tip) for
+label anchor, or absolutely by specifying a number in a string with an 'm'
+suffix, .e.g., "0.3m" for 0.3 meters from origin (default "0.1m").</li>
 </ul>
 <h2 id="schema-at-a-glance">Schema at a glance</h2>
 <p>Legend: parentheses group alternatives; <code>|</code> means “or”; square brackets <code>[...]</code> are optional; curly braces <code>{...}</code> repeat; <code>*</code> is zero-or-more, <code>+</code> is one-or-more; angle brackets <code>&lt;...&gt;</code> mark positional args.</p>
