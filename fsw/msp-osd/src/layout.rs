@@ -123,7 +123,8 @@ fn render_horizon(grid: &mut OsdGrid, roll_deg: f32, pitch_deg: f32, osd_config:
     // pitch_scale is degrees per row (lower = more sensitive)
     // Max offset is half the horizon height to keep horizon visible
     let max_pitch_offset = (horizon_height as f32) / 2.0;
-    let pitch_offset = (-pitch_deg / osd_config.pitch_scale).clamp(-max_pitch_offset, max_pitch_offset);
+    let pitch_offset =
+        (-pitch_deg / osd_config.pitch_scale).clamp(-max_pitch_offset, max_pitch_offset);
 
     // Calculate roll angle based on coordinate frame:
     // - ENU (Elodin): positive roll = left wing up, needs negation for OSD
@@ -155,10 +156,8 @@ fn render_horizon(grid: &mut OsdGrid, roll_deg: f32, pitch_deg: f32, osd_config:
             let rel_row = row as f32 - (center_row as f32 + pitch_offset);
             let d = roll_sin * rel_col - roll_cos * char_aspect_ratio * rel_row;
 
-            let ch = if d < -0.5 {
-                ' ' // Ground (keep it empty to minimize camera occlusion)
-            } else if d > 0.5 {
-                ' ' // Sky
+            let ch = if d.abs() > 0.5 {
+                ' ' // Ground/Sky (keep empty to minimize camera occlusion)
             } else {
                 '-' // Horizon line
             };
