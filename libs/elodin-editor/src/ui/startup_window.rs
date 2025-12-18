@@ -4,7 +4,7 @@ use bevy::{
     render::camera::RenderTarget,
     window::{EnabledButtons, PrimaryWindow, WindowRef, WindowResolution, WindowTheme},
 };
-use bevy_egui::{EguiContext, EguiContexts};
+use bevy_egui::EguiContexts;
 use egui::{Color32, CornerRadius, RichText, Stroke, load::SizedTexture};
 use hifitime::Epoch;
 use impeller2_bevy::{
@@ -20,13 +20,13 @@ use std::{
     sync::Arc,
 };
 
-use crate::{VERSION, dirs, ui::DEFAULT_PRESENT_MODE};
+use crate::{VERSION, create_egui_context, dirs, ui::DEFAULT_PRESENT_MODE};
 
 use super::{
     button::EButton,
     colors::{self, ColorExt, get_scheme},
     images,
-    theme::{self, corner_radius_sm},
+    theme::corner_radius_sm,
     widgets::{RootWidgetSystem, RootWidgetSystemExt},
 };
 
@@ -46,7 +46,7 @@ fn create_startup_window(
             bevy::window::CompositeAlphaMode::Opaque
         };
 
-        let egui_context = EguiContext::default();
+        let egui_context = create_egui_context();
 
         let mut window = commands.spawn((
             Window {
@@ -282,7 +282,6 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
             .contexts
             .add_image(state.images.icon_ip_addr.clone_weak());
 
-        theme::set_theme(ctx);
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
