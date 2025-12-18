@@ -116,22 +116,21 @@ test_steps = [
     group(
         name=":nix: aleph-os",
         steps=[
-            # # Disable temporarily
-            # step(
-            #     label=":nix: toplevel",
-            #     key="toplevel",
-            #     command=["cd aleph", "nix build --accept-flake-config .#toplevel"],
-            #     agents={"queue": "nixos-arm-aws"},
-            # ),
-            # step(
-            #     label=":nix: sdimage",
-            #     key="sdimage",
-            #     command=[
-            #         "cd aleph",
-            #         "nix build --accept-flake-config .#sdimage",
-            #     ],
-            #     agents={"queue": "nixos-arm-aws"},
-            # ),
+            step(
+                label=":nix: toplevel",
+                key="toplevel",
+                command=["cd aleph", "nix build --accept-flake-config .#toplevel"],
+                agents={"queue": "nixos-arm-aws"},
+            ),
+            step(
+                label=":nix: sdimage",
+                key="sdimage",
+                command=[
+                    "cd aleph",
+                    "nix build --accept-flake-config .#sdimage",
+                ],
+                agents={"queue": "nixos-arm-aws"},
+            ),
             step(
                 label=":nix: flash-uefi",
                 key="flash-uefi",
