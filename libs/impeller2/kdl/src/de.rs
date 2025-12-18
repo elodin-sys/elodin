@@ -788,23 +788,63 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
     let thickness = parse_arrow_thickness(node, src)?;
 
     let label_position = match node.entry("label_position") {
-        None => 1.0,
+        None => LabelPosition::None,
         Some(entry) => {
             let value = entry.value();
-            let label_position = if let Some(value) = value.as_float() {
-                value as f32
-            } else if let Some(value) = value.as_integer() {
-                value as f32
+            if let Some(s) = value.as_string() {
+                if s.ends_with("m") {
+                    match s[..s.len() - 1].parse() {
+                        Ok(v) => LabelPosition::Absolute(v),
+                        Err(e) => {
+                            return Err(KdlSchematicError::InvalidValue {
+                                property: "label_position".to_string(),
+                                node: "vector_arrow".to_string(),
+                                expected: format!("a numeric value before the meter marker 'm' but had error: {e}"),
+                                src: src.to_string(),
+                                span: entry.span(),
+                            });
+                        }
+                    }
+                } else {
+                    match s.parse::<f32>() {
+                        Ok(v) => if v <= 1.0 && v >= 0.0 {
+                            LabelPosition::Proportionate(v)
+                        } else {
+                            return Err(KdlSchematicError::InvalidValue {
+                                property: "label_position".to_string(),
+                                node: "vector_arrow".to_string(),
+                                expected: format!("a numeric value between [0,1] but was {v:.2}"),
+                                src: src.to_string(),
+                                span: entry.span(),
+                            });
+                        },
+                        Err(e) => {
+                            return Err(KdlSchematicError::InvalidValue {
+                                property: "label_position".to_string(),
+                                node: "vector_arrow".to_string(),
+                                expected: format!("a numeric value expected but had error: {e}"),
+                                src: src.to_string(),
+                                span: entry.span(),
+                            });
+                        }
+                    }
+                }
             } else {
-                return Err(KdlSchematicError::InvalidValue {
-                    property: "label_position".to_string(),
-                    node: "vector_arrow".to_string(),
-                    expected: "a numeric value between 0.0 and 1.0".to_string(),
-                    src: src.to_string(),
-                    span: entry.span(),
-                });
-            };
-            label_position.clamp(0.0, 1.0)
+                let label_position = if let Some(value) = value.as_float() {
+                    value as f32
+                } else if let Some(value) = value.as_integer() {
+                    value as f32
+                } else {
+                    return Err(KdlSchematicError::InvalidValue {
+                        property: "label_position".to_string(),
+                        node: "vector_arrow".to_string(),
+                        expected: "a numeric value between 0.0 and 1.0".to_string(),
+                        src: src.to_string(),
+                        span: entry.span(),
+                    });
+                };
+                LabelPosition::Proportionate(label_position.clamp(0.0, 1.0))
+            }
         }
     };
 
