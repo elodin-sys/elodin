@@ -20,8 +20,7 @@ use big_space::FloatingOriginSettings;
 use impeller2::types::ComponentId;
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::{
-    BodyAxes, Color as WktColor, ComponentValue as WktComponentValue, VectorArrow3d,
-    LabelPosition,
+    BodyAxes, Color as WktColor, ComponentValue as WktComponentValue, LabelPosition, VectorArrow3d,
 };
 use std::collections::{HashMap, HashSet};
 
