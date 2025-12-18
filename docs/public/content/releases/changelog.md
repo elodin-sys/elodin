@@ -15,6 +15,19 @@ order = 1
 
 ## v0.15
 
+### v0.15.5
+- **(feat)** Hold button to multi step. (#361)
+- **(feat)** Allow absolute positioning of arrow labels. (#362)
+- **(feat)** Reset cameras (command palette). (#349)
+- **(feat)** Emissivity support. (#349)
+- **(feat)** Make arrow thickness configurable as a numeric value. (#341)
+- **(fix)** Persist graph locks. (#349)
+- **(fix)** Prevent unwanted drags on tab titles. (#349)
+- **(chore)** Update bevy_egui to 0.35.1. (#360)
+- **(doc)** Add OrbStack Qt build disk note. (#356)
+- **(doc)** Add pre-release section to release.md documentation. (#359)
+- **(doc)** Add Schematic KDL documentation. (#349)
+
 ### v0.15.4
 - **(feat)** Persist multi-window properties: physical screen, position, dimension. (#302)
 - **(feat)** Support SITL Python module. (#323)
