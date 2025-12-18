@@ -206,17 +206,16 @@ impl WindowState {
 
         if let Some((index, _)) = best {
             self.descriptor.screen = Some(index);
-            if let Some((screen_pos, screen_size)) = best_bounds {
-                if position_is_reliable_linux(position, (screen_pos.x, screen_pos.y)) {
-                    if let Some(rect) = rect_from_bounds(
-                        (position.x, position.y),
-                        (size.x, size.y),
-                        (screen_pos.x, screen_pos.y),
-                        (screen_size.x, screen_size.y),
-                    ) {
-                        self.descriptor.screen_rect = Some(rect);
-                    }
-                }
+            if let Some((screen_pos, screen_size)) = best_bounds
+                && position_is_reliable_linux(position, (screen_pos.x, screen_pos.y))
+                && let Some(rect) = rect_from_bounds(
+                    (position.x, position.y),
+                    (size.x, size.y),
+                    (screen_pos.x, screen_pos.y),
+                    (screen_size.x, screen_size.y),
+                )
+            {
+                self.descriptor.screen_rect = Some(rect);
             }
         }
     }
@@ -576,35 +575,30 @@ impl TileState {
             let is_tabs = matches!(container, Container::Tabs(_));
             container.add_child(tile_id);
 
-            if active {
-                if let Container::Tabs(tabs) = container {
-                    tabs.set_active(tile_id);
-                }
+            if active && let Container::Tabs(tabs) = container {
+                tabs.set_active(tile_id);
             }
-            if is_tabs {
-                if let Some(tile) = self.tree.tiles.get(tile_id) {
-                    let (kind, label) = describe_tile(tile);
-                    info!(
-                        target: "tabs.insert",
-                        ?parent_id,
-                        tile_id = ?tile_id,
-                        kind = %kind,
-                        label = %label.unwrap_or_default(),
-                        tabs_title_hint = tabs_title_hint.unwrap_or(""),
-                        parent_title = %self.container_titles.get(&parent_id).map(String::as_str).unwrap_or(""),
-                        "insert_tile: added child to Tabs"
-                    );
-                }
+            if is_tabs && let Some(tile) = self.tree.tiles.get(tile_id) {
+                let (kind, label) = describe_tile(tile);
+                info!(
+                    target: "tabs.insert",
+                    ?parent_id,
+                    tile_id = ?tile_id,
+                    kind = %kind,
+                    label = %label.unwrap_or_default(),
+                    tabs_title_hint = tabs_title_hint.unwrap_or(""),
+                    parent_title = %self.container_titles.get(&parent_id).map(String::as_str).unwrap_or(""),
+                    "insert_tile: added child to Tabs"
+                );
             }
             is_tabs
         };
 
-        if is_tabs_container {
-            if let Some(title) = tabs_title_hint {
-                if !self.container_titles.contains_key(&parent_id) {
-                    self.set_container_title(parent_id, title);
-                }
-            }
+        if is_tabs_container
+            && let Some(title) = tabs_title_hint
+            && !self.container_titles.contains_key(&parent_id)
+        {
+            self.set_container_title(parent_id, title);
         }
 
         self.update_has_non_sidebar_for(tile_id);
@@ -727,11 +721,6 @@ impl TileState {
             label,
             new_tab,
         ));
-    }
-
-    pub fn create_hierarchy_tile(&mut self, tile_id: Option<TileId>, new_tab: bool) {
-        self.tree_actions
-            .push(TreeAction::AddHierarchy(tile_id, new_tab));
     }
 
     pub fn create_tree_tile(&mut self, tile_id: Option<TileId>, new_tab: bool) {
@@ -882,11 +871,11 @@ impl TileState {
             }
         }
 
-        if let Some(root_id) = self.tree.root() {
-            if let Some(Tile::Container(root)) = self.tree.tiles.get_mut(root_id) {
-                root.retain(|_| false);
-            }
-        };
+        if let Some(root_id) = self.tree.root()
+            && let Some(Tile::Container(root)) = self.tree.tiles.get_mut(root_id)
+        {
+            root.retain(|_| false);
+        }
         self.graphs.clear();
         self.container_titles.clear();
         self.tree_actions.clear();
@@ -1974,28 +1963,27 @@ fn take_ui_frame_state(
 
 // Ensure the center lane of the root linear container is always tabs for consistent UX.
 fn ensure_center_tabs(tree: &mut egui_tiles::Tree<Pane>) {
-    if let Some(root_id) = tree.root() {
-        if let Some(Tile::Container(Container::Linear(linear))) = tree.tiles.get(root_id) {
-            if linear.children.len() == 3 {
-                let center_id = linear.children[1];
-                let is_tabs = matches!(
-                    tree.tiles.get(center_id),
-                    Some(Tile::Container(Container::Tabs(_)))
-                );
-                if !is_tabs {
-                    let center_share = linear.shares[center_id];
-                    let mut tabs = egui_tiles::Tabs::new(vec![center_id]);
-                    tabs.set_active(center_id);
-                    let tabs_id = tree
-                        .tiles
-                        .insert_new(Tile::Container(Container::Tabs(tabs)));
-                    if let Some(Tile::Container(Container::Linear(linear_mut))) =
-                        tree.tiles.get_mut(root_id)
-                    {
-                        linear_mut.children[1] = tabs_id;
-                        linear_mut.shares.set_share(tabs_id, center_share);
-                    }
-                }
+    if let Some(root_id) = tree.root()
+        && let Some(Tile::Container(Container::Linear(linear))) = tree.tiles.get(root_id)
+        && linear.children.len() == 3
+    {
+        let center_id = linear.children[1];
+        let is_tabs = matches!(
+            tree.tiles.get(center_id),
+            Some(Tile::Container(Container::Tabs(_)))
+        );
+        if !is_tabs {
+            let center_share = linear.shares[center_id];
+            let mut tabs = egui_tiles::Tabs::new(vec![center_id]);
+            tabs.set_active(center_id);
+            let tabs_id = tree
+                .tiles
+                .insert_new(Tile::Container(Container::Tabs(tabs)));
+            if let Some(Tile::Container(Container::Linear(linear_mut))) =
+                tree.tiles.get_mut(root_id)
+            {
+                linear_mut.children[1] = tabs_id;
+                linear_mut.shares.set_share(tabs_id, center_share);
             }
         }
     }

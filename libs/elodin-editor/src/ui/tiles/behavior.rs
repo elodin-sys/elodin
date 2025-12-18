@@ -56,20 +56,20 @@ impl<'w> TreeBehavior<'w> {
                     return title;
                 }
                 Container::Linear(linear) => {
-                    if linear.children.len() == 1 {
-                        if let Some(child) = linear.children.first().copied() {
-                            let text = self.tab_title_for_tile(tiles, child).text().to_string();
-                            if Some(id) == self.root_id {
-                                info!(
-                                    target: "tabs.title",
-                                    ?id,
-                                    root = true,
-                                    source = "fallback_linear_single",
-                                    title = %text
-                                );
-                            }
-                            return text;
+                    if linear.children.len() == 1
+                        && let Some(child) = linear.children.first().copied()
+                    {
+                        let text = self.tab_title_for_tile(tiles, child).text().to_string();
+                        if Some(id) == self.root_id {
+                            info!(
+                                target: "tabs.title",
+                                ?id,
+                                root = true,
+                                source = "fallback_linear_single",
+                                title = %text
+                            );
                         }
+                        return text;
                     }
                     // Default fallback label when no explicit title is set.
                     let title = "New tab".to_string();
@@ -249,10 +249,10 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         let (_parent_tabs_id, is_first_child) = tiles
             .iter()
             .find_map(|(id, tile)| {
-                if let Tile::Container(Container::Tabs(tabs)) = tile {
-                    if let Some(idx) = tabs.children.iter().position(|c| *c == tile_id) {
-                        return Some((*id, idx == 0));
-                    }
+                if let Tile::Container(Container::Tabs(tabs)) = tile
+                    && let Some(idx) = tabs.children.iter().position(|c| *c == tile_id)
+                {
+                    return Some((*id, idx == 0));
                 }
                 None
             })

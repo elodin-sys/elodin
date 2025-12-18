@@ -62,6 +62,18 @@ pub fn collect_sidebar_gutter_updates(
         share_updates: Vec<ShareUpdate>,
     }
 
+    #[derive(Clone, Copy)]
+    struct PairInfo {
+        container_id: TileId,
+        parent_rect: egui::Rect,
+        left_id: TileId,
+        left_rect: egui::Rect,
+        left_kind: Option<SidebarKind>,
+        right_id: TileId,
+        right_rect: egui::Rect,
+        right_kind: Option<SidebarKind>,
+    }
+
     impl<'a> GutterCtx<'a> {
         fn sidebar_kind(&self, id: TileId) -> Option<SidebarKind> {
             match self.tree.tiles.get(id) {
@@ -135,33 +147,23 @@ pub fn collect_sidebar_gutter_updates(
             (left_share.max(0.01), right_share.max(0.01))
         }
 
-        fn process_pair(
-            &mut self,
-            container_id: TileId,
-            parent_rect: egui::Rect,
-            left_id: TileId,
-            left_rect: egui::Rect,
-            left_kind: Option<SidebarKind>,
-            right_id: TileId,
-            right_rect: egui::Rect,
-            right_kind: Option<SidebarKind>,
-        ) {
-            let left_sidebar = left_kind.is_some();
-            let right_sidebar = right_kind.is_some();
+        fn process_pair(&mut self, pair: PairInfo) {
+            let left_sidebar = pair.left_kind.is_some();
+            let right_sidebar = pair.right_kind.is_some();
             if left_sidebar == right_sidebar {
                 return;
             }
-            let sidebar_kind = match (left_kind, right_kind) {
+            let sidebar_kind = match (pair.left_kind, pair.right_kind) {
                 (Some(k), _) => k,
                 (_, Some(k)) => k,
                 _ => return,
             };
             let gutter_draw_width = self.gutter_width.max(MIN_SIDEBAR_MASKED_PX);
             let sidebar_on_left = left_sidebar;
-            let pair_width = left_rect.width() + right_rect.width();
-            let (share_left, share_right) = match self.tree.tiles.get(container_id) {
+            let pair_width = pair.left_rect.width() + pair.right_rect.width();
+            let (share_left, share_right) = match self.tree.tiles.get(pair.container_id) {
                 Some(Tile::Container(Container::Linear(linear))) => {
-                    (linear.shares[left_id], linear.shares[right_id])
+                    (linear.shares[pair.left_id], linear.shares[pair.right_id])
                 }
                 _ => return,
             };
@@ -174,7 +176,8 @@ pub fn collect_sidebar_gutter_updates(
             } else {
                 0.0
             };
-            let min_sidebar_px = (parent_rect.width() * MIN_SIDEBAR_FRACTION).max(MIN_SIDEBAR_PX);
+            let min_sidebar_px =
+                (pair.parent_rect.width() * MIN_SIDEBAR_FRACTION).max(MIN_SIDEBAR_PX);
             let min_other_px = MIN_OTHER_PX;
             let min_sidebar_share = if share_per_px > 0.0 {
                 min_sidebar_px * share_per_px
@@ -187,8 +190,8 @@ pub fn collect_sidebar_gutter_updates(
                 pair_sum * MIN_SIDEBAR_FRACTION
             };
 
-            let gap = right_rect.min.x - left_rect.max.x;
-            let mut center_x = (left_rect.max.x + right_rect.min.x) * 0.5;
+            let gap = pair.right_rect.min.x - pair.left_rect.max.x;
+            let mut center_x = (pair.left_rect.max.x + pair.right_rect.min.x) * 0.5;
             if gap < gutter_draw_width {
                 let offset = (gutter_draw_width - gap).max(0.0) * 0.5;
                 if left_sidebar {
@@ -199,11 +202,11 @@ pub fn collect_sidebar_gutter_updates(
             }
             let half = gutter_draw_width * 0.5;
             center_x = center_x
-                .max(parent_rect.left() + half)
-                .min(parent_rect.right() - half);
+                .max(pair.parent_rect.left() + half)
+                .min(pair.parent_rect.right() - half);
             let gutter_rect = egui::Rect::from_min_max(
-                egui::pos2(center_x - half, parent_rect.top()),
-                egui::pos2(center_x + half, parent_rect.bottom()),
+                egui::pos2(center_x - half, pair.parent_rect.top()),
+                egui::pos2(center_x + half, pair.parent_rect.bottom()),
             );
 
             let gutter_color = Color32::from_gray(80);
@@ -213,10 +216,12 @@ pub fn collect_sidebar_gutter_updates(
             self.painter
                 .rect_stroke(gutter_rect, 0.0, stroke, egui::StrokeKind::Inside);
 
-            let id = self
-                .ui
-                .id()
-                .with(("sidebar_gutter", container_id, left_id, right_id));
+            let id = self.ui.id().with((
+                "sidebar_gutter",
+                pair.container_id,
+                pair.left_id,
+                pair.right_id,
+            ));
             #[derive(Clone, Copy, Default)]
             struct DragState {
                 left_width: f32,
@@ -251,7 +256,7 @@ pub fn collect_sidebar_gutter_updates(
 
             if click_inside_gutter {
                 let (left_share, right_share) = if sidebar_masked {
-                    let default_px = (parent_rect.width() * 0.15).max(min_sidebar_px);
+                    let default_px = (pair.parent_rect.width() * 0.15).max(min_sidebar_px);
                     let restore_share = if share_per_px > 0.0 {
                         default_px * share_per_px
                     } else {
@@ -288,7 +293,13 @@ pub fn collect_sidebar_gutter_updates(
                         sidebar_on_left,
                     )
                 };
-                self.apply_shares(container_id, left_id, right_id, left_share, right_share);
+                self.apply_shares(
+                    pair.container_id,
+                    pair.left_id,
+                    pair.right_id,
+                    left_share,
+                    right_share,
+                );
                 self.mask_state.set_masked(sidebar_kind, !sidebar_masked);
                 sidebar_masked = !sidebar_masked;
             }
@@ -305,8 +316,8 @@ pub fn collect_sidebar_gutter_updates(
             if !drag_state.active && pointer_down && response.hovered() {
                 let start_x = pointer_pos.map(|p| p.x).unwrap_or(gutter_rect.center().x);
                 drag_state = DragState {
-                    left_width: left_rect.width(),
-                    right_width: right_rect.width(),
+                    left_width: pair.left_rect.width(),
+                    right_width: pair.right_rect.width(),
                     start_x,
                     active: true,
                 };
@@ -328,10 +339,10 @@ pub fn collect_sidebar_gutter_updates(
                 let new_left = (drag_state.left_width + delta).max(min_left);
                 let new_right = (drag_state.right_width - delta).max(min_right);
                 if let Some(Tile::Container(Container::Linear(linear))) =
-                    self.tree.tiles.get_mut(container_id)
+                    self.tree.tiles.get_mut(pair.container_id)
                 {
-                    let share_left = linear.shares[left_id];
-                    let share_right = linear.shares[right_id];
+                    let share_left = linear.shares[pair.left_id];
+                    let share_right = linear.shares[pair.right_id];
                     let share_sum = share_left + share_right;
                     let current_sidebar_share = if sidebar_on_left {
                         share_left
@@ -344,7 +355,13 @@ pub fn collect_sidebar_gutter_updates(
                     let new_right_share = share_sum - new_left_share;
                     let left_clamped = new_left_share.max(0.01);
                     let right_clamped = new_right_share.max(0.01);
-                    self.apply_shares(container_id, left_id, right_id, left_clamped, right_clamped);
+                    self.apply_shares(
+                        pair.container_id,
+                        pair.left_id,
+                        pair.right_id,
+                        left_clamped,
+                        right_clamped,
+                    );
 
                     let new_sidebar_share = if sidebar_on_left {
                         new_left_share
@@ -407,7 +424,7 @@ pub fn collect_sidebar_gutter_updates(
             for pair in child_data.windows(2) {
                 let (left_id, left_rect, left_kind) = pair[0];
                 let (right_id, right_rect, right_kind) = pair[1];
-                self.process_pair(
+                self.process_pair(PairInfo {
                     container_id,
                     parent_rect,
                     left_id,
@@ -416,7 +433,7 @@ pub fn collect_sidebar_gutter_updates(
                     right_id,
                     right_rect,
                     right_kind,
-                );
+                });
             }
         }
 

@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui::{query_plot, video_stream};
+use crate::ui::{query_plot, schematic::TreeWidgetState, video_stream};
 
 #[derive(Clone)]
 pub enum TreeAction {
@@ -11,7 +11,6 @@ pub enum TreeAction {
     AddActionTile(Option<TileId>, String, String, bool),
     AddVideoStream(Option<TileId>, [u8; 2], String, bool),
     AddDashboard(Option<TileId>, Box<Dashboard>, String, bool),
-    AddHierarchy(Option<TileId>, bool),
     AddSchematicTree(Option<TileId>, bool),
     AddSidebars,
     DeleteTab(TileId),
@@ -117,9 +116,6 @@ impl<'a, 'w, 's> ActionContext<'a, 'w, 's> {
             }
             TreeAction::AddDashboard(parent_tile_id, dashboard, label, new_tab) => {
                 self.add_dashboard(parent_tile_id, dashboard, label, new_tab)
-            }
-            TreeAction::AddHierarchy(parent_tile_id, new_tab) => {
-                self.add_hierarchy(parent_tile_id, new_tab)
             }
             TreeAction::AddSchematicTree(parent_tile_id, new_tab) => {
                 self.add_schematic_tree(parent_tile_id, new_tab)
@@ -283,25 +279,9 @@ impl<'a, 'w, 's> ActionContext<'a, 'w, 's> {
         }
     }
 
-    // Insert a hierarchy pane into tabs.
-    fn add_hierarchy(&mut self, parent_tile_id: Option<TileId>, new_tab: bool) {
-        if let Some(tile_id) = self.ui_state.insert_pane_in_tabs(
-            Pane::Hierarchy,
-            parent_tile_id,
-            true,
-            self.window,
-            new_tab,
-        ) {
-            self.ui_state.tree.make_active(|id, _| id == tile_id);
-        }
-    }
-
     // Spawn a schematic tree widget and insert it.
     fn add_schematic_tree(&mut self, parent_tile_id: Option<TileId>, new_tab: bool) {
-        let entity = self
-            .commands
-            .spawn(super::schematic::TreeWidgetState::default())
-            .id();
+        let entity = self.commands.spawn(TreeWidgetState::default()).id();
         let pane = Pane::SchematicTree(TreePane { entity });
         if let Some(tile_id) =
             self.ui_state
@@ -435,10 +415,10 @@ impl<'a, 'w, 's> ActionContext<'a, 'w, 's> {
                     match container {
                         Container::Tabs(tabs) => {
                             tabs.children.retain(|child| !sidebar_ids.contains(child));
-                            if let Some(active) = tabs.active {
-                                if !tabs.children.contains(&active) {
-                                    tabs.active = tabs.children.first().copied();
-                                }
+                            if let Some(active) = tabs.active
+                                && !tabs.children.contains(&active)
+                            {
+                                tabs.active = tabs.children.first().copied();
                             }
                         }
                         Container::Linear(linear) => {
@@ -509,14 +489,12 @@ impl<'a, 'w, 's> ActionContext<'a, 'w, 's> {
                 .tree
                 .tiles
                 .insert_new(Tile::Container(Container::Tabs(tabs)));
-            if let Some(wrapped_id) = self.ui_state.tree.root() {
-                if let Some(Tile::Container(Container::Linear(linear))) =
+            if let Some(wrapped_id) = self.ui_state.tree.root()
+                && let Some(Tile::Container(Container::Linear(linear))) =
                     self.ui_state.tree.tiles.get(wrapped_id)
-                {
-                    if linear.children.len() == 3 {
-                        self.ui_state.clear_container_title(main_content);
-                    }
-                }
+                && linear.children.len() == 3
+            {
+                self.ui_state.clear_container_title(main_content);
             }
         }
 
@@ -571,10 +549,10 @@ impl<'a, 'w, 's> ActionContext<'a, 'w, 's> {
                 }
                 Pane::Graph(graph) => {
                     graph.label = title.clone();
-                    if let Some(graph_entity) = self.ui_state.graphs.get(&tile_id) {
-                        if let Ok(mut state) = self.graphs.get_mut(*graph_entity) {
-                            state.label = title.clone();
-                        }
+                    if let Some(graph_entity) = self.ui_state.graphs.get(&tile_id)
+                        && let Ok(mut state) = self.graphs.get_mut(*graph_entity)
+                    {
+                        state.label = title.clone();
                     }
                     self.ui_state.clear_container_title(tile_id);
                 }
@@ -709,9 +687,9 @@ pub(super) fn unmask_sidebar_by_kind(ui_state: &mut TileState, kind: SidebarKind
             _ => None,
         });
 
-    if let Some(tile_id) = target {
-        if ui_state.tree.tiles.is_visible(tile_id) {
-            unmask_sidebar_on_select(ui_state, tile_id, kind);
-        }
+    if let Some(tile_id) = target
+        && ui_state.tree.tiles.is_visible(tile_id)
+    {
+        unmask_sidebar_on_select(ui_state, tile_id, kind);
     }
 }

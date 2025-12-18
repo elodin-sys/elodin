@@ -20,6 +20,7 @@ order = 7
 - `Query Table` / `Query Plot`: inserts the corresponding query tile.
 - `Action`: inserts an action tile (prompts for label and Lua payload).
 - `Video Stream`: inserts a video stream tile (prompts for message name).
+- `Schematic Tree`: inserts a schematic tree tile (shows the current schematic; empty if none loaded).
 - `Dashboard`: inserts a dashboard tile (empty layout).
 
 ### Viewport & render toggles
@@ -27,7 +28,7 @@ order = 7
 - `Toggle HDR`
 - `Toggle Grid`
 - `Reset Cameras`: reset all or a selected viewport camera to defaults.
-- `Toggle Body Axes`: currently disabled (placeholder prompt).
+- `Toggle Body Axes`: temporarily disabled during refactor (placeholder prompt).
 
 ## Simulation / time
 - `Toggle Recording`

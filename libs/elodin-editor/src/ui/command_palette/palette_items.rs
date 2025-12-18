@@ -688,20 +688,6 @@ pub fn create_query_plot(tile_id: Option<TileId>, new_tab: bool) -> PaletteItem 
     )
 }
 
-pub fn create_hierarchy(tile_id: Option<TileId>, new_tab: bool) -> PaletteItem {
-    PaletteItem::new(
-        "Create Hierarchy",
-        TILES_LABEL,
-        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
-            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
-                return PaletteEvent::Error("Secondary window unavailable".to_string());
-            };
-            tile_state.create_hierarchy_tile(tile_id, new_tab);
-            PaletteEvent::Exit
-        },
-    )
-}
-
 pub fn create_schematic_tree(tile_id: Option<TileId>, new_tab: bool) -> PaletteItem {
     PaletteItem::new(
         "Create Schematic Tree",
@@ -1627,7 +1613,6 @@ pub fn create_tiles(tile_id: TileId, new_tab: bool) -> PalettePage {
         create_query_table(Some(tile_id), new_tab),
         create_query_plot(Some(tile_id), new_tab),
         create_video_stream(Some(tile_id), new_tab),
-        create_hierarchy(Some(tile_id), new_tab),
         create_schematic_tree(Some(tile_id), new_tab),
         create_dashboard(Some(tile_id), new_tab),
     ])
@@ -1699,8 +1684,7 @@ impl Default for PalettePage {
             create_query_table(None, false),
             create_query_plot(None, false),
             create_video_stream(None, false),
-            create_hierarchy(None, false),
-            create_schematic_tree(None, false),
+            create_schematic_tree(None, true),
             create_dashboard(None, true),
             create_3d_object(),
             save_db_native(),
