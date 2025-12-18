@@ -197,6 +197,15 @@ pub struct EntityPair {
     pub impeller: ComponentId,
 }
 
+pub fn create_egui_context() -> EguiContext {
+    let mut bevy_egui_ctx = EguiContext::default();
+    let egui_ctx = bevy_egui_ctx.get_mut();
+
+    theme::set_theme(egui_ctx);
+
+    bevy_egui_ctx
+}
+
 pub fn shortcuts(
     mut paused: ResMut<Paused>,
     command_palette_state: Res<CommandPaletteState>,
@@ -357,8 +366,6 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         _args: Self::Args,
     ) {
         let _state = state.get_mut(world);
-
-        theme::set_theme(ctx);
 
         #[cfg(not(target_family = "wasm"))]
         world.add_root_widget::<status_bar::StatusBar>("status_bar");
@@ -545,7 +552,7 @@ fn sync_windows(
             )
         };
 
-        let egui_context = EguiContext::default();
+        let egui_context = create_egui_context();
 
         let window_component = Window {
             title,

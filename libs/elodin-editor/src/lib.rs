@@ -37,6 +37,7 @@ use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc};
 use ui::{
     SelectedObject, UI_ORDER_BASE,
     colors::{ColorExt, get_scheme},
+    create_egui_context,
     inspector::viewport::set_viewport_pos,
     plot::{CollectedGraphData, gpu::LineHandle},
     tiles,
@@ -282,7 +283,7 @@ fn setup_egui_inspector(mut commands: Commands) {
     let window_ent = commands.spawn((window, InspectorWindow));
     let window_id = window_ent.id();
 
-    let egui_context = EguiContext::default();
+    let egui_context = create_egui_context();
 
     commands.entity(window_id).insert((
         Camera2d,
@@ -344,7 +345,7 @@ fn spawn_ui_cam(mut commands: Commands, mut query: Query<Entity, With<PrimaryWin
         .single_mut()
         .expect("failed to get single primary window");
 
-    let egui_context = EguiContext::default();
+    let egui_context = create_egui_context();
 
     commands.entity(primary_window_ent).insert((
         Camera2d,
