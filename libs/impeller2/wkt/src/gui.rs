@@ -345,7 +345,6 @@ pub enum LabelPosition {
     Absolute(f32),
 }
 
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct ArrowThickness(pub f32);
