@@ -1310,6 +1310,31 @@ pub fn set_color_scheme() -> PaletteItem {
     })
 }
 
+pub fn set_ui_theme() -> PaletteItem {
+    PaletteItem::new("Set Theme", PRESETS_LABEL, |_: In<String>| {
+        let themes = [
+            ("Dark", "dark", &colors::DARK),
+            ("Light", "light", &colors::LIGHT),
+        ];
+        let mut items = vec![];
+        for (label, mode, scheme) in themes {
+            let mode = mode.to_string();
+            items.push(PaletteItem::new(
+                label,
+                "",
+                move |_: In<String>, mut windows_state: Query<&mut tiles::WindowState>| {
+                    colors::set_schema(scheme);
+                    for mut state in &mut windows_state {
+                        state.descriptor.mode = Some(mode.clone());
+                    }
+                    PaletteEvent::Exit
+                },
+            ));
+        }
+        PalettePage::new(items).into()
+    })
+}
+
 fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> PaletteEvent {
     PalettePage::new(vec![
         PaletteItem::new(
@@ -1679,6 +1704,7 @@ impl Default for PalettePage {
             save_schematic_db(),
             load_schematic(),
             clear_schematic(),
+            set_ui_theme(),
             set_color_scheme(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {
                 let _ = opener::open("https://docs.elodin.systems");
