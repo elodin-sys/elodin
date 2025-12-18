@@ -288,6 +288,7 @@ impl Plugin for UiPlugin {
             .add_systems(Update, tiles::shortcuts)
             .add_systems(Update, query_plot::auto_bounds)
             .add_systems(Update, dashboard::update_nodes)
+            .add_plugins(timeline::plugin)
             .add_plugins(tiles::plugin)
             .add_plugins(SchematicPlugin)
             .add_plugins(LinePlot3dPlugin)
