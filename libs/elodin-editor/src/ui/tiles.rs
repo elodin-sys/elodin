@@ -745,19 +745,8 @@ impl TileState {
                         }
                     }
                     Tile::Pane(pane) => {
-                        let (kind, label): (&str, &str) = match pane {
-                            Pane::Viewport(viewport) => ("Viewport", viewport.label.as_str()),
-                            Pane::Graph(graph) => ("Graph", graph.label.as_str()),
-                            Pane::Monitor(monitor) => ("Monitor", monitor.label.as_str()),
-                            Pane::QueryTable(_) => ("QueryTable", "QueryTable"),
-                            Pane::QueryPlot(_) => ("QueryPlot", "QueryPlot"),
-                            Pane::ActionTile(action) => ("Action", action.label.as_str()),
-                            Pane::VideoStream(video) => ("VideoStream", video.label.as_str()),
-                            Pane::Dashboard(dashboard) => ("Dashboard", dashboard.label.as_str()),
-                            Pane::Hierarchy => ("Hierarchy", "Hierarchy"),
-                            Pane::Inspector => ("Inspector", "Inspector"),
-                            Pane::SchematicTree(_) => ("SchematicTree", "SchematicTree"),
-                        };
+                        let kind = pane.display_kind();
+                        let label = pane.label().unwrap_or(kind);
                         let _ = writeln!(out, "{}Pane::{} ({})", indent, kind, label);
                     }
                 }
@@ -920,6 +909,45 @@ impl TileState {
 }
 
 impl Pane {
+    fn kind(&self) -> &'static str {
+        match self {
+            Pane::Viewport(_) => "Viewport",
+            Pane::Graph(_) => "Graph",
+            Pane::Monitor(_) => "Monitor",
+            Pane::QueryTable(_) => "QueryTable",
+            Pane::QueryPlot(_) => "QueryPlot",
+            Pane::ActionTile(_) => "ActionTile",
+            Pane::VideoStream(_) => "VideoStream",
+            Pane::Dashboard(_) => "Dashboard",
+            Pane::Hierarchy => "Hierarchy",
+            Pane::Inspector => "Inspector",
+            Pane::SchematicTree(_) => "SchematicTree",
+        }
+    }
+
+    fn display_kind(&self) -> &'static str {
+        match self {
+            Pane::ActionTile(_) => "Action",
+            _ => self.kind(),
+        }
+    }
+
+    fn label(&self) -> Option<&str> {
+        match self {
+            Pane::Viewport(viewport) => Some(viewport.label.as_str()),
+            Pane::Graph(graph) => Some(graph.label.as_str()),
+            Pane::Monitor(monitor) => Some(monitor.label.as_str()),
+            Pane::ActionTile(action) => Some(action.label.as_str()),
+            Pane::VideoStream(video_stream) => Some(video_stream.label.as_str()),
+            Pane::Dashboard(dashboard) => Some(dashboard.label.as_str()),
+            Pane::QueryTable(_)
+            | Pane::QueryPlot(_)
+            | Pane::Hierarchy
+            | Pane::Inspector
+            | Pane::SchematicTree(_) => None,
+        }
+    }
+
     fn fallback_label(label: &str, default: &str) -> String {
         let trimmed = label.trim();
         if trimmed.is_empty() {
@@ -1447,19 +1475,7 @@ impl TileState {
                                 ?window_entity,
                                 ?parent_tabs_id,
                                 active_child = ?active_child,
-                                pane = %match pane {
-                                    Pane::Viewport(_) => "Viewport",
-                                    Pane::Graph(_) => "Graph",
-                                    Pane::Monitor(_) => "Monitor",
-                                    Pane::QueryTable(_) => "QueryTable",
-                                    Pane::QueryPlot(_) => "QueryPlot",
-                                    Pane::ActionTile(_) => "ActionTile",
-                                    Pane::VideoStream(_) => "VideoStream",
-                                    Pane::Dashboard(_) => "Dashboard",
-                                    Pane::Hierarchy => "Hierarchy",
-                                    Pane::Inspector => "Inspector",
-                                    Pane::SchematicTree(_) => "SchematicTree",
-                                },
+                                pane = %pane.kind(),
                                 "insert_pane_in_tabs: descending into nested Tabs"
                             );
                             return self.insert_pane_in_tabs(
@@ -1476,19 +1492,7 @@ impl TileState {
                                 ?window_entity,
                                 ?parent_tabs_id,
                                 active_child = ?active_child,
-                                pane = %match pane {
-                                    Pane::Viewport(_) => "Viewport",
-                                    Pane::Graph(_) => "Graph",
-                                    Pane::Monitor(_) => "Monitor",
-                                    Pane::QueryTable(_) => "QueryTable",
-                                    Pane::QueryPlot(_) => "QueryPlot",
-                                    Pane::ActionTile(_) => "ActionTile",
-                                    Pane::VideoStream(_) => "VideoStream",
-                                    Pane::Dashboard(_) => "Dashboard",
-                                    Pane::Hierarchy => "Hierarchy",
-                                    Pane::Inspector => "Inspector",
-                                    Pane::SchematicTree(_) => "SchematicTree",
-                                },
+                                pane = %pane.kind(),
                                 "insert_pane_in_tabs: append to active Linear"
                             );
                             let pane_id = self.tree.tiles.insert_new(Tile::Pane(pane));
@@ -1511,19 +1515,7 @@ impl TileState {
                                 ?window_entity,
                                 ?parent_tabs_id,
                                 active_child = ?active_child,
-                                pane = %match pane {
-                                    Pane::Viewport(_) => "Viewport",
-                                    Pane::Graph(_) => "Graph",
-                                    Pane::Monitor(_) => "Monitor",
-                                    Pane::QueryTable(_) => "QueryTable",
-                                    Pane::QueryPlot(_) => "QueryPlot",
-                                    Pane::ActionTile(_) => "ActionTile",
-                                    Pane::VideoStream(_) => "VideoStream",
-                                    Pane::Dashboard(_) => "Dashboard",
-                                    Pane::Hierarchy => "Hierarchy",
-                                    Pane::Inspector => "Inspector",
-                                    Pane::SchematicTree(_) => "SchematicTree",
-                                },
+                                pane = %pane.kind(),
                                 "insert_pane_in_tabs: wrap active pane into Linear with new pane"
                             );
                             let pane_id = self.tree.tiles.insert_new(Tile::Pane(pane));
@@ -1604,22 +1596,15 @@ impl TileState {
                 ?parent_tabs_id,
                 ?target_tabs,
                 ?tile_id,
-                pane_kind = match self.tree.tiles.get(tile_id) {
-                    Some(Tile::Pane(p)) => match p {
-                        Pane::Viewport(_) => "Viewport",
-                        Pane::Graph(_) => "Graph",
-                        Pane::Monitor(_) => "Monitor",
-                        Pane::QueryTable(_) => "QueryTable",
-                        Pane::QueryPlot(_) => "QueryPlot",
-                        Pane::ActionTile(_) => "ActionTile",
-                        Pane::VideoStream(_) => "VideoStream",
-                        Pane::Dashboard(_) => "Dashboard",
-                        Pane::Hierarchy => "Hierarchy",
-                        Pane::Inspector => "Inspector",
-                        Pane::SchematicTree(_) => "SchematicTree",
-                    },
-                    _ => "Unknown",
-                },
+                pane_kind = self
+                    .tree
+                    .tiles
+                    .get(tile_id)
+                    .and_then(|tile| match tile {
+                        Tile::Pane(pane) => Some(pane.kind()),
+                        _ => None,
+                    })
+                    .unwrap_or("Unknown"),
                 "inserted pane into tabs"
             );
         }

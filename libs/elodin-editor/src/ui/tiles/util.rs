@@ -24,22 +24,10 @@ pub fn is_content_tile(tile: &Tile<Pane>) -> bool {
 
 pub fn describe_tile(tile: &Tile<Pane>) -> (String, Option<String>) {
     match tile {
-        Tile::Pane(pane) => {
-            let (kind, label) = match pane {
-                Pane::Viewport(p) => ("Viewport", Some(p.label.clone())),
-                Pane::Graph(p) => ("Graph", Some(p.label.clone())),
-                Pane::Monitor(p) => ("Monitor", Some(p.label.clone())),
-                Pane::QueryTable(_) => ("QueryTable", None),
-                Pane::QueryPlot(_) => ("QueryPlot", None),
-                Pane::ActionTile(p) => ("ActionTile", Some(p.label.clone())),
-                Pane::VideoStream(p) => ("VideoStream", Some(p.label.clone())),
-                Pane::Dashboard(p) => ("Dashboard", Some(p.label.clone())),
-                Pane::Hierarchy => ("Hierarchy", None),
-                Pane::Inspector => ("Inspector", None),
-                Pane::SchematicTree(_) => ("SchematicTree", None),
-            };
-            (kind.to_string(), label)
-        }
+        Tile::Pane(pane) => (
+            pane.kind().to_string(),
+            pane.label().map(|label| label.to_string()),
+        ),
         Tile::Container(container) => {
             let label = match container {
                 Container::Tabs(_) => "Tabs",
