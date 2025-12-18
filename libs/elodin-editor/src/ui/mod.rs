@@ -1709,7 +1709,7 @@ fn warn_camera_order_ambiguities(
             if let Some(prev) = seen.insert(key, entity)
                 && warned.insert(norm)
             {
-                warn!(
+                warn_once!(
                     window = ?norm,
                     order = camera.order,
                     first = ?prev,
