@@ -85,6 +85,7 @@ impl WidgetSystem for TimelineControls<'_> {
         let tick_step_micros = i64::try_from(tick_step_micros_i128).unwrap_or(0);
         ui.set_height(50.0);
         let typical_mouse_click = Duration::from_millis(85);
+        let wait_before_advancing = typical_mouse_click * 2;
 
         egui::Frame::NONE
             .inner_margin(egui::Margin::symmetric(8, 8))
@@ -121,7 +122,7 @@ impl WidgetSystem for TimelineControls<'_> {
                                     Instant::now()
                                 });
 
-                                if first || down.elapsed() > typical_mouse_click {
+                                if first || down.elapsed() > wait_before_advancing {
                                     tick.0.0 -= tick_step_micros;
                                     tick_changed = true;
                                     if tick.0 <= earliest_timestamp.0 {
@@ -163,7 +164,7 @@ impl WidgetSystem for TimelineControls<'_> {
                                     Instant::now()
                                 });
 
-                                if first || down.elapsed() > typical_mouse_click {
+                                if first || down.elapsed() > wait_before_advancing {
                                     tick.0.0 += tick_step_micros;
 
                                     tick_changed = true;
