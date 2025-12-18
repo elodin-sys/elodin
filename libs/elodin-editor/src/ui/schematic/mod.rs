@@ -326,6 +326,11 @@ pub fn tiles_to_schematic(
     }
 
     schematic.elems.extend(window_elems);
+    if let Ok((state, _)) = param.windows_state.get(*param.primary_window)
+        && let Some(mode) = state.descriptor.mode.clone()
+    {
+        schematic.theme = Some(impeller2_wkt::ThemeConfig { mode: Some(mode) });
+    }
 }
 
 pub struct SchematicPlugin;

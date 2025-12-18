@@ -18,6 +18,11 @@ order = 6
 - EQL: expressions are evaluated in the runtime EQL context. Vector-like fields expect 3 components; `world_pos` is a 7-component array (quat + position).
 - Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `red`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional. Colors can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
 
+### theme
+- Optional top-level node that sets the session UI appearance. Supported `mode` values: `"dark"` (default fallback) or `"light"`.
+- Applies to all windows in the session; a secondary schematic can override by declaring its own `theme` node.
+- Controls both egui styling (Light vs Dark palette) and the OS window decoration theme.
+
 ### window
 - `path`/`file`/`name`: optional secondary schematic file. Relative paths resolve against the parent schematic directory (or CWD). If absent, the entry configures the primary window instead of loading a secondary file.
 - `title`/`display`: optional window title.
@@ -76,12 +81,16 @@ Legend: parentheses group alternatives; `|` means “or”; square brackets `[..
 
 ```kdl
 schematic =
-  ( window
+  ( theme
+  | window
   | panel
   | object_3d
   | line_3d
   | vector_arrow
   )*
+
+theme = "theme"
+      [mode=dark|light]
 
 window = "window"
        [path|file|name=string]
@@ -194,6 +203,8 @@ color = "color"
 Minimal viewport + graph:
 
 ```kdl
+theme mode="light"
+
 viewport name="Main"
          fov=45.0
          active=#true

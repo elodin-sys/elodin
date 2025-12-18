@@ -123,6 +123,7 @@ pub struct WindowDescriptor {
     pub path: Option<PathBuf>,
     pub title: Option<String>,
     pub screen: Option<usize>,
+    pub mode: Option<String>,
     pub screen_rect: Option<WindowRect>,
 }
 
@@ -412,6 +413,7 @@ pub fn create_secondary_window(title: Option<String>) -> (WindowState, WindowId)
         path: Some(PathBuf::from(path)),
         title: cleaned_title.or_else(|| Some(format!("Window {}", id.0 + 1))),
         screen: None,
+        mode: None,
         screen_rect: None,
     };
     let tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));

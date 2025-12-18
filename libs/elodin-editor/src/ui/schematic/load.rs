@@ -110,9 +110,18 @@ pub fn sync_schematic(
     }
 }
 
+fn apply_theme_mode(theme_mode: Option<&str>) {
+    match theme_mode.map(|m| m.to_ascii_lowercase()) {
+        Some(mode) if mode == "light" => colors::set_schema(&colors::LIGHT),
+        Some(mode) if mode == "dark" => colors::set_schema(&colors::DARK),
+        _ => {}
+    }
+}
+
 fn resolve_window_descriptor(
     window: &WindowSchematic,
     base_dir: Option<&Path>,
+    theme_mode: Option<&str>,
 ) -> Option<WindowDescriptor> {
     let path_str = window.path.as_ref()?;
     let mut resolved = PathBuf::from(path_str);
@@ -129,6 +138,7 @@ fn resolve_window_descriptor(
         path: Some(resolved),
         title: window.title.clone(),
         screen: window.screen.map(|idx| idx as usize),
+        mode: theme_mode.map(|m| m.to_string()),
         screen_rect: window.screen_rect.or(Some(DEFAULT_SECONDARY_RECT)),
     })
 }
@@ -234,6 +244,8 @@ impl LoadSchematicParams<'_, '_> {
             self.commands.entity(entity).despawn();
         }
         let mut secondary_descriptors: Vec<WindowDescriptor> = Vec::new();
+        let theme_mode = schematic.theme.as_ref().and_then(|t| t.mode.as_deref());
+        apply_theme_mode(theme_mode);
         let mut main_window_descriptor = None;
 
         for elem in &schematic.elems {
@@ -251,7 +263,9 @@ impl LoadSchematicParams<'_, '_> {
                     self.spawn_vector_arrow(vector_arrow.clone(), None);
                 }
                 impeller2_wkt::SchematicElem::Window(window) => {
-                    if let Some(descriptor) = resolve_window_descriptor(window, base_dir) {
+                    if let Some(descriptor) =
+                        resolve_window_descriptor(window, base_dir, theme_mode)
+                    {
                         secondary_descriptors.push(descriptor);
                     } else {
                         main_window_descriptor = Some(WindowDescriptor {
@@ -261,6 +275,7 @@ impl LoadSchematicParams<'_, '_> {
                         });
                     }
                 }
+                impeller2_wkt::SchematicElem::Theme(_) => {}
             }
         }
 
@@ -319,11 +334,22 @@ impl LoadSchematicParams<'_, '_> {
             }
         }
 
+        if let Some(mode) = theme_mode {
+            for (_entity, _window_id, mut window_state) in self.window_states.iter_mut() {
+                window_state.descriptor.mode = Some(mode.to_string());
+            }
+        }
+
         for descriptor in secondary_descriptors {
             if let Some(path) = descriptor.path.as_ref() {
                 match std::fs::read_to_string(path) {
                     Ok(kdl) => match impeller2_wkt::Schematic::from_kdl(&kdl) {
                         Ok(sec_schematic) => {
+                            let theme_mode = sec_schematic
+                                .theme
+                                .as_ref()
+                                .and_then(|t| t.mode.as_deref())
+                                .or(theme_mode);
                             let id = WindowId::default();
                             let mut tile_state =
                                 TileState::new(Id::new(("secondary_tab_tree", id.0)));
@@ -339,6 +365,10 @@ impl LoadSchematicParams<'_, '_> {
                             }
 
                             let graph_entities = tile_state.collect_graph_entities();
+                            let descriptor = WindowDescriptor {
+                                mode: theme_mode.map(|m| m.to_string()),
+                                ..descriptor
+                            };
                             info!(
                                 path = ?descriptor.path,
                                 "Loaded secondary schematic"

@@ -10,9 +10,9 @@ use bevy_defer::AsyncCommandsExtension;
 use egui_tiles::Tile;
 
 use crate::ui::{
-    UI_ORDER_BASE, create_egui_context,
+    UI_ORDER_BASE, base_window, create_egui_context,
     tiles::{WindowId, WindowRelayout, WindowState},
-    window_defaults::base_window,
+    window_theme_for_mode,
 };
 
 use super::placement::{apply_physical_screen_rect, collect_sorted_screens};
@@ -22,7 +22,7 @@ struct Camera2d;
 
 pub fn sync_windows(
     mut commands: Commands,
-    mut windows_state: Query<(Entity, &WindowId, &mut WindowState, Option<&Window>)>,
+    mut windows_state: Query<(Entity, &WindowId, &mut WindowState, Option<&mut Window>)>,
     mut cameras: Query<&mut Camera>,
     winit_windows: NonSend<bevy::winit::WinitWindows>,
     mut existing_map: Local<HashMap<WindowId, Entity>>,
@@ -39,7 +39,8 @@ pub fn sync_windows(
     for (entity, marker, mut state, window_maybe) in &mut windows_state {
         state.graph_entities = state.tile_state.collect_graph_entities();
 
-        if window_maybe.is_some() {
+        if let Some(mut window) = window_maybe {
+            window.window_theme = window_theme_for_mode(state.descriptor.mode.as_deref());
             existing_map.insert(*marker, entity);
             let window_ref = WindowRef::Entity(entity);
             for (index, &graph) in state.graph_entities.iter().enumerate() {
@@ -103,6 +104,7 @@ pub fn sync_windows(
                 minimize: true,
                 maximize: true,
             },
+            window_theme: window_theme_for_mode(state.descriptor.mode.as_deref()),
             ..base_window()
         };
 

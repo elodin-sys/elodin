@@ -20,7 +20,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{VERSION, create_egui_context, dirs, ui::window_defaults};
+use crate::{VERSION, create_egui_context, dirs, ui::base_window};
 
 use super::{
     button::EButton,
@@ -57,7 +57,7 @@ fn create_startup_window(
                     maximize: false,
                     close: true,
                 },
-                ..window_defaults::base_window()
+                ..base_window()
             },
             StartupWindow,
             egui_context,

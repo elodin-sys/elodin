@@ -14,6 +14,8 @@ use strum::{EnumString, IntoStaticStr, VariantNames};
 #[cfg_attr(feature = "bevy", type_path = "impeller2::wkt::gui::Schematic")]
 pub struct Schematic<T = ()> {
     pub elems: Vec<SchematicElem<T>>,
+    #[serde(default)]
+    pub theme: Option<ThemeConfig>,
 }
 
 #[cfg(feature = "bevy")]
@@ -28,6 +30,7 @@ impl<T> Default for Schematic<T> {
     fn default() -> Self {
         Self {
             elems: Default::default(),
+            theme: None,
         }
     }
 }
@@ -40,6 +43,7 @@ pub enum SchematicElem<T = ()> {
     Line3d(Line3d<T>),
     VectorArrow(VectorArrow3d<T>),
     Window(WindowSchematic),
+    Theme(ThemeConfig),
 }
 
 impl<T> SchematicElem<T> {
@@ -50,6 +54,7 @@ impl<T> SchematicElem<T> {
             SchematicElem::Line3d(line) => SchematicElem::Line3d(line.map_aux(|_| ())),
             SchematicElem::VectorArrow(arrow) => SchematicElem::VectorArrow(arrow.map_aux(|_| ())),
             SchematicElem::Window(window) => SchematicElem::Window(window),
+            SchematicElem::Theme(theme) => SchematicElem::Theme(theme.clone()),
         }
     }
 }
@@ -70,6 +75,11 @@ pub struct WindowSchematic {
     pub screen: Option<u32>,
     #[serde(default)]
     pub screen_rect: Option<WindowRect>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct ThemeConfig {
+    pub mode: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

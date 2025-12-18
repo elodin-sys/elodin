@@ -1,6 +1,6 @@
 use crate::color_names::color_from_name;
 use impeller2_wkt::{
-    ArrowThickness, Color, Schematic, SchematicElem, VectorArrow3d, WindowSchematic,
+    ArrowThickness, Color, Schematic, SchematicElem, ThemeConfig, VectorArrow3d, WindowSchematic,
 };
 use kdl::{KdlDocument, KdlNode};
 use std::collections::HashMap;
@@ -24,7 +24,10 @@ pub fn parse_schematic(input: &str) -> Result<Schematic, KdlSchematicError> {
 
     for node in doc.nodes() {
         let elem = parse_schematic_elem(node, input)?;
-        schematic.elems.push(elem);
+        match elem {
+            SchematicElem::Theme(theme) => schematic.theme = Some(theme),
+            other => schematic.elems.push(other),
+        }
     }
 
     Ok(schematic)
@@ -36,6 +39,7 @@ fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlS
         | "action_pane" | "query_table" | "query_plot" | "inspector" | "hierarchy"
         | "schematic_tree" | "dashboard" => Ok(SchematicElem::Panel(parse_panel(node, src)?)),
         "window" => Ok(SchematicElem::Window(parse_window(node, src)?)),
+        "theme" => Ok(SchematicElem::Theme(parse_theme(node, src)?)),
         "object_3d" => Ok(SchematicElem::Object3d(parse_object_3d(node, src)?)),
         "line_3d" => Ok(SchematicElem::Line3d(parse_line_3d(node, src)?)),
         "vector_arrow" => Ok(SchematicElem::VectorArrow(parse_vector_arrow(node, src)?)),
@@ -105,6 +109,21 @@ fn parse_window(node: &KdlNode, src: &str) -> Result<WindowSchematic, KdlSchemat
         screen: screen_idx,
         screen_rect,
     })
+}
+
+fn parse_theme(node: &KdlNode, _src: &str) -> Result<ThemeConfig, KdlSchematicError> {
+    let mode = node
+        .get("mode")
+        .and_then(|v| v.as_string())
+        .or_else(|| {
+            node.entries()
+                .first()
+                .and_then(|entry| entry.value().as_string())
+        })
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty());
+
+    Ok(ThemeConfig { mode })
 }
 
 fn parse_window_rect(node: &KdlNode, src: &str) -> Result<WindowRect, KdlSchematicError> {
