@@ -295,16 +295,14 @@ impl WindowState {
                 if position_is_reliable_linux(
                     IVec2::new(position.x, position.y),
                     (screen_pos.x, screen_pos.y),
+                ) && let Some(rect) = rect_from_bounds(
+                    (position.x, position.y),
+                    (outer_size.width, outer_size.height),
+                    (screen_pos.x, screen_pos.y),
+                    (screen_handle.size().width, screen_handle.size().height),
                 ) {
-                    if let Some(rect) = rect_from_bounds(
-                        (position.x, position.y),
-                        (outer_size.width, outer_size.height),
-                        (screen_pos.x, screen_pos.y),
-                        (screen_handle.size().width, screen_handle.size().height),
-                    ) {
-                        self.descriptor.screen_rect = Some(rect);
-                        updated = true;
-                    }
+                    self.descriptor.screen_rect = Some(rect);
+                    updated = true;
                 }
             }
             return updated;
