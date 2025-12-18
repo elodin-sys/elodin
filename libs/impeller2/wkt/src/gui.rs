@@ -329,8 +329,20 @@ pub struct VectorArrow3d<T = ()> {
     #[serde(default = "VectorArrow3d::<T>::default_thickness")]
     pub thickness: ArrowThickness,
     #[serde(default = "VectorArrow3d::<T>::default_label_position")]
-    pub label_position: f32,
+    pub label_position: LabelPosition,
     pub aux: T,
+}
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+/// The position of a label.
+pub enum LabelPosition {
+    /// No label position.
+    #[default]
+    None,
+    /// A value from [0, 1] meant to represent some proportion of a whole.
+    Proportionate(f32),
+    /// An absolute magnitude in meters.
+    Absolute(f32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -457,8 +469,8 @@ impl<T> VectorArrow3d<T> {
         ArrowThickness::default()
     }
 
-    fn default_label_position() -> f32 {
-        1.0
+    fn default_label_position() -> LabelPosition {
+        LabelPosition::default()
     }
 
     pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> VectorArrow3d<U> {
@@ -472,7 +484,7 @@ impl<T> VectorArrow3d<T> {
             normalize: self.normalize,
             show_name: self.show_name,
             thickness: self.thickness,
-            label_position: self.label_position,
+            label_position: self.label_position.clone(),
             aux: f(&self.aux),
         }
     }

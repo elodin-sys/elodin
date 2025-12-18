@@ -452,11 +452,20 @@ fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
         ));
     }
 
-    if (arrow.label_position - 1.0).abs() > f32::EPSILON {
-        node.entries_mut().push(KdlEntry::new_prop(
-            "label_position",
-            arrow.label_position as f64,
-        ));
+    match arrow.label_position {
+        LabelPosition::None => {}
+        LabelPosition::Proportionate(label_position) => {
+            node.entries_mut().push(KdlEntry::new_prop(
+                "label_position",
+                format!("{:.2}", label_position),
+            ));
+        }
+        LabelPosition::Absolute(length) => {
+            node.entries_mut().push(KdlEntry::new_prop(
+                "label_position",
+                format!("{:.2}m", length),
+            ));
+        }
     }
 
     serialize_color_to_node(&mut node, &arrow.color);
@@ -1157,7 +1166,7 @@ graph "value" {
                 normalize: true,
                 show_name: false,
                 thickness: ArrowThickness::new(1.23456),
-                label_position: 1.0,
+                label_position: LabelPosition::None,
                 aux: (),
             }));
 
