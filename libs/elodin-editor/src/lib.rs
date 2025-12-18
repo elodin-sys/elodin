@@ -19,7 +19,9 @@ use bevy::{
     winit::WinitSettings,
 };
 use bevy_editor_cam::{SyncCameraPosition, controller::component::EditorCam};
-use bevy_egui::{EguiContext, EguiContextSettings, EguiGlobalSettings, EguiPlugin};
+#[cfg(feature = "inspector")]
+use bevy_egui::EguiContext;
+use bevy_egui::{EguiContextSettings, EguiGlobalSettings, EguiPlugin};
 use bevy_render::alpha::AlphaMode;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use impeller2::types::{ComponentId, OwnedPacket};
