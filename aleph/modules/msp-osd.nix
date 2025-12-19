@@ -18,10 +18,13 @@ with lib; let
       cols = ${toString cfg.osdCols}
       refresh_rate_hz = ${toString cfg.refreshRateHz}
       coordinate_frame = "${cfg.coordinateFrame}"
+      char_aspect_ratio = ${toString cfg.charAspectRatio}
+      pitch_scale = ${toString cfg.pitchScale}
 
       [serial]
       port = "${cfg.serialPort}"
       baud = ${toString cfg.baudRate}
+      auto_record = ${boolToString cfg.autoRecord}
 
       # Input mappings for extracting telemetry from Elodin-DB components
       [inputs.position]
@@ -130,6 +133,40 @@ in {
       '';
     };
 
+    charAspectRatio = mkOption {
+      type = types.float;
+      default = 1.5;
+      description = ''
+        Character aspect ratio (height/width) for horizon line rendering.
+        HD OSD systems like Walksnail Avatar use ~12x18 pixel characters (ratio 1.5).
+        This compensates for non-square characters so the horizon tilt angle
+        matches the actual aircraft roll angle.
+
+        Common values:
+        - 1.5: Walksnail Avatar, DJI HD (default)
+        - 2.0: Standard SD analog OSD
+        - 1.0: Square characters (no compensation)
+      '';
+    };
+
+    pitchScale = mkOption {
+      type = types.float;
+      default = 5.0;
+      description = ''
+        Pitch scale in degrees per row for the artificial horizon.
+        Lower values = more sensitive pitch response (horizon moves more per degree).
+        Should be calibrated to match camera vertical FOV for accurate overlay.
+
+        Formula: pitch_scale ≈ camera_vertical_fov / osd_rows
+        Example: 90° VFOV / 18 rows ≈ 5° per row
+
+        Common values:
+        - 5.0: ~90° VFOV camera (default, good for Walksnail Avatar)
+        - 6.0: ~108° VFOV camera
+        - 4.0: ~72° VFOV camera (narrower FOV)
+      '';
+    };
+
     serialPort = mkOption {
       type = types.str;
       default = "/dev/ttyTHS7";
@@ -140,6 +177,16 @@ in {
       type = types.int;
       default = 115200;
       description = "Serial baud rate";
+    };
+
+    autoRecord = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Automatically start DVR recording on the VTX when msp-osd starts.
+        Uses MSP2_COMMON_SET_RECORDING command (Walksnail Avatar compatible).
+        Only applies when running in serial mode.
+      '';
     };
 
     extraArgs = mkOption {

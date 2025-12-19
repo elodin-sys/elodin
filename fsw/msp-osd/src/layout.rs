@@ -1,11 +1,13 @@
-use crate::config::CoordinateFrame;
+use crate::config::{CoordinateFrame, OsdConfig};
 use crate::osd_grid::OsdGrid;
 use crate::telemetry::{SystemStatus, TelemetryState};
 
 /// Main render function that lays out all OSD elements
 /// Uses only position, orientation, and velocity inputs
-pub fn render(grid: &mut OsdGrid, state: &TelemetryState, coordinate_frame: CoordinateFrame) {
+pub fn render(grid: &mut OsdGrid, state: &TelemetryState, osd_config: &OsdConfig) {
     grid.clear();
+
+    let coordinate_frame = osd_config.coordinate_frame;
 
     // Derive display values from core telemetry
     // Altitude and climb rate need coordinate frame conversion:
@@ -32,7 +34,7 @@ pub fn render(grid: &mut OsdGrid, state: &TelemetryState, coordinate_frame: Coor
     render_speed(grid, ground_speed_ms);
 
     // Center - Artificial horizon (from orientation)
-    render_horizon(grid, roll_deg, pitch_deg, coordinate_frame);
+    render_horizon(grid, roll_deg, pitch_deg, osd_config);
 
     // Target indicator (if target is being tracked)
     render_target(grid, state, coordinate_frame);
@@ -105,12 +107,7 @@ fn render_speed(grid: &mut OsdGrid, speed_ms: f32) {
 /// Uses FPV/OSD convention: horizon moves opposite to aircraft pitch
 /// - Climbing (nose up): horizon moves DOWN, more sky visible
 /// - Diving (nose down): horizon moves UP, more ground visible
-fn render_horizon(
-    grid: &mut OsdGrid,
-    roll_deg: f32,
-    pitch_deg: f32,
-    coordinate_frame: CoordinateFrame,
-) {
+fn render_horizon(grid: &mut OsdGrid, roll_deg: f32, pitch_deg: f32, osd_config: &OsdConfig) {
     let center_row = grid.rows / 2;
     let center_col = grid.cols / 2;
     let horizon_width = 30.min(grid.cols.saturating_sub(20));
@@ -123,12 +120,16 @@ fn render_horizon(
 
     // Calculate horizon line position based on pitch
     // Negative sign: pitch up → horizon moves down (higher row number) → more sky above
-    let pitch_offset = (-pitch_deg / 10.0).clamp(-3.0, 3.0);
+    // pitch_scale is degrees per row (lower = more sensitive)
+    // Max offset is half the horizon height to keep horizon visible
+    let max_pitch_offset = (horizon_height as f32) / 2.0;
+    let pitch_offset =
+        (-pitch_deg / osd_config.pitch_scale).clamp(-max_pitch_offset, max_pitch_offset);
 
     // Calculate roll angle based on coordinate frame:
     // - ENU (Elodin): positive roll = left wing up, needs negation for OSD
     // - NED (aviation): positive roll = right wing down, already correct for OSD
-    let roll_rad = match coordinate_frame {
+    let roll_rad = match osd_config.coordinate_frame {
         CoordinateFrame::Enu => (-roll_deg).to_radians(),
         CoordinateFrame::Ned => roll_deg.to_radians(),
     };
@@ -138,19 +139,25 @@ fn render_horizon(
     // tan() has asymptotes at ±90° causing horizon to "flip" at those angles.
     let (roll_sin, roll_cos) = roll_rad.sin_cos();
 
+    // Character aspect ratio compensation for HD OSD systems (e.g., Walksnail Avatar).
+    // OSD characters are taller than wide (~12x18 pixels = 1.5:1 aspect ratio).
+    // Without this correction, the horizon line appears more steeply tilted than
+    // the actual roll angle because each row step is visually larger than each column step.
+    let char_aspect_ratio = osd_config.char_aspect_ratio;
+
     // Draw sky and ground regions using signed distance from tilted horizon line
     for row in start_row..=end_row {
         for col in start_col..=end_col {
             // Signed distance from the tilted horizon line through center point
             // d > 0: above horizon (sky), d < 0: below horizon (ground)
+            // The row coordinate is scaled by char_aspect_ratio so the visual angle
+            // on screen matches the actual roll angle.
             let rel_col = (col as i8 - center_col as i8) as f32;
             let rel_row = row as f32 - (center_row as f32 + pitch_offset);
-            let d = roll_sin * rel_col - roll_cos * rel_row;
+            let d = roll_sin * rel_col - roll_cos * char_aspect_ratio * rel_row;
 
-            let ch = if d < -0.5 {
-                '.' // Ground (minimal dot pattern for least camera occlusion)
-            } else if d > 0.5 {
-                ' ' // Sky
+            let ch = if d.abs() > 0.5 {
+                ' ' // Ground/Sky (keep empty to minimize camera occlusion)
             } else {
                 '-' // Horizon line
             };
@@ -166,8 +173,7 @@ fn render_horizon(
 
     // Draw pitch ladder marks
     // Generate marks every 10 degrees, visible range depends on current pitch
-    // Scale: approximately 2-3 rows per 10 degrees for better spacing
-    let rows_per_10deg = 2.5;
+    // Use the same pitch_scale as the horizon for consistency
     let pitch_range = 50; // Show marks from -50 to +50 degrees relative to current pitch
 
     for pitch_mark in (-pitch_range..=pitch_range).step_by(10) {
@@ -179,7 +185,7 @@ fn render_horizon(
         // Positive pitch marks appear ABOVE center (lower row numbers)
         // Sign matches the horizon movement direction
         let pitch_diff = pitch_mark as f32 - pitch_deg;
-        let row_offset = pitch_diff / 10.0 * rows_per_10deg;
+        let row_offset = -pitch_diff / osd_config.pitch_scale;
         let ladder_row = center_row as f32 + row_offset;
 
         // Only draw if within visible area

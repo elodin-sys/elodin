@@ -222,7 +222,7 @@ async fn run_osd_loop(
             // Update grid with layout
             {
                 let mut grid = grid.write().await;
-                layout::render(&mut grid, &state, config.osd.coordinate_frame);
+                layout::render(&mut grid, &state, &config.osd);
             }
 
             // Send to backend (with status if terminal backend)
