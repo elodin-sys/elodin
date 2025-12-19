@@ -79,6 +79,7 @@ pub mod button;
 pub mod colors;
 pub mod command_palette;
 pub mod dashboard;
+pub mod data_overview;
 pub mod hierarchy;
 pub mod images;
 pub mod inspector;

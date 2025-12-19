@@ -38,6 +38,7 @@ use super::{
     colors::{self, get_scheme, with_opacity},
     command_palette::{CommandPaletteState, palette_items},
     dashboard::{DashboardWidget, spawn_dashboard},
+    data_overview::{DataOverviewPane, DataOverviewWidget},
     hierarchy::{Hierarchy, HierarchyContent},
     images,
     inspector::{InspectorContent, InspectorIcons},
@@ -582,6 +583,10 @@ impl TileState {
             .push(TreeAction::AddSchematicTree(tile_id));
     }
 
+    pub fn create_data_overview_tile(&mut self, tile_id: Option<TileId>) {
+        self.tree_actions.push(TreeAction::AddDataOverview(tile_id));
+    }
+
     pub fn debug_dump(&self) -> String {
         fn visit(
             tree: &egui_tiles::Tree<Pane>,
@@ -611,6 +616,7 @@ impl TileState {
                             Pane::Hierarchy => ("Hierarchy", "Hierarchy"),
                             Pane::Inspector => ("Inspector", "Inspector"),
                             Pane::SchematicTree(_) => ("SchematicTree", "SchematicTree"),
+                            Pane::DataOverview(_) => ("DataOverview", "DataOverview"),
                         };
                         let _ = writeln!(out, "{}Pane::{} ({})", indent, kind, label);
                     }
@@ -772,6 +778,7 @@ pub enum Pane {
     Hierarchy,
     Inspector,
     SchematicTree(TreePane),
+    DataOverview(DataOverviewPane),
 }
 
 impl Pane {
@@ -812,6 +819,7 @@ impl Pane {
             Pane::Hierarchy => "Entities".to_string(),
             Pane::Inspector => "Inspector".to_string(),
             Pane::SchematicTree(_) => "Tree".to_string(),
+            Pane::DataOverview(_) => "Data Overview".to_string(),
         }
     }
 
@@ -913,6 +921,15 @@ impl Pane {
                     "tree",
                     (tree_icons, tree_pane.entity),
                 );
+                egui_tiles::UiResponse::None
+            }
+            Pane::DataOverview(pane) => {
+                let updated_pane = ui.add_widget_with::<DataOverviewWidget>(
+                    world,
+                    "data_overview",
+                    pane.clone(),
+                );
+                *pane = updated_pane;
                 egui_tiles::UiResponse::None
             }
         }
@@ -1156,6 +1173,7 @@ pub enum TreeAction {
     AddHierarchy(Option<TileId>),
     AddInspector(Option<TileId>),
     AddSchematicTree(Option<TileId>),
+    AddDataOverview(Option<TileId>),
     AddSidebars,
     DeleteTab(TileId),
     SelectTile(TileId),
@@ -2146,6 +2164,17 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         ui_state.tree.make_active(|id, _| id == tile_id);
                     }
                 }
+                TreeAction::AddDataOverview(parent_tile_id) => {
+                    if read_only {
+                        continue;
+                    }
+                    let pane = Pane::DataOverview(DataOverviewPane::default());
+                    if let Some(tile_id) =
+                        ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
+                    {
+                        ui_state.tree.make_active(|id, _| id == tile_id);
+                    }
+                }
                 TreeAction::AddSidebars => {
                     if read_only {
                         continue;
@@ -2230,6 +2259,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         stream.try_insert(IsTileVisible(visible));
                     }
                 }
+                Pane::DataOverview(_) => {}
             }
         }
     }

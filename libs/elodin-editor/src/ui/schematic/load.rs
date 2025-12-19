@@ -109,7 +109,11 @@ pub fn sync_schematic(
             return;
         };
         params.load_schematic(&schematic, None);
+        return;
     }
+    
+    // No schematic found - create a default Data Overview panel
+    params.load_default_data_overview();
 }
 
 fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSelection {
@@ -727,6 +731,25 @@ impl LoadSchematicParams<'_, '_> {
                     false,
                 )
             }
+        }
+    }
+
+    /// Create a default Data Overview panel when no schematic is found.
+    /// This provides immediate visibility into the database contents.
+    pub fn load_default_data_overview(&mut self) {
+        use crate::ui::data_overview::DataOverviewPane;
+        
+        let primary_window = *self.primary_window;
+        let mut window_state = self
+            .window_states
+            .get_mut(primary_window)
+            .expect("no primary window")
+            .2;
+        
+        // Only add if the tile tree is empty
+        if window_state.tile_state.is_empty() {
+            let pane = Pane::DataOverview(DataOverviewPane::default());
+            window_state.tile_state.insert_tile(Tile::Pane(pane), None, true);
         }
     }
 }

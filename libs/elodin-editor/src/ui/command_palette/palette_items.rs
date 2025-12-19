@@ -714,6 +714,20 @@ pub fn create_dashboard(tile_id: Option<TileId>) -> PaletteItem {
     )
 }
 
+pub fn create_data_overview(tile_id: Option<TileId>) -> PaletteItem {
+    PaletteItem::new(
+        "Create Data Overview",
+        TILES_LABEL,
+        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
+            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
+                return PaletteEvent::Error("Secondary window unavailable".to_string());
+            };
+            tile_state.create_data_overview_tile(tile_id);
+            PaletteEvent::Exit
+        },
+    )
+}
+
 pub fn create_sidebars() -> PaletteItem {
     PaletteItem::new(
         "Create Sidebars",
@@ -1638,6 +1652,7 @@ pub fn create_tiles(tile_id: TileId) -> PalettePage {
         create_hierarchy(Some(tile_id)),
         create_schematic_tree(Some(tile_id)),
         create_dashboard(Some(tile_id)),
+        create_data_overview(Some(tile_id)),
         create_inspector(Some(tile_id)),
         create_sidebars(),
     ])
@@ -1711,6 +1726,7 @@ impl Default for PalettePage {
             create_inspector(None),
             create_schematic_tree(None),
             create_dashboard(None),
+            create_data_overview(None),
             create_sidebars(),
             create_3d_object(),
             save_db_native(),
