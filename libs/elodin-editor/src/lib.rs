@@ -240,6 +240,7 @@ impl Plugin for EditorPlugin {
             .insert_resource(SelectedTimeRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)))
             .init_resource::<EqlContext>()
             .init_resource::<SyncedObject3d>()
+            .init_resource::<ui::data_overview::ComponentTimeRanges>()
             .add_plugins(object_3d::Object3DPlugin);
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
@@ -914,6 +915,7 @@ fn clear_state_new_connection(
     lines: Query<Entity, With<LineHandle>>,
     mut synced_glbs: ResMut<SyncedObject3d>,
     mut eql_context: ResMut<EqlContext>,
+    mut component_time_ranges: ResMut<ui::data_overview::ComponentTimeRanges>,
     mut commands: Commands,
     mut windows_state: Query<(Entity, &mut tiles::WindowState)>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
@@ -923,6 +925,11 @@ fn clear_state_new_connection(
         _ => return,
     }
     eql_context.0.component_parts.clear();
+    // Clear cached component time ranges so they will be re-queried
+    component_time_ranges.ranges.clear();
+    component_time_ranges.pending_queries = 0;
+    component_time_ranges.total_queries = 0;
+    component_time_ranges.state = ui::data_overview::TimeRangeQueryState::NotStarted;
     entity_map.0.retain(|_, entity| {
         if let Ok(mut entity_commands) = commands.get_entity(*entity) {
             entity_commands.despawn();
