@@ -23,7 +23,9 @@ use std::{
 const NOTIFY_SILENCE: Duration = Duration::from_millis(3000);
 
 #[cfg(not(target_os = "macos"))]
-use crate::ui::WindowRelayout;
+use crate::tiles::WindowRelayout;
+#[cfg(target_os = "macos")]
+use crate::ui::window::placement::apply_physical_screen_rect;
 use crate::{
     EqlContext, MainCamera,
     object_3d::Object3DState,
@@ -327,7 +329,7 @@ impl LoadSchematicParams<'_, '_> {
                     window_state.descriptor.screen_rect,
                 ) {
                     self.commands.spawn_task(move || async move {
-                        crate::ui::apply_physical_screen_rect(primary_window, screen_idx, rect)
+                        apply_physical_screen_rect(primary_window, screen_idx, rect)
                             .await
                             .ok();
                         Ok(())

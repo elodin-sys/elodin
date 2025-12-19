@@ -6,7 +6,6 @@ use bevy::{
     render::camera::RenderTarget,
     window::{EnabledButtons, Window, WindowPosition, WindowRef, WindowResolution},
 };
-use bevy_defer::AsyncCommandsExtension;
 use egui_tiles::Tile;
 
 use crate::ui::{
@@ -15,7 +14,7 @@ use crate::ui::{
     window_theme_for_mode,
 };
 
-use super::placement::{apply_physical_screen_rect, collect_sorted_screens};
+use super::placement::collect_sorted_screens;
 
 #[derive(Component)]
 struct Camera2d;
@@ -145,8 +144,9 @@ pub fn sync_windows(
                     rect = ?rect,
                     "mac spawn: apply physical rect"
                 );
+                use bevy_defer::AsyncCommandsExtension;
                 commands.spawn_task(move || async move {
-                    apply_physical_screen_rect(window_entity, screen_idx, rect)
+                    super::placement::apply_physical_screen_rect(window_entity, screen_idx, rect)
                         .await
                         .ok();
                     Ok(())

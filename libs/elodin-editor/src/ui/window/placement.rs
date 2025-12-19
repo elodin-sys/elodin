@@ -8,7 +8,7 @@ use bevy::{
     prelude::*,
     window::{PrimaryWindow, WindowCloseRequested},
 };
-use bevy_defer::{AccessError, AccessResult, AsyncAccess, AsyncCommandsExtension, AsyncWorld};
+use bevy_defer::{AccessError, AsyncAccess, AsyncCommandsExtension, AsyncWorld};
 use impeller2_wkt::WindowRect;
 use winit::{
     dpi::{LogicalPosition, LogicalSize, PhysicalSize},
@@ -55,7 +55,7 @@ pub async fn apply_physical_screen_rect(
     window_entity: Entity,
     screen_index: usize,
     rect: WindowRect,
-) -> AccessResult {
+) -> bevy_defer::AccessResult {
     if !wait_for_winit_window(window_entity, Duration::from_millis(2000)).await? {
         warn!(%window_entity, "apply_physical_screen_rect: winit window not ready");
         return Ok(());
@@ -377,7 +377,7 @@ async fn apply_window_rect(
                 (pos_y * scale_with_monitor).round(),
             );
             window.set_outer_position(pos);
-            window.set_inner_size(size);
+            window.request_inner_size(size);
             if is_full_rect {
                 info!("Applied full-screen rect via positioning");
             }
@@ -513,6 +513,12 @@ fn screen_physical_position(screen: &MonitorHandle) -> LogicalPosition<f64> {
 }
 
 #[cfg(not(target_os = "macos"))]
+fn screen_physical_size(screen: &MonitorHandle) -> LogicalSize<f64> {
+    let size = screen.size();
+    LogicalSize::new(size.width as f64, size.height as f64)
+}
+
+#[cfg(not(target_os = "macos"))]
 fn window_on_target_screen(
     state: &mut WindowState,
     window: &WinitWindow,
@@ -555,15 +561,8 @@ fn force_windowed(window: &WinitWindow) {
 
 #[cfg(not(target_os = "macos"))]
 fn linux_clear_minimized(_window: &WinitWindow) {
-    #[cfg(target_os = "linux")]
-    {
-        let window = _window;
-        use winit::platform::x11::WindowExtX11;
-        if let Some(xlib) = window.xlib_window() {
-            window.set_minimized(false);
-            info!(?xlib, "Cleared minimized state on X11 window");
-        }
-    }
+    _window.set_minimized(false);
+    info!("Cleared minimized state on X11 window");
 }
 
 #[cfg(not(target_os = "macos"))]

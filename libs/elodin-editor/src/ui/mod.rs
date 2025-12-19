@@ -101,10 +101,9 @@ pub mod window;
 
 // Re-export window helpers for existing call sites.
 pub use window::{
-    apply_physical_screen_rect, base_window, collect_sorted_screens, default_composite_alpha_mode,
-    default_present_mode, default_window_theme, detect_window_screen, handle_window_close,
-    handle_window_relayout_events, sync_windows, wait_for_winit_window, window_graph_order_base,
-    window_theme_for_mode,
+    base_window, collect_sorted_screens, default_composite_alpha_mode, default_present_mode,
+    default_window_theme, detect_window_screen, handle_window_close, handle_window_relayout_events,
+    sync_windows, wait_for_winit_window, window_graph_order_base, window_theme_for_mode,
 };
 
 #[cfg(not(target_family = "wasm"))]
