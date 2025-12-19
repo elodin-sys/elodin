@@ -697,7 +697,10 @@ fn update_arrow_label_ui(
         let label_color = arrow_state
             .label_color
             .map(readable_label_color)
-            .unwrap_or(Color::WHITE);
+            .unwrap_or_else(|| {
+                use crate::ui::colors::ColorExt;
+                crate::ui::colors::get_scheme().text_primary.into_bevy()
+            });
         let label_offset = arrow_state
             .label_grid_pos
             .map(|(_, _, _, offset)| offset)

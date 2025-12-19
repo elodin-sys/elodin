@@ -80,6 +80,7 @@ pub struct WindowSchematic {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct ThemeConfig {
     pub mode: Option<String>,
+    pub scheme: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

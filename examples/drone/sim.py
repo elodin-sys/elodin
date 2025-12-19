@@ -134,7 +134,7 @@ def world() -> tuple[el.World, el.EntityId]:
 
     world.schematic(
         """
-        theme mode="light"
+        theme mode="dark" scheme="default"
 
         tabs {
             hsplit name = "Viewport" {

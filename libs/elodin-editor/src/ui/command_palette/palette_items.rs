@@ -1290,43 +1290,64 @@ fn load_schematic_inner(path: &Path) -> Option<PaletteItem> {
     })
 }
 
+fn apply_mode_to_windows(mode: &str, windows_state: &mut Query<&mut tiles::WindowState>) {
+    for mut state in windows_state.iter_mut() {
+        state.descriptor.mode = Some(mode.to_string());
+    }
+}
+
 pub fn set_color_scheme() -> PaletteItem {
     PaletteItem::new("Set Color Scheme", PRESETS_LABEL, |_: In<String>| {
-        let schemes = [
-            ("DARK", &colors::DARK),
-            ("LIGHT", &colors::LIGHT),
-            ("CATPPUCINI LATTE", &colors::CATPPUCINI_LATTE),
-            ("CATPPUCINI MOCHA", &colors::CATPPUCINI_MOCHA),
-            ("CATPPUCINI MACCHIATO", &colors::CATPPUCINI_MACCHIATO),
-        ];
+        let presets = colors::available_presets();
         let mut items = vec![];
-        for (name, schema) in schemes {
-            items.push(PaletteItem::new(name, "", move |_: In<String>| {
-                colors::set_schema(schema);
-                PaletteEvent::Exit
-            }));
+        for preset in presets {
+            let name = preset.name.to_string();
+            let label = preset.label.to_string();
+            items.push(PaletteItem::new(
+                label,
+                "",
+                move |_: In<String>, mut windows_state: Query<&mut tiles::WindowState>| {
+                    let current = colors::current_selection();
+                    let desired_mode = if colors::scheme_supports_mode(&name, &current.mode) {
+                        current.mode
+                    } else {
+                        "dark".to_string()
+                    };
+                    let selection = colors::apply_scheme_and_mode(&name, &desired_mode);
+                    apply_mode_to_windows(&selection.mode, &mut windows_state);
+                    PaletteEvent::Exit
+                },
+            ));
         }
         PalettePage::new(items).into()
     })
 }
 
-pub fn set_ui_theme() -> PaletteItem {
-    PaletteItem::new("Set Theme", PRESETS_LABEL, |_: In<String>| {
-        let themes = [
-            ("Dark", "dark", &colors::DARK),
-            ("Light", "light", &colors::LIGHT),
-        ];
+pub fn set_color_scheme_mode() -> PaletteItem {
+    PaletteItem::new("Set Color Scheme Mode", PRESETS_LABEL, |_: In<String>| {
+        let current = colors::current_selection();
+        let scheme_name = current.scheme.clone();
+        let options = [("Dark", "dark"), ("Light", "light")];
         let mut items = vec![];
-        for (label, mode, scheme) in themes {
-            let mode = mode.to_string();
+        for (label, mode) in options {
+            let available = colors::scheme_supports_mode(&scheme_name, mode);
+            let display_label = if available {
+                label.to_string()
+            } else {
+                format!("{label} (unavailable)")
+            };
+            let scheme_name = scheme_name.clone();
             items.push(PaletteItem::new(
-                label,
+                display_label,
                 "",
                 move |_: In<String>, mut windows_state: Query<&mut tiles::WindowState>| {
-                    colors::set_schema(scheme);
-                    for mut state in &mut windows_state {
-                        state.descriptor.mode = Some(mode.clone());
+                    if !colors::scheme_supports_mode(&scheme_name, mode) {
+                        return PaletteEvent::Error(
+                            "This scheme does not provide that variant".to_string(),
+                        );
                     }
+                    let selection = colors::apply_scheme_and_mode(&scheme_name, mode);
+                    apply_mode_to_windows(&selection.mode, &mut windows_state);
                     PaletteEvent::Exit
                 },
             ));
@@ -1704,7 +1725,7 @@ impl Default for PalettePage {
             save_schematic_db(),
             load_schematic(),
             clear_schematic(),
-            set_ui_theme(),
+            set_color_scheme_mode(),
             set_color_scheme(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {
                 let _ = opener::open("https://docs.elodin.systems");

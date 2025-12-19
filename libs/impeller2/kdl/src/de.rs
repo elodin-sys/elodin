@@ -123,7 +123,13 @@ fn parse_theme(node: &KdlNode, _src: &str) -> Result<ThemeConfig, KdlSchematicEr
         .map(|s| s.trim().to_lowercase())
         .filter(|s| !s.is_empty());
 
-    Ok(ThemeConfig { mode })
+    let scheme = node
+        .get("scheme")
+        .and_then(|v| v.as_string())
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty());
+
+    Ok(ThemeConfig { mode, scheme })
 }
 
 fn parse_window_rect(node: &KdlNode, src: &str) -> Result<WindowRect, KdlSchematicError> {

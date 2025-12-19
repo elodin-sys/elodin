@@ -1,4 +1,7 @@
-use std::sync::atomic::{self, AtomicPtr};
+use std::sync::{
+    Mutex, OnceLock,
+    atomic::{self, AtomicPtr},
+};
 
 use egui::Color32;
 use impeller2_wkt::Color;
@@ -163,7 +166,7 @@ pub mod bevy {
     pub const GREY_900: Color = Color::srgb(0.2, 0.2, 0.2);
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct ColorScheme {
     pub bg_primary: Color32,
     pub bg_secondary: Color32,
@@ -290,31 +293,299 @@ pub static CATPPUCINI_MACCHIATO: ColorScheme = ColorScheme {
     shadow: Color32::BLACK,
 };
 
-static COLOR_SCHEME: AtomicPtr<ColorScheme> = AtomicPtr::new(std::ptr::null_mut());
+pub static CATPPUCINI_MACCHIATO_LIGHT: ColorScheme = ColorScheme {
+    bg_primary: Color32::from_rgb(0xEF, 0xF1, 0xF5),
+    bg_secondary: Color32::from_rgb(0xDC, 0xE0, 0xE8),
 
-pub fn get_scheme() -> &'static ColorScheme {
-    let ptr = COLOR_SCHEME.load(atomic::Ordering::Relaxed);
-    if ptr.is_null() {
-        let scheme = load_color_scheme()
-            .map(|c| &*Box::leak(Box::new(c)))
-            .unwrap_or(&DARK);
-        COLOR_SCHEME.store((scheme as *const _) as *mut _, atomic::Ordering::Relaxed);
-        scheme
-    } else {
-        unsafe { &*ptr }
+    text_primary: Color32::from_rgb(0x4C, 0x4F, 0x69),
+    text_secondary: Color32::from_rgb(0x5C, 0x5F, 0x77),
+    text_tertiary: Color32::from_rgb(0x6C, 0x6F, 0x85),
+
+    icon_primary: Color32::from_rgb(0x40, 0x40, 0x40),
+    icon_secondary: Color32::from_rgb(0x80, 0x80, 0x80),
+
+    border_primary: Color32::from_rgb(0xCC, 0xD0, 0xDA),
+
+    highlight: Color32::from_rgb(0x7C, 0x7F, 0x93),
+    blue: Color32::from_rgb(0x1E, 0x66, 0xF5),
+    error: Color32::from_rgb(0xE6, 0x45, 0x53),
+    success: Color32::from_rgb(0x40, 0xA0, 0x2B),
+
+    shadow: Color32::BLACK,
+};
+
+pub static EGGPLANT_DARK: ColorScheme = ColorScheme {
+    bg_primary: Color32::from_rgb(0x1B, 0x13, 0x25),
+    bg_secondary: Color32::from_rgb(0x14, 0x0C, 0x1C),
+    text_primary: Color32::from_rgb(0xF8, 0xEE, 0xFE),
+    text_secondary: Color32::from_rgb(0xCB, 0xB8, 0xE0),
+    text_tertiary: Color32::from_rgb(0xA6, 0x8D, 0xC6),
+    icon_primary: Color32::from_rgb(0xF8, 0xEE, 0xFE),
+    icon_secondary: Color32::from_rgb(0xCB, 0xB8, 0xE0),
+    border_primary: Color32::from_rgb(0x2E, 0x1B, 0x36),
+    highlight: Color32::from_rgb(0xB2, 0x6F, 0xD4),
+    blue: Color32::from_rgb(0xB2, 0x6F, 0xD4),
+    error: REDDISH_DEFAULT,
+    success: MINT_DEFAULT,
+    shadow: Color32::BLACK,
+};
+
+pub static EGGPLANT_LIGHT: ColorScheme = ColorScheme {
+    bg_primary: Color32::from_rgb(0xF3, 0xED, 0xFA),
+    bg_secondary: Color32::from_rgb(0xE4, 0xD9, 0xF2),
+    text_primary: Color32::from_rgb(0x2A, 0x18, 0x37),
+    text_secondary: Color32::from_rgb(0x4A, 0x31, 0x5C),
+    text_tertiary: Color32::from_rgb(0x6B, 0x4C, 0x7D),
+    icon_primary: Color32::from_rgb(0x2A, 0x18, 0x37),
+    icon_secondary: Color32::from_rgb(0x4A, 0x31, 0x5C),
+    border_primary: Color32::from_rgb(0xC8, 0xB6, 0xD8),
+    highlight: Color32::from_rgb(0x8A, 0x3B, 0xB2),
+    blue: Color32::from_rgb(0x8A, 0x3B, 0xB2),
+    error: REDDISH_DEFAULT,
+    success: MINT_DEFAULT,
+    shadow: Color32::BLACK,
+};
+
+pub static MATRIX_DARK: ColorScheme = ColorScheme {
+    bg_primary: Color32::from_rgb(0x0B, 0x0F, 0x0C),
+    bg_secondary: Color32::from_rgb(0x08, 0x0B, 0x09),
+    text_primary: Color32::from_rgb(0xE0, 0xFF, 0xE1),
+    text_secondary: Color32::from_rgb(0x6F, 0xDC, 0x6F),
+    text_tertiary: Color32::from_rgb(0x4A, 0xA4, 0x4A),
+    icon_primary: Color32::from_rgb(0xE0, 0xFF, 0xE1),
+    icon_secondary: Color32::from_rgb(0x6F, 0xDC, 0x6F),
+    border_primary: Color32::from_rgb(0x1A, 0x3A, 0x1A),
+    highlight: Color32::from_rgb(0x4A, 0xE3, 0x4A),
+    blue: Color32::from_rgb(0x4A, 0xE3, 0x4A),
+    error: REDDISH_DEFAULT,
+    success: MINT_DEFAULT,
+    shadow: Color32::BLACK,
+};
+
+pub static MATRIX_LIGHT: ColorScheme = ColorScheme {
+    bg_primary: Color32::from_rgb(0xE6, 0xF5, 0xE7),
+    bg_secondary: Color32::from_rgb(0xD2, 0xE8, 0xD4),
+    text_primary: Color32::from_rgb(0x0F, 0x1F, 0x12),
+    text_secondary: Color32::from_rgb(0x27, 0x44, 0x2B),
+    text_tertiary: Color32::from_rgb(0x3C, 0x5C, 0x40),
+    icon_primary: Color32::from_rgb(0x0F, 0x1F, 0x12),
+    icon_secondary: Color32::from_rgb(0x27, 0x44, 0x2B),
+    border_primary: Color32::from_rgb(0x9E, 0xC9, 0xA1),
+    highlight: Color32::from_rgb(0x2F, 0x9E, 0x34),
+    blue: Color32::from_rgb(0x2F, 0x9E, 0x34),
+    error: REDDISH_DEFAULT,
+    success: MINT_DEFAULT,
+    shadow: Color32::BLACK,
+};
+
+#[derive(Clone, Debug)]
+pub struct SchemeSelection {
+    pub scheme: String,
+    pub mode: String,
+}
+
+pub struct ColorSchemePreset {
+    pub name: &'static str,
+    pub label: &'static str,
+    pub dark: &'static ColorScheme,
+    pub light: Option<&'static ColorScheme>,
+}
+
+static PRESETS: &[ColorSchemePreset] = &[
+    ColorSchemePreset {
+        name: "default",
+        label: "Default",
+        dark: &DARK,
+        light: Some(&LIGHT),
+    },
+    ColorSchemePreset {
+        name: "eggplant",
+        label: "Eggplant",
+        dark: &EGGPLANT_DARK,
+        light: Some(&EGGPLANT_LIGHT),
+    },
+    ColorSchemePreset {
+        name: "catppuccini-macchiato",
+        label: "Catppuccini Macchiato",
+        dark: &CATPPUCINI_MACCHIATO,
+        light: Some(&CATPPUCINI_MACCHIATO_LIGHT),
+    },
+];
+
+static COLOR_SCHEME: AtomicPtr<ColorScheme> = AtomicPtr::new(std::ptr::null_mut());
+static SELECTION: OnceLock<Mutex<SchemeSelection>> = OnceLock::new();
+
+fn selection_store() -> &'static Mutex<SchemeSelection> {
+    SELECTION.get_or_init(|| {
+        Mutex::new(SchemeSelection {
+            scheme: "default".to_string(),
+            mode: "dark".to_string(),
+        })
+    })
+}
+
+fn normalize_mode(mode: &str) -> String {
+    match mode.to_ascii_lowercase().as_str() {
+        "light" => "light".to_string(),
+        _ => "dark".to_string(),
     }
 }
 
-fn load_color_scheme() -> Option<ColorScheme> {
+fn find_preset(name: &str) -> Option<&'static ColorSchemePreset> {
+    let name_lc = name.to_ascii_lowercase();
+    PRESETS
+        .iter()
+        .find(|p| p.name.eq_ignore_ascii_case(&name_lc) || p.label.eq_ignore_ascii_case(&name_lc))
+}
+
+fn resolve_variant<'a>(
+    preset: &'a ColorSchemePreset,
+    requested_mode: &str,
+) -> (&'a ColorScheme, String) {
+    let mode = normalize_mode(requested_mode);
+    match mode.as_str() {
+        "light" if preset.light.is_some() => (preset.light.unwrap(), "light".to_string()),
+        _ => (preset.dark, "dark".to_string()),
+    }
+}
+
+fn apply_selection(scheme: String, mode: String, colors: &'static ColorScheme) -> SchemeSelection {
+    COLOR_SCHEME.store(colors as *const _ as *mut _, atomic::Ordering::Relaxed);
+    {
+        let mut guard = selection_store().lock().unwrap_or_else(|e| e.into_inner());
+        guard.scheme = scheme.clone();
+        guard.mode = mode.clone();
+    }
+    persist_selection(&scheme, &mode, colors);
+    SchemeSelection { scheme, mode }
+}
+
+fn set_to_preset(name: &str, mode: &str) -> SchemeSelection {
+    if let Some(preset) = find_preset(name) {
+        let (colors, resolved_mode) = resolve_variant(preset, mode);
+        apply_selection(preset.name.to_string(), resolved_mode, colors)
+    } else {
+        let fallback = PRESETS.first().expect("at least one preset should exist");
+        let (colors, resolved_mode) = resolve_variant(fallback, mode);
+        apply_selection(fallback.name.to_string(), resolved_mode, colors)
+    }
+}
+
+fn set_custom_scheme(name: String, mode: String, colors: ColorScheme) -> SchemeSelection {
+    let leaked = Box::leak(Box::new(colors));
+    apply_selection(name, normalize_mode(&mode), leaked)
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum StoredColorScheme {
+    Named {
+        scheme: String,
+        mode: Option<String>,
+        colors: ColorScheme,
+    },
+    Legacy(ColorScheme),
+}
+
+fn load_color_scheme() -> Option<StoredColorScheme> {
     let color_scheme_path = dirs().data_dir().join("color_scheme.json");
     let json = std::fs::read_to_string(color_scheme_path).ok()?;
     serde_json::from_str(&json).ok()
 }
 
-pub fn set_schema(schema: &'static ColorScheme) {
-    COLOR_SCHEME.store((schema as *const _) as *mut _, atomic::Ordering::Relaxed);
+fn persist_selection(scheme: &str, mode: &str, colors: &ColorScheme) {
+    let payload = StoredColorScheme::Named {
+        scheme: scheme.to_string(),
+        mode: Some(mode.to_string()),
+        colors: colors.clone(),
+    };
     let color_scheme_path = dirs().data_dir().join("color_scheme.json");
-    if let Ok(json) = serde_json::to_string(&schema) {
+    if let Ok(json) = serde_json::to_string(&payload) {
         let _ = std::fs::write(color_scheme_path, json);
     }
+}
+
+fn ensure_initialized() -> &'static ColorScheme {
+    let ptr = COLOR_SCHEME.load(atomic::Ordering::Relaxed);
+    if !ptr.is_null() {
+        // SAFETY: pointer is either null or points to a ColorScheme we set.
+        return unsafe { &*ptr };
+    }
+
+    match load_color_scheme() {
+        Some(StoredColorScheme::Named {
+            scheme,
+            mode,
+            colors,
+        }) => {
+            if find_preset(&scheme).is_some() {
+                set_to_preset(&scheme, mode.as_deref().unwrap_or("dark"))
+            } else {
+                set_custom_scheme(scheme, mode.unwrap_or_else(|| "dark".to_string()), colors)
+            }
+        }
+        Some(StoredColorScheme::Legacy(colors)) => {
+            set_custom_scheme("custom".to_string(), "dark".to_string(), colors)
+        }
+        None => set_to_preset("default", "dark"),
+    };
+    unsafe { &*COLOR_SCHEME.load(atomic::Ordering::Relaxed) }
+}
+
+pub fn get_scheme() -> &'static ColorScheme {
+    ensure_initialized()
+}
+
+pub fn current_selection() -> SchemeSelection {
+    ensure_initialized();
+    selection_store()
+        .lock()
+        .map(|g| SchemeSelection {
+            scheme: g.scheme.clone(),
+            mode: g.mode.clone(),
+        })
+        .unwrap_or_else(|e| {
+            let guard = e.into_inner();
+            SchemeSelection {
+                scheme: guard.scheme.clone(),
+                mode: guard.mode.clone(),
+            }
+        })
+}
+
+pub fn set_active_scheme(scheme: &str, mode: &str) -> SchemeSelection {
+    set_to_preset(scheme, mode)
+}
+
+pub fn set_active_mode(mode: &str) -> SchemeSelection {
+    let current = current_selection();
+    set_to_preset(&current.scheme, mode)
+}
+
+pub fn scheme_supports_mode(scheme: &str, mode: &str) -> bool {
+    find_preset(scheme).is_some_and(|preset| match normalize_mode(mode).as_str() {
+        "light" => preset.light.is_some(),
+        _ => true,
+    })
+}
+
+pub fn available_presets() -> &'static [ColorSchemePreset] {
+    PRESETS
+}
+
+/// Apply a scheme/mode request and return the resolved selection.
+pub fn apply_scheme_and_mode(scheme: &str, mode: &str) -> SchemeSelection {
+    set_to_preset(scheme, mode)
+}
+
+/// Get the active palette and selection.
+pub fn current_colors() -> (&'static ColorScheme, SchemeSelection) {
+    let colors = get_scheme();
+    (colors, current_selection())
+}
+
+/// Backwards-compatible entry point: sets a custom scheme while keeping the current mode.
+pub fn set_schema(schema: &'static ColorScheme) {
+    let current = current_selection();
+    apply_selection("custom".to_string(), current.mode, schema);
 }

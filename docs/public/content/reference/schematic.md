@@ -19,9 +19,11 @@ order = 6
 - Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `red`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional. Colors can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
 
 ### theme
-- Optional top-level node that sets the session UI appearance. Supported `mode` values: `"dark"` (default fallback) or `"light"`.
-- Applies to all windows in the session; a secondary schematic can override by declaring its own `theme` node.
-- Controls both egui styling (Light vs Dark palette) and the OS window decoration theme.
+- Optional top-level node that sets the session UI appearance.
+- `mode`: `"dark"` (default) or `"light"`; drives window decorations and picks the dark/light variant of the color scheme.
+- `scheme`: name of a built-in color preset (`default`, `eggplant`, `catppuccini-macchiato`). If missing or unknown, `default` is used.
+- Applies to the whole session; a secondary file can set its own `mode` for its windows, but the active scheme stays the one from the primary schematic.
+- Controls both egui styling (palette) and the window decoration theme (Dark/Light).
 
 ### window
 - `path`/`file`/`name`: optional secondary schematic file. Relative paths resolve against the parent schematic directory (or CWD). If absent, the entry configures the primary window instead of loading a secondary file.
@@ -91,6 +93,7 @@ schematic =
 
 theme = "theme"
       [mode=dark|light]
+      [scheme=string]
 
 window = "window"
        [path|file|name=string]
@@ -203,7 +206,7 @@ color = "color"
 Minimal viewport + graph:
 
 ```kdl
-theme mode="light"
+theme mode="light" scheme="matrix"
 
 viewport name="Main"
          fov=45.0

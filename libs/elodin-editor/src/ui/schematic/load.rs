@@ -110,12 +110,15 @@ pub fn sync_schematic(
     }
 }
 
-fn apply_theme_mode(theme_mode: Option<&str>) {
-    match theme_mode.map(|m| m.to_ascii_lowercase()) {
-        Some(mode) if mode == "light" => colors::set_schema(&colors::LIGHT),
-        Some(mode) if mode == "dark" => colors::set_schema(&colors::DARK),
-        _ => {}
-    }
+fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSelection {
+    let current = colors::current_selection();
+    let scheme = theme
+        .and_then(|t| t.scheme.as_deref())
+        .unwrap_or(&current.scheme);
+    let mode = theme
+        .and_then(|t| t.mode.as_deref())
+        .unwrap_or(&current.mode);
+    colors::set_active_scheme(scheme, mode)
 }
 
 fn resolve_window_descriptor(
@@ -244,8 +247,9 @@ impl LoadSchematicParams<'_, '_> {
             self.commands.entity(entity).despawn();
         }
         let mut secondary_descriptors: Vec<WindowDescriptor> = Vec::new();
-        let theme_mode = schematic.theme.as_ref().and_then(|t| t.mode.as_deref());
-        apply_theme_mode(theme_mode);
+        let theme_selection = apply_theme(schematic.theme.as_ref());
+        let theme_mode = Some(theme_selection.mode.clone());
+        let theme_mode_str = theme_mode.as_deref();
         let mut main_window_descriptor = None;
 
         for elem in &schematic.elems {
@@ -264,7 +268,7 @@ impl LoadSchematicParams<'_, '_> {
                 }
                 impeller2_wkt::SchematicElem::Window(window) => {
                     if let Some(descriptor) =
-                        resolve_window_descriptor(window, base_dir, theme_mode)
+                        resolve_window_descriptor(window, base_dir, theme_mode_str)
                     {
                         secondary_descriptors.push(descriptor);
                     } else {
@@ -334,9 +338,9 @@ impl LoadSchematicParams<'_, '_> {
             }
         }
 
-        if let Some(mode) = theme_mode {
+        if let Some(mode) = theme_mode.as_ref() {
             for (_entity, _window_id, mut window_state) in self.window_states.iter_mut() {
-                window_state.descriptor.mode = Some(mode.to_string());
+                window_state.descriptor.mode = Some(mode.clone());
             }
         }
 
@@ -349,7 +353,14 @@ impl LoadSchematicParams<'_, '_> {
                                 .theme
                                 .as_ref()
                                 .and_then(|t| t.mode.as_deref())
-                                .or(theme_mode);
+                                .or(theme_mode.as_deref());
+                            let resolved_mode = theme_mode.map(|mode| {
+                                if colors::scheme_supports_mode(&theme_selection.scheme, mode) {
+                                    mode.to_string()
+                                } else {
+                                    "dark".to_string()
+                                }
+                            });
                             let id = WindowId::default();
                             let mut tile_state =
                                 TileState::new(Id::new(("secondary_tab_tree", id.0)));
@@ -366,7 +377,7 @@ impl LoadSchematicParams<'_, '_> {
 
                             let graph_entities = tile_state.collect_graph_entities();
                             let descriptor = WindowDescriptor {
-                                mode: theme_mode.map(|m| m.to_string()),
+                                mode: resolved_mode,
                                 ..descriptor
                             };
                             info!(

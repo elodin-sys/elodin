@@ -4,7 +4,7 @@ use crate::{
     GridHandle,
     object_3d::Object3DState,
     ui::{
-        HdrEnabled, actions,
+        HdrEnabled, actions, colors,
         colors::EColor,
         inspector, plot, query_plot, query_table,
         tiles::{self, Pane},
@@ -329,7 +329,11 @@ pub fn tiles_to_schematic(
     if let Ok((state, _)) = param.windows_state.get(*param.primary_window)
         && let Some(mode) = state.descriptor.mode.clone()
     {
-        schematic.theme = Some(impeller2_wkt::ThemeConfig { mode: Some(mode) });
+        let selection = colors::current_selection();
+        schematic.theme = Some(impeller2_wkt::ThemeConfig {
+            mode: Some(mode),
+            scheme: Some(selection.scheme),
+        });
     }
 }
 

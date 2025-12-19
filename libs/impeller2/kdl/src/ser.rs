@@ -188,6 +188,10 @@ fn serialize_theme(theme: &ThemeConfig) -> KdlNode {
         node.entries_mut()
             .push(KdlEntry::new_prop("mode", mode.clone()));
     }
+    if let Some(scheme) = &theme.scheme {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("scheme", scheme.clone()));
+    }
     node
 }
 
