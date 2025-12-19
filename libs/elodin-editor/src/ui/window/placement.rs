@@ -10,8 +10,10 @@ use bevy::{
 };
 use bevy_defer::{AccessError, AsyncAccess, AsyncCommandsExtension, AsyncWorld};
 use impeller2_wkt::WindowRect;
+#[cfg(target_os = "macos")]
+use winit::dpi::LogicalPosition;
 use winit::{
-    dpi::{LogicalPosition, LogicalSize, PhysicalSize},
+    dpi::{LogicalSize, PhysicalSize},
     monitor::MonitorHandle,
     window::Window as WinitWindow,
 };
