@@ -431,7 +431,7 @@ fn render_vector_arrow(
             // Store just the offset from the arrow root
             state.label_grid_pos = Some((0, 0, 0, total_offset));
             state.label_name = result.name.clone();
-            state.label_color = Some(base_color);
+            state.label_color = None;
             state.label_scope = arrow_scope;
         } else {
             state.label_grid_pos = None;
@@ -586,15 +586,6 @@ fn lighten_color(color: Color, factor: f32) -> Color {
 }
 
 /// Convert arrow color to a readable label color (ensure good contrast)
-fn readable_label_color(color: Color) -> Color {
-    let linear = color.to_linear();
-    // Brighten the color for better visibility
-    let r = (linear.red * 1.5 + 0.3).clamp(0.0, 1.0);
-    let g = (linear.green * 1.5 + 0.3).clamp(0.0, 1.0);
-    let b = (linear.blue * 1.5 + 0.3).clamp(0.0, 1.0);
-    Color::linear_rgba(r, g, b, 1.0)
-}
-
 /// Get the window entity from a camera's render target.
 fn window_from_camera_target(
     target: &RenderTarget,
@@ -694,13 +685,10 @@ fn update_arrow_label_ui(
             continue;
         };
 
-        let label_color = arrow_state
-            .label_color
-            .map(readable_label_color)
-            .unwrap_or_else(|| {
-                use crate::ui::colors::ColorExt;
-                crate::ui::colors::get_scheme().text_primary.into_bevy()
-            });
+        let label_color = {
+            use crate::ui::colors::ColorExt;
+            crate::ui::colors::get_scheme().text_primary.into_bevy()
+        };
         let label_offset = arrow_state
             .label_grid_pos
             .map(|(_, _, _, offset)| offset)
