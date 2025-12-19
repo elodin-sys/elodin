@@ -377,7 +377,7 @@ async fn apply_window_rect(
                 (pos_y * scale_with_monitor).round(),
             );
             window.set_outer_position(pos);
-            window.request_inner_size(size);
+            let _ = window.request_inner_size(size);
             if is_full_rect {
                 info!("Applied full-screen rect via positioning");
             }
@@ -479,6 +479,7 @@ fn screens_match(a: &MonitorHandle, b: &MonitorHandle) -> bool {
     a.name() == b.name() && a.position() == b.position() && a.size() == b.size()
 }
 
+#[cfg(target_os = "macos")]
 fn log_screens(label: &str, screens: &[MonitorHandle]) {
     let named: Vec<_> = screens
         .iter()
@@ -507,12 +508,6 @@ fn screen_physical_size(screen: &MonitorHandle) -> LogicalSize<f64> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn screen_physical_position(screen: &MonitorHandle) -> LogicalPosition<f64> {
-    let pos = screen.position();
-    LogicalPosition::new(pos.x as f64, pos.y as f64)
-}
-
-#[cfg(not(target_os = "macos"))]
 fn screen_physical_size(screen: &MonitorHandle) -> LogicalSize<f64> {
     let size = screen.size();
     LogicalSize::new(size.width as f64, size.height as f64)
@@ -537,15 +532,6 @@ fn window_on_target_screen(
         return true;
     }
     false
-}
-
-#[cfg(not(target_os = "macos"))]
-fn window_on_screen(window: &WinitWindow, screen: &MonitorHandle) -> bool {
-    if let Some(current) = window.current_monitor() {
-        screens_match(&current, screen)
-    } else {
-        false
-    }
 }
 
 #[cfg(not(target_os = "macos"))]
