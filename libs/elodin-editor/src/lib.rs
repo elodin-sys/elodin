@@ -224,7 +224,15 @@ impl Plugin for EditorPlugin {
                     .in_set(PositionSync),
             )
             .add_systems(Update, sync_paused)
-            .add_systems(PreUpdate, set_selected_range)
+            .add_systems(Update, ui::data_overview::trigger_time_range_queries)
+            .add_systems(
+                PreUpdate,
+                (
+                    ui::data_overview::correct_timestamp_range,
+                    set_selected_range,
+                )
+                    .chain(),
+            )
             .add_systems(Update, update_eql_context)
             .add_systems(Update, set_eql_context_range.after(update_eql_context))
             .add_systems(Startup, spawn_ui_cam)
