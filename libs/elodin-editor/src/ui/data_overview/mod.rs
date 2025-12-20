@@ -4,7 +4,7 @@
 //! data density across time. Useful for identifying gaps or disparities in data.
 
 use std::collections::HashMap;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use arrow::array::{Array, TimestampMicrosecondArray};
 use arrow::record_batch::RecordBatch;
@@ -48,18 +48,39 @@ pub enum TimeRangeQueryState {
 }
 
 /// Pane data for the DataOverview panel
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct DataOverviewPane {
     /// Cached screen rect for rendering
     pub rect: Option<egui::Rect>,
     /// Vertical scroll offset for component list
     pub scroll_offset: f32,
-    /// Horizontal zoom level (pixels per microsecond)
-    pub zoom: f64,
-    /// Horizontal pan offset (timestamp)
-    pub pan_offset: i64,
+    /// Horizontal zoom factor (1.0 = fit to data, >1.0 = zoomed in)
+    pub zoom_factor: f32,
+    /// Horizontal pan offset in microseconds from the data start
+    pub pan_offset_us: i64,
     /// Whether we've triggered the initial query
     pub query_triggered: bool,
+    /// Last time we refreshed queries (for live updates)
+    pub last_refresh: Option<Instant>,
+    /// Cached data time range (min, max) from component queries
+    pub cached_data_range: Option<(Timestamp, Timestamp)>,
+    /// Last known drag position for pan calculation
+    pub last_drag_pos: Option<egui::Pos2>,
+}
+
+impl Default for DataOverviewPane {
+    fn default() -> Self {
+        Self {
+            rect: None,
+            scroll_offset: 0.0,
+            zoom_factor: 1.0,
+            pan_offset_us: 0,
+            query_triggered: false,
+            last_refresh: None,
+            cached_data_range: None,
+            last_drag_pos: None,
+        }
+    }
 }
 
 /// Summary of a component's data presence
@@ -178,12 +199,26 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
         let mut component_list: Vec<(ComponentId, String, String)> = Vec::new();
         collect_components(&params.eql_context.0.component_parts, &mut component_list);
         
-        // Trigger query for timestamp ranges if not started
-        if !pane.query_triggered && !component_list.is_empty() {
-            if matches!(params.time_ranges.state, TimeRangeQueryState::NotStarted) {
+        // Refresh interval for live updates (2 seconds)
+        const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
+        
+        // Check if we should refresh queries for live data
+        let should_refresh = pane.last_refresh
+            .map(|t| t.elapsed() > REFRESH_INTERVAL)
+            .unwrap_or(true);
+
+        // Trigger query for timestamp ranges if not started or need refresh
+        let should_query = (!pane.query_triggered && !component_list.is_empty())
+            || (should_refresh 
+                && matches!(params.time_ranges.state, TimeRangeQueryState::Ready)
+                && !component_list.is_empty());
+        
+        if should_query {
+            if matches!(params.time_ranges.state, TimeRangeQueryState::NotStarted | TimeRangeQueryState::Ready) {
                 params.time_ranges.state = TimeRangeQueryState::Querying(Instant::now());
                 params.time_ranges.total_queries = component_list.len();
                 params.time_ranges.pending_queries = component_list.len();
+                pane.last_refresh = Some(Instant::now());
                 
                 // Query each table individually to handle missing tables gracefully
                 for (_, _, table_name) in component_list.iter() {
@@ -256,10 +291,48 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
             summary.color = row_color(index);
         }
 
-        // Calculate time range - use selected_range to match the window timeline
-        let time_range = &params.selected_range.0;
-        let time_span = (time_range.end.0 - time_range.start.0).max(1) as f64;
+        // Calculate time range from actual component data ranges
+        // This ensures the timeline scales to fit the actual data
+        let data_time_range: Option<(Timestamp, Timestamp)> = summaries
+            .iter()
+            .filter_map(|s| s.timestamp_range)
+            .fold(None, |acc: Option<(Timestamp, Timestamp)>, (min, max)| {
+                Some(match acc {
+                    None => (min, max),
+                    Some((a_min, a_max)) => (
+                        Timestamp(a_min.0.min(min.0)),
+                        Timestamp(a_max.0.max(max.0)),
+                    ),
+                })
+            });
+
+        // Update cached data range when queries complete
+        if matches!(params.time_ranges.state, TimeRangeQueryState::Ready) && data_time_range.is_some() {
+            pane.cached_data_range = data_time_range;
+        }
+
+        // Use cached data range, falling back to selected_range if no data yet
+        let (data_min, data_max) = pane.cached_data_range
+            .or(data_time_range)
+            .unwrap_or_else(|| (params.selected_range.0.start, params.selected_range.0.end));
+
+        // Add a small margin (5%) to the data range for better visualization
+        let base_span = (data_max.0 - data_min.0).max(1_000_000) as f64; // minimum 1 second
+        let margin = (base_span * 0.05) as i64;
+        let display_data_min = Timestamp(data_min.0.saturating_sub(margin));
+
+        // Apply zoom factor (1.0 = fit all data, >1.0 = zoomed in)
+        let zoomed_span = base_span / pane.zoom_factor.max(0.01) as f64;
+        
+        // Apply pan offset (clamped to prevent scrolling beyond data)
+        let max_pan = (base_span - zoomed_span).max(0.0) as i64;
+        pane.pan_offset_us = pane.pan_offset_us.clamp(0, max_pan);
+        
+        let display_start = Timestamp(display_data_min.0 + pane.pan_offset_us);
+        let display_end = Timestamp(display_start.0 + zoomed_span as i64);
+
         let timeline_width = (available_rect.width() - LABEL_WIDTH).max(100.0);
+        let time_span = (display_end.0 - display_start.0).max(1) as f64;
         let pixels_per_us = timeline_width as f64 / time_span;
         let timeline_start_x = available_rect.min.x + LABEL_WIDTH;
         let timeline_end_x = timeline_start_x + timeline_width;
@@ -355,9 +428,9 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
 
                 // Draw bar if we have timestamp data
                 if let Some((start_ts, end_ts)) = summary.timestamp_range {
-                    // Calculate bar position relative to the selected time range
-                    let start_offset = (start_ts.0 - time_range.start.0) as f64;
-                    let end_offset = (end_ts.0 - time_range.start.0) as f64;
+                    // Calculate bar position relative to the display range
+                    let start_offset = (start_ts.0 - display_start.0) as f64;
+                    let end_offset = (end_ts.0 - display_start.0) as f64;
                     
                     let start_x = timeline_start_x + (start_offset * pixels_per_us) as f32;
                     let end_x = timeline_start_x + (end_offset * pixels_per_us) as f32;
@@ -397,15 +470,61 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
         // Handle interactions
         let response = ui.interact(available_rect, ui.id().with("data_overview"), Sense::click_and_drag());
         
+        // Check if pointer is over the timeline area (right of labels)
+        let pointer_in_timeline = response.hover_pos()
+            .map(|pos| pos.x > timeline_start_x)
+            .unwrap_or(false);
+
+        // Double-click to reset zoom and pan
+        if response.double_clicked() {
+            pane.zoom_factor = 1.0;
+            pane.pan_offset_us = 0;
+        }
+
+        // Handle drag for panning
         if response.dragged() {
             let delta = response.drag_delta();
+            
+            if pointer_in_timeline {
+                // Horizontal drag in timeline area = horizontal pan
+                // Convert pixel delta to timestamp delta
+                let us_per_pixel = time_span / timeline_width as f64;
+                let pan_delta = (-delta.x as f64 * us_per_pixel) as i64;
+                pane.pan_offset_us = (pane.pan_offset_us + pan_delta).max(0);
+            }
+            
+            // Vertical drag anywhere = vertical scroll
             pane.scroll_offset = (pane.scroll_offset - delta.y).max(0.0);
         }
 
-        // Zoom with scroll wheel
+        // Zoom with scroll wheel when hovering over timeline
         if response.hovered() {
-            let scroll_delta = ui.input(|i| i.raw_scroll_delta);
-            if scroll_delta.y != 0.0 {
+            let scroll_delta = ui.input(|i| i.smooth_scroll_delta);
+            
+            if pointer_in_timeline && scroll_delta.y != 0.0 {
+                // Horizontal zoom in timeline area
+                const ZOOM_SENSITIVITY: f32 = 0.002;
+                let zoom_delta = scroll_delta.y * ZOOM_SENSITIVITY;
+                
+                // Get pointer position relative to timeline for zoom centering
+                let pointer_x = response.hover_pos()
+                    .map(|pos| pos.x - timeline_start_x)
+                    .unwrap_or(timeline_width / 2.0);
+                let pointer_ratio = pointer_x / timeline_width;
+                
+                let old_zoom = pane.zoom_factor;
+                pane.zoom_factor = (pane.zoom_factor * (1.0 + zoom_delta)).clamp(1.0, 100.0);
+                
+                // Adjust pan to zoom towards pointer position
+                if pane.zoom_factor != old_zoom {
+                    let old_span = base_span / old_zoom as f64;
+                    let new_span = base_span / pane.zoom_factor as f64;
+                    let span_delta = old_span - new_span;
+                    let pan_adjustment = (span_delta * pointer_ratio as f64) as i64;
+                    pane.pan_offset_us = (pane.pan_offset_us + pan_adjustment).max(0);
+                }
+            } else if scroll_delta.y != 0.0 {
+                // Vertical scroll in label area
                 pane.scroll_offset = (pane.scroll_offset - scroll_delta.y).max(0.0);
             }
         }
@@ -457,13 +576,29 @@ fn process_single_table_result(
 
 /// System that triggers component time range queries when components become available.
 /// This ensures filtering happens even if the Data Overview panel isn't displayed.
+/// The panel's own refresh logic handles periodic updates for live data.
 pub fn trigger_time_range_queries(
     eql_context: Res<EqlContext>,
     mut time_ranges: ResMut<ComponentTimeRanges>,
     mut commands: Commands,
 ) {
-    // Skip if already querying or ready
-    if !matches!(time_ranges.state, TimeRangeQueryState::NotStarted) {
+    // Check if we should start queries or handle stale queries
+    let should_start = match &time_ranges.state {
+        TimeRangeQueryState::NotStarted => true,
+        TimeRangeQueryState::Querying(start) => {
+            // Timeout stale queries after 30 seconds and reset to NotStarted
+            if start.elapsed() > Duration::from_secs(30) {
+                time_ranges.state = TimeRangeQueryState::NotStarted;
+                true
+            } else {
+                false
+            }
+        }
+        TimeRangeQueryState::Ready => false, // Panel handles refresh
+        TimeRangeQueryState::Error(_) => true,
+    };
+    
+    if !should_start {
         return;
     }
 
