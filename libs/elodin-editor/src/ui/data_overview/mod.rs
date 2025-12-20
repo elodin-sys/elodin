@@ -16,7 +16,7 @@ use bevy_egui::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use convert_case::{Case, Casing};
 use impeller2::types::{ComponentId, Timestamp};
 use impeller2_bevy::CommandsExt;
-use impeller2_wkt::{ArrowIPC, EarliestTimestamp, ErrorResponse, LastUpdated, SQLQuery};
+use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery};
 
 use crate::{EqlContext, SelectedTimeRange, ui::widgets::WidgetSystem};
 
@@ -127,58 +127,6 @@ fn component_to_table_name(full_component_name: &str) -> String {
     // Table name is like "gps_pos_message_1_vacc"
     // Must match the conversion in libs/db/src/arrow/mod.rs
     full_component_name.to_case(Case::Snake).replace('.', "_")
-}
-
-/// Filter out components that are timestamp sources (like TIME_MONOTONIC fields).
-///
-/// Timestamp source components have anomalous time ranges:
-/// - In original database state: timestamps near epoch (1970) because raw monotonic clock values are stored
-/// - After fix_timestamps tool: timestamps in the future because large monotonic values interpreted as microseconds
-///
-/// Detection uses dual-threshold matching libs/db/src/bin/fix_timestamps.rs:
-/// 1. Max timestamp before year 2000 = monotonic timestamps from original state
-/// 2. Min timestamp > median + 7 days = anomalous future timestamps from fixed state
-fn filter_timestamp_source_components(
-    summaries: Vec<ComponentTimestampSummary>,
-) -> Vec<ComponentTimestampSummary> {
-    // Cutoff from fix_timestamps.rs: 2000-01-01 in microseconds
-    const CUTOFF_2000_US: i64 = 946_684_800_000_000;
-    // 7 days in microseconds
-    const SEVEN_DAYS_US: i64 = 7 * 24 * 60 * 60 * 1_000_000;
-
-    // Calculate median max timestamp from components with data
-    let mut max_timestamps: Vec<i64> = summaries
-        .iter()
-        .filter_map(|s| s.timestamp_range.map(|(_, max)| max.0))
-        .collect();
-
-    // Need at least 2 components with data to detect anomalies
-    if max_timestamps.len() < 2 {
-        return summaries;
-    }
-
-    max_timestamps.sort();
-    let median_max = max_timestamps[max_timestamps.len() / 2];
-
-    summaries
-        .into_iter()
-        .filter(|s| {
-            match s.timestamp_range {
-                Some((min_ts, max_ts)) => {
-                    // Filter if max timestamp is before year 2000 (monotonic/epoch timestamps)
-                    if max_ts.0 < CUTOFF_2000_US {
-                        return false;
-                    }
-                    // Filter if min timestamp is significantly in the future (fixed db state)
-                    if min_ts.0 > median_max + SEVEN_DAYS_US {
-                        return false;
-                    }
-                    true
-                }
-                None => true, // Keep empty components
-            }
-        })
-        .collect()
 }
 
 /// Widget for rendering the Data Overview panel
@@ -294,9 +242,6 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
             });
         }
 
-        // Filter out timestamp source components (like TIME_MONOTONIC fields)
-        let mut summaries = filter_timestamp_source_components(summaries);
-        
         // Sort: components with data first (alphabetically), then empty components (alphabetically)
         summaries.sort_by(|a, b| {
             match (a.timestamp_range.is_some(), b.timestamp_range.is_some()) {
@@ -579,68 +524,5 @@ pub fn trigger_time_range_queries(
                 true
             },
         );
-    }
-}
-
-/// System that corrects the EarliestTimestamp and LastUpdated resources based on
-/// filtered component time ranges. This filters out timestamp source components
-/// (like TIME_MONOTONIC) that have anomalous time ranges.
-///
-/// This should run BEFORE set_selected_range so the timeline uses corrected values.
-pub fn correct_timestamp_range(
-    time_ranges: Res<ComponentTimeRanges>,
-    mut earliest: ResMut<EarliestTimestamp>,
-    mut latest: ResMut<LastUpdated>,
-) {
-    // Only run when queries are ready and we have data
-    if !matches!(time_ranges.state, TimeRangeQueryState::Ready) {
-        return;
-    }
-
-    if time_ranges.ranges.is_empty() {
-        return;
-    }
-
-    // Apply the same filtering logic as filter_timestamp_source_components
-    const CUTOFF_2000_US: i64 = 946_684_800_000_000;
-    const SEVEN_DAYS_US: i64 = 7 * 24 * 60 * 60 * 1_000_000;
-
-    // Collect all max timestamps for median calculation
-    let mut max_timestamps: Vec<i64> = time_ranges
-        .ranges
-        .values()
-        .map(|(_, max)| max.0)
-        .collect();
-
-    if max_timestamps.len() < 2 {
-        return;
-    }
-
-    max_timestamps.sort();
-    let median_max = max_timestamps[max_timestamps.len() / 2];
-
-    // Filter and find the true earliest/latest from valid components
-    let mut filtered_earliest = i64::MAX;
-    let mut filtered_latest = i64::MIN;
-
-    for (min_ts, max_ts) in time_ranges.ranges.values() {
-        // Skip if max timestamp is before year 2000 (monotonic/epoch timestamps)
-        if max_ts.0 < CUTOFF_2000_US {
-            continue;
-        }
-        // Skip if min timestamp is significantly in the future (fixed db state)
-        if min_ts.0 > median_max + SEVEN_DAYS_US {
-            continue;
-        }
-
-        // This is a valid component, update the range
-        filtered_earliest = filtered_earliest.min(min_ts.0);
-        filtered_latest = filtered_latest.max(max_ts.0);
-    }
-
-    // Only update if we found valid data
-    if filtered_earliest != i64::MAX && filtered_latest != i64::MIN {
-        earliest.0 = Timestamp(filtered_earliest);
-        latest.0 = Timestamp(filtered_latest);
     }
 }
