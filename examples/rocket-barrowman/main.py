@@ -40,6 +40,14 @@ from rocket_model import Rocket as RocketModel
 from flight_solver import FlightSolver, FlightResult
 from calisto_builder import build_calisto
 
+# Try to import mesh renderer for Elodin visualization
+try:
+    from mesh_renderer import generate_rocket_glb_from_solver, generate_elodin_assets, TRIMESH_AVAILABLE
+except ImportError:
+    TRIMESH_AVAILABLE = False
+    generate_rocket_glb_from_solver = None
+    generate_elodin_assets = None
+
 
 def main():
     """Run Calisto rocket simulation and visualize in Elodin."""
@@ -73,7 +81,7 @@ def main():
         heading_deg=0.0,  # degrees (north)
     )
 
-    result = solver.run(max_time=200.0)
+    result = solver.run(max_time=600.0)  # 10 minutes max, will stop at impact
 
     # Print summary
     if len(result.history) == 0:
@@ -101,16 +109,58 @@ def main():
 
 def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     print(f"\nConverting to Elodin format and launching editor...")
+    
+    # Generate rocket mesh for Elodin visualization
+    if TRIMESH_AVAILABLE and generate_rocket_glb_from_solver:
+        try:
+            # Generate in the elodin/assets directory
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            assets_dir = os.path.join(script_dir, "..", "..", "assets")
+            os.makedirs(assets_dir, exist_ok=True)
+            generate_rocket_glb_from_solver(solver, assets_dir)
+        except Exception as e:
+            print(f"⚠ Could not generate rocket mesh: {e}")
+            print("  (Elodin will use existing rocket.glb in assets)")
 
     history = result.history
     times_np = np.array([s.time for s in history])
     dt = float(times_np[1] - times_np[0]) if len(times_np) > 1 else 0.01
 
-    positions = jnp.asarray([s.position for s in history])
-    velocities = jnp.asarray([s.velocity for s in history])
-    quaternions = jnp.asarray([s.quaternion for s in history])
-    angular_velocities = jnp.asarray([s.angular_velocity for s in history])
-    aero_forces = jnp.asarray([s.total_aero_force for s in history])
+    # Sanitize data - replace NaN/Inf with safe values
+    def sanitize_array(arr, default=0.0):
+        """Replace NaN and Inf with safe values."""
+        arr = np.nan_to_num(arr, nan=default, posinf=1e6, neginf=-1e6)
+        return arr
+    
+    def sanitize_quaternion(q):
+        """Ensure quaternion is valid (normalized, no NaN)."""
+        q = np.nan_to_num(q, nan=0.0, posinf=1.0, neginf=-1.0)
+        norm = np.linalg.norm(q)
+        if norm < 1e-6:
+            return np.array([0.0, 0.0, 0.0, 1.0])  # Identity quaternion
+        return q / norm
+
+    # Extract and sanitize arrays
+    positions_raw = np.array([s.position for s in history])
+    velocities_raw = np.array([s.velocity for s in history])
+    quaternions_raw = np.array([sanitize_quaternion(s.quaternion) for s in history])
+    angular_velocities_raw = np.array([s.angular_velocity for s in history])
+    aero_forces_raw = np.array([s.total_aero_force for s in history])
+    
+    # Clamp unreasonable values
+    positions_raw = sanitize_array(positions_raw)
+    velocities_raw = sanitize_array(velocities_raw)
+    velocities_raw = np.clip(velocities_raw, -2000, 2000)  # Max ~Mach 6
+    angular_velocities_raw = sanitize_array(angular_velocities_raw)
+    angular_velocities_raw = np.clip(angular_velocities_raw, -50, 50)  # Max 50 rad/s
+    aero_forces_raw = sanitize_array(aero_forces_raw)
+    aero_forces_raw = np.clip(aero_forces_raw, -1e6, 1e6)
+
+    positions = jnp.asarray(positions_raw)
+    velocities = jnp.asarray(velocities_raw)
+    quaternions = jnp.asarray(quaternions_raw)
+    angular_velocities = jnp.asarray(angular_velocities_raw)
+    aero_forces = jnp.asarray(aero_forces_raw)
 
     altitudes = positions[:, 2]
     downrange = jnp.linalg.norm(positions[:, :2], axis=1)
@@ -125,31 +175,46 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     else:
         # Single point: zero acceleration
         accel_vec = jnp.zeros((1, 3))
-    accel_mag = jnp.linalg.norm(accel_vec, axis=1)
+    # Clamp acceleration to reasonable values (< 100g = 981 m/s²)
+    accel_vec = jnp.clip(accel_vec, -1000, 1000)
+    accel_mag = jnp.nan_to_num(jnp.linalg.norm(accel_vec, axis=1), nan=0.0, posinf=1000)
 
-    machs = jnp.nan_to_num(jnp.asarray([s.mach for s in history]))
-    aoas = jnp.asarray([s.angle_of_attack for s in history])
-    dynamic_pressures = jnp.asarray([s.dynamic_pressure for s in history])
-    aero_force_mag = jnp.linalg.norm(aero_forces, axis=1)
+    # Sanitize all scalar arrays
+    machs = jnp.nan_to_num(jnp.asarray([s.mach for s in history]), nan=0.0, posinf=10.0, neginf=0.0)
+    aoas_raw = sanitize_array(np.array([s.angle_of_attack for s in history]))
+    aoas = jnp.asarray(np.clip(aoas_raw, -180, 180))
+    dynamic_pressures_raw = sanitize_array(np.array([s.dynamic_pressure for s in history]))
+    dynamic_pressures = jnp.asarray(np.clip(dynamic_pressures_raw, 0, 1e6))
+    aero_force_mag = jnp.nan_to_num(jnp.linalg.norm(aero_forces, axis=1), nan=0.0, posinf=1e6)
 
     def quat_to_euler_deg(q: jnp.ndarray) -> jnp.ndarray:
         x, y, z, w = q
+        # Ensure quaternion is normalized
+        norm = jnp.sqrt(x*x + y*y + z*z + w*w)
+        norm = jnp.where(norm < 1e-6, 1.0, norm)
+        x, y, z, w = x/norm, y/norm, z/norm, w/norm
+        
         sinr_cosp = 2.0 * (w * x + y * z)
         cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
         roll = jnp.arctan2(sinr_cosp, cosr_cosp)
 
-        sinp = 2.0 * (w * y - z * x)
-        pitch = jnp.where(jnp.abs(sinp) >= 1.0, jnp.sign(sinp) * (jnp.pi / 2.0), jnp.arcsin(sinp))
+        sinp = jnp.clip(2.0 * (w * y - z * x), -1.0, 1.0)
+        pitch = jnp.arcsin(sinp)
 
         siny_cosp = 2.0 * (w * z + x * y)
         cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
         yaw = jnp.arctan2(siny_cosp, cosy_cosp)
 
-        return jnp.rad2deg(jnp.array([roll, pitch, yaw]))
+        euler = jnp.rad2deg(jnp.array([roll, pitch, yaw]))
+        # Clamp to reasonable range
+        return jnp.clip(euler, -360.0, 360.0)
 
     euler_deg = jax.vmap(quat_to_euler_deg)(quaternions)
+    # Replace any remaining NaN with 0
+    euler_deg = jnp.nan_to_num(euler_deg, nan=0.0)
 
     angular_rates_deg = jnp.rad2deg(angular_velocities)
+    angular_rates_deg = jnp.clip(angular_rates_deg, -3000.0, 3000.0)  # Reasonable angular rate limit
 
     Altitude = ty.Annotated[jax.Array, el.Component("altitude_m", el.ComponentType.F64)]
     Downrange = ty.Annotated[jax.Array, el.Component("downrange_m", el.ComponentType.F64)]
@@ -197,12 +262,26 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     mass0 = solver.mass_model.total_mass(0.0)
     inertia_diag0 = solver.mass_model.inertia_diag(0.0)
 
+    # Ensure initial position is at origin (ground level)
+    initial_pos = positions[0]
+    if initial_pos[2] < 0:
+        initial_pos = initial_pos.copy()
+        initial_pos[2] = 0.0  # Start at ground level
+    
+    # Ensure initial quaternion is valid
+    initial_quat = quaternions[0]
+    quat_norm = np.linalg.norm(initial_quat)
+    if quat_norm < 1e-6:
+        initial_quat = np.array([0.0, 0.0, 0.0, 1.0])  # Identity
+    else:
+        initial_quat = initial_quat / quat_norm
+    
     rocket_entity = world.spawn(
         [
             el.Body(
                 world_pos=el.SpatialTransform(
-                    linear=positions[0],
-                    angular=el.Quaternion.from_array(quaternions[0]),
+                    linear=jnp.asarray(initial_pos),
+                    angular=el.Quaternion.from_array(initial_quat),
                 ),
                 inertia=el.SpatialInertia(
                     mass=mass0,
@@ -214,31 +293,38 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
         name="rocket",
     )
 
-    schematic = """
-    tabs {
-        hsplit share=0.65 name="Flight View" {
+    # Get absolute paths to assets
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    elodin_root = os.path.join(script_dir, "..", "..")
+    assets_dir = os.path.abspath(os.path.join(elodin_root, "assets"))
+    compass_path = os.path.join(assets_dir, "compass.glb")
+    rocket_path = os.path.join(assets_dir, "rocket.glb")
+    
+    schematic = f"""
+    tabs {{
+        hsplit share=0.65 name="Flight View" {{
             viewport name=Viewport pos="rocket.world_pos + (0,0,0,0, 6,3,2)" look_at="rocket.world_pos" hdr=#true show_grid=#true active=#true
-            vsplit share=0.45 {
+            vsplit share=0.45 {{
                 graph "rocket.altitude_m,rocket.downrange_m" name="Altitude / Downrange"
                 graph "rocket.speed_ms" name="Speed"
                 graph "rocket.dynamic_pressure_pa,rocket.mach,rocket.aero_force_n" name="Aero Loads"
-            }
-        }
-        hsplit share=0.35 name="Orientation" {
+            }}
+        }}
+        hsplit share=0.35 name="Orientation" {{
             graph "rocket.euler_deg[0],rocket.euler_deg[1],rocket.euler_deg[2]" name="Euler Angles"
             graph "rocket.angular_rates_deg[0],rocket.angular_rates_deg[1],rocket.angular_rates_deg[2]" name="Body Rates"
-        }
-    }
+        }}
+    }}
 
-    object_3d "(0,0,0,1)" {
-        glb path="compass.glb"
-    }
-    object_3d rocket.world_pos {
-        glb path="rocket.glb"
-    }
-    line_3d rocket.world_pos line_width=2.0 perspective=#false {
+    object_3d "(0,0,0,1)" {{
+        glb path="{compass_path}"
+    }}
+    object_3d rocket.world_pos {{
+        glb path="{rocket_path}"
+    }}
+    line_3d rocket.world_pos line_width=2.0 perspective=#false {{
         color 255 223 0
-    }
+    }}
     """
 
     # Pass schematic directly to editor - this avoids file watcher triggering reload loops

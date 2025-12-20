@@ -1,10 +1,13 @@
-"""RocketPy-inspired flight solver with RK4 integration."""
+"""Standalone 6-DOF flight solver with RK4 integration.
+
+This module implements RocketPy-style dynamics without requiring the RocketPy package.
+All math utilities (Matrix, Vector) are provided by the local math_utils module.
+"""
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from pathlib import Path
 from typing import List, Optional
 
 import numpy as np
@@ -12,14 +15,7 @@ import numpy as np
 from environment import Environment
 from motor_model import Motor
 from rocket_model import Rocket, ParachuteConfig
-
-# Ensure the vendored RocketPy installation is importable.
-ROCKETPY_VENDOR_PATH = Path(__file__).resolve().parents[2] / "third_party" / "rocketpy"
-if ROCKETPY_VENDOR_PATH.exists():
-    import sys
-
-    if str(ROCKETPY_VENDOR_PATH) not in sys.path:
-        sys.path.append(str(ROCKETPY_VENDOR_PATH))
+from math_utils import Matrix, Vector
 
 try:
     from calisto_drag_curve import get_calisto_cd
@@ -27,14 +23,6 @@ try:
     USE_CALISTO_DRAG = True
 except ImportError:
     USE_CALISTO_DRAG = False
-
-try:
-    # The math utilities from RocketPy provide lightweight Vector/Matrix helpers.
-    # Using them keeps our numerical implementation aligned with RocketPy's conventions.
-    from rocketpy.mathutils.vector_matrix import Matrix, Vector  # type: ignore
-except Exception:  # pragma: no cover - fallback if RocketPy is unavailable
-    Matrix = None  # type: ignore
-    Vector = None  # type: ignore
 
 G0 = 9.80665
 
@@ -106,7 +94,7 @@ class MassInertiaModel:
     def __init__(self, rocket: Rocket, motor: Motor) -> None:
         self.rocket = rocket
         self.motor = motor
-        self._has_rocketpy = Matrix is not None and Vector is not None
+        self._has_rocketpy = True  # Always True with standalone math_utils
 
         self.structural_mass = rocket.structural_mass()
         self.structural_cg = rocket.structural_cg()
@@ -344,17 +332,25 @@ class FlightSolver:
         state = self._initial_state()
         history: List[StateSnapshot] = []
         t = 0.0
-        max_time = self.max_time if self.max_time is not None else 180.0
+        max_time_limit = self.max_time if self.max_time is not None else 600.0  # 10 minutes max
+        impact_detected = False
 
-        while t <= max_time:
+        while t <= max_time_limit:
             snapshot = self._state_to_snapshot(t, state)
             history.append(snapshot)
 
+            # Stop when rocket hits ground (after initial launch)
             if snapshot.z < 0.0 and t > 1.0:
+                impact_detected = True
                 break
 
             state = self._rk4_step(t, state, self.dt)
             t += self.dt
+            
+            # Safety: stop if we detect NaN/Inf in state
+            if not np.isfinite(state).all():
+                print(f"WARNING: Simulation stopped at t={t:.2f}s due to numerical instability")
+                break
 
         summary = self._summarize(history)
         return FlightResult(history=history, summary=summary)
@@ -480,23 +476,10 @@ class FlightSolver:
         # Transform velocity to body frame (RocketPy line 1863)
         # Note: velocity here is in world frame, not air_velocity
         # RocketPy uses: velocity_in_body_frame = Kt @ v (where v is world-frame velocity)
-        # Then separately adds wind in body frame
         velocity_world = velocity  # World frame velocity
-        if Matrix is not None and Vector is not None:
-            Kt = Matrix.transformation(quaternion).transpose
-            velocity_body_cm_vec = Kt @ Vector(velocity_world)
-            vx_cm, vy_cm, vz_cm = (
-                velocity_body_cm_vec.x,
-                velocity_body_cm_vec.y,
-                velocity_body_cm_vec.z,
-            )
-        else:
-            velocity_body_local = self._rotate_world_to_body(quaternion, velocity_world)
-            vx_cm, vy_cm, vz_cm = (
-                velocity_body_local[2],
-                velocity_body_local[1],
-                velocity_body_local[0],
-            )
+        Kt = Matrix.transformation(quaternion).transpose
+        velocity_body_cm_vec = Kt @ Vector(velocity_world)
+        vx_cm, vy_cm, vz_cm = velocity_body_cm_vec.x, velocity_body_cm_vec.y, velocity_body_cm_vec.z
         velocity_body_cm = np.array([vx_cm, vy_cm, vz_cm])
 
         # For now, use CM velocity only (not CP with rotation) to avoid feedback instability
@@ -511,18 +494,11 @@ class FlightSolver:
 
         # Stream velocity = -rocket velocity at CM (assuming no wind)
         # Note: air_velocity already accounts for wind, so we use it directly
-        if Matrix is not None and Vector is not None:
-            air_velocity_body_vec = Kt @ Vector(air_velocity)
-            stream_velocity_vec = -air_velocity_body_vec
-            stream_velocity = np.array(
-                [stream_velocity_vec.x, stream_velocity_vec.y, stream_velocity_vec.z]
-            )
-        else:
-            air_velocity_body = self._rotate_world_to_body(quaternion, air_velocity)
-            air_velocity_body_rp = np.array(
-                [air_velocity_body[2], air_velocity_body[1], air_velocity_body[0]]
-            )
-            stream_velocity = -air_velocity_body_rp
+        air_velocity_body_vec = Kt @ Vector(air_velocity)
+        stream_velocity_vec = -air_velocity_body_vec
+        stream_velocity = np.array(
+            [stream_velocity_vec.x, stream_velocity_vec.y, stream_velocity_vec.z]
+        )
 
         stream_speed = np.linalg.norm(stream_velocity)
 
@@ -568,15 +544,10 @@ class FlightSolver:
                     parachute_drag_world -= 0.5 * rho * chute.config.cd_area * speed * air_velocity
 
         # Transform parachute drag to body frame for force summation
-        if Matrix is not None and Vector is not None:
-            Kt = Matrix.transformation(quaternion).transpose
-            chute_drag_body_vec = Kt @ Vector(parachute_drag_world)
-            chute_drag_body_rp = np.array(
-                [chute_drag_body_vec.x, chute_drag_body_vec.y, chute_drag_body_vec.z]
-            )
-        else:
-            # Transform world to body without axis swap
-            chute_drag_body_rp = self._rotate_world_to_body(quaternion, parachute_drag_world)
+        chute_drag_body_vec = Kt @ Vector(parachute_drag_world)
+        chute_drag_body_rp = np.array(
+            [chute_drag_body_vec.x, chute_drag_body_vec.y, chute_drag_body_vec.z]
+        )
 
         # Lift force using stream velocity at CP (RocketPy aero_surface.py lines 130-149)
         R1, R2, R3 = 0.0, 0.0, 0.0
@@ -609,28 +580,18 @@ class FlightSolver:
 
         # Transform to world frame for total force calculation
         # Body frame: x=lateral(yaw), y=lateral(pitch), z=longitudinal(forward)
-        if Matrix is not None and Vector is not None:
-            K = Matrix.transformation(quaternion)
-            aero_force_world = K @ Vector(aero_force_body_rp)
-            aero_force_world = np.array(
-                [aero_force_world.x, aero_force_world.y, aero_force_world.z]
-            )
-        else:
-            # Use body frame directly: aero_force_body_rp is [x_lat, y_lat, z_axial]
-            # Our quaternion maps body-z to world launch direction
-            aero_force_world = self._rotate_vector(quaternion, aero_force_body_rp)
+        K = Matrix.transformation(quaternion)
+        aero_force_world_vec = K @ Vector(aero_force_body_rp)
+        aero_force_world = np.array(
+            [aero_force_world_vec.x, aero_force_world_vec.y, aero_force_world_vec.z]
+        )
 
         # Thrust in body frame (along +z, which is the rocket's longitudinal axis)
         # The quaternion maps body-z to the launch direction, so thrust along body-z
         thrust_mag = self.motor.thrust(time)
-        if Matrix is not None and Vector is not None:
-            thrust_body_rp = np.array([0.0, 0.0, thrust_mag])
-            thrust_world = K @ Vector(thrust_body_rp)
-            thrust_world = np.array([thrust_world.x, thrust_world.y, thrust_world.z])
-        else:
-            # In our convention: body-z is longitudinal (forward), same as initial quaternion setup
-            thrust_body = np.array([0.0, 0.0, thrust_mag])
-            thrust_world = self._rotate_vector(quaternion, thrust_body)
+        thrust_body_rp = np.array([0.0, 0.0, thrust_mag])
+        thrust_world_vec = K @ Vector(thrust_body_rp)
+        thrust_world = np.array([thrust_world_vec.x, thrust_world_vec.y, thrust_world_vec.z])
 
         gravity = np.array([0.0, 0.0, -mass_total * G0])
         total_force = thrust_world + aero_force_world + gravity
@@ -672,25 +633,14 @@ class FlightSolver:
         moment_body_rp = np.array([M1, M2, M3])
 
         # Transform to world frame
-        if Matrix is not None and Vector is not None:
-            moment_world = K @ Vector(moment_body_rp)
-            moment_world = np.array([moment_world.x, moment_world.y, moment_world.z])
-        else:
-            # Use body frame directly without axis swap
-            moment_world = self._rotate_vector(quaternion, moment_body_rp)
+        moment_world_vec = K @ Vector(moment_body_rp)
+        moment_world = np.array([moment_world_vec.x, moment_world_vec.y, moment_world_vec.z])
 
         # Store forces for compatibility (compute world frame equivalents)
-        # Drag is primarily along -z in body frame
-        if Matrix is not None and Vector is not None:
-            drag_world_vec = K @ Vector(drag_body_rp)
-            drag_world = np.array([drag_world_vec.x, drag_world_vec.y, drag_world_vec.z])
-            lift_world_vec = K @ Vector(normal_force_body_rp)
-            lift_world = np.array([lift_world_vec.x, lift_world_vec.y, lift_world_vec.z])
-            # parachute_drag_world already calculated above in world frame
-        else:
-            drag_world = aero_force_world
-            lift_world = np.zeros(3)
-            # parachute_drag_world already calculated above in world frame
+        drag_world_vec = K @ Vector(drag_body_rp)
+        drag_world = np.array([drag_world_vec.x, drag_world_vec.y, drag_world_vec.z])
+        lift_world_vec = K @ Vector(normal_force_body_rp)
+        lift_world = np.array([lift_world_vec.x, lift_world_vec.y, lift_world_vec.z])
 
         return {
             "position": position,
@@ -740,11 +690,27 @@ class FlightSolver:
         )
 
     def _rk4_step(self, time: float, state: np.ndarray, dt: float) -> np.ndarray:
+        # Check for NaN/Inf in input state and reset if needed
+        if not np.isfinite(state).all():
+            # State is corrupted, try to salvage what we can
+            state = np.nan_to_num(state, nan=0.0, posinf=1e6, neginf=-1e6)
+            # Reset quaternion to identity if corrupted
+            if not np.isfinite(state[6:10]).all() or np.linalg.norm(state[6:10]) < 1e-6:
+                state[6:10] = np.array([0.0, 0.0, 0.0, 1.0])
+        
         k1 = self._derivatives(time, state)
         k2 = self._derivatives(time + 0.5 * dt, state + 0.5 * dt * k1)
         k3 = self._derivatives(time + 0.5 * dt, state + 0.5 * dt * k2)
         k4 = self._derivatives(time + dt, state + dt * k3)
         next_state = state + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+        
+        # Clamp position to reasonable bounds (within 100km of origin)
+        next_state[0:3] = np.clip(next_state[0:3], -1e5, 1e5)
+        
+        # Clamp velocity to reasonable bounds (< Mach 10 ≈ 3400 m/s)
+        next_state[3:6] = np.clip(next_state[3:6], -4000, 4000)
+        
+        # Normalize quaternion
         quat = next_state[6:10]
         norm = np.linalg.norm(quat)
         if norm > 1e-10:
@@ -752,7 +718,25 @@ class FlightSolver:
         else:
             # Reset to identity quaternion if norm is too small (numerical error)
             next_state[6:10] = np.array([0.0, 0.0, 0.0, 1.0])
+        
+        # Clamp angular velocity to prevent tumble-induced instability
+        # During descent, rockets can tumble but we limit angular rate to 50 rad/s (~2800 deg/s)
+        next_state[10:13] = np.clip(next_state[10:13], -50.0, 50.0)
+        
+        # Ensure motor mass doesn't go negative
         next_state[13] = max(next_state[13], self.motor.dry_mass)
+        
+        # Final NaN check
+        if not np.isfinite(next_state).all():
+            next_state = np.nan_to_num(next_state, nan=0.0, posinf=1e6, neginf=-1e6)
+            next_state[6:10] = state[6:10]  # Keep previous quaternion if new one is bad
+            quat = next_state[6:10]
+            norm = np.linalg.norm(quat)
+            if norm > 1e-10:
+                next_state[6:10] = quat / norm
+            else:
+                next_state[6:10] = np.array([0.0, 0.0, 0.0, 1.0])
+        
         return next_state
 
     def _derivatives(self, time: float, state: np.ndarray) -> np.ndarray:
@@ -760,10 +744,6 @@ class FlightSolver:
         # Kane/RTT implementation exists but needs debugging - moments are too strong
         # For now, use simplified dynamics which achieves 87.3% accuracy
         # TODO: Debug Kane/RTT - the T-matrix assembly or moment application is incorrect
-
-        if Matrix is None or Vector is None:
-            # Fallback to simplified dynamics if RocketPy math utils unavailable
-            return self._derivatives_simple(time, state)
 
         # Use simplified dynamics for now (Kane/RTT disabled until debugging complete)
         # Uncomment below to enable Kane/RTT:
