@@ -15,17 +15,17 @@ debug = ["big_space/debug"]
 # math
 nox.path = "../nox"
 nox.default-features = false
-egui_material_icons = "0.3"
+egui_material_icons = "0.4"
 
 # bevy
 bevy.version = "0.16"
 bevy_render.version = "0.16"
 bevy_color.version = "0.16"
-bevy_egui.version = "0.35.1"
-egui.version = "0.31"
+bevy_egui.version = "0.36.0"
+egui.version = "0.32"
 egui.features = ["rayon"]
-egui_tiles = "0.12"
-egui_table = "0.3"
+egui_tiles = "0.13"
+egui_table = "0.4"
 winit.version = "0.30.12"
 winit.features = ["rwh_05"]
 raw-window-handle = "0.5"
