@@ -152,7 +152,7 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
         pane.rect = Some(available_rect);
 
         // Constants for layout
-        const LABEL_WIDTH: f32 = 150.0;
+        const LABEL_WIDTH: f32 = 280.0;  // Wider to show full component paths
         const ROW_HEIGHT: f32 = 16.0;
 
         // Collect component info from EqlContext
@@ -160,12 +160,13 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
             parts: &std::collections::BTreeMap<String, eql::ComponentPart>,
             result: &mut Vec<(ComponentId, String, String)>,
         ) {
-            for (name, part) in parts {
+            for (_name, part) in parts {
                 if let Some(component) = &part.component {
                     // Use the full component name (e.g., "MfNavElodinEnumMessage.ypr_enu_2_body_deg")
-                    // to generate the table name (e.g., "mfnavelodinenumessage_ypr_enu_2_body_deg")
-                    let table_name = component_to_table_name(&component.name);
-                    result.push((part.id, name.clone(), table_name));
+                    // for both display label and table name generation
+                    let full_name = component.name.clone();
+                    let table_name = component_to_table_name(&full_name);
+                    result.push((part.id, full_name, table_name));
                 }
                 collect_components(&part.children, result);
             }
@@ -323,8 +324,8 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
 
                 // Component name (truncated if needed)
                 let mut label = summary.label.clone();
-                if label.len() > 18 {
-                    label.truncate(15);
+                if label.len() > 38 {
+                    label.truncate(35);
                     label.push_str("...");
                 }
                 

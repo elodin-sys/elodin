@@ -475,19 +475,46 @@ impl TileState {
         let parent_id = if let Some(id) = parent_id {
             id
         } else {
-            let root_id = self.tree.root().or_else(|| {
-                self.reset_tree();
-                self.tree.root()
-            })?;
+            // If there's no root, create a proper tabs container as root
+            let root_id = match self.tree.root() {
+                Some(id) => id,
+                None => {
+                    let tabs_container = Tile::Container(Container::new_tabs(vec![]));
+                    let tabs_id = self.tree.tiles.insert_new(tabs_container);
+                    self.tree.root = Some(tabs_id);
+                    tabs_id
+                }
+            };
 
-            if let Some(Tile::Container(Container::Linear(linear))) = self.tree.tiles.get(root_id) {
-                if let Some(center) = linear.children.get(linear.children.len() / 2) {
-                    *center
-                } else {
+            // Check if the root is a container we can add to
+            match self.tree.tiles.get(root_id) {
+                Some(Tile::Container(Container::Linear(linear))) => {
+                    // For Linear containers, find the center child
+                    if let Some(center) = linear.children.get(linear.children.len() / 2) {
+                        *center
+                    } else {
+                        root_id
+                    }
+                }
+                Some(Tile::Container(_)) => {
+                    // Root is a container (Tabs or Grid), use it directly
                     root_id
                 }
-            } else {
-                root_id
+                Some(Tile::Pane(_)) => {
+                    // Root is a pane, not a container! This can happen if simplification
+                    // pruned away the tabs container. We need to wrap it in a new tabs container.
+                    let tabs_container = Tile::Container(Container::new_tabs(vec![root_id]));
+                    let tabs_id = self.tree.tiles.insert_new(tabs_container);
+                    self.tree.root = Some(tabs_id);
+                    tabs_id
+                }
+                None => {
+                    // Root tile doesn't exist, create a new tabs container
+                    let tabs_container = Tile::Container(Container::new_tabs(vec![]));
+                    let tabs_id = self.tree.tiles.insert_new(tabs_container);
+                    self.tree.root = Some(tabs_id);
+                    tabs_id
+                }
             }
         };
 
@@ -1428,6 +1455,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         egui_tiles::SimplificationOptions {
             all_panes_must_have_tabs: true,
             join_nested_linear_containers: true,
+            prune_single_child_tabs: false, // Keep tabs container even with single child
             ..Default::default()
         }
     }
