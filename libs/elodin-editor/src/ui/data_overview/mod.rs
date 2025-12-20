@@ -849,15 +849,18 @@ fn extract_values_from_array(array: &dyn Array) -> Option<Vec<Vec<f64>>> {
     }
 
     // Handle scalar numeric types - return as single series
+    // NOTE: We use f64::NAN for null values to preserve array indices.
+    // This ensures 1:1 correspondence with the timestamp array, allowing
+    // sparklines to show gaps where data is missing.
     let values: Option<Vec<f64>> = if let Some(vals) = array.as_any().downcast_ref::<Float64Array>()
     {
         Some(
             (0..vals.len())
-                .filter_map(|i| {
+                .map(|i| {
                     if vals.is_null(i) {
-                        None
+                        f64::NAN
                     } else {
-                        Some(vals.value(i))
+                        vals.value(i)
                     }
                 })
                 .collect(),
@@ -865,11 +868,11 @@ fn extract_values_from_array(array: &dyn Array) -> Option<Vec<Vec<f64>>> {
     } else if let Some(vals) = array.as_any().downcast_ref::<Float32Array>() {
         Some(
             (0..vals.len())
-                .filter_map(|i| {
+                .map(|i| {
                     if vals.is_null(i) {
-                        None
+                        f64::NAN
                     } else {
-                        Some(vals.value(i) as f64)
+                        vals.value(i) as f64
                     }
                 })
                 .collect(),
@@ -877,11 +880,11 @@ fn extract_values_from_array(array: &dyn Array) -> Option<Vec<Vec<f64>>> {
     } else if let Some(vals) = array.as_any().downcast_ref::<Int64Array>() {
         Some(
             (0..vals.len())
-                .filter_map(|i| {
+                .map(|i| {
                     if vals.is_null(i) {
-                        None
+                        f64::NAN
                     } else {
-                        Some(vals.value(i) as f64)
+                        vals.value(i) as f64
                     }
                 })
                 .collect(),
@@ -889,11 +892,11 @@ fn extract_values_from_array(array: &dyn Array) -> Option<Vec<Vec<f64>>> {
     } else if let Some(vals) = array.as_any().downcast_ref::<Int32Array>() {
         Some(
             (0..vals.len())
-                .filter_map(|i| {
+                .map(|i| {
                     if vals.is_null(i) {
-                        None
+                        f64::NAN
                     } else {
-                        Some(vals.value(i) as f64)
+                        vals.value(i) as f64
                     }
                 })
                 .collect(),
@@ -901,11 +904,11 @@ fn extract_values_from_array(array: &dyn Array) -> Option<Vec<Vec<f64>>> {
     } else if let Some(vals) = array.as_any().downcast_ref::<UInt64Array>() {
         Some(
             (0..vals.len())
-                .filter_map(|i| {
+                .map(|i| {
                     if vals.is_null(i) {
-                        None
+                        f64::NAN
                     } else {
-                        Some(vals.value(i) as f64)
+                        vals.value(i) as f64
                     }
                 })
                 .collect(),
@@ -913,11 +916,11 @@ fn extract_values_from_array(array: &dyn Array) -> Option<Vec<Vec<f64>>> {
     } else {
         array.as_any().downcast_ref::<UInt32Array>().map(|vals| {
             (0..vals.len())
-                .filter_map(|i| {
+                .map(|i| {
                     if vals.is_null(i) {
-                        None
+                        f64::NAN
                     } else {
-                        Some(vals.value(i) as f64)
+                        vals.value(i) as f64
                     }
                 })
                 .collect()
@@ -987,12 +990,17 @@ fn process_sparkline_result(
         .map(|values| {
             let mut points = Vec::with_capacity(point_count);
 
-            for i in 0..timestamps.len() {
-                if timestamps.is_null(i) || i >= values.len() {
+            // Iterate timestamps and values together - they have 1:1 correspondence
+            // since extract_values_from_array preserves array indices using NAN for nulls
+            for (i, &value) in values.iter().enumerate() {
+                if timestamps.is_null(i) {
+                    continue;
+                }
+                // Skip NAN values - this creates gaps in the sparkline where data is missing
+                if value.is_nan() {
                     continue;
                 }
                 let time = timestamps.value(i);
-                let value = values[i];
                 points.push((time, value));
                 y_min = y_min.min(value);
                 y_max = y_max.max(value);

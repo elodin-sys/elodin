@@ -6,14 +6,14 @@ At the most basic high level, "Elodin" is:
 2. Elodin DB - A telemetry database that can ingest this huge amount of data in real time or faster
 3. Elodin Aleph - A flight computer that uses these things for effective bench top testing
 
-Which enables more rapid software develop for physical systems
+Which enables more rapid software development for physical systems
 
-The recommend development workflow repository wide:
+The recommended development workflow repository wide:
 
 1. Always develop inside a nix develop shell, you can start one in a terminal with:
 `nix develop`
 Or alternatively can pass it a one-off command:
-`nix develop -c "EXAMPLE COMMAND"`
+`nix develop --command "EXAMPLE COMMAND"`
 
 2. For developing nox-py, or running simulations with nox-py changes, you need to build the Elodin SDK Python wheel with:
 ```
