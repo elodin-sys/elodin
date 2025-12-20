@@ -530,7 +530,8 @@ impl TileState {
                         // Root tabs has children but none are Tabs containers.
                         // Wrap all existing children in a new nested Tabs container.
                         let existing_children: Vec<_> = tabs.children.clone();
-                        let nested_tabs = Tile::Container(Container::new_tabs(existing_children.clone()));
+                        let nested_tabs =
+                            Tile::Container(Container::new_tabs(existing_children.clone()));
                         let nested_id = self.tree.tiles.insert_new(nested_tabs);
                         // Replace root's children with just the nested container
                         if let Some(Tile::Container(Container::Tabs(root_tabs))) =
@@ -997,11 +998,8 @@ impl Pane {
                 egui_tiles::UiResponse::None
             }
             Pane::DataOverview(pane) => {
-                let updated_pane = ui.add_widget_with::<DataOverviewWidget>(
-                    world,
-                    "data_overview",
-                    pane.clone(),
-                );
+                let updated_pane =
+                    ui.add_widget_with::<DataOverviewWidget>(world, "data_overview", pane.clone());
                 *pane = updated_pane;
                 egui_tiles::UiResponse::None
             }

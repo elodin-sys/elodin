@@ -112,7 +112,7 @@ pub fn sync_schematic(
         params.load_schematic(&schematic, None);
         return;
     }
-    
+
     // No schematic found - create a default Data Overview panel
     params.load_default_data_overview();
 }
@@ -754,13 +754,20 @@ impl LoadSchematicParams<'_, '_> {
             // So we create a tabs container explicitly (like Panel::Tabs does)
             // and add our pane inside it.
             let tabs_container = Tile::Container(Container::new_tabs(vec![]));
-            if let Some(tabs_id) = window_state.tile_state.insert_tile(tabs_container, None, false) {
+            if let Some(tabs_id) = window_state
+                .tile_state
+                .insert_tile(tabs_container, None, false)
+            {
                 let pane = Pane::DataOverview(DataOverviewPane::default());
-                if let Some(tile_id) = window_state
-                    .tile_state
-                    .insert_tile(Tile::Pane(pane), Some(tabs_id), true)
+                if let Some(tile_id) =
+                    window_state
+                        .tile_state
+                        .insert_tile(Tile::Pane(pane), Some(tabs_id), true)
                 {
-                    window_state.tile_state.tree.make_active(|id, _| id == tile_id);
+                    window_state
+                        .tile_state
+                        .tree
+                        .make_active(|id, _| id == tile_id);
                 }
             }
         }

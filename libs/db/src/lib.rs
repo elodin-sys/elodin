@@ -74,10 +74,10 @@ where
     for op in vtable.ops.as_slice() {
         if let Op::Timestamp { source, .. } = op {
             // Resolve source to get the actual Table op
-            if let Ok(resolved) = vtable.realize(*source, None) {
-                if let Some(range) = resolved.as_table_range() {
-                    ranges.push((range.start, range.end));
-                }
+            if let Ok(resolved) = vtable.realize(*source, None)
+                && let Some(range) = resolved.as_table_range()
+            {
+                ranges.push((range.start, range.end));
             }
         }
     }
@@ -665,16 +665,15 @@ impl State {
                 return Err(Error::SchemaMismatch);
             }
             // If this component is a timestamp source, update the metadata
-            if is_timestamp_source {
-                if let Some(existing_meta) = self.component_metadata.get_mut(&component_id) {
-                    if !existing_meta.is_timestamp_source() {
-                        existing_meta.set_timestamp_source(true);
-                        // Re-save the metadata
-                        let metadata_path = db_path.join(component_id.to_string()).join("metadata");
-                        if let Err(err) = existing_meta.write(&metadata_path) {
-                            warn!(?err, "failed to update timestamp source metadata");
-                        }
-                    }
+            if is_timestamp_source
+                && let Some(existing_meta) = self.component_metadata.get_mut(&component_id)
+                && !existing_meta.is_timestamp_source()
+            {
+                existing_meta.set_timestamp_source(true);
+                // Re-save the metadata
+                let metadata_path = db_path.join(component_id.to_string()).join("metadata");
+                if let Err(err) = existing_meta.write(&metadata_path) {
+                    warn!(?err, "failed to update timestamp source metadata");
                 }
             }
             return Ok(());
