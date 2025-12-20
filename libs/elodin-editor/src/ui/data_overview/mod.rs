@@ -56,6 +56,8 @@ pub struct SparklineData {
 pub struct ComponentTimeRanges {
     /// Map from component table name to (min_timestamp, max_timestamp)
     pub ranges: HashMap<String, (Timestamp, Timestamp)>,
+    /// Map from component table name to row count
+    pub row_counts: HashMap<String, usize>,
     /// Map from component table name to sparkline data
     pub sparklines: HashMap<String, SparklineData>,
     /// Number of queries still pending
@@ -64,13 +66,18 @@ pub struct ComponentTimeRanges {
     pub total_queries: usize,
     /// State of the query
     pub state: TimeRangeQueryState,
+    /// List of table names to query (cached for phase 2)
+    pub tables_to_query: Vec<String>,
 }
 
 #[derive(Default, Clone)]
 pub enum TimeRangeQueryState {
     #[default]
     NotStarted,
-    Querying(Instant),
+    /// Phase 1: Querying time ranges and row counts
+    QueryingTimeRanges(Instant),
+    /// Phase 2: Querying sparkline data (after row counts are known)
+    QueryingSparklines(Instant),
     Ready,
     Error(String),
 }
@@ -240,18 +247,18 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
         
         if should_query {
             if matches!(params.time_ranges.state, TimeRangeQueryState::NotStarted | TimeRangeQueryState::Ready) {
-                params.time_ranges.state = TimeRangeQueryState::Querying(Instant::now());
-                // Each component needs 2 queries: time range + sparkline data
-                params.time_ranges.total_queries = component_list.len() * 2;
-                params.time_ranges.pending_queries = component_list.len() * 2;
+                // Phase 1: Query time ranges and row counts first
+                params.time_ranges.state = TimeRangeQueryState::QueryingTimeRanges(Instant::now());
+                params.time_ranges.total_queries = component_list.len();
+                params.time_ranges.pending_queries = component_list.len();
+                params.time_ranges.tables_to_query = component_list.iter().map(|(_, _, t)| t.clone()).collect();
                 pane.last_refresh = Some(Instant::now());
                 
-                // Query each table individually to handle missing tables gracefully
+                // Query each table for time range AND row count
                 for (_, _, table_name) in component_list.iter() {
-                    // Query 1: Get time range
                     let table_name_clone = table_name.clone();
                     let query = format!(
-                        "SELECT min(time) as min_time, max(time) as max_time FROM {}",
+                        "SELECT min(time) as min_time, max(time) as max_time, count(*) as row_count FROM {}",
                         table_name
                     );
                     
@@ -266,50 +273,77 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                                 if let Some(batch_data) = ipc.batch {
                                     let mut buffer = arrow::buffer::Buffer::from(batch_data.into_owned());
                                     if let Some(batch) = decoder.decode(&mut buffer).ok().and_then(|b| b) {
-                                        process_single_table_result(&table_name_clone, &batch, &mut time_ranges.ranges);
+                                        process_time_range_and_count(&table_name_clone, &batch, &mut time_ranges);
                                     }
                                 }
                             }
                             
+                            // When all time range queries complete, transition to phase 2
                             if time_ranges.pending_queries == 0 {
-                                time_ranges.state = TimeRangeQueryState::Ready;
-                            }
-                            true
-                        },
-                    );
-                    
-                    // Query 2: Get sparkline data
-                    // Query all data and downsample client-side to get even distribution
-                    let table_name_clone2 = table_name.clone();
-                    let sparkline_query = format!(
-                        "SELECT * FROM {} ORDER BY time",
-                        table_name
-                    );
-                    
-                    params.commands.send_req_reply(
-                        SQLQuery(sparkline_query),
-                        move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
-                              mut time_ranges: ResMut<ComponentTimeRanges>| {
-                            time_ranges.pending_queries = time_ranges.pending_queries.saturating_sub(1);
-                            
-                            if let Ok(ipc) = res {
-                                let mut decoder = arrow::ipc::reader::StreamDecoder::new();
-                                if let Some(batch_data) = ipc.batch {
-                                    let mut buffer = arrow::buffer::Buffer::from(batch_data.into_owned());
-                                    if let Some(batch) = decoder.decode(&mut buffer).ok().and_then(|b| b) {
-                                        process_sparkline_result(&table_name_clone2, &batch, &mut time_ranges.sparklines);
-                                    }
-                                }
-                            }
-                            
-                            if time_ranges.pending_queries == 0 {
-                                time_ranges.state = TimeRangeQueryState::Ready;
+                                time_ranges.state = TimeRangeQueryState::QueryingSparklines(Instant::now());
                             }
                             true
                         },
                     );
                 }
                 pane.query_triggered = true;
+            }
+        }
+        
+        // Phase 2: Query sparkline data after row counts are known
+        if matches!(params.time_ranges.state, TimeRangeQueryState::QueryingSparklines(_)) 
+            && params.time_ranges.pending_queries == 0 
+        {
+            let tables_to_query = std::mem::take(&mut params.time_ranges.tables_to_query);
+            
+            // Safety: if no tables to query, transition directly to Ready
+            if tables_to_query.is_empty() {
+                params.time_ranges.state = TimeRangeQueryState::Ready;
+            } else {
+                params.time_ranges.pending_queries = tables_to_query.len();
+                params.time_ranges.total_queries = tables_to_query.len();
+            }
+            
+            for table_name in tables_to_query {
+                let table_name_clone = table_name.clone();
+                
+                // Build smart sparkline query based on row count
+                let row_count = params.time_ranges.row_counts.get(&table_name).copied().unwrap_or(0);
+                
+                let sparkline_query = if row_count <= SPARKLINE_MAX_POINTS {
+                    // Small dataset: fetch all data
+                    format!("SELECT * FROM {} ORDER BY time", table_name)
+                } else {
+                    // Large dataset: use ROW_NUMBER() for server-side downsampling
+                    let step = (row_count / SPARKLINE_MAX_POINTS).max(1);
+                    format!(
+                        "SELECT * FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY time) as rn FROM {}) sub WHERE sub.rn % {} = 1 ORDER BY time",
+                        table_name, step
+                    )
+                };
+                
+                params.commands.send_req_reply(
+                    SQLQuery(sparkline_query),
+                    move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
+                          mut time_ranges: ResMut<ComponentTimeRanges>| {
+                        time_ranges.pending_queries = time_ranges.pending_queries.saturating_sub(1);
+                        
+                        if let Ok(ipc) = res {
+                            let mut decoder = arrow::ipc::reader::StreamDecoder::new();
+                            if let Some(batch_data) = ipc.batch {
+                                let mut buffer = arrow::buffer::Buffer::from(batch_data.into_owned());
+                                if let Some(batch) = decoder.decode(&mut buffer).ok().and_then(|b| b) {
+                                    process_sparkline_result(&table_name_clone, &batch, &mut time_ranges.sparklines);
+                                }
+                            }
+                        }
+                        
+                        if time_ranges.pending_queries == 0 {
+                            time_ranges.state = TimeRangeQueryState::Ready;
+                        }
+                        true
+                    },
+                );
             }
         }
 
@@ -398,9 +432,13 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
         // Header text with status
         let status_text = match &params.time_ranges.state {
             TimeRangeQueryState::NotStarted => format!("Components: {} (loading...)", summaries.len()),
-            TimeRangeQueryState::Querying(_) => {
+            TimeRangeQueryState::QueryingTimeRanges(_) => {
                 let done = params.time_ranges.total_queries - params.time_ranges.pending_queries;
-                format!("Components: {} (querying {}/{}...)", summaries.len(), done, params.time_ranges.total_queries)
+                format!("Components: {} (scanning {}/{}...)", summaries.len(), done, params.time_ranges.total_queries)
+            }
+            TimeRangeQueryState::QueryingSparklines(_) => {
+                let done = params.time_ranges.total_queries - params.time_ranges.pending_queries;
+                format!("Components: {} (loading data {}/{}...)", summaries.len(), done, params.time_ranges.total_queries)
             }
             TimeRangeQueryState::Ready => {
                 let with_data = summaries.iter().filter(|s| s.timestamp_range.is_some()).count();
@@ -656,11 +694,11 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
     }
 }
 
-/// Process a single table's timestamp range result
-fn process_single_table_result(
+/// Process a single table's timestamp range and row count result
+fn process_time_range_and_count(
     table_name: &str,
     batch: &RecordBatch,
-    ranges: &mut HashMap<String, (Timestamp, Timestamp)>,
+    time_ranges: &mut ComponentTimeRanges,
 ) {
     if batch.num_rows() == 0 {
         return;
@@ -671,28 +709,42 @@ fn process_single_table_result(
     // Find column indices
     let min_col = schema.fields().iter().position(|f| f.name() == "min_time");
     let max_col = schema.fields().iter().position(|f| f.name() == "max_time");
+    let count_col = schema.fields().iter().position(|f| f.name() == "row_count");
     
-    let (Some(min_idx), Some(max_idx)) = (min_col, max_col) else {
-        return;
-    };
+    // Extract time range
+    if let (Some(min_idx), Some(max_idx)) = (min_col, max_col) {
+        let min_array = batch.column(min_idx);
+        let max_array = batch.column(max_idx);
+        
+        let min_timestamps = min_array
+            .as_any()
+            .downcast_ref::<TimestampMicrosecondArray>();
+        let max_timestamps = max_array
+            .as_any()
+            .downcast_ref::<TimestampMicrosecondArray>();
+        
+        if let (Some(mins), Some(maxs)) = (min_timestamps, max_timestamps) {
+            if !mins.is_null(0) && !maxs.is_null(0) {
+                let min_ts = Timestamp(mins.value(0));
+                let max_ts = Timestamp(maxs.value(0));
+                time_ranges.ranges.insert(table_name.to_string(), (min_ts, max_ts));
+            }
+        }
+    }
     
-    let min_array = batch.column(min_idx);
-    let max_array = batch.column(max_idx);
-    
-    // Try timestamp arrays
-    let min_timestamps = min_array
-        .as_any()
-        .downcast_ref::<TimestampMicrosecondArray>();
-    let max_timestamps = max_array
-        .as_any()
-        .downcast_ref::<TimestampMicrosecondArray>();
-    
-    if let (Some(mins), Some(maxs)) = (min_timestamps, max_timestamps) {
-        // Should only have one row with min/max
-        if !mins.is_null(0) && !maxs.is_null(0) {
-            let min_ts = Timestamp(mins.value(0));
-            let max_ts = Timestamp(maxs.value(0));
-            ranges.insert(table_name.to_string(), (min_ts, max_ts));
+    // Extract row count
+    if let Some(count_idx) = count_col {
+        let count_array = batch.column(count_idx);
+        
+        // Try different integer types for count
+        if let Some(counts) = count_array.as_any().downcast_ref::<arrow::array::Int64Array>() {
+            if !counts.is_null(0) {
+                time_ranges.row_counts.insert(table_name.to_string(), counts.value(0) as usize);
+            }
+        } else if let Some(counts) = count_array.as_any().downcast_ref::<arrow::array::UInt64Array>() {
+            if !counts.is_null(0) {
+                time_ranges.row_counts.insert(table_name.to_string(), counts.value(0) as usize);
+            }
         }
     }
 }
@@ -764,6 +816,7 @@ fn extract_values_from_array(array: &dyn Array) -> Option<Vec<Vec<f64>>> {
 }
 
 /// Process sparkline data result from SQL query
+/// Note: Server-side downsampling via ROW_NUMBER() is already applied, so we just parse the data directly
 fn process_sparkline_result(
     table_name: &str,
     batch: &RecordBatch,
@@ -778,13 +831,13 @@ fn process_sparkline_result(
     // Find the time column
     let time_col = schema.fields().iter().position(|f| f.name() == "time");
     let Some(time_idx) = time_col else {
-        return;
+        return; // Missing time column - skip silently
     };
     
-    // Find first non-time column for data
-    let value_idx = schema.fields().iter().position(|f| f.name() != "time");
+    // Find first non-time, non-rn column for data (skip 'rn' from ROW_NUMBER query)
+    let value_idx = schema.fields().iter().position(|f| f.name() != "time" && f.name() != "rn");
     let Some(value_idx) = value_idx else {
-        return;
+        return; // Missing data column - skip silently
     };
     
     let time_array = batch.column(time_idx);
@@ -792,73 +845,39 @@ fn process_sparkline_result(
     
     // Try to get timestamps
     let Some(timestamps) = time_array.as_any().downcast_ref::<TimestampMicrosecondArray>() else {
-        return;
+        return; // Non-timestamp time column - skip silently
     };
     
     // Extract values from the data column (may be multiple series for vector types)
     let Some(value_series) = extract_values_from_array(value_array.as_ref()) else {
-        return;
+        return; // Failed to extract values - skip silently
     };
     
     if value_series.is_empty() || value_series[0].is_empty() {
         return;
     }
     
-    let raw_point_count = timestamps.len();
-    
-    // Check if we already have data with the same point count (no new data)
-    if let Some(existing) = sparklines.get(table_name) {
-        if existing.raw_point_count == raw_point_count {
-            return; // No new data, skip update
-        }
-    }
+    let point_count = timestamps.len();
     
     // Build points for each series and track global Y range
+    // No downsampling needed - server already handled it via ROW_NUMBER()
     let mut y_min = f64::INFINITY;
     let mut y_max = f64::NEG_INFINITY;
     
-    let mut all_series: Vec<Vec<(i64, f64)>> = value_series.iter()
-        .map(|_| Vec::with_capacity(timestamps.len()))
-        .collect();
-    
-    // Collect all points for each series
-    for i in 0..timestamps.len() {
-        if timestamps.is_null(i) {
-            continue;
-        }
-        let time = timestamps.value(i);
+    let series: Vec<SparklineSeries> = value_series.iter().map(|values| {
+        let mut points = Vec::with_capacity(point_count);
         
-        for (series_idx, values) in value_series.iter().enumerate() {
-            if i < values.len() {
-                let value = values[i];
-                all_series[series_idx].push((time, value));
-                y_min = y_min.min(value);
-                y_max = y_max.max(value);
+        for i in 0..timestamps.len() {
+            if timestamps.is_null(i) || i >= values.len() {
+                continue;
             }
+            let time = timestamps.value(i);
+            let value = values[i];
+            points.push((time, value));
+            y_min = y_min.min(value);
+            y_max = y_max.max(value);
         }
-    }
-    
-    // Downsample each series to SPARKLINE_MAX_POINTS if needed
-    let series: Vec<SparklineSeries> = all_series.into_iter().map(|all_points| {
-        let points = if all_points.len() <= SPARKLINE_MAX_POINTS {
-            all_points
-        } else {
-            let step = all_points.len() as f64 / SPARKLINE_MAX_POINTS as f64;
-            let mut sampled = Vec::with_capacity(SPARKLINE_MAX_POINTS);
-            for i in 0..SPARKLINE_MAX_POINTS {
-                let idx = (i as f64 * step) as usize;
-                if idx < all_points.len() {
-                    sampled.push(all_points[idx]);
-                }
-            }
-            // Always include the last point
-            if let Some(&last) = all_points.last() {
-                if sampled.last() != Some(&last) {
-                    sampled.push(last);
-                }
-            }
-            sampled
-        };
+        
         SparklineSeries { points }
     }).collect();
     
@@ -872,7 +891,7 @@ fn process_sparkline_result(
         series,
         y_min,
         y_max,
-        raw_point_count,
+        raw_point_count: point_count,
     });
 }
 
@@ -887,7 +906,7 @@ pub fn trigger_time_range_queries(
     // Check if we should start queries or handle stale queries
     let should_start = match &time_ranges.state {
         TimeRangeQueryState::NotStarted => true,
-        TimeRangeQueryState::Querying(start) => {
+        TimeRangeQueryState::QueryingTimeRanges(start) | TimeRangeQueryState::QueryingSparklines(start) => {
             // Timeout stale queries after 30 seconds and reset to NotStarted
             if start.elapsed() > Duration::from_secs(30) {
                 time_ranges.state = TimeRangeQueryState::NotStarted;
@@ -926,8 +945,8 @@ pub fn trigger_time_range_queries(
         return;
     }
 
-    // Start querying
-    time_ranges.state = TimeRangeQueryState::Querying(Instant::now());
+    // Start querying time ranges (phase 1 only - sparklines handled by panel)
+    time_ranges.state = TimeRangeQueryState::QueryingTimeRanges(Instant::now());
     time_ranges.total_queries = table_names.len();
     time_ranges.pending_queries = table_names.len();
 
@@ -935,7 +954,7 @@ pub fn trigger_time_range_queries(
     for table_name in table_names {
         let table_name_clone = table_name.clone();
         let query = format!(
-            "SELECT min(time) as min_time, max(time) as max_time FROM {}",
+            "SELECT min(time) as min_time, max(time) as max_time, count(*) as row_count FROM {}",
             table_name
         );
 
@@ -950,12 +969,13 @@ pub fn trigger_time_range_queries(
                     if let Some(batch_data) = ipc.batch {
                         let mut buffer = arrow::buffer::Buffer::from(batch_data.into_owned());
                         if let Some(batch) = decoder.decode(&mut buffer).ok().and_then(|b| b) {
-                            process_single_table_result(&table_name_clone, &batch, &mut time_ranges.ranges);
+                            process_time_range_and_count(&table_name_clone, &batch, &mut time_ranges);
                         }
                     }
                 }
 
                 if time_ranges.pending_queries == 0 {
+                    // Transition to Ready - the panel will handle sparkline queries
                     time_ranges.state = TimeRangeQueryState::Ready;
                 }
                 true
