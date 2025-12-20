@@ -272,8 +272,7 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                     SQLQuery(query),
                     move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
                           mut time_ranges: ResMut<ComponentTimeRanges>| {
-                        time_ranges.pending_queries =
-                            time_ranges.pending_queries.saturating_sub(1);
+                        time_ranges.pending_queries = time_ranges.pending_queries.saturating_sub(1);
 
                         if let Ok(ipc) = res {
                             let mut decoder = arrow::ipc::reader::StreamDecoder::new();
@@ -912,20 +911,17 @@ fn extract_values_from_array(array: &dyn Array) -> Option<Vec<Vec<f64>>> {
                 .collect(),
         )
     } else {
-        array
-            .as_any()
-            .downcast_ref::<UInt32Array>()
-            .map(|vals| {
-                (0..vals.len())
-                    .filter_map(|i| {
-                        if vals.is_null(i) {
-                            None
-                        } else {
-                            Some(vals.value(i) as f64)
-                        }
-                    })
-                    .collect()
-            })
+        array.as_any().downcast_ref::<UInt32Array>().map(|vals| {
+            (0..vals.len())
+                .filter_map(|i| {
+                    if vals.is_null(i) {
+                        None
+                    } else {
+                        Some(vals.value(i) as f64)
+                    }
+                })
+                .collect()
+        })
     };
 
     values.map(|v| vec![v])
