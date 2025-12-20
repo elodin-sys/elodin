@@ -13,6 +13,7 @@ use bevy::{
     prelude::*,
 };
 use bevy_egui::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
+use convert_case::{Case, Casing};
 use impeller2::types::{ComponentId, Timestamp};
 use impeller2_bevy::CommandsExt;
 use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery};
@@ -119,11 +120,13 @@ fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
     p
 }
 
-/// Convert component name to SQL table name (lowercase with underscores)
+/// Convert component name to SQL table name using the same conversion as the database.
+/// The database uses `to_case(Case::Snake)` followed by replacing '.' with '_'.
 fn component_to_table_name(full_component_name: &str) -> String {
-    // Full component name is like "MfNavElodinEnumMessage.ypr_enu_2_body_deg"
-    // Table name is like "mfnavelodinenumessage_ypr_enu_2_body_deg"
-    full_component_name.to_lowercase().replace('.', "_")
+    // Full component name is like "GpsPosMessage1.VACC"
+    // Table name is like "gps_pos_message_1_vacc"
+    // Must match the conversion in libs/db/src/arrow/mod.rs
+    full_component_name.to_case(Case::Snake).replace('.', "_")
 }
 
 /// Widget for rendering the Data Overview panel
