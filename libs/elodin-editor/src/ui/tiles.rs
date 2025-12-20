@@ -472,6 +472,9 @@ impl TileState {
         parent_id: Option<TileId>,
         active: bool,
     ) -> Option<TileId> {
+        // Check if we're inserting a pane (need nested tabs handling) or a container
+        let is_pane = matches!(tile, Tile::Pane(_));
+
         let parent_id = if let Some(id) = parent_id {
             id
         } else {
@@ -496,8 +499,51 @@ impl TileState {
                         root_id
                     }
                 }
+                Some(Tile::Container(Container::Tabs(tabs))) if is_pane => {
+                    // Root is a Tabs container and we're inserting a PANE.
+                    // egui_tiles only shows tab bars for NESTED Tabs containers, not the root.
+                    // So we need to find or create a nested Tabs container to add the pane to.
+                    //
+                    // Look for an existing nested Tabs container among the children.
+                    let nested_tabs_id = tabs.children.iter().find(|&&child_id| {
+                        matches!(
+                            self.tree.tiles.get(child_id),
+                            Some(Tile::Container(Container::Tabs(_)))
+                        )
+                    });
+
+                    if let Some(&nested_id) = nested_tabs_id {
+                        // Found a nested Tabs container, use it
+                        nested_id
+                    } else if tabs.children.is_empty() {
+                        // Root tabs is empty, create a nested tabs container
+                        let nested_tabs = Tile::Container(Container::new_tabs(vec![]));
+                        let nested_id = self.tree.tiles.insert_new(nested_tabs);
+                        // Add the nested tabs to the root
+                        if let Some(Tile::Container(Container::Tabs(root_tabs))) =
+                            self.tree.tiles.get_mut(root_id)
+                        {
+                            root_tabs.add_child(nested_id);
+                        }
+                        nested_id
+                    } else {
+                        // Root tabs has children but none are Tabs containers.
+                        // Wrap all existing children in a new nested Tabs container.
+                        let existing_children: Vec<_> = tabs.children.clone();
+                        let nested_tabs = Tile::Container(Container::new_tabs(existing_children.clone()));
+                        let nested_id = self.tree.tiles.insert_new(nested_tabs);
+                        // Replace root's children with just the nested container
+                        if let Some(Tile::Container(Container::Tabs(root_tabs))) =
+                            self.tree.tiles.get_mut(root_id)
+                        {
+                            root_tabs.children.clear();
+                            root_tabs.add_child(nested_id);
+                        }
+                        nested_id
+                    }
+                }
                 Some(Tile::Container(_)) => {
-                    // Root is a container (Tabs or Grid), use it directly
+                    // Root is a container (Tabs with Container being inserted, or Grid), use it directly
                     root_id
                 }
                 Some(Tile::Pane(_)) => {
