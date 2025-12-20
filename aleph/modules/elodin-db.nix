@@ -15,6 +15,20 @@ in {
         Whether to enable the elodin-db service.
       '';
     };
+    autostart = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Whether to auto-start the elodin-db service.
+      '';
+    };
+    dbUniqueOnBoot = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Whether to automatically create a unique db on boot. This is useful if you are using a different time source (such as CLOCK_MONOTONIC).
+      '';
+    };
     openFirewall = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -32,9 +46,10 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
-    systemd.services."elodin-db@" = with pkgs; {
+    # Create template elodin-db service
+    systemd.services."elodin-db@" = {
       after = ["network.target"];
-      description = "start elodin-db";
+      description = "Start elodin-db under the folder '%i'";
       serviceConfig = {
         Type = "exec";
         User = "root";
@@ -44,20 +59,23 @@ in {
       };
     };
 
-    systemd.packages = [
-      (pkgs.runCommandNoCC "elodin-db-default-service" {
-          preferLocalBuild = true;
-          allowSubstitutes = false;
-        } ''
-          mkdir -p $out/etc/systemd/system/
-          ln -s /etc/systemd/system/elodin-db@.service $out/etc/systemd/system/elodin-db@default.service
-        '')
-    ];
-
-    # see: https://github.com/NixOS/nixpkgs/issues/80933
-    systemd.services."elodin-db@default" = {
+    systemd.services."elodin-db-default" = lib.mkIf cfg.autostart {
+      after = ["network.target"];
       wantedBy = ["multi-user.target"];
-      overrideStrategy = "asDropin";
+      description = "Start the default elodin-db instance";
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = pkgs.writeShellScript "elodin-db-default" (
+          if cfg.dbUniqueOnBoot
+          then ''
+            TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+            systemctl start "elodin-db@default-$TIMESTAMP.service"
+          ''
+          else ''
+            systemctl start "elodin-db@default.service"
+          ''
+        );
+      };
     };
 
     environment.systemPackages = [elodin-db];

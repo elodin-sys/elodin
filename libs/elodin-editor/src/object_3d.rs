@@ -88,6 +88,304 @@ impl CompiledExpr {
     }
 }
 
+// ============================================================================
+// Quaternion and transform helper functions
+// ============================================================================
+
+/// Reference frame for rotation/translation operations
+#[derive(Clone, Copy)]
+enum Frame {
+    Body,
+    World,
+}
+
+/// Hamilton product for quaternion multiplication: q1 * q2
+/// Quaternions are stored as (x, y, z, w) where w is the scalar component
+fn quat_multiply(q1: (f64, f64, f64, f64), q2: (f64, f64, f64, f64)) -> (f64, f64, f64, f64) {
+    let (x1, y1, z1, w1) = q1;
+    let (x2, y2, z2, w2) = q2;
+    (
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2, // x
+        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2, // y
+        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2, // z
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2, // w
+    )
+}
+
+/// Create rotation quaternion from axis index (0=X, 1=Y, 2=Z) and angle in radians
+fn axis_angle_to_quat(axis: usize, angle_rad: f64) -> (f64, f64, f64, f64) {
+    let half = angle_rad / 2.0;
+    let (s, c) = (half.sin(), half.cos());
+    match axis {
+        0 => (s, 0.0, 0.0, c),
+        1 => (0.0, s, 0.0, c),
+        2 => (0.0, 0.0, s, c),
+        _ => (0.0, 0.0, 0.0, 1.0),
+    }
+}
+
+/// Rotate vector by quaternion: q * v * q^-1
+fn rotate_vector_by_quat(q: (f64, f64, f64, f64), v: (f64, f64, f64)) -> (f64, f64, f64) {
+    let (qx, qy, qz, qw) = q;
+    let (vx, vy, vz) = v;
+    // t = q * v (treating v as quaternion with w=0)
+    let tw = -qx * vx - qy * vy - qz * vz;
+    let tx = qw * vx + qy * vz - qz * vy;
+    let ty = qw * vy + qz * vx - qx * vz;
+    let tz = qw * vz + qx * vy - qy * vx;
+    // result = t * q_conjugate
+    (
+        tw * (-qx) + tx * qw + ty * (-qz) - tz * (-qy),
+        tw * (-qy) - tx * (-qz) + ty * qw + tz * (-qx),
+        tw * (-qz) + tx * (-qy) - ty * (-qx) + tz * qw,
+    )
+}
+
+/// Extract spatial transform data (qx, qy, qz, qw, px, py, pz), validating it has 7 elements
+fn extract_spatial(val: ComponentValue) -> Result<[f64; 7], String> {
+    use nox::ArrayBuf;
+    let ComponentValue::F64(array) = val else {
+        return Err("requires a spatial transform".to_string());
+    };
+    let data = array.buf.as_buf();
+    if data.len() < 7 {
+        return Err(format!("requires 7-element array, got {}", data.len()));
+    }
+    Ok([
+        data[0], data[1], data[2], data[3], data[4], data[5], data[6],
+    ])
+}
+
+/// Extract a scalar f64 from component value
+fn extract_scalar(val: ComponentValue) -> Result<f64, String> {
+    use nox::ArrayBuf;
+    let ComponentValue::F64(arr) = val else {
+        return Err("must be a number".to_string());
+    };
+    let d = arr.buf.as_buf();
+    if d.is_empty() {
+        return Err("cannot be empty".to_string());
+    }
+    Ok(d[0])
+}
+
+/// Build result array from quaternion and position
+fn build_spatial_result(q: (f64, f64, f64, f64), pos: (f64, f64, f64)) -> ComponentValue {
+    let result = vec![q.0, q.1, q.2, q.3, pos.0, pos.1, pos.2];
+    let result_array = Array::from_shape_vec(smallvec![7], result).unwrap();
+    ComponentValue::F64(result_array)
+}
+
+/// Compiles a formula expression into a runtime closure
+fn compile_formula(formula_name: &str, inner_expr: eql::Expr) -> CompiledExpr {
+    match formula_name {
+        // Single-axis rotation formulas (body and world frame)
+        "rotate_x" | "rotate_y" | "rotate_z" | "rotate_world_x" | "rotate_world_y"
+        | "rotate_world_z" => {
+            let (axis, frame) = match formula_name {
+                "rotate_x" => (0, Frame::Body),
+                "rotate_y" => (1, Frame::Body),
+                "rotate_z" => (2, Frame::Body),
+                "rotate_world_x" => (0, Frame::World),
+                "rotate_world_y" => (1, Frame::World),
+                "rotate_world_z" => (2, Frame::World),
+                _ => unreachable!(),
+            };
+
+            let eql::Expr::Tuple(elements) = inner_expr else {
+                let error = format!("{} requires tuple expression", formula_name);
+                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+            };
+            if elements.len() != 2 {
+                let error = format!("{} requires receiver and angle", formula_name);
+                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+            }
+
+            let receiver_compiled = compile_eql_expr(elements[0].clone());
+            let angle_compiled = compile_eql_expr(elements[1].clone());
+
+            CompiledExpr::closure(move |entity_map, component_values| {
+                let spatial = receiver_compiled.execute(entity_map, component_values)?;
+                let data = extract_spatial(spatial)?;
+                let angle_val = angle_compiled.execute(entity_map, component_values)?;
+                let angle_deg = extract_scalar(angle_val)?;
+
+                let q_input = (data[0], data[1], data[2], data[3]);
+                let q_rot = axis_angle_to_quat(axis, angle_deg.to_radians());
+
+                // Body-frame: q_input * q_rot, World-frame: q_rot * q_input
+                let q_result = match frame {
+                    Frame::Body => quat_multiply(q_input, q_rot),
+                    Frame::World => quat_multiply(q_rot, q_input),
+                };
+
+                Ok(build_spatial_result(q_result, (data[4], data[5], data[6])))
+            })
+        }
+
+        // Multi-axis rotation (body and world frame)
+        "rotate" | "rotate_world" => {
+            let frame = if formula_name == "rotate" {
+                Frame::Body
+            } else {
+                Frame::World
+            };
+
+            let eql::Expr::Tuple(elements) = inner_expr else {
+                let error = format!("{} requires tuple expression", formula_name);
+                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+            };
+            if elements.len() != 4 {
+                let error = format!(
+                    "{} requires receiver and three angles (x, y, z)",
+                    formula_name
+                );
+                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+            }
+
+            let receiver_compiled = compile_eql_expr(elements[0].clone());
+            let x_angle_compiled = compile_eql_expr(elements[1].clone());
+            let y_angle_compiled = compile_eql_expr(elements[2].clone());
+            let z_angle_compiled = compile_eql_expr(elements[3].clone());
+
+            CompiledExpr::closure(move |entity_map, component_values| {
+                let spatial = receiver_compiled.execute(entity_map, component_values)?;
+                let data = extract_spatial(spatial)?;
+
+                let x_deg =
+                    extract_scalar(x_angle_compiled.execute(entity_map, component_values)?)?;
+                let y_deg =
+                    extract_scalar(y_angle_compiled.execute(entity_map, component_values)?)?;
+                let z_deg =
+                    extract_scalar(z_angle_compiled.execute(entity_map, component_values)?)?;
+
+                let mut q = (data[0], data[1], data[2], data[3]);
+
+                // Apply rotations in order: X, then Y, then Z
+                for (axis, deg) in [(0, x_deg), (1, y_deg), (2, z_deg)] {
+                    if deg.abs() > 1e-10 {
+                        let q_rot = axis_angle_to_quat(axis, deg.to_radians());
+                        q = match frame {
+                            Frame::Body => quat_multiply(q, q_rot),
+                            Frame::World => quat_multiply(q_rot, q),
+                        };
+                    }
+                }
+
+                Ok(build_spatial_result(q, (data[4], data[5], data[6])))
+            })
+        }
+
+        // Single-axis translation (body and world frame)
+        "translate_x" | "translate_y" | "translate_z" | "translate_world_x"
+        | "translate_world_y" | "translate_world_z" => {
+            let (axis, frame) = match formula_name {
+                "translate_x" => (0, Frame::Body),
+                "translate_y" => (1, Frame::Body),
+                "translate_z" => (2, Frame::Body),
+                "translate_world_x" => (0, Frame::World),
+                "translate_world_y" => (1, Frame::World),
+                "translate_world_z" => (2, Frame::World),
+                _ => unreachable!(),
+            };
+
+            let eql::Expr::Tuple(elements) = inner_expr else {
+                let error = format!("{} requires tuple expression", formula_name);
+                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+            };
+            if elements.len() != 2 {
+                let error = format!("{} requires receiver and distance", formula_name);
+                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+            }
+
+            let receiver_compiled = compile_eql_expr(elements[0].clone());
+            let distance_compiled = compile_eql_expr(elements[1].clone());
+
+            CompiledExpr::closure(move |entity_map, component_values| {
+                let spatial = receiver_compiled.execute(entity_map, component_values)?;
+                let data = extract_spatial(spatial)?;
+                let dist_val = distance_compiled.execute(entity_map, component_values)?;
+                let dist = extract_scalar(dist_val)?;
+
+                let q = (data[0], data[1], data[2], data[3]);
+                let offset_body = match axis {
+                    0 => (dist, 0.0, 0.0),
+                    1 => (0.0, dist, 0.0),
+                    2 => (0.0, 0.0, dist),
+                    _ => unreachable!(),
+                };
+
+                // Body-frame: rotate offset to world frame; World-frame: use directly
+                let (dx, dy, dz) = match frame {
+                    Frame::Body => rotate_vector_by_quat(q, offset_body),
+                    Frame::World => offset_body,
+                };
+
+                Ok(build_spatial_result(
+                    q,
+                    (data[4] + dx, data[5] + dy, data[6] + dz),
+                ))
+            })
+        }
+
+        // Multi-axis translation (body and world frame)
+        "translate" | "translate_world" => {
+            let frame = if formula_name == "translate" {
+                Frame::Body
+            } else {
+                Frame::World
+            };
+
+            let eql::Expr::Tuple(elements) = inner_expr else {
+                let error = format!("{} requires tuple expression", formula_name);
+                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+            };
+            if elements.len() != 4 {
+                let error = format!(
+                    "{} requires receiver and three distances (x, y, z)",
+                    formula_name
+                );
+                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+            }
+
+            let receiver_compiled = compile_eql_expr(elements[0].clone());
+            let x_dist_compiled = compile_eql_expr(elements[1].clone());
+            let y_dist_compiled = compile_eql_expr(elements[2].clone());
+            let z_dist_compiled = compile_eql_expr(elements[3].clone());
+
+            CompiledExpr::closure(move |entity_map, component_values| {
+                let spatial = receiver_compiled.execute(entity_map, component_values)?;
+                let data = extract_spatial(spatial)?;
+
+                let dx = extract_scalar(x_dist_compiled.execute(entity_map, component_values)?)?;
+                let dy = extract_scalar(y_dist_compiled.execute(entity_map, component_values)?)?;
+                let dz = extract_scalar(z_dist_compiled.execute(entity_map, component_values)?)?;
+
+                let q = (data[0], data[1], data[2], data[3]);
+
+                // Body-frame: rotate offset to world frame; World-frame: use directly
+                let (rx, ry, rz) = match frame {
+                    Frame::Body => rotate_vector_by_quat(q, (dx, dy, dz)),
+                    Frame::World => (dx, dy, dz),
+                };
+
+                Ok(build_spatial_result(
+                    q,
+                    (data[4] + rx, data[5] + ry, data[6] + rz),
+                ))
+            })
+        }
+
+        _ => {
+            let error = format!(
+                "formula '{}' is not supported in editor runtime",
+                formula_name
+            );
+            CompiledExpr::closure(move |_, _| Err(error.clone()))
+        }
+    }
+}
+
 /// Compiles an EQL expression into a closure-based form
 pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
     match expression {
@@ -199,6 +497,7 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
             })
         }
         Expr::FloatLiteral(f) => CompiledExpr::Value(ComponentValue::F64(nox::array!(f).to_dyn())),
+        Expr::Formula(formula, inner_expr) => compile_formula(formula.name(), *inner_expr),
         expr => {
             let error = format!("{:?} can't be converted to a component value", expr);
             CompiledExpr::closure(move |_, _| Err(error.clone()))
@@ -333,7 +632,7 @@ pub fn warn_imported_cameras(
 
         if let Ok(state) = object_states.get(object_root) {
             let source = match &state.data.mesh {
-                impeller2_wkt::Object3DMesh::Glb(path) => format!("GLB '{path}'"),
+                impeller2_wkt::Object3DMesh::Glb { path, .. } => format!("GLB '{path}'"),
                 _ => "object_3d".to_string(),
             };
             warn_once!(
@@ -468,13 +767,45 @@ pub fn spawn_mesh(
     assets: &Res<AssetServer>,
 ) -> Option<EllipsoidVisual> {
     match mesh {
-        impeller2_wkt::Object3DMesh::Glb(path) => {
+        impeller2_wkt::Object3DMesh::Glb {
+            path,
+            scale,
+            translate,
+            rotate,
+        } => {
             let url = format!("{path}#Scene0");
             let scene = assets.load(&url);
-            commands.entity(entity).insert(SceneRoot(scene));
+
+            // Create transform for offset (translate, rotate, scale)
+            let translation = Vec3::new(translate.0, translate.1, translate.2);
+            let rotation = Quat::from_euler(
+                EulerRot::XYZ,
+                rotate.0.to_radians(),
+                rotate.1.to_radians(),
+                rotate.2.to_radians(),
+            );
+            let offset_transform = Transform {
+                translation,
+                rotation,
+                scale: Vec3::splat(*scale),
+            };
+
+            // Create a child entity to hold the scene with the offset transform
+            // This way the parent can be synced with WorldPos without affecting the offset
+            commands.spawn((
+                SceneRoot(scene),
+                offset_transform,
+                GlobalTransform::default(),
+                Visibility::default(),
+                InheritedVisibility::default(),
+                ViewVisibility::default(),
+                ChildOf(entity),
+                Name::new(format!("object_3d_scene {}", path)),
+            ));
+
             commands
                 .entity(entity)
-                .insert(Name::new(format!("object_3d {}", &path)));
+                .insert(Name::new(format!("object_3d {}", path)));
             None
         }
         impeller2_wkt::Object3DMesh::Mesh { mesh, material } => {

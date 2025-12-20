@@ -7,18 +7,21 @@ use bevy::{
     DefaultPlugins,
     asset::{UnapprovedPathMode, embedded_asset},
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
-    log::{LogPlugin, warn},
+    log::LogPlugin,
     math::{DQuat, DVec3},
     pbr::{
         DirectionalLightShadowMap,
         wireframe::{WireframeConfig, WireframePlugin},
     },
     prelude::*,
-    window::{PresentMode, WindowResolution, WindowTheme},
+    render::camera::RenderTarget,
+    window::{PresentMode, PrimaryWindow, WindowRef, WindowResolution, WindowTheme},
     winit::WinitSettings,
 };
 use bevy_editor_cam::{SyncCameraPosition, controller::component::EditorCam};
-use bevy_egui::{EguiContextSettings, EguiPlugin};
+#[cfg(feature = "inspector")]
+use bevy_egui::EguiContext;
+use bevy_egui::{EguiContextSettings, EguiGlobalSettings, EguiPlugin};
 use bevy_render::alpha::AlphaMode;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use impeller2::types::{ComponentId, OwnedPacket};
@@ -34,8 +37,9 @@ use object_3d::create_object_3d_entity;
 use plugins::gizmos::GizmoPlugin;
 use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc};
 use ui::{
-    SelectedObject,
+    SelectedObject, UI_ORDER_BASE,
     colors::{ColorExt, get_scheme},
+    create_egui_context,
     inspector::viewport::set_viewport_pos,
     plot::{CollectedGraphData, gpu::LineHandle},
     tiles,
@@ -48,10 +52,18 @@ mod plugins;
 pub mod ui;
 pub mod vector_arrow;
 
+const fn default_present_mode() -> PresentMode {
+    PresentMode::Fifo
+}
+
 #[cfg(not(target_family = "wasm"))]
 pub mod run;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[cfg(feature = "inspector")]
+#[derive(Component)]
+struct InspectorWindow;
 
 struct EmbeddedAssetPlugin;
 
@@ -144,7 +156,7 @@ impl Plugin for EditorPlugin {
                         primary_window: Some(Window {
                             window_theme: Some(WindowTheme::Dark),
                             title: "Elodin".into(),
-                            present_mode: PresentMode::AutoVsync,
+                            present_mode: default_present_mode(),
                             canvas: Some("#editor".to_string()),
                             resolution: self.window_resolution.clone(),
                             resize_constraints: WindowResizeConstraints {
@@ -154,7 +166,7 @@ impl Plugin for EditorPlugin {
                             },
                             composite_alpha_mode,
                             prevent_default_event_handling: true,
-                            decorations: cfg!(target_os = "macos"),
+                            decorations: true,
                             visible: cfg!(target_os = "linux"),
                             ..default()
                         }),
@@ -178,9 +190,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
             .add_plugins(big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
             .add_plugins(EmbeddedAssetPlugin)
-            .add_plugins(EguiPlugin {
-                enable_multipass_for_primary_context: false,
-            })
+            .add_plugins(EguiPlugin::default())
             .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
             .add_plugins(NavigationGizmoPlugin)
             .add_plugins(impeller2_bevy::Impeller2Plugin)
@@ -191,6 +201,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(editor_cam_touch::EditorCamTouchPlugin)
             .add_plugins(crate::ui::plot::PlotPlugin)
             .add_plugins(crate::plugins::LogicalKeyPlugin)
+            .add_systems(Startup, setup_egui_global_system)
             .add_systems(Startup, setup_floating_origin)
             .add_systems(Startup, setup_window_icon)
             //.add_systems(Startup, spawn_clear_bg)
@@ -245,7 +256,10 @@ impl Plugin for EditorPlugin {
         app.add_systems(Update, setup_titlebar);
 
         #[cfg(feature = "inspector")]
-        app.add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new());
+        app.add_systems(Startup, setup_egui_inspector);
+
+        #[cfg(feature = "inspector")]
+        app.add_systems(Update, run_egui_inspector);
 
         // For adding features incompatible with wasm:
         embedded_asset!(app, "./assets/diffuse.ktx2");
@@ -258,6 +272,52 @@ impl Plugin for EditorPlugin {
             PositionSync.before(bevy_editor_cam::SyncCameraPosition),
         );
     }
+}
+
+#[cfg(feature = "inspector")]
+fn setup_egui_inspector(mut commands: Commands) {
+    let window = Window {
+        title: "World Inspector".to_string(),
+        resolution: WindowResolution::new(640.0, 480.0),
+        ..Default::default()
+    };
+
+    let window_ent = commands.spawn((window, InspectorWindow));
+    let window_id = window_ent.id();
+
+    let egui_context = create_egui_context();
+
+    commands.entity(window_id).insert((
+        Camera2d,
+        Camera {
+            target: RenderTarget::Window(WindowRef::Entity(window_id)),
+            ..Default::default()
+        },
+        egui_context,
+    ));
+}
+
+#[cfg(feature = "inspector")]
+fn run_egui_inspector(world: &mut World) {
+    let egui_context = world
+        .query_filtered::<&mut EguiContext, With<InspectorWindow>>()
+        .single(world);
+
+    let Ok(egui_context) = egui_context else {
+        return;
+    };
+    let mut egui_context = egui_context.clone();
+
+    egui::CentralPanel::default().show(egui_context.get_mut(), |ui| {
+        egui::ScrollArea::both().show(ui, |ui| {
+            bevy_inspector_egui::bevy_inspector::ui_for_world(world, ui);
+            ui.allocate_space(ui.available_size());
+        });
+    });
+}
+
+fn setup_egui_global_system(mut egui_global_settings: ResMut<EguiGlobalSettings>) {
+    egui_global_settings.auto_create_primary_context = false;
 }
 
 fn setup_egui_context(mut contexts: Query<&mut EguiContextSettings>) {
@@ -282,8 +342,22 @@ fn setup_floating_origin(mut commands: Commands) {
     ));
 }
 
-fn spawn_ui_cam(mut commands: Commands) {
-    commands.spawn((Camera2d, IsDefaultUiCamera));
+fn spawn_ui_cam(mut commands: Commands, mut query: Query<Entity, With<PrimaryWindow>>) {
+    let primary_window_ent = query
+        .single_mut()
+        .expect("failed to get single primary window");
+
+    let egui_context = create_egui_context();
+
+    commands.entity(primary_window_ent).insert((
+        Camera2d,
+        Camera {
+            order: UI_ORDER_BASE,
+            target: RenderTarget::Window(WindowRef::Entity(primary_window_ent)),
+            ..Default::default()
+        },
+        egui_context,
+    ));
 }
 
 fn set_clear_color(mut clear_color: ResMut<ClearColor>) {
@@ -381,15 +455,9 @@ fn setup_titlebar(
                 initWithIdentifier: &*identifier
             ];
 
-            window.setTitlebarAppearsTransparent(true);
-
-            // Create color with RGBA
-            let color = NSColor::colorWithRed_green_blue_alpha(
-                (0x0C as f64) / (0xFF as f64),
-                (0x0C as f64) / (0xFF as f64),
-                (0x0C as f64) / (0xFF as f64),
-                0.7,
-            );
+            // Keep the native titlebar visible and readable.
+            window.setTitlebarAppearsTransparent(false);
+            let color = NSColor::windowBackgroundColor();
             window.setBackgroundColor(Some(&color));
 
             window.setStyleMask(
@@ -401,7 +469,8 @@ fn setup_titlebar(
                     | NSWindowStyleMask::UnifiedTitleAndToolbar,
             );
             window.setToolbarStyle(NSWindowToolbarStyle::UnifiedCompact);
-            let _: () = msg_send![window, setTitleVisibility: 1u64]; // NSWindowTitleHidden = 1
+            // Keep the native title visible in the toolbar/titlebar area.
+            let _: () = msg_send![window, setTitleVisibility: 0u64]; // NSWindowTitleVisible = 0
             window.setToolbar(Some(&toolbar));
             commands.entity(id).insert(SetupTitlebar);
         }
@@ -653,10 +722,12 @@ pub fn sync_pos(
             let att = world_pos.bevy_att();
             let (new_grid_cell, translation) = floating_origin.translation_to_grid(pos);
             *grid_cell = new_grid_cell;
+            // Preserve the existing scale when updating position and rotation
+            let existing_scale = transform.scale;
             *transform = bevy::prelude::Transform {
                 translation,
                 rotation: att.as_quat(),
-                ..Default::default()
+                scale: existing_scale,
             }
         });
 }
@@ -718,10 +789,28 @@ impl BevyExt for impeller2_wkt::Material {
         } else {
             AlphaMode::Opaque
         };
+        let emissivity = self.emissivity.clamp(0.0, 1.0);
+        let boost = 4.0 * emissivity;
+        let boosted_color = Color::srgba(
+            self.base_color.r * boost,
+            self.base_color.g * boost,
+            self.base_color.b * boost,
+            self.base_color.a,
+        );
+        let emissive = if emissivity > 0.0 {
+            boosted_color
+        } else {
+            Color::BLACK
+        };
 
         bevy::prelude::StandardMaterial {
-            base_color,
+            base_color: if emissivity > 0.0 {
+                boosted_color
+            } else {
+                base_color
+            },
             alpha_mode,
+            emissive: emissive.into(),
             ..Default::default()
         }
     }
@@ -774,7 +863,7 @@ fn sync_object_3d(
             .and_then(|e| materials.get(*e).ok());
 
         let mesh_source = match (glb, mesh, material) {
-            (Some(glb), _, _) => impeller2_wkt::Object3DMesh::Glb(glb.0.clone()),
+            (Some(glb), _, _) => impeller2_wkt::Object3DMesh::glb(glb.0.clone()),
             (_, Some(mesh), Some(mat)) => impeller2_wkt::Object3DMesh::Mesh {
                 mesh: mesh.clone(),
                 material: mat.clone(),
@@ -819,7 +908,6 @@ pub fn setup_clear_state(mut packet_handlers: ResMut<PacketHandlers>, mut comman
 fn clear_state_new_connection(
     PacketHandlerInput { packet, .. }: PacketHandlerInput,
     mut entity_map: ResMut<EntityMap>,
-    mut windows: ResMut<tiles::WindowManager>,
     mut selected_object: ResMut<SelectedObject>,
     mut render_layer_alloc: ResMut<RenderLayerAlloc>,
     mut value_map: Query<&mut ComponentValueMap>,
@@ -828,6 +916,8 @@ fn clear_state_new_connection(
     mut synced_glbs: ResMut<SyncedObject3d>,
     mut eql_context: ResMut<EqlContext>,
     mut commands: Commands,
+    mut windows_state: Query<(Entity, &mut tiles::WindowState)>,
+    primary_window: Single<Entity, With<PrimaryWindow>>,
 ) {
     match packet {
         OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
@@ -849,18 +939,24 @@ fn clear_state_new_connection(
         }
     }
     synced_glbs.0.clear();
-    windows
-        .main_mut()
-        .clear(&mut commands, &mut selected_object);
-    for secondary in windows.take_secondary() {
-        for graph in secondary.graph_entities {
-            commands.entity(graph).despawn();
+    let primary_id: Entity = *primary_window;
+    let Ok(mut primary_state) = windows_state.get_mut(primary_id) else {
+        return;
+    };
+    primary_state
+        .1
+        .tile_state
+        .clear(&mut commands, &mut selected_object, &mut render_layer_alloc);
+    for (entity, secondary) in &windows_state {
+        if entity == primary_id {
+            // We don't despawn the primary window ever.
+            continue;
         }
-        if let Some(entity) = secondary.window_entity {
-            commands.entity(entity).despawn();
+        for graph in secondary.graph_entities.iter() {
+            commands.entity(*graph).despawn();
         }
+        commands.entity(entity).despawn();
     }
-    windows.replace_secondary(Vec::new());
     *graph_data = CollectedGraphData::default();
     render_layer_alloc.free_all();
 }

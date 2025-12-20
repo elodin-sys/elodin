@@ -29,7 +29,7 @@ write_files:
     permissions: "0644"
     owner: root:root
     content: |
-      overlayroot="tmpfs"
+      overlayroot="tmpfs:tmpfs_size=75%"
 
   - path: /etc/systemd/system/buildkite-bootstrap.service
     permissions: "0644"

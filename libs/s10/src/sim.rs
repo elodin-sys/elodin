@@ -10,6 +10,7 @@ use which::which;
 
 use crate::DEFAULT_WATCH_TIMEOUT;
 use crate::{error::Error, watch::watch};
+use std::time::Duration;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -52,7 +53,16 @@ impl SimRecipe {
                     );
                 }
                 tracing::info!("Waiting for sim process to exit");
-                let _ = child.wait().await;
+                match tokio::time::timeout(Duration::from_secs(2), child.wait()).await {
+                    Ok(res) => {
+                        let _ = res;
+                    }
+                    Err(_) => {
+                        tracing::warn!("Sim process did not exit after SIGTERM, forcing kill");
+                        let _ = child.start_kill();
+                        let _ = child.wait().await;
+                    }
+                }
                 Ok(())
             }
             res = child.wait() => {

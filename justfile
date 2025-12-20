@@ -18,23 +18,39 @@ default:
 version:
   @echo "v$(cargo metadata --format-version 1 | jq -r '.packages[] | select(.name == "elodin") | .version')"
 
-tag new_tag:
+tag new_tag commit="":
   #!/usr/bin/env sh
   [ -n "$DRY_RUN" ] && echo "DRY_RUN enabled."
   current_tag=$(git describe --tags --abbrev=0)
+  commit="{{commit}}"
   new_tag="{{new_tag}}"
   if [ "$current_tag" = "$new_tag" ]; then
     echo "error: Latest tag is already '$new_tag'" >&2; exit 1;
   fi
   current_branch=$(git branch --show-current);
-  if [ "$current_branch" != "main" ]; then
+  if [ -z "$commit" ] && [ "$current_branch" != "main" ]; then
     echo "error: Expected 'main' branch but was '$current_branch'." >&2; exit 2;
   fi
   echo "🏷️ Tagging HEAD with '$new_tag'"
   sh -v ${DRY_RUN:+-n} <<EOF
-    git tag -a $new_tag -m "Elodin $new_tag"
+    git tag -a $new_tag $commit -m "Elodin $new_tag"
     git push origin $new_tag
   EOF
+
+wait-for-release tag:
+  #!/usr/bin/env sh
+  tag="{{tag}}"
+  start=$(date +%s)
+  max_wait=45; # minutes
+  while ! (gh release list | egrep "^v${tag}[[:space:]]"); do
+        sleep $((5 * 60)); # Sleep for 5 minutes.
+        now=$(date +%s)
+        if $((now - start)) -gt $((max_wait * 60)); then
+           echo "error: Timed out waiting for release ${tag}." >&2;
+           exit 3;
+        fi
+  done
+  echo "Release ${tag} is available for download.";
 
 promote tag:
   #!/usr/bin/env sh
@@ -43,7 +59,7 @@ promote tag:
     echo "error: Set UV_PUBLISH_TOKEN to the token." >&2;
     exit 1;
   fi
-  sh -v ${DRY_RUN:+-n} <<EOF
+  sh -v ${DRY_RUN:+-n} <<'EOF'
     dir=$(mktemp -d)
     gh release download {{tag}} --pattern 'elodin-*.whl' --dir $dir
     uv publish "$dir/*.whl" --token "$UV_PUBLISH_TOKEN"
@@ -55,9 +71,17 @@ public-changelog:
   sh -v ${DRY_RUN:+-n} <<EOF
     cd {{justfile_directory()}}
     ./scripts/public-changelog.sh CHANGELOG.md > docs/public/content/releases/changelog.md
-    old_version=$(cat ./docs/public/config.toml | yq -p toml '.extra.version')
-    new_version=$(just version)
-    sed -i "" "s/$old_version/$new_version/g" docs/public/config.toml
+  EOF
+  bash << 'EOF'
+    echo -n "Checking docs/public/config.toml for right version... "
+    new_version="$(just version)"
+    if ! grep "^version = \"$new_version\"" docs/public/config.toml >/dev/null; then
+       echo "NOT FOUND."
+       echo "error: version not set to $new_version in docs/public/config.toml" >&2;
+       exit 1
+    else
+       echo "FOUND."
+    fi
   EOF
 
 install:

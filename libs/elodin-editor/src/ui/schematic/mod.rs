@@ -9,8 +9,9 @@ use crate::{
         inspector, plot, query_plot, query_table,
         tiles::{self, Pane},
     },
+    vector_arrow::ViewportArrow,
 };
-use bevy::{ecs::system::SystemParam, prelude::*};
+use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
 use egui_tiles::{Tile, TileId};
 use impeller2_bevy::ComponentMetadataRegistry;
 use impeller2_wkt::{
@@ -43,12 +44,22 @@ pub struct SchematicParam<'w, 's> {
     pub graph_states: Query<'w, 's, &'static plot::GraphState>,
     pub query_plots: Query<'w, 's, &'static query_plot::QueryPlotData>,
     pub viewports: Query<'w, 's, &'static inspector::viewport::Viewport>,
+    pub viewport_configs: Query<'w, 's, &'static tiles::ViewportConfig>,
     pub camera_grids: Query<'w, 's, &'static GridHandle>,
     pub grid_visibility: Query<'w, 's, &'static Visibility>,
     pub objects_3d: Query<'w, 's, (Entity, &'static Object3DState)>,
     pub lines_3d: Query<'w, 's, (Entity, &'static Line3d)>,
-    pub vector_arrows: Query<'w, 's, (Entity, &'static VectorArrow3d)>,
-    pub windows: Res<'w, tiles::WindowManager>,
+    pub vector_arrows: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static VectorArrow3d,
+            Option<&'static ViewportArrow>,
+        ),
+    >,
+    pub windows_state: Query<'w, 's, (&'static tiles::WindowState, &'static tiles::WindowId)>,
+    pub primary_window: Single<'w, Entity, With<PrimaryWindow>>,
     pub dashboards: Query<'w, 's, &'static Dashboard<Entity>>,
     pub hdr_enabled: Res<'w, HdrEnabled>,
     pub metadata: Res<'w, ComponentMetadataRegistry>,
@@ -56,7 +67,12 @@ pub struct SchematicParam<'w, 's> {
 
 impl SchematicParam<'_, '_> {
     pub fn get_panel(&self, tile_id: TileId) -> Option<Panel<Entity>> {
-        self.get_panel_from_state(self.windows.main(), tile_id)
+        self.windows_state
+            .get(*self.primary_window)
+            .ok()
+            .and_then(|(window_state, _)| {
+                self.get_panel_from_state(&window_state.tile_state, tile_id)
+            })
     }
 
     pub fn get_panel_from_state(
@@ -80,14 +96,35 @@ impl SchematicParam<'_, '_> {
                         show_grid = matches!(*visibility, Visibility::Visible);
                     }
 
+                    let show_arrows = self
+                        .viewport_configs
+                        .get(cam_entity)
+                        .map(|config| config.show_arrows)
+                        .unwrap_or(true);
+
+                    let local_arrows: Vec<VectorArrow3d> = self
+                        .vector_arrows
+                        .iter()
+                        .filter(|(_, _, viewport_arrow)| {
+                            if let Some(viewport_arrow) = viewport_arrow {
+                                viewport_arrow.camera == cam_entity
+                            } else {
+                                false
+                            }
+                        })
+                        .map(|(_, arrow, _)| arrow.clone())
+                        .collect();
+
                     Some(Panel::Viewport(Viewport {
                         fov: 45.0,
                         active: false,
                         show_grid,
+                        show_arrows,
                         hdr: self.hdr_enabled.0,
                         name: Some(viewport.label.clone()),
                         pos: Some(viewport_data.pos.eql.clone()),
                         look_at: Some(viewport_data.look_at.eql.clone()),
+                        local_arrows,
                         aux: cam_entity,
                     }))
                 }
@@ -119,6 +156,7 @@ impl SchematicParam<'_, '_> {
                         eql,
                         name: Some(graph_state.label.clone()),
                         graph_type: graph_state.graph_type,
+                        locked: graph_state.locked,
                         auto_y_range: graph_state.auto_y_range,
                         y_range: graph_state.y_range.clone(),
                         aux: graph.id,
@@ -221,7 +259,13 @@ pub fn tiles_to_schematic(
     mut secondary: ResMut<CurrentSecondarySchematics>,
 ) {
     schematic.elems.clear();
-    if let Some(tile_id) = param.windows.main().tree.root() {
+
+    if let Some(tile_id) = param
+        .windows_state
+        .get(*param.primary_window)
+        .ok()
+        .and_then(|(window_state, _)| window_state.tile_state.tree.root())
+    {
         schematic
             .elems
             .extend(param.get_panel(tile_id).map(SchematicElem::Panel))
@@ -243,31 +287,41 @@ pub fn tiles_to_schematic(
         param
             .vector_arrows
             .iter()
-            .map(|(entity, arrow)| SchematicElem::VectorArrow(arrow.map_aux(|_| entity))),
+            .filter(|(_, _, viewport_arrow)| viewport_arrow.is_none())
+            .map(|(entity, arrow, _)| SchematicElem::VectorArrow(arrow.map_aux(|_| entity))),
     );
 
     secondary.0.clear();
     let mut window_elems = Vec::new();
     let mut name_counts: HashMap<String, usize> = HashMap::new();
-    for state in param.windows.secondary() {
-        let base_stem = preferred_secondary_stem(state);
-        let unique_stem = ensure_unique_stem(&mut name_counts, &base_stem);
-        let file_name = format!("{unique_stem}.kdl");
+    for (state, window_id) in &param.windows_state {
+        let mut file_name: Option<String> = None;
 
-        let mut window_schematic = Schematic::default();
-        if let Some(root_id) = state.tile_state.tree.root()
-            && let Some(panel) = param.get_panel_from_state(&state.tile_state, root_id)
-        {
-            window_schematic.elems.push(SchematicElem::Panel(panel));
+        if !window_id.is_primary() {
+            let base_stem = preferred_secondary_stem(state);
+            let unique_stem = ensure_unique_stem(&mut name_counts, &base_stem);
+            file_name = Some(format!("{unique_stem}.kdl"));
+
+            let mut window_schematic = Schematic::default();
+            if let Some(root_id) = state.tile_state.tree.root()
+                && let Some(panel) = param.get_panel_from_state(&state.tile_state, root_id)
+            {
+                window_schematic.elems.push(SchematicElem::Panel(panel));
+            }
+            if let Some(file_name) = &file_name {
+                secondary.0.push(SecondarySchematic {
+                    file_name: file_name.clone(),
+                    title: state.descriptor.title.clone(),
+                    schematic: window_schematic,
+                });
+            }
         }
-        secondary.0.push(SecondarySchematic {
-            file_name: file_name.clone(),
-            title: state.descriptor.title.clone(),
-            schematic: window_schematic,
-        });
+
         window_elems.push(SchematicElem::Window(WindowSchematic {
-            title: state.descriptor.title.clone(),
+            title: None,
             path: file_name,
+            screen: state.descriptor.screen.map(|idx| idx as u32),
+            screen_rect: state.descriptor.screen_rect,
         }));
     }
 
@@ -287,14 +341,20 @@ impl Plugin for SchematicPlugin {
     }
 }
 
-fn preferred_secondary_stem(state: &tiles::SecondaryWindowState) -> String {
+fn preferred_secondary_stem(state: &tiles::WindowState) -> String {
     if let Some(title) = state.descriptor.title.as_deref() {
         let stem = sanitize_to_stem(title);
         if !stem.is_empty() {
             return stem;
         }
     }
-    if let Some(stem) = state.descriptor.path.file_stem().and_then(|s| s.to_str()) {
+    if let Some(stem) = state
+        .descriptor
+        .path
+        .as_ref()
+        .and_then(|p| p.file_stem())
+        .and_then(|s| s.to_str())
+    {
         let stem = sanitize_to_stem(stem);
         if !stem.is_empty() {
             return stem;

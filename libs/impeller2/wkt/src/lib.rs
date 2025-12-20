@@ -34,6 +34,7 @@ impl Color {
     pub const WHITE: Self = Self::rgb(1., 1., 1.);
 
     pub const BLUE: Self = Self::rgb(0., 0., 1.);
+    pub const RED: Self = Self::rgb(1., 0., 0.);
     pub const ORANGE: Self = Self::rgb(1., 0.5, 0.);
     pub const YELLOW: Self = Self::rgb(1., 1., 0.);
     pub const CYAN: Self = Self::rgb(0., 1., 1.);

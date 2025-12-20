@@ -1,0 +1,90 @@
+# MSP OSD Configuration
+# This file defines how to extract telemetry from Elodin-DB for OSD display
+
+[db]
+host = "127.0.0.1"
+port = 2240
+
+[osd]
+rows = 18
+cols = 50
+refresh_rate_hz = 20.0
+
+# Coordinate frame convention for heading interpretation:
+#   "enu" - East-North-Up: 0°=East, 90°=North (Elodin simulation default)
+#   "ned" - North-East-Down: 0°=North, 90°=East (Aviation convention)
+# 
+# Use "enu" when connecting to Elodin simulations (rc-jet, drone examples).
+# Use "ned" when connecting to real aviation hardware with standard conventions.
+coordinate_frame = "enu"
+
+# Character aspect ratio (height/width) for horizon line rendering.
+# HD OSD systems like Walksnail Avatar use ~12x18 pixel characters (ratio 1.5).
+# This compensates for non-square characters so the horizon tilt angle
+# matches the actual aircraft roll angle.
+#
+# Common values:
+#   1.5 - Walksnail Avatar, DJI HD (default)
+#   2.0 - Standard SD analog OSD
+#   1.0 - Square characters (no compensation)
+char_aspect_ratio = 1.5
+
+# Pitch scale in degrees per row for the artificial horizon.
+# Lower values = more sensitive pitch response (horizon moves more per degree).
+# Should be calibrated to match camera vertical FOV for accurate overlay.
+#
+# Formula: pitch_scale ≈ camera_vertical_fov / osd_rows
+# Example: 90° VFOV / 18 rows ≈ 5° per row
+#
+# Common values:
+#   5.0 - ~90° VFOV camera (default, good for Walksnail Avatar)
+#   6.0 - ~108° VFOV camera
+#   4.0 - ~72° VFOV camera (narrower FOV)
+pitch_scale = 5.0
+
+[serial]
+port = "/dev/ttyTHS7"
+baud = 115200
+
+# Automatically start DVR recording on the VTX when msp-osd starts.
+# Uses MSP2_COMMON_SET_RECORDING command (Walksnail Avatar compatible).
+# Only applies when running in serial mode.
+auto_record = false
+
+# Input mappings define how to extract OSD telemetry from Elodin-DB components.
+# Each mapping specifies a component name and the array indices for each value.
+
+# Position in world frame (x, y, z) in meters
+# For bdx example: bdx.world_pos is [q0, q1, q2, q3, x, y, z]
+[inputs.position]
+component = "bdx.world_pos"
+x = 4
+y = 5
+z = 6
+
+# Orientation quaternion from database
+# Elodin stores quaternions as [x, y, z, w] (scalar w is at index 3)
+# For bdx example: bdx.world_pos is [qx, qy, qz, qw, pos_x, pos_y, pos_z]
+[inputs.orientation]
+component = "bdx.world_pos"
+qx = 0
+qy = 1
+qz = 2
+qw = 3
+
+# Velocity in world frame (x, y, z) in m/s
+# For bdx example: bdx.world_vel is [ωx, ωy, ωz, vx, vy, vz]
+[inputs.velocity]
+component = "bdx.world_vel"
+x = 3
+y = 4
+z = 5
+
+# Target position in world frame (x, y, z) in meters (optional)
+# Used for OSD target tracking indicator
+# For rc-jet example: target.world_pos is [qx, qy, qz, qw, x, y, z]
+[inputs.target]
+component = "target.world_pos"
+x = 4
+y = 5
+z = 6

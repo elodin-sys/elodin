@@ -8,11 +8,13 @@
         "/apps"
         "/libs"
         "/fsw"
+        "/examples"
         "/.config"
       ];
       matchesSuffix = lib.any (suffix: lib.hasSuffix suffix base) [
         "Cargo.toml"
         "Cargo.lock"
+        "pyproject.toml"
         "logo.txt"
         "logo.png"
         ".rs"
@@ -21,6 +23,8 @@
         ".cpp"
         ".hpp"
         ".jinja"
+        ".py"
+        ".proto"
       ];
     in
       (type == "directory" && matchesPrefix) || matchesSuffix;

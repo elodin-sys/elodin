@@ -118,6 +118,7 @@ in {
     ethtool
     wget
     iperf3
+    i2c-tools
     # Utilities for interfacing with the MCU
     (writeShellScriptBin "reset-mcu" (builtins.readFile ../scripts/reset-mcu.sh))
     (writeShellScriptBin "flash-mcu" (builtins.readFile ../scripts/flash-mcu.sh))

@@ -14,11 +14,13 @@ use bevy::{
     },
     log::{error, info, warn},
     pbr::{StandardMaterial, wireframe::WireframeConfig},
-    prelude::{Deref, DerefMut, In, Resource},
+    prelude::{Deref, DerefMut, Entity, In, Mut, Resource, Transform},
     render::view::Visibility,
+    window::PrimaryWindow,
 };
+use bevy_editor_cam::controller::{component::EditorCam, motion::CurrentMotion};
 use bevy_infinite_grid::InfiniteGrid;
-use egui_tiles::TileId;
+use egui_tiles::{Tile, TileId};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::{Timestamp, msg_id};
 use impeller2_bevy::{CommandsExt, ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
@@ -35,7 +37,7 @@ use miette::IntoDiagnostic;
 use nox::ArrayBuf;
 
 use crate::{
-    EqlContext, Offset, SelectedTimeRange, TimeRangeBehavior, TimeRangeError,
+    EqlContext, MainCamera, Offset, SelectedTimeRange, TimeRangeBehavior, TimeRangeError,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
         HdrEnabled, Paused, colors,
@@ -250,15 +252,90 @@ const TIME_LABEL: &str = "Time";
 const HELP_LABEL: &str = "Help";
 const PRESETS_LABEL: &str = "Presets";
 
-fn target_tile_state_mut(
-    windows: &mut tiles::WindowManager,
-    target: Option<tiles::SecondaryWindowId>,
-) -> Option<&mut tiles::TileState> {
-    match target {
-        Some(id) => windows
-            .get_secondary_mut(id)
-            .map(|state| &mut state.tile_state),
-        None => Some(windows.main_mut()),
+struct ViewportEntry {
+    label: String,
+    camera: Entity,
+}
+
+fn gather_viewport_entries(
+    window_states: &Query<(&tiles::WindowState, &tiles::WindowId)>,
+) -> Vec<ViewportEntry> {
+    let mut entries = Vec::new();
+    for (window_state, window_id) in window_states.iter() {
+        let window_label = window_state
+            .descriptor
+            .title
+            .clone()
+            .unwrap_or_else(|| format!("Window {}", window_id.0));
+        if let Some(root) = window_state.tile_state.tree.root() {
+            collect_viewport_entries(
+                &window_state.tile_state.tree,
+                root,
+                &window_label,
+                &mut entries,
+            );
+        }
+    }
+    entries
+}
+
+fn collect_viewport_entries(
+    tree: &egui_tiles::Tree<tiles::Pane>,
+    tile_id: TileId,
+    window_label: &str,
+    entries: &mut Vec<ViewportEntry>,
+) {
+    let Some(tile) = tree.tiles.get(tile_id) else {
+        return;
+    };
+    match tile {
+        Tile::Pane(tiles::Pane::Viewport(viewport)) => {
+            if let Some(camera) = viewport.camera {
+                entries.push(ViewportEntry {
+                    label: viewport_display_label(&viewport.label, window_label),
+                    camera,
+                });
+            }
+        }
+        Tile::Container(container) => {
+            for child in container.children() {
+                collect_viewport_entries(tree, *child, window_label, entries);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn viewport_display_label(label: &str, window_label: &str) -> String {
+    let base = if label.is_empty() { "Viewport" } else { label };
+    if window_label.is_empty() || window_label == base {
+        base.to_string()
+    } else {
+        format!("{base} ({window_label})")
+    }
+}
+
+fn reset_editor_cam(transform: &mut Transform, editor_cam: &mut EditorCam) {
+    *transform = Transform::IDENTITY;
+    editor_cam.current_motion = CurrentMotion::Stationary;
+    editor_cam.last_anchor_depth = -2.0;
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct TileParam<'w, 's> {
+    windows_state: Query<'w, 's, &'static mut tiles::WindowState>,
+    primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
+}
+
+impl<'w, 's> TileParam<'w, 's> {
+    pub fn target(&mut self, target: Option<Entity>) -> Option<Mut<'_, tiles::TileState>> {
+        let target_id = target.or_else(|| self.primary_window.iter().next());
+        target_id.and_then(|target_id| {
+            self.windows_state
+                .get_mut(target_id)
+                .ok()
+                .map(|s| s.map_unchanged(|s| &mut s.tile_state))
+        })
     }
 }
 
@@ -282,12 +359,10 @@ pub fn create_action(tile_id: Option<TileId>) -> PaletteItem {
                                                 LabelSource::placeholder("Msg"),
                                                 "Contents of the msg as a lua table - {foo = \"bar\"}",
                                                 move |In(msg): In<String>,
-                                                      mut windows: ResMut<tiles::WindowManager>,
+                                                mut tile_param: TileParam,
                                                       palette_state: Res<CommandPaletteState>| {
-                                                    let Some(tile_state) = target_tile_state_mut(
-                                                        &mut windows,
-                                                        palette_state.target_window,
-                                                    ) else {
+                                                          let Some(mut tile_state) = tile_param.target(palette_state.target_window)
+                                                     else {
                                                         return PaletteEvent::Error(
                                                             "Secondary window unavailable"
                                                                 .to_string(),
@@ -310,12 +385,10 @@ pub fn create_action(tile_id: Option<TileId>) -> PaletteItem {
                                     LabelSource::placeholder("Enter a lua command (i.e client:send_table)"),
                                     "Enter a custom lua command",
                                     move |lua: In<String>,
-                                          mut windows: ResMut<tiles::WindowManager>,
+                                    mut tile_param: TileParam,
                                           palette_state: Res<CommandPaletteState>| {
-                                        let Some(tile_state) = target_tile_state_mut(
-                                            &mut windows,
-                                            palette_state.target_window,
-                                        ) else {
+                                              let Some(mut tile_state) = tile_param.target(palette_state.target_window)
+                                         else {
                                             return PaletteEvent::Error(
                                                 "Secondary window unavailable".to_string(),
                                             );
@@ -363,11 +436,10 @@ fn graph_parts(
                       query: Query<&ComponentValue>,
                       entity_map: Res<EntityMap>,
                       mut render_layer_alloc: ResMut<RenderLayerAlloc>,
-                      mut windows: ResMut<tiles::WindowManager>,
+                      mut tile_param: TileParam,
                       path_reg: Res<ComponentPathRegistry>,
                       palette_state: Res<CommandPaletteState>| {
-                    let Some(tile_state) =
-                        target_tile_state_mut(&mut windows, palette_state.target_window)
+                    let Some(mut tile_state) = tile_param.target(palette_state.target_window)
                     else {
                         return PaletteEvent::Error("Secondary window unavailable".to_string());
                     };
@@ -429,10 +501,9 @@ fn monitor_parts(
                 name.clone(),
                 "Component",
                 move |_: In<String>,
-                      mut windows: ResMut<tiles::WindowManager>,
+                      mut tile_param: TileParam,
                       palette_state: Res<CommandPaletteState>| {
-                    let Some(tile_state) =
-                        target_tile_state_mut(&mut windows, palette_state.target_window)
+                    let Some(mut tile_state) = tile_param.target(palette_state.target_window)
                     else {
                         return PaletteEvent::Error("Secondary window unavailable".to_string());
                     };
@@ -458,15 +529,71 @@ fn toggle_body_axes() -> PaletteItem {
     })
 }
 
+fn reset_cameras() -> PaletteItem {
+    PaletteItem::new(
+        "Reset Cameras",
+        VIEWPORT_LABEL,
+        |_: In<String>, window_states: Query<(&tiles::WindowState, &tiles::WindowId)>| {
+            let entries = gather_viewport_entries(&window_states);
+            if entries.is_empty() {
+                return PalettePage::new(vec![PaletteItem::new(
+                    "No viewports available",
+                    VIEWPORT_LABEL,
+                    |_: In<String>| PaletteEvent::Exit,
+                )])
+                .into();
+            }
+
+            let all_cameras: Vec<_> = entries.iter().map(|entry| entry.camera).collect();
+            let mut items = Vec::with_capacity(entries.len() + 1);
+            items.push(PaletteItem::new(
+                "Reset all viewports",
+                VIEWPORT_LABEL,
+                move |_: In<String>,
+                      mut query: Query<(&mut Transform, &mut EditorCam), With<MainCamera>>| {
+                    for camera in &all_cameras {
+                        if let Ok((mut transform, mut editor_cam)) = query.get_mut(*camera) {
+                            reset_editor_cam(&mut transform, &mut editor_cam);
+                        }
+                    }
+                    PaletteEvent::Exit
+                },
+            ));
+
+            for entry in entries {
+                let label = format!("Reset {}", entry.label);
+                let camera = entry.camera;
+                items.push(
+                    PaletteItem::new(
+                        label,
+                        VIEWPORT_LABEL,
+                        move |_: In<String>,
+                              mut query: Query<
+                            (&mut Transform, &mut EditorCam),
+                            With<MainCamera>,
+                        >| {
+                            if let Ok((mut transform, mut editor_cam)) = query.get_mut(camera) {
+                                reset_editor_cam(&mut transform, &mut editor_cam);
+                            }
+                            PaletteEvent::Exit
+                        },
+                    ),
+                );
+            }
+
+            PalettePage::new(items)
+                .prompt("Select viewport to reset")
+                .into()
+        },
+    )
+}
+
 pub fn create_viewport(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Viewport",
         TILES_LABEL,
-        move |_: In<String>,
-              mut windows: ResMut<tiles::WindowManager>,
-              palette_state: Res<CommandPaletteState>| {
-            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
-            else {
+        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
+            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
             tile_state.create_viewport_tile(tile_id);
@@ -482,15 +609,17 @@ pub fn create_window() -> PaletteItem {
                 LabelSource::placeholder("Enter window title"),
                 "Leave blank for a default title",
                 move |In(title): In<String>,
-                      mut windows: ResMut<tiles::WindowManager>,
+                      mut commands: Commands,
+
                       mut palette_state: ResMut<CommandPaletteState>| {
                     let title_opt = if title.trim().is_empty() {
                         None
                     } else {
                         Some(title.trim().to_string())
                     };
-                    let id = windows.create_secondary_window(title_opt);
-                    palette_state.target_window = Some(id);
+                    let (state, id) = tiles::create_secondary_window(title_opt);
+                    let entity = commands.spawn((id, state)).id();
+                    palette_state.target_window = Some(entity);
                     PaletteEvent::Exit
                 },
             )
@@ -505,11 +634,8 @@ pub fn create_query_table(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Query Table",
         TILES_LABEL,
-        move |_: In<String>,
-              mut windows: ResMut<tiles::WindowManager>,
-              palette_state: Res<CommandPaletteState>| {
-            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
-            else {
+        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
+            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
             tile_state.create_query_table_tile(tile_id);
@@ -522,11 +648,8 @@ pub fn create_query_plot(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Query Plot",
         TILES_LABEL,
-        move |_: In<String>,
-              mut windows: ResMut<tiles::WindowManager>,
-              palette_state: Res<CommandPaletteState>| {
-            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
-            else {
+        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
+            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
             tile_state.create_query_plot_tile(tile_id);
@@ -539,11 +662,8 @@ pub fn create_hierarchy(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Hierarchy",
         TILES_LABEL,
-        move |_: In<String>,
-              mut windows: ResMut<tiles::WindowManager>,
-              palette_state: Res<CommandPaletteState>| {
-            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
-            else {
+        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
+            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
             tile_state.create_hierarchy_tile(tile_id);
@@ -556,11 +676,8 @@ pub fn create_inspector(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Inspector",
         TILES_LABEL,
-        move |_: In<String>,
-              mut windows: ResMut<tiles::WindowManager>,
-              palette_state: Res<CommandPaletteState>| {
-            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
-            else {
+        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
+            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
             tile_state.create_inspector_tile(tile_id);
@@ -573,11 +690,8 @@ pub fn create_schematic_tree(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Schematic Tree",
         TILES_LABEL,
-        move |_: In<String>,
-              mut windows: ResMut<tiles::WindowManager>,
-              palette_state: Res<CommandPaletteState>| {
-            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
-            else {
+        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
+            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
             tile_state.create_tree_tile(tile_id);
@@ -590,11 +704,8 @@ pub fn create_dashboard(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Dashboard",
         TILES_LABEL,
-        move |_: In<String>,
-              mut windows: ResMut<tiles::WindowManager>,
-              palette_state: Res<CommandPaletteState>| {
-            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
-            else {
+        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
+            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
             tile_state.create_dashboard_tile(Default::default(), "Dashboard".to_string(), tile_id);
@@ -607,11 +718,8 @@ pub fn create_sidebars() -> PaletteItem {
     PaletteItem::new(
         "Create Sidebars",
         TILES_LABEL,
-        move |_: In<String>,
-              mut windows: ResMut<tiles::WindowManager>,
-              palette_state: Res<CommandPaletteState>| {
-            let Some(tile_state) = target_tile_state_mut(&mut windows, palette_state.target_window)
-            else {
+        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
+            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
             tile_state.create_sidebars_layout();
@@ -631,10 +739,9 @@ pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
                     ),
                     "",
                     move |In(msg_name): In<String>,
-                          mut windows: ResMut<tiles::WindowManager>,
+                          mut tile_param: TileParam,
                           palette_state: Res<CommandPaletteState>| {
-                        let Some(tile_state) =
-                            target_tile_state_mut(&mut windows, palette_state.target_window)
+                        let Some(mut tile_state) = tile_param.target(palette_state.target_window)
                         else {
                             return PaletteEvent::Error("Secondary window unavailable".to_string());
                         };
@@ -856,28 +963,39 @@ pub fn save_schematic() -> PaletteItem {
     PaletteItem::new(
         "Save Schematic",
         PRESETS_LABEL,
-        |_name: In<String>,
-         db_config: Res<DbConfig>,
-         schematic: Res<CurrentSchematic>,
-         secondary: Res<CurrentSecondarySchematics>| {
-            match db_config.schematic_path() {
-                Some(path) => {
-                    let kdl = schematic.0.to_kdl();
-                    let path = Path::new(path).with_extension("kdl");
-                    let dest = schematic_file(&path);
-                    if let Err(e) = std::fs::write(&dest, kdl) {
-                        error!(?e, "saving schematic to {:?}", dest.display());
-                    } else {
-                        info!("saved schematic to {:?}", dest.display());
-                        let base_dir = dest.parent().unwrap_or_else(|| Path::new("."));
-                        write_secondary_schematics(base_dir, &secondary);
-                    }
-                    PaletteEvent::Exit
-                }
-                None => PalettePage::new(vec![save_schematic_inner()]).into(),
-            }
+        |_name: In<String>, mut commands: Commands| {
+            // Refresh primary path + descriptors, rebuild schematics, then serialize in a dedicated system.
+            commands.run_system_cached(crate::ui::update_primary_descriptor_path);
+            commands.run_system_cached(crate::ui::capture_window_screens_oneoff);
+            commands.run_system_cached(crate::ui::schematic::tiles_to_schematic);
+            commands.run_system_cached(save_schematic_now);
+            PaletteEvent::Exit
         },
     )
+}
+
+fn save_schematic_now(
+    db_config: Res<DbConfig>,
+    schematic: Res<CurrentSchematic>,
+    secondary: Res<CurrentSecondarySchematics>,
+    mut live_reload: ResMut<SchematicLiveReloadRx>,
+) {
+    let Some(path) = db_config.schematic_path() else {
+        return;
+    };
+    live_reload.guard_for(Duration::from_millis(2000));
+    let kdl = schematic.0.to_kdl();
+    let path = Path::new(path).with_extension("kdl");
+    let dest = schematic_file(&path);
+    if let Err(e) = std::fs::write(&dest, kdl) {
+        error!(?e, "saving schematic to {:?}", dest.display());
+    } else {
+        info!("saved schematic to {:?}", dest.display());
+        live_reload.ignore_path(dest.clone());
+        live_reload.record_loaded(&dest);
+        let base_dir = dest.parent().unwrap_or_else(|| Path::new("."));
+        write_secondary_schematics(base_dir, &secondary, &mut live_reload);
+    }
 }
 
 pub fn save_schematic_db() -> PaletteItem {
@@ -1028,7 +1146,7 @@ pub fn clear_schematic() -> PaletteItem {
         PRESETS_LABEL,
         |_: In<String>, mut params: LoadSchematicParams, mut rx: ResMut<SchematicLiveReloadRx>| {
             params.load_schematic(&impeller2_wkt::Schematic::default(), None);
-            rx.0 = None;
+            rx.clear();
             PaletteEvent::Exit
         },
     )
@@ -1040,16 +1158,19 @@ pub fn save_schematic_inner() -> PaletteItem {
         "",
         move |In(name): In<String>,
               schematic: Res<CurrentSchematic>,
-              secondary: Res<CurrentSecondarySchematics>| {
+              secondary: Res<CurrentSecondarySchematics>,
+              mut live_reload: ResMut<SchematicLiveReloadRx>| {
             let kdl = schematic.0.to_kdl();
             let path = PathBuf::from(name).with_extension("kdl");
             let dest = schematic_file(&path);
+            live_reload.guard_for(Duration::from_millis(2000));
             if let Err(e) = std::fs::write(&dest, kdl) {
                 error!(?e, "saving schematic");
             } else {
                 info!("saved schematic to {:?}", dest.display());
+                live_reload.ignore_path(dest.clone());
                 let base_dir = dest.parent().unwrap_or_else(|| Path::new("."));
-                write_secondary_schematics(base_dir, &secondary);
+                write_secondary_schematics(base_dir, &secondary, &mut live_reload);
             }
             PaletteEvent::Exit
         },
@@ -1057,7 +1178,11 @@ pub fn save_schematic_inner() -> PaletteItem {
     .default()
 }
 
-fn write_secondary_schematics(base_dir: &Path, secondary: &CurrentSecondarySchematics) {
+fn write_secondary_schematics(
+    base_dir: &Path,
+    secondary: &CurrentSecondarySchematics,
+    live_reload: &mut SchematicLiveReloadRx,
+) {
     for entry in &secondary.0 {
         let dest = base_dir.join(&entry.file_name);
         if let Some(parent) = dest.parent()
@@ -1076,6 +1201,8 @@ fn write_secondary_schematics(base_dir: &Path, secondary: &CurrentSecondarySchem
             error!(?e, path = %dest.display(), "saving secondary schematic");
         } else {
             info!(path = %dest.display(), "saved secondary schematic");
+            live_reload.ignore_path(dest.clone());
+            live_reload.record_loaded(&dest);
         }
     }
 }
@@ -1282,7 +1409,7 @@ pub fn create_3d_object() -> PaletteItem {
                                                   mut material_assets: ResMut<Assets<StandardMaterial>>,
                                                   mut mesh_assets: ResMut<Assets<bevy::prelude::Mesh>>,
                                                   assets: Res<AssetServer>| {
-                                                let obj = impeller2_wkt::Object3DMesh::Glb(gltf_path.trim().to_string());
+                                                let obj = impeller2_wkt::Object3DMesh::glb(gltf_path.trim());
 
                                                 crate::object_3d::create_object_3d_entity(
                                                     &mut commands,
@@ -1515,6 +1642,7 @@ impl Default for PalettePage {
                 },
             ),
             toggle_body_axes(),
+            reset_cameras(),
             PaletteItem::new(
                 "Toggle Recording",
                 SIMULATION_LABEL,

@@ -1668,18 +1668,64 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
 ) -> Result<(), Error> {
     let mut visited_ids = HashSet::new();
     loop {
-        db.with_state(|state| {
-            DBVisitor.visit(&state.components, |component| {
-                if visited_ids.contains(&component.component_id) {
-                    return Ok(());
+        // Collect new components along with their metadata and schema
+        let new_components: Vec<(Component, Option<ComponentMetadata>, Schema<Vec<u64>>)> = db
+            .with_state(|state| {
+                let mut new_comps = Vec::new();
+                for component in state.components.values() {
+                    if visited_ids.contains(&component.component_id) {
+                        continue;
+                    }
+                    let metadata = state
+                        .get_component_metadata(component.component_id)
+                        .cloned();
+                    let schema = component.schema.to_schema();
+                    new_comps.push((component.clone(), metadata, schema));
                 }
-                visited_ids.insert(component.component_id);
-                let sink = sink.clone();
-                let component = component.clone();
-                stellarator::spawn(handle_real_time_component(sink, component, req_id));
-                Ok(())
-            })
-        })?;
+                new_comps
+            });
+
+        // Send metadata and schema for each new component, then spawn data handlers
+        for (component, metadata, schema) in new_components {
+            visited_ids.insert(component.component_id);
+
+            // Send ComponentMetadata so the editor knows about this component
+            if let Some(metadata) = metadata {
+                let stream = sink.lock().await;
+                if let Err(err) = stream
+                    .send(metadata.into_len_packet().with_request_id(req_id))
+                    .await
+                    .0
+                {
+                    debug!(%err, "error sending component metadata");
+                }
+            }
+
+            // Send schema for this component
+            let schema_msg = DumpSchemaResp {
+                schemas: [(component.component_id, schema)].into_iter().collect(),
+            };
+            {
+                let stream = sink.lock().await;
+                if let Err(err) = stream
+                    .send(schema_msg.into_len_packet().with_request_id(req_id))
+                    .await
+                    .0
+                {
+                    debug!(%err, "error sending component schema");
+                }
+            }
+
+            // Spawn the data handler for this component
+            let sink_clone = sink.clone();
+            let component_clone = component.clone();
+            stellarator::spawn(handle_real_time_component(
+                sink_clone,
+                component_clone,
+                req_id,
+            ));
+        }
+
         db.vtable_gen.wait().await;
     }
 }

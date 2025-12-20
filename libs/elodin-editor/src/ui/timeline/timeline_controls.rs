@@ -2,6 +2,7 @@ use bevy::ecs::{
     system::{Res, ResMut, SystemParam, SystemState},
     world::World,
 };
+use bevy::prelude::*;
 use bevy_egui::egui;
 use egui::{Ui, load::SizedTexture};
 use impeller2::types::Timestamp;
@@ -10,6 +11,8 @@ use impeller2_wkt::{
     CurrentTimestamp, EarliestTimestamp, LastUpdated, SetStreamState, SimulationTimeStep,
 };
 use std::convert::TryFrom;
+use std::time::Duration;
+use std::time::Instant;
 
 use crate::{
     TimeRangeBehavior,
@@ -25,6 +28,10 @@ use crate::{
 
 use super::{StreamTickOrigin, TimelineIcons};
 
+pub(crate) fn plugin(app: &mut App) {
+    app.init_resource::<TimelineStepButtons>();
+}
+
 #[derive(SystemParam)]
 pub struct TimelineControls<'w> {
     event: Res<'w, PacketTx>,
@@ -36,6 +43,13 @@ pub struct TimelineControls<'w> {
     earliest_timestamp: Res<'w, EarliestTimestamp>,
     behavior: ResMut<'w, TimeRangeBehavior>,
     tick_origin: ResMut<'w, StreamTickOrigin>,
+    step_buttons: ResMut<'w, TimelineStepButtons>,
+}
+
+#[derive(Default, Debug, Resource)]
+struct TimelineStepButtons {
+    back: Option<Instant>,
+    forward: Option<Instant>,
 }
 
 impl WidgetSystem for TimelineControls<'_> {
@@ -59,6 +73,7 @@ impl WidgetSystem for TimelineControls<'_> {
             earliest_timestamp,
             mut behavior,
             mut tick_origin,
+            mut step_buttons,
         } = state.get_mut(world);
 
         tick_origin.observe_stream(**stream_id);
@@ -69,6 +84,8 @@ impl WidgetSystem for TimelineControls<'_> {
         let tick_step_micros_i128 = tick_step_duration.total_nanoseconds() / 1000;
         let tick_step_micros = i64::try_from(tick_step_micros_i128).unwrap_or(0);
         ui.set_height(50.0);
+        let typical_mouse_click = Duration::from_millis(85);
+        let wait_before_advancing = typical_mouse_click * 2;
 
         egui::Frame::NONE
             .inner_margin(egui::Margin::symmetric(8, 8))
@@ -95,15 +112,25 @@ impl WidgetSystem for TimelineControls<'_> {
                                 EImageButton::new(icons.frame_back).scale(btn_scale, btn_scale),
                             );
 
-                            if frame_back_btn.clicked()
+                            if frame_back_btn.is_pointer_button_down_on()
                                 && tick.0 > earliest_timestamp.0
                                 && tick_step_micros > 0
                             {
-                                tick.0.0 -= tick_step_micros;
-                                tick_changed = true;
-                                if tick.0 <= earliest_timestamp.0 {
-                                    tick_origin.request_rebase();
+                                let mut first = false;
+                                let down = step_buttons.back.get_or_insert_with(|| {
+                                    first = true;
+                                    Instant::now()
+                                });
+
+                                if first || down.elapsed() > wait_before_advancing {
+                                    tick.0.0 -= tick_step_micros;
+                                    tick_changed = true;
+                                    if tick.0 <= earliest_timestamp.0 {
+                                        tick_origin.request_rebase();
+                                    }
                                 }
+                            } else {
+                                let _ = step_buttons.back.take();
                             }
 
                             if paused.0 {
@@ -127,13 +154,23 @@ impl WidgetSystem for TimelineControls<'_> {
                                 EImageButton::new(icons.frame_forward).scale(btn_scale, btn_scale),
                             );
 
-                            if frame_forward_btn.clicked()
+                            if frame_forward_btn.is_pointer_button_down_on()
                                 && tick.0 < max_tick.0
                                 && tick_step_micros > 0
                             {
-                                tick.0.0 += tick_step_micros;
+                                let mut first = false;
+                                let down = step_buttons.forward.get_or_insert_with(|| {
+                                    first = true;
+                                    Instant::now()
+                                });
 
-                                tick_changed = true;
+                                if first || down.elapsed() > wait_before_advancing {
+                                    tick.0.0 += tick_step_micros;
+
+                                    tick_changed = true;
+                                }
+                            } else {
+                                let _ = step_buttons.forward.take();
                             }
 
                             let jump_to_end_btn = ui.add(

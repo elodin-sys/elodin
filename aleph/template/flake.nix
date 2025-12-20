@@ -45,6 +45,11 @@
 
         # default fsw
         mekf # a basic attitude mekf that runs on the sensor data from the expansion board
+        msp-osd # MSP DisplayPort OSD for FPV goggles, displays attitude from MEKF
+
+        # udp component broadcast (for sharing component data between flight computers)
+        udp-component-broadcast # broadcasts component data over UDP
+        udp-component-receive # receives UDP broadcasts and writes to local elodin-db
       ];
 
       # overlays required to get elodin and nvidia packages
@@ -64,6 +69,95 @@
       };
       security.sudo.wheelNeedsPassword = false;
       nix.settings.trusted-users = ["@wheel"];
+
+      # Customize the kernel source (current options are default and no_otg)
+      aleph.kernel.source = "default";
+
+      # Elodin-DB configuration
+      # services.elodin-db = {
+      #   enable = true;                    # Enable elodin-db (default: true)
+      #   autostart = true;                 # Set to false to configure but not auto-start
+      #   dbUniqueOnBoot = true;            # Create unique db folder on each boot
+      #   openFirewall = true;              # Open ports 2240 and 2248
+      # };
+
+      # Enable MSP OSD service (uses MEKF attitude output by default)
+      services.msp-osd = {
+        enable = true;
+
+        # Override input mappings for a different data source
+        inputs = {
+          position = {
+            component = "my.PositionComponent";
+            x = 0;
+            y = 1;
+            z = 2;
+          };
+          orientation = {
+            component = "my.OrientationComponent";
+            qx = 3;
+            qy = 4;
+            qz = 5;
+            qw = 6;
+          };
+          velocity = {
+            component = "my.VelocityComponent";
+            x = 0;
+            y = 1;
+            z = 2;
+          };
+          # Optional: target position for tracking indicator (e.g., another aircraft)
+          # target = {
+          #   component = "target.world_pos";
+          #   x = 4;
+          #   y = 5;
+          #   z = 6;
+          # };
+        };
+
+        # Other overridable options:
+        # autostart = true;         # Set to false to configure but not auto-start
+        # coordinateFrame = "enu";  # or "ned" (default)
+        # serialPort = "/dev/ttyTHS7";
+        # baudRate = 115200;
+        # mode = "serial";  # or "debug" for terminal output
+        # refreshRateHz = 20.0;
+        # osdRows = 18;
+        # osdCols = 50;
+
+        # Horizon display calibration:
+        # charAspectRatio = 1.5;    # Character height/width ratio (1.5 for Walksnail Avatar)
+        # pitchScale = 5.0;         # Degrees per row (~camera_vfov / osd_rows)
+
+        # Auto-recording (Walksnail Avatar):
+        # autoRecord = true;        # Start VTX recording when service starts
+      };
+
+      # UDP Component Broadcast service - broadcasts component data to other flight computers
+      # Uncomment and configure to enable broadcasting
+      # services.udp-component-broadcast = {
+      #   enable = true;
+      #   component = "bdx.world_pos";      # Component to broadcast (required)
+      #   rename = "target.world_pos";      # Rename for receivers (optional)
+      #   sourceId = "bdx-plane";           # Identifier for this broadcaster
+      #   broadcastRate = 20.0;             # Broadcast rate in Hz
+      #   broadcastPort = 41235;            # UDP broadcast port
+      #   # autostart = true;                # Set to false to configure but not auto-start
+      #   # dbAddr = "127.0.0.1:2240";      # Elodin-DB address (default)
+      #   # verbose = false;                 # Enable verbose logging
+      # };
+
+      # UDP Component Receive service - receives broadcasts from other flight computers
+      # Uncomment and configure to enable receiving
+      # services.udp-component-receive = {
+      #   enable = true;
+      #   listenPort = 41235;               # UDP port to listen on
+      #   # autostart = true;               # Set to false to configure but not auto-start
+      #   # filter = ["target.world_pos"];  # Only accept specific components (empty = all)
+      #   # dbAddr = "127.0.0.1:2240";      # Elodin-DB address to write to
+      #   # timestampMode = "sender";       # Timestamp mode: "sender", "local", or "monotonic"
+      #   # verbose = false;                # Enable verbose logging
+      # };
     };
     # sets up two different nixos systems default and installer
     # installer is setup to be flashed to a usb drive, and contains the

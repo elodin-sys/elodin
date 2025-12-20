@@ -1,0 +1,10 @@
+%YAML 1.2
+---
+name: KDL
+file_extensions:
+  - kdl
+scope: source.kdl
+contexts:
+  main:
+    - match: .
+      scope: text.plain

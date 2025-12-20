@@ -1,8 +1,9 @@
 use crate::Color;
 use impeller2::component::Asset;
 use impeller2::types::EntityId;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de, de::DeserializeOwned};
 use std::collections::HashMap;
+use std::fmt;
 use std::ops::Range;
 use std::time::Duration;
 use strum::{EnumString, IntoStaticStr, VariantNames};
@@ -53,10 +54,22 @@ impl<T> SchematicElem<T> {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::TypePath))]
+pub struct WindowRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct WindowSchematic {
     pub title: Option<String>,
-    pub path: String,
+    pub path: Option<String>,
+    pub screen: Option<u32>,
+    #[serde(default)]
+    pub screen_rect: Option<WindowRect>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -180,10 +193,13 @@ pub struct Viewport<T = ()> {
     pub fov: f32,
     pub active: bool,
     pub show_grid: bool,
+    pub show_arrows: bool,
     pub hdr: bool,
     pub name: Option<String>,
     pub pos: Option<String>,
     pub look_at: Option<String>,
+    #[serde(default)]
+    pub local_arrows: Vec<VectorArrow3d>,
     pub aux: T,
 }
 
@@ -193,10 +209,12 @@ impl<T> Viewport<T> {
             fov: self.fov,
             active: self.active,
             show_grid: self.show_grid,
+            show_arrows: self.show_arrows,
             hdr: self.hdr,
             name: self.name.clone(),
             pos: self.pos.clone(),
             look_at: self.look_at.clone(),
+            local_arrows: self.local_arrows.clone(),
             aux: f(&self.aux),
         }
     }
@@ -208,10 +226,12 @@ impl Default for Viewport {
             fov: 45.0,
             active: false,
             show_grid: false,
+            show_arrows: true,
             hdr: false,
             name: None,
             pos: None,
             look_at: None,
+            local_arrows: Vec::new(),
             aux: (),
         }
     }
@@ -229,6 +249,8 @@ pub struct Graph<T = ()> {
     pub name: Option<String>,
     #[serde(default)]
     pub graph_type: GraphType,
+    #[serde(default)]
+    pub locked: bool,
     pub auto_y_range: bool,
     pub y_range: Range<f64>,
     pub aux: T,
@@ -241,6 +263,7 @@ impl<T> Graph<T> {
             eql: self.eql.clone(),
             name: self.name.clone(),
             graph_type: self.graph_type,
+            locked: self.locked,
             auto_y_range: self.auto_y_range,
             y_range: self.y_range.clone(),
             aux: f(&self.aux),
@@ -301,24 +324,132 @@ pub struct VectorArrow3d<T = ()> {
     pub body_frame: bool,
     #[serde(default)]
     pub normalize: bool,
-    #[serde(default = "VectorArrow3d::<T>::default_display_name")]
-    pub display_name: bool,
+    #[serde(default = "VectorArrow3d::<T>::default_show_name")]
+    pub show_name: bool,
     #[serde(default = "VectorArrow3d::<T>::default_thickness")]
     pub thickness: ArrowThickness,
     #[serde(default = "VectorArrow3d::<T>::default_label_position")]
-    pub label_position: f32,
+    pub label_position: LabelPosition,
     pub aux: T,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+/// The position of a label.
+pub enum LabelPosition {
+    /// No label position.
+    #[default]
+    None,
+    /// A value from [0, 1] meant to represent some proportion of a whole.
+    Proportionate(f32),
+    /// An absolute magnitude in meters.
+    Absolute(f32),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub enum ArrowThickness {
-    #[serde(alias = "small")]
-    Small,
-    #[serde(alias = "middle")]
-    Middle,
-    #[serde(alias = "big")]
-    Big,
+pub struct ArrowThickness(pub f32);
+
+impl ArrowThickness {
+    pub const DEFAULT: f32 = 0.1;
+    const MIN: f32 = 0.001;
+
+    pub fn new(raw: f32) -> Self {
+        if !raw.is_finite() {
+            return Self(Self::DEFAULT);
+        }
+
+        Self(Self::round_to_precision(raw.max(Self::MIN)))
+    }
+
+    pub fn value(self) -> f32 {
+        if !self.0.is_finite() {
+            return Self::DEFAULT;
+        }
+
+        Self::round_to_precision(self.0.max(Self::MIN))
+    }
+
+    pub fn round_to_precision(value: f32) -> f32 {
+        (value * 1000.0).round() / 1000.0
+    }
+}
+
+impl Serialize for ArrowThickness {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_f32(self.value())
+    }
+}
+
+impl<'de> Deserialize<'de> for ArrowThickness {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ThicknessVisitor;
+
+        impl<'de> de::Visitor<'de> for ThicknessVisitor {
+            type Value = ArrowThickness;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a numeric arrow thickness")
+            }
+
+            fn visit_f32<E>(self, value: f32) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(ArrowThickness::new(value))
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(ArrowThickness::new(value as f32))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(ArrowThickness::new(value as f32))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(ArrowThickness::new(value as f32))
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                v.parse::<f32>()
+                    .map(ArrowThickness::new)
+                    .map_err(|_| E::custom(format!("invalid arrow thickness '{v}'")))
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_str(&v)
+            }
+        }
+
+        deserializer.deserialize_any(ThicknessVisitor)
+    }
+}
+
+impl Default for ArrowThickness {
+    fn default() -> Self {
+        Self(Self::DEFAULT)
+    }
 }
 
 impl<T> VectorArrow3d<T> {
@@ -330,16 +461,16 @@ impl<T> VectorArrow3d<T> {
         Color::WHITE
     }
 
-    fn default_display_name() -> bool {
+    fn default_show_name() -> bool {
         true
     }
 
     fn default_thickness() -> ArrowThickness {
-        ArrowThickness::Small
+        ArrowThickness::default()
     }
 
-    fn default_label_position() -> f32 {
-        1.0
+    fn default_label_position() -> LabelPosition {
+        LabelPosition::default()
     }
 
     pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> VectorArrow3d<U> {
@@ -351,9 +482,9 @@ impl<T> VectorArrow3d<T> {
             color: self.color,
             body_frame: self.body_frame,
             normalize: self.normalize,
-            display_name: self.display_name,
+            show_name: self.show_name,
             thickness: self.thickness,
-            label_position: self.label_position,
+            label_position: self.label_position.clone(),
             aux: f(&self.aux),
         }
     }
@@ -413,22 +544,40 @@ impl Asset for Glb {
     const NAME: &'static str = "glb";
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Material {
     pub base_color: Color,
+    #[serde(default)]
+    pub emissivity: f32,
 }
 
 impl Material {
     pub fn color(r: f32, g: f32, b: f32) -> Self {
         Material {
             base_color: Color::rgb(r, g, b),
+            emissivity: 0.0,
         }
     }
 
     pub fn color_with_alpha(r: f32, g: f32, b: f32, a: f32) -> Self {
         Material {
             base_color: Color::rgba(r, g, b, a),
+            emissivity: 0.0,
+        }
+    }
+
+    pub fn color_with_emissivity(r: f32, g: f32, b: f32, emissivity: f32) -> Self {
+        Material {
+            base_color: Color::rgb(r, g, b),
+            emissivity,
+        }
+    }
+
+    pub fn with_color(color: Color) -> Self {
+        Material {
+            base_color: color,
+            emissivity: 0.0,
         }
     }
 }
@@ -445,10 +594,30 @@ pub fn default_ellipsoid_color() -> Color {
     Color::WHITE
 }
 
+pub fn default_glb_scale() -> f32 {
+    1.0
+}
+
+pub fn default_glb_translate() -> (f32, f32, f32) {
+    (0.0, 0.0, 0.0)
+}
+
+pub fn default_glb_rotate() -> (f32, f32, f32) {
+    (0.0, 0.0, 0.0)
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub enum Object3DMesh {
-    Glb(String),
+    Glb {
+        path: String,
+        #[serde(default = "default_glb_scale")]
+        scale: f32,
+        #[serde(default = "default_glb_translate")]
+        translate: (f32, f32, f32),
+        #[serde(default = "default_glb_rotate")]
+        rotate: (f32, f32, f32),
+    },
     Mesh {
         mesh: Mesh,
         material: Material,
@@ -459,6 +628,18 @@ pub enum Object3DMesh {
         #[serde(default = "default_ellipsoid_color")]
         color: Color,
     },
+}
+
+impl Object3DMesh {
+    /// Create a GLB mesh with default scale (1.0), translate (0,0,0), and rotate (0,0,0)
+    pub fn glb(path: impl Into<String>) -> Self {
+        Self::Glb {
+            path: path.into(),
+            scale: default_glb_scale(),
+            translate: default_glb_translate(),
+            rotate: default_glb_rotate(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
