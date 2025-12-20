@@ -230,17 +230,30 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
 
         // Build summaries with cached time ranges
         let mut summaries: Vec<ComponentTimestampSummary> = Vec::new();
-        for (index, (component_id, label, table_name)) in component_list.iter().enumerate() {
-            let color = row_color(index);
+        for (component_id, label, table_name) in component_list.iter() {
             let timestamp_range = params.time_ranges.ranges.get(table_name).copied();
             
             summaries.push(ComponentTimestampSummary {
                 component_id: *component_id,
                 label: label.clone(),
                 table_name: table_name.clone(),
-                color,
+                color: Color32::WHITE, // Will be assigned after sorting
                 timestamp_range,
             });
+        }
+        
+        // Sort: components with data first (alphabetically), then empty components (alphabetically)
+        summaries.sort_by(|a, b| {
+            match (a.timestamp_range.is_some(), b.timestamp_range.is_some()) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => a.label.cmp(&b.label),
+            }
+        });
+        
+        // Assign colors after sorting so adjacent rows have distinct colors
+        for (index, summary) in summaries.iter_mut().enumerate() {
+            summary.color = row_color(index);
         }
 
         // Calculate time range - use selected_range to match the window timeline
