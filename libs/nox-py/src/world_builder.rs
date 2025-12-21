@@ -262,6 +262,7 @@ impl WorldBuilder {
                 if !no_s10 {
                     std::thread::spawn(move || {
                         let rt = tokio::runtime::Builder::new_current_thread()
+                            .enable_all()  // Enable IO, time, and signal drivers for process spawning
                             .build()
                             .map_err(|err| miette!("rt err {}", err))
                             .unwrap();

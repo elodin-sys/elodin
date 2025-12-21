@@ -83,14 +83,19 @@ This only needs to be done once - the config is saved to `eeprom.bin`.
 
 ### Run the Simulation
 
-**With 3D Editor:**
+**With 3D Editor (s10 manages Betaflight):**
 ```bash
 elodin editor examples/betaflight-sitl/main.py
 ```
 
-**Headless (for testing):**
+**Headless with s10:**
 ```bash
-python3 examples/betaflight-sitl/main.py headless
+elodin run examples/betaflight-sitl/main.py
+```
+
+**Direct Python (subprocess starts Betaflight):**
+```bash
+python3 examples/betaflight-sitl/main.py run
 ```
 
 ### Quick Arming Test
