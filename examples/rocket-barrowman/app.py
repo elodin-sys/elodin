@@ -173,6 +173,7 @@ code, .stCode {
     margin-bottom: 0.5rem;
 }
 
+
 /* ═══════════════════════════════════════════════════════════════════════════ */
 /* HERO SECTION                                                                 */
 /* ═══════════════════════════════════════════════════════════════════════════ */
@@ -535,13 +536,17 @@ code, .stCode {
 /* CUSTOM COMPONENTS                                                            */
 /* ═══════════════════════════════════════════════════════════════════════════ */
 .status-badge {
-    display: inline-flex;
+    display: flex;
     align-items: center;
+    justify-content: center;
     gap: 0.5rem;
+    width: 100%;
     padding: 0.5rem 1rem;
-    border-radius: 20px;
+    border-radius: 10px;
     font-size: 0.85rem;
     font-weight: 600;
+    margin-bottom: 0.75rem;
+    box-sizing: border-box;
 }
 
 .status-badge.ready {
@@ -583,8 +588,196 @@ code, .stCode {
         grid-template-columns: 1fr;
     }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* SIDEBAR EXPAND HINT                                                          */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* When sidebar is collapsed, Streamlit shows an expand button in the header.   */
+/* This hint tab provides additional visual cue on the left edge.               */
+.sidebar-hint-tab {
+    position: fixed;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 1000000;
+    background: linear-gradient(135deg, rgba(0, 212, 255, 0.3) 0%, rgba(123, 47, 255, 0.3) 100%);
+    border: 1px solid var(--border);
+    border-left: none;
+    border-radius: 0 8px 8px 0;
+    padding: 12px 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(10px);
+}
+
+.sidebar-hint-tab:hover {
+    background: linear-gradient(135deg, rgba(0, 212, 255, 0.5) 0%, rgba(123, 47, 255, 0.5) 100%);
+    border-color: var(--primary);
+    box-shadow: 0 0 20px rgba(0, 212, 255, 0.4);
+    padding-right: 16px;
+}
+
+.sidebar-hint-tab svg {
+    width: 16px;
+    height: 16px;
+    fill: var(--primary);
+    transition: transform 0.2s ease;
+}
+
+.sidebar-hint-tab:hover svg {
+    transform: translateX(3px);
+}
+
+/* Tooltip that appears on hover */
+.sidebar-hint-tab::after {
+    content: 'Click ≫ icon in header to show menu';
+    position: absolute;
+    left: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--bg-surface);
+    border: 1px solid var(--primary);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.sidebar-hint-tab:hover::after {
+    opacity: 1;
+}
 </style>
 """, unsafe_allow_html=True)
+
+# Sidebar hint tab - rendered via st.markdown (visual only, no JS)
+# Plus a hidden component that injects click handler into the parent document
+import streamlit.components.v1 as components
+
+# First, render the visual tab via st.markdown (this shows up in the main document)
+st.markdown("""
+<div class="sidebar-hint-tab" id="sidebarHintTab" title="Click to show menu">
+    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/>
+    </svg>
+</div>
+""", unsafe_allow_html=True)
+
+# Then inject JavaScript via components.html to attach the click handler
+# This script runs in an iframe but manipulates the parent document
+_sidebar_click_handler = """
+<script>
+(function() {
+    function expandSidebar() {
+        try {
+            var parentDoc = window.parent.document;
+            
+            // Find Streamlit's expand button by looking for the icon text
+            var buttons = parentDoc.querySelectorAll('button');
+            for (var i = 0; i < buttons.length; i++) {
+                var btn = buttons[i];
+                if (btn.textContent && btn.textContent.indexOf('keyboard_double_arrow_right') !== -1) {
+                    btn.click();
+                    return true;
+                }
+            }
+            return false;
+        } catch (e) {
+            console.error('Error:', e);
+            return false;
+        }
+    }
+    
+    // Check if sidebar is visible by examining its transform property
+    function isSidebarVisible() {
+        try {
+            var parentDoc = window.parent.document;
+            var sidebar = parentDoc.querySelector('[data-testid="stSidebar"]');
+            if (!sidebar) return false;
+            
+            var style = window.parent.getComputedStyle(sidebar);
+            var transform = style.transform;
+            
+            // Parse the transform matrix to get the X translation
+            // transform is either "none" or "matrix(a, b, c, d, tx, ty)"
+            if (transform === 'none') {
+                return true; // No transform means visible
+            }
+            
+            var match = transform.match(/matrix.*\((.+)\)/);
+            if (match) {
+                var values = match[1].split(', ');
+                var tx = parseFloat(values[4]); // translateX is the 5th value
+                return tx >= 0; // Visible if translateX >= 0
+            }
+            return true; // Default to visible if can't parse
+        } catch (e) {
+            return true; // Default to visible on error
+        }
+    }
+    
+    // Update tab visibility based on sidebar state
+    function updateTabVisibility() {
+        try {
+            var parentDoc = window.parent.document;
+            var tab = parentDoc.getElementById('sidebarHintTab');
+            if (tab) {
+                var sidebarVisible = isSidebarVisible();
+                tab.style.opacity = sidebarVisible ? '0' : '1';
+                tab.style.pointerEvents = sidebarVisible ? 'none' : 'auto';
+            }
+        } catch (e) {}
+    }
+    
+    function attachHandler() {
+        try {
+            var parentDoc = window.parent.document;
+            var tab = parentDoc.getElementById('sidebarHintTab');
+            if (tab && !tab.hasAttribute('data-handler-attached')) {
+                tab.setAttribute('data-handler-attached', 'true');
+                tab.style.cursor = 'pointer';
+                tab.style.transition = 'opacity 0.3s ease';
+                tab.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    expandSidebar();
+                });
+                console.log('Sidebar tab handler attached');
+                
+                // Initial visibility check
+                updateTabVisibility();
+            }
+        } catch (e) {
+            console.error('Error attaching handler:', e);
+        }
+    }
+    
+    // Try to attach handler immediately and with delays (for dynamic loading)
+    attachHandler();
+    setTimeout(attachHandler, 100);
+    setTimeout(attachHandler, 500);
+    setTimeout(attachHandler, 1000);
+    
+    // Watch for DOM/style changes to update tab visibility
+    var observer = new MutationObserver(function() {
+        attachHandler();
+        updateTabVisibility();
+    });
+    try {
+        observer.observe(window.parent.document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+    } catch (e) {}
+    
+    // Also poll for sidebar state changes (backup for transform changes not caught by observer)
+    setInterval(updateTabVisibility, 200);
+})();
+</script>
+"""
+
+# Render hidden iframe that injects the JavaScript
+components.html(_sidebar_click_handler, height=0, scrolling=False)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1056,7 +1249,7 @@ def visualize_results(result: FlightResult):
             fig = go.Figure()
             fig.add_trace(go.Scatter(
                 x=times, y=dynamic_pressures,
-                mode="lines",
+                    mode="lines",
                 name="Q",
                 line=dict(color=COLORS["primary"], width=3),
                 fill="tozeroy",
@@ -1074,7 +1267,7 @@ def visualize_results(result: FlightResult):
 
         fig = go.Figure(data=go.Scatter3d(
             x=x_coords, y=y_coords, z=z_coords,
-            mode="lines",
+                mode="lines",
             line=dict(
                 color=times,
                 colorscale=[
@@ -1084,7 +1277,7 @@ def visualize_results(result: FlightResult):
                 ],
                 width=6,
             ),
-            marker=dict(size=2),
+                marker=dict(size=2),
         ))
         
         # Add apogee marker
@@ -1133,7 +1326,7 @@ def launch_elodin_editor(result: FlightResult, solver: FlightSolver):
 
         # Extract data
         summary = result.summary if hasattr(result, "summary") and result.summary else {}
-        
+
         if not summary or "max_altitude" not in summary:
             max_alt = max(s.z for s in result.history) if result.history else 0.0
             max_v = max(np.linalg.norm(s.velocity) for s in result.history) if result.history else 0.0
@@ -1210,7 +1403,7 @@ def launch_elodin_editor(result: FlightResult, solver: FlightSolver):
         # Launch editor
         with st.spinner("🚀 Launching Elodin Editor..."):
             cmd = ["elodin", "editor", str(main_py)]
-            
+
             import platform
             if platform.system() != "Windows":
                 terminals = [
@@ -1220,7 +1413,7 @@ def launch_elodin_editor(result: FlightResult, solver: FlightSolver):
                 ]
                 
                 cmd_str = f'cd {script_dir} && elodin editor {main_py.name}'
-                
+
                 for term_base, shell_prefix in terminals:
                     try:
                         which_result = subprocess.run(["which", term_base[0]], capture_output=True, timeout=1)
@@ -1275,14 +1468,14 @@ def render_sidebar():
         if rocket_type == "AI Builder":
             st.markdown("### 🤖 Smart Optimizer")
             st.caption("Tell us what you need - we'll find the cheapest working design")
-            
+
             ai_input = st.text_area(
                 "Requirements",
                 placeholder="e.g., 'rocket to 5000 ft as cheap as possible' or '10k feet with 2kg payload, under $500'",
                 height=100,
                 label_visibility="collapsed",
             )
-            
+
             max_iterations = st.slider("Max simulations", 10, 50, 25, help="More = better search, slower")
 
             if st.button("🔍 Find Cheapest Design", type="primary", use_container_width=True):
@@ -1299,7 +1492,7 @@ def render_sidebar():
                                 scraper = ThrustCurveScraper()
                                 motor_db = scraper.load_motor_database()
                                 st.session_state.motor_database = motor_db
-                            
+
                             optimizer = SmartOptimizer(motor_db)
                             
                             # Progress callback
@@ -1400,32 +1593,29 @@ def render_sidebar():
                 </div>
                 """, unsafe_allow_html=True)
             
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("📥 Load Cache", use_container_width=True):
-                    with st.spinner("Loading..."):
-                        try:
-                            scraper = ThrustCurveScraper()
-                            motor_db = scraper.load_motor_database()
-                            if motor_db:
-                                st.session_state.motor_database = motor_db
-                                st.success(f"✅ {len(motor_db)} motors")
-                        except Exception as e:
-                            st.error(str(e))
+            if st.button("🌐 Download Motors", type="primary", use_container_width=True):
+                with st.spinner("Downloading..."):
+                    try:
+                        scraper = ThrustCurveScraper()
+                        motors = scraper.scrape_motor_list(max_motors=10000)
+                        if motors:
+                            scraper.save_motor_database(motors)
+                            st.session_state.motor_database = motors
+                            st.success(f"✅ {len(motors)} motors")
+                            st.balloons()
+                    except Exception as e:
+                        st.error(str(e))
             
-            with col2:
-                if st.button("🌐 Download", type="primary", use_container_width=True):
-                    with st.spinner("Downloading..."):
-                        try:
-                            scraper = ThrustCurveScraper()
-                            motors = scraper.scrape_motor_list(max_motors=10000)
-                            if motors:
-                                scraper.save_motor_database(motors)
-                                st.session_state.motor_database = motors
-                                st.success(f"✅ {len(motors)} motors")
-                                st.balloons()
-                        except Exception as e:
-                            st.error(str(e))
+            if st.button("📥 Load from Cache", use_container_width=True):
+                with st.spinner("Loading..."):
+                    try:
+                        scraper = ThrustCurveScraper()
+                        motor_db = scraper.load_motor_database()
+                        if motor_db:
+                            st.session_state.motor_database = motor_db
+                            st.success(f"✅ {len(motor_db)} motors")
+                    except Exception as e:
+                        st.error(str(e))
 
         # ─────────────────────────────────────────────────────────────────────
         # CUSTOM ROCKET CONFIGURATION
@@ -1464,7 +1654,7 @@ def render_sidebar():
                 if has_main_chute:
                     main_chute_diameter = st.number_input("Main Diameter (m)", 0.1, 10.0, 2.91, 0.1)
                     main_deployment_altitude = st.number_input("Deploy Altitude (m)", 0.0, 10000.0, 800.0, 10.0)
-                
+
                 has_drogue = st.checkbox("Drogue Parachute", value=True)
                 if has_drogue:
                     drogue_diameter = st.number_input("Drogue Diameter (m)", 0.1, 5.0, 0.99, 0.1)
@@ -1518,7 +1708,7 @@ def render_sidebar():
             
             if st.session_state.motor_database and len(st.session_state.motor_database) > 0:
                 motor_type = st.radio("Source", ["Default (M1670)", "Database", "Custom"], horizontal=True)
-                
+
                 if motor_type == "Database":
                     motors_by_class = {}
                     for motor in st.session_state.motor_database:
@@ -1535,7 +1725,7 @@ def render_sidebar():
                         motor_display = [f"{m.designation} - {m.total_impulse:.0f} N·s" for m in motors_in_class]
                         selected_idx = st.selectbox("Motor", range(len(motor_display)), format_func=lambda i: motor_display[i])
                         selected_motor = motors_in_class[selected_idx]
-                        
+
                         motor_config = {
                             "designation": selected_motor.designation,
                             "manufacturer": selected_motor.manufacturer,
@@ -1550,7 +1740,7 @@ def render_sidebar():
                             "thrust_curve": selected_motor.thrust_curve,
                         }
                         st.session_state.motor_config = motor_config
-                        
+
                         st.caption(f"📊 {selected_motor.avg_thrust:.0f} N avg | {selected_motor.burn_time:.2f}s burn")
                 
                 elif motor_type == "Default (M1670)":
@@ -1813,7 +2003,7 @@ def main():
 
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
-        
+
         st.markdown("<br>", unsafe_allow_html=True)
         
         # Elodin Editor Button

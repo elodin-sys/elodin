@@ -15,10 +15,10 @@
     }
 
     object_3d "(0,0,0,1)" {
-        glb path="/home/kush-mahajan/elodin/assets/compass.glb"
+        glb path="compass.glb"
     }
     object_3d rocket.world_pos {
-        glb path="/home/kush-mahajan/elodin/assets/rocket.glb"
+        glb path="rocket.glb"
     }
     line_3d rocket.world_pos line_width=2.0 perspective=#false {
         color 255 223 0

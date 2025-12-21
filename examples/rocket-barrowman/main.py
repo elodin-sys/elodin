@@ -28,9 +28,9 @@ try:
     import elodin as el
 except ImportError:
     print("ERROR: elodin not found. Make sure you're in the nix shell:")
-    print("  cd /home/kush-mahajan/elodin")
+    print("  cd <elodin-repo>")
     print("  nix develop")
-    print("  python3 examples/rocket-barrowman/main.py")
+    print("  elodin editor examples/rocket-barrowman/main.py")
     sys.exit(1)
 
 # Import our rocket simulation

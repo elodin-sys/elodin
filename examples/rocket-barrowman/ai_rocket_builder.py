@@ -22,7 +22,7 @@ try:
 except ImportError:
     OPENAI_AVAILABLE = False
     OpenAI = None
-    print("Warning: OpenAI library not installed. Install with: pip install openai")
+    # OpenAI is optional - AI Builder will show a message in the UI if unavailable
 
 
 @dataclass
@@ -335,12 +335,12 @@ IMPORTANT:
                     "ft" in pattern
                     or "feet" in pattern
                     or "thousand" in pattern
-                    or "k\s*ft" in pattern
+                    or "kft" in pattern
                 ):
                     req.target_altitude_m = value * multiplier
                 elif "km" in pattern or "kilometer" in pattern:
                     req.target_altitude_m = value * multiplier
-                elif "m\b" in pattern or "meter" in pattern:
+                elif "meter" in pattern or pattern.endswith("m"):
                     req.target_altitude_m = value
                 else:
                     # Default assumption: if number is large (>1000), assume meters; else feet

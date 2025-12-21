@@ -33,7 +33,7 @@ class AerodynamicCalculator:
 
     @staticmethod
     def nose_cone_normal_force(nose: NoseCone, alpha: float) -> float:
-        """
+        r"""
         Nose cone normal force coefficient derivative (per radian).
         
         Theory: barrowman_equation.tex, Section 4.1, Equation (4.1)
