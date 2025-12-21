@@ -320,14 +320,14 @@ if __name__ == "__main__":
     ref_diameter = rocket.reference_diameter
     ref_area = math.pi * (ref_diameter / 2.0) ** 2
 
-    print(f"\nRocket:")
+    print("\nRocket:")
     print(f"  Total length: {rocket.reference_length:.3f} m")
     print(f"  Diameter: {ref_diameter * 1000:.1f} mm")
     print(f"  Reference area: {ref_area * 10000:.2f} cm²")
     print(f"  Dry mass: {rocket.get_total_mass():.3f} kg")
     print(f"  Dry CG: {rocket.get_total_cg():.3f} m from nose")
 
-    print(f"\nMotor (Cesaroni M1670):")
+    print("\nMotor (Cesaroni M1670):")
     print(f"  Diameter: {motor.diameter * 1000:.1f} mm")
     print(f"  Length: {motor.length * 1000:.1f} mm")
     print(f"  Dry mass: {motor.case_mass:.3f} kg")
@@ -338,10 +338,10 @@ if __name__ == "__main__":
     print(f"  Max thrust: {max_thrust:.1f} N")
     print(f"  Total impulse: {motor.total_impulse:.1f} Ns")
 
-    print(f"\nLoaded Rocket:")
+    print("\nLoaded Rocket:")
     print(f"  Total mass: {rocket.get_total_mass() + motor.total_mass_initial:.3f} kg")
-    print(f"  Expected apogee: ~3350 m (AGL)")
-    print(f"  Expected max velocity: ~280 m/s")
-    print(f"  Expected burnout altitude: ~660 m")
+    print("  Expected apogee: ~3350 m (AGL)")
+    print("  Expected max velocity: ~280 m/s")
+    print("  Expected burnout altitude: ~660 m")
 
     print("\n" + "=" * 70)

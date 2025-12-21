@@ -4,9 +4,8 @@ Gets the basic physics working first before adding 6DOF complexity.
 """
 
 import math
-import numpy as np
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List
 from openrocket_components import *
 from openrocket_motor import Motor
 from openrocket_aero import RocketAerodynamics

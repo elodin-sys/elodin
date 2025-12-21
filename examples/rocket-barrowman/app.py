@@ -39,10 +39,16 @@ from openrocket_components import (
 )
 from openrocket_motor import Motor as ORMotor
 from ai_rocket_builder import RocketDesigner
-from smart_optimizer import SmartOptimizer, Requirements, DesignPoint
+from smart_optimizer import SmartOptimizer
 from motor_scraper import ThrustCurveScraper
+
 try:
-    from mesh_renderer import build_rocket_mesh, render_to_plotly, get_rocket_preview_html, TRIMESH_AVAILABLE
+    from mesh_renderer import (
+        build_rocket_mesh,
+        render_to_plotly,
+        get_rocket_preview_html,
+        TRIMESH_AVAILABLE,
+    )
 except ImportError:
     TRIMESH_AVAILABLE = False
 import os
@@ -53,17 +59,17 @@ import os
 
 # Color palette - Aerospace inspired
 COLORS = {
-    "primary": "#00D4FF",      # Cyan - main accent
-    "secondary": "#FF6B35",    # Orange - thrust/energy
-    "success": "#00FF88",      # Green - success states
-    "warning": "#FFB800",      # Amber - warnings
-    "danger": "#FF3366",       # Red - errors/danger
-    "background": "#0A0E17",   # Deep space blue
-    "surface": "#131B2E",      # Elevated surface
-    "surface2": "#1A2540",     # Higher elevation
-    "text": "#E8ECF4",         # Primary text
-    "text_muted": "#8B9CB6",   # Secondary text
-    "border": "#2A3A5C",       # Borders
+    "primary": "#00D4FF",  # Cyan - main accent
+    "secondary": "#FF6B35",  # Orange - thrust/energy
+    "success": "#00FF88",  # Green - success states
+    "warning": "#FFB800",  # Amber - warnings
+    "danger": "#FF3366",  # Red - errors/danger
+    "background": "#0A0E17",  # Deep space blue
+    "surface": "#131B2E",  # Elevated surface
+    "surface2": "#1A2540",  # Higher elevation
+    "text": "#E8ECF4",  # Primary text
+    "text_muted": "#8B9CB6",  # Secondary text
+    "border": "#2A3A5C",  # Borders
     "gradient_start": "#00D4FF",
     "gradient_end": "#7B2FFF",
 }
@@ -73,14 +79,15 @@ st.set_page_config(
     page_title="Rocket Flight Simulator",
     page_icon="🚀",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CUSTOM CSS STYLING
 # ═══════════════════════════════════════════════════════════════════════════════
 
-st.markdown("""
+st.markdown(
+    """
 <style>
 /* ═══════════════════════════════════════════════════════════════════════════ */
 /* IMPORTS & FONTS                                                              */
@@ -652,20 +659,25 @@ code, .stCode {
     opacity: 1;
 }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 # Sidebar hint tab - rendered via st.markdown (visual only, no JS)
 # Plus a hidden component that injects click handler into the parent document
 import streamlit.components.v1 as components
 
 # First, render the visual tab via st.markdown (this shows up in the main document)
-st.markdown("""
+st.markdown(
+    """
 <div class="sidebar-hint-tab" id="sidebarHintTab" title="Click to show menu">
     <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
         <path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/>
     </svg>
 </div>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 # Then inject JavaScript via components.html to attach the click handler
 # This script runs in an iframe but manipulates the parent document
@@ -818,6 +830,7 @@ if len(st.session_state.motor_database) == 0:
 # HELPER FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def create_chart_layout(title: str, xaxis_title: str, yaxis_title: str) -> dict:
     """Create consistent chart layout."""
     return {
@@ -855,17 +868,21 @@ def create_chart_layout(title: str, xaxis_title: str, yaxis_title: str) -> dict:
 
 def render_metric_card(label: str, value: str, unit: str = "", variant: str = "default"):
     """Render a styled metric card."""
-    st.markdown(f"""
+    st.markdown(
+        f"""
     <div class="metric-card {variant}">
         <div class="metric-label">{label}</div>
         <div class="metric-value">{value}<span class="metric-unit">{unit}</span></div>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_hero():
     """Render the hero section."""
-    st.markdown("""
+    st.markdown(
+        """
     <div class="hero-container">
         <div class="hero-title">
             🚀 Rocket Flight Simulator
@@ -875,17 +892,22 @@ def render_hero():
             Design, simulate, and visualize high-powered rocket flights with Barrowman aerodynamics
         </div>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_section_header(icon: str, title: str):
     """Render a section header."""
-    st.markdown(f"""
+    st.markdown(
+        f"""
     <div class="section-title">
         <span class="section-title-icon">{icon}</span>
         {title}
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_divider():
@@ -896,6 +918,7 @@ def render_divider():
 # ═══════════════════════════════════════════════════════════════════════════════
 # ROCKET BUILDING FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 def build_custom_rocket(config: Dict[str, Any]) -> Rocket:
     """Build a custom rocket from configuration."""
@@ -1020,7 +1043,9 @@ def build_custom_motor(config: Dict[str, Any]) -> ORMotor:
         total_impulse = config.get(
             "total_impulse",
             sum(
-                (thrust_curve[i][1] + thrust_curve[i + 1][1]) / 2 * (thrust_curve[i + 1][0] - thrust_curve[i][0])
+                (thrust_curve[i][1] + thrust_curve[i + 1][1])
+                / 2
+                * (thrust_curve[i + 1][0] - thrust_curve[i][0])
                 for i in range(len(thrust_curve) - 1)
             )
             if len(thrust_curve) > 1
@@ -1072,6 +1097,7 @@ def build_custom_motor(config: Dict[str, Any]) -> ORMotor:
 # VISUALIZATION FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def visualize_results(result: FlightResult):
     """Create visualizations of simulation results with styled charts."""
     if not result or not result.history:
@@ -1099,43 +1125,57 @@ def visualize_results(result: FlightResult):
     # Metrics row
     st.markdown('<div class="metric-grid">', unsafe_allow_html=True)
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
-        st.markdown(f"""
+        st.markdown(
+            f"""
         <div class="metric-card altitude">
             <div class="metric-label">Max Altitude</div>
             <div class="metric-value">{max_alt:,.0f}<span class="metric-unit">m</span></div>
         </div>
-        """, unsafe_allow_html=True)
-    
+        """,
+            unsafe_allow_html=True,
+        )
+
     with col2:
-        st.markdown(f"""
+        st.markdown(
+            f"""
         <div class="metric-card velocity">
             <div class="metric-label">Max Velocity</div>
             <div class="metric-value">{max_v:,.0f}<span class="metric-unit">m/s</span></div>
         </div>
-        """, unsafe_allow_html=True)
-    
+        """,
+            unsafe_allow_html=True,
+        )
+
     with col3:
-        st.markdown(f"""
+        st.markdown(
+            f"""
         <div class="metric-card mach">
             <div class="metric-label">Max Mach</div>
             <div class="metric-value">{max_mach:.2f}</div>
         </div>
-        """, unsafe_allow_html=True)
-    
+        """,
+            unsafe_allow_html=True,
+        )
+
     with col4:
-        st.markdown(f"""
+        st.markdown(
+            f"""
         <div class="metric-card time">
             <div class="metric-label">Apogee Time</div>
             <div class="metric-value">{apogee_time:.1f}<span class="metric-unit">s</span></div>
         </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
     # Tabs for different visualizations
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 Trajectory", "⚡ Performance", "🌪️ Aerodynamics", "🌍 3D Path"])
+    tab1, tab2, tab3, tab4 = st.tabs(
+        ["📈 Trajectory", "⚡ Performance", "🌪️ Aerodynamics", "🌍 3D Path"]
+    )
 
     with tab1:
         col1, col2 = st.columns(2)
@@ -1143,14 +1183,17 @@ def visualize_results(result: FlightResult):
         with col1:
             # Altitude vs Time
             fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=times, y=altitudes,
-                mode="lines",
-                name="Altitude",
-                line=dict(color=COLORS["primary"], width=3),
-                fill="tozeroy",
-                fillcolor=f"rgba(0, 212, 255, 0.1)",
-            ))
+            fig.add_trace(
+                go.Scatter(
+                    x=times,
+                    y=altitudes,
+                    mode="lines",
+                    name="Altitude",
+                    line=dict(color=COLORS["primary"], width=3),
+                    fill="tozeroy",
+                    fillcolor="rgba(0, 212, 255, 0.1)",
+                )
+            )
             fig.update_layout(**create_chart_layout("Altitude vs Time", "Time (s)", "Altitude (m)"))
             fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
@@ -1158,34 +1201,46 @@ def visualize_results(result: FlightResult):
         with col2:
             # Velocity vs Time
             fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=times, y=velocities,
-                mode="lines",
-                name="Velocity",
-                line=dict(color=COLORS["secondary"], width=3),
-                fill="tozeroy",
-                fillcolor=f"rgba(255, 107, 53, 0.1)",
-            ))
-            fig.update_layout(**create_chart_layout("Velocity vs Time", "Time (s)", "Velocity (m/s)"))
+            fig.add_trace(
+                go.Scatter(
+                    x=times,
+                    y=velocities,
+                    mode="lines",
+                    name="Velocity",
+                    line=dict(color=COLORS["secondary"], width=3),
+                    fill="tozeroy",
+                    fillcolor="rgba(255, 107, 53, 0.1)",
+                )
+            )
+            fig.update_layout(
+                **create_chart_layout("Velocity vs Time", "Time (s)", "Velocity (m/s)")
+            )
             fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
 
         # Trajectory plot
         fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=downrange, y=altitudes,
-            mode="lines",
-            name="Trajectory",
-            line=dict(color=COLORS["success"], width=3),
-        ))
-        fig.add_trace(go.Scatter(
-            x=[downrange[altitudes.index(max_alt)]],
-            y=[max_alt],
-            mode="markers",
-            name="Apogee",
-            marker=dict(color=COLORS["warning"], size=12, symbol="star"),
-        ))
-        fig.update_layout(**create_chart_layout("Flight Trajectory", "Downrange (m)", "Altitude (m)"))
+        fig.add_trace(
+            go.Scatter(
+                x=downrange,
+                y=altitudes,
+                mode="lines",
+                name="Trajectory",
+                line=dict(color=COLORS["success"], width=3),
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=[downrange[altitudes.index(max_alt)]],
+                y=[max_alt],
+                mode="markers",
+                name="Apogee",
+                marker=dict(color=COLORS["warning"], size=12, symbol="star"),
+            )
+        )
+        fig.update_layout(
+            **create_chart_layout("Flight Trajectory", "Downrange (m)", "Altitude (m)")
+        )
         fig.update_layout(height=400)
         st.plotly_chart(fig, use_container_width=True)
 
@@ -1195,15 +1250,23 @@ def visualize_results(result: FlightResult):
         with col1:
             # Mach number
             fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=times, y=machs,
-                mode="lines",
-                name="Mach",
-                line=dict(color=COLORS["warning"], width=3),
-            ))
+            fig.add_trace(
+                go.Scatter(
+                    x=times,
+                    y=machs,
+                    mode="lines",
+                    name="Mach",
+                    line=dict(color=COLORS["warning"], width=3),
+                )
+            )
             # Add sonic line
-            fig.add_hline(y=1, line_dash="dash", line_color=COLORS["danger"], 
-                         annotation_text="Mach 1", annotation_position="top right")
+            fig.add_hline(
+                y=1,
+                line_dash="dash",
+                line_color=COLORS["danger"],
+                annotation_text="Mach 1",
+                annotation_position="top right",
+            )
             fig.update_layout(**create_chart_layout("Mach Number", "Time (s)", "Mach"))
             fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
@@ -1211,20 +1274,25 @@ def visualize_results(result: FlightResult):
         with col2:
             # Altitude vs Velocity phase plot
             fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=velocities, y=altitudes,
-                mode="lines",
-                name="Phase",
-                line=dict(color=COLORS["primary"], width=2),
-                marker=dict(
-                    color=times,
-                    colorscale="Viridis",
-                    size=4,
-                    showscale=True,
-                    colorbar=dict(title="Time (s)"),
-                ),
-            ))
-            fig.update_layout(**create_chart_layout("Altitude-Velocity Phase", "Velocity (m/s)", "Altitude (m)"))
+            fig.add_trace(
+                go.Scatter(
+                    x=velocities,
+                    y=altitudes,
+                    mode="lines",
+                    name="Phase",
+                    line=dict(color=COLORS["primary"], width=2),
+                    marker=dict(
+                        color=times,
+                        colorscale="Viridis",
+                        size=4,
+                        showscale=True,
+                        colorbar=dict(title="Time (s)"),
+                    ),
+                )
+            )
+            fig.update_layout(
+                **create_chart_layout("Altitude-Velocity Phase", "Velocity (m/s)", "Altitude (m)")
+            )
             fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
 
@@ -1234,12 +1302,15 @@ def visualize_results(result: FlightResult):
         with col1:
             # Angle of Attack
             fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=times, y=aoas,
-                mode="lines",
-                name="AoA",
-                line=dict(color=COLORS["danger"], width=2),
-            ))
+            fig.add_trace(
+                go.Scatter(
+                    x=times,
+                    y=aoas,
+                    mode="lines",
+                    name="AoA",
+                    line=dict(color=COLORS["danger"], width=2),
+                )
+            )
             fig.update_layout(**create_chart_layout("Angle of Attack", "Time (s)", "Angle (deg)"))
             fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
@@ -1247,15 +1318,20 @@ def visualize_results(result: FlightResult):
         with col2:
             # Dynamic Pressure
             fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=times, y=dynamic_pressures,
+            fig.add_trace(
+                go.Scatter(
+                    x=times,
+                    y=dynamic_pressures,
                     mode="lines",
-                name="Q",
-                line=dict(color=COLORS["primary"], width=3),
-                fill="tozeroy",
-                fillcolor=f"rgba(0, 212, 255, 0.1)",
-            ))
-            fig.update_layout(**create_chart_layout("Dynamic Pressure (Max-Q)", "Time (s)", "Pressure (kPa)"))
+                    name="Q",
+                    line=dict(color=COLORS["primary"], width=3),
+                    fill="tozeroy",
+                    fillcolor="rgba(0, 212, 255, 0.1)",
+                )
+            )
+            fig.update_layout(
+                **create_chart_layout("Dynamic Pressure (Max-Q)", "Time (s)", "Pressure (kPa)")
+            )
             fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
 
@@ -1265,31 +1341,37 @@ def visualize_results(result: FlightResult):
         y_coords = [s.y for s in history]
         z_coords = [s.z for s in history]
 
-        fig = go.Figure(data=go.Scatter3d(
-            x=x_coords, y=y_coords, z=z_coords,
+        fig = go.Figure(
+            data=go.Scatter3d(
+                x=x_coords,
+                y=y_coords,
+                z=z_coords,
                 mode="lines",
-            line=dict(
-                color=times,
-                colorscale=[
-                    [0, COLORS["primary"]],
-                    [0.5, COLORS["warning"]],
-                    [1, COLORS["secondary"]]
-                ],
-                width=6,
-            ),
+                line=dict(
+                    color=times,
+                    colorscale=[
+                        [0, COLORS["primary"]],
+                        [0.5, COLORS["warning"]],
+                        [1, COLORS["secondary"]],
+                    ],
+                    width=6,
+                ),
                 marker=dict(size=2),
-        ))
-        
+            )
+        )
+
         # Add apogee marker
         apogee_idx = altitudes.index(max_alt)
-        fig.add_trace(go.Scatter3d(
-            x=[x_coords[apogee_idx]],
-            y=[y_coords[apogee_idx]],
-            z=[z_coords[apogee_idx]],
-            mode="markers",
-            marker=dict(size=10, color=COLORS["warning"], symbol="diamond"),
-            name="Apogee",
-        ))
+        fig.add_trace(
+            go.Scatter3d(
+                x=[x_coords[apogee_idx]],
+                y=[y_coords[apogee_idx]],
+                z=[z_coords[apogee_idx]],
+                mode="markers",
+                marker=dict(size=10, color=COLORS["warning"], symbol="diamond"),
+                name="Apogee",
+            )
+        )
 
         fig.update_layout(
             title={
@@ -1300,7 +1382,9 @@ def visualize_results(result: FlightResult):
             scene=dict(
                 xaxis=dict(title="X (m)", color=COLORS["text_muted"], gridcolor=COLORS["border"]),
                 yaxis=dict(title="Y (m)", color=COLORS["text_muted"], gridcolor=COLORS["border"]),
-                zaxis=dict(title="Altitude (m)", color=COLORS["text_muted"], gridcolor=COLORS["border"]),
+                zaxis=dict(
+                    title="Altitude (m)", color=COLORS["text_muted"], gridcolor=COLORS["border"]
+                ),
                 bgcolor="rgba(10, 14, 23, 0.8)",
             ),
             paper_bgcolor="rgba(0,0,0,0)",
@@ -1329,8 +1413,14 @@ def launch_elodin_editor(result: FlightResult, solver: FlightSolver):
 
         if not summary or "max_altitude" not in summary:
             max_alt = max(s.z for s in result.history) if result.history else 0.0
-            max_v = max(np.linalg.norm(s.velocity) for s in result.history) if result.history else 0.0
-            apogee_state = next((s for s in result.history if s.z == max_alt), result.history[-1]) if result.history else None
+            max_v = (
+                max(np.linalg.norm(s.velocity) for s in result.history) if result.history else 0.0
+            )
+            apogee_state = (
+                next((s for s in result.history if s.z == max_alt), result.history[-1])
+                if result.history
+                else None
+            )
             apogee_time = apogee_state.time if apogee_state else 0.0
             landing_time = result.history[-1].time if result.history else 0.0
         else:
@@ -1343,20 +1433,40 @@ def launch_elodin_editor(result: FlightResult, solver: FlightSolver):
             "history": [
                 {
                     "time": s.time,
-                    "position": s.position.tolist() if isinstance(s.position, np.ndarray) else s.position,
-                    "velocity": s.velocity.tolist() if isinstance(s.velocity, np.ndarray) else s.velocity,
-                    "quaternion": s.quaternion.tolist() if isinstance(s.quaternion, np.ndarray) else s.quaternion,
-                    "angular_velocity": s.angular_velocity.tolist() if isinstance(s.angular_velocity, np.ndarray) else s.angular_velocity,
+                    "position": s.position.tolist()
+                    if isinstance(s.position, np.ndarray)
+                    else s.position,
+                    "velocity": s.velocity.tolist()
+                    if isinstance(s.velocity, np.ndarray)
+                    else s.velocity,
+                    "quaternion": s.quaternion.tolist()
+                    if isinstance(s.quaternion, np.ndarray)
+                    else s.quaternion,
+                    "angular_velocity": s.angular_velocity.tolist()
+                    if isinstance(s.angular_velocity, np.ndarray)
+                    else s.angular_velocity,
                     "motor_mass": s.motor_mass,
                     "angle_of_attack": s.angle_of_attack,
                     "sideslip": s.sideslip,
                     "mach": getattr(s, "mach", 0.0),
                     "dynamic_pressure": getattr(s, "dynamic_pressure", 0.0),
-                    "drag_force": getattr(s, "drag_force", np.array([0.0, 0.0, 0.0])).tolist() if isinstance(getattr(s, "drag_force", None), np.ndarray) else [0.0, 0.0, 0.0],
-                    "lift_force": getattr(s, "lift_force", np.array([0.0, 0.0, 0.0])).tolist() if isinstance(getattr(s, "lift_force", None), np.ndarray) else [0.0, 0.0, 0.0],
-                    "parachute_drag": getattr(s, "parachute_drag", np.array([0.0, 0.0, 0.0])).tolist() if isinstance(getattr(s, "parachute_drag", None), np.ndarray) else [0.0, 0.0, 0.0],
-                    "moment_world": getattr(s, "moment_world", np.array([0.0, 0.0, 0.0])).tolist() if isinstance(getattr(s, "moment_world", None), np.ndarray) else [0.0, 0.0, 0.0],
-                    "total_aero_force": s.total_aero_force.tolist() if isinstance(s.total_aero_force, np.ndarray) else s.total_aero_force,
+                    "drag_force": getattr(s, "drag_force", np.array([0.0, 0.0, 0.0])).tolist()
+                    if isinstance(getattr(s, "drag_force", None), np.ndarray)
+                    else [0.0, 0.0, 0.0],
+                    "lift_force": getattr(s, "lift_force", np.array([0.0, 0.0, 0.0])).tolist()
+                    if isinstance(getattr(s, "lift_force", None), np.ndarray)
+                    else [0.0, 0.0, 0.0],
+                    "parachute_drag": getattr(
+                        s, "parachute_drag", np.array([0.0, 0.0, 0.0])
+                    ).tolist()
+                    if isinstance(getattr(s, "parachute_drag", None), np.ndarray)
+                    else [0.0, 0.0, 0.0],
+                    "moment_world": getattr(s, "moment_world", np.array([0.0, 0.0, 0.0])).tolist()
+                    if isinstance(getattr(s, "moment_world", None), np.ndarray)
+                    else [0.0, 0.0, 0.0],
+                    "total_aero_force": s.total_aero_force.tolist()
+                    if isinstance(s.total_aero_force, np.ndarray)
+                    else s.total_aero_force,
                 }
                 for s in result.history
             ],
@@ -1374,7 +1484,9 @@ def launch_elodin_editor(result: FlightResult, solver: FlightSolver):
                 "reference_diameter": solver.rocket.reference_diameter,
                 "structural_mass": mass_model.structural_mass,
                 "structural_cg": mass_model.structural_cg,
-                "structural_inertia": mass_model.structural_inertia.tolist() if isinstance(mass_model.structural_inertia, np.ndarray) else list(mass_model.structural_inertia),
+                "structural_inertia": mass_model.structural_inertia.tolist()
+                if isinstance(mass_model.structural_inertia, np.ndarray)
+                else list(mass_model.structural_inertia),
             },
             "motor": {
                 "total_mass": solver.motor.total_mass,
@@ -1382,9 +1494,15 @@ def launch_elodin_editor(result: FlightResult, solver: FlightSolver):
             },
             "environment": {"elevation": solver.environment.elevation},
             "mass_model": {
-                "times": mass_model.times.tolist() if isinstance(mass_model.times, np.ndarray) else list(mass_model.times),
-                "total_mass_values": mass_model.total_mass_values.tolist() if isinstance(mass_model.total_mass_values, np.ndarray) else list(mass_model.total_mass_values),
-                "inertia_values": mass_model.inertia_values.tolist() if isinstance(mass_model.inertia_values, np.ndarray) else [[0.0, 0.0, 0.0]],
+                "times": mass_model.times.tolist()
+                if isinstance(mass_model.times, np.ndarray)
+                else list(mass_model.times),
+                "total_mass_values": mass_model.total_mass_values.tolist()
+                if isinstance(mass_model.total_mass_values, np.ndarray)
+                else list(mass_model.total_mass_values),
+                "inertia_values": mass_model.inertia_values.tolist()
+                if isinstance(mass_model.inertia_values, np.ndarray)
+                else [[0.0, 0.0, 0.0]],
             },
         }
 
@@ -1395,7 +1513,7 @@ def launch_elodin_editor(result: FlightResult, solver: FlightSolver):
 
         script_dir = Path(__file__).parent.resolve()  # Use absolute path
         main_py = script_dir / "main.py"
-        
+
         # Get the elodin repository root (two levels up from examples/rocket-barrowman/)
         # This ensures ELODIN_ASSETS_DIR finds the root-level assets/ directory
         elodin_root = script_dir.parent.parent.resolve()  # Absolute path to repo root
@@ -1411,19 +1529,22 @@ def launch_elodin_editor(result: FlightResult, solver: FlightSolver):
             cmd = ["elodin", "editor", main_py_abs]
 
             import platform
+
             if platform.system() != "Windows":
                 terminals = [
                     (["gnome-terminal", "--"], "bash -c"),
                     (["xterm", "-e"], "bash -c"),
                     (["konsole", "-e"], "bash -c"),
                 ]
-                
+
                 # Launch from elodin root so ELODIN_ASSETS_DIR defaults to ./assets/
-                cmd_str = f'cd {elodin_root} && elodin editor {main_py_abs}'
+                cmd_str = f"cd {elodin_root} && elodin editor {main_py_abs}"
 
                 for term_base, shell_prefix in terminals:
                     try:
-                        which_result = subprocess.run(["which", term_base[0]], capture_output=True, timeout=1)
+                        which_result = subprocess.run(
+                            ["which", term_base[0]], capture_output=True, timeout=1
+                        )
                         if which_result.returncode == 0:
                             full_cmd = term_base + ["bash", "-c", cmd_str]
                             subprocess.Popen(full_cmd, cwd=str(elodin_root), start_new_session=True)
@@ -1444,17 +1565,21 @@ def launch_elodin_editor(result: FlightResult, solver: FlightSolver):
 # SIDEBAR
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def render_sidebar():
     """Render the sidebar with all configuration options."""
     with st.sidebar:
         # Logo / Header
-        st.markdown("""
+        st.markdown(
+            """
         <div style="text-align: center; padding: 1rem 0 1.5rem 0;">
             <div class="sidebar-header">🚀 ROCKET SIM</div>
             <div style="color: var(--text-muted); font-size: 0.85rem;">Barrowman Aerodynamics</div>
         </div>
-        """, unsafe_allow_html=True)
-        
+        """,
+            unsafe_allow_html=True,
+        )
+
         render_divider()
 
         # ─────────────────────────────────────────────────────────────────────
@@ -1483,14 +1608,16 @@ def render_sidebar():
                 label_visibility="collapsed",
             )
 
-            max_iterations = st.slider("Max simulations", 10, 50, 25, help="More = better search, slower")
+            max_iterations = st.slider(
+                "Max simulations", 10, 50, 25, help="More = better search, slower"
+            )
 
             if st.button("🔍 Find Cheapest Design", type="primary", use_container_width=True):
                 if ai_input:
                     # Progress placeholder
                     progress_container = st.empty()
                     log_container = st.empty()
-                    
+
                     with st.spinner("Optimizing design..."):
                         try:
                             # Initialize optimizer
@@ -1501,36 +1628,39 @@ def render_sidebar():
                                 st.session_state.motor_database = motor_db
 
                             optimizer = SmartOptimizer(motor_db)
-                            
+
                             # Progress callback
                             progress_lines = []
+
                             def on_progress(i, total, design):
                                 status = "✓" if design.meets_target else "✗"
                                 line = f"{status} [{i}/{total}] {design.motor_designation}: {design.simulated_altitude_m:.0f}m, ${design.cost.total:.0f}"
                                 progress_lines.append(line)
                                 log_container.code("\n".join(progress_lines[-10:]))  # Last 10 lines
-                            
+
                             best, designs, log = optimizer.optimize_from_text(
-                                ai_input, 
-                                max_iterations=max_iterations,
-                                callback=on_progress
+                                ai_input, max_iterations=max_iterations, callback=on_progress
                             )
-                            
+
                             if best and best.rocket_config:
                                 st.session_state.rocket_config = best.rocket_config
                                 st.session_state.motor_config = best.motor_config
                                 st.session_state.ai_design_just_generated = True
                                 st.session_state.last_optimization_result = best
                                 st.session_state.last_optimization_log = log
-                                
+
                                 # Show results
                                 st.success(f"✅ Found: {best.motor_designation}")
-                                
+
                                 cols = st.columns(3)
-                                cols[0].metric("Altitude", f"{best.simulated_altitude_m:.0f}m", f"{best.simulated_altitude_m*3.281:.0f} ft")
+                                cols[0].metric(
+                                    "Altitude",
+                                    f"{best.simulated_altitude_m:.0f}m",
+                                    f"{best.simulated_altitude_m*3.281:.0f} ft",
+                                )
                                 cols[1].metric("Total Cost", f"${best.cost.total:.0f}")
                                 cols[2].metric("Tube Size", f"{best.body_diameter_m*1000:.0f}mm")
-                                
+
                                 # Cost breakdown
                                 with st.expander("💰 Cost Breakdown"):
                                     st.markdown(f"""
@@ -1546,29 +1676,33 @@ def render_sidebar():
                                     | Hardware | ${best.cost.hardware_cost:.0f} |
                                     | **Total** | **${best.cost.total:.0f}** |
                                     """)
-                                
+
                                 st.rerun()
                             else:
                                 st.warning("❌ No design found within tolerance")
                                 with st.expander("📋 Optimization Log"):
                                     st.code("\n".join(log))
-                                    
+
                         except Exception as e:
                             st.error(f"Error: {str(e)}")
                             import traceback
+
                             st.code(traceback.format_exc())
                 else:
                     st.warning("Enter requirements first")
-            
+
             # Show last result if available
-            if hasattr(st.session_state, 'last_optimization_result') and st.session_state.last_optimization_result:
+            if (
+                hasattr(st.session_state, "last_optimization_result")
+                and st.session_state.last_optimization_result
+            ):
                 result = st.session_state.last_optimization_result
                 with st.expander("📋 Last Optimization Log", expanded=False):
-                    if hasattr(st.session_state, 'last_optimization_log'):
+                    if hasattr(st.session_state, "last_optimization_log"):
                         st.code("\n".join(st.session_state.last_optimization_log))
 
             render_divider()
-            
+
             # OpenAI API Key
             with st.expander("🔑 API Configuration"):
                 openai_key = st.text_input(
@@ -1587,19 +1721,27 @@ def render_sidebar():
         # ─────────────────────────────────────────────────────────────────────
         with st.expander("🔧 Motor Database", expanded=False):
             if st.session_state.motor_database:
-                motors_with_impulse = [m for m in st.session_state.motor_database if m.total_impulse > 0]
-                st.markdown(f"""
+                motors_with_impulse = [
+                    m for m in st.session_state.motor_database if m.total_impulse > 0
+                ]
+                st.markdown(
+                    f"""
                 <div class="status-badge ready">
                     ✓ {len(st.session_state.motor_database)} motors loaded
                 </div>
-                """, unsafe_allow_html=True)
+                """,
+                    unsafe_allow_html=True,
+                )
             else:
-                st.markdown("""
+                st.markdown(
+                    """
                 <div class="status-badge warning">
                     ⚠ No motors loaded
                 </div>
-                """, unsafe_allow_html=True)
-            
+                """,
+                    unsafe_allow_html=True,
+                )
+
             if st.button("🌐 Download Motors", type="primary", use_container_width=True):
                 with st.spinner("Downloading..."):
                     try:
@@ -1612,7 +1754,7 @@ def render_sidebar():
                             st.balloons()
                     except Exception as e:
                         st.error(str(e))
-            
+
             if st.button("📥 Load from Cache", use_container_width=True):
                 with st.spinner("Loading..."):
                     try:
@@ -1630,28 +1772,42 @@ def render_sidebar():
         if rocket_type == "Custom Rocket":
             render_divider()
             st.markdown("### 📐 Rocket Configuration")
-            
+
             # Nose Cone
             with st.expander("🔺 Nose Cone", expanded=True):
                 has_nose = st.checkbox("Include Nose Cone", value=True)
                 if has_nose:
-                    nose_length = st.number_input("Length (m)", 0.1, 2.0, 0.558, 0.01, key="nose_len")
-                    nose_shape = st.selectbox("Shape", ["VON_KARMAN", "OGIVE", "CONICAL", "ELLIPSOID", "HAACK"])
-                    nose_material = st.selectbox("Material", list(MATERIALS.keys()), index=3, key="nose_mat")
+                    nose_length = st.number_input(
+                        "Length (m)", 0.1, 2.0, 0.558, 0.01, key="nose_len"
+                    )
+                    nose_shape = st.selectbox(
+                        "Shape", ["VON_KARMAN", "OGIVE", "CONICAL", "ELLIPSOID", "HAACK"]
+                    )
+                    nose_material = st.selectbox(
+                        "Material", list(MATERIALS.keys()), index=3, key="nose_mat"
+                    )
 
             # Body Tube
             with st.expander("📦 Body Tube", expanded=True):
                 body_length = st.number_input("Length (m)", 0.1, 5.0, 1.5, 0.1, key="body_len")
-                body_radius = st.number_input("Radius (m)", 0.01, 0.5, 0.0635, 0.001, key="body_rad")
-                body_material = st.selectbox("Material", list(MATERIALS.keys()), index=3, key="body_mat")
+                body_radius = st.number_input(
+                    "Radius (m)", 0.01, 0.5, 0.0635, 0.001, key="body_rad"
+                )
+                body_material = st.selectbox(
+                    "Material", list(MATERIALS.keys()), index=3, key="body_mat"
+                )
 
             # Fins
             with st.expander("🔱 Fins", expanded=True):
                 has_fins = st.checkbox("Include Fins", value=True)
                 if has_fins:
                     fin_count = st.number_input("Count", 2, 8, 4, 1, key="fin_count")
-                    fin_root_chord = st.number_input("Root Chord (m)", 0.01, 0.5, 0.12, 0.01, key="fin_root")
-                    fin_tip_chord = st.number_input("Tip Chord (m)", 0.01, 0.5, 0.06, 0.01, key="fin_tip")
+                    fin_root_chord = st.number_input(
+                        "Root Chord (m)", 0.01, 0.5, 0.12, 0.01, key="fin_root"
+                    )
+                    fin_tip_chord = st.number_input(
+                        "Tip Chord (m)", 0.01, 0.5, 0.06, 0.01, key="fin_tip"
+                    )
                     fin_span = st.number_input("Span (m)", 0.01, 0.5, 0.11, 0.01, key="fin_span")
                     fin_sweep = st.number_input("Sweep (m)", 0.0, 0.5, 0.06, 0.01, key="fin_sweep")
 
@@ -1660,7 +1816,9 @@ def render_sidebar():
                 has_main_chute = st.checkbox("Main Parachute", value=True)
                 if has_main_chute:
                     main_chute_diameter = st.number_input("Main Diameter (m)", 0.1, 10.0, 2.91, 0.1)
-                    main_deployment_altitude = st.number_input("Deploy Altitude (m)", 0.0, 10000.0, 800.0, 10.0)
+                    main_deployment_altitude = st.number_input(
+                        "Deploy Altitude (m)", 0.0, 10000.0, 800.0, 10.0
+                    )
 
                 has_drogue = st.checkbox("Drogue Parachute", value=True)
                 if has_drogue:
@@ -1712,9 +1870,11 @@ def render_sidebar():
         if rocket_type in ["Custom Rocket", "AI Builder"]:
             render_divider()
             st.markdown("### 🔥 Motor")
-            
+
             if st.session_state.motor_database and len(st.session_state.motor_database) > 0:
-                motor_type = st.radio("Source", ["Default (M1670)", "Database", "Custom"], horizontal=True)
+                motor_type = st.radio(
+                    "Source", ["Default (M1670)", "Database", "Custom"], horizontal=True
+                )
 
                 if motor_type == "Database":
                     motors_by_class = {}
@@ -1728,9 +1888,17 @@ def render_sidebar():
 
                     if motors_by_class:
                         selected_class = st.selectbox("Class", sorted(motors_by_class.keys()))
-                        motors_in_class = sorted(motors_by_class[selected_class], key=lambda m: m.total_impulse)
-                        motor_display = [f"{m.designation} - {m.total_impulse:.0f} N·s" for m in motors_in_class]
-                        selected_idx = st.selectbox("Motor", range(len(motor_display)), format_func=lambda i: motor_display[i])
+                        motors_in_class = sorted(
+                            motors_by_class[selected_class], key=lambda m: m.total_impulse
+                        )
+                        motor_display = [
+                            f"{m.designation} - {m.total_impulse:.0f} N·s" for m in motors_in_class
+                        ]
+                        selected_idx = st.selectbox(
+                            "Motor",
+                            range(len(motor_display)),
+                            format_func=lambda i: motor_display[i],
+                        )
                         selected_motor = motors_in_class[selected_idx]
 
                         motor_config = {
@@ -1748,8 +1916,10 @@ def render_sidebar():
                         }
                         st.session_state.motor_config = motor_config
 
-                        st.caption(f"📊 {selected_motor.avg_thrust:.0f} N avg | {selected_motor.burn_time:.2f}s burn")
-                
+                        st.caption(
+                            f"📊 {selected_motor.avg_thrust:.0f} N avg | {selected_motor.burn_time:.2f}s burn"
+                        )
+
                 elif motor_type == "Default (M1670)":
                     st.session_state.motor_config = None
             else:
@@ -1760,7 +1930,7 @@ def render_sidebar():
         # ─────────────────────────────────────────────────────────────────────
         render_divider()
         st.markdown("### 🌍 Environment")
-        
+
         with st.expander("Launch Conditions", expanded=False):
             elevation = st.number_input("Elevation (m)", 0.0, 5000.0, 1400.0, 10.0)
             rail_length = st.number_input("Rail Length (m)", 0.5, 20.0, 5.2, 0.1)
@@ -1776,11 +1946,14 @@ def render_sidebar():
 # MAIN CONTENT
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def main():
     """Main application."""
     # Render sidebar and get configuration
-    rocket_type, elevation, rail_length, inclination_deg, heading_deg, max_time, dt = render_sidebar()
-    
+    rocket_type, elevation, rail_length, inclination_deg, heading_deg, max_time, dt = (
+        render_sidebar()
+    )
+
     # Hero section
     render_hero()
 
@@ -1791,52 +1964,62 @@ def main():
         # Design Preview Section
         if st.session_state.rocket_config:
             config = st.session_state.rocket_config
-            
-            st.markdown("""
+
+            st.markdown(
+                """
             <div class="section-card">
                 <div class="section-title">
                     <span class="section-title-icon">🎨</span>
                     Rocket Design
                 </div>
-            """, unsafe_allow_html=True)
-            
+            """,
+                unsafe_allow_html=True,
+            )
+
             # Quick specs
-            total_length = config.get('nose_length', 0) + config.get('body_length', 0)
-            diameter_mm = config.get('body_radius', 0) * 2 * 1000
-            
+            total_length = config.get("nose_length", 0) + config.get("body_length", 0)
+            diameter_mm = config.get("body_radius", 0) * 2 * 1000
+
             spec_cols = st.columns(4)
             with spec_cols[0]:
                 st.metric("Length", f"{total_length:.2f} m")
             with spec_cols[1]:
                 st.metric("Diameter", f"{diameter_mm:.0f} mm")
             with spec_cols[2]:
-                st.metric("Fins", config.get('fin_count', 0))
+                st.metric("Fins", config.get("fin_count", 0))
             with spec_cols[3]:
-                motor_name = st.session_state.motor_config.get('designation', 'M1670') if st.session_state.motor_config else 'M1670'
+                motor_name = (
+                    st.session_state.motor_config.get("designation", "M1670")
+                    if st.session_state.motor_config
+                    else "M1670"
+                )
                 st.metric("Motor", motor_name)
-            
+
             st.markdown("</div>", unsafe_allow_html=True)
-            
+
             # Visualization tabs
             if TRIMESH_AVAILABLE:
-                viz_tab1, viz_tab2, viz_tab3 = st.tabs(["🎮 3D Interactive", "🌐 Plotly 3D", "📐 2D Side"])
+                viz_tab1, viz_tab2, viz_tab3 = st.tabs(
+                    ["🎮 3D Interactive", "🌐 Plotly 3D", "📐 2D Side"]
+                )
             else:
                 viz_tab1, viz_tab2 = st.tabs(["🌐 3D View", "📐 2D Side View"])
                 viz_tab3 = None
-            
+
             motor_config = st.session_state.motor_config if st.session_state.motor_config else None
-            
+
             with viz_tab1:
                 if TRIMESH_AVAILABLE:
                     # Real 3D with Three.js
                     try:
                         html = get_rocket_preview_html(config, motor_config)
                         st.components.v1.html(html, height=450)
-                        
+
                         # Export buttons
                         export_cols = st.columns(3)
                         with export_cols[0]:
                             from mesh_renderer import export_stl
+
                             stl_data = export_stl(config, motor_config)
                             st.download_button(
                                 "📥 Download STL",
@@ -1846,6 +2029,7 @@ def main():
                             )
                         with export_cols[1]:
                             from mesh_renderer import export_gltf
+
                             gltf_data = export_gltf(config, motor_config)
                             st.download_button(
                                 "📥 Download GLTF",
@@ -1855,6 +2039,7 @@ def main():
                             )
                         with export_cols[2]:
                             from mesh_renderer import export_obj
+
                             obj_data = export_obj(config, motor_config)
                             st.download_button(
                                 "📥 Download OBJ",
@@ -1941,14 +2126,16 @@ def main():
             render_divider()
             with st.expander("📥 Export Data"):
                 history = st.session_state.simulation_result.history
-                df = pd.DataFrame({
-                    "time": [s.time for s in history],
-                    "x": [s.x for s in history],
-                    "y": [s.y for s in history],
-                    "z": [s.z for s in history],
-                    "velocity": [np.linalg.norm(s.velocity) for s in history],
-                    "mach": [s.mach for s in history],
-                })
+                df = pd.DataFrame(
+                    {
+                        "time": [s.time for s in history],
+                        "x": [s.x for s in history],
+                        "y": [s.y for s in history],
+                        "z": [s.z for s in history],
+                        "velocity": [np.linalg.norm(s.velocity) for s in history],
+                        "mach": [s.mach for s in history],
+                    }
+                )
                 csv = df.to_csv(index=False)
                 st.download_button(
                     "📥 Download CSV",
@@ -1959,14 +2146,17 @@ def main():
                 )
 
     with col_actions:
-        st.markdown("""
+        st.markdown(
+            """
         <div class="section-card" style="position: sticky; top: 1rem;">
             <div class="section-title">
                 <span class="section-title-icon">⚡</span>
                 Actions
             </div>
-        """, unsafe_allow_html=True)
-        
+        """,
+            unsafe_allow_html=True,
+        )
+
         # Run Simulation Button
         if st.button("🚀 LAUNCH", type="primary", use_container_width=True):
             with st.spinner("Running simulation..."):
@@ -2012,22 +2202,25 @@ def main():
                     st.error(f"Error: {str(e)}")
 
         st.markdown("<br>", unsafe_allow_html=True)
-        
+
         # Elodin Editor Button
         if st.session_state.simulation_result is not None:
             if st.button("🎮 Elodin Editor", use_container_width=True):
                 if "solver" in st.session_state and st.session_state.solver:
-                    launch_elodin_editor(st.session_state.simulation_result, st.session_state.solver)
+                    launch_elodin_editor(
+                        st.session_state.simulation_result, st.session_state.solver
+                    )
                 else:
                     st.error("Run simulation first")
-        
+
         st.markdown("</div>", unsafe_allow_html=True)
-        
+
         # Status
         if st.session_state.simulation_result:
             result = st.session_state.simulation_result
             max_alt = max(s.z for s in result.history)
-            st.markdown(f"""
+            st.markdown(
+                f"""
             <div style="margin-top: 1rem; padding: 1rem; background: rgba(0, 255, 136, 0.1); 
                         border: 1px solid var(--success); border-radius: 8px; text-align: center;">
                 <div style="color: var(--success); font-size: 0.8rem; font-weight: 600;">APOGEE</div>
@@ -2038,7 +2231,9 @@ def main():
                     ({max_alt * 3.28084:,.0f} ft)
                 </div>
             </div>
-            """, unsafe_allow_html=True)
+            """,
+                unsafe_allow_html=True,
+            )
 
 
 if __name__ == "__main__":

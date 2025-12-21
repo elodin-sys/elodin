@@ -12,7 +12,7 @@ Usage:
 import sys
 import os
 import typing as ty
-from dataclasses import dataclass, field
+from dataclasses import field
 
 # Check for visualize mode BEFORE importing elodin (which has its own CLI)
 VISUALIZE_MODE = os.getenv("ELODIN_VISUALIZE", "false").lower() == "true"
@@ -42,7 +42,11 @@ from calisto_builder import build_calisto
 
 # Try to import mesh renderer for Elodin visualization
 try:
-    from mesh_renderer import generate_rocket_glb_from_solver, generate_elodin_assets, TRIMESH_AVAILABLE
+    from mesh_renderer import (
+        generate_rocket_glb_from_solver,
+        generate_elodin_assets,
+        TRIMESH_AVAILABLE,
+    )
 except ImportError:
     TRIMESH_AVAILABLE = False
     generate_rocket_glb_from_solver = None
@@ -61,7 +65,7 @@ def main():
     rocket = RocketModel(rocket_raw)
     motor = Motor.from_openrocket(motor_raw)
 
-    print(f"\n✓ Calisto loaded:")
+    print("\n✓ Calisto loaded:")
     print(f"  Dry mass: {rocket.dry_mass:.3f} kg")
     print(f"  Dry CG: {rocket.dry_cg:.3f} m")
     print(f"  Reference diameter: {rocket.reference_diameter * 1000:.1f} mm")
@@ -71,7 +75,7 @@ def main():
     env = Environment(elevation=1400.0)
 
     # Run simulation
-    print(f"\nRunning simulation...")
+    print("\nRunning simulation...")
     solver = FlightSolver(
         rocket=rocket,
         motor=motor,
@@ -85,7 +89,7 @@ def main():
 
     # Print summary
     if len(result.history) == 0:
-        print(f"\n❌ Simulation failed - no history recorded")
+        print("\n❌ Simulation failed - no history recorded")
         return
 
     max_alt = max(s.z for s in result.history)
@@ -93,14 +97,14 @@ def main():
     apogee_time = apogee_state.time
     max_v = max(np.linalg.norm(s.velocity) for s in result.history)
 
-    print(f"\n✓ Simulation complete:")
+    print("\n✓ Simulation complete:")
     print(f"  Max altitude: {max_alt:.1f} m (AGL)")
     print(f"  Apogee time: {apogee_time:.2f} s")
     print(f"  Max velocity: {max_v:.1f} m/s")
     print(f"  History length: {len(result.history)} snapshots")
 
     # Debug: print first few states
-    print(f"\nFirst 3 states:")
+    print("\nFirst 3 states:")
     for i, s in enumerate(result.history[:3]):
         print(f"  t={s.time:.2f}s: pos={s.position}, z={s.z:.2f}m")
 
@@ -108,8 +112,8 @@ def main():
 
 
 def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
-    print(f"\nConverting to Elodin format and launching editor...")
-    
+    print("\nConverting to Elodin format and launching editor...")
+
     # Generate rocket mesh for Elodin visualization
     if TRIMESH_AVAILABLE and generate_rocket_glb_from_solver:
         try:
@@ -131,7 +135,7 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
         """Replace NaN and Inf with safe values."""
         arr = np.nan_to_num(arr, nan=default, posinf=1e6, neginf=-1e6)
         return arr
-    
+
     def sanitize_quaternion(q):
         """Ensure quaternion is valid (normalized, no NaN)."""
         q = np.nan_to_num(q, nan=0.0, posinf=1.0, neginf=-1.0)
@@ -146,7 +150,7 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     quaternions_raw = np.array([sanitize_quaternion(s.quaternion) for s in history])
     angular_velocities_raw = np.array([s.angular_velocity for s in history])
     aero_forces_raw = np.array([s.total_aero_force for s in history])
-    
+
     # Clamp unreasonable values
     positions_raw = sanitize_array(positions_raw)
     velocities_raw = sanitize_array(velocities_raw)
@@ -190,10 +194,10 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     def quat_to_euler_deg(q: jnp.ndarray) -> jnp.ndarray:
         x, y, z, w = q
         # Ensure quaternion is normalized
-        norm = jnp.sqrt(x*x + y*y + z*z + w*w)
+        norm = jnp.sqrt(x * x + y * y + z * z + w * w)
         norm = jnp.where(norm < 1e-6, 1.0, norm)
-        x, y, z, w = x/norm, y/norm, z/norm, w/norm
-        
+        x, y, z, w = x / norm, y / norm, z / norm, w / norm
+
         sinr_cosp = 2.0 * (w * x + y * z)
         cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
         roll = jnp.arctan2(sinr_cosp, cosr_cosp)
@@ -214,7 +218,9 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     euler_deg = jnp.nan_to_num(euler_deg, nan=0.0)
 
     angular_rates_deg = jnp.rad2deg(angular_velocities)
-    angular_rates_deg = jnp.clip(angular_rates_deg, -3000.0, 3000.0)  # Reasonable angular rate limit
+    angular_rates_deg = jnp.clip(
+        angular_rates_deg, -3000.0, 3000.0
+    )  # Reasonable angular rate limit
 
     Altitude = ty.Annotated[jax.Array, el.Component("altitude_m", el.ComponentType.F64)]
     Downrange = ty.Annotated[jax.Array, el.Component("downrange_m", el.ComponentType.F64)]
@@ -267,7 +273,7 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     if initial_pos[2] < 0:
         initial_pos = initial_pos.copy()
         initial_pos[2] = 0.0  # Start at ground level
-    
+
     # Ensure initial quaternion is valid
     initial_quat = quaternions[0]
     quat_norm = np.linalg.norm(initial_quat)
@@ -275,7 +281,7 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
         initial_quat = np.array([0.0, 0.0, 0.0, 1.0])  # Identity
     else:
         initial_quat = initial_quat / quat_norm
-    
+
     rocket_entity = world.spawn(
         [
             el.Body(
@@ -299,7 +305,7 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     assets_dir = os.path.abspath(os.path.join(elodin_root, "assets"))
     compass_path = os.path.join(assets_dir, "compass.glb")
     rocket_path = os.path.join(assets_dir, "rocket.glb")
-    
+
     schematic = f"""
     tabs {{
         hsplit share=0.65 name="Flight View" {{
@@ -461,8 +467,8 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
         | playback_body_rates
     )
 
-    print(f"\n✓ Schematic: rocket.kdl")
-    print(f"✓ Launching Elodin editor...")
+    print("\n✓ Schematic: rocket.kdl")
+    print("✓ Launching Elodin editor...")
 
     world.run(
         playback_system,
@@ -473,7 +479,7 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     )
 
     print(f"\n{'=' * 70}")
-    print(f"Simulation + visualization complete!")
+    print("Simulation + visualization complete!")
     print(f"{'=' * 70}\n")
 
 
@@ -544,10 +550,8 @@ if __name__ == "__main__":
         )
 
         # Reconstruct minimal solver for visualization
-        from rocket_model import Rocket
         from motor_model import Motor
         from environment import Environment
-        from flight_solver import MassInertiaModel
 
         # Create minimal MassInertiaModel for visualization
         class MinimalMassModel:

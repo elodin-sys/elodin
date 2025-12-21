@@ -8,8 +8,6 @@ OpenRocket .ork files are gzipped XML files.
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 import gzip
-from typing import Dict
-import os
 
 from rocket_components import Rocket, NoseCone, BodyTube, FinSet, Parachute, NoseShape, MATERIALS
 
@@ -68,7 +66,7 @@ class OpenRocketExporter:
             f.write(xml_str)
 
         print(f"Exported to {filename}")
-        print(f"You can now open this file in OpenRocket for validation!")
+        print("You can now open this file in OpenRocket for validation!")
 
     def _add_nosecone(self, parent, nose: NoseCone):
         """Add nose cone to XML"""
@@ -135,7 +133,6 @@ class OpenRocketExporter:
 
 def create_openrocket_validation_file():
     """Create a standard rocket design for OpenRocket validation"""
-    from motor_database import create_sample_motors
 
     # Build a well-documented test rocket
     rocket = Rocket("Validation Rocket - Aerotech F50")

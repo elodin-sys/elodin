@@ -3,7 +3,6 @@ PROPER rocket builder with ALL internal components matching OpenRocket exactly.
 No shortcuts - full fidelity implementation.
 """
 
-import math
 from openrocket_components import *
 from openrocket_motor import get_builtin_motors
 
@@ -228,7 +227,7 @@ def print_complete_mass_breakdown(rocket: Rocket, motor):
 
     # Motor
     print(f"\nMotor ({motor.designation}):")
-    print(f"  Position: Motor mount tube (270-390 mm from nose)")
+    print("  Position: Motor mount tube (270-390 mm from nose)")
     print(f"  Mass (ignition): {motor.total_mass_initial * 1000:.3f} g")
     print(f"  Mass (burnout):  {motor.case_mass * 1000:.3f} g")
     print(f"  Propellant:      {motor.propellant_mass * 1000:.3f} g")
@@ -268,4 +267,4 @@ if __name__ == "__main__":
     print(
         f"\n✓ Total component count: {len(list(rocket.children)) + sum(len(c.children) for c in rocket.children)}"
     )
-    print(f"✓ Ready for high-fidelity simulation")
+    print("✓ Ready for high-fidelity simulation")

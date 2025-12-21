@@ -6,7 +6,7 @@ First-order, second-order analysis matching OpenRocket.
 import math
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle, FancyBboxPatch, Circle, Polygon
+from matplotlib.patches import Rectangle
 from openrocket_components import *
 from openrocket_motor import Motor, get_builtin_motors
 from openrocket_aero import RocketAerodynamics

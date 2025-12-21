@@ -12,10 +12,9 @@ Design Philosophy:
 - Real-time stability analysis as components are added/modified
 """
 
-import numpy as np
 import math
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Tuple
+from dataclasses import dataclass
+from typing import List, Optional
 from abc import ABC, abstractmethod
 from enum import Enum
 
@@ -695,7 +694,7 @@ class Rocket:
 
         # Mass properties
         mass_props = self.get_total_mass_properties()
-        print(f"\nMass Properties:")
+        print("\nMass Properties:")
         print(f"  Total mass: {mass_props.mass:.3f} kg")
         print(f"  CG location: {mass_props.cg_x:.3f} m from nose tip")
         print(f"  Ixx (roll): {mass_props.ixx:.6f} kg·m²")
@@ -704,23 +703,23 @@ class Rocket:
 
         # Aerodynamic properties
         aero_props = self.get_total_aerodynamic_properties(mach=0.3)
-        print(f"\nAerodynamic Properties (Mach 0.3):")
+        print("\nAerodynamic Properties (Mach 0.3):")
         print(f"  CNα: {aero_props.cn_alpha:.3f} /rad")
         print(f"  CP location: {aero_props.cp_x:.3f} m from nose tip")
         print(f"  CD (total): {aero_props.cd_base + aero_props.cd_friction:.3f}")
 
         # Stability
         static_margin = self.get_static_margin(mach=0.3)
-        print(f"\nStability:")
+        print("\nStability:")
         print(f"  Static margin: {static_margin:.2f} calibers")
         if static_margin < 0:
-            print(f"  ⚠️  UNSTABLE - CP is ahead of CG!")
+            print("  ⚠️  UNSTABLE - CP is ahead of CG!")
         elif static_margin < 1.0:
-            print(f"  ⚠️  MARGINALLY STABLE - Increase fin size or move CG forward")
+            print("  ⚠️  MARGINALLY STABLE - Increase fin size or move CG forward")
         elif static_margin > 3.0:
-            print(f"  ⚠️  OVERSTABLE - May be difficult to turn, consider smaller fins")
+            print("  ⚠️  OVERSTABLE - May be difficult to turn, consider smaller fins")
         else:
-            print(f"  ✓ STABLE - Good design!")
+            print("  ✓ STABLE - Good design!")
 
         print(f"{'=' * 60}\n")
 

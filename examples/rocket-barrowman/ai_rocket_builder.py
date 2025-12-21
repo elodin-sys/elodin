@@ -1353,7 +1353,7 @@ IMPORTANT:
 
         # Convert to Streamlit app format
         config = {
-            "name": f"AI-Designed Rocket",
+            "name": "AI-Designed Rocket",
             "has_nose": True,
             "nose_length": design["nose_length"],
             "nose_thickness": design["nose_thickness"],
@@ -1780,7 +1780,7 @@ IMPORTANT:
                     "clearance_required": f"5 mm minimum clearance around packed chute ({drogue_chute_dia / 25.0 * 1000:.1f} mm diameter)"
                     if has_drogue
                     else "N/A",
-                    "notes": f"Packed in avionics bay, deploys at apogee"
+                    "notes": "Packed in avionics bay, deploys at apogee"
                     if has_drogue
                     else "Not used (single deploy)",
                 },
@@ -1855,7 +1855,7 @@ if __name__ == "__main__":
 
     # Test design
     config, motor = designer.build_rocket_config(req)
-    print(f"\nGenerated rocket configuration:")
+    print("\nGenerated rocket configuration:")
     print(f"  Total length: {config['nose_length'] + config['body_length']:.2f} m")
     print(f"  Body diameter: {config['body_radius'] * 2 * 1000:.1f} mm")
     print(f"  Fin count: {config['fin_count']}")

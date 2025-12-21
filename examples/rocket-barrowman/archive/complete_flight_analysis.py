@@ -6,7 +6,7 @@ Shows rocket build, flight trajectory, and ALL flight data.
 import math
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle, Circle, FancyBboxPatch
+from matplotlib.patches import Rectangle, Circle
 from matplotlib.gridspec import GridSpec
 from proper_rocket_builder import build_proper_rocket
 from openrocket_sim_3dof import Simulator3DOF

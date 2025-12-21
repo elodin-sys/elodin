@@ -21,7 +21,7 @@ Estes C6 18 70 5 6.2 11.0 Estes
 import os
 import numpy as np
 from dataclasses import dataclass
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Optional
 import glob
 
 
@@ -320,12 +320,12 @@ class MotorDatabase:
 
     def print_summary(self):
         """Print database summary"""
-        print(f"\nMotor Database Summary:")
+        print("\nMotor Database Summary:")
         print(f"  Total motors: {len(self.motors)}")
         print(f"  Manufacturers: {len(self._by_manufacturer)}")
         print(f"  Impulse classes: {sorted(self._by_class.keys())}")
 
-        print(f"\nMotors by class:")
+        print("\nMotors by class:")
         for cls in sorted(self._by_class.keys()):
             count = len(self._by_class[cls])
             print(f"  {cls}: {count} motors")
@@ -416,7 +416,7 @@ def main():
     db.print_summary()
 
     # Test motor lookup
-    print(f"\n\nLooking up Estes C6-5:")
+    print("\n\nLooking up Estes C6-5:")
     c6 = db.get_motor("Estes", "C6-5")
     if c6:
         print(c6)
@@ -424,12 +424,12 @@ def main():
         print(f"  Mass at t=0.5s: {c6.get_mass(0.5) * 1000:.2f}g")
 
     # Test motor search
-    print(f"\n\n18mm diameter motors:")
+    print("\n\n18mm diameter motors:")
     motors_18mm = db.find_motors(diameter_mm=18.0)
     for motor in motors_18mm:
         print(f"  {motor}")
 
-    print(f"\n\nF-class motors:")
+    print("\n\nF-class motors:")
     motors_f = db.list_motors(motor_class="F")
     for motor in motors_f:
         print(f"  {motor}")
@@ -460,7 +460,7 @@ def main():
         plt.savefig(
             "/home/kush-mahajan/elodin/examples/rocket-barrowman/motor_thrust_curves.png", dpi=150
         )
-        print(f"\n\nThrust curves saved to motor_thrust_curves.png")
+        print("\n\nThrust curves saved to motor_thrust_curves.png")
         plt.show()
     except ImportError:
         print("\nMatplotlib not available, skipping plots")

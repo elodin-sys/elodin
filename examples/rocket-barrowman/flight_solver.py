@@ -346,7 +346,7 @@ class FlightSolver:
 
             state = self._rk4_step(t, state, self.dt)
             t += self.dt
-            
+
             # Safety: stop if we detect NaN/Inf in state
             if not np.isfinite(state).all():
                 print(f"WARNING: Simulation stopped at t={t:.2f}s due to numerical instability")
@@ -697,19 +697,19 @@ class FlightSolver:
             # Reset quaternion to identity if corrupted
             if not np.isfinite(state[6:10]).all() or np.linalg.norm(state[6:10]) < 1e-6:
                 state[6:10] = np.array([0.0, 0.0, 0.0, 1.0])
-        
+
         k1 = self._derivatives(time, state)
         k2 = self._derivatives(time + 0.5 * dt, state + 0.5 * dt * k1)
         k3 = self._derivatives(time + 0.5 * dt, state + 0.5 * dt * k2)
         k4 = self._derivatives(time + dt, state + dt * k3)
         next_state = state + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
-        
+
         # Clamp position to reasonable bounds (within 100km of origin)
         next_state[0:3] = np.clip(next_state[0:3], -1e5, 1e5)
-        
+
         # Clamp velocity to reasonable bounds (< Mach 10 ≈ 3400 m/s)
         next_state[3:6] = np.clip(next_state[3:6], -4000, 4000)
-        
+
         # Normalize quaternion
         quat = next_state[6:10]
         norm = np.linalg.norm(quat)
@@ -718,14 +718,14 @@ class FlightSolver:
         else:
             # Reset to identity quaternion if norm is too small (numerical error)
             next_state[6:10] = np.array([0.0, 0.0, 0.0, 1.0])
-        
+
         # Clamp angular velocity to prevent tumble-induced instability
         # During descent, rockets can tumble but we limit angular rate to 50 rad/s (~2800 deg/s)
         next_state[10:13] = np.clip(next_state[10:13], -50.0, 50.0)
-        
+
         # Ensure motor mass doesn't go negative
         next_state[13] = max(next_state[13], self.motor.dry_mass)
-        
+
         # Final NaN check
         if not np.isfinite(next_state).all():
             next_state = np.nan_to_num(next_state, nan=0.0, posinf=1e6, neginf=-1e6)
@@ -736,7 +736,7 @@ class FlightSolver:
                 next_state[6:10] = quat / norm
             else:
                 next_state[6:10] = np.array([0.0, 0.0, 0.0, 1.0])
-        
+
         return next_state
 
     def _derivatives(self, time: float, state: np.ndarray) -> np.ndarray:

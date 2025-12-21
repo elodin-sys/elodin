@@ -12,7 +12,7 @@ This is a production-quality flight simulator with:
 
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Tuple, Dict, Optional
+from typing import Tuple, Optional
 import math
 from dataclasses import dataclass
 
@@ -606,13 +606,13 @@ class RobustSimulator:
     def run(self, max_time: float = 60.0, verbose: bool = True):
         """Run simulation"""
         print(f"\n{'=' * 70}")
-        print(f"ROBUST 6DOF FLIGHT SIMULATION")
+        print("ROBUST 6DOF FLIGHT SIMULATION")
         print(f"{'=' * 70}")
         print(f"Rocket: {self.rocket.name}")
         print(f"Motor: {self.motor.manufacturer} {self.motor.designation}")
         print(f"Total impulse: {self.motor.total_impulse:.1f} N·s")
         print(f"Burn time: {self.motor.burn_time:.2f} s")
-        print(f"\nStarting simulation...")
+        print("\nStarting simulation...")
 
         steps = 0
         last_print_time = 0
@@ -641,7 +641,7 @@ class RobustSimulator:
         max_mach = max(self.history["mach"])
 
         print(f"\n{'=' * 70}")
-        print(f"FLIGHT SUMMARY")
+        print("FLIGHT SUMMARY")
         print(f"{'=' * 70}")
         print(f"Maximum altitude: {max_alt:.1f} m ({max_alt * 3.28084:.1f} ft)")
         print(f"Maximum velocity: {max_vel:.1f} m/s")

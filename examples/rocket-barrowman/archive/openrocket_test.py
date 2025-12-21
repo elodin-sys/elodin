@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from openrocket_components import *
 from openrocket_motor import Motor, get_builtin_motors
 from openrocket_aero import RocketAerodynamics
-from openrocket_atmosphere import ISAAtmosphere, WindModel
+from openrocket_atmosphere import ISAAtmosphere
 from openrocket_sim_3dof import Simulator3DOF
 
 
@@ -164,12 +164,12 @@ def print_aerodynamics(rocket: Rocket, motor: Motor):
     print(f"\nCN_alpha: {cn_alpha:.3f} /rad ({cn_alpha * 180 / math.pi:.3f} /deg)")
     print(f"CP location: {cp * 1000:.1f} mm from nose tip")
 
-    print(f"\nAt ignition:")
+    print("\nAt ignition:")
     print(f"  Mass: {mass_ignition * 1000:.1f} g")
     print(f"  CG: {cg_ignition * 1000:.1f} mm from nose tip")
     print(f"  Static margin: {(cp - cg_ignition) / rocket.reference_diameter:.2f} cal")
 
-    print(f"\nAt burnout:")
+    print("\nAt burnout:")
     print(f"  Mass: {mass_burnout * 1000:.1f} g")
     print(f"  CG: {cg_burnout * 1000:.1f} mm from nose tip")
     print(f"  Static margin: {(cp - cg_burnout) / rocket.reference_diameter:.2f} cal")
@@ -178,7 +178,7 @@ def print_aerodynamics(rocket: Rocket, motor: Motor):
     atm = ISAAtmosphere()
     props = atm.get_properties(0)
 
-    print(f"\nDrag coefficient (sea level):")
+    print("\nDrag coefficient (sea level):")
     for v in [10, 50, 100, 200]:
         mach = v / props["speed_of_sound"]
         cd = aero.calculate_cd(mach, v, props["density"], props["viscosity"], 0.0)
@@ -210,7 +210,7 @@ def run_simulation_test():
 
     print("Launch configuration:")
     print(f"  Rail length: {sim.rail_length} m")
-    print(f"  Launch angle: 90.0° (vertical, 3DOF)")
+    print("  Launch angle: 90.0° (vertical, 3DOF)")
     print(f"  Timestep: {sim.dt * 1000:.1f} ms")
 
     history = sim.run()

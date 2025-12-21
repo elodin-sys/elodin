@@ -4,7 +4,6 @@ Every coefficient, derivative, ratio, and metric that OpenRocket calculates.
 """
 
 import math
-import numpy as np
 from proper_rocket_builder import build_proper_rocket
 from openrocket_aero import RocketAerodynamics
 from openrocket_atmosphere import ISAAtmosphere
@@ -22,7 +21,7 @@ def calculate_all_parameters(rocket, motor):
 
     def find_mount(comp):
         nonlocal motor_mount_pos
-        from openrocket_components import BodyTube, InnerTube
+        from openrocket_components import InnerTube
 
         if isinstance(comp, InnerTube) and "Motor Mount" in comp.name:
             motor_mount_pos = comp.get_absolute_position()

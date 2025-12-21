@@ -9,8 +9,7 @@ Generates actual 3D meshes for:
 
 from __future__ import annotations
 
-import math
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Dict, Any, Optional
 import io
 import base64
 
@@ -18,6 +17,7 @@ try:
     import numpy as np
     import trimesh
     from trimesh.creation import cylinder, cone
+
     TRIMESH_AVAILABLE = True
 except ImportError:
     TRIMESH_AVAILABLE = False
@@ -25,12 +25,12 @@ except ImportError:
 
 # Colors for rocket components (RGB 0-255)
 COLORS = {
-    "nose": [0, 212, 255, 230],      # Cyan
-    "body": [123, 47, 255, 220],      # Purple
-    "fins": [255, 107, 53, 255],      # Orange
-    "mount": [255, 184, 0, 180],      # Amber
-    "motor": [255, 51, 102, 255],     # Red
-    "chute": [200, 200, 200, 150],    # Light gray
+    "nose": [0, 212, 255, 230],  # Cyan
+    "body": [123, 47, 255, 220],  # Purple
+    "fins": [255, 107, 53, 255],  # Orange
+    "mount": [255, 184, 0, 180],  # Amber
+    "motor": [255, 51, 102, 255],  # Red
+    "chute": [200, 200, 200, 150],  # Light gray
 }
 
 
@@ -43,11 +43,11 @@ def create_nose_cone(
     """Create a nose cone mesh."""
     if not TRIMESH_AVAILABLE:
         return None
-    
+
     # Generate nose cone profile
     n_rings = 20
     z_values = np.linspace(0, length, n_rings)
-    
+
     if shape == "VON_KARMAN" or shape == "HAACK":
         # Von Karman profile (optimal for supersonic)
         theta = np.arccos(1 - 2 * z_values / length)
@@ -55,31 +55,31 @@ def create_nose_cone(
     elif shape == "OGIVE":
         # Tangent ogive
         rho = (base_radius**2 + length**2) / (2 * base_radius)
-        radii = np.sqrt(rho**2 - (length - z_values)**2) - rho + base_radius
+        radii = np.sqrt(rho**2 - (length - z_values) ** 2) - rho + base_radius
     elif shape == "CONICAL":
         # Simple cone
         radii = base_radius * z_values / length
     elif shape == "ELLIPSOID":
         # Elliptical
-        radii = base_radius * np.sqrt(1 - (1 - z_values / length)**2)
+        radii = base_radius * np.sqrt(1 - (1 - z_values / length) ** 2)
     else:
         # Default to parabolic
         radii = base_radius * np.sqrt(z_values / length)
-    
+
     # Ensure tip starts at 0
     radii[0] = 0.001
-    
+
     # Create vertices
     vertices = []
     faces = []
-    
+
     for i, (z, r) in enumerate(zip(z_values, radii)):
         for j in range(resolution):
             theta = 2 * np.pi * j / resolution
             x = r * np.cos(theta)
             y = r * np.sin(theta)
             vertices.append([x, y, z])
-    
+
     # Create faces
     for i in range(n_rings - 1):
         for j in range(resolution):
@@ -89,7 +89,7 @@ def create_nose_cone(
             v3 = (i + 1) * resolution + (j + 1) % resolution
             faces.append([v0, v2, v1])
             faces.append([v1, v2, v3])
-    
+
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
     mesh.visual.face_colors = COLORS["nose"]
     return mesh
@@ -103,7 +103,7 @@ def create_body_tube(
     """Create a body tube mesh."""
     if not TRIMESH_AVAILABLE:
         return None
-    
+
     mesh = cylinder(radius=outer_radius, height=length, sections=resolution)
     # Center is at 0, rotate so it extends in +Z
     mesh.apply_translation([0, 0, length / 2])
@@ -121,39 +121,45 @@ def create_fin(
     """Create a single trapezoidal fin."""
     if not TRIMESH_AVAILABLE:
         return None
-    
+
     # Fin vertices (looking from above, fin extends in +Y)
     # XZ plane is the plane of the fin
     half_t = thickness / 2
-    
+
     vertices = [
         # Bottom (outer surface of body tube side)
-        [0, 0, -half_t],            # Root leading edge
-        [root_chord, 0, -half_t],   # Root trailing edge
+        [0, 0, -half_t],  # Root leading edge
+        [root_chord, 0, -half_t],  # Root trailing edge
         [sweep + tip_chord, span, -half_t],  # Tip trailing edge
-        [sweep, span, -half_t],     # Tip leading edge
+        [sweep, span, -half_t],  # Tip leading edge
         # Top
         [0, 0, half_t],
         [root_chord, 0, half_t],
         [sweep + tip_chord, span, half_t],
         [sweep, span, half_t],
     ]
-    
+
     faces = [
         # Bottom face
-        [0, 1, 2], [0, 2, 3],
+        [0, 1, 2],
+        [0, 2, 3],
         # Top face
-        [4, 6, 5], [4, 7, 6],
+        [4, 6, 5],
+        [4, 7, 6],
         # Leading edge
-        [0, 3, 7], [0, 7, 4],
+        [0, 3, 7],
+        [0, 7, 4],
         # Trailing edge
-        [1, 5, 6], [1, 6, 2],
+        [1, 5, 6],
+        [1, 6, 2],
         # Root
-        [0, 4, 5], [0, 5, 1],
+        [0, 4, 5],
+        [0, 5, 1],
         # Tip
-        [3, 2, 6], [3, 6, 7],
+        [3, 2, 6],
+        [3, 6, 7],
     ]
-    
+
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
     mesh.visual.face_colors = COLORS["fins"]
     return mesh
@@ -171,36 +177,36 @@ def create_fin_set(
     """Create a set of fins around the body."""
     if not TRIMESH_AVAILABLE:
         return None
-    
+
     meshes = []
-    
+
     for i in range(fin_count):
         fin = create_fin(root_chord, tip_chord, span, sweep, thickness)
         if fin is None:
             continue
-        
+
         # Rotate to radial position
         angle = 2 * np.pi * i / fin_count
-        
+
         # Transform: rotate around Z, then translate to body surface
         rotation = trimesh.transformations.rotation_matrix(angle, [0, 0, 1])
-        
+
         # The fin is in the XY plane, we need it radial
         # First rotate 90° around X to make it vertical
         vertical = trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0])
         fin.apply_transform(vertical)
-        
+
         # Translate to body surface
         fin.apply_translation([body_radius, 0, root_chord])
-        
+
         # Rotate around Z axis
         fin.apply_transform(rotation)
-        
+
         meshes.append(fin)
-    
+
     if not meshes:
         return None
-    
+
     return trimesh.util.concatenate(meshes)
 
 
@@ -212,7 +218,7 @@ def create_motor(
     """Create motor mesh."""
     if not TRIMESH_AVAILABLE:
         return None
-    
+
     mesh = cylinder(radius=diameter / 2, height=length, sections=resolution)
     mesh.apply_translation([0, 0, length / 2])
     mesh.visual.face_colors = COLORS["motor"]
@@ -222,7 +228,7 @@ def create_motor(
 def build_rocket_mesh(config: Dict[str, Any], motor: Optional[Dict] = None) -> "trimesh.Trimesh":
     """
     Build complete rocket mesh from config.
-    
+
     Config should have:
     - nose_length, body_length, body_radius
     - fin_count, fin_root_chord, fin_tip_chord, fin_span, fin_sweep
@@ -230,26 +236,26 @@ def build_rocket_mesh(config: Dict[str, Any], motor: Optional[Dict] = None) -> "
     """
     if not TRIMESH_AVAILABLE:
         raise RuntimeError("trimesh not installed")
-    
+
     meshes = []
-    
+
     # Get dimensions
     body_radius = config.get("body_radius", 0.05)
     nose_length = config.get("nose_length", body_radius * 4)
     body_length = config.get("body_length", 1.0)
-    
+
     # Nose cone
     nose_shape = config.get("nose_shape", "VON_KARMAN")
     nose = create_nose_cone(nose_length, body_radius, nose_shape)
     if nose:
         meshes.append(nose)
-    
+
     # Body tube (starts at end of nose)
     body = create_body_tube(body_length, body_radius)
     if body:
         body.apply_translation([0, 0, nose_length])
         meshes.append(body)
-    
+
     # Fins
     if config.get("fin_count", 0) > 0:
         fin_root = config.get("fin_root_chord", body_radius * 1.5)
@@ -258,16 +264,15 @@ def build_rocket_mesh(config: Dict[str, Any], motor: Optional[Dict] = None) -> "
         fin_sweep = config.get("fin_sweep", fin_root * 0.25)
         fin_thickness = config.get("fin_thickness", 0.004)
         fin_count = config.get("fin_count", 4)
-        
+
         fins = create_fin_set(
-            fin_root, fin_tip, fin_span, fin_sweep, fin_thickness,
-            fin_count, body_radius
+            fin_root, fin_tip, fin_span, fin_sweep, fin_thickness, fin_count, body_radius
         )
         if fins:
             # Position at rear of body
             fins.apply_translation([0, 0, nose_length + body_length - fin_root])
             meshes.append(fins)
-    
+
     # Motor (if provided)
     if motor:
         motor_dia = motor.get("diameter", 0.054)
@@ -277,10 +282,10 @@ def build_rocket_mesh(config: Dict[str, Any], motor: Optional[Dict] = None) -> "
             # Position inside motor mount at aft end
             motor_mesh.apply_translation([0, 0, nose_length + body_length - motor_len])
             meshes.append(motor_mesh)
-    
+
     if not meshes:
         raise RuntimeError("No meshes created")
-    
+
     return trimesh.util.concatenate(meshes)
 
 
@@ -288,7 +293,7 @@ def export_stl(config: Dict, motor: Optional[Dict] = None) -> bytes:
     """Export rocket to STL bytes."""
     mesh = build_rocket_mesh(config, motor)
     buffer = io.BytesIO()
-    mesh.export(buffer, file_type='stl')
+    mesh.export(buffer, file_type="stl")
     return buffer.getvalue()
 
 
@@ -296,60 +301,62 @@ def export_gltf(config: Dict, motor: Optional[Dict] = None) -> bytes:
     """Export rocket to GLTF bytes (for web viewers)."""
     mesh = build_rocket_mesh(config, motor)
     buffer = io.BytesIO()
-    mesh.export(buffer, file_type='glb')
+    mesh.export(buffer, file_type="glb")
     return buffer.getvalue()
 
 
 def export_obj(config: Dict, motor: Optional[Dict] = None) -> str:
     """Export rocket to OBJ string."""
     mesh = build_rocket_mesh(config, motor)
-    return mesh.export(file_type='obj')
+    return mesh.export(file_type="obj")
 
 
 def render_to_plotly(config: Dict, motor: Optional[Dict] = None):
     """Render rocket mesh to Plotly figure with proper lighting."""
     import plotly.graph_objects as go
-    
+
     mesh = build_rocket_mesh(config, motor)
-    
+
     # Extract vertices and faces
     vertices = mesh.vertices
     faces = mesh.faces
-    
+
     # Get per-face colors
-    if hasattr(mesh.visual, 'face_colors') and mesh.visual.face_colors is not None:
+    if hasattr(mesh.visual, "face_colors") and mesh.visual.face_colors is not None:
         face_colors = mesh.visual.face_colors
         # Convert to intensity (use average of RGB)
         intensity = np.mean(face_colors[:, :3] / 255.0, axis=1)
     else:
         intensity = np.ones(len(faces)) * 0.5
-    
-    fig = go.Figure(data=[
-        go.Mesh3d(
-            x=vertices[:, 0],
-            y=vertices[:, 1],
-            z=vertices[:, 2],
-            i=faces[:, 0],
-            j=faces[:, 1],
-            k=faces[:, 2],
-            intensity=intensity,
-            colorscale=[
-                [0.0, '#FF6B35'],   # Orange (fins)
-                [0.3, '#7B2FFF'],   # Purple (body)
-                [0.6, '#00D4FF'],   # Cyan (nose)
-                [1.0, '#FF3366'],   # Red (motor)
-            ],
-            flatshading=True,
-            lighting=dict(
-                ambient=0.4,
-                diffuse=0.8,
-                specular=0.3,
-                roughness=0.5,
-            ),
-            lightposition=dict(x=1000, y=1000, z=2000),
-        )
-    ])
-    
+
+    fig = go.Figure(
+        data=[
+            go.Mesh3d(
+                x=vertices[:, 0],
+                y=vertices[:, 1],
+                z=vertices[:, 2],
+                i=faces[:, 0],
+                j=faces[:, 1],
+                k=faces[:, 2],
+                intensity=intensity,
+                colorscale=[
+                    [0.0, "#FF6B35"],  # Orange (fins)
+                    [0.3, "#7B2FFF"],  # Purple (body)
+                    [0.6, "#00D4FF"],  # Cyan (nose)
+                    [1.0, "#FF3366"],  # Red (motor)
+                ],
+                flatshading=True,
+                lighting=dict(
+                    ambient=0.4,
+                    diffuse=0.8,
+                    specular=0.3,
+                    roughness=0.5,
+                ),
+                lightposition=dict(x=1000, y=1000, z=2000),
+            )
+        ]
+    )
+
     # Dark theme styling
     fig.update_layout(
         scene=dict(
@@ -374,7 +381,7 @@ def render_to_plotly(config: Dict, motor: Optional[Dict] = None):
                 zerolinecolor="#2A3A5C",
                 title="Length (m)",
             ),
-            aspectmode='data',
+            aspectmode="data",
             camera=dict(
                 eye=dict(x=1.5, y=1.5, z=0.8),
                 up=dict(x=0, y=0, z=1),
@@ -389,7 +396,7 @@ def render_to_plotly(config: Dict, motor: Optional[Dict] = None):
             font=dict(size=18, color="#00D4FF"),
         ),
     )
-    
+
     return fig
 
 
@@ -400,11 +407,11 @@ def get_rocket_preview_html(config: Dict, motor: Optional[Dict] = None) -> str:
     """
     try:
         glb_bytes = export_gltf(config, motor)
-        glb_base64 = base64.b64encode(glb_bytes).decode('utf-8')
+        glb_base64 = base64.b64encode(glb_bytes).decode("utf-8")
     except Exception as e:
         return f"<div style='color: red;'>Error generating 3D model: {e}</div>"
-    
-    html = f'''
+
+    html = f"""
 <!DOCTYPE html>
 <html>
 <head>
@@ -500,61 +507,63 @@ def get_rocket_preview_html(config: Dict, motor: Optional[Dict] = None) -> str:
     </script>
 </body>
 </html>
-'''
+"""
     return html
 
 
-def generate_elodin_assets(config: Dict, motor: Optional[Dict] = None, output_dir: str = ".") -> str:
+def generate_elodin_assets(
+    config: Dict, motor: Optional[Dict] = None, output_dir: str = "."
+) -> str:
     """
     Generate assets for Elodin editor visualization.
-    
+
     Creates:
     - rocket.glb - The rocket 3D model
-    
+
     Returns: Path to the generated GLB file
     """
     import os
-    
+
     if not TRIMESH_AVAILABLE:
         raise RuntimeError("trimesh required for Elodin asset generation")
-    
+
     # Build the mesh
     mesh = build_rocket_mesh(config, motor)
-    
+
     # Rotate mesh to align with Elodin/glTF coordinate expectations
     # Testing +90° around X axis (opposite direction)
-    rotation = trimesh.transformations.rotation_matrix(np.pi/2, [1, 0, 0])
+    rotation = trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0])
     mesh.apply_transform(rotation)
-    
+
     # Center the mesh at origin
     mesh.vertices -= mesh.centroid
-    
+
     # Export to GLB
     glb_path = os.path.join(output_dir, "rocket.glb")
-    mesh.export(glb_path, file_type='glb')
-    
+    mesh.export(glb_path, file_type="glb")
+
     print(f"✓ Generated Elodin asset: {glb_path}")
     print(f"  Vertices: {len(mesh.vertices)}, Faces: {len(mesh.faces)}")
-    
+
     return glb_path
 
 
 def generate_rocket_glb_from_solver(solver, output_dir: str = ".") -> str:
     """
     Generate rocket.glb from a FlightSolver's rocket configuration.
-    
+
     Args:
         solver: FlightSolver instance with rocket model
         output_dir: Directory to write rocket.glb
-        
+
     Returns: Path to generated GLB
     """
     if not TRIMESH_AVAILABLE:
         raise RuntimeError("trimesh required")
-    
+
     # Extract config from solver's rocket model
     rocket = solver.rocket
-    
+
     # Get dimensions from rocket model
     config = {
         "name": "Rocket",
@@ -569,39 +578,41 @@ def generate_rocket_glb_from_solver(solver, output_dir: str = ".") -> str:
         "fin_sweep": 0.03,
         "fin_thickness": 0.004,
     }
-    
+
     # Try to extract from OpenRocket components if available
-    if hasattr(rocket, '_rocket') and hasattr(rocket._rocket, 'children'):
+    if hasattr(rocket, "_rocket") and hasattr(rocket._rocket, "children"):
         for child in rocket._rocket.children:
-            if hasattr(child, '__class__'):
+            if hasattr(child, "__class__"):
                 cls_name = child.__class__.__name__
                 if cls_name == "NoseCone":
-                    config["nose_length"] = getattr(child, 'length', 0.5)
-                    if hasattr(child, 'shape'):
-                        config["nose_shape"] = child.shape.name if hasattr(child.shape, 'name') else "VON_KARMAN"
+                    config["nose_length"] = getattr(child, "length", 0.5)
+                    if hasattr(child, "shape"):
+                        config["nose_shape"] = (
+                            child.shape.name if hasattr(child.shape, "name") else "VON_KARMAN"
+                        )
                 elif cls_name == "BodyTube":
-                    config["body_length"] = getattr(child, 'length', 1.5)
-                    config["body_radius"] = getattr(child, 'outer_radius', 0.05)
-                    
+                    config["body_length"] = getattr(child, "length", 1.5)
+                    config["body_radius"] = getattr(child, "outer_radius", 0.05)
+
                     # Check for fins in body tube children
-                    if hasattr(child, 'children'):
+                    if hasattr(child, "children"):
                         for subchild in child.children:
                             if "Fin" in subchild.__class__.__name__:
-                                config["fin_count"] = getattr(subchild, 'fin_count', 4)
-                                config["fin_root_chord"] = getattr(subchild, 'root_chord', 0.12)
-                                config["fin_tip_chord"] = getattr(subchild, 'tip_chord', 0.05)
-                                config["fin_span"] = getattr(subchild, 'span', 0.1)
-                                config["fin_sweep"] = getattr(subchild, 'sweep', 0.03)
-    
+                                config["fin_count"] = getattr(subchild, "fin_count", 4)
+                                config["fin_root_chord"] = getattr(subchild, "root_chord", 0.12)
+                                config["fin_tip_chord"] = getattr(subchild, "tip_chord", 0.05)
+                                config["fin_span"] = getattr(subchild, "span", 0.1)
+                                config["fin_sweep"] = getattr(subchild, "sweep", 0.03)
+
     # Motor config from solver
     motor_config = None
-    if hasattr(solver, 'motor'):
+    if hasattr(solver, "motor"):
         motor = solver.motor
         motor_config = {
-            "diameter": getattr(motor, 'diameter', 0.054),
-            "length": getattr(motor, 'length', 0.5),
+            "diameter": getattr(motor, "diameter", 0.054),
+            "length": getattr(motor, "length", 0.5),
         }
-    
+
     return generate_elodin_assets(config, motor_config, output_dir)
 
 
@@ -620,26 +631,25 @@ if __name__ == "__main__":
         "fin_sweep": 0.03,
         "fin_thickness": 0.004,
     }
-    
+
     motor = {
         "diameter": 0.054,
         "length": 0.4,
     }
-    
+
     print("Building mesh...")
     mesh = build_rocket_mesh(config, motor)
     print(f"Vertices: {len(mesh.vertices)}, Faces: {len(mesh.faces)}")
-    
+
     # Export test
     stl_data = export_stl(config, motor)
     print(f"STL size: {len(stl_data)} bytes")
-    
+
     # Save test STL
     with open("/tmp/test_rocket.stl", "wb") as f:
         f.write(stl_data)
     print("Saved to /tmp/test_rocket.stl")
-    
+
     # Generate Elodin assets
     print("\nGenerating Elodin assets...")
     generate_elodin_assets(config, motor, "/tmp")
-

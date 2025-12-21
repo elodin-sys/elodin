@@ -3,7 +3,6 @@ Correct Barrowman-Based Rocket Simulation
 Implementing equations exactly as specified in the white papers
 """
 
-import numpy as np
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 import math

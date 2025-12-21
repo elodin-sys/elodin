@@ -7,7 +7,7 @@ without requiring the full RocketPy package.
 from __future__ import annotations
 
 import math
-from typing import List, Sequence, Union
+from typing import Sequence, Union
 
 import numpy as np
 
@@ -80,15 +80,11 @@ class Vector:
     @property
     def cross_matrix(self) -> Matrix:
         """Return the skew-symmetric cross product matrix.
-        
+
         For vector v, returns matrix M such that M @ u = v x u for any vector u.
         """
         x, y, z = self._data
-        return Matrix([
-            [0, -z, y],
-            [z, 0, -x],
-            [-y, x, 0]
-        ])
+        return Matrix([[0, -z, y], [z, 0, -x], [-y, x, 0]])
 
     def norm(self) -> float:
         return float(np.linalg.norm(self._data))
@@ -116,40 +112,36 @@ class Matrix:
     @staticmethod
     def transformation(quaternion: Sequence[float]) -> Matrix:
         """Create rotation matrix from quaternion [x, y, z, w].
-        
+
         This matches RocketPy's convention where the quaternion transforms
         from body frame to world frame (inertial frame).
-        
+
         Quaternion format: [e1, e2, e3, e0] where e0 is the scalar part.
         RocketPy uses e = [e0, e1, e2, e3] internally but their API
         often takes [e1, e2, e3, e0] in the state vector.
         """
         # Extract quaternion components (state vector format: [x, y, z, w])
         e1, e2, e3, e0 = quaternion
-        
+
         # Normalize quaternion
-        norm = math.sqrt(e0*e0 + e1*e1 + e2*e2 + e3*e3)
+        norm = math.sqrt(e0 * e0 + e1 * e1 + e2 * e2 + e3 * e3)
         if norm < 1e-12:
             return Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
-        e0, e1, e2, e3 = e0/norm, e1/norm, e2/norm, e3/norm
-        
+        e0, e1, e2, e3 = e0 / norm, e1 / norm, e2 / norm, e3 / norm
+
         # Rotation matrix from quaternion (body to world)
         # Using RocketPy's exact formula from vector_matrix.py
-        a = 1 - 2*(e2*e2 + e3*e3)
-        b = 2*(e1*e2 - e0*e3)
-        c = 2*(e0*e2 + e1*e3)
-        d = 2*(e1*e2 + e0*e3)
-        e = 1 - 2*(e1*e1 + e3*e3)
-        f = 2*(e2*e3 - e0*e1)
-        g = 2*(e1*e3 - e0*e2)
-        h = 2*(e0*e1 + e2*e3)
-        i = 1 - 2*(e1*e1 + e2*e2)
-        
-        return Matrix([
-            [a, b, c],
-            [d, e, f],
-            [g, h, i]
-        ])
+        a = 1 - 2 * (e2 * e2 + e3 * e3)
+        b = 2 * (e1 * e2 - e0 * e3)
+        c = 2 * (e0 * e2 + e1 * e3)
+        d = 2 * (e1 * e2 + e0 * e3)
+        e = 1 - 2 * (e1 * e1 + e3 * e3)
+        f = 2 * (e2 * e3 - e0 * e1)
+        g = 2 * (e1 * e3 - e0 * e2)
+        h = 2 * (e0 * e1 + e2 * e3)
+        i = 1 - 2 * (e1 * e1 + e2 * e2)
+
+        return Matrix([[a, b, c], [d, e, f], [g, h, i]])
 
     @staticmethod
     def identity() -> Matrix:
@@ -222,25 +214,26 @@ if __name__ == "__main__":
     R = Matrix.transformation(q_identity)
     print("Identity quaternion rotation matrix:")
     print(R.to_array())
-    
+
     # Test 90 degree rotation about z-axis
     # q = [0, 0, sin(45°), cos(45°)] = [0, 0, 0.707, 0.707]
     angle = math.pi / 2
-    q_z90 = [0.0, 0.0, math.sin(angle/2), math.cos(angle/2)]
+    q_z90 = [0.0, 0.0, math.sin(angle / 2), math.cos(angle / 2)]
     R_z90 = Matrix.transformation(q_z90)
     print("\n90° rotation about z-axis:")
     print(R_z90.to_array())
-    
+
     # Test vector transformation
     v = Vector([1.0, 0.0, 0.0])
     v_rotated = R_z90 @ v
-    print(f"\n[1,0,0] rotated 90° about z: [{v_rotated.x:.3f}, {v_rotated.y:.3f}, {v_rotated.z:.3f}]")
-    
+    print(
+        f"\n[1,0,0] rotated 90° about z: [{v_rotated.x:.3f}, {v_rotated.y:.3f}, {v_rotated.z:.3f}]"
+    )
+
     # Test cross product
     a = Vector([1.0, 0.0, 0.0])
     b = Vector([0.0, 1.0, 0.0])
     c = a ^ b
     print(f"\n[1,0,0] x [0,1,0] = [{c.x:.3f}, {c.y:.3f}, {c.z:.3f}]")
-    
-    print("\nAll tests passed!")
 
+    print("\nAll tests passed!")

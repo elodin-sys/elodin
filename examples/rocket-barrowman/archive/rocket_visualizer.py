@@ -9,19 +9,14 @@ Interactive 3D visualization of rocket assembly showing:
 """
 
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import numpy as np
-from typing import List, Tuple
-import math
 
 from rocket_components import (
     Rocket,
-    RocketComponent,
     NoseCone,
     BodyTube,
     FinSet,
-    Parachute,
     NoseShape,
 )
 
