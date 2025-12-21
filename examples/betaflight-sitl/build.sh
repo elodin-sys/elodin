@@ -71,6 +71,19 @@ case "${1:-build}" in
             fi
         fi
         
+        # Enable SIMULATOR_GYROPID_SYNC for lockstep synchronization with Elodin
+        # This makes Betaflight block on FDM packets, allowing tight timing control
+        TARGET_H="$BETAFLIGHT_DIR/src/platform/SIMULATOR/target/SITL/target.h"
+        if grep -q "^//#define SIMULATOR_GYROPID_SYNC" "$TARGET_H"; then
+            echo "Enabling SIMULATOR_GYROPID_SYNC for lockstep mode..."
+            sed -i.bak 's|^//#define SIMULATOR_GYROPID_SYNC|#define SIMULATOR_GYROPID_SYNC|' "$TARGET_H"
+            rm -f "${TARGET_H}.bak"
+        elif grep -q "^#define SIMULATOR_GYROPID_SYNC" "$TARGET_H"; then
+            echo "SIMULATOR_GYROPID_SYNC already enabled."
+        else
+            echo "Warning: Could not find SIMULATOR_GYROPID_SYNC in target.h"
+        fi
+        
         # Build SITL target
         JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
         

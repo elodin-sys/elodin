@@ -14,12 +14,12 @@ The simulation provides:
 ```
 ┌─────────────────────┐        UDP        ┌─────────────────────┐
 │   Elodin Physics    │◄─────────────────►│   Betaflight SITL   │
-│                     │                    │                     │
-│  • Rigid Body Sim   │   Port 9003: FDM   │  • Flight Control   │
-│  • Motor Thrust     │   Port 9004: RC    │  • PID Loops        │
-│  • Sensor Output    │   Port 9002: PWM   │  • Attitude Est.    │
-│  • 3D Visualization │   Port 9001: RAW   │  • Motor Mixing     │
-└─────────────────────┘                    └─────────────────────┘
+│                     │                   │                     │
+│  • Rigid Body Sim   │   Port 9003: FDM  │  • Flight Control   │
+│  • Motor Thrust     │   Port 9004: RC   │  • PID Loops        │
+│  • Sensor Output    │   Port 9002: PWM  │  • Attitude Est.    │
+│  • 3D Visualization │   Port 9001: RAW  │  • Motor Mixing     │
+└─────────────────────┘                   └─────────────────────┘
 ```
 
 ## Quick Start
@@ -215,7 +215,175 @@ DroneConfig(
 Pre-configured drone types:
 - `create_5inch_racing_quad()` - 5" racing quadcopter
 - `create_3inch_cinewhoop()` - 3" cinewhoop
-- `create_7inch_long_range()` - 7" long range quad
+- `create_7inch_long_range()` - 7" long range quad    
+
+
+## Betaflight SITL Elodin Integration Strategy
+
+### Architecture Overview
+
+The wrapper leverages Betaflight's native `SIMULATOR_GYROPID_SYNC` mechanism.
+
+```mermaid
+sequenceDiagram
+    participant Sim as Elodin Physics
+    participant PS as post_step callback
+    participant Bridge as BetaflightBridge
+    participant BF as Betaflight SITL
+    participant DB as Elodin-DB
+
+    loop Each Physics Tick
+        Sim->>Sim: Run physics (JAX)
+        Sim->>DB: Commit world state
+        Sim->>PS: Call post_step(tick)
+        
+        PS->>DB: Read sensor data (pos, vel, quat)
+        PS->>Bridge: Build FDM packet
+        Bridge->>BF: Send FDM (UDP 9003)
+        Note over BF: GYROPID_SYNC unblocks
+        BF->>BF: Run 1 PID iteration
+        BF->>Bridge: Send motor output (UDP 9002)
+        Bridge->>PS: Return motor values
+        PS->>DB: Write motor_command (external_control)
+        PS->>Sim: Return from post_step
+    end
+```
+
+
+
+### Key Components
+
+#### 1. Betaflight Build with GYROPID_SYNC
+
+Modify [build.sh](examples/betaflight-sitl/build.sh) to enable lockstep mode:
+
+```c
+// In target.h - uncomment this line:
+#define SIMULATOR_GYROPID_SYNC
+```
+
+When enabled, Betaflight's main loop blocks on a mutex that is only released when a new FDM packet arrives. This provides synchronization without needing custom semaphores.
+
+#### 2. External Control Component for Motor Commands
+
+Update [sim.py](examples/betaflight-sitl/sim.py) to mark `MotorCommand` as `external_control`:
+
+```python
+MotorCommand = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "motor_command",
+        el.ComponentType(el.PrimitiveType.F64, (4,)),
+        metadata={
+            "element_names": "m0,m1,m2,m3",
+            "external_control": "true",  # NEW: allows external writes
+        },
+    ),
+]
+```
+
+
+
+#### 3. Synchronous Bridge Class
+
+Create a new `BetaflightSyncBridge` class in [comms.py](examples/betaflight-sitl/comms.py) that:
+
+- Sends FDM packet
+- Blocks waiting for motor response (with timeout)
+- Returns motor values for DB write
+```python
+class BetaflightSyncBridge:
+    def step(self, fdm: FDMPacket, rc: RCPacket, timeout_ms: int = 100) -> np.ndarray:
+        """
+        Perform one synchronized SITL step.
+        
+        1. Send FDM + RC packets to Betaflight
+        2. Wait for motor response (blocking)
+        3. Return motor values
+        
+        This works because SIMULATOR_GYROPID_SYNC makes Betaflight
+        block until FDM arrives, then immediately send motor output.
+        """
+```
+
+
+
+
+#### 4. Post-Step Integration
+
+Update [main.py](examples/betaflight-sitl/main.py) to use the `post_step` pattern from the SITL example:
+
+```python
+def create_sitl_step_callback(bridge: BetaflightSyncBridge, client: Impeller2):
+    """Create the post_step callback for SITL synchronization."""
+    
+    def sitl_step(tick: int):
+        # 1. Read current sensor state from DB
+        sensor_data = read_sensor_state_from_db(client)
+        
+        # 2. Build and send packets, wait for response
+        fdm = build_fdm_packet(sensor_data, tick)
+        rc = build_rc_packet(rc_state)
+        motors = bridge.step(fdm, rc)
+        
+        # 3. Write motor commands back to DB
+        write_motor_command_to_db(client, motors)
+    
+    return sitl_step
+```
+
+
+
+#### 5. Sensor Data Extraction
+
+Create helper to extract sensor data from Elodin components:
+
+```python
+def extract_sensor_data(world_pos, world_vel, inertia) -> FDMPacket:
+    """
+    Extract sensor readings from physics state.
+    
+    - Gyro: world_vel.angular (body frame angular velocity)
+    - Accel: specific_force = (forces/mass) - gravity_rotated_to_body
+    - Quaternion: world_pos.angular
+    - Position/Velocity: world_pos.linear, world_vel.linear (ENU)
+    """
+```
+
+
+
+### Data Flow Diagram
+
+```mermaid
+flowchart TB
+    subgraph Elodin [Elodin Simulation]
+        Physics[Physics Engine<br/>JAX/nox-ecs]
+        DB[(Elodin-DB)]
+        Physics -->|write state| DB
+    end
+    
+    subgraph PostStep [post_step Callback]
+        ReadSensors[Read Sensors<br/>world_pos, world_vel]
+        BuildFDM[Build FDM Packet<br/>gyro, accel, quat]
+        WriteMotors[Write motor_command<br/>external_control]
+    end
+    
+    subgraph Betaflight [Betaflight SITL]
+        UDP_RX[UDP Receive<br/>Port 9003/9004]
+        PID[PID Controller<br/>GYROPID_SYNC]
+        UDP_TX[UDP Send<br/>Port 9002]
+    end
+    
+    DB -->|sensor data| ReadSensors
+    ReadSensors --> BuildFDM
+    BuildFDM -->|FDM + RC| UDP_RX
+    UDP_RX -->|unlock| PID
+    PID -->|motor values| UDP_TX
+    UDP_TX -->|normalized motors| WriteMotors
+    WriteMotors -->|motor_command| DB
+    DB -->|next tick input| Physics
+```
+
 
 ## Troubleshooting
 

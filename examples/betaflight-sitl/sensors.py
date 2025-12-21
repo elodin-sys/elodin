@@ -239,6 +239,160 @@ def extract_sensor_data(
     }
 
 
+def build_fdm_from_components(
+    world_pos: np.ndarray,
+    world_vel: np.ndarray,
+    accel: np.ndarray,
+    gyro: np.ndarray,
+    timestamp: float,
+    gravity: float = 9.80665,
+) -> "FDMPacket":
+    """
+    Build an FDM packet directly from Elodin component data.
+    
+    This is the primary function for extracting sensor data from the simulation
+    and packaging it for Betaflight. It handles:
+    - Quaternion extraction from world_pos
+    - Velocity extraction from world_vel  
+    - ENU to NED coordinate conversion for gyro/accel
+    - Pressure calculation from altitude
+    
+    Args:
+        world_pos: Position array [qw, qx, qy, qz, x, y, z]
+        world_vel: Velocity array [wx, wy, wz, vx, vy, vz] (angular first in Elodin)
+        accel: Accelerometer [ax, ay, az] in body frame (ENU)
+        gyro: Gyroscope [wx, wy, wz] in body frame (ENU)
+        timestamp: Simulation time in seconds
+        gravity: Gravity constant (for reference)
+        
+    Returns:
+        FDMPacket ready for transmission to Betaflight
+    """
+    # Import here to avoid circular dependency
+    from comms import FDMPacket
+    
+    # Extract quaternion [w, x, y, z]
+    quat = np.array(world_pos[:4])
+    
+    # Extract position [x, y, z] (ENU)
+    position = np.array(world_pos[4:7])
+    
+    # Elodin stores world_vel as [wx, wy, wz, vx, vy, vz]
+    angular_vel = np.array(world_vel[:3])
+    linear_vel = np.array(world_vel[3:6])
+    
+    # Use provided sensor readings or compute from velocity
+    accel_enu = np.array(accel) if accel is not None else np.array([0.0, 0.0, gravity])
+    gyro_enu = np.array(gyro) if gyro is not None else angular_vel
+    
+    # Convert from Elodin ENU body frame to Betaflight NED body frame
+    # ENU to NED: x_ned = y_enu, y_ned = x_enu, z_ned = -z_enu
+    accel_ned = np.array([
+        accel_enu[1],   # ENU-Y -> NED-X (forward)
+        accel_enu[0],   # ENU-X -> NED-Y (right)
+        -accel_enu[2],  # ENU-Z -> NED-Z (down, inverted)
+    ])
+    
+    gyro_ned = np.array([
+        gyro_enu[1],    # pitch rate
+        gyro_enu[0],    # roll rate
+        -gyro_enu[2],   # yaw rate (inverted)
+    ])
+    
+    # Calculate pressure from altitude (simplified atmosphere model)
+    altitude = position[2]
+    pressure = 101325.0 - 12.0 * altitude
+    
+    return FDMPacket(
+        timestamp=timestamp,
+        imu_angular_velocity_rpy=gyro_ned,
+        imu_linear_acceleration_xyz=accel_ned,
+        imu_orientation_quat=quat,
+        velocity_xyz=linear_vel,  # ENU, which Betaflight expects for GPS
+        position_xyz=position,    # ENU
+        pressure=pressure,
+    )
+
+
+def extract_from_history(df, tick: int = -1) -> dict:
+    """
+    Extract sensor data from an Elodin history DataFrame.
+    
+    This is useful for post-processing or when accessing data via exec.history().
+    
+    Args:
+        df: Polars DataFrame from exec.history()
+        tick: Which tick to extract (-1 for latest)
+        
+    Returns:
+        Dictionary with component arrays
+    """
+    import polars as pl
+    
+    row = df[tick]
+    
+    result = {}
+    
+    # Try to extract common components
+    for col in ["drone.world_pos", "drone.world_vel", "drone.accel", 
+                "drone.gyro", "drone.baro", "drone.motor_command"]:
+        if col in df.columns:
+            result[col.split(".")[-1]] = np.array(row[col].to_list())
+    
+    return result
+
+
+class SensorDataBuffer:
+    """
+    Buffer for accumulating sensor data during simulation.
+    
+    This class provides a convenient way to store and retrieve sensor data
+    for use in the post_step callback. It's updated during simulation and
+    read by the Betaflight bridge.
+    """
+    
+    def __init__(self):
+        self.world_pos = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        self.world_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        self.accel = np.array([0.0, 0.0, 9.80665])  # 1g upward at rest
+        self.gyro = np.array([0.0, 0.0, 0.0])
+        self.baro = np.array([0.0])
+        self.timestamp = 0.0
+    
+    def update(
+        self,
+        world_pos: np.ndarray = None,
+        world_vel: np.ndarray = None,
+        accel: np.ndarray = None,
+        gyro: np.ndarray = None,
+        baro: np.ndarray = None,
+        timestamp: float = None,
+    ):
+        """Update sensor buffer with new values."""
+        if world_pos is not None:
+            self.world_pos = np.array(world_pos)
+        if world_vel is not None:
+            self.world_vel = np.array(world_vel)
+        if accel is not None:
+            self.accel = np.array(accel)
+        if gyro is not None:
+            self.gyro = np.array(gyro)
+        if baro is not None:
+            self.baro = np.array(baro)
+        if timestamp is not None:
+            self.timestamp = timestamp
+    
+    def build_fdm(self) -> "FDMPacket":
+        """Build FDM packet from current buffer state."""
+        return build_fdm_from_components(
+            self.world_pos,
+            self.world_vel,
+            self.accel,
+            self.gyro,
+            self.timestamp,
+        )
+
+
 if __name__ == "__main__":
     # Test sensor computation
     from config import DEFAULT_CONFIG

@@ -32,12 +32,17 @@ from config import DroneConfig
 # --- Component Type Definitions ---
 
 # Motor commands from Betaflight (normalized 0-1)
+# Marked as external_control so Betaflight can write to it via Elodin-DB
 MotorCommand = ty.Annotated[
     jax.Array,
     el.Component(
         "motor_command",
         el.ComponentType(el.PrimitiveType.F64, (4,)),
-        metadata={"element_names": "m0,m1,m2,m3", "priority": 100},
+        metadata={
+            "element_names": "m0,m1,m2,m3",
+            "priority": 100,
+            "external_control": "true",  # Allows external writes from Betaflight bridge
+        },
     ),
 ]
 

@@ -561,6 +561,263 @@ class BetaflightBridge:
         return False
 
 
+class BetaflightSyncBridge:
+    """
+    Synchronous Betaflight SITL bridge for lockstep simulation.
+    
+    This bridge is designed for use with Elodin's post_step callback and
+    Betaflight's SIMULATOR_GYROPID_SYNC mode. It provides blocking step()
+    calls that:
+    1. Send FDM + RC packets to Betaflight
+    2. Wait for motor response (blocking with timeout)
+    3. Return motor values
+    
+    This enables deterministic, faster-than-realtime simulation where each
+    Elodin physics tick is tightly synchronized with one Betaflight PID iteration.
+    
+    Usage:
+        bridge = BetaflightSyncBridge()
+        bridge.start()
+        
+        # In post_step callback:
+        motors = bridge.step(fdm_packet, rc_packet)
+        
+        bridge.stop()
+    """
+    
+    def __init__(
+        self,
+        host: str = DEFAULT_HOST,
+        state_port: int = PORT_STATE,
+        rc_port: int = PORT_RC,
+        pwm_port: int = PORT_PWM,
+        timeout_ms: int = 100,
+    ):
+        """
+        Initialize the synchronous Betaflight bridge.
+        
+        Args:
+            host: IP address of Betaflight SITL (default localhost)
+            state_port: Port for FDM packets (default 9003)
+            rc_port: Port for RC packets (default 9004)
+            pwm_port: Port to receive normalized motor outputs (default 9002)
+            timeout_ms: Timeout for motor response in milliseconds
+        """
+        self.host = host
+        self.state_port = state_port
+        self.rc_port = rc_port
+        self.pwm_port = pwm_port
+        self.timeout_ms = timeout_ms
+        
+        # Sockets
+        self._state_socket: Optional[socket.socket] = None
+        self._rc_socket: Optional[socket.socket] = None
+        self._pwm_socket: Optional[socket.socket] = None
+        
+        # State
+        self._started = False
+        self._step_count = 0
+        self._last_motors = np.zeros(4)
+    
+    def start(self) -> None:
+        """Start the bridge and prepare sockets."""
+        if self._started:
+            return
+        
+        # Create UDP sockets for sending
+        self._state_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._rc_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        
+        # Create and bind receiving socket with timeout
+        self._pwm_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._pwm_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._pwm_socket.bind(("0.0.0.0", self.pwm_port))
+        self._pwm_socket.settimeout(self.timeout_ms / 1000.0)
+        
+        self._started = True
+        self._step_count = 0
+        
+        print(f"[BetaflightSyncBridge] Started in lockstep mode")
+        print(f"  FDM -> {self.host}:{self.state_port}")
+        print(f"  RC  -> {self.host}:{self.rc_port}")
+        print(f"  PWM <- 0.0.0.0:{self.pwm_port} (timeout={self.timeout_ms}ms)")
+    
+    def stop(self) -> None:
+        """Stop the bridge and close sockets."""
+        if not self._started:
+            return
+        
+        # Close sockets
+        for sock in [self._state_socket, self._rc_socket, self._pwm_socket]:
+            if sock:
+                sock.close()
+        
+        self._state_socket = None
+        self._rc_socket = None
+        self._pwm_socket = None
+        self._started = False
+        
+        print(f"[BetaflightSyncBridge] Stopped after {self._step_count} steps")
+    
+    def step(
+        self,
+        fdm: FDMPacket,
+        rc: RCPacket,
+        timeout_ms: Optional[int] = None,
+    ) -> np.ndarray:
+        """
+        Perform one synchronized SITL step.
+        
+        This is the core synchronization method. When Betaflight is built with
+        SIMULATOR_GYROPID_SYNC enabled, it blocks its main loop until an FDM
+        packet arrives. After processing, it immediately sends motor outputs.
+        
+        This method:
+        1. Sends FDM packet (sensor data)
+        2. Sends RC packet (control inputs)
+        3. Waits for motor response (blocking with timeout)
+        4. Returns normalized motor values [0.0, 1.0]
+        
+        Args:
+            fdm: FDM packet with sensor data
+            rc: RC packet with control inputs
+            timeout_ms: Override default timeout (optional)
+            
+        Returns:
+            Array of 4 normalized motor values [0.0, 1.0]
+            
+        Raises:
+            TimeoutError: If no motor response within timeout
+            RuntimeError: If bridge not started
+        """
+        if not self._started:
+            raise RuntimeError("Bridge not started - call start() first")
+        
+        # Send FDM packet (this unblocks Betaflight's GYROPID_SYNC)
+        fdm_data = fdm.pack()
+        self._state_socket.sendto(fdm_data, (self.host, self.state_port))
+        
+        # Send RC packet
+        rc_data = rc.pack()
+        self._rc_socket.sendto(rc_data, (self.host, self.rc_port))
+        
+        # Wait for motor response (blocking)
+        timeout = (timeout_ms or self.timeout_ms) / 1000.0
+        self._pwm_socket.settimeout(timeout)
+        
+        try:
+            data, addr = self._pwm_socket.recvfrom(ServoPacket.SIZE)
+            packet = ServoPacket.from_bytes(data)
+            self._last_motors = packet.motor_speed.copy()
+            self._step_count += 1
+            return self._last_motors
+            
+        except socket.timeout:
+            # Return last known motors on timeout (first few steps may timeout
+            # before Betaflight is fully initialized)
+            if self._step_count == 0:
+                # During initialization, just return zeros
+                return np.zeros(4)
+            raise TimeoutError(
+                f"No motor response from Betaflight within {timeout*1000:.0f}ms "
+                f"(step {self._step_count})"
+            )
+    
+    def step_with_state(
+        self,
+        timestamp: float,
+        angular_velocity: np.ndarray,
+        linear_acceleration: np.ndarray,
+        orientation_quat: np.ndarray,
+        velocity: np.ndarray,
+        position: np.ndarray,
+        pressure: float,
+        throttle: int,
+        roll: int,
+        pitch: int,
+        yaw: int,
+        aux: Optional[list] = None,
+    ) -> np.ndarray:
+        """
+        Convenience method to step with raw state values.
+        
+        Handles ENU to NED coordinate conversion internally.
+        
+        Args:
+            timestamp: Simulation time in seconds
+            angular_velocity: Body-frame angular velocity [x, y, z] rad/s (ENU)
+            linear_acceleration: Body-frame acceleration [x, y, z] m/s² (ENU)
+            orientation_quat: Quaternion [w, x, y, z]
+            velocity: World-frame velocity [x, y, z] m/s (ENU)
+            position: World-frame position [x, y, z] meters (ENU)
+            pressure: Barometric pressure in Pascals
+            throttle: Throttle PWM (1000-2000)
+            roll: Roll PWM (1000-2000, center=1500)
+            pitch: Pitch PWM (1000-2000, center=1500)
+            yaw: Yaw PWM (1000-2000, center=1500)
+            aux: List of auxiliary channel values
+            
+        Returns:
+            Array of 4 normalized motor values [0.0, 1.0]
+        """
+        # Convert from Elodin ENU body frame to Betaflight NED body frame
+        accel_ned = np.array([
+            linear_acceleration[1],   # ENU-Y -> NED-X
+            linear_acceleration[0],   # ENU-X -> NED-Y
+            -linear_acceleration[2],  # ENU-Z -> NED-Z (inverted)
+        ])
+        
+        gyro_ned = np.array([
+            angular_velocity[1],   # pitch rate
+            angular_velocity[0],   # roll rate
+            -angular_velocity[2],  # yaw rate (inverted)
+        ])
+        
+        fdm = FDMPacket(
+            timestamp=timestamp,
+            imu_angular_velocity_rpy=gyro_ned,
+            imu_linear_acceleration_xyz=accel_ned,
+            imu_orientation_quat=orientation_quat,
+            velocity_xyz=velocity,
+            position_xyz=position,
+            pressure=pressure,
+        )
+        
+        # Build RC packet
+        channels = np.full(MAX_RC_CHANNELS, 1500, dtype=np.uint16)
+        channels[0] = roll
+        channels[1] = pitch
+        channels[2] = throttle
+        channels[3] = yaw
+        if aux:
+            for i, val in enumerate(aux[:MAX_RC_CHANNELS - 4]):
+                channels[4 + i] = val
+        
+        rc = RCPacket(timestamp=timestamp, channels=channels)
+        
+        return self.step(fdm, rc)
+    
+    @property
+    def step_count(self) -> int:
+        """Number of successful steps completed."""
+        return self._step_count
+    
+    @property
+    def last_motors(self) -> np.ndarray:
+        """Last received motor values."""
+        return self._last_motors.copy()
+    
+    def __enter__(self):
+        """Context manager entry."""
+        self.start()
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit."""
+        self.stop()
+        return False
+
+
 # Betaflight motor remapping for Quad-X configuration
 # Betaflight motor order (looking from above, front is top):
 #   1(FR)  2(BR)

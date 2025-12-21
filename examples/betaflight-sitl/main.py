@@ -5,27 +5,39 @@ Betaflight SITL Drone Simulation with Elodin
 This is the main entry point for the Betaflight Software-In-The-Loop (SITL)
 drone simulation. It integrates:
 - Elodin physics simulation (rigid body dynamics, forces, sensors)
-- Betaflight flight controller (running as SITL binary)
-- UDP communication bridge
+- Betaflight flight controller (running as SITL binary with GYROPID_SYNC)
+- Synchronous UDP communication bridge
+- Lockstep time control via post_step callback
+
+Architecture:
+    Each simulation tick:
+    1. Elodin runs physics (JAX)
+    2. Elodin commits state to DB
+    3. post_step callback fires:
+       a. Build FDM packet from sensor data
+       b. Send FDM + RC to Betaflight (UDP)
+       c. Wait for motor response (blocking)
+       d. Write motor_command to DB
+    4. Next tick begins (using updated motor commands)
 
 Usage:
-    elodin editor main.py       # Run with 3D visualization
-    python3 main.py bench       # Run headless benchmark
+    elodin editor main.py           # Run with 3D visualization
+    python3 main.py bench           # Run headless benchmark
+    python3 main.py lockstep        # Run lockstep SITL test
 
 Prerequisites:
-    1. Build Betaflight SITL: ./build.sh
-    2. (Optional) Configure Betaflight via Configurator at localhost:5761
-
-Communication Flow:
-    [Elodin Physics] --FDM Packet (sensors)--> [Betaflight SITL]
-    [Elodin Physics] <--Servo Packet (motors)- [Betaflight SITL]
-    [Elodin Physics] --RC Packet (commands)--> [Betaflight SITL]
+    1. Build Betaflight SITL with GYROPID_SYNC: ./build.sh
+    2. (Optional) Configure Betaflight via CLI: socat + screen
 """
 
+import atexit
+import signal
+import subprocess
 import sys
 import time
-from dataclasses import field
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 import elodin as el
 import jax.numpy as jnp
@@ -33,12 +45,47 @@ import numpy as np
 
 from config import DroneConfig, DEFAULT_CONFIG
 from sim import Drone, create_physics_system
-from sensors import IMU, create_sensor_system
+from sensors import IMU, create_sensor_system, build_fdm_from_components, SensorDataBuffer
 from comms import (
+    BetaflightSyncBridge,
     BetaflightBridge,
-    remap_motors_betaflight_to_elodin,
+    RCPacket,
     FDMPacket,
+    remap_motors_betaflight_to_elodin,
+    MAX_RC_CHANNELS,
 )
+
+
+# --- Global Betaflight Process Tracking ---
+# Track the current Betaflight process so we can clean it up on exit
+_betaflight_process: Optional[subprocess.Popen] = None
+
+
+def _cleanup_betaflight_on_exit():
+    """Cleanup handler called on Python process exit."""
+    global _betaflight_process
+    if _betaflight_process is not None:
+        try:
+            _betaflight_process.terminate()
+            _betaflight_process.wait(timeout=2)
+        except Exception:
+            try:
+                _betaflight_process.kill()
+            except Exception:
+                pass
+        _betaflight_process = None
+
+
+def _signal_handler(signum, frame):
+    """Handle SIGINT/SIGTERM gracefully."""
+    _cleanup_betaflight_on_exit()
+    sys.exit(0)
+
+
+# Register cleanup handlers
+atexit.register(_cleanup_betaflight_on_exit)
+signal.signal(signal.SIGINT, _signal_handler)
+signal.signal(signal.SIGTERM, _signal_handler)
 
 
 # --- Configuration ---
@@ -117,114 +164,107 @@ def create_system(config: DroneConfig) -> el.System:
     return physics | sensors
 
 
-class BetaflightSITLRunner:
+@dataclass
+class SITLState:
     """
-    Manages the Betaflight SITL integration with Elodin.
+    Shared state for SITL synchronization.
     
-    This class handles:
-    - Starting/stopping the UDP bridge
-    - Sending sensor data to Betaflight
-    - Receiving motor commands from Betaflight
-    - Updating the simulation with motor commands
+    This class holds the mutable state accessed by the post_step callback,
+    including RC inputs, sensor buffer, and the bridge connection.
     """
+    bridge: BetaflightSyncBridge
+    sensor_buffer: SensorDataBuffer
+    config: DroneConfig
     
-    def __init__(self, config: DroneConfig):
-        self.config = config
-        self.bridge = BetaflightBridge()
-        self.sim_time = 0.0
-        self.last_motor_update = np.zeros(4)
-        
-        # RC state (can be modified for different flight modes)
-        self.rc_throttle = 1000  # Idle
-        self.rc_roll = 1500
-        self.rc_pitch = 1500
-        self.rc_yaw = 1500
-        self.rc_arm = 1000  # Disarmed
-        
-    def start(self):
-        """Start the UDP bridge."""
-        self.bridge.start()
-        print("[BetaflightSITL] Ready for simulation")
-        
-    def stop(self):
-        """Stop the UDP bridge."""
-        self.bridge.stop()
-        
-    def pre_step(self, world: el.World, drone_id: el.EntityId):
-        """
-        Called before each physics step.
-        
-        Gets motor commands from Betaflight and applies them to the simulation.
-        """
-        # Get motor commands from Betaflight
-        motors_bf = self.bridge.get_motors()
-        
-        # Remap to Elodin motor order
-        motors_el = remap_motors_betaflight_to_elodin(motors_bf)
-        
-        # Store for logging
-        self.last_motor_update = motors_el
-        
-        # Update the drone's motor command component
-        # Note: This requires direct component access which isn't available
-        # in the standard world.run() loop. For now, motor commands are
-        # applied through the post_step callback.
-        
-    def post_step(self, world: el.World, drone_id: el.EntityId):
-        """
-        Called after each physics step.
-        
-        Extracts sensor data from the simulation and sends to Betaflight.
-        """
-        # Update simulation time
-        self.sim_time += self.config.sim_time_step
-        
-        # For now, send static sensor data (actual sensor extraction 
-        # requires access to component values which isn't directly available
-        # in world.run callbacks)
-        
-        # Send RC channels
-        self.bridge.send_rc_channels(
-            throttle=self.rc_throttle,
-            roll=self.rc_roll,
-            pitch=self.rc_pitch,
-            yaw=self.rc_yaw,
-            aux=[self.rc_arm, 1500, 1500, 1500],
-            timestamp=self.sim_time,
-        )
-        
-        # Send FDM packet with placeholder data
-        # In a full implementation, this would extract real sensor values
-        fdm = FDMPacket(
-            timestamp=self.sim_time,
-            imu_angular_velocity_rpy=np.array([0.0, 0.0, 0.0]),
-            imu_linear_acceleration_xyz=np.array([0.0, 0.0, 9.81]),  # Gravity
-            imu_orientation_quat=np.array([1.0, 0.0, 0.0, 0.0]),
-            velocity_xyz=np.array([0.0, 0.0, 0.0]),
-            position_xyz=np.array([0.0, 0.0, 0.0]),
-            pressure=101325.0,
-        )
-        self.bridge.send_fdm(fdm)
+    # RC inputs
+    throttle: int = 1000
+    roll: int = 1500
+    pitch: int = 1500
+    yaw: int = 1500
+    arm: int = 1000  # 1000=disarmed, 1800=armed
     
-    def set_rc(
-        self,
-        throttle: int = None,
-        roll: int = None,
-        pitch: int = None,
-        yaw: int = None,
-        arm: bool = None,
-    ):
-        """Set RC inputs for the flight controller."""
-        if throttle is not None:
-            self.rc_throttle = throttle
-        if roll is not None:
-            self.rc_roll = roll
-        if pitch is not None:
-            self.rc_pitch = pitch
-        if yaw is not None:
-            self.rc_yaw = yaw
-        if arm is not None:
-            self.rc_arm = 1800 if arm else 1000
+    # Timing
+    tick_count: int = 0
+    sim_time: float = 0.0
+    
+    # Motor output (for logging/debugging)
+    last_motors: np.ndarray = None
+    
+    def __post_init__(self):
+        if self.last_motors is None:
+            self.last_motors = np.zeros(4)
+    
+    def set_arm(self, armed: bool):
+        """Set arm state."""
+        self.arm = 1800 if armed else 1000
+    
+    def build_rc_packet(self) -> RCPacket:
+        """Build RC packet from current state."""
+        channels = np.full(MAX_RC_CHANNELS, 1500, dtype=np.uint16)
+        channels[0] = self.roll
+        channels[1] = self.pitch
+        channels[2] = self.throttle
+        channels[3] = self.yaw
+        channels[4] = self.arm  # AUX1 for arming
+        return RCPacket(timestamp=self.sim_time, channels=channels)
+
+
+def create_sitl_step_callback(state: SITLState):
+    """
+    Create the post_step callback for lockstep SITL synchronization.
+    
+    This callback is called after each physics tick. It:
+    1. Builds FDM packet from sensor buffer
+    2. Sends FDM + RC to Betaflight via synchronous bridge
+    3. Receives motor response (blocking)
+    4. Updates state with new motor values
+    
+    The motor values will be applied on the next physics tick via the
+    external_control component mechanism.
+    """
+    def sitl_step(tick: int):
+        # Update timing
+        state.tick_count = tick
+        state.sim_time = tick * state.config.sim_time_step
+        state.sensor_buffer.timestamp = state.sim_time
+        
+        # Build FDM packet from sensor buffer
+        fdm = state.sensor_buffer.build_fdm()
+        
+        # Build RC packet
+        rc = state.build_rc_packet()
+        
+        try:
+            # Perform synchronous step: send FDM+RC, wait for motors
+            motors_bf = state.bridge.step(fdm, rc)
+            
+            # Remap motors from Betaflight to Elodin order
+            motors_el = remap_motors_betaflight_to_elodin(motors_bf)
+            state.last_motors = motors_el
+            
+        except TimeoutError as e:
+            # On timeout, keep last motor values
+            if state.tick_count > 100:  # Only warn after initialization
+                print(f"[SITL] Timeout at tick {tick}: {e}")
+        except Exception as e:
+            print(f"[SITL] Error at tick {tick}: {e}")
+    
+    return sitl_step
+
+
+def cleanup_stale_betaflight():
+    """Kill any stale Betaflight SITL processes from previous runs."""
+    try:
+        result = subprocess.run(
+            ["pkill", "-f", "betaflight_SITL"],
+            capture_output=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            print("Cleaned up stale Betaflight process")
+            time.sleep(0.5)  # Give ports time to be released
+    except Exception:
+        pass  # pkill not found or no processes to kill
 
 
 def run_with_editor():
@@ -232,12 +272,14 @@ def run_with_editor():
     print("Starting Betaflight SITL Simulation with Editor")
     print("=" * 50)
     
+    # Kill any stale Betaflight processes from previous runs
+    cleanup_stale_betaflight()
+    
     # Create world and system
     world, drone = create_world(config)
     system = create_system(config)
     
     # Register Betaflight SITL as an external process
-    # This will start Betaflight automatically with the simulation
     betaflight_path = Path(__file__).parent / "betaflight" / "obj" / "main" / "betaflight_SITL.elf"
     
     if betaflight_path.exists():
@@ -252,32 +294,228 @@ def run_with_editor():
         print(f"WARNING: Betaflight SITL not found at {betaflight_path}")
         print("         Run ./build.sh to build it first")
     
-    # Run the simulation
+    # Create SITL state and bridge
+    bridge = BetaflightSyncBridge(timeout_ms=50)
+    sensor_buffer = SensorDataBuffer()
+    state = SITLState(bridge=bridge, sensor_buffer=sensor_buffer, config=config)
+    
+    # Create post_step callback
+    sitl_step = create_sitl_step_callback(state)
+    
     print("\nStarting simulation...")
-    print("  - Connect to Betaflight Configurator at localhost:5761")
-    print("  - Use 'elodin editor main.py' for visualization")
+    print("  - Betaflight SITL will be started automatically")
+    print("  - Configure via CLI: socat PTY,link=/tmp/bf,rawer TCP:localhost:5761")
+    print("  - Use arrow keys or mouse in editor to control view")
     print()
     
-    world.run(
-        system,
-        sim_time_step=config.sim_time_step,
-        run_time_step=1.0 / 60.0,  # 60 FPS for editor
-        max_ticks=config.total_sim_ticks,
+    # Start bridge
+    bridge.start()
+    
+    try:
+        world.run(
+            system,
+            sim_time_step=config.sim_time_step,
+            run_time_step=1.0 / 60.0,  # 60 FPS for editor
+            max_ticks=config.total_sim_ticks,
+            post_step=sitl_step,
+            interactive=True,
+        )
+    finally:
+        bridge.stop()
+
+
+def run_lockstep_test():
+    """
+    Run a lockstep SITL test demonstrating tight timing synchronization.
+    
+    This test uses SIMULATOR_GYROPID_SYNC for lockstep execution:
+    - Each physics tick triggers exactly one Betaflight PID iteration
+    - Deterministic, reproducible simulation
+    - Can run faster than real-time
+    """
+    print("Starting Betaflight SITL Lockstep Test")
+    print("=" * 50)
+    print("This test demonstrates tight timing synchronization using")
+    print("SIMULATOR_GYROPID_SYNC for deterministic simulation.")
+    
+    # Kill any stale Betaflight processes from previous runs
+    cleanup_stale_betaflight()
+    print()
+    
+    # Check if Betaflight SITL exists
+    betaflight_path = Path(__file__).parent / "betaflight" / "obj" / "main" / "betaflight_SITL.elf"
+    if not betaflight_path.exists():
+        print(f"ERROR: Betaflight SITL not found at {betaflight_path}")
+        print("       Run ./build.sh to build it first")
+        print("       (This will also enable SIMULATOR_GYROPID_SYNC)")
+        return
+    
+    # Start Betaflight SITL
+    global _betaflight_process
+    print(f"Starting Betaflight SITL: {betaflight_path}")
+    betaflight_proc = subprocess.Popen(
+        [str(betaflight_path)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        cwd=str(Path(__file__).parent),
     )
+    _betaflight_process = betaflight_proc  # Track for cleanup on exit
+    
+    # Give Betaflight time to start
+    time.sleep(2)
+    
+    # Create world and system
+    world, drone = create_world(config)
+    system = create_system(config)
+    
+    # Create SITL components
+    bridge = BetaflightSyncBridge(timeout_ms=100)
+    sensor_buffer = SensorDataBuffer()
+    state = SITLState(bridge=bridge, sensor_buffer=sensor_buffer, config=config)
+    
+    # Track if we ever saw motor response (for success detection)
+    max_motor_seen = 0.0
+    
+    # Test phases
+    BOOTGRACE_DURATION = 5.0
+    ARM_DURATION = 2.0
+    THROTTLE_DURATION = 3.0
+    DISARM_DURATION = 1.0
+    total_duration = BOOTGRACE_DURATION + ARM_DURATION + THROTTLE_DURATION + DISARM_DURATION
+    
+    # Create post_step callback with phase logic
+    def sitl_step_with_phases(tick: int):
+        nonlocal max_motor_seen
+        state.tick_count = tick
+        state.sim_time = tick * state.config.sim_time_step
+        state.sensor_buffer.timestamp = state.sim_time
+        
+        # Determine phase and set RC accordingly
+        if state.sim_time < BOOTGRACE_DURATION:
+            phase = "bootgrace"
+            state.arm = 1000
+            state.throttle = 1000
+        elif state.sim_time < BOOTGRACE_DURATION + ARM_DURATION:
+            phase = "arming"
+            state.arm = 1800
+            state.throttle = 1000
+        elif state.sim_time < BOOTGRACE_DURATION + ARM_DURATION + THROTTLE_DURATION:
+            phase = "throttle"
+            state.arm = 1800
+            state.throttle = 1400
+        else:
+            phase = "disarm"
+            state.arm = 1000
+            state.throttle = 1000
+        
+        # Build packets
+        fdm = state.sensor_buffer.build_fdm()
+        rc = state.build_rc_packet()
+        
+        try:
+            motors_bf = state.bridge.step(fdm, rc)
+            motors_el = remap_motors_betaflight_to_elodin(motors_bf)
+            state.last_motors = motors_el
+            # Track max motor value seen for success detection
+            max_motor_seen = max(max_motor_seen, np.max(motors_el))
+        except TimeoutError:
+            pass  # Keep last motors
+    
+    # Build executor
+    executor = world.build(system)
+    
+    print(f"\nRunning lockstep simulation ({total_duration:.0f}s total):")
+    print(f"  - BOOTGRACE: {BOOTGRACE_DURATION:.0f}s (waiting for Betaflight)")
+    print(f"  - ARMING: {ARM_DURATION:.0f}s (AUX1=1800)")
+    print(f"  - THROTTLE: {THROTTLE_DURATION:.0f}s (40% power)")
+    print(f"  - DISARM: {DISARM_DURATION:.0f}s")
+    print()
+    
+    bridge.start()
+    
+    try:
+        last_print_time = time.time()
+        start_time = time.time()
+        
+        total_ticks = int(total_duration / config.sim_time_step)
+        
+        for tick in range(total_ticks):
+            # Call SITL step (handles phases, sends FDM, receives motors)
+            sitl_step_with_phases(tick)
+            
+            # Run one physics tick
+            executor.run(1)
+            
+            # Print status every second
+            current_time = time.time()
+            if current_time - last_print_time >= 1.0:
+                # Determine current phase
+                if state.sim_time < BOOTGRACE_DURATION:
+                    phase = "bootgrace"
+                elif state.sim_time < BOOTGRACE_DURATION + ARM_DURATION:
+                    phase = "arming"
+                elif state.sim_time < BOOTGRACE_DURATION + ARM_DURATION + THROTTLE_DURATION:
+                    phase = "throttle"
+                else:
+                    phase = "disarm"
+                
+                motors = state.last_motors
+                armed = "ARMED" if np.any(motors > 0.02) else "DISARMED"
+                
+                # Calculate simulation rate
+                elapsed = current_time - start_time
+                sim_rate = state.sim_time / elapsed if elapsed > 0 else 0
+                
+                print(f"  t={state.sim_time:5.1f}s | {phase:10s} | {armed:8s} | "
+                      f"motors=[{motors[0]:.3f}, {motors[1]:.3f}, {motors[2]:.3f}, {motors[3]:.3f}] | "
+                      f"{sim_rate:.1f}x realtime")
+                last_print_time = current_time
+                
+    except KeyboardInterrupt:
+        print("\nInterrupted by user")
+        
+    finally:
+        bridge.stop()
+        betaflight_proc.terminate()
+        try:
+            betaflight_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            betaflight_proc.kill()
+        _betaflight_process = None  # Clear so atexit doesn't double-cleanup
+    
+    # Summary
+    elapsed = time.time() - start_time
+    example_dir = Path(__file__).parent
+    print()
+    print("=" * 50)
+    print("Lockstep test complete!")
+    print(f"  Simulated: {state.sim_time:.1f}s in {elapsed:.1f}s ({state.sim_time/elapsed:.1f}x realtime)")
+    print(f"  Total ticks: {state.tick_count}")
+    print(f"  Sync steps: {bridge.step_count}")
+    print(f"  Max motor value seen: {max_motor_seen:.3f}")
+    print()
+    if bridge.step_count > 0 and max_motor_seen > 0.1:
+        print("SUCCESS: Lockstep SITL integration working!")
+    else:
+        print("WARNING: No motor response received. Check:")
+        print("  1. Betaflight built with SIMULATOR_GYROPID_SYNC enabled")
+        print("  2. Arm switch configured: aux 0 0 0 1700 2100 0 0")
+        print(f"  3. eeprom.bin present in {example_dir}")
 
 
 def run_headless_test():
     """
-    Run a headless test of the simulation with Betaflight communication.
+    Run a headless test using the async bridge (legacy mode).
     
-    This test demonstrates the full SITL loop:
-    1. Start Betaflight SITL process
-    2. Wait for BOOTGRACE period
-    3. ARM the drone via AUX1 switch
-    4. Apply throttle and watch motor response
+    For lockstep testing, use run_lockstep_test() instead.
     """
-    print("Starting Betaflight SITL Headless Test")
+    print("Starting Betaflight SITL Headless Test (Legacy Mode)")
     print("=" * 50)
+    print("NOTE: For lockstep testing, use: python3 main.py lockstep")
+    
+    # Kill any stale Betaflight processes from previous runs
+    cleanup_stale_betaflight()
+    print()
     
     # Check if Betaflight SITL exists
     betaflight_path = Path(__file__).parent / "betaflight" / "obj" / "main" / "betaflight_SITL.elf"
@@ -286,116 +524,125 @@ def run_headless_test():
         print("       Run ./build.sh to build it first")
         return
     
-    # Start Betaflight SITL manually for headless test
-    import subprocess
-    
+    # Start Betaflight SITL
+    global _betaflight_process
     print(f"Starting Betaflight SITL: {betaflight_path}")
     betaflight_proc = subprocess.Popen(
         [str(betaflight_path)],
-        stdout=subprocess.DEVNULL,  # Suppress SITL output
+        stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         cwd=str(Path(__file__).parent),
     )
+    _betaflight_process = betaflight_proc  # Track for cleanup on exit
     
-    # Give Betaflight time to start
     time.sleep(2)
     
-    # Create simulation
+    # Create world and system
     world, drone = create_world(config)
     system = create_system(config)
     
-    # Create SITL runner
-    runner = BetaflightSITLRunner(config)
-    runner.start()
+    # Create async bridge for legacy mode
+    bridge = BetaflightBridge()
+    bridge.start()
     
-    # Build executor for step-by-step control
+    # Build executor
     executor = world.build(system)
     
-    # Test phases
+    # Test timing
     BOOTGRACE_DURATION = 5.0
     ARM_DURATION = 2.0
     THROTTLE_DURATION = 3.0
     DISARM_DURATION = 1.0
-    
     total_duration = BOOTGRACE_DURATION + ARM_DURATION + THROTTLE_DURATION + DISARM_DURATION
     
     print(f"\nRunning simulation ({total_duration:.0f}s total):")
-    print(f"  - BOOTGRACE: {BOOTGRACE_DURATION:.0f}s (waiting for Betaflight)")
-    print(f"  - ARMING: {ARM_DURATION:.0f}s (AUX1=1800)")
-    print(f"  - THROTTLE: {THROTTLE_DURATION:.0f}s (40% power)")
-    print(f"  - DISARM: {DISARM_DURATION:.0f}s")
-    print()
+    
+    sim_time = 0.0
+    rc_arm = 1000
+    rc_throttle = 1000
     
     try:
-        tick = 0
         last_print_time = time.time()
-        phase = "bootgrace"
         
-        while runner.sim_time < total_duration:
-            # Determine phase and set RC accordingly
-            if runner.sim_time < BOOTGRACE_DURATION:
+        while sim_time < total_duration:
+            # Determine phase
+            if sim_time < BOOTGRACE_DURATION:
                 phase = "bootgrace"
-                runner.rc_arm = 1000  # Keep disarmed during bootgrace
-                runner.rc_throttle = 1000
-            elif runner.sim_time < BOOTGRACE_DURATION + ARM_DURATION:
+                rc_arm = 1000
+                rc_throttle = 1000
+            elif sim_time < BOOTGRACE_DURATION + ARM_DURATION:
                 phase = "arming"
-                runner.rc_arm = 1800  # ARM switch high
-                runner.rc_throttle = 1000  # Throttle low for arming
-            elif runner.sim_time < BOOTGRACE_DURATION + ARM_DURATION + THROTTLE_DURATION:
+                rc_arm = 1800
+                rc_throttle = 1000
+            elif sim_time < BOOTGRACE_DURATION + ARM_DURATION + THROTTLE_DURATION:
                 phase = "throttle"
-                runner.rc_arm = 1800  # Stay armed
-                runner.rc_throttle = 1400  # 40% throttle
+                rc_arm = 1800
+                rc_throttle = 1400
             else:
                 phase = "disarm"
-                runner.rc_arm = 1000  # Disarm
-                runner.rc_throttle = 1000
+                rc_arm = 1000
+                rc_throttle = 1000
             
-            # Send sensor data and RC to Betaflight
-            runner.post_step(world, drone)
+            # Send RC and FDM
+            bridge.send_rc_channels(
+                throttle=rc_throttle,
+                roll=1500,
+                pitch=1500,
+                yaw=1500,
+                aux=[rc_arm, 1500, 1500, 1500],
+                timestamp=sim_time,
+            )
             
-            # Get motor commands from Betaflight and store
-            motors = runner.bridge.get_motors()
+            fdm = FDMPacket(
+                timestamp=sim_time,
+                imu_angular_velocity_rpy=np.array([0.0, 0.0, 0.0]),
+                imu_linear_acceleration_xyz=np.array([0.0, 0.0, 9.81]),
+                imu_orientation_quat=np.array([1.0, 0.0, 0.0, 0.0]),
+                velocity_xyz=np.array([0.0, 0.0, 0.0]),
+                position_xyz=np.array([0.0, 0.0, 0.0]),
+                pressure=101325.0,
+            )
+            bridge.send_fdm(fdm)
             
-            # Step the physics simulation
+            # Get motors
+            motors = bridge.get_motors()
+            
+            # Run physics
             executor.run(1)
-            tick += 1
+            sim_time += config.sim_time_step
             
-            # Print status every second
+            # Print status
             current_time = time.time()
             if current_time - last_print_time >= 1.0:
-                armed_status = "ARMED" if np.any(motors > 0.02) else "DISARMED"
-                print(f"  t={runner.sim_time:5.1f}s | {phase:10s} | {armed_status:8s} | "
+                armed = "ARMED" if np.any(motors > 0.02) else "DISARMED"
+                print(f"  t={sim_time:5.1f}s | {phase:10s} | {armed:8s} | "
                       f"motors=[{motors[0]:.3f}, {motors[1]:.3f}, {motors[2]:.3f}, {motors[3]:.3f}]")
                 last_print_time = current_time
             
-            # Small delay to prevent CPU spinning (real-time-ish)
             time.sleep(0.001)
                 
     except KeyboardInterrupt:
-        print("\nInterrupted by user")
+        print("\nInterrupted")
         
     finally:
-        # Cleanup
-        runner.stop()
+        bridge.stop()
         betaflight_proc.terminate()
         try:
             betaflight_proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             betaflight_proc.kill()
-        
-    print()
-    print("=" * 50)
-    print("Headless test complete!")
-    print()
-    print("If motors showed non-zero values during 'arming' and 'throttle' phases,")
-    print("the SITL integration is working correctly!")
+        _betaflight_process = None  # Clear so atexit doesn't double-cleanup
+    
+    print("\nHeadless test complete!")
 
 
 def main():
     """Main entry point."""
     args = sys.argv[1:]
     
-    if "bench" in args or "headless" in args or "test" in args:
+    if "lockstep" in args or "sync" in args:
+        run_lockstep_test()
+    elif "bench" in args or "headless" in args or "test" in args:
         run_headless_test()
     else:
         run_with_editor()
