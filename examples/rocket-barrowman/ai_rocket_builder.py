@@ -330,21 +330,8 @@ IMPORTANT:
             match = re.search(pattern, text_normalized)
             if match:
                 value = float(match.group(1))
-                # Apply multiplier based on pattern
-                if (
-                    "ft" in pattern
-                    or "feet" in pattern
-                    or "thousand" in pattern
-                    or "kft" in pattern
-                ):
-                    req.target_altitude_m = value * multiplier
-                elif "km" in pattern or "kilometer" in pattern:
-                    req.target_altitude_m = value * multiplier
-                elif "meter" in pattern or pattern.endswith("m"):
-                    req.target_altitude_m = value
-                else:
-                    # Default assumption: if number is large (>1000), assume meters; else feet
-                    req.target_altitude_m = value * (1.0 if value > 1000 else 0.3048)
+                # Apply the multiplier directly - each pattern has the correct conversion factor
+                req.target_altitude_m = value * multiplier
                 break
 
         # Extract total rocket mass FIRST (higher priority)
