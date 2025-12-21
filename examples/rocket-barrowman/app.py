@@ -1653,10 +1653,10 @@ def render_sidebar():
                                 cols[0].metric(
                                     "Altitude",
                                     f"{best.simulated_altitude_m:.0f}m",
-                                    f"{best.simulated_altitude_m*3.281:.0f} ft",
+                                    f"{best.simulated_altitude_m * 3.281:.0f} ft",
                                 )
                                 cols[1].metric("Total Cost", f"${best.cost.total:.0f}")
-                                cols[2].metric("Tube Size", f"{best.body_diameter_m*1000:.0f}mm")
+                                cols[2].metric("Tube Size", f"{best.body_diameter_m * 1000:.0f}mm")
 
                                 # Cost breakdown
                                 with st.expander("💰 Cost Breakdown"):

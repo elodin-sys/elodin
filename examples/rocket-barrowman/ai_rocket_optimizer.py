@@ -896,7 +896,7 @@ Be thorough with unit conversions. Return only valid JSON."""
         sims_run = 0
         for i, motor in enumerate(motor_candidates[:max_simulations]):
             log.append(
-                f"\n--- Testing motor {i+1}/{min(len(motor_candidates), max_simulations)}: {motor.designation} ---"
+                f"\n--- Testing motor {i + 1}/{min(len(motor_candidates), max_simulations)}: {motor.designation} ---"
             )
             log.append(
                 f"  Impulse: {motor.total_impulse:.0f} N·s, Cost: ${motor.estimated_cost_usd:.0f}"

@@ -320,18 +320,27 @@ IMPORTANT:
             (r"(\d+\.?\d*)\s*kilometers?", 1000.0),
             (r"(\d+\.?\d*)\s*m\b(?!s)", 1.0),  # meters (not m/s)
             (r"(\d+\.?\d*)\s*meters?", 1.0),
-            # Patterns with context words
-            (r"goes?\s+to\s+(\d+\.?\d*)", 0.3048),  # Assume feet if no unit
-            (r"reach\s+(\d+\.?\d*)", 0.3048),
-            (r"altitude\s+of\s+(\d+\.?\d*)", 0.3048),
+            # Patterns with context words (no explicit unit - need heuristic)
+            # Use None as multiplier to signal "apply heuristic"
+            (r"goes?\s+to\s+(\d+\.?\d*)", None),  # No unit - apply heuristic
+            (r"reach\s+(\d+\.?\d*)", None),
+            (r"altitude\s+of\s+(\d+\.?\d*)", None),
             (r"(\d+\.?\d*)\s*(?:thousand|k)\s*(?:feet|ft)", 304.8),
         ]
         for pattern, multiplier in altitude_patterns:
             match = re.search(pattern, text_normalized)
             if match:
                 value = float(match.group(1))
-                # Apply the multiplier directly - each pattern has the correct conversion factor
-                req.target_altitude_m = value * multiplier
+                if multiplier is None:
+                    # Heuristic for patterns without explicit units:
+                    # Large values (>1000) are likely meters, smaller values are likely feet
+                    if value > 1000:
+                        req.target_altitude_m = value  # Interpret as meters
+                    else:
+                        req.target_altitude_m = value * 0.3048  # Interpret as feet
+                else:
+                    # Apply the multiplier directly - each pattern has the correct conversion factor
+                    req.target_altitude_m = value * multiplier
                 break
 
         # Extract total rocket mass FIRST (higher priority)
