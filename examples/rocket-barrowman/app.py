@@ -1393,16 +1393,22 @@ def launch_elodin_editor(result: FlightResult, solver: FlightSolver):
         with open(solver_file, "wb") as f:
             pickle.dump(solver_data, f)
 
-        script_dir = Path(__file__).parent
+        script_dir = Path(__file__).parent.resolve()  # Use absolute path
         main_py = script_dir / "main.py"
+        
+        # Get the elodin repository root (two levels up from examples/rocket-barrowman/)
+        # This ensures ELODIN_ASSETS_DIR finds the root-level assets/ directory
+        elodin_root = script_dir.parent.parent.resolve()  # Absolute path to repo root
 
         if not main_py.exists():
             st.error(f"main.py not found at {main_py}")
             return
 
-        # Launch editor
+        # Launch editor from elodin root so assets/ directory is found
         with st.spinner("🚀 Launching Elodin Editor..."):
-            cmd = ["elodin", "editor", str(main_py)]
+            # Use absolute path to main.py since we're launching from repo root
+            main_py_abs = str(main_py.resolve())
+            cmd = ["elodin", "editor", main_py_abs]
 
             import platform
             if platform.system() != "Windows":
@@ -1412,21 +1418,22 @@ def launch_elodin_editor(result: FlightResult, solver: FlightSolver):
                     (["konsole", "-e"], "bash -c"),
                 ]
                 
-                cmd_str = f'cd {script_dir} && elodin editor {main_py.name}'
+                # Launch from elodin root so ELODIN_ASSETS_DIR defaults to ./assets/
+                cmd_str = f'cd {elodin_root} && elodin editor {main_py_abs}'
 
                 for term_base, shell_prefix in terminals:
                     try:
                         which_result = subprocess.run(["which", term_base[0]], capture_output=True, timeout=1)
                         if which_result.returncode == 0:
                             full_cmd = term_base + ["bash", "-c", cmd_str]
-                            subprocess.Popen(full_cmd, cwd=str(script_dir), start_new_session=True)
+                            subprocess.Popen(full_cmd, cwd=str(elodin_root), start_new_session=True)
                             st.success("✅ Elodin Editor launched!")
                             return
                     except:
                         continue
 
-            # Fallback
-            subprocess.Popen(cmd, cwd=str(script_dir), start_new_session=True)
+            # Fallback - launch from elodin root
+            subprocess.Popen(cmd, cwd=str(elodin_root), start_new_session=True)
             st.success("✅ Elodin Editor launched in background")
 
     except Exception as e:
