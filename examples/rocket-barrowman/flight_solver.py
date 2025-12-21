@@ -333,7 +333,6 @@ class FlightSolver:
         history: List[StateSnapshot] = []
         t = 0.0
         max_time_limit = self.max_time if self.max_time is not None else 600.0  # 10 minutes max
-        impact_detected = False
 
         while t <= max_time_limit:
             snapshot = self._state_to_snapshot(t, state)
@@ -341,7 +340,6 @@ class FlightSolver:
 
             # Stop when rocket hits ground (after initial launch)
             if snapshot.z < 0.0 and t > 1.0:
-                impact_detected = True
                 break
 
             state = self._rk4_step(t, state, self.dt)
@@ -458,7 +456,6 @@ class FlightSolver:
         structural_mass = self.mass_model.structural_mass
         mass_total = structural_mass + motor_mass
         mass_total = max(mass_total, 1e-6)
-        motor_cg_abs = self.mass_model.motor_cg_abs(time)
         cg = self.mass_model.total_cg(time)
 
         wind = np.array(self.environment.wind_velocity(altitude, time), dtype=np.float64)
@@ -753,11 +750,9 @@ class FlightSolver:
     def _derivatives_kane_rtt(self, time: float, state: np.ndarray) -> np.ndarray:
         """Kane/RTT equations with numerical safeguards."""
         # Extract state components
-        x, y, z = state[0], state[1], state[2]
         vx, vy, vz = state[3], state[4], state[5]
         e0, e1, e2, e3 = state[6], state[7], state[8], state[9]
         omega1, omega2, omega3 = state[10], state[11], state[12]
-        motor_mass = state[13]
 
         # Create Vector/Matrix objects
         # RocketPy body frame: x=yaw, y=pitch, z=forward (longitudinal)
@@ -809,7 +804,6 @@ class FlightSolver:
 
         # Thrust in RocketPy body frame (along +z axis)
         thrust_mag = self.motor.thrust(time)
-        pressure = self.environment.air_properties(z)["pressure"]
         # Pressure thrust correction (simplified - RocketPy uses motor.pressure_thrust)
         net_thrust = max(thrust_mag, 0.0)  # Simplified for now
 

@@ -44,7 +44,6 @@ from motor_scraper import ThrustCurveScraper
 
 try:
     from mesh_renderer import (
-        build_rocket_mesh,
         render_to_plotly,
         get_rocket_preview_html,
         TRIMESH_AVAILABLE,
@@ -1120,7 +1119,6 @@ def visualize_results(result: FlightResult):
     max_v = max(velocities)
     max_mach = max(machs)
     apogee_time = times[altitudes.index(max_alt)]
-    flight_time = times[-1]
 
     # Metrics row
     st.markdown('<div class="metric-grid">', unsafe_allow_html=True)
@@ -1550,7 +1548,7 @@ def launch_elodin_editor(result: FlightResult, solver: FlightSolver):
                             subprocess.Popen(full_cmd, cwd=str(elodin_root), start_new_session=True)
                             st.success("✅ Elodin Editor launched!")
                             return
-                    except:
+                    except Exception:
                         continue
 
             # Fallback - launch from elodin root
@@ -1615,7 +1613,6 @@ def render_sidebar():
             if st.button("🔍 Find Cheapest Design", type="primary", use_container_width=True):
                 if ai_input:
                     # Progress placeholder
-                    progress_container = st.empty()
                     log_container = st.empty()
 
                     with st.spinner("Optimizing design..."):
@@ -1696,7 +1693,6 @@ def render_sidebar():
                 hasattr(st.session_state, "last_optimization_result")
                 and st.session_state.last_optimization_result
             ):
-                result = st.session_state.last_optimization_result
                 with st.expander("📋 Last Optimization Log", expanded=False):
                     if hasattr(st.session_state, "last_optimization_log"):
                         st.code("\n".join(st.session_state.last_optimization_log))
@@ -1721,9 +1717,6 @@ def render_sidebar():
         # ─────────────────────────────────────────────────────────────────────
         with st.expander("🔧 Motor Database", expanded=False):
             if st.session_state.motor_database:
-                motors_with_impulse = [
-                    m for m in st.session_state.motor_database if m.total_impulse > 0
-                ]
                 st.markdown(
                     f"""
                 <div class="status-badge ready">
@@ -2058,7 +2051,7 @@ def main():
                                 font=dict(family="Outfit", color=COLORS["text"]),
                             )
                             st.plotly_chart(fig_3d, use_container_width=True)
-                        except:
+                        except Exception:
                             pass
                 else:
                     # Fallback Plotly 3D
@@ -2079,7 +2072,7 @@ def main():
                     try:
                         fig_3d = render_to_plotly(config, motor_config)
                         st.plotly_chart(fig_3d, use_container_width=True)
-                    except Exception as e:
+                    except Exception:
                         # Fallback
                         try:
                             fig_3d = visualize_rocket_3d(config, motor_config)
@@ -2089,7 +2082,7 @@ def main():
                                 font=dict(family="Outfit", color=COLORS["text"]),
                             )
                             st.plotly_chart(fig_3d, use_container_width=True)
-                        except:
+                        except Exception as e:
                             st.warning(f"Error: {e}")
                 else:
                     try:

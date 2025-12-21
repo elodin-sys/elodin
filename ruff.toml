@@ -1,2 +1,7 @@
 line-length = 100
-extend-exclude = ["vendor", "aleph/modules/mk-esp-contents.py", "**/*_pb2.py"]
+extend-exclude = ["vendor", "aleph/modules/mk-esp-contents.py", "**/*_pb2.py", "examples/rocket-barrowman/archive"]
+
+[lint.per-file-ignores]
+# app.py needs to modify sys.path before importing local modules
+"examples/rocket-barrowman/app.py" = ["E402"]
+"examples/rocket-barrowman/main.py" = ["E402"]

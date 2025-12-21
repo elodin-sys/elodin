@@ -13,7 +13,18 @@ Specifications from RocketPy:
 
 import math
 import numpy as np
-from openrocket_components import *
+from openrocket_components import (
+    BodyTube,
+    CenteringRing,
+    InnerTube,
+    MATERIALS,
+    MassComponent,
+    NoseCone,
+    Parachute,
+    Rocket,
+    TrapezoidFinSet,
+    Transition,
+)
 from openrocket_motor import Motor as ORMotor
 
 

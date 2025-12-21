@@ -298,7 +298,6 @@ class SmartOptimizer:
     ) -> float:
         """Estimate dry mass of rocket."""
         # Fiberglass tube: ~1850 kg/m³, wall ~2-3mm
-        wall_thickness = 0.003
         tube_volume = math.pi * ((tube["od"] / 2) ** 2 - (tube["id"] / 2) ** 2) * body_length
         tube_mass = tube_volume * 1850
 

@@ -732,7 +732,7 @@ Be thorough with unit conversions. Return only valid JSON."""
                 cp = rocket_model.aero.calculate_cp(0.3)
                 cg = rocket_model.dry_cg
                 stability = (cp - cg) / (rocket_model.reference_diameter)
-            except:
+            except Exception:
                 stability = 1.5
 
             return SimulationResult(

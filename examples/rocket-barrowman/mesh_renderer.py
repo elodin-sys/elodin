@@ -16,7 +16,7 @@ import base64
 try:
     import numpy as np
     import trimesh
-    from trimesh.creation import cylinder, cone
+    from trimesh.creation import cylinder
 
     TRIMESH_AVAILABLE = True
 except ImportError:

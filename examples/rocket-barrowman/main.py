@@ -282,7 +282,7 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     else:
         initial_quat = initial_quat / quat_norm
 
-    rocket_entity = world.spawn(
+    world.spawn(
         [
             el.Body(
                 world_pos=el.SpatialTransform(

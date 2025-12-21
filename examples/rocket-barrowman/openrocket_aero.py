@@ -17,7 +17,15 @@ Each function includes references to:
 """
 
 import math
-from openrocket_components import *
+from openrocket_components import (
+    BodyTube,
+    EllipticalFinSet,
+    FinishType,
+    NoseCone,
+    Rocket,
+    Transition,
+    TrapezoidFinSet,
+)
 
 
 class AerodynamicCalculator:
@@ -111,7 +119,6 @@ class AerodynamicCalculator:
         """
         r1 = trans.fore_radius
         r2 = trans.aft_radius
-        L = trans.length
         d = body_radius * 2  # Reference diameter
 
         if d <= 0:
@@ -164,18 +171,11 @@ class AerodynamicCalculator:
         Cr = fin.root_chord
         Ct = fin.tip_chord
         s = fin.span
-        m = fin.sweep  # Sweep distance
         n = fin.fin_count
         d = body_radius * 2
 
         if d <= 0:
             return 0.0
-
-        # Fin mid-chord sweep angle
-        if Cr > Ct:
-            sweep_angle = math.atan(m / s)
-        else:
-            sweep_angle = 0.0
 
         # Fin aspect ratio parameter: barrowman_equation.tex, Section 5.2
         # R = 2s²/A_f = 4s/(c_r+c_t)
@@ -217,7 +217,6 @@ class AerodynamicCalculator:
         """
         Cr = fin.root_chord
         Ct = fin.tip_chord
-        s = fin.span
         m = fin.sweep
 
         # barrowman_equation.tex, Section 5.6, Equation (5.6)
