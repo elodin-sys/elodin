@@ -521,10 +521,9 @@ def generate_elodin_assets(config: Dict, motor: Optional[Dict] = None, output_di
     # Build the mesh
     mesh = build_rocket_mesh(config, motor)
     
-    # Scale for Elodin (meters are fine, but center the mesh)
-    # Elodin expects Y-up, but our mesh is Z-up, so we need to rotate
-    # Rotate -90 degrees around X axis to convert Z-up to Y-up
-    rotation = trimesh.transformations.rotation_matrix(-np.pi/2, [1, 0, 0])
+    # Rotate mesh to align with Elodin/glTF coordinate expectations
+    # Testing +90° around X axis (opposite direction)
+    rotation = trimesh.transformations.rotation_matrix(np.pi/2, [1, 0, 0])
     mesh.apply_transform(rotation)
     
     # Center the mesh at origin

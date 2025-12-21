@@ -316,7 +316,7 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
         }}
     }}
 
-    object_3d "(0,0,0,1)" {{
+    object_3d "(0,0,0,1, rocket.world_pos[4],rocket.world_pos[5],rocket.world_pos[6])" {{
         glb path="{compass_path}"
     }}
     object_3d rocket.world_pos {{
