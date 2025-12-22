@@ -24,7 +24,6 @@ from dataclasses import dataclass, field
 import elodin as el
 import jax
 import jax.numpy as jnp
-import numpy as np
 
 from config import DroneConfig
 

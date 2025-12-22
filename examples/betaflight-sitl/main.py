@@ -92,11 +92,6 @@ def cleanup_stale_processes():
 def cleanup_on_exit():
     """Cleanup handler for exit - kills Betaflight processes."""
     try:
-        subprocess.run(["pkill", "-f", "betaflight_SITL"], capture_output=True, timeout=2)
-    except Exception:
-        pass
-    # Also clean up any zombie processes
-    try:
         subprocess.run(["pkill", "-9", "-f", "betaflight_SITL"], capture_output=True, timeout=2)
     except Exception:
         pass
