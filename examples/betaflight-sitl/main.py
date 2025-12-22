@@ -109,7 +109,10 @@ signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 atexit.register(cleanup_on_exit)
 
-cleanup_stale_processes()
+# Only cleanup stale processes when NOT running under s10 orchestration
+# When s10 manages us, it passes --no-s10 flag, and it starts Betaflight separately
+if "--no-s10" not in sys.argv:
+    cleanup_stale_processes()
 
 
 # --- World Creation ---

@@ -49,11 +49,32 @@ pub async fn serve_tokio() -> std::io::Result<u16> {
 pub async fn monitor(port: u16) {
     let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port));
     tracing::info!("Monitoring liveness on {}", addr);
-    let stream = match net::TcpStream::connect(addr).await {
-        Ok(stream) => stream,
-        Err(err) => {
-            tracing::error!("Error connecting to liveness server: {}", err);
-            std::process::exit(1);
+
+    // Retry connection with exponential backoff to handle race with server startup
+    const MAX_RETRIES: u32 = 10;
+    const INITIAL_DELAY_MS: u64 = 10;
+
+    let mut retries = 0;
+    let mut delay_ms = INITIAL_DELAY_MS;
+
+    let stream = loop {
+        match net::TcpStream::connect(addr).await {
+            Ok(stream) => break stream,
+            Err(err) => {
+                retries += 1;
+                if retries > MAX_RETRIES {
+                    tracing::error!(
+                        "Failed to connect to liveness server after {} retries: {}",
+                        MAX_RETRIES,
+                        err
+                    );
+                    std::process::exit(1);
+                }
+                tracing::debug!("Retrying liveness connection in {}ms (attempt {}/{})", delay_ms, retries, MAX_RETRIES);
+                // Brief blocking sleep is acceptable at startup for retry backoff
+                std::thread::sleep(Duration::from_millis(delay_ms));
+                delay_ms = delay_ms.saturating_mul(2).min(500); // cap at 500ms
+            }
         }
     };
     let mut buf = vec![0u8; 8];

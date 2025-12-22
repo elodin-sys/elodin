@@ -330,7 +330,9 @@ impl WorldBuilder {
                 })
             }
             Args::Plan { addr, out_dir } => {
-                let recipe = self.sim_recipe(path, addr, optimize);
+                // Canonicalize the path to ensure s10 can find the file regardless of working directory
+                let canonical_path = std::fs::canonicalize(&path).unwrap_or(path);
+                let recipe = self.sim_recipe(canonical_path, addr, optimize);
                 let toml = toml::to_string_pretty(&recipe)
                     .map_err(|err| PyValueError::new_err(err.to_string()))?;
                 let plan_path = out_dir.join("s10.toml");

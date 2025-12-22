@@ -1,0 +1,4 @@
+# Ignore Betaflight source directory - it has 30,000+ files that slow down s10 file watching
+betaflight/
+__pycache__/
+
