@@ -49,6 +49,7 @@ use crate::{
         },
         tiles,
         timeline::{StreamTickOrigin, timeline_slider::UITick},
+        window::apply_mode_to_windows,
     },
 };
 
@@ -1288,12 +1289,6 @@ fn load_schematic_inner(path: &Path) -> Option<PaletteItem> {
             },
         )
     })
-}
-
-fn apply_mode_to_windows(mode: &str, windows_state: &mut Query<&mut tiles::WindowState>) {
-    for mut state in windows_state.iter_mut() {
-        state.descriptor.mode = Some(mode.to_string());
-    }
 }
 
 pub fn set_color_scheme() -> PaletteItem {
