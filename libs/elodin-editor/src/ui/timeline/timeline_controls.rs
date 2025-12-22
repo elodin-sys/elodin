@@ -21,10 +21,9 @@ use crate::{
         button::EImageButton,
         colors::{self, ColorExt, get_scheme},
         theme::configure_combo_box,
-        tiles,
+        tiles::{self, set_mode_all},
         time_label::time_label,
         widgets::WidgetSystem,
-        window::apply_mode_to_windows,
     },
 };
 
@@ -191,7 +190,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                             let is_dark = current_mode.eq_ignore_ascii_case("dark");
                             if let Some(mode) = theme_mode_toggle(ui, is_dark) {
                                 let selection = colors::set_active_mode(mode);
-                                apply_mode_to_windows(&selection.mode, &mut windows_state);
+                                set_mode_all(&selection.mode, &mut windows_state);
                             }
                         },
                     );

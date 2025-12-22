@@ -11,12 +11,3 @@ pub use placement::{
     handle_window_relayout_events, wait_for_winit_window,
 };
 pub use spawn::{compute_window_title, sync_windows, window_graph_order_base};
-
-pub fn apply_mode_to_windows(mode: &str, windows_state: &mut Query<&mut tiles::WindowState>) {
-    for mut state in windows_state.iter_mut() {
-        state.descriptor.mode = Some(mode.to_string());
-    }
-}
-use bevy::prelude::Query;
-
-use super::tiles;

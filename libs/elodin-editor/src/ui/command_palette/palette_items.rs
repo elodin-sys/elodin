@@ -47,9 +47,8 @@ use crate::{
             CurrentSchematic, CurrentSecondarySchematics, LoadSchematicParams,
             SchematicLiveReloadRx, load_schematic_file,
         },
-        tiles,
+        tiles::{self, set_mode_all},
         timeline::{StreamTickOrigin, timeline_slider::UITick},
-        window::apply_mode_to_windows,
     },
 };
 
@@ -1309,7 +1308,7 @@ pub fn set_color_scheme() -> PaletteItem {
                         "dark".to_string()
                     };
                     let selection = colors::apply_scheme_and_mode(&name, &desired_mode);
-                    apply_mode_to_windows(&selection.mode, &mut windows_state);
+                    set_mode_all(&selection.mode, &mut windows_state);
                     PaletteEvent::Exit
                 },
             ));
@@ -1342,7 +1341,7 @@ pub fn set_color_scheme_mode() -> PaletteItem {
                         );
                     }
                     let selection = colors::apply_scheme_and_mode(&scheme_name, mode);
-                    apply_mode_to_windows(&selection.mode, &mut windows_state);
+                    set_mode_all(&selection.mode, &mut windows_state);
                     PaletteEvent::Exit
                 },
             ));

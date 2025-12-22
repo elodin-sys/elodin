@@ -313,6 +313,12 @@ impl WindowState {
     }
 }
 
+pub fn set_mode_all(mode: &str, windows_state: &mut Query<&mut WindowState>) {
+    for mut state in windows_state.iter_mut() {
+        state.descriptor.mode = Some(mode.to_string());
+    }
+}
+
 pub(crate) fn screen_index_from_bounds(
     position: PhysicalPosition<i32>,
     size: PhysicalSize<u32>,
