@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 
 use bevy::{
+    core_pipeline::core_2d::Camera2d,
     log::info,
     prelude::*,
     render::camera::RenderTarget,
     window::{EnabledButtons, Window, WindowPosition, WindowRef, WindowResolution},
 };
+use bevy_egui::EguiContextSettings;
 use egui_tiles::Tile;
 
 use crate::ui::{
@@ -15,9 +17,6 @@ use crate::ui::{
 };
 
 use super::placement::collect_sorted_screens;
-
-#[derive(Component)]
-struct Camera2d;
 
 pub fn sync_windows(
     mut commands: Commands,
@@ -109,7 +108,13 @@ pub fn sync_windows(
 
         let window_entity = commands
             .entity(entity)
-            .insert((window_component, *marker, egui_context, Camera2d))
+            .insert((
+                window_component,
+                *marker,
+                egui_context,
+                EguiContextSettings::default(),
+                Camera2d,
+            ))
             .id();
 
         let camera = Camera {
