@@ -387,7 +387,17 @@
             <ul>
                 
                 <li>
-                    <a href="https://docs.elodin.systems/preview/pr-372/reference/color-schemes/#presets">Presets</a>
+                    <a href="https://docs.elodin.systems/preview/pr-372/reference/color-schemes/#overview">Overview</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-372/reference/color-schemes/#built-in-presets">Built-in presets</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-372/reference/color-schemes/#registry-and-precedence">Registry and precedence</a>
                     
                 </li>
                 
@@ -411,6 +421,11 @@
                     
                 </li>
                 
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-372/reference/color-schemes/#persistence">Persistence</a>
+                    
+                </li>
+                
             </ul>
         </nav>
     </div>
@@ -418,16 +433,36 @@
  
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Color Schemes</h1>
-                   <h2 id="presets">Presets</h2>
+                   <h2 id="overview">Overview</h2>
+<p>Color schemes define the UI palette. Each preset has a required dark variant and an optional light
+variant. Built-ins ship with the app and do not depend on your asset directory.</p>
+<h2 id="built-in-presets">Built-in presets</h2>
 <ul>
-<li>Built-ins: <code>default</code>, <code>eggplant</code>, <code>catppuccini-macchiato</code>, <code>catppuccini-mocha</code>, <code>catppuccini-latte</code>, and <code>matrix</code> ship with the app; most have dark and light variants, while mocha is dark-only and latte is light-preferred.</li>
-<li>Registry merge: user presets are loaded from disk and merged with the built-ins; if a user preset reuses a built-in name, the user version replaces it.</li>
-<li>Modes: dark is required; light is optional. When a light file is missing, the UI stays in dark mode and the palette entry shows the mode as unavailable.</li>
+<li><code>default</code> (dark + light)</li>
+<li><code>eggplant</code> (dark + light)</li>
+<li><code>catppuccini-macchiato</code> (dark + light)</li>
+<li><code>catppuccini-mocha</code> (dark only)</li>
+<li><code>catppuccini-latte</code> (light-preferred; dark uses mocha)</li>
+<li><code>matrix</code> (dark + light)</li>
+</ul>
+<h2 id="registry-and-precedence">Registry and precedence</h2>
+<ul>
+<li>Built-ins are always available.</li>
+<li>User presets are loaded from disk and merged with the built-ins.</li>
+<li>If a user preset reuses a built-in name, the user version replaces it.</li>
+<li>If the same user name appears in multiple locations, later sources win (data dir overrides assets).</li>
+<li>Dark is required; light is optional. If light is missing, the UI stays in dark mode and the
+palette marks the light variant as unavailable.</li>
+<li>Names are matched case-insensitively.</li>
 </ul>
 <h2 id="file-locations">File locations</h2>
 <ul>
 <li>Assets: <code>color_schemes</code> inside the asset root (<code>$ELODIN_ASSETS_DIR</code> if set, otherwise <code>./assets</code>).</li>
-<li>User data: <code>color_schemes</code> under the app data directory (for example <code>~/Library/Application Support/systems.elodin.editor/color_schemes</code> on macOS, <code>~/.local/share/systems/elodin/editor/color_schemes</code> on Linux, or <code>%APPDATA%\\systems\\elodin\\editor\\color_schemes</code> on Windows). Entries here override assets when names match.</li>
+<li>User data: <code>color_schemes</code> under the app data directory (for example
+<code>~/Library/Application Support/systems.elodin.editor/color_schemes</code> on macOS,
+<code>~/.local/share/systems/elodin/editor/color_schemes</code> on Linux, or
+<code>%APPDATA%\\systems\\elodin\\editor\\color_schemes</code> on Windows). Entries here override assets
+when names match.</li>
 </ul>
 <h2 id="file-naming">File naming</h2>
 <ul>
@@ -455,9 +490,15 @@
 </span></code></pre>
 <h2 id="using-presets">Using presets</h2>
 <ul>
-<li>KDL: <code>theme { scheme="eggplant" mode="light" }</code> pulls from the merged registry; unknown names fall back to <code>default</code>.</li>
-<li>Command Palette: <code>Set Color Scheme</code> lists every loaded preset; <code>Set Color Scheme Mode</code> switches between Dark/Light when the preset defines the requested mode.</li>
+<li>KDL: <code>theme { scheme="eggplant" mode="light" }</code> pulls from the merged registry. Unknown names
+fall back to <code>default</code>.</li>
+<li>Command Palette: <code>Set Color Scheme</code> lists every loaded preset; <code>Set Color Scheme Mode</code> switches
+between Dark/Light when the preset defines the requested mode.</li>
 </ul>
+<h2 id="persistence">Persistence</h2>
+<p>The current selection is saved as <code>color_scheme.json</code> in the app data directory. This file stores
+the scheme name, the mode, and the resolved colors so the UI can restore the last selection on
+startup.</p>
 
                   
 <div class="footer-line-padding"></div>
