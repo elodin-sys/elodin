@@ -12,16 +12,38 @@ icon = ""
 order = 7
 +++
 
-## Presets
+## Overview
 
-- Built-ins: `default`, `eggplant`, `catppuccini-macchiato`, `catppuccini-mocha`, `catppuccini-latte`, and `matrix` ship with the app; most have dark and light variants, while mocha is dark-only and latte is light-preferred.
-- Registry merge: user presets are loaded from disk and merged with the built-ins; if a user preset reuses a built-in name, the user version replaces it.
-- Modes: dark is required; light is optional. When a light file is missing, the UI stays in dark mode and the palette entry shows the mode as unavailable.
+Color schemes define the UI palette. Each preset has a required dark variant and an optional light
+variant. Built-ins ship with the app and do not depend on your asset directory.
+
+## Built-in presets
+
+- `default` (dark + light)
+- `eggplant` (dark + light)
+- `catppuccini-macchiato` (dark + light)
+- `catppuccini-mocha` (dark only)
+- `catppuccini-latte` (light-preferred; dark uses mocha)
+- `matrix` (dark + light)
+
+## Registry and precedence
+
+- Built-ins are always available.
+- User presets are loaded from disk and merged with the built-ins.
+- If a user preset reuses a built-in name, the user version replaces it.
+- If the same user name appears in multiple locations, later sources win (data dir overrides assets).
+- Dark is required; light is optional. If light is missing, the UI stays in dark mode and the
+  palette marks the light variant as unavailable.
+- Names are matched case-insensitively.
 
 ## File locations
 
 - Assets: `color_schemes` inside the asset root (`$ELODIN_ASSETS_DIR` if set, otherwise `./assets`).
-- User data: `color_schemes` under the app data directory (for example `~/Library/Application Support/systems.elodin.editor/color_schemes` on macOS, `~/.local/share/systems/elodin/editor/color_schemes` on Linux, or `%APPDATA%\\systems\\elodin\\editor\\color_schemes` on Windows). Entries here override assets when names match.
+- User data: `color_schemes` under the app data directory (for example
+  `~/Library/Application Support/systems.elodin.editor/color_schemes` on macOS,
+  `~/.local/share/systems/elodin/editor/color_schemes` on Linux, or
+  `%APPDATA%\\systems\\elodin\\editor\\color_schemes` on Windows). Entries here override assets
+  when names match.
 
 ## File naming
 
@@ -53,5 +75,13 @@ Each file encodes a `ColorScheme` as RGBA byte arrays:
 
 ## Using presets
 
-- KDL: `theme { scheme="eggplant" mode="light" }` pulls from the merged registry; unknown names fall back to `default`.
-- Command Palette: `Set Color Scheme` lists every loaded preset; `Set Color Scheme Mode` switches between Dark/Light when the preset defines the requested mode.
+- KDL: `theme { scheme="eggplant" mode="light" }` pulls from the merged registry. Unknown names
+  fall back to `default`.
+- Command Palette: `Set Color Scheme` lists every loaded preset; `Set Color Scheme Mode` switches
+  between Dark/Light when the preset defines the requested mode.
+
+## Persistence
+
+The current selection is saved as `color_scheme.json` in the app data directory. This file stores
+the scheme name, the mode, and the resolved colors so the UI can restore the last selection on
+startup.
