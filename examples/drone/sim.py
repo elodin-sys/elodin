@@ -134,6 +134,8 @@ def world() -> tuple[el.World, el.EntityId]:
 
     world.schematic(
         """
+        theme mode="dark" scheme="default"
+
         tabs {
             hsplit name = "Viewport" {
                 viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 2,2,2)" look_at="drone.world_pos" show_grid=#true active=#true

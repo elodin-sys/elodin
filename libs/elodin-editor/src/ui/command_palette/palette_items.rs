@@ -47,7 +47,7 @@ use crate::{
             CurrentSchematic, CurrentSecondarySchematics, LoadSchematicParams,
             SchematicLiveReloadRx, load_schematic_file,
         },
-        tiles,
+        tiles::{self, set_mode_all},
         timeline::{StreamTickOrigin, timeline_slider::UITick},
     },
 };
@@ -1292,19 +1292,59 @@ fn load_schematic_inner(path: &Path) -> Option<PaletteItem> {
 
 pub fn set_color_scheme() -> PaletteItem {
     PaletteItem::new("Set Color Scheme", PRESETS_LABEL, |_: In<String>| {
-        let schemes = [
-            ("DARK", &colors::DARK),
-            ("LIGHT", &colors::LIGHT),
-            ("CATPPUCINI LATTE", &colors::CATPPUCINI_LATTE),
-            ("CATPPUCINI MOCHA", &colors::CATPPUCINI_MOCHA),
-            ("CATPPUCINI MACCHIATO", &colors::CATPPUCINI_MACCHIATO),
-        ];
+        let presets = colors::available_presets();
         let mut items = vec![];
-        for (name, schema) in schemes {
-            items.push(PaletteItem::new(name, "", move |_: In<String>| {
-                colors::set_schema(schema);
-                PaletteEvent::Exit
-            }));
+        for preset in presets {
+            let name = preset.name.to_string();
+            let label = preset.label.to_string();
+            items.push(PaletteItem::new(
+                label,
+                "",
+                move |_: In<String>, mut windows_state: Query<&mut tiles::WindowState>| {
+                    let current = colors::current_selection();
+                    let desired_mode = if colors::scheme_supports_mode(&name, &current.mode) {
+                        current.mode
+                    } else {
+                        "dark".to_string()
+                    };
+                    let selection = colors::apply_scheme_and_mode(&name, &desired_mode);
+                    set_mode_all(&selection.mode, &mut windows_state);
+                    PaletteEvent::Exit
+                },
+            ));
+        }
+        PalettePage::new(items).into()
+    })
+}
+
+pub fn set_color_scheme_mode() -> PaletteItem {
+    PaletteItem::new("Set Color Scheme Mode", PRESETS_LABEL, |_: In<String>| {
+        let current = colors::current_selection();
+        let scheme_name = current.scheme.clone();
+        let options = [("Dark", "dark"), ("Light", "light")];
+        let mut items = vec![];
+        for (label, mode) in options {
+            let available = colors::scheme_supports_mode(&scheme_name, mode);
+            let display_label = if available {
+                label.to_string()
+            } else {
+                format!("{label} (unavailable)")
+            };
+            let scheme_name = scheme_name.clone();
+            items.push(PaletteItem::new(
+                display_label,
+                "",
+                move |_: In<String>, mut windows_state: Query<&mut tiles::WindowState>| {
+                    if !colors::scheme_supports_mode(&scheme_name, mode) {
+                        return PaletteEvent::Error(
+                            "This scheme does not provide that variant".to_string(),
+                        );
+                    }
+                    let selection = colors::apply_scheme_and_mode(&scheme_name, mode);
+                    set_mode_all(&selection.mode, &mut windows_state);
+                    PaletteEvent::Exit
+                },
+            ));
         }
         PalettePage::new(items).into()
     })
@@ -1679,6 +1719,7 @@ impl Default for PalettePage {
             save_schematic_db(),
             load_schematic(),
             clear_schematic(),
+            set_color_scheme_mode(),
             set_color_scheme(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {
                 let _ = opener::open("https://docs.elodin.systems");

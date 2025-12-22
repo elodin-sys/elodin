@@ -5,6 +5,10 @@ use kdl::{KdlDocument, KdlEntry, KdlNode};
 pub fn serialize_schematic<T>(schematic: &Schematic<T>) -> String {
     let mut doc = KdlDocument::new();
 
+    if let Some(theme) = schematic.theme.as_ref() {
+        doc.nodes_mut().push(serialize_theme(theme));
+    }
+
     for elem in &schematic.elems {
         let node = serialize_schematic_elem(elem);
         doc.nodes_mut().push(node);
@@ -23,6 +27,7 @@ fn serialize_schematic_elem<T>(elem: &SchematicElem<T>) -> KdlNode {
         SchematicElem::Line3d(line) => serialize_line_3d(line),
         SchematicElem::VectorArrow(arrow) => serialize_vector_arrow(arrow),
         SchematicElem::Window(window) => serialize_window(window),
+        SchematicElem::Theme(theme) => serialize_theme(theme),
     }
 }
 
@@ -174,6 +179,19 @@ fn serialize_window(window: &WindowSchematic) -> KdlNode {
         node.set_children(children);
     }
 
+    node
+}
+
+fn serialize_theme(theme: &ThemeConfig) -> KdlNode {
+    let mut node = KdlNode::new("theme");
+    if let Some(mode) = &theme.mode {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("mode", mode.clone()));
+    }
+    if let Some(scheme) = &theme.scheme {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("scheme", scheme.clone()));
+    }
     node
 }
 
