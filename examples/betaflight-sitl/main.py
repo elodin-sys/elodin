@@ -217,13 +217,14 @@ start_time = [None]
 last_print = [0.0]
 
 
-def sitl_post_step(tick: int):
+def sitl_post_step(tick: int, ctx: el.PostStepContext):
     """
     Post-step callback for lockstep SITL synchronization.
     
     This implements the two-phase synchronization pattern:
     1. Send sensor data (FDM) and RC inputs to Betaflight
     2. Wait for motor response (blocking - this is the lockstep sync point)
+    3. Write motor commands back to Elodin-DB via ctx.write_component()
     
     Following the pattern from ai-context/sitl-example/SITL_EXAMPLE_EXPLAINED.md
     """
@@ -286,6 +287,10 @@ def sitl_post_step(tick: int):
         motors_bf = b.step(fdm, rc)
         s.motors = remap_motors_betaflight_to_elodin(motors_bf)
         s.max_motor = max(s.max_motor, np.max(s.motors))
+        
+        # Write motor commands back to Elodin-DB for physics simulation
+        # This uses the PostStepContext for direct DB access (no TCP overhead)
+        ctx.write_component("drone.motor_command", s.motors)
     except TimeoutError:
         pass  # Timeouts expected during bootgrace
     

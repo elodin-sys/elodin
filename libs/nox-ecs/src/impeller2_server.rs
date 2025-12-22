@@ -25,13 +25,14 @@ impl Server {
 
     pub async fn run(self) -> Result<(), Error> {
         tracing::info!("running server");
-        self.run_with_cancellation(|| false, |_| {}, false).await
+        self.run_with_cancellation(|| false, |_, _, _| {}, false)
+            .await
     }
 
     pub async fn run_with_cancellation(
         self,
         is_cancelled: impl Fn() -> bool + 'static,
-        post_step: impl Fn(u64) + 'static,
+        post_step: impl Fn(u64, &Arc<DB>, Timestamp) + 'static,
         interactive: bool,
     ) -> Result<(), Error> {
         tracing::info!("running server with cancellation");
@@ -265,7 +266,7 @@ async fn tick(
     db: Arc<DB>,
     mut world: WorldExec<Compiled>,
     is_cancelled: impl Fn() -> bool + 'static,
-    post_step: impl Fn(u64) + 'static,
+    post_step: impl Fn(u64, &Arc<DB>, Timestamp) + 'static,
     mut timestamp: Timestamp,
     interactive: bool,
 ) {
@@ -314,7 +315,7 @@ async fn tick(
             return;
         }
         // Python func runs.
-        post_step(tick);
+        post_step(tick, &db, timestamp);
         // We only wait if there is a run_time_step set and it's >= the time elapsed.
         if let Some(run_time_step) = run_time_step.as_ref()
             && let Some(sleep_time) = run_time_step.checked_sub(start.elapsed())
