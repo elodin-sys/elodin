@@ -346,6 +346,14 @@
                 >
             </li>
             
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-372/reference/color-schemes/"
+                    >Color Schemes</a
+                >
+            </li>
+            
         </ul>
           
          
@@ -445,8 +453,8 @@
 <h3 id="theme">theme</h3>
 <ul>
 <li>Optional top-level node that sets the session UI appearance.</li>
-<li><code>mode</code>: <code>"dark"</code> (default) or <code>"light"</code>; drives window decorations and picks the dark/light variant of the color scheme.</li>
-<li><code>scheme</code>: name of a built-in color preset (<code>default</code>, <code>eggplant</code>, <code>catppuccini-macchiato</code>). If missing or unknown, <code>default</code> is used.</li>
+<li><code>mode</code>: <code>"dark"</code> (default) or <code>"light"</code>; drives window decorations and picks the dark/light variant of the color scheme. If a preset does not ship a light variant, the theme stays in dark.</li>
+<li><code>scheme</code>: name of a color preset. Built-ins are <code>default</code>, <code>eggplant</code>, <code>catppuccini-macchiato</code>, <code>catppuccini-mocha</code>, <code>catppuccini-latte</code>, and <code>matrix</code>; user presets are picked up from any <code>color_schemes</code> folder in the asset directory or data directory. Unknown names fall back to <code>default</code>. If a user preset shares a name with a built-in, the user version wins. See <a href="https://docs.elodin.systems/preview/pr-372/reference/schematic/./color-schemes.md">color-schemes</a> for the file layout.</li>
 <li>Applies to the whole session; a secondary file can set its own <code>mode</code> for its windows, but the active scheme stays the one from the primary schematic.</li>
 <li>Controls both egui styling (palette) and the window decoration theme (Dark/Light).</li>
 </ul>
