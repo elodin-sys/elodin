@@ -54,8 +54,8 @@
 
       # overlays required to get elodin and nvidia packages
       nixpkgs.overlays = [
-        aleph.overlays.default
         aleph.overlays.jetpack
+        aleph.overlays.default
       ];
 
       system.stateVersion = "25.05";
@@ -69,9 +69,6 @@
       };
       security.sudo.wheelNeedsPassword = false;
       nix.settings.trusted-users = ["@wheel"];
-
-      # Customize the kernel source (current options are default and no_otg)
-      aleph.kernel.source = "default";
 
       # Elodin-DB configuration
       # services.elodin-db = {
