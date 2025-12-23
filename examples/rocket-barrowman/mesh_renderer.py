@@ -118,46 +118,53 @@ def create_fin(
     sweep: float,
     thickness: float,
 ) -> "trimesh.Trimesh":
-    """Create a single trapezoidal fin."""
+    """Create a single trapezoidal fin.
+    
+    Fin is created in the YZ plane (matching rocket coordinate system):
+    - Y axis: span direction (0 to span, extends radially outward from body)
+    - Z axis: chord direction (0 to root_chord, along rocket axis)
+    - X axis: thickness direction (perpendicular to fin surface)
+    """
     if not TRIMESH_AVAILABLE:
         return None
 
-    # Fin vertices (looking from above, fin extends in +Y)
-    # XZ plane is the plane of the fin
     half_t = thickness / 2
 
+    # Coordinate system: X=thickness, Y=span (radial), Z=chord (axial)
     vertices = [
-        # Bottom (outer surface of body tube side)
-        [0, 0, -half_t],  # Root leading edge
-        [root_chord, 0, -half_t],  # Root trailing edge
-        [sweep + tip_chord, span, -half_t],  # Tip trailing edge
-        [sweep, span, -half_t],  # Tip leading edge
-        # Top
-        [0, 0, half_t],
-        [root_chord, 0, half_t],
-        [sweep + tip_chord, span, half_t],
-        [sweep, span, half_t],
+        # Front face (toward body center, X = -half_t)
+        # Root edge (Y=0, at body surface)
+        [-half_t, 0, 0],  # Root leading edge
+        [-half_t, 0, root_chord],  # Root trailing edge
+        # Tip edge (Y=span, extends outward)
+        [-half_t, span, sweep],  # Tip leading edge
+        [-half_t, span, sweep + tip_chord],  # Tip trailing edge
+        # Back face (away from body center, X = +half_t)
+        [half_t, 0, 0],  # Root leading edge
+        [half_t, 0, root_chord],  # Root trailing edge
+        [half_t, span, sweep],  # Tip leading edge
+        [half_t, span, sweep + tip_chord],  # Tip trailing edge
     ]
 
     faces = [
-        # Bottom face
-        [0, 1, 2],
-        [0, 2, 3],
-        # Top face
-        [4, 6, 5],
-        [4, 7, 6],
-        # Leading edge
-        [0, 3, 7],
-        [0, 7, 4],
-        # Trailing edge
-        [1, 5, 6],
-        [1, 6, 2],
-        # Root
-        [0, 4, 5],
+        # Front face (X = -half_t, toward body) - quad split into 2 triangles
+        [0, 1, 3],  # Root trailing to tip trailing
+        [0, 3, 2],  # Root leading to tip leading
+        # Back face (X = +half_t, away from body) - quad split into 2 triangles
+        [4, 6, 5],  # Root leading to tip leading
+        [4, 7, 6],  # Root trailing to tip trailing
+        # Leading edge (sweep line, Z = 0 to sweep)
+        [0, 2, 6],  # Front to back at leading edge
+        [0, 6, 4],
+        # Trailing edge (Z = root_chord to sweep+tip_chord)
+        [1, 3, 7],  # Front to back at trailing edge
+        [1, 7, 5],
+        # Root edge (at body surface, Y=0, Z = 0 to root_chord)
+        [0, 4, 5],  # Front to back at root
         [0, 5, 1],
-        # Tip
-        [3, 2, 6],
-        [3, 6, 7],
+        # Tip edge (outermost, Y=span, Z = sweep to sweep+tip_chord)
+        [2, 3, 7],  # Front to back at tip
+        [2, 7, 6],
     ]
 
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
@@ -185,22 +192,21 @@ def create_fin_set(
         if fin is None:
             continue
 
-        # Rotate to radial position
+        # Fin is created in YZ plane:
+        # - Y = span direction (radial, outward from body, 0 to span)
+        # - Z = chord direction (along rocket axis, 0 to root_chord)
+        # - X = thickness direction (perpendicular to fin)
+        
+        # Rotate around Z axis (rocket axis) to position fin radially
         angle = 2 * np.pi * i / fin_count
-
-        # Transform: rotate around Z, then translate to body surface
         rotation = trimesh.transformations.rotation_matrix(angle, [0, 0, 1])
-
-        # The fin is in the XY plane, we need it radial
-        # First rotate 90° around X to make it vertical
-        vertical = trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0])
-        fin.apply_transform(vertical)
+        fin.apply_transform(rotation)
 
         # Translate to body surface
-        fin.apply_translation([body_radius, 0, root_chord])
-
-        # Rotate around Z axis
-        fin.apply_transform(rotation)
+        # After rotation, Y is still the radial direction
+        # Move fin so root (Y=0) is at body_radius from center
+        # The fin root leading edge is at Y=0, Z=0, so translate in Y to body_radius
+        fin.apply_translation([0, body_radius, 0])
 
         meshes.append(fin)
 
@@ -270,6 +276,8 @@ def build_rocket_mesh(config: Dict[str, Any], motor: Optional[Dict] = None) -> "
         )
         if fins:
             # Position at rear of body
+            # Z axis is along rocket length, so translate in Z
+            # Root leading edge should be at: nose_length + body_length - fin_root
             fins.apply_translation([0, 0, nose_length + body_length - fin_root])
             meshes.append(fins)
 

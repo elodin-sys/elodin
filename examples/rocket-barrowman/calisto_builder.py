@@ -89,8 +89,9 @@ def build_calisto_rocket():
         thickness=0.005,
     )
     fins.material = MATERIALS["Fiberglass"]
-    # Position at end of body - 0.120m (root chord length)
-    fins.position.x = 0.55829 + 1.90 - 0.120
+    # Position relative to body start: body length - fin root chord
+    # Body starts at 0.55829m, so fins should be at body_end - fin_root relative to body
+    fins.position.x = 1.90 - 0.120  # Relative to body start, not absolute
     body.add_child(fins)
 
     # ============================================================================
@@ -105,7 +106,8 @@ def build_calisto_rocket():
         thickness=0.003,
     )
     tail.material = MATERIALS["Fiberglass"]
-    tail.position.x = 0.55829 + 1.90 - 0.060
+    # Position relative to body start
+    tail.position.x = 1.90 - 0.060
     body.add_child(tail)
 
     # ============================================================================
@@ -120,7 +122,8 @@ def build_calisto_rocket():
         thickness=0.003,
     )
     motor_mount.material = MATERIALS["Fiberglass"]
-    motor_mount.position.x = 0.55829 + 1.90 - 0.650  # At tail end
+    # Position relative to body start
+    motor_mount.position.x = 1.90 - 0.650  # At tail end
     motor_mount.motor_mount = True
     body.add_child(motor_mount)
 
@@ -132,7 +135,8 @@ def build_calisto_rocket():
     )
     ring_fwd.length = 0.010
     ring_fwd.material = MATERIALS["Plywood (birch)"]
-    ring_fwd.position.x = 0.55829 + 1.90 - 0.650
+    # Position relative to body start
+    ring_fwd.position.x = 1.90 - 0.650
     body.add_child(ring_fwd)
 
     ring_aft = CenteringRing(
@@ -142,7 +146,8 @@ def build_calisto_rocket():
     )
     ring_aft.length = 0.010
     ring_aft.material = MATERIALS["Plywood (birch)"]
-    ring_aft.position.x = 0.55829 + 1.90 - 0.010
+    # Position relative to body start
+    ring_aft.position.x = 1.90 - 0.010
     body.add_child(ring_aft)
 
     # ============================================================================

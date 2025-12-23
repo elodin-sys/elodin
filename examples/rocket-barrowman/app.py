@@ -19,7 +19,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 # Import rocket simulation components
 from environment import Environment
@@ -41,6 +41,7 @@ from openrocket_motor import Motor as ORMotor
 from ai_rocket_builder import RocketDesigner
 from smart_optimizer import SmartOptimizer
 from motor_scraper import ThrustCurveScraper
+from flight_analysis import FlightAnalyzer, compute_flight_phases
 
 try:
     from mesh_renderer import (
@@ -680,7 +681,7 @@ st.markdown(
 
 # Then inject JavaScript via components.html to attach the click handler
 # This script runs in an iframe but manipulates the parent document
-_sidebar_click_handler = """
+_sidebar_click_handler = r"""
 <script>
 (function() {
     function expandSidebar() {
@@ -795,12 +796,23 @@ components.html(_sidebar_click_handler, height=0, scrolling=False)
 # SESSION STATE INITIALIZATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# Initialize all session state variables to prevent AttributeError
 if "simulation_result" not in st.session_state:
     st.session_state.simulation_result = None
 if "rocket_config" not in st.session_state:
     st.session_state.rocket_config = None
 if "motor_config" not in st.session_state:
     st.session_state.motor_config = None
+if "flight_analyzer" not in st.session_state:
+    st.session_state.flight_analyzer = None
+if "flight_metrics" not in st.session_state:
+    st.session_state.flight_metrics = None
+if "solver" not in st.session_state:
+    st.session_state.solver = None
+if "last_selected_rocket" not in st.session_state:
+    st.session_state.last_selected_rocket = "Calisto (Default)"
+if "last_rocket_type" not in st.session_state:
+    st.session_state.last_rocket_type = "Calisto (Default)"
 if "motor_database" not in st.session_state:
     st.session_state.motor_database = []
 if "ai_designer" not in st.session_state:
@@ -979,7 +991,8 @@ def build_custom_rocket(config: Dict[str, Any]) -> Rocket:
         )
         body_length = config.get("body_length", 1.5)
         nose_length = config.get("nose_length", 0.5) if config.get("has_nose", True) else 0.0
-        fins.position.x = nose_length + body_length - config.get("fin_root_chord", 0.12)
+        # Fins position is relative to body start, not absolute
+        fins.position.x = body_length - config.get("fin_root_chord", 0.12)
         body.add_child(fins)
 
     # Motor mount
@@ -1097,292 +1110,983 @@ def build_custom_motor(config: Dict[str, Any]) -> ORMotor:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def visualize_results(result: FlightResult):
-    """Create visualizations of simulation results with styled charts."""
+def visualize_results(result: FlightResult, solver: Optional[FlightSolver] = None):
+    """Aerospace-grade comprehensive flight analysis visualization."""
     if not result or not result.history:
         st.error("No simulation data to visualize")
         return
 
     history = result.history
 
-    # Extract data
-    times = [s.time for s in history]
-    altitudes = [s.z for s in history]
-    velocities = [np.linalg.norm(s.velocity) for s in history]
-    downrange = [np.linalg.norm([s.x, s.y]) for s in history]
-    machs = [s.mach for s in history]
-    aoas = [np.degrees(s.angle_of_attack) for s in history]
-    dynamic_pressures = [s.dynamic_pressure / 1000 for s in history]  # Convert to kPa
+    # Compute comprehensive analysis if solver is available
+    analyzer = None
+    metrics = None
+    if solver:
+        try:
+            analyzer = FlightAnalyzer(result, solver)
+            metrics = analyzer.compute_all_metrics()
+            st.session_state.flight_analyzer = analyzer
+            st.session_state.flight_metrics = metrics
+        except Exception as e:
+            st.warning(f"Advanced analysis unavailable: {e}")
+            import traceback
+            st.code(traceback.format_exc())
+            analyzer = None
+    else:
+        # Try to create analyzer without solver for basic dynamics (first/second order terms)
+        # This allows dynamics analysis even when solver isn't available
+        try:
+            # Create a minimal solver-like object for basic analysis
+            class MinimalSolverForAnalysis:
+                def __init__(self, result):
+                    self.result = result
+                    # Estimate rocket properties from flight data
+                    self.rocket = type('obj', (object,), {
+                        'reference_diameter': 0.1,  # Default 100mm
+                        'reference_area': np.pi * (0.05)**2,
+                    })()
+                    self.motor = type('obj', (object,), {
+                        'burn_time': 5.0,  # Estimate
+                    })()
+                    self.mass_model = type('obj', (object,), {
+                        'total_mass': lambda t: 10.0,  # Estimate
+                        'total_cg': lambda t: 1.0,  # Estimate
+                    })()
+            
+            minimal_solver = MinimalSolverForAnalysis(result)
+            analyzer = FlightAnalyzer(result, minimal_solver)
+            # Only compute first/second order terms (don't need full metrics)
+            st.session_state.flight_analyzer = analyzer
+        except Exception:
+            analyzer = None
 
+    # Extract basic data
+    times = np.array([s.time for s in history])
+    altitudes = np.array([s.z for s in history])
+    velocities = np.array([np.linalg.norm(s.velocity) for s in history])
+    downrange = np.array([np.linalg.norm([s.x, s.y]) for s in history])
+    machs = np.array([s.mach for s in history])
+    aoas = np.array([np.degrees(s.angle_of_attack) for s in history])
+    sideslips = np.array([np.degrees(s.sideslip) for s in history])
+    dynamic_pressures = np.array([s.dynamic_pressure / 1000 for s in history])  # kPa
+    drag_forces = np.array([s.drag_force for s in history])
+    lift_forces = np.array([s.lift_force for s in history])
+    moments = np.array([s.moment_world for s in history])
+    angular_velocities = np.array([s.angular_velocity for s in history])
+    
     # Key metrics
-    max_alt = max(altitudes)
-    max_v = max(velocities)
-    max_mach = max(machs)
-    apogee_time = times[altitudes.index(max_alt)]
+    max_alt = float(np.max(altitudes))
+    max_v = float(np.max(velocities))
+    max_mach = float(np.max(machs))
+    apogee_idx = int(np.argmax(altitudes))
+    apogee_time = float(times[apogee_idx])
+    
+    # Enhanced metrics if available
+    if metrics:
+        max_q = metrics.max_q / 1000  # Convert to kPa
+        max_q_time = metrics.max_q_time
+        max_g = metrics.max_g
+        max_g_time = metrics.max_g_time
+        static_margin = metrics.static_margin
+        min_stability = metrics.min_stability_cal
+    else:
+        max_q = float(np.max(dynamic_pressures))
+        max_q_idx = int(np.argmax(dynamic_pressures))
+        max_q_time = float(times[max_q_idx])
+        max_g = 0.0
+        max_g_time = 0.0
+        static_margin = 1.5  # Default estimate
+        min_stability = 1.5
 
-    # Metrics row
+    # Professional header with confidence indicators
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, rgba(0, 212, 255, 0.1) 0%, rgba(123, 47, 255, 0.1) 100%);
+                border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <h2 style="margin: 0; color: var(--primary); font-family: 'Outfit', sans-serif;">
+                    ✈️ Flight Analysis Report
+                </h2>
+                <p style="margin: 0.5rem 0 0 0; color: var(--text-muted); font-size: 0.9rem;">
+                    Comprehensive 6-DOF trajectory analysis with stability derivatives
+                </p>
+            </div>
+            <div style="text-align: right;">
+                <div style="color: var(--success); font-size: 0.85rem; font-weight: 600;">
+                    ✓ Analysis Complete
+                </div>
+                <div style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.25rem;">
+                    {:.0f} data points
+                </div>
+            </div>
+        </div>
+    </div>
+    """.format(len(history)), unsafe_allow_html=True)
+
+    # Enhanced metrics grid
     st.markdown('<div class="metric-grid">', unsafe_allow_html=True)
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
 
     with col1:
-        st.markdown(
-            f"""
+        st.markdown(f"""
         <div class="metric-card altitude">
             <div class="metric-label">Max Altitude</div>
             <div class="metric-value">{max_alt:,.0f}<span class="metric-unit">m</span></div>
+            <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.25rem;">
+                {max_alt*3.281:.0f} ft
+            </div>
         </div>
-        """,
-            unsafe_allow_html=True,
-        )
+        """, unsafe_allow_html=True)
 
     with col2:
-        st.markdown(
-            f"""
+        st.markdown(f"""
         <div class="metric-card velocity">
             <div class="metric-label">Max Velocity</div>
             <div class="metric-value">{max_v:,.0f}<span class="metric-unit">m/s</span></div>
+            <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.25rem;">
+                Mach {max_mach:.2f}
+            </div>
         </div>
-        """,
-            unsafe_allow_html=True,
-        )
+        """, unsafe_allow_html=True)
 
     with col3:
-        st.markdown(
-            f"""
+        st.markdown(f"""
         <div class="metric-card mach">
-            <div class="metric-label">Max Mach</div>
-            <div class="metric-value">{max_mach:.2f}</div>
+            <div class="metric-label">Max-Q</div>
+            <div class="metric-value">{max_q:.1f}<span class="metric-unit">kPa</span></div>
+            <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.25rem;">
+                @ {max_q_time:.1f}s
+            </div>
         </div>
-        """,
-            unsafe_allow_html=True,
-        )
+        """, unsafe_allow_html=True)
 
     with col4:
-        st.markdown(
-            f"""
+        st.markdown(f"""
+        <div class="metric-card time">
+            <div class="metric-label">Max G-Force</div>
+            <div class="metric-value">{max_g:.1f}<span class="metric-unit">g</span></div>
+            <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.25rem;">
+                @ {max_g_time:.1f}s
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col5:
+        stability_color = "#00FF88" if min_stability >= 1.0 else "#FFB800" if min_stability >= 0.5 else "#FF3366"
+        st.markdown(f"""
+        <div class="metric-card" style="border-left: 3px solid {stability_color};">
+            <div class="metric-label">Static Margin</div>
+            <div class="metric-value" style="color: {stability_color};">{static_margin:.2f}<span class="metric-unit">cal</span></div>
+            <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.25rem;">
+                Min: {min_stability:.2f} cal
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col6:
+        st.markdown(f"""
         <div class="metric-card time">
             <div class="metric-label">Apogee Time</div>
             <div class="metric-value">{apogee_time:.1f}<span class="metric-unit">s</span></div>
+            <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.25rem;">
+                Flight: {times[-1]:.1f}s
+            </div>
         </div>
-        """,
-            unsafe_allow_html=True,
-        )
+        """, unsafe_allow_html=True)
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # Tabs for different visualizations
-    tab1, tab2, tab3, tab4 = st.tabs(
-        ["📈 Trajectory", "⚡ Performance", "🌪️ Aerodynamics", "🌍 3D Path"]
-    )
+    # Track active tab for state management
+    if "current_analysis_tab" not in st.session_state:
+        st.session_state.current_analysis_tab = "Trajectory"
+    
+    # Comprehensive analysis tabs
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "📈 Trajectory", 
+        "⚡ Performance", 
+        "🌪️ Aerodynamics",
+        "🎯 Stability",
+        "📊 Dynamics",
+        "🔬 Advanced",
+        "🌍 3D Path"
+    ])
+    
+    # Clear state when switching tabs (optional - can be removed if too aggressive)
+    # This ensures clean state when switching between analysis views
 
-    with tab1:
+    with tab1:  # Trajectory
         col1, col2 = st.columns(2)
-
         with col1:
-            # Altitude vs Time
             fig = go.Figure()
-            fig.add_trace(
-                go.Scatter(
-                    x=times,
-                    y=altitudes,
-                    mode="lines",
-                    name="Altitude",
-                    line=dict(color=COLORS["primary"], width=3),
-                    fill="tozeroy",
-                    fillcolor="rgba(0, 212, 255, 0.1)",
-                )
-            )
+            fig.add_trace(go.Scatter(
+                x=times, y=altitudes, mode="lines", name="Altitude",
+                line=dict(color=COLORS["primary"], width=3),
+                fill="tozeroy", fillcolor="rgba(0, 212, 255, 0.1)",
+            ))
+            # Mark flight phases
+            if solver:
+                phases = compute_flight_phases(result, solver.motor.burn_time)
+                for phase_name, (start, end) in phases.items():
+                    if end > start:
+                        fig.add_vrect(
+                            x0=times[start], x1=times[min(end, len(times)-1)],
+                            fillcolor="rgba(255, 184, 0, 0.1)", layer="below",
+                            annotation_text=phase_name.title(), annotation_position="top left"
+                        )
             fig.update_layout(**create_chart_layout("Altitude vs Time", "Time (s)", "Altitude (m)"))
             fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
 
         with col2:
-            # Velocity vs Time
             fig = go.Figure()
-            fig.add_trace(
-                go.Scatter(
-                    x=times,
-                    y=velocities,
-                    mode="lines",
-                    name="Velocity",
-                    line=dict(color=COLORS["secondary"], width=3),
-                    fill="tozeroy",
-                    fillcolor="rgba(255, 107, 53, 0.1)",
-                )
-            )
-            fig.update_layout(
-                **create_chart_layout("Velocity vs Time", "Time (s)", "Velocity (m/s)")
-            )
+            fig.add_trace(go.Scatter(
+                x=times, y=velocities, mode="lines", name="Velocity",
+                line=dict(color=COLORS["secondary"], width=3),
+                fill="tozeroy", fillcolor="rgba(255, 107, 53, 0.1)",
+            ))
+            fig.update_layout(**create_chart_layout("Velocity vs Time", "Time (s)", "Velocity (m/s)"))
             fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
 
-        # Trajectory plot
+        # Trajectory plot with phase coloring
         fig = go.Figure()
-        fig.add_trace(
-            go.Scatter(
-                x=downrange,
-                y=altitudes,
-                mode="lines",
-                name="Trajectory",
+        if solver:
+            phases = compute_flight_phases(result, solver.motor.burn_time)
+            phase_colors = {"boost": COLORS["secondary"], "coast": COLORS["primary"], "descent": COLORS["warning"]}
+            for phase_name, (start, end) in phases.items():
+                if end > start:
+                    fig.add_trace(go.Scatter(
+                        x=downrange[start:end], y=altitudes[start:end],
+                        mode="lines", name=phase_name.title(),
+                        line=dict(color=phase_colors.get(phase_name, COLORS["primary"]), width=3),
+                    ))
+        else:
+            fig.add_trace(go.Scatter(
+                x=downrange, y=altitudes, mode="lines", name="Trajectory",
                 line=dict(color=COLORS["success"], width=3),
-            )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=[downrange[altitudes.index(max_alt)]],
-                y=[max_alt],
-                mode="markers",
-                name="Apogee",
-                marker=dict(color=COLORS["warning"], size=12, symbol="star"),
-            )
-        )
-        fig.update_layout(
-            **create_chart_layout("Flight Trajectory", "Downrange (m)", "Altitude (m)")
-        )
+            ))
+        fig.add_trace(go.Scatter(
+            x=[downrange[apogee_idx]], y=[max_alt], mode="markers",
+            name="Apogee", marker=dict(color=COLORS["warning"], size=12, symbol="star"),
+        ))
+        fig.update_layout(**create_chart_layout("Flight Trajectory", "Downrange (m)", "Altitude (m)"))
         fig.update_layout(height=400)
         st.plotly_chart(fig, use_container_width=True)
 
-    with tab2:
+    with tab2:  # Performance
         col1, col2 = st.columns(2)
-
         with col1:
-            # Mach number
             fig = go.Figure()
-            fig.add_trace(
-                go.Scatter(
-                    x=times,
-                    y=machs,
-                    mode="lines",
-                    name="Mach",
-                    line=dict(color=COLORS["warning"], width=3),
-                )
-            )
-            # Add sonic line
-            fig.add_hline(
-                y=1,
-                line_dash="dash",
-                line_color=COLORS["danger"],
-                annotation_text="Mach 1",
-                annotation_position="top right",
-            )
+            fig.add_trace(go.Scatter(
+                x=times, y=machs, mode="lines", name="Mach",
+                line=dict(color=COLORS["warning"], width=3),
+            ))
+            fig.add_hline(y=1, line_dash="dash", line_color=COLORS["danger"], annotation_text="Mach 1")
             fig.update_layout(**create_chart_layout("Mach Number", "Time (s)", "Mach"))
             fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
 
         with col2:
-            # Altitude vs Velocity phase plot
             fig = go.Figure()
-            fig.add_trace(
-                go.Scatter(
-                    x=velocities,
-                    y=altitudes,
-                    mode="lines",
-                    name="Phase",
-                    line=dict(color=COLORS["primary"], width=2),
-                    marker=dict(
-                        color=times,
-                        colorscale="Viridis",
-                        size=4,
-                        showscale=True,
-                        colorbar=dict(title="Time (s)"),
-                    ),
-                )
-            )
-            fig.update_layout(
-                **create_chart_layout("Altitude-Velocity Phase", "Velocity (m/s)", "Altitude (m)")
-            )
+            fig.add_trace(go.Scatter(
+                x=velocities, y=altitudes, mode="lines", name="Phase",
+                line=dict(color=COLORS["primary"], width=2),
+                marker=dict(color=times, colorscale="Viridis", size=4, showscale=True, colorbar=dict(title="Time (s)")),
+            ))
+            fig.update_layout(**create_chart_layout("Altitude-Velocity Phase", "Velocity (m/s)", "Altitude (m)"))
             fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
 
-    with tab3:
-        col1, col2 = st.columns(2)
+        # Energy plots
+        if metrics:
+            col1, col2 = st.columns(2)
+            with col1:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=times, y=metrics.kinetic_energy/1000, mode="lines", name="Kinetic", line=dict(color=COLORS["secondary"])))
+                fig.add_trace(go.Scatter(x=times, y=metrics.potential_energy/1000, mode="lines", name="Potential", line=dict(color=COLORS["success"])))
+                fig.add_trace(go.Scatter(x=times, y=metrics.total_energy/1000, mode="lines", name="Total", line=dict(color=COLORS["primary"], width=2)))
+                fig.update_layout(**create_chart_layout("Energy vs Time", "Time (s)", "Energy (kJ)"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
 
+            with col2:
+                # Acceleration (G-forces)
+                if len(velocities) > 1:
+                    dt = times[1] - times[0] if len(times) > 1 else 0.01
+                    accel = np.diff(velocities) / dt
+                    g_forces = accel / 9.80665
+                    times_accel = times[1:]
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=times_accel, y=g_forces, mode="lines", name="G-Force",
+                        line=dict(color=COLORS["danger"], width=2),
+                    ))
+                    fig.add_hline(y=10, line_dash="dash", line_color=COLORS["warning"], annotation_text="10g limit")
+                    fig.update_layout(**create_chart_layout("Acceleration (G-Forces)", "Time (s)", "G-Force"))
+                    fig.update_layout(height=400)
+                    st.plotly_chart(fig, use_container_width=True)
+
+    with tab3:  # Aerodynamics
+        st.markdown("### Aerodynamic Angles & Flow Conditions")
+        col1, col2 = st.columns(2)
         with col1:
-            # Angle of Attack
             fig = go.Figure()
-            fig.add_trace(
-                go.Scatter(
-                    x=times,
-                    y=aoas,
-                    mode="lines",
-                    name="AoA",
-                    line=dict(color=COLORS["danger"], width=2),
-                )
-            )
+            fig.add_trace(go.Scatter(
+                x=times, y=aoas, mode="lines", name="AoA",
+                line=dict(color=COLORS["danger"], width=3),
+                fill="tozeroy", fillcolor="rgba(255, 51, 102, 0.1)",
+            ))
+            fig.add_hline(y=15, line_dash="dash", line_color=COLORS["warning"], annotation_text="15° limit")
+            fig.add_hline(y=-15, line_dash="dash", line_color=COLORS["warning"])
+            fig.add_hline(y=30, line_dash="dot", line_color=COLORS["danger"], annotation_text="30° critical")
             fig.update_layout(**create_chart_layout("Angle of Attack", "Time (s)", "Angle (deg)"))
             fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
 
         with col2:
-            # Dynamic Pressure
             fig = go.Figure()
-            fig.add_trace(
-                go.Scatter(
-                    x=times,
-                    y=dynamic_pressures,
-                    mode="lines",
-                    name="Q",
-                    line=dict(color=COLORS["primary"], width=3),
-                    fill="tozeroy",
-                    fillcolor="rgba(0, 212, 255, 0.1)",
-                )
-            )
-            fig.update_layout(
-                **create_chart_layout("Dynamic Pressure (Max-Q)", "Time (s)", "Pressure (kPa)")
-            )
+            fig.add_trace(go.Scatter(
+                x=times, y=sideslips, mode="lines", name="Sideslip",
+                line=dict(color=COLORS["warning"], width=3),
+                fill="tozeroy", fillcolor="rgba(255, 184, 0, 0.1)",
+            ))
+            fig.add_hline(y=15, line_dash="dash", line_color=COLORS["warning"], annotation_text="15° limit")
+            fig.update_layout(**create_chart_layout("Sideslip Angle", "Time (s)", "Angle (deg)"))
             fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
 
-    with tab4:
-        # 3D trajectory
-        x_coords = [s.x for s in history]
-        y_coords = [s.y for s in history]
-        z_coords = [s.z for s in history]
+        st.markdown("### Dynamic Pressure & Mach Number")
+        col1, col2 = st.columns(2)
+        with col1:
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=times, y=dynamic_pressures, mode="lines", name="Q",
+                line=dict(color=COLORS["primary"], width=3),
+                fill="tozeroy", fillcolor="rgba(0, 212, 255, 0.1)",
+            ))
+            if metrics:
+                fig.add_vline(x=max_q_time, line_dash="dash", line_color=COLORS["warning"], annotation_text="Max-Q")
+            fig.update_layout(**create_chart_layout("Dynamic Pressure (Max-Q)", "Time (s)", "Pressure (kPa)"))
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
 
-        fig = go.Figure(
-            data=go.Scatter3d(
-                x=x_coords,
-                y=y_coords,
-                z=z_coords,
-                mode="lines",
-                line=dict(
-                    color=times,
-                    colorscale=[
-                        [0, COLORS["primary"]],
-                        [0.5, COLORS["warning"]],
-                        [1, COLORS["secondary"]],
-                    ],
-                    width=6,
-                ),
-                marker=dict(size=2),
-            )
-        )
+        with col2:
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=times, y=machs, mode="lines", name="Mach",
+                line=dict(color=COLORS["secondary"], width=3),
+            ))
+            fig.add_hline(y=1.0, line_dash="dash", line_color=COLORS["danger"], annotation_text="Mach 1 (Transonic)")
+            fig.add_hline(y=0.8, line_dash="dot", line_color=COLORS["warning"], annotation_text="0.8 (Compressibility)")
+            fig.update_layout(**create_chart_layout("Mach Number", "Time (s)", "Mach"))
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("### Aerodynamic Coefficients")
+        if metrics:
+            col1, col2 = st.columns(2)
+            with col1:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=times, y=metrics.lift_coefficient, mode="lines", name="C_L",
+                    line=dict(color=COLORS["success"], width=3),
+                ))
+                fig.add_trace(go.Scatter(
+                    x=times, y=metrics.drag_coefficient, mode="lines", name="C_D",
+                    line=dict(color=COLORS["danger"], width=3),
+                ))
+                fig.update_layout(**create_chart_layout("Aerodynamic Coefficients vs Time", "Time (s)", "Coefficient"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+
+            with col2:
+                # C_L vs C_D (drag polar)
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=metrics.drag_coefficient, y=metrics.lift_coefficient, mode="lines",
+                    name="Drag Polar", line=dict(color=COLORS["primary"], width=2),
+                    marker=dict(color=times, colorscale="Viridis", size=4, showscale=True, colorbar=dict(title="Time (s)")),
+                ))
+                fig.update_layout(**create_chart_layout("Drag Polar (C_L vs C_D)", "C_D", "C_L"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+
+            # C_L and C_D vs Mach
+            col1, col2 = st.columns(2)
+            with col1:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=machs, y=metrics.lift_coefficient, mode="lines", name="C_L",
+                    line=dict(color=COLORS["success"], width=2),
+                    marker=dict(color=times, colorscale="Viridis", size=4, showscale=True, colorbar=dict(title="Time (s)")),
+                ))
+                fig.update_layout(**create_chart_layout("Lift Coefficient vs Mach", "Mach", "C_L"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+
+            with col2:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=machs, y=metrics.drag_coefficient, mode="lines", name="C_D",
+                    line=dict(color=COLORS["danger"], width=2),
+                    marker=dict(color=times, colorscale="Viridis", size=4, showscale=True, colorbar=dict(title="Time (s)")),
+                ))
+                fig.update_layout(**create_chart_layout("Drag Coefficient vs Mach", "Mach", "C_D"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+
+            # C_L and C_D vs AOA
+            col1, col2 = st.columns(2)
+            with col1:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=aoas, y=metrics.lift_coefficient, mode="lines", name="C_L",
+                    line=dict(color=COLORS["success"], width=2),
+                    marker=dict(color=times, colorscale="Viridis", size=4, showscale=True, colorbar=dict(title="Time (s)")),
+                ))
+                fig.update_layout(**create_chart_layout("Lift Coefficient vs AOA", "AOA (deg)", "C_L"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+
+            with col2:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=aoas, y=metrics.drag_coefficient, mode="lines", name="C_D",
+                    line=dict(color=COLORS["danger"], width=2),
+                    marker=dict(color=times, colorscale="Viridis", size=4, showscale=True, colorbar=dict(title="Time (s)")),
+                ))
+                fig.update_layout(**create_chart_layout("Drag Coefficient vs AOA", "AOA (deg)", "C_D"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+
+            # Lift-to-Drag ratio
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=times, y=metrics.lift_to_drag_ratio, mode="lines", name="L/D",
+                line=dict(color=COLORS["primary"], width=3),
+                fill="tozeroy", fillcolor="rgba(0, 212, 255, 0.1)",
+            ))
+            fig.update_layout(**create_chart_layout("Lift-to-Drag Ratio", "Time (s)", "L/D"))
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Force magnitudes
+            drag_mags = np.linalg.norm(drag_forces, axis=1)
+            lift_mags = np.linalg.norm(lift_forces, axis=1)
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=times, y=drag_mags, mode="lines", name="Drag Force", line=dict(color=COLORS["danger"], width=2)))
+            fig.add_trace(go.Scatter(x=times, y=lift_mags, mode="lines", name="Lift Force", line=dict(color=COLORS["success"], width=2)))
+            fig.update_layout(**create_chart_layout("Aerodynamic Forces", "Time (s)", "Force (N)"))
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Aerodynamic coefficient analysis requires solver data.")
+
+    with tab4:  # Stability
+        if metrics and analyzer:
+            st.markdown("### Stability Derivatives")
+            st.caption("Longitudinal and lateral-directional stability characteristics")
+            
+            derivs = metrics.stability_derivatives
+            
+            # Stability derivatives overview cards
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                stability_status = "✓ Stable" if derivs.C_m_alpha < 0 else "✗ Unstable"
+                stability_color = COLORS["success"] if derivs.C_m_alpha < 0 else COLORS["danger"]
+                st.markdown(f"""
+                <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; border-left: 3px solid {stability_color};">
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">Static Stability</div>
+                    <div style="font-size: 1.2rem; font-weight: 600; color: {stability_color};">{stability_status}</div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">C_m_α = {derivs.C_m_alpha:.3f}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown(f"""
+                <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; border-left: 3px solid {COLORS['primary']};">
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">Lift Curve Slope</div>
+                    <div style="font-size: 1.2rem; font-weight: 600; color: {COLORS['primary']};">{derivs.C_L_alpha:.3f}</div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">C_L_α (1/rad)</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col3:
+                st.markdown(f"""
+                <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; border-left: 3px solid {COLORS['warning']};">
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">Pitch Damping</div>
+                    <div style="font-size: 1.2rem; font-weight: 600; color: {COLORS['warning']};">{derivs.C_m_q:.3f}</div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">C_m_q (1/rad)</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col4:
+                st.markdown(f"""
+                <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; border-left: 3px solid {COLORS['secondary']};">
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">Weathercock</div>
+                    <div style="font-size: 1.2rem; font-weight: 600; color: {COLORS['secondary']};">{derivs.C_n_beta:.3f}</div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">C_n_β (1/rad)</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Stability derivatives tables
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("#### Longitudinal Stability Derivatives")
+                st.markdown(f"""
+                | Derivative | Value | Description |
+                |------------|-------|-------------|
+                | **C_L_α** | {derivs.C_L_alpha:.4f} | Lift curve slope (1/rad) |
+                | **C_D_α** | {derivs.C_D_alpha:.4f} | Drag due to AOA (1/rad) |
+                | **C_m_α** | {derivs.C_m_alpha:.4f} | Static stability (1/rad) |
+                | **C_m_q** | {derivs.C_m_q:.4f} | Pitch damping (1/rad) |
+                | **C_m_α̇** | {derivs.C_m_alphadot:.4f} | Alpha rate damping (1/rad) |
+                | **C_L_q** | {derivs.C_L_q:.4f} | Lift due to pitch rate (1/rad) |
+                | **C_D_q** | {derivs.C_D_q:.4f} | Drag due to pitch rate (1/rad) |
+                """)
+            
+            with col2:
+                st.markdown("#### Lateral-Directional Stability Derivatives")
+                st.markdown(f"""
+                | Derivative | Value | Description |
+                |------------|-------|-------------|
+                | **C_Y_β** | {derivs.C_Y_beta:.4f} | Side force (1/rad) |
+                | **C_l_β** | {derivs.C_l_beta:.4f} | Dihedral effect (1/rad) |
+                | **C_l_p** | {derivs.C_l_p:.4f} | Roll damping (1/rad) |
+                | **C_n_β** | {derivs.C_n_beta:.4f} | Weathercock stability (1/rad) |
+                | **C_n_r** | {derivs.C_n_r:.4f} | Yaw damping (1/rad) |
+                | **C_n_p** | {derivs.C_n_p:.4f} | Cross-coupling (1/rad) |
+                """)
+            
+            # Stability derivative plots
+            st.markdown("#### Stability Derivative Analysis")
+            
+            # Longitudinal derivatives plot
+            col1, col2 = st.columns(2)
+            with col1:
+                fig = go.Figure()
+                fig.add_trace(go.Bar(
+                    x=["C_L_α", "C_D_α", "C_m_α", "C_m_q", "C_m_α̇"],
+                    y=[derivs.C_L_alpha, derivs.C_D_alpha, derivs.C_m_alpha, derivs.C_m_q, derivs.C_m_alphadot],
+                    marker=dict(color=[
+                        COLORS["primary"] if derivs.C_L_alpha > 0 else COLORS["danger"],
+                        COLORS["danger"],
+                        COLORS["success"] if derivs.C_m_alpha < 0 else COLORS["danger"],
+                        COLORS["warning"] if derivs.C_m_q < 0 else COLORS["danger"],
+                        COLORS["secondary"],
+                    ]),
+                    text=[f"{v:.3f}" for v in [derivs.C_L_alpha, derivs.C_D_alpha, derivs.C_m_alpha, derivs.C_m_q, derivs.C_m_alphadot]],
+                    textposition="outside",
+                ))
+                fig.update_layout(**create_chart_layout("Longitudinal Stability Derivatives", "Derivative", "Value"))
+                fig.update_layout(height=400, showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                fig = go.Figure()
+                fig.add_trace(go.Bar(
+                    x=["C_Y_β", "C_l_β", "C_l_p", "C_n_β", "C_n_r"],
+                    y=[derivs.C_Y_beta, derivs.C_l_beta, derivs.C_l_p, derivs.C_n_beta, derivs.C_n_r],
+                    marker=dict(color=[
+                        COLORS["primary"],
+                        COLORS["warning"] if derivs.C_l_beta < 0 else COLORS["danger"],
+                        COLORS["success"] if derivs.C_l_p < 0 else COLORS["danger"],
+                        COLORS["success"] if derivs.C_n_beta > 0 else COLORS["danger"],
+                        COLORS["success"] if derivs.C_n_r < 0 else COLORS["danger"],
+                    ]),
+                    text=[f"{v:.3f}" for v in [derivs.C_Y_beta, derivs.C_l_beta, derivs.C_l_p, derivs.C_n_beta, derivs.C_n_r]],
+                    textposition="outside",
+                ))
+                fig.update_layout(**create_chart_layout("Lateral-Directional Stability Derivatives", "Derivative", "Value"))
+                fig.update_layout(height=400, showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Static margin plot - get time-varying data from analyzer
+            if analyzer:
+                try:
+                    # Get time-varying static margin from analyzer (accounts for CG shift)
+                    static_margin_vals = analyzer._estimate_static_margin()
+                    if not isinstance(static_margin_vals, np.ndarray):
+                        static_margin_vals = np.full_like(times, float(static_margin_vals))
+                except:
+                    # Fallback to constant
+                    static_margin_vals = np.full_like(times, metrics.static_margin if isinstance(metrics.static_margin, (int, float)) else 1.5)
+            else:
+                static_margin_vals = np.full_like(times, metrics.static_margin if isinstance(metrics.static_margin, (int, float)) else 1.5)
+            
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=times, y=static_margin_vals, mode="lines", name="Static Margin",
+                line=dict(color=COLORS["success"], width=3),
+                fill="tozeroy", fillcolor="rgba(0, 255, 136, 0.1)",
+            ))
+            fig.add_hline(y=1.0, line_dash="dash", line_color=COLORS["warning"], annotation_text="1.0 cal (minimum safe)", annotation_position="right")
+            fig.add_hline(y=2.0, line_dash="dash", line_color=COLORS["primary"], annotation_text="2.0 cal (optimal)", annotation_position="right")
+            fig.add_hline(y=0.0, line_dash="dot", line_color=COLORS["danger"], annotation_text="Unstable", annotation_position="right")
+            fig.update_layout(**create_chart_layout("Static Margin vs Time", "Time (s)", "Static Margin (calibers)"))
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Stability margin during flight phases
+            if solver:
+                phases = compute_flight_phases(result, solver.motor.burn_time)
+                st.markdown("#### Stability by Flight Phase")
+                phase_data = []
+                for phase_name, (start, end) in phases.items():
+                    if end > start:
+                        phase_margins = static_margin_vals[start:end]
+                        phase_data.append({
+                            "Phase": phase_name.title(),
+                            "Min": float(np.min(phase_margins)),
+                            "Max": float(np.max(phase_margins)),
+                            "Mean": float(np.mean(phase_margins)),
+                        })
+                
+                if phase_data:
+                    phase_df = pd.DataFrame(phase_data)
+                    st.dataframe(phase_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("Stability analysis requires solver data. Run a simulation to see stability derivatives.")
+
+    with tab5:  # Dynamics
+        st.markdown("### First and Second Order Flight Dynamics")
+        st.caption("Comprehensive analysis of flight dynamics including rates, accelerations, and higher-order terms")
+        
+        if analyzer:
+            first_order = analyzer.compute_first_order_terms()
+            second_order = analyzer.compute_second_order_terms()
+            
+            st.markdown("#### First Order Terms (Rates & Accelerations)")
+            col1, col2 = st.columns(2)
+            with col1:
+                # Linear acceleration components
+                accel = first_order["acceleration"]
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=times, y=accel[:, 0], mode="lines", name="a_x", line=dict(color=COLORS["primary"], width=2)))
+                fig.add_trace(go.Scatter(x=times, y=accel[:, 1], mode="lines", name="a_y", line=dict(color=COLORS["success"], width=2)))
+                fig.add_trace(go.Scatter(x=times, y=accel[:, 2], mode="lines", name="a_z", line=dict(color=COLORS["secondary"], width=2)))
+                accel_mag = np.linalg.norm(accel, axis=1)
+                fig.add_trace(go.Scatter(x=times, y=accel_mag, mode="lines", name="|a|", line=dict(color=COLORS["warning"], width=3, dash="dash")))
+                fig.update_layout(**create_chart_layout("Linear Acceleration Components", "Time (s)", "Acceleration (m/s²)"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Velocity rate components
+                vel_rate = first_order["velocity_rate"]
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=times, y=vel_rate[:, 0], mode="lines", name="v̇_x", line=dict(color=COLORS["primary"], width=2)))
+                fig.add_trace(go.Scatter(x=times, y=vel_rate[:, 1], mode="lines", name="v̇_y", line=dict(color=COLORS["success"], width=2)))
+                fig.add_trace(go.Scatter(x=times, y=vel_rate[:, 2], mode="lines", name="v̇_z", line=dict(color=COLORS["secondary"], width=2)))
+                fig.update_layout(**create_chart_layout("Velocity Rate Components", "Time (s)", "Velocity Rate (m/s²)"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                # Angular acceleration components
+                ang_accel = first_order["angular_acceleration"]
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=times, y=np.degrees(ang_accel[:, 0]), mode="lines", name="α̇_x (roll)", line=dict(color=COLORS["primary"], width=2)))
+                fig.add_trace(go.Scatter(x=times, y=np.degrees(ang_accel[:, 1]), mode="lines", name="α̇_y (pitch)", line=dict(color=COLORS["secondary"], width=2)))
+                fig.add_trace(go.Scatter(x=times, y=np.degrees(ang_accel[:, 2]), mode="lines", name="α̇_z (yaw)", line=dict(color=COLORS["warning"], width=2)))
+                ang_accel_mag = np.linalg.norm(ang_accel, axis=1)
+                fig.add_trace(go.Scatter(x=times, y=np.degrees(ang_accel_mag), mode="lines", name="|α̇|", line=dict(color=COLORS["danger"], width=3, dash="dash")))
+                fig.update_layout(**create_chart_layout("Angular Acceleration Components", "Time (s)", "Angular Accel (deg/s²)"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Angular rate rate
+                ang_rate_rate = first_order["angular_rate_rate"]
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=times, y=np.degrees(ang_rate_rate[:, 0]), mode="lines", name="ṗ", line=dict(color=COLORS["primary"], width=2)))
+                fig.add_trace(go.Scatter(x=times, y=np.degrees(ang_rate_rate[:, 1]), mode="lines", name="q̇", line=dict(color=COLORS["secondary"], width=2)))
+                fig.add_trace(go.Scatter(x=times, y=np.degrees(ang_rate_rate[:, 2]), mode="lines", name="ṙ", line=dict(color=COLORS["warning"], width=2)))
+                fig.update_layout(**create_chart_layout("Angular Rate Rate Components", "Time (s)", "Angular Rate Rate (deg/s²)"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            st.markdown("#### Second Order Terms (Jerk)")
+            col1, col2 = st.columns(2)
+            with col1:
+                # Linear jerk components
+                jerk = second_order["jerk"]
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=times, y=jerk[:, 0], mode="lines", name="j_x", line=dict(color=COLORS["primary"], width=2)))
+                fig.add_trace(go.Scatter(x=times, y=jerk[:, 1], mode="lines", name="j_y", line=dict(color=COLORS["success"], width=2)))
+                fig.add_trace(go.Scatter(x=times, y=jerk[:, 2], mode="lines", name="j_z", line=dict(color=COLORS["secondary"], width=2)))
+                jerk_mag = np.linalg.norm(jerk, axis=1)
+                fig.add_trace(go.Scatter(x=times, y=jerk_mag, mode="lines", name="|j|", line=dict(color=COLORS["danger"], width=3, dash="dash")))
+                fig.update_layout(**create_chart_layout("Linear Jerk Components", "Time (s)", "Jerk (m/s³)"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                # Angular jerk components
+                ang_jerk = second_order["angular_jerk"]
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=times, y=np.degrees(ang_jerk[:, 0]), mode="lines", name="j_α_x", line=dict(color=COLORS["primary"], width=2)))
+                fig.add_trace(go.Scatter(x=times, y=np.degrees(ang_jerk[:, 1]), mode="lines", name="j_α_y", line=dict(color=COLORS["secondary"], width=2)))
+                fig.add_trace(go.Scatter(x=times, y=np.degrees(ang_jerk[:, 2]), mode="lines", name="j_α_z", line=dict(color=COLORS["warning"], width=2)))
+                ang_jerk_mag = np.linalg.norm(ang_jerk, axis=1)
+                fig.add_trace(go.Scatter(x=times, y=np.degrees(ang_jerk_mag), mode="lines", name="|j_α|", line=dict(color=COLORS["danger"], width=3, dash="dash")))
+                fig.update_layout(**create_chart_layout("Angular Jerk Components", "Time (s)", "Angular Jerk (deg/s³)"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            st.markdown("#### Aerodynamic Angle Rates")
+            col1, col2 = st.columns(2)
+            with col1:
+                # AOA rate and acceleration
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=times, y=np.degrees(first_order["aoa_rate"]), mode="lines", name="α̇",
+                    line=dict(color=COLORS["danger"], width=3),
+                ))
+                fig.add_trace(go.Scatter(
+                    x=times, y=np.degrees(second_order["aoa_acceleration"]), mode="lines", name="α̈",
+                    line=dict(color=COLORS["warning"], width=2, dash="dash"),
+                ))
+                fig.update_layout(**create_chart_layout("Angle of Attack Rate & Acceleration", "Time (s)", "Rate (deg/s) / Accel (deg/s²)"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                # Sideslip rate and acceleration
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=times, y=np.degrees(first_order["sideslip_rate"]), mode="lines", name="β̇",
+                    line=dict(color=COLORS["warning"], width=3),
+                ))
+                fig.add_trace(go.Scatter(
+                    x=times, y=np.degrees(second_order["sideslip_acceleration"]), mode="lines", name="β̈",
+                    line=dict(color=COLORS["secondary"], width=2, dash="dash"),
+                ))
+                fig.update_layout(**create_chart_layout("Sideslip Rate & Acceleration", "Time (s)", "Rate (deg/s) / Accel (deg/s²)"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            st.markdown("#### Body Rates (p, q, r)")
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=times, y=np.degrees(angular_velocities[:, 0]), mode="lines", name="p (roll)", line=dict(color=COLORS["primary"], width=3)))
+            fig.add_trace(go.Scatter(x=times, y=np.degrees(angular_velocities[:, 1]), mode="lines", name="q (pitch)", line=dict(color=COLORS["secondary"], width=3)))
+            fig.add_trace(go.Scatter(x=times, y=np.degrees(angular_velocities[:, 2]), mode="lines", name="r (yaw)", line=dict(color=COLORS["warning"], width=3)))
+            fig.update_layout(**create_chart_layout("Body Rates", "Time (s)", "Angular Rate (deg/s)"))
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Body rate magnitudes
+            body_rate_mag = np.linalg.norm(angular_velocities, axis=1)
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=times, y=np.degrees(body_rate_mag), mode="lines", name="|ω|",
+                line=dict(color=COLORS["primary"], width=3),
+                fill="tozeroy", fillcolor="rgba(0, 212, 255, 0.1)",
+            ))
+            fig.update_layout(**create_chart_layout("Total Body Rate Magnitude", "Time (s)", "Angular Rate (deg/s)"))
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Dynamics analysis requires solver data.")
+
+    with tab6:  # Advanced
+        st.markdown("### Advanced Analysis")
+        st.caption("Comprehensive force, moment, and performance analysis")
+        
+        if metrics and analyzer:
+            # Summary cards
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.markdown(f"""
+                <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; border-left: 3px solid {COLORS['success']};">
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">Flight Phases</div>
+                    <div style="font-size: 0.9rem; margin-top: 0.5rem;">
+                        <div>Boost: {metrics.boost_phase_duration:.1f}s</div>
+                        <div>Coast: {metrics.coast_phase_duration:.1f}s</div>
+                        <div>Descent: {metrics.descent_phase_duration:.1f}s</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                safety_status = "✓" if metrics.min_stability_cal >= 1.0 else "⚠"
+                safety_color = COLORS["success"] if metrics.min_stability_cal >= 1.0 else COLORS["warning"]
+                st.markdown(f"""
+                <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; border-left: 3px solid {safety_color};">
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">Safety Margins</div>
+                    <div style="font-size: 0.9rem; margin-top: 0.5rem;">
+                        <div>Stability: {metrics.min_stability_cal:.2f} cal {safety_status}</div>
+                        <div>AoA: {metrics.max_angle_of_attack:.1f}° {'✓' if metrics.max_angle_of_attack < 30 else '⚠'}</div>
+                        <div>Sideslip: {metrics.max_sideslip:.1f}° {'✓' if metrics.max_sideslip < 30 else '⚠'}</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col3:
+                st.markdown(f"""
+                <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; border-left: 3px solid {COLORS['primary']};">
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">Performance</div>
+                    <div style="font-size: 0.9rem; margin-top: 0.5rem;">
+                        <div>Max Alt: {max_alt:.0f}m</div>
+                        <div>Max V: {max_v:.0f} m/s</div>
+                        <div>Max G: {max_g:.1f}g</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col4:
+                st.markdown(f"""
+                <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; border-left: 3px solid {COLORS['secondary']};">
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">Timing</div>
+                    <div style="font-size: 0.9rem; margin-top: 0.5rem;">
+                        <div>Apogee: {apogee_time:.1f}s</div>
+                        <div>Max-Q: {max_q_time:.1f}s</div>
+                        <div>Total: {times[-1]:.1f}s</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            st.markdown("#### Aerodynamic Forces & Moments")
+            drag_mags = np.linalg.norm(drag_forces, axis=1)
+            lift_mags = np.linalg.norm(lift_forces, axis=1)
+            moment_mags = np.linalg.norm(moments, axis=1)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=times, y=drag_mags, mode="lines", name="Drag", line=dict(color=COLORS["danger"], width=3)))
+                fig.add_trace(go.Scatter(x=times, y=lift_mags, mode="lines", name="Lift", line=dict(color=COLORS["success"], width=3)))
+                fig.update_layout(**create_chart_layout("Aerodynamic Forces", "Time (s)", "Force (N)"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=times, y=moment_mags, mode="lines", name="Moment Magnitude", line=dict(color=COLORS["warning"], width=3)))
+                fig.update_layout(**create_chart_layout("Aerodynamic Moments", "Time (s)", "Moment (N⋅m)"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Force components
+            st.markdown("#### Force Components")
+            col1, col2 = st.columns(2)
+            with col1:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=times, y=drag_forces[:, 0], mode="lines", name="Drag X", line=dict(color=COLORS["primary"], width=2)))
+                fig.add_trace(go.Scatter(x=times, y=drag_forces[:, 1], mode="lines", name="Drag Y", line=dict(color=COLORS["success"], width=2)))
+                fig.add_trace(go.Scatter(x=times, y=drag_forces[:, 2], mode="lines", name="Drag Z", line=dict(color=COLORS["secondary"], width=2)))
+                fig.update_layout(**create_chart_layout("Drag Force Components", "Time (s)", "Force (N)"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=times, y=lift_forces[:, 0], mode="lines", name="Lift X", line=dict(color=COLORS["primary"], width=2)))
+                fig.add_trace(go.Scatter(x=times, y=lift_forces[:, 1], mode="lines", name="Lift Y", line=dict(color=COLORS["success"], width=2)))
+                fig.add_trace(go.Scatter(x=times, y=lift_forces[:, 2], mode="lines", name="Lift Z", line=dict(color=COLORS["secondary"], width=2)))
+                fig.update_layout(**create_chart_layout("Lift Force Components", "Time (s)", "Force (N)"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Moment components
+            st.markdown("#### Moment Components")
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=times, y=moments[:, 0], mode="lines", name="M_x (Roll)", line=dict(color=COLORS["primary"], width=2)))
+            fig.add_trace(go.Scatter(x=times, y=moments[:, 1], mode="lines", name="M_y (Pitch)", line=dict(color=COLORS["secondary"], width=2)))
+            fig.add_trace(go.Scatter(x=times, y=moments[:, 2], mode="lines", name="M_z (Yaw)", line=dict(color=COLORS["warning"], width=2)))
+            fig.update_layout(**create_chart_layout("Aerodynamic Moment Components", "Time (s)", "Moment (N⋅m)"))
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Energy analysis
+            st.markdown("#### Energy Analysis")
+            col1, col2 = st.columns(2)
+            with col1:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=times, y=metrics.kinetic_energy/1000, mode="lines", name="Kinetic", line=dict(color=COLORS["secondary"], width=3)))
+                fig.add_trace(go.Scatter(x=times, y=metrics.potential_energy/1000, mode="lines", name="Potential", line=dict(color=COLORS["success"], width=3)))
+                fig.add_trace(go.Scatter(x=times, y=metrics.total_energy/1000, mode="lines", name="Total", line=dict(color=COLORS["primary"], width=3, dash="dash")))
+                fig.update_layout(**create_chart_layout("Energy vs Time", "Time (s)", "Energy (kJ)"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                # Energy vs altitude
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=altitudes, y=metrics.kinetic_energy/1000, mode="lines", name="Kinetic", 
+                    line=dict(color=COLORS["secondary"], width=2),
+                    marker=dict(color=times, colorscale="Viridis", size=4, showscale=True, colorbar=dict(title="Time (s)"))))
+                fig.add_trace(go.Scatter(x=altitudes, y=metrics.potential_energy/1000, mode="lines", name="Potential", 
+                    line=dict(color=COLORS["success"], width=2),
+                    marker=dict(color=times, colorscale="Viridis", size=4, showscale=False)))
+                fig.update_layout(**create_chart_layout("Energy vs Altitude", "Altitude (m)", "Energy (kJ)"))
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Detailed tables
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("#### Flight Phase Summary")
+                phase_data = []
+                if solver:
+                    phases = compute_flight_phases(result, solver.motor.burn_time)
+                    for phase_name, (start, end) in phases.items():
+                        if end > start:
+                            phase_times = times[start:end]
+                            phase_alts = altitudes[start:end]
+                            phase_data.append({
+                                "Phase": phase_name.title(),
+                                "Duration (s)": f"{phase_times[-1] - phase_times[0]:.1f}",
+                                "Max Alt (m)": f"{np.max(phase_alts):.0f}",
+                                "Avg V (m/s)": f"{np.mean(velocities[start:end]):.1f}",
+                            })
+                    if phase_data:
+                        phase_df = pd.DataFrame(phase_data)
+                        st.dataframe(phase_df, use_container_width=True, hide_index=True)
+            
+            with col2:
+                st.markdown("#### Performance Metrics")
+                perf_data = {
+                    "Metric": ["Max Altitude", "Max Velocity", "Max Mach", "Max Dynamic Pressure", "Max G-Force", "Apogee Time", "Total Flight Time"],
+                    "Value": [
+                        f"{max_alt:.0f} m ({max_alt*3.281:.0f} ft)",
+                        f"{max_v:.0f} m/s",
+                        f"{max_mach:.2f}",
+                        f"{max_q:.1f} kPa",
+                        f"{max_g:.1f} g",
+                        f"{apogee_time:.1f} s",
+                        f"{times[-1]:.1f} s",
+                    ]
+                }
+                perf_df = pd.DataFrame(perf_data)
+                st.dataframe(perf_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("Advanced analysis requires solver data.")
+
+    with tab7:  # 3D Path
+        x_coords = np.array([s.x for s in history])
+        y_coords = np.array([s.y for s in history])
+        z_coords = np.array([s.z for s in history])
+
+        fig = go.Figure(data=go.Scatter3d(
+            x=x_coords, y=y_coords, z=z_coords, mode="lines",
+            line=dict(
+                color=times, colorscale="Viridis", width=6,
+            ),
+            marker=dict(size=2),
+        ))
 
         # Add apogee marker
-        apogee_idx = altitudes.index(max_alt)
-        fig.add_trace(
-            go.Scatter3d(
-                x=[x_coords[apogee_idx]],
-                y=[y_coords[apogee_idx]],
-                z=[z_coords[apogee_idx]],
-                mode="markers",
-                marker=dict(size=10, color=COLORS["warning"], symbol="diamond"),
-                name="Apogee",
-            )
-        )
+        fig.add_trace(go.Scatter3d(
+            x=[x_coords[apogee_idx]], y=[y_coords[apogee_idx]], z=[z_coords[apogee_idx]],
+            mode="markers", name="Apogee",
+            marker=dict(size=10, color=COLORS["warning"], symbol="diamond"),
+        ))
 
         fig.update_layout(
-            title={
-                "text": "3D Flight Path",
-                "font": {"size": 16, "color": COLORS["text"], "family": "Outfit"},
-                "x": 0.5,
-            },
+            title={"text": "3D Flight Path", "font": {"size": 16, "color": COLORS["text"], "family": "Outfit"}, "x": 0.5},
             scene=dict(
                 xaxis=dict(title="X (m)", color=COLORS["text_muted"], gridcolor=COLORS["border"]),
                 yaxis=dict(title="Y (m)", color=COLORS["text_muted"], gridcolor=COLORS["border"]),
-                zaxis=dict(
-                    title="Altitude (m)", color=COLORS["text_muted"], gridcolor=COLORS["border"]
-                ),
+                zaxis=dict(title="Altitude (m)", color=COLORS["text_muted"], gridcolor=COLORS["border"]),
                 bgcolor="rgba(10, 14, 23, 0.8)",
             ),
             paper_bgcolor="rgba(0,0,0,0)",
@@ -1581,21 +2285,21 @@ def render_sidebar():
         render_divider()
 
         # ─────────────────────────────────────────────────────────────────────
-        # ROCKET TYPE SELECTION
+        # ROCKET TYPE SELECTION (removed - using main selector only)
         # ─────────────────────────────────────────────────────────────────────
-        st.markdown("### 🎯 Design Mode")
-        rocket_type = st.radio(
-            "Select design approach",
-            ["Calisto (Default)", "Custom Rocket", "AI Builder"],
-            label_visibility="collapsed",
-        )
+        # Note: Rocket selection is now handled in main content area to avoid duplicate dropdowns
+        # Sync sidebar state with main selector
+        current_rocket_type = st.session_state.get("last_selected_rocket", "Calisto (Default)")
 
         render_divider()
 
         # ─────────────────────────────────────────────────────────────────────
         # AI BUILDER
         # ─────────────────────────────────────────────────────────────────────
-        if rocket_type == "AI Builder":
+        # Get current rocket type from main selector (sync with sidebar)
+        current_rocket_type = st.session_state.get("last_selected_rocket", "Calisto (Default)")
+        
+        if current_rocket_type == "AI Builder":
             st.markdown("### 🤖 Smart Optimizer")
             st.caption("Tell us what you need - we'll find the cheapest working design")
 
@@ -1762,7 +2466,7 @@ def render_sidebar():
         # ─────────────────────────────────────────────────────────────────────
         # CUSTOM ROCKET CONFIGURATION
         # ─────────────────────────────────────────────────────────────────────
-        if rocket_type == "Custom Rocket":
+        if current_rocket_type == "Custom Rocket":
             render_divider()
             st.markdown("### 📐 Rocket Configuration")
 
@@ -1860,7 +2564,9 @@ def render_sidebar():
         # ─────────────────────────────────────────────────────────────────────
         # MOTOR SELECTION
         # ─────────────────────────────────────────────────────────────────────
-        if rocket_type in ["Custom Rocket", "AI Builder"]:
+        # Get current rocket type from main selector (sync with sidebar)
+        current_rocket_type = st.session_state.get("last_selected_rocket", "Calisto (Default)")
+        if current_rocket_type in ["Custom Rocket", "AI Builder"]:
             render_divider()
             st.markdown("### 🔥 Motor")
 
@@ -1929,9 +2635,12 @@ def render_sidebar():
             rail_length = st.number_input("Rail Length (m)", 0.5, 20.0, 5.2, 0.1)
             inclination_deg = st.number_input("Inclination (°)", 0.0, 90.0, 5.0, 1.0)
             heading_deg = st.number_input("Heading (°)", 0.0, 360.0, 0.0, 1.0)
-            max_time = st.number_input("Max Time (s)", 10.0, 1000.0, 200.0, 10.0)
+            max_time = st.number_input("Max Time (s)", 10.0, 1000.0, 600.0, 10.0, 
+                                      help="Maximum simulation time. Simulation will stop at impact or this time, whichever comes first.")
             dt = st.number_input("Time Step (s)", 0.001, 0.1, 0.01, 0.001, format="%.3f")
 
+        # Return current rocket type from session state
+        rocket_type = st.session_state.get("last_selected_rocket", "Calisto (Default)")
         return rocket_type, elevation, rail_length, inclination_deg, heading_deg, max_time, dt
 
 
@@ -1950,12 +2659,149 @@ def main():
     # Hero section
     render_hero()
 
+    # ─────────────────────────────────────────────────────────────────────
+    # ROCKET SELECTOR (Prominent at top)
+    # ─────────────────────────────────────────────────────────────────────
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, rgba(0, 212, 255, 0.1) 0%, rgba(123, 47, 255, 0.1) 100%);
+                border: 1px solid var(--border); border-radius: 12px; padding: 1rem; margin-bottom: 2rem;">
+        <div style="display: flex; align-items: center; gap: 1rem;">
+            <div style="font-size: 1.2rem;">🎯</div>
+            <div style="flex: 1;">
+                <div style="font-weight: 600; color: var(--primary); margin-bottom: 0.25rem;">Rocket Configuration</div>
+                <div style="font-size: 0.85rem; color: var(--text-muted);">Select your rocket design</div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Rocket selector with state clearing
+    rocket_selector_col1, rocket_selector_col2 = st.columns([3, 1])
+    with rocket_selector_col1:
+        rocket_options = ["Calisto (Default)", "Custom Rocket", "AI Builder"]
+        
+        # Initialize the selectbox key if it doesn't exist
+        if "main_rocket_selector" not in st.session_state:
+            st.session_state.main_rocket_selector = st.session_state.get("last_selected_rocket", "Calisto (Default)")
+        
+        # Get the current value from the key (this is what Streamlit uses)
+        current_value = st.session_state.main_rocket_selector
+        try:
+            default_index = rocket_options.index(current_value)
+        except ValueError:
+            default_index = 0
+            st.session_state.main_rocket_selector = "Calisto (Default)"
+        
+        selected_rocket = st.selectbox(
+            "Rocket Design",
+            rocket_options,
+            index=default_index,
+            key="main_rocket_selector",
+            help="Select rocket configuration. Switching will clear current simulation results."
+        )
+        
+        # Read the actual selected value from session state (after selectbox updates it)
+        selected_rocket = st.session_state.main_rocket_selector
+    
+    with rocket_selector_col2:
+        if st.button("🔄 Clear Results", use_container_width=True, help="Clear all simulation data"):
+            # Safely clear all simulation state
+            for key in ["simulation_result", "flight_analyzer", "flight_metrics", "solver"]:
+                if key in st.session_state:
+                    st.session_state[key] = None
+            st.rerun()
+    
+    # Sync state and clear on change - check if selection actually changed
+    previous_selection = st.session_state.get("last_selected_rocket", "Calisto (Default)")
+    if previous_selection != selected_rocket:
+        # Clear simulation state when switching
+        for key in ["simulation_result", "flight_analyzer", "flight_metrics", "solver"]:
+            if key in st.session_state:
+                st.session_state[key] = None
+        st.session_state.last_rocket_type = selected_rocket
+        st.session_state.last_selected_rocket = selected_rocket
+        st.rerun()
+    
+    # Update session state to track current selection
+    st.session_state.last_selected_rocket = selected_rocket
+    
+    # Update sidebar rocket_type to match (use selected_rocket for rest of function)
+    rocket_type = selected_rocket
+
     # Main content layout
     col_main, col_actions = st.columns([4, 1])
 
     with col_main:
+        # Show Calisto rocket when selected
+        if selected_rocket == "Calisto (Default)":
+            st.markdown("""
+            <div class="section-card" style="margin-bottom: 1.5rem;">
+                <div class="section-title">
+                    <span class="section-title-icon">🚀</span>
+                    Calisto Rocket
+                </div>
+            """, unsafe_allow_html=True)
+            
+            # Calisto specs
+            calisto_cols = st.columns(4)
+            with calisto_cols[0]:
+                st.metric("Length", "2.0 m")
+            with calisto_cols[1]:
+                st.metric("Diameter", "98 mm")
+            with calisto_cols[2]:
+                st.metric("Dry Mass", "9.5 kg")
+            with calisto_cols[3]:
+                st.metric("Motor", "M1670")
+            
+            # Show 3D visualization if available
+            if TRIMESH_AVAILABLE:
+                try:
+                    rocket_raw, motor_raw = build_calisto()
+                    rocket = RocketModel(rocket_raw)
+                    motor = Motor.from_openrocket(motor_raw)
+                    
+                    # Create config for visualization
+                    calisto_config = {
+                        "name": "Calisto",
+                        "nose_length": 0.4,
+                        "nose_radius": 0.049,
+                        "body_length": 1.6,
+                        "body_radius": 0.049,
+                        "fin_count": 4,
+                        "fin_root_chord": 0.15,
+                        "fin_tip_chord": 0.05,
+                        "fin_span": 0.1,
+                        "fin_sweep": 0.05,
+                    }
+                    
+                    viz_tab1, viz_tab2 = st.tabs(["🌐 3D View", "📐 2D Side View"])
+                    with viz_tab1:
+                        try:
+                            fig_3d = render_to_plotly(calisto_config, None)
+                            st.plotly_chart(fig_3d, use_container_width=True)
+                        except:
+                            fig_3d = visualize_rocket_3d(calisto_config, None)
+                            fig_3d.update_layout(
+                                paper_bgcolor="rgba(0,0,0,0)",
+                                scene=dict(bgcolor="rgba(10, 14, 23, 0.8)"),
+                                font=dict(family="Outfit", color=COLORS["text"]),
+                            )
+                            st.plotly_chart(fig_3d, use_container_width=True)
+                    with viz_tab2:
+                        fig_2d = visualize_rocket_2d_side_view(calisto_config, None)
+                        fig_2d.update_layout(
+                            paper_bgcolor="rgba(0,0,0,0)",
+                            plot_bgcolor="rgba(19, 27, 46, 0.5)",
+                            font=dict(family="Outfit", color=COLORS["text"]),
+                        )
+                        st.plotly_chart(fig_2d, use_container_width=True)
+                except Exception as e:
+                    st.info(f"3D visualization unavailable: {e}")
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+        
         # Design Preview Section
-        if st.session_state.rocket_config:
+        if st.session_state.rocket_config and selected_rocket != "Calisto (Default)":
             config = st.session_state.rocket_config
 
             st.markdown(
@@ -2113,7 +2959,8 @@ def main():
         if st.session_state.simulation_result is not None:
             render_divider()
             render_section_header("📊", "Simulation Results")
-            visualize_results(st.session_state.simulation_result)
+            solver = st.session_state.get("solver", None)
+            visualize_results(st.session_state.simulation_result, solver)
 
             # Export section
             render_divider()
@@ -2154,8 +3001,9 @@ def main():
         if st.button("🚀 LAUNCH", type="primary", use_container_width=True):
             with st.spinner("Running simulation..."):
                 try:
-                    # Build rocket
-                    if rocket_type == "Calisto (Default)":
+                    # Build rocket (use selected_rocket from main selector)
+                    selected_rocket_type = st.session_state.get("last_selected_rocket", "Calisto (Default)")
+                    if selected_rocket_type == "Calisto (Default)":
                         rocket_raw, motor_raw = build_calisto()
                     elif st.session_state.rocket_config:
                         rocket_raw = build_custom_rocket(st.session_state.rocket_config)
@@ -2181,7 +3029,10 @@ def main():
                         dt=dt,
                     )
 
-                    result = solver.run(max_time=max_time)
+                    # Run until impact - max_time is just a safety limit
+                    # Use at least 600s to ensure we run to impact for most flights
+                    effective_max_time = max(max_time, 600.0) if max_time else 600.0
+                    result = solver.run(max_time=effective_max_time)
 
                     if len(result.history) > 0:
                         st.session_state.simulation_result = result

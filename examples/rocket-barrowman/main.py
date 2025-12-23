@@ -39,6 +39,7 @@ from motor_model import Motor
 from rocket_model import Rocket as RocketModel
 from flight_solver import FlightSolver, FlightResult
 from calisto_builder import build_calisto
+from flight_analysis import FlightAnalyzer, FlightMetrics, StabilityDerivatives
 
 # Try to import mesh renderer for Elodin visualization
 try:
@@ -113,6 +114,23 @@ def main():
 
 def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     print("\nConverting to Elodin format and launching editor...")
+    
+    # Compute comprehensive flight analysis
+    print("Computing flight analysis metrics...")
+    try:
+        analyzer = FlightAnalyzer(result, solver)
+        metrics = analyzer.compute_all_metrics()
+        first_order = analyzer.compute_first_order_terms()
+        second_order = analyzer.compute_second_order_terms()
+        analysis_available = True
+        print(f"  ✓ Stability: C_m_α = {metrics.stability_derivatives.C_m_alpha:.3f}")
+        print(f"  ✓ Static Margin: {metrics.static_margin:.2f} cal")
+    except Exception as e:
+        print(f"  ⚠ Analysis computation failed: {e}")
+        analysis_available = False
+        metrics = None
+        first_order = None
+        second_order = None
 
     # Generate rocket mesh for Elodin visualization
     if TRIMESH_AVAILABLE and generate_rocket_glb_from_solver:
@@ -221,6 +239,59 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     angular_rates_deg = jnp.clip(
         angular_rates_deg, -3000.0, 3000.0
     )  # Reasonable angular rate limit
+    
+    # Compute analysis arrays if available
+    if analysis_available and metrics is not None:
+        # Aerodynamic coefficients
+        ref_area = np.pi * (solver.rocket.reference_diameter / 2)**2
+        drag_forces = np.array([s.drag_force for s in history])
+        lift_forces = np.array([s.lift_force for s in history])
+        drag_mags = np.linalg.norm(drag_forces, axis=1)
+        lift_mags = np.linalg.norm(lift_forces, axis=1)
+        qs_safe = np.where(dynamic_pressures_raw > 1e-3, dynamic_pressures_raw, 1e-3)
+        C_L = 2 * lift_mags / (qs_safe * ref_area)
+        C_D = 2 * drag_mags / (qs_safe * ref_area)
+        
+        # Energy metrics
+        masses = np.array([solver.mass_model.total_mass(t) for t in times_np])
+        kinetic_energy = 0.5 * masses * speed**2
+        potential_energy = masses * 9.80665 * altitudes
+        total_energy = kinetic_energy + potential_energy
+        
+        # Jerk and angular jerk
+        jerk_mag = np.linalg.norm(second_order["jerk"], axis=1) if second_order else np.zeros(len(history))
+        angular_jerk_mag = np.linalg.norm(second_order["angular_jerk"], axis=1) if second_order else np.zeros(len(history))
+        
+        # Sideslip
+        sideslips_deg = np.degrees(np.array([s.sideslip for s in history]))
+        
+        # Static margin (constant or time-varying if available)
+        if isinstance(metrics.static_margin, (int, float)):
+            static_margin_vals = np.full_like(times_np, metrics.static_margin)
+        else:
+            static_margin_vals = metrics.static_margin if isinstance(metrics.static_margin, np.ndarray) else np.full_like(times_np, 1.5)
+        
+        # Convert to JAX arrays
+        lift_coeff_arr = jnp.asarray(np.clip(C_L, -10.0, 10.0))
+        drag_coeff_arr = jnp.asarray(np.clip(C_D, 0.0, 10.0))
+        kinetic_energy_arr = jnp.asarray(np.clip(kinetic_energy, 0.0, 1e10))
+        potential_energy_arr = jnp.asarray(np.clip(potential_energy, 0.0, 1e10))
+        total_energy_arr = jnp.asarray(np.clip(total_energy, 0.0, 1e10))
+        jerk_arr = jnp.asarray(np.clip(jerk_mag, 0.0, 1e6))
+        angular_jerk_arr = jnp.asarray(np.clip(angular_jerk_mag, 0.0, 1e6))
+        sideslip_arr = jnp.asarray(np.clip(sideslips_deg, -180.0, 180.0))
+        static_margin_arr = jnp.asarray(np.clip(static_margin_vals, -5.0, 10.0))
+    else:
+        # Default zero arrays
+        lift_coeff_arr = jnp.zeros(len(history))
+        drag_coeff_arr = jnp.zeros(len(history))
+        kinetic_energy_arr = jnp.zeros(len(history))
+        potential_energy_arr = jnp.zeros(len(history))
+        total_energy_arr = jnp.zeros(len(history))
+        jerk_arr = jnp.zeros(len(history))
+        angular_jerk_arr = jnp.zeros(len(history))
+        sideslip_arr = jnp.zeros(len(history))
+        static_margin_arr = jnp.ones(len(history)) * 1.5  # Default stable margin
 
     Altitude = ty.Annotated[jax.Array, el.Component("altitude_m", el.ComponentType.F64)]
     Downrange = ty.Annotated[jax.Array, el.Component("downrange_m", el.ComponentType.F64)]
@@ -250,6 +321,17 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
             metadata={"element_names": "p,q,r"},
         ),
     ]
+    
+    # Analysis components
+    LiftCoeff = ty.Annotated[jax.Array, el.Component("lift_coeff", el.ComponentType.F64)]
+    DragCoeff = ty.Annotated[jax.Array, el.Component("drag_coeff", el.ComponentType.F64)]
+    KineticEnergy = ty.Annotated[jax.Array, el.Component("kinetic_energy_j", el.ComponentType.F64)]
+    PotentialEnergy = ty.Annotated[jax.Array, el.Component("potential_energy_j", el.ComponentType.F64)]
+    TotalEnergy = ty.Annotated[jax.Array, el.Component("total_energy_j", el.ComponentType.F64)]
+    Jerk = ty.Annotated[jax.Array, el.Component("jerk_ms3", el.ComponentType.F64)]
+    AngularJerk = ty.Annotated[jax.Array, el.Component("angular_jerk_rads3", el.ComponentType.F64)]
+    Sideslip = ty.Annotated[jax.Array, el.Component("sideslip_deg", el.ComponentType.F64)]
+    StaticMargin = ty.Annotated[jax.Array, el.Component("static_margin_cal", el.ComponentType.F64)]
 
     @el.dataclass
     class PlaybackTelemetry(el.Archetype):
@@ -263,6 +345,16 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
         aero_force: AeroForceMag = field(default_factory=lambda: jnp.float64(0.0))
         euler: EulerAngles = field(default_factory=lambda: jnp.zeros(3))
         angular_rates: BodyRates = field(default_factory=lambda: jnp.zeros(3))
+        # Analysis metrics
+        lift_coeff: LiftCoeff = field(default_factory=lambda: jnp.float64(0.0))
+        drag_coeff: DragCoeff = field(default_factory=lambda: jnp.float64(0.0))
+        kinetic_energy: KineticEnergy = field(default_factory=lambda: jnp.float64(0.0))
+        potential_energy: PotentialEnergy = field(default_factory=lambda: jnp.float64(0.0))
+        total_energy: TotalEnergy = field(default_factory=lambda: jnp.float64(0.0))
+        jerk: Jerk = field(default_factory=lambda: jnp.float64(0.0))
+        angular_jerk: AngularJerk = field(default_factory=lambda: jnp.float64(0.0))
+        sideslip: Sideslip = field(default_factory=lambda: jnp.float64(0.0))
+        static_margin: StaticMargin = field(default_factory=lambda: jnp.float64(0.0))
 
     world = el.World()
     mass0 = solver.mass_model.total_mass(0.0)
@@ -319,6 +411,15 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
         hsplit share=0.35 name="Orientation" {{
             graph "rocket.euler_deg[0],rocket.euler_deg[1],rocket.euler_deg[2]" name="Euler Angles"
             graph "rocket.angular_rates_deg[0],rocket.angular_rates_deg[1],rocket.angular_rates_deg[2]" name="Body Rates"
+        }}
+        hsplit share=0.35 name="Aerodynamics" {{
+            graph "rocket.lift_coeff,rocket.drag_coeff" name="Aerodynamic Coefficients"
+            graph "rocket.angle_of_attack_deg,rocket.sideslip_deg" name="Aerodynamic Angles"
+            graph "rocket.static_margin_cal" name="Static Margin"
+        }}
+        hsplit share=0.35 name="Energy & Dynamics" {{
+            graph "rocket.kinetic_energy_j,rocket.potential_energy_j,rocket.total_energy_j" name="Energy"
+            graph "rocket.jerk_ms3,rocket.angular_jerk_rads3" name="Jerk"
         }}
     }}
 
@@ -451,6 +552,78 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     ) -> el.Query[BodyRates]:
         idx = frame_index(tick[0])
         return comp.map(BodyRates, lambda _: angular_rates_deg[idx])
+    
+    @el.system
+    def playback_lift_coeff(
+        tick: el.Query[el.SimulationTick],
+        comp: el.Query[LiftCoeff],
+    ) -> el.Query[LiftCoeff]:
+        idx = frame_index(tick[0])
+        return comp.map(LiftCoeff, lambda _: jnp.float64(lift_coeff_arr[idx]))
+    
+    @el.system
+    def playback_drag_coeff(
+        tick: el.Query[el.SimulationTick],
+        comp: el.Query[DragCoeff],
+    ) -> el.Query[DragCoeff]:
+        idx = frame_index(tick[0])
+        return comp.map(DragCoeff, lambda _: jnp.float64(drag_coeff_arr[idx]))
+    
+    @el.system
+    def playback_kinetic_energy(
+        tick: el.Query[el.SimulationTick],
+        comp: el.Query[KineticEnergy],
+    ) -> el.Query[KineticEnergy]:
+        idx = frame_index(tick[0])
+        return comp.map(KineticEnergy, lambda _: jnp.float64(kinetic_energy_arr[idx]))
+    
+    @el.system
+    def playback_potential_energy(
+        tick: el.Query[el.SimulationTick],
+        comp: el.Query[PotentialEnergy],
+    ) -> el.Query[PotentialEnergy]:
+        idx = frame_index(tick[0])
+        return comp.map(PotentialEnergy, lambda _: jnp.float64(potential_energy_arr[idx]))
+    
+    @el.system
+    def playback_total_energy(
+        tick: el.Query[el.SimulationTick],
+        comp: el.Query[TotalEnergy],
+    ) -> el.Query[TotalEnergy]:
+        idx = frame_index(tick[0])
+        return comp.map(TotalEnergy, lambda _: jnp.float64(total_energy_arr[idx]))
+    
+    @el.system
+    def playback_jerk(
+        tick: el.Query[el.SimulationTick],
+        comp: el.Query[Jerk],
+    ) -> el.Query[Jerk]:
+        idx = frame_index(tick[0])
+        return comp.map(Jerk, lambda _: jnp.float64(jerk_arr[idx]))
+    
+    @el.system
+    def playback_angular_jerk(
+        tick: el.Query[el.SimulationTick],
+        comp: el.Query[AngularJerk],
+    ) -> el.Query[AngularJerk]:
+        idx = frame_index(tick[0])
+        return comp.map(AngularJerk, lambda _: jnp.float64(angular_jerk_arr[idx]))
+    
+    @el.system
+    def playback_sideslip(
+        tick: el.Query[el.SimulationTick],
+        comp: el.Query[Sideslip],
+    ) -> el.Query[Sideslip]:
+        idx = frame_index(tick[0])
+        return comp.map(Sideslip, lambda _: jnp.float64(sideslip_arr[idx]))
+    
+    @el.system
+    def playback_static_margin(
+        tick: el.Query[el.SimulationTick],
+        comp: el.Query[StaticMargin],
+    ) -> el.Query[StaticMargin]:
+        idx = frame_index(tick[0])
+        return comp.map(StaticMargin, lambda _: jnp.float64(static_margin_arr[idx]))
 
     playback_system = (
         playback_world_pos
@@ -465,6 +638,15 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
         | playback_aero_force
         | playback_euler
         | playback_body_rates
+        | playback_lift_coeff
+        | playback_drag_coeff
+        | playback_kinetic_energy
+        | playback_potential_energy
+        | playback_total_energy
+        | playback_jerk
+        | playback_angular_jerk
+        | playback_sideslip
+        | playback_static_margin
     )
 
     print("\n✓ Schematic: rocket.kdl")
@@ -596,12 +778,19 @@ if __name__ == "__main__":
                         "reference_diameter": solver_data["rocket"]["reference_diameter"],
                     },
                 )()
+                # Get burn_time from motor data or estimate from propellant mass
+                propellant_mass = solver_data["motor"].get("propellant_mass", 0.0)
+                # Estimate burn_time if not available (typical burn rate ~0.1 kg/s for large motors)
+                estimated_burn_time = propellant_mass / 0.1 if propellant_mass > 0 else 5.0
+                burn_time = solver_data["motor"].get("burn_time", estimated_burn_time)
+                
                 self.motor = type(
                     "obj",
                     (object,),
                     {
                         "total_mass": solver_data["motor"]["total_mass"],
-                        "propellant_mass": solver_data["motor"]["propellant_mass"],
+                        "propellant_mass": propellant_mass,
+                        "burn_time": burn_time,
                     },
                 )()
                 self.environment = type(
@@ -628,7 +817,9 @@ if __name__ == "__main__":
                     )
 
         solver = MinimalSolver(solver_data)
-
+        
+        # Note: Analysis computation is handled inside visualize_in_elodin
+        # It will gracefully degrade if MinimalSolver doesn't have all required methods
         visualize_in_elodin(result, solver)
     else:
         main()
