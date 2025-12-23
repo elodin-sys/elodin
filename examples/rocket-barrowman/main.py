@@ -120,7 +120,7 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
     try:
         analyzer = FlightAnalyzer(result, solver)
         metrics = analyzer.compute_all_metrics()
-        first_order = analyzer.compute_first_order_terms()
+        analyzer.compute_first_order_terms()  # Computed but not stored
         second_order = analyzer.compute_second_order_terms()
         analysis_available = True
         print(f"  ✓ Stability: C_m_α = {metrics.stability_derivatives.C_m_alpha:.3f}")
