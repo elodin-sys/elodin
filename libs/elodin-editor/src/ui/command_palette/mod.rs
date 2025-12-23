@@ -268,10 +268,16 @@ impl WidgetSystem for PaletteSearch<'_> {
             .inner_margin(egui::Margin::same(16))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    let scheme = get_scheme();
                     let style = ui.style_mut();
                     style.visuals.selection.stroke = egui::Stroke::NONE;
                     style.visuals.widgets.hovered.bg_stroke = egui::Stroke::NONE;
                     style.visuals.extreme_bg_color = colors::TRANSPARENT;
+                    style.visuals.override_text_color = Some(scheme.text_primary);
+                    style.visuals.widgets.inactive.fg_stroke.color = scheme.text_primary;
+                    style.visuals.widgets.active.fg_stroke.color = scheme.text_primary;
+                    style.visuals.widgets.inactive.bg_fill = scheme.bg_secondary;
+                    style.visuals.widgets.active.bg_fill = scheme.bg_secondary;
                     let len = command_palette_state.page_stack.len().saturating_sub(1);
                     for page in command_palette_state.page_stack[..len].iter() {
                         ui.style_mut().interaction.selectable_labels = false;

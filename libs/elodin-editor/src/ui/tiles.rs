@@ -2,7 +2,6 @@ use bevy::{
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     ecs::system::{SystemParam, SystemState},
     input::keyboard::Key,
-    log::info,
     prelude::*,
     window::{Monitor, PrimaryWindow, Window, WindowPosition},
 };
@@ -123,6 +122,7 @@ pub struct WindowDescriptor {
     pub path: Option<PathBuf>,
     pub title: Option<String>,
     pub screen: Option<usize>,
+    pub mode: Option<String>,
     pub screen_rect: Option<WindowRect>,
 }
 
@@ -313,6 +313,12 @@ impl WindowState {
     }
 }
 
+pub fn set_mode_all(mode: &str, windows_state: &mut Query<&mut WindowState>) {
+    for mut state in windows_state.iter_mut() {
+        state.descriptor.mode = Some(mode.to_string());
+    }
+}
+
 pub(crate) fn screen_index_from_bounds(
     position: PhysicalPosition<i32>,
     size: PhysicalSize<u32>,
@@ -412,15 +418,10 @@ pub fn create_secondary_window(title: Option<String>) -> (WindowState, WindowId)
         path: Some(PathBuf::from(path)),
         title: cleaned_title.or_else(|| Some(format!("Window {}", id.0 + 1))),
         screen: None,
+        mode: None,
         screen_rect: None,
     };
     let tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
-    info!(
-        id = id.0,
-        title = descriptor.title.as_deref().unwrap_or(""),
-        path = ?descriptor.path,
-        "Created secondary window"
-    );
     (
         WindowState {
             descriptor,
@@ -1676,19 +1677,45 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) {
-        let mut state_mut = state.get_mut(world);
-
         let TileLayoutEmptyArgs { icons, window } = args;
 
-        let button_height = 160.0;
-        let button_width = 240.0;
-        let button_spacing = 20.0;
+        let window_size = window
+            .and_then(|window_entity| world.get::<Window>(window_entity))
+            .map(|window| window.resolution.size());
+        let window_rect = window_size.and_then(|size| {
+            if size.x > 0.0 && size.y > 0.0 {
+                Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(size.x, size.y),
+                ))
+            } else {
+                None
+            }
+        });
+        let max_rect = ui.max_rect();
+        let layout_rect = match window_rect {
+            Some(rect)
+                if max_rect.width() > rect.width() * 1.5
+                    || max_rect.height() > rect.height() * 1.5 =>
+            {
+                rect
+            }
+            _ => max_rect,
+        };
 
-        let desired_size = egui::vec2(button_width * 3.0 + button_spacing, button_height);
+        let button_height = 160.0;
+        let base_button_width: f32 = 240.0;
+        let base_button_spacing: f32 = 20.0;
+        let button_spacing = base_button_spacing.min((layout_rect.width() / 6.0).max(0.0));
+        let max_button_width = ((layout_rect.width() - 2.0 * button_spacing) / 3.0).max(0.0);
+        let button_width = max_button_width.min(base_button_width);
+        let desired_size = egui::vec2(button_width * 3.0 + button_spacing * 2.0, button_height);
+
+        let mut state_mut = state.get_mut(world);
 
         ui.allocate_new_ui(
             UiBuilder::new().max_rect(egui::Rect::from_center_size(
-                ui.max_rect().center(),
+                layout_rect.center(),
                 desired_size,
             )),
             |ui| {

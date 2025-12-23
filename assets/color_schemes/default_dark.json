@@ -1,0 +1,15 @@
+{
+  "bg_primary": [31, 31, 31, 255],
+  "bg_secondary": [22, 22, 22, 255],
+  "text_primary": [255, 251, 240, 255],
+  "text_secondary": [109, 109, 109, 255],
+  "text_tertiary": [107, 107, 107, 255],
+  "icon_primary": [255, 251, 240, 255],
+  "icon_secondary": [98, 98, 98, 255],
+  "border_primary": [46, 45, 44, 255],
+  "highlight": [20, 95, 207, 255],
+  "blue": [20, 95, 207, 255],
+  "error": [233, 75, 20, 255],
+  "success": [136, 222, 159, 255],
+  "shadow": [0, 0, 0, 255]
+}

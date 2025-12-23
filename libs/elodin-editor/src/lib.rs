@@ -15,7 +15,7 @@ use bevy::{
     },
     prelude::*,
     render::camera::RenderTarget,
-    window::{PresentMode, PrimaryWindow, WindowRef, WindowResolution, WindowTheme},
+    window::{PresentMode, PrimaryWindow, WindowRef, WindowResolution},
     winit::WinitSettings,
 };
 use bevy_editor_cam::{SyncCameraPosition, controller::component::EditorCam};
@@ -154,7 +154,6 @@ impl Plugin for EditorPlugin {
                 DefaultPlugins
                     .set(WindowPlugin {
                         primary_window: Some(Window {
-                            window_theme: Some(WindowTheme::Dark),
                             title: "Elodin".into(),
                             present_mode: default_present_mode(),
                             canvas: Some("#editor".to_string()),
