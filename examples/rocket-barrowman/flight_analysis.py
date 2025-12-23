@@ -12,7 +12,7 @@ Computes comprehensive flight dynamics metrics:
 from __future__ import annotations
 
 import numpy as np
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, Tuple
 from dataclasses import dataclass
 from flight_solver import FlightResult, StateSnapshot
 from math_utils import Matrix, Vector

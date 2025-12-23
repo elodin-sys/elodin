@@ -2042,7 +2042,7 @@ def visualize_results(result: FlightResult, solver: Optional[FlightSolver] = Non
                     static_margin_vals = analyzer._estimate_static_margin()
                     if not isinstance(static_margin_vals, np.ndarray):
                         static_margin_vals = np.full_like(times, float(static_margin_vals))
-                except:
+                except Exception:
                     # Fallback to constant
                     static_margin_vals = np.full_like(
                         times,
@@ -3577,7 +3577,6 @@ def main():
     st.session_state.last_selected_rocket = selected_rocket
 
     # Update sidebar rocket_type to match (use selected_rocket for rest of function)
-    rocket_type = selected_rocket
 
     # Main content layout
     col_main, col_actions = st.columns([4, 1])
@@ -3633,7 +3632,7 @@ def main():
                         try:
                             fig_3d = render_to_plotly(calisto_config, None)
                             st.plotly_chart(fig_3d, use_container_width=True)
-                        except:
+                        except Exception:
                             fig_3d = visualize_rocket_3d(calisto_config, None)
                             fig_3d.update_layout(
                                 paper_bgcolor="rgba(0,0,0,0)",
