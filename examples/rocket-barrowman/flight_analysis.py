@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 from typing import Dict, Tuple
 from dataclasses import dataclass
-from flight_solver import FlightResult, StateSnapshot
+from flight_solver import FlightResult
 from math_utils import Matrix, Vector
 
 
@@ -156,7 +156,6 @@ class FlightAnalyzer:
         total_energy = kinetic_energy + potential_energy
 
         # Aerodynamic coefficients
-        speeds = np.linalg.norm(velocities, axis=1)
         qs = dynamic_pressures
         ref_area = np.pi * (self.solver.rocket.reference_diameter / 2) ** 2
 
@@ -177,7 +176,7 @@ class FlightAnalyzer:
         # Stability margin (simplified - would need CG/CP data)
         # Estimate from moment coefficient
         moment_mags = np.linalg.norm(moments, axis=1)
-        moment_coeff = np.where(
+        np.where(
             qs_safe > 1e-3,
             moment_mags / (qs_safe * ref_area * self.solver.rocket.reference_diameter),
             0.0,
@@ -240,13 +239,13 @@ class FlightAnalyzer:
             # CP is typically calculated from nose tip
             try:
                 cp_positions = np.array([float(rocket.aero.calculate_cp(mach)) for mach in machs])
-            except:
+            except Exception:
                 # Fallback: estimate CP position (typically ~60% of body length from nose)
                 try:
                     total_length = getattr(rocket, "reference_length", 2.0)
                     if total_length <= 0:
                         total_length = 2.0
-                except:
+                except Exception:
                     total_length = 2.0  # Default estimate
                 cp_positions = np.full_like(times, total_length * 0.6)
 
