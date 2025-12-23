@@ -25,7 +25,11 @@ pub struct PostStepContext {
 impl PostStepContext {
     /// Create a new PostStepContext with access to the database.
     pub fn new(db: Arc<DB>, timestamp: Timestamp, tick: u64) -> Self {
-        Self { db, timestamp, tick }
+        Self {
+            db,
+            timestamp,
+            tick,
+        }
     }
 }
 
@@ -215,4 +219,3 @@ impl PostStepContext {
         self.timestamp.0
     }
 }
-

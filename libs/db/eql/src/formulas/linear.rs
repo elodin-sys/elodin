@@ -130,4 +130,3 @@ impl super::Formula for Linear {
         Ok(format!("select {} from {}", selects.join(", "), table))
     }
 }
-

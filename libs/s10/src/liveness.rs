@@ -70,7 +70,12 @@ pub async fn monitor(port: u16) {
                     );
                     std::process::exit(1);
                 }
-                tracing::debug!("Retrying liveness connection in {}ms (attempt {}/{})", delay_ms, retries, MAX_RETRIES);
+                tracing::debug!(
+                    "Retrying liveness connection in {}ms (attempt {}/{})",
+                    delay_ms,
+                    retries,
+                    MAX_RETRIES
+                );
                 // Brief blocking sleep is acceptable at startup for retry backoff
                 std::thread::sleep(Duration::from_millis(delay_ms));
                 delay_ms = delay_ms.saturating_mul(2).min(500); // cap at 500ms

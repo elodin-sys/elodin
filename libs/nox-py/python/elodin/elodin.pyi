@@ -24,7 +24,7 @@ class Integrator:
 
 class PostStepContext:
     """Context object passed to post_step callbacks, providing direct DB read/write access.
-    
+
     This enables SITL workflows to read sensor data and write component data (like motor
     commands from Betaflight) back to the database within the same process.
     """
@@ -38,12 +38,12 @@ class PostStepContext:
         ...
     def write_component(self, pair_name: str, data: jax.typing.ArrayLike) -> None:
         """Write component data to the database.
-        
+
         Args:
             pair_name: The full component name in "entity.component" format
                       (e.g., "drone.motor_command")
             data: NumPy array containing the component data to write
-            
+
         Raises:
             RuntimeError: If the component doesn't exist in the database
             ValueError: If the data size doesn't match the component schema
@@ -51,15 +51,15 @@ class PostStepContext:
         ...
     def read_component(self, pair_name: str) -> jax.Array:
         """Read the latest component data from the database.
-        
+
         Args:
             pair_name: The full component name in "entity.component" format
                       (e.g., "drone.accel", "drone.gyro", "drone.world_pos")
-            
+
         Returns:
             NumPy array containing the component data (dtype matches component schema).
             The array is always 1D; reshape if needed.
-            
+
         Raises:
             RuntimeError: If the component doesn't exist or has no data
         """
@@ -292,7 +292,10 @@ class Impeller:
 
 class Exec:
     def run(
-        self, ticks: int = 1, show_progress: bool = True, is_canceled: Optional[Callable[[], bool]] = None
+        self,
+        ticks: int = 1,
+        show_progress: bool = True,
+        is_canceled: Optional[Callable[[], bool]] = None,
     ): ...
     def profile(self) -> dict[str, float]: ...
     def save_archive(self, path: str, format: str): ...

@@ -135,4 +135,3 @@ impl super::Formula for Angular {
         Ok(format!("select {} from {}", selects.join(", "), table))
     }
 }
-

@@ -262,7 +262,7 @@ impl WorldBuilder {
                 if !no_s10 {
                     std::thread::spawn(move || {
                         let rt = tokio::runtime::Builder::new_current_thread()
-                            .enable_all()  // Enable IO, time, and signal drivers for process spawning
+                            .enable_all() // Enable IO, time, and signal drivers for process spawning
                             .build()
                             .map_err(|err| miette!("rt err {}", err))
                             .unwrap();
@@ -308,15 +308,20 @@ impl WorldBuilder {
                                             .into_bound_py_any(py)
                                             .unwrap_or_else(|_| py.None().into_bound(py));
                                         // Create PostStepContext with DB access for writing components
-                                        let ctx = PostStepContext::new(db.clone(), timestamp, tick_count);
+                                        let ctx =
+                                            PostStepContext::new(db.clone(), timestamp, tick_count);
                                         match Py::new(py, ctx) {
                                             Ok(ctx_py) => {
-                                                if let Err(e) = func.call1(py, (tick_count_py, ctx_py)) {
+                                                if let Err(e) =
+                                                    func.call1(py, (tick_count_py, ctx_py))
+                                                {
                                                     tracing::warn!("post_step error {e}");
                                                 }
                                             }
                                             Err(e) => {
-                                                tracing::warn!("failed to create PostStepContext: {e}");
+                                                tracing::warn!(
+                                                    "failed to create PostStepContext: {e}"
+                                                );
                                             }
                                         }
                                     });

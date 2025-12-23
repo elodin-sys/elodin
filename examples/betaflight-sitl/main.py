@@ -67,17 +67,12 @@ def cleanup_stale_processes():
         subprocess.run(["pkill", "-f", "betaflight_SITL"], capture_output=True, timeout=5)
     except Exception:
         pass
-    
+
     # Free elodin-db port (2240)
     try:
-        result = subprocess.run(
-            ["lsof", "-ti:2240"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
+        result = subprocess.run(["lsof", "-ti:2240"], capture_output=True, text=True, timeout=5)
         if result.stdout.strip():
-            pids = result.stdout.strip().split('\n')
+            pids = result.stdout.strip().split("\n")
             for pid in pids:
                 try:
                     subprocess.run(["kill", "-9", pid], capture_output=True, timeout=2)
@@ -85,7 +80,7 @@ def cleanup_stale_processes():
                     pass
     except Exception:
         pass
-    
+
     time.sleep(0.5)
 
 
@@ -183,28 +178,29 @@ betaflight_recipe = el.s10.PyRecipe.process(
 world.recipe(betaflight_recipe)
 
 print(f"Betaflight SITL: {BETAFLIGHT_PATH.name}")
-print(f"Simulation: {config.simulation_time}s at {1/config.sim_time_step:.0f}Hz")
+print(f"Simulation: {config.simulation_time}s at {1 / config.sim_time_step:.0f}Hz")
 
 
 # --- SITL State ---
 @dataclass
 class SITLState:
     """State for SITL synchronization."""
+
     throttle: int = 1000
     arm: int = 1000
     tick: int = 0
     sim_time: float = 0.0
     motors: np.ndarray = None
     max_motor: float = 0.0
-    
+
     def __post_init__(self):
         if self.motors is None:
             self.motors = np.zeros(4)
 
 
 # Test phases (durations in seconds)
-BOOTGRACE = 5.0   # Wait for Betaflight to initialize
-ARM_DUR = 2.0     # Arming phase
+BOOTGRACE = 5.0  # Wait for Betaflight to initialize
+ARM_DUR = 2.0  # Arming phase
 THROTTLE_DUR = 3.0  # Apply throttle
 # Remaining time is disarm phase
 
@@ -222,12 +218,12 @@ last_print = [0.0]
 def sitl_post_step(tick: int, ctx: el.PostStepContext):
     """
     Post-step callback for lockstep SITL synchronization.
-    
+
     This implements the two-phase synchronization pattern:
     1. Send sensor data (FDM) and RC inputs to Betaflight
     2. Wait for motor response (blocking - this is the lockstep sync point)
     3. Write motor commands back to Elodin-DB via ctx.write_component()
-    
+
     Following the pattern from ai-context/sitl-example/SITL_EXAMPLE_EXPLAINED.md
     """
     # Lazy initialization - only start bridge when first tick runs
@@ -241,7 +237,7 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
         # Betaflight needs time to complete gyro calibration and internal setup
         print("[SITL] Waiting for Betaflight to initialize...")
         time.sleep(2)
-        
+
         # Warmup phase: Send some initial packets to prime Betaflight's RC processing
         # This helps stabilize the throttle response on fresh starts
         print("[SITL] Sending warmup packets...")
@@ -251,7 +247,7 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
         warmup_channels[2] = 1000  # Low throttle
         warmup_channels[4] = 1000  # Disarmed
         warmup_rc = RCPacket(timestamp=0.0, channels=warmup_channels)
-        
+
         warmup_count = 0
         for i in range(500):  # 500ms of warmup at ~1ms per packet
             try:
@@ -263,27 +259,27 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
                 pass  # Expected during initial warmup
         print(f"[SITL] Warmup complete ({warmup_count} responses)")
         print("[SITL] Bridge ready")
-    
+
     if start_time[0] is None:
         start_time[0] = time.time()
-    
+
     s = state[0]
     b = bridge[0]
     buf = sensor_buf[0]
-    
+
     # Update timing
     s.tick = tick
     s.sim_time = tick * config.sim_time_step
     t = s.sim_time
-    
+
     # Read actual sensor data from physics simulation
     # CRITICAL: These are essential for Betaflight's PID loop
     try:
-        accel = np.array(ctx.read_component("drone.accel"))      # Body-frame accelerometer
-        gyro = np.array(ctx.read_component("drone.gyro"))        # Body-frame gyroscope
+        accel = np.array(ctx.read_component("drone.accel"))  # Body-frame accelerometer
+        gyro = np.array(ctx.read_component("drone.gyro"))  # Body-frame gyroscope
         world_pos = np.array(ctx.read_component("drone.world_pos"))  # GPS simulation
         world_vel = np.array(ctx.read_component("drone.world_vel"))  # GPS velocity
-        
+
         # Update sensor buffer with real physics data
         buf.update(
             world_pos=world_pos,
@@ -297,25 +293,25 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
         if tick > 5:
             print(f"[SITL] Warning: Could not read sensor data: {e}")
         buf.timestamp = t
-    
+
     # Phase logic - determine arm and throttle based on sim time
     if t < BOOTGRACE:
         phase = "boot"
-        s.arm = 1000     # Disarmed
+        s.arm = 1000  # Disarmed
         s.throttle = 1000  # Min throttle
     elif t < BOOTGRACE + ARM_DUR:
         phase = "arm"
-        s.arm = 1800     # Armed (AUX1 high)
+        s.arm = 1800  # Armed (AUX1 high)
         s.throttle = 1000  # Min throttle during arm
     elif t < BOOTGRACE + ARM_DUR + THROTTLE_DUR:
         phase = "throttle"
-        s.arm = 1800     # Stay armed
+        s.arm = 1800  # Stay armed
         s.throttle = 1400  # Mid throttle
     else:
         phase = "disarm"
-        s.arm = 1000     # Disarm
+        s.arm = 1000  # Disarm
         s.throttle = 1000
-    
+
     # Build RC packet with all channels
     channels = np.full(MAX_RC_CHANNELS, 1500, dtype=np.uint16)
     channels[0] = 1500  # Roll (center)
@@ -323,29 +319,29 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
     channels[2] = s.throttle  # Throttle
     channels[3] = 1500  # Yaw (center)
     channels[4] = s.arm  # AUX1 (arm switch)
-    
+
     # Build FDM packet with sensor data
     fdm = buf.build_fdm()
     rc = RCPacket(timestamp=t, channels=channels)
-    
+
     try:
         # Synchronous lockstep: send FDM+RC, wait for motor response
         motors_bf = b.step(fdm, rc)
         s.motors = remap_motors_betaflight_to_elodin(motors_bf)
         s.max_motor = max(s.max_motor, np.max(s.motors))
-        
+
         # Write motor commands back to Elodin-DB for physics simulation
         # This uses the PostStepContext for direct DB access (no TCP overhead)
         ctx.write_component("drone.motor_command", s.motors)
     except TimeoutError:
         pass  # Timeouts expected during bootgrace
-    
+
     # Print status every second
     if t - last_print[0] >= 1.0:
         armed = "ARMED" if np.any(s.motors > 0.02) else "DISARMED"
         elapsed = time.time() - start_time[0]
         rate = t / elapsed if elapsed > 0 else 0
-        
+
         # Get current position for debug output
         try:
             pos = np.array(ctx.read_component("drone.world_pos"))
@@ -355,7 +351,7 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
             pos_str = f"z={z_pos:+.2f}m vz={z_vel:+.2f}m/s"
         except Exception:
             pos_str = "z=?.??m"
-        
+
         # DEBUG: Check what motor values the physics is seeing
         try:
             motor_cmd_db = np.array(ctx.read_component("drone.motor_command"))
@@ -374,17 +370,19 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
             )
         except Exception as e:
             debug_str = f"\n    [DEBUG] read failed: {e}"
-        
-        print(f"  t={t:5.1f}s | {phase:8} | {armed:8} | "
-              f"motors=[{s.motors[0]:.3f},{s.motors[1]:.3f},{s.motors[2]:.3f},{s.motors[3]:.3f}] | "
-              f"{pos_str} | {rate:.1f}x realtime{debug_str}")
+
+        print(
+            f"  t={t:5.1f}s | {phase:8} | {armed:8} | "
+            f"motors=[{s.motors[0]:.3f},{s.motors[1]:.3f},{s.motors[2]:.3f},{s.motors[3]:.3f}] | "
+            f"{pos_str} | {rate:.1f}x realtime{debug_str}"
+        )
         last_print[0] = t
-    
+
     # Check if simulation is complete - print summary and exit
     if tick >= MAX_TICKS - 1:
         b.stop()
         elapsed = time.time() - start_time[0]
-        
+
         # Read final position
         try:
             final_pos = np.array(ctx.read_component("drone.world_pos"))
@@ -394,21 +392,23 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
         except Exception:
             final_z = 0.0
             final_vz = 0.0
-        
+
         print()
         print("=" * 50)
         print("Simulation complete!")
-        print(f"  Simulated: {s.sim_time:.1f}s in {elapsed:.1f}s "
-              f"({s.sim_time/elapsed if elapsed > 0 else 0:.1f}x realtime)")
+        print(
+            f"  Simulated: {s.sim_time:.1f}s in {elapsed:.1f}s "
+            f"({s.sim_time / elapsed if elapsed > 0 else 0:.1f}x realtime)"
+        )
         print(f"  Total ticks: {s.tick}")
         print(f"  Sync steps: {b.step_count}")
         print(f"  Max motor: {s.max_motor:.3f}")
         print(f"  Final position: z={final_z:.2f}m, vz={final_vz:.2f}m/s")
         print()
-        
+
         # Success criteria: motors responded AND drone moved
         took_off = final_z > config.initial_position[2] + 0.1  # More than 10cm above start
-        
+
         if b.step_count > 0 and s.max_motor > 0.06 and took_off:
             print("SUCCESS: SITL integration working! Drone took off!")
         elif b.step_count > 0 and s.max_motor > 0.06:
@@ -418,7 +418,7 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
             print("WARNING: Motors armed but no throttle response.")
         else:
             print("WARNING: No motor response. Check Betaflight configuration.")
-        
+
         # Force exit - world.run() may not return cleanly
         cleanup_on_exit()
         os._exit(0)
