@@ -173,8 +173,10 @@ rocket-barrowman/
 
 ## Additional Documentation
 
-- **AI Builder Guide**: See `AI_BUILDER_README.md`
-- **API Integration**: See `API_INTEGRATION.md`
+- **Technical Whitepaper**: See `docs/WHITEPAPER.md`
+- **AI Builder Guide**: See `docs/AI_BUILDER_README.md`
+- **API Integration**: See `docs/API_INTEGRATION.md`
+- **Barrowman Equations**: See `docs/sources/barrowman_equation.tex`
 
 ## License
 
