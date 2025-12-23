@@ -1,6 +1,7 @@
 use bevy::math::{DMat3, DVec3};
 use bevy::prelude::*;
 use bevy::transform::TransformSystem;
+use map_3d::{ecef2enu, enu2ecef, geodetic2ecef, Ellipsoid};
 
 /// Default Earth radius in meters (approximate mean radius).
 pub const EARTH_RADIUS_M: f64 = 6_371_000.0;
@@ -48,8 +49,6 @@ pub struct GeoOrigin {
     pub radius_m: f64,
     /// Origin in ECEF coordinates [m]
     pub ecef_origin: DVec3,
-    /// Matrix that converts ECEF -> local ENU at the origin.
-    pub ecef_to_enu: DMat3,
 }
 
 impl GeoOrigin {
@@ -70,25 +69,11 @@ impl GeoOrigin {
         let lat = lat_deg.to_radians();
         let lon = lon_deg.to_radians();
 
-        // Spherical radius at this altitude
-        let r = radius_m + alt_m;
-
-        let (slat, clat) = lat.sin_cos();
-        let (slon, clon) = lon.sin_cos();
-
-        // ECEF position of the origin
-        let ecef_origin = DVec3::new(r * clat * clon, r * clat * slon, r * slat);
-
-        // Standard ECEF -> ENU rotation at (lat, lon)
-        //
-        // [ e ]   [ -sinλ        cosλ          0 ] [ x - x0 ]
-        // [ n ] = [ -sinφ cosλ  -sinφ sinλ   cosφ] [ y - y0 ]
-        // [ u ]   [  cosφ cosλ   cosφ sinλ   sinφ] [ z - z0 ]
-        let ecef_to_enu = DMat3::from_cols(
-            DVec3::new(-slon, clon, 0.0),
-            DVec3::new(-slat * clon, -slat * slon, clat),
-            DVec3::new(clat * clon, clat * slon, slat),
-        );
+        // Use map_3d to compute ECEF position of the origin
+        // Note: map_3d uses WGS84 ellipsoid, but we'll use it for the ECEF calculation
+        // and still maintain our custom radius for other purposes
+        let (x, y, z) = geodetic2ecef(lat, lon, alt_m, Ellipsoid::WGS84);
+        let ecef_origin = DVec3::new(x, y, z);
 
         Self {
             lat,
@@ -96,7 +81,6 @@ impl GeoOrigin {
             alt_m,
             radius_m,
             ecef_origin,
-            ecef_to_enu,
         }
     }
 }
@@ -179,8 +163,16 @@ impl GeoContext {
 
     /// ECEF -> local ENU at the origin.
     pub fn ecef_to_enu(&self, r_ecef: DVec3) -> DVec3 {
-        let diff = r_ecef - self.origin.ecef_origin;
-        self.origin.ecef_to_enu * diff
+        let (e, n, u) = ecef2enu(
+            r_ecef.x,
+            r_ecef.y,
+            r_ecef.z,
+            self.origin.lat,
+            self.origin.lon,
+            self.origin.alt_m,
+            Ellipsoid::WGS84,
+        );
+        DVec3::new(e, n, u)
     }
 }
 
@@ -292,18 +284,33 @@ impl GeoFrame {
                 // Bevy -> ENU -> ECEF
                 let enu = Self::bevy_to_enu_vec(v_bevy);
                 let enu_d = DVec3::new(enu.x as f64, enu.y as f64, enu.z as f64);
-                // Reverse ECEF -> ENU: enu = ecef_to_enu * (ecef - ecef_origin)
-                // So: ecef = ecef_origin + ecef_to_enu^-1 * enu
-                let ecef_diff = ctx.origin.ecef_to_enu.transpose() * enu_d; // transpose is inverse for rotation matrix
-                let ecef = ctx.origin.ecef_origin + ecef_diff;
-                Vec3::new(ecef.x as f32, ecef.y as f32, ecef.z as f32)
+                // Use map_3d to convert ENU to ECEF
+                let (x, y, z) = enu2ecef(
+                    enu_d.x,
+                    enu_d.y,
+                    enu_d.z,
+                    ctx.origin.lat,
+                    ctx.origin.lon,
+                    ctx.origin.alt_m,
+                    Ellipsoid::WGS84,
+                );
+                Vec3::new(x as f32, y as f32, z as f32)
             }
             GeoFrame::ECI => {
                 // Bevy -> ENU -> ECEF -> ECI
                 let enu = Self::bevy_to_enu_vec(v_bevy);
                 let enu_d = DVec3::new(enu.x as f64, enu.y as f64, enu.z as f64);
-                let ecef_diff = ctx.origin.ecef_to_enu.transpose() * enu_d;
-                let ecef = ctx.origin.ecef_origin + ecef_diff;
+                // Use map_3d to convert ENU to ECEF
+                let (x, y, z) = enu2ecef(
+                    enu_d.x,
+                    enu_d.y,
+                    enu_d.z,
+                    ctx.origin.lat,
+                    ctx.origin.lon,
+                    ctx.origin.alt_m,
+                    Ellipsoid::WGS84,
+                );
+                let ecef = DVec3::new(x, y, z);
                 // Reverse ECI -> ECEF: ecef = Rz(theta) * eci, so eci = Rz(-theta) * ecef
                 let theta = ctx.theta0_rad + ctx.earth_rot_rate_rad_per_s * t_seconds;
                 let eci = GeoContext::rot_z(-theta) * ecef;
@@ -313,8 +320,17 @@ impl GeoFrame {
                 // Bevy -> ENU -> ECEF -> ECI -> GCRF (currently identity)
                 let enu = Self::bevy_to_enu_vec(v_bevy);
                 let enu_d = DVec3::new(enu.x as f64, enu.y as f64, enu.z as f64);
-                let ecef_diff = ctx.origin.ecef_to_enu.transpose() * enu_d;
-                let ecef = ctx.origin.ecef_origin + ecef_diff;
+                // Use map_3d to convert ENU to ECEF
+                let (x, y, z) = enu2ecef(
+                    enu_d.x,
+                    enu_d.y,
+                    enu_d.z,
+                    ctx.origin.lat,
+                    ctx.origin.lon,
+                    ctx.origin.alt_m,
+                    Ellipsoid::WGS84,
+                );
+                let ecef = DVec3::new(x, y, z);
                 let theta = ctx.theta0_rad + ctx.earth_rot_rate_rad_per_s * t_seconds;
                 let eci = GeoContext::rot_z(-theta) * ecef;
                 // GCRF == ECI currently
