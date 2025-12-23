@@ -419,14 +419,9 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
             print("WARNING: Motors armed but no throttle response.")
         else:
             print("WARNING: No motor response. Check Betaflight configuration.")
-        #global db_filename
-        #print(f"Wrote database to: {db_filename}")
 
-        # Force exit - world.run() may not return cleanly
-        # cleanup_on_exit()
-        # os._exit(0)
 
-# Return the next non-existant filename with auto-incremented
+# Return the next non-existent filename with auto-incremented
 # number if the pattern ends in Xs.
 #
 # e.g., `next_filename("sim_sitlXXX") -> "sim_sitl001"`
@@ -445,6 +440,7 @@ def next_filename(pattern: str) -> str:
         if not os.path.exists(fname):
             return fname
         i += 1
+
 
 # --- Run Simulation ---
 # world.run() creates a CLI - use with:
