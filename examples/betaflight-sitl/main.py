@@ -32,7 +32,7 @@ import elodin as el
 import jax.numpy as jnp
 import numpy as np
 
-from config import DroneConfig, DEFAULT_CONFIG
+from config import DEFAULT_CONFIG
 from sim import Drone, create_physics_system
 from sensors import IMU, create_sensor_system, SensorDataBuffer
 from comms import (

@@ -644,7 +644,7 @@ class BetaflightSyncBridge:
         self._started = True
         self._step_count = 0
 
-        print(f"[BetaflightSyncBridge] Started in lockstep mode")
+        print("[BetaflightSyncBridge] Started in lockstep mode")
         print(f"  FDM -> {self.host}:{self.state_port}")
         print(f"  RC  -> {self.host}:{self.rc_port}")
         print(f"  PWM <- 0.0.0.0:{self.pwm_port} (timeout={self.timeout_ms}ms)")
@@ -886,7 +886,7 @@ if __name__ == "__main__":
     packed = fdm.pack()
     unpacked = FDMPacket.from_bytes(packed)
 
-    print(f"\nFDM Pack/Unpack test:")
+    print("\nFDM Pack/Unpack test:")
     print(f"  Original timestamp: {fdm.timestamp}")
     print(f"  Unpacked timestamp: {unpacked.timestamp}")
     print(

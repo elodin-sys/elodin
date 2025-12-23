@@ -25,7 +25,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from config import DroneConfig
-
+from comms import FDMPacket
 
 # --- Sensor Component Types ---
 
@@ -249,7 +249,7 @@ def build_fdm_from_components(
     gyro: np.ndarray,
     timestamp: float,
     gravity: float = 9.80665,
-) -> "FDMPacket":
+) -> FDMPacket:
     """
     Build an FDM packet directly from Elodin component data.
 
@@ -334,7 +334,6 @@ def extract_from_history(df, tick: int = -1) -> dict:
     Returns:
         Dictionary with component arrays
     """
-    import polars as pl
 
     row = df[tick]
 
@@ -395,7 +394,7 @@ class SensorDataBuffer:
         if timestamp is not None:
             self.timestamp = timestamp
 
-    def build_fdm(self) -> "FDMPacket":
+    def build_fdm(self) -> FDMPacket:
         """Build FDM packet from current buffer state."""
         return build_fdm_from_components(
             self.world_pos,
@@ -409,8 +408,7 @@ class SensorDataBuffer:
 if __name__ == "__main__":
     # Test sensor computation
     from config import DEFAULT_CONFIG
-    import polars as pl
-    from sim import create_world, create_physics_system
+    from sim import create_physics_system
 
     print("Testing sensor simulation...")
 
@@ -466,20 +464,20 @@ if __name__ == "__main__":
     first_accel = df[0]["drone.accel"].to_list()
     last_accel = df[-1]["drone.accel"].to_list()
 
-    print(f"\nAccelerometer (body frame):")
+    print("\nAccelerometer (body frame):")
     print(f"  First reading: {first_accel}")
     print(f"  Last reading:  {last_accel}")
     print(f"  Expected at rest: [0, 0, +{config.gravity:.2f}] m/s^2")
 
     # Check gyro (should be ~0 for stable drone)
     last_gyro = df[-1]["drone.gyro"].to_list()
-    print(f"\nGyroscope (body frame):")
+    print("\nGyroscope (body frame):")
     print(f"  Last reading: {last_gyro}")
-    print(f"  Expected at rest: [0, 0, 0] rad/s")
+    print("  Expected at rest: [0, 0, 0] rad/s")
 
     # Check barometer
     last_baro = df[-1]["drone.baro"].to_list()
-    print(f"\nBarometer:")
+    print("\nBarometer:")
     print(f"  Last reading: {last_baro} m")
 
     print("\nSensor test complete!")

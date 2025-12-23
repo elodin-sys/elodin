@@ -19,12 +19,9 @@ Expected output:
 
 import time
 import signal
-import sys
 import numpy as np
 from comms import (
     BetaflightBridge,
-    FDMPacket,
-    RCPacket,
     remap_motors_betaflight_to_elodin,
 )
 
