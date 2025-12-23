@@ -430,7 +430,8 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
             .unwrap_or_else(|| (params.selected_range.0.start, params.selected_range.0.end));
 
         // Add a small margin (5%) to the data range for better visualization
-        let base_span = (data_max.0 - data_min.0).max(1_000_000) as f64; // minimum 1 second
+        let span_us = data_max.0.saturating_sub(data_min.0);
+        let base_span = span_us.max(1_000_000) as f64; // minimum 1 second
         let margin = (base_span * 0.05) as i64;
         let display_data_min = Timestamp(data_min.0.saturating_sub(margin));
 
@@ -441,8 +442,8 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
         let max_pan = (base_span - zoomed_span).max(0.0) as i64;
         pane.pan_offset_us = pane.pan_offset_us.clamp(0, max_pan);
 
-        let display_start = Timestamp(display_data_min.0 + pane.pan_offset_us);
-        let display_end = Timestamp(display_start.0 + zoomed_span as i64);
+        let display_start = Timestamp(display_data_min.0.saturating_add(pane.pan_offset_us));
+        let display_end = Timestamp(display_start.0.saturating_add(zoomed_span as i64));
 
         let timeline_width = (available_rect.width() - LABEL_WIDTH).max(100.0);
         let time_span = (display_end.0 - display_start.0).max(1) as f64;
