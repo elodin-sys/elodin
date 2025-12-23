@@ -145,7 +145,7 @@ world.schematic(
     """
     tabs {
         hsplit name = "Viewport" {
-            viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 10,10,10)" look_at="drone.world_pos" show_grid=#true active=#true
+            viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 10,10,5)" look_at="drone.world_pos" show_grid=#true active=#true
             vsplit share=0.3 {
                 graph "drone.motor_command" name="Motor Commands (from Betaflight)"
                 graph "drone.motor_thrust" name="Motor Thrust"
@@ -159,7 +159,7 @@ world.schematic(
         }
     }
     object_3d drone.world_pos {
-        glb path="edu-450-v2-drone.glb" rotate="(180.0, 0.0, 0.0)" translate="(0.0, -1.0, 0.0)" scale=10.0
+        glb path="edu-450-v2-drone.glb" rotate="(0.0, 0.0, 0.0)" translate="(0.0, 1.0, 0.0)" scale=10.0
     }
     """,
     "betaflight-sitl.kdl",
@@ -275,7 +275,28 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
     s.tick = tick
     s.sim_time = tick * config.sim_time_step
     t = s.sim_time
-    buf.timestamp = t
+    
+    # Read actual sensor data from physics simulation
+    # CRITICAL: These are essential for Betaflight's PID loop
+    try:
+        accel = np.array(ctx.read_component("drone.accel"))      # Body-frame accelerometer
+        gyro = np.array(ctx.read_component("drone.gyro"))        # Body-frame gyroscope
+        world_pos = np.array(ctx.read_component("drone.world_pos"))  # GPS simulation
+        world_vel = np.array(ctx.read_component("drone.world_vel"))  # GPS velocity
+        
+        # Update sensor buffer with real physics data
+        buf.update(
+            world_pos=world_pos,
+            world_vel=world_vel,
+            accel=accel,
+            gyro=gyro,
+            timestamp=t,
+        )
+    except RuntimeError as e:
+        # First few ticks may not have data yet
+        if tick > 5:
+            print(f"[SITL] Warning: Could not read sensor data: {e}")
+        buf.timestamp = t
     
     # Phase logic - determine arm and throttle based on sim time
     if t < BOOTGRACE:
@@ -324,15 +345,55 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
         armed = "ARMED" if np.any(s.motors > 0.02) else "DISARMED"
         elapsed = time.time() - start_time[0]
         rate = t / elapsed if elapsed > 0 else 0
+        
+        # Get current position for debug output
+        try:
+            pos = np.array(ctx.read_component("drone.world_pos"))
+            z_pos = pos[6] if len(pos) > 6 else pos[2]  # world_pos is [qw,qx,qy,qz,x,y,z]
+            vel = np.array(ctx.read_component("drone.world_vel"))
+            z_vel = vel[5] if len(vel) > 5 else vel[2]  # world_vel is [wx,wy,wz,vx,vy,vz]
+            pos_str = f"z={z_pos:+.2f}m vz={z_vel:+.2f}m/s"
+        except Exception:
+            pos_str = "z=?.??m"
+        
+        # DEBUG: Check what motor values the physics is seeing
+        try:
+            motor_cmd_db = np.array(ctx.read_component("drone.motor_command"))
+            motor_thrust = np.array(ctx.read_component("drone.motor_thrust"))
+            body_thrust = np.array(ctx.read_component("drone.body_thrust"))
+            force = np.array(ctx.read_component("drone.force"))
+            world_pos = np.array(ctx.read_component("drone.world_pos"))
+            # body_thrust layout: [τx, τy, τz, fx, fy, fz]
+            # world_pos layout: [qw, qx, qy, qz, x, y, z]
+            quat = world_pos[:4]
+            debug_str = (
+                f"\n    [DEBUG] motor_cmd={motor_cmd_db.sum():.3f} thrust={motor_thrust.sum():.2f}N"
+                f"\n    [DEBUG] body_thrust=[{body_thrust[3]:.1f},{body_thrust[4]:.1f},{body_thrust[5]:.1f}]N (linear xyz)"
+                f"\n    [DEBUG] force=[{force[3]:.1f},{force[4]:.1f},{force[5]:.1f}]N (linear xyz)"
+                f"\n    [DEBUG] quat=[{quat[0]:.3f},{quat[1]:.3f},{quat[2]:.3f},{quat[3]:.3f}]"
+            )
+        except Exception as e:
+            debug_str = f"\n    [DEBUG] read failed: {e}"
+        
         print(f"  t={t:5.1f}s | {phase:8} | {armed:8} | "
               f"motors=[{s.motors[0]:.3f},{s.motors[1]:.3f},{s.motors[2]:.3f},{s.motors[3]:.3f}] | "
-              f"{rate:.1f}x realtime")
+              f"{pos_str} | {rate:.1f}x realtime{debug_str}")
         last_print[0] = t
     
     # Check if simulation is complete - print summary and exit
     if tick >= MAX_TICKS - 1:
         b.stop()
         elapsed = time.time() - start_time[0]
+        
+        # Read final position
+        try:
+            final_pos = np.array(ctx.read_component("drone.world_pos"))
+            final_z = final_pos[6] if len(final_pos) > 6 else final_pos[2]
+            final_vel = np.array(ctx.read_component("drone.world_vel"))
+            final_vz = final_vel[5] if len(final_vel) > 5 else final_vel[2]
+        except Exception:
+            final_z = 0.0
+            final_vz = 0.0
         
         print()
         print("=" * 50)
@@ -342,10 +403,17 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
         print(f"  Total ticks: {s.tick}")
         print(f"  Sync steps: {b.step_count}")
         print(f"  Max motor: {s.max_motor:.3f}")
+        print(f"  Final position: z={final_z:.2f}m, vz={final_vz:.2f}m/s")
         print()
         
-        if b.step_count > 0 and s.max_motor > 0.06:
-            print("SUCCESS: SITL integration working!")
+        # Success criteria: motors responded AND drone moved
+        took_off = final_z > config.initial_position[2] + 0.1  # More than 10cm above start
+        
+        if b.step_count > 0 and s.max_motor > 0.06 and took_off:
+            print("SUCCESS: SITL integration working! Drone took off!")
+        elif b.step_count > 0 and s.max_motor > 0.06:
+            print("WARNING: Motors responded but drone did not take off.")
+            print("  Check physics pipeline: motor_command -> thrust -> force")
         elif b.step_count > 0 and s.max_motor > 0.02:
             print("WARNING: Motors armed but no throttle response.")
         else:

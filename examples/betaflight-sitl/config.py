@@ -118,9 +118,10 @@ class DroneConfig:
         default_factory=lambda: np.zeros(3)
     )
     
-    # Initial attitude as quaternion [w, x, y, z]
+    # Initial attitude as quaternion [x, y, z, w] (Elodin internal format, scalar last)
+    # Identity quaternion: w=1, x=y=z=0 → [0, 0, 0, 1]
     initial_quaternion: NDArray[np.float64] = field(
-        default_factory=lambda: np.array([1.0, 0.0, 0.0, 0.0])
+        default_factory=lambda: np.array([0.0, 0.0, 0.0, 1.0])
     )
     
     # Initial angular velocity [wx, wy, wz] in rad/s
