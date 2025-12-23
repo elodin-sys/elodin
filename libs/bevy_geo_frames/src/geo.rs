@@ -608,4 +608,64 @@ mod tests {
         let geo = q.single(&world).unwrap();
         assert_eq!(geo.1, Vec3::new(1.0, 0.0, 0.0));
     }
+
+    #[test]
+    fn round_trip_eus() {
+        let ctx = dummy_ctx();
+        let original = Vec3::new(1.0, 2.0, 3.0);
+        let bevy = GeoFrame::EUS.to_bevy_vec(original, &ctx, 0.0);
+        let round_trip = GeoFrame::EUS.from_bevy_vec(bevy, &ctx, 0.0);
+        assert!((round_trip - original).length() < 1e-5);
+    }
+
+    #[test]
+    fn round_trip_enu() {
+        let ctx = dummy_ctx();
+        let original = Vec3::new(1.0, 2.0, 3.0);
+        let bevy = GeoFrame::ENU.to_bevy_vec(original, &ctx, 0.0);
+        let round_trip = GeoFrame::ENU.from_bevy_vec(bevy, &ctx, 0.0);
+        assert!((round_trip - original).length() < 1e-5);
+    }
+
+    #[test]
+    fn round_trip_ned() {
+        let ctx = dummy_ctx();
+        let original = Vec3::new(1.0, 2.0, 3.0);
+        let bevy = GeoFrame::NED.to_bevy_vec(original, &ctx, 0.0);
+        let round_trip = GeoFrame::NED.from_bevy_vec(bevy, &ctx, 0.0);
+        assert!((round_trip - original).length() < 1e-5);
+    }
+
+    #[test]
+    fn round_trip_ecef() {
+        let ctx = dummy_ctx();
+        // Use unique coordinates to verify the conversion works correctly
+        let original = Vec3::new(1.0, 2.0, 3.0);
+        let bevy = GeoFrame::ECEF.to_bevy_vec(original, &ctx, 0.0);
+        let round_trip = GeoFrame::ECEF.from_bevy_vec(bevy, &ctx, 0.0);
+        // ECEF involves coordinate transformations, so use a slightly larger tolerance
+        assert!((round_trip - original).length() < 1e-3);
+    }
+
+    #[test]
+    fn round_trip_eci() {
+        let ctx = dummy_ctx();
+        // Use unique coordinates to verify the conversion works correctly
+        let original = Vec3::new(1.0, 2.0, 3.0);
+        let bevy = GeoFrame::ECI.to_bevy_vec(original, &ctx, 0.0);
+        let round_trip = GeoFrame::ECI.from_bevy_vec(bevy, &ctx, 0.0);
+        // ECI involves time-dependent transformations, so use a slightly larger tolerance
+        assert!((round_trip - original).length() < 1e-3);
+    }
+
+    #[test]
+    fn round_trip_gcrf() {
+        let ctx = dummy_ctx();
+        // Use unique coordinates to verify the conversion works correctly
+        let original = Vec3::new(1.0, 2.0, 3.0);
+        let bevy = GeoFrame::GCRF.to_bevy_vec(original, &ctx, 0.0);
+        let round_trip = GeoFrame::GCRF.from_bevy_vec(bevy, &ctx, 0.0);
+        // GCRF involves time-dependent transformations, so use a slightly larger tolerance
+        assert!((round_trip - original).length() < 1e-3);
+    }
 }
