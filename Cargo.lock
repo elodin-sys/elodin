@@ -1609,6 +1609,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_geo_frames"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_editor_cam",
+]
+
+[[package]]
 name = "bevy_gilrs"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

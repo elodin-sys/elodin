@@ -62,7 +62,7 @@ fn setup(
     let cuboid_mat = materials.add(Color::srgb(0.3, 0.8, 0.9));
 
     // Position in ENU frame to start: 20 m east, 0 m north, 1 m up
-    let enu_pos = Vec3::new(10.0, 0.0, 0.0);
+    let enu_pos = Vec3::new(0.0, 0.0, 0.0);
 
     commands.spawn((
         Mesh3d(cuboid_mesh),
@@ -73,7 +73,8 @@ fn setup(
         GeoRotation(GeoFrame::ENU, Quat::IDENTITY),
         GeoAngularVelocity(
             GeoFrame::ENU,
-            Vec3::new(0.0, 0.0, 10.0_f32.to_radians()),
+            // Vec3::new(0.0, 0.0, 10.0_f32.to_radians()),
+            Vec3::new(10.0, 0.0, 0.0)
         ),
         FrameDemo,
     ));
