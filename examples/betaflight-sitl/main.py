@@ -233,8 +233,31 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
         sensor_buf[0] = SensorDataBuffer()
         state[0] = SITLState()
         bridge[0].start()
-        # Give Betaflight (started by s10) time to initialize
+        # Give Betaflight (started by s10) time to fully initialize
+        # Betaflight needs time to complete gyro calibration and internal setup
+        print("[SITL] Waiting for Betaflight to initialize...")
         time.sleep(2)
+        
+        # Warmup phase: Send some initial packets to prime Betaflight's RC processing
+        # This helps stabilize the throttle response on fresh starts
+        print("[SITL] Sending warmup packets...")
+        warmup_buf = SensorDataBuffer()
+        warmup_fdm = warmup_buf.build_fdm()
+        warmup_channels = np.full(MAX_RC_CHANNELS, 1500, dtype=np.uint16)
+        warmup_channels[2] = 1000  # Low throttle
+        warmup_channels[4] = 1000  # Disarmed
+        warmup_rc = RCPacket(timestamp=0.0, channels=warmup_channels)
+        
+        warmup_count = 0
+        for i in range(500):  # 500ms of warmup at ~1ms per packet
+            try:
+                warmup_fdm.timestamp = i * 0.001
+                warmup_rc.timestamp = i * 0.001
+                bridge[0].step(warmup_fdm, warmup_rc)
+                warmup_count += 1
+            except TimeoutError:
+                pass  # Expected during initial warmup
+        print(f"[SITL] Warmup complete ({warmup_count} responses)")
         print("[SITL] Bridge ready")
     
     if start_time[0] is None:
@@ -317,8 +340,10 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
         print(f"  Max motor: {s.max_motor:.3f}")
         print()
         
-        if b.step_count > 0 and s.max_motor > 0.02:
+        if b.step_count > 0 and s.max_motor > 0.06:
             print("SUCCESS: SITL integration working!")
+        elif b.step_count > 0 and s.max_motor > 0.02:
+            print("WARNING: Motors armed but no throttle response.")
         else:
             print("WARNING: No motor response. Check Betaflight configuration.")
         

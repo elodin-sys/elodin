@@ -634,6 +634,20 @@ class BetaflightSyncBridge:
         self._pwm_socket.bind(("0.0.0.0", self.pwm_port))
         self._pwm_socket.settimeout(self.timeout_ms / 1000.0)
         
+        # Drain any stale packets from previous runs
+        self._pwm_socket.setblocking(False)
+        drained = 0
+        try:
+            while True:
+                self._pwm_socket.recv(1024)
+                drained += 1
+        except BlockingIOError:
+            pass  # No more data to drain
+        self._pwm_socket.setblocking(True)
+        self._pwm_socket.settimeout(self.timeout_ms / 1000.0)
+        if drained > 0:
+            print(f"[BetaflightSyncBridge] Drained {drained} stale packet(s)")
+        
         self._started = True
         self._step_count = 0
         
