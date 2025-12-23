@@ -70,6 +70,11 @@ case "${1:-build}" in
                 make arm_sdk_install
             fi
         fi
+
+        if [ ! -d "$BETAFLIGHT_DIR/src/config/configs" ]; then
+            echo "Making configs."
+            make configs
+        fi
         
         # Enable SIMULATOR_GYROPID_SYNC for lockstep synchronization with Elodin
         # This makes Betaflight block on FDM packets, allowing tight timing control
