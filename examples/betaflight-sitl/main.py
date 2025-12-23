@@ -25,6 +25,7 @@ import signal
 import subprocess
 import sys
 import time
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -418,11 +419,32 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
             print("WARNING: Motors armed but no throttle response.")
         else:
             print("WARNING: No motor response. Check Betaflight configuration.")
+        #global db_filename
+        #print(f"Wrote database to: {db_filename}")
 
         # Force exit - world.run() may not return cleanly
-        cleanup_on_exit()
-        os._exit(0)
+        # cleanup_on_exit()
+        # os._exit(0)
 
+# Return the next non-existant filename with auto-incremented
+# number if the pattern ends in Xs.
+#
+# e.g., `next_filename("sim_sitlXXX") -> "sim_sitl001"`
+# `next_filename("sim_sitl_mine") -> "sim_sitl_mine"`
+def next_filename(pattern: str) -> str:
+    match = re.search(r"(X+)$", pattern)
+    if not match:
+        return pattern
+
+    width = len(match.group(1))
+    prefix = pattern[:-width]
+
+    i = 0
+    while True:
+        fname = f"{prefix}{i:0{width}d}"
+        if not os.path.exists(fname):
+            return fname
+        i += 1
 
 # --- Run Simulation ---
 # world.run() creates a CLI - use with:
@@ -430,14 +452,18 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
 #   elodin run examples/betaflight-sitl/main.py
 #   elodin editor examples/betaflight-sitl/main.py
 
+db_filename = next_filename("betaflight_dbXXX")
 world.run(
     system,
     sim_time_step=config.sim_time_step,
     run_time_step=config.sim_time_step,
     max_ticks=int(config.simulation_time / config.sim_time_step),
     post_step=sitl_post_step,
+    db_path=db_filename,
+    interactive=False,
 )
-
+# `world.run()` won't reach here unless `interactive` is false.
+print(f"Wrote database to: {db_filename}")
 
 # --- Cleanup (fallback if world.run() returns without triggering post_step exit) ---
 cleanup_on_exit()
