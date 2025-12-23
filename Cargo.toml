@@ -50,7 +50,8 @@ members = [
     "fsw/gstreamer",
     "libs/db/eql",
     "libs/impeller2/kdl",
-    "libs/db/examples/rust_client"
+    "libs/db/examples/rust_client",
+    "libs/bevy_geo_frames",
  ]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 
