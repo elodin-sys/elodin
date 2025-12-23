@@ -71,6 +71,7 @@ heapless.version = "0.8"
 arc-swap = "1.7.1"
 
 # helpers
+convert_case = "0.7"
 itertools = "0.12.1"
 opener = "0.7.1"
 hex = "0.4.3"

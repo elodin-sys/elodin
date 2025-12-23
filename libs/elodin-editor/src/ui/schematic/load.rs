@@ -34,6 +34,7 @@ use crate::{
         DEFAULT_SECONDARY_RECT, HdrEnabled, SelectedObject,
         colors::{self, EColor},
         dashboard::{NodeUpdaterParams, spawn_dashboard},
+        data_overview::DataOverviewPane,
         modal::ModalDialog,
         monitor::MonitorPane,
         plot::GraphBundle,
@@ -109,7 +110,11 @@ pub fn sync_schematic(
             return;
         };
         params.load_schematic(&schematic, None);
+        return;
     }
+
+    // No schematic found - create a default Data Overview panel
+    params.load_default_data_overview();
 }
 
 fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSelection {
@@ -726,6 +731,44 @@ impl LoadSchematicParams<'_, '_> {
                     parent_id,
                     false,
                 )
+            }
+        }
+    }
+
+    /// Create a default Data Overview panel when no schematic is found.
+    /// This provides immediate visibility into the database contents.
+    pub fn load_default_data_overview(&mut self) {
+        let primary_window = *self.primary_window;
+        let mut window_state = self
+            .window_states
+            .get_mut(primary_window)
+            .expect("no primary window")
+            .2;
+
+        // Only add if the tile tree is empty
+        if window_state.tile_state.is_empty() {
+            // Create a structure that matches how schematics work:
+            // Root → Tabs container → Pane
+            //
+            // egui_tiles only shows tab bars for NESTED Tabs containers, not the root.
+            // So we create a tabs container explicitly (like Panel::Tabs does)
+            // and add our pane inside it.
+            let tabs_container = Tile::Container(Container::new_tabs(vec![]));
+            if let Some(tabs_id) = window_state
+                .tile_state
+                .insert_tile(tabs_container, None, false)
+            {
+                let pane = Pane::DataOverview(DataOverviewPane::default());
+                if let Some(tile_id) =
+                    window_state
+                        .tile_state
+                        .insert_tile(Tile::Pane(pane), Some(tabs_id), true)
+                {
+                    window_state
+                        .tile_state
+                        .tree
+                        .make_active(|id, _| id == tile_id);
+                }
             }
         }
     }

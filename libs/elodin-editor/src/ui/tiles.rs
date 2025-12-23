@@ -38,6 +38,7 @@ use super::{
     colors::{self, get_scheme, with_opacity},
     command_palette::{CommandPaletteState, palette_items},
     dashboard::{DashboardWidget, spawn_dashboard},
+    data_overview::{DataOverviewPane, DataOverviewWidget},
     hierarchy::{Hierarchy, HierarchyContent},
     images,
     inspector::{InspectorContent, InspectorIcons},
@@ -471,22 +472,96 @@ impl TileState {
         parent_id: Option<TileId>,
         active: bool,
     ) -> Option<TileId> {
+        // Check if we're inserting a pane (need nested tabs handling) or a container
+        let is_pane = matches!(tile, Tile::Pane(_));
+
         let parent_id = if let Some(id) = parent_id {
             id
         } else {
-            let root_id = self.tree.root().or_else(|| {
-                self.reset_tree();
-                self.tree.root()
-            })?;
+            // If there's no root, create a proper tabs container as root
+            let root_id = match self.tree.root() {
+                Some(id) => id,
+                None => {
+                    let tabs_container = Tile::Container(Container::new_tabs(vec![]));
+                    let tabs_id = self.tree.tiles.insert_new(tabs_container);
+                    self.tree.root = Some(tabs_id);
+                    tabs_id
+                }
+            };
 
-            if let Some(Tile::Container(Container::Linear(linear))) = self.tree.tiles.get(root_id) {
-                if let Some(center) = linear.children.get(linear.children.len() / 2) {
-                    *center
-                } else {
+            // Check if the root is a container we can add to
+            match self.tree.tiles.get(root_id) {
+                Some(Tile::Container(Container::Linear(linear))) => {
+                    // For Linear containers, find the center child
+                    if let Some(center) = linear.children.get(linear.children.len() / 2) {
+                        *center
+                    } else {
+                        root_id
+                    }
+                }
+                Some(Tile::Container(Container::Tabs(tabs))) if is_pane => {
+                    // Root is a Tabs container and we're inserting a PANE.
+                    // egui_tiles only shows tab bars for NESTED Tabs containers, not the root.
+                    // So we need to find or create a nested Tabs container to add the pane to.
+                    //
+                    // Look for an existing nested Tabs container among the children.
+                    let nested_tabs_id = tabs.children.iter().find(|&&child_id| {
+                        matches!(
+                            self.tree.tiles.get(child_id),
+                            Some(Tile::Container(Container::Tabs(_)))
+                        )
+                    });
+
+                    if let Some(&nested_id) = nested_tabs_id {
+                        // Found a nested Tabs container, use it
+                        nested_id
+                    } else if tabs.children.is_empty() {
+                        // Root tabs is empty, create a nested tabs container
+                        let nested_tabs = Tile::Container(Container::new_tabs(vec![]));
+                        let nested_id = self.tree.tiles.insert_new(nested_tabs);
+                        // Add the nested tabs to the root
+                        if let Some(Tile::Container(Container::Tabs(root_tabs))) =
+                            self.tree.tiles.get_mut(root_id)
+                        {
+                            root_tabs.add_child(nested_id);
+                        }
+                        nested_id
+                    } else {
+                        // Root tabs has children but none are Tabs containers.
+                        // Wrap all existing children in a new nested Tabs container.
+                        let existing_children: Vec<_> = tabs.children.clone();
+                        let nested_tabs =
+                            Tile::Container(Container::new_tabs(existing_children.clone()));
+                        let nested_id = self.tree.tiles.insert_new(nested_tabs);
+                        // Replace root's children with just the nested container
+                        if let Some(Tile::Container(Container::Tabs(root_tabs))) =
+                            self.tree.tiles.get_mut(root_id)
+                        {
+                            root_tabs.children.clear();
+                            root_tabs.add_child(nested_id);
+                        }
+                        nested_id
+                    }
+                }
+                Some(Tile::Container(_)) => {
+                    // Root is a container (Tabs with Container being inserted, or Grid), use it directly
                     root_id
                 }
-            } else {
-                root_id
+                Some(Tile::Pane(_)) => {
+                    // Root is a pane, not a container! This can happen if simplification
+                    // pruned away the tabs container. We need to wrap it in a new tabs container.
+                    let tabs_container = Tile::Container(Container::new_tabs(vec![root_id]));
+                    let tabs_id = self.tree.tiles.insert_new(tabs_container);
+                    self.tree.root = Some(tabs_id);
+                    tabs_id
+                }
+                None => {
+                    // Root tile doesn't exist, create a new tabs container
+                    let tabs_container = Tile::Container(Container::new_tabs(vec![]));
+                    let tabs_id = self.tree.tiles.insert_new(tabs_container);
+                    self.tree.root = Some(tabs_id);
+                    tabs_id
+                }
             }
         };
 
@@ -582,6 +657,10 @@ impl TileState {
             .push(TreeAction::AddSchematicTree(tile_id));
     }
 
+    pub fn create_data_overview_tile(&mut self, tile_id: Option<TileId>) {
+        self.tree_actions.push(TreeAction::AddDataOverview(tile_id));
+    }
+
     pub fn debug_dump(&self) -> String {
         fn visit(
             tree: &egui_tiles::Tree<Pane>,
@@ -611,6 +690,7 @@ impl TileState {
                             Pane::Hierarchy => ("Hierarchy", "Hierarchy"),
                             Pane::Inspector => ("Inspector", "Inspector"),
                             Pane::SchematicTree(_) => ("SchematicTree", "SchematicTree"),
+                            Pane::DataOverview(_) => ("DataOverview", "DataOverview"),
                         };
                         let _ = writeln!(out, "{}Pane::{} ({})", indent, kind, label);
                     }
@@ -772,6 +852,7 @@ pub enum Pane {
     Hierarchy,
     Inspector,
     SchematicTree(TreePane),
+    DataOverview(DataOverviewPane),
 }
 
 impl Pane {
@@ -812,6 +893,7 @@ impl Pane {
             Pane::Hierarchy => "Entities".to_string(),
             Pane::Inspector => "Inspector".to_string(),
             Pane::SchematicTree(_) => "Tree".to_string(),
+            Pane::DataOverview(_) => "Data Overview".to_string(),
         }
     }
 
@@ -913,6 +995,12 @@ impl Pane {
                     "tree",
                     (tree_icons, tree_pane.entity),
                 );
+                egui_tiles::UiResponse::None
+            }
+            Pane::DataOverview(pane) => {
+                let updated_pane =
+                    ui.add_widget_with::<DataOverviewWidget>(world, "data_overview", pane.clone());
+                *pane = updated_pane;
                 egui_tiles::UiResponse::None
             }
         }
@@ -1156,6 +1244,7 @@ pub enum TreeAction {
     AddHierarchy(Option<TileId>),
     AddInspector(Option<TileId>),
     AddSchematicTree(Option<TileId>),
+    AddDataOverview(Option<TileId>),
     AddSidebars,
     DeleteTab(TileId),
     SelectTile(TileId),
@@ -1410,6 +1499,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         egui_tiles::SimplificationOptions {
             all_panes_must_have_tabs: true,
             join_nested_linear_containers: true,
+            prune_single_child_tabs: false, // Keep tabs container even with single child
             ..Default::default()
         }
     }
@@ -2146,6 +2236,17 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         ui_state.tree.make_active(|id, _| id == tile_id);
                     }
                 }
+                TreeAction::AddDataOverview(parent_tile_id) => {
+                    if read_only {
+                        continue;
+                    }
+                    let pane = Pane::DataOverview(DataOverviewPane::default());
+                    if let Some(tile_id) =
+                        ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
+                    {
+                        ui_state.tree.make_active(|id, _| id == tile_id);
+                    }
+                }
                 TreeAction::AddSidebars => {
                     if read_only {
                         continue;
@@ -2230,6 +2331,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         stream.try_insert(IsTileVisible(visible));
                     }
                 }
+                Pane::DataOverview(_) => {}
             }
         }
     }
