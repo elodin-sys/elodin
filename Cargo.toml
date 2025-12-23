@@ -53,7 +53,8 @@ members = [
     "libs/db/eql",
     "libs/impeller2/kdl",
     "libs/db/examples/rust_client",
-    "examples/rc-jet/controller"
+    "examples/rc-jet/controller",
+    "libs/bevy_geo_frames",
  ]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 

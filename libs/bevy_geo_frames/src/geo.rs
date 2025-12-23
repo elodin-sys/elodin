@@ -113,6 +113,12 @@ pub struct GeoContext {
     pub earth_rot_rate_rad_per_s: f64,
 }
 
+impl Default for GeoContext {
+    fn default() -> Self {
+        Self::new_from_degrees(0.0, 0.0, 0.0, 0.0)
+    }
+}
+
 impl GeoContext {
     /// Construct with a given origin and an initial Earth angle.
     /// For more realism you can plug in GMST at startup as theta0_rad.
@@ -446,7 +452,7 @@ pub fn integrate_geo_motion(
     let dt = time.delta_secs();
     let t = time.elapsed_secs_f64();
     for (mut geo_pos, geo_vel) in &mut q {
-        let v = geo_pos.0.convert_to(geo_vel.1, &geo_vel.0, &ctx, t);
+        let v = dbg!(geo_pos.0.convert_to(geo_vel.1, &geo_vel.0, &ctx, t));
         geo_pos.1 += v * dt;
     }
 }
@@ -583,6 +589,7 @@ mod tests {
         let mut world = World::new();
         // Initialize Time resource - in Bevy 0.16, Res<Time> resolves to Time<Real>
         world.init_resource::<Time>();
+        world.init_resource::<GeoContext>();
         // Advance time to have a delta
         let mut time = world.resource_mut::<Time>();
         time.advance_by(std::time::Duration::from_secs(1));
