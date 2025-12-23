@@ -4,7 +4,6 @@
     "g_ncm.host_addr=ee:a1:ef:ae:a1:ef"
   ];
   networking.interfaces.usb0.useDHCP = false;
-  networking.interfaces.dummy0.useDHCP = false;
   networking.interfaces.usb0.ipv4.addresses = [
     {
       address = "10.224.0.1";
@@ -36,7 +35,7 @@
   services.avahi = {
     enable = true;
     nssmdns4 = true;
-    denyInterfaces = ["dummy0" "lo" "usb0"];
+    denyInterfaces = ["lo" "usb0"];
     publish = {
       enable = true;
       userServices = true;

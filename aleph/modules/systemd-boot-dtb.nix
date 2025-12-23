@@ -29,7 +29,6 @@ in {
         FILENAME="/dtbs/$FILEHASH.dtb"
         ${pkgs.coreutils}/bin/cp -fv "${config.hardware.deviceTree.package}/${config.hardware.deviceTree.name}" "/boot$FILENAME"
         echo "devicetree $FILENAME" >> /boot/loader/entries/$default_cfg
-        echo "test" > /boot/loader/entries/foo
       '';
     };
   };
