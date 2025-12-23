@@ -37,7 +37,7 @@ use super::{
     button::{EImageButton, ETileButton},
     colors::{self, get_scheme, with_opacity},
     command_palette::{CommandPaletteState, palette_items},
-    dashboard::{DashboardWidget, spawn_dashboard},
+    dashboard::{DashboardWidget, DashboardWidgetArgs, spawn_dashboard},
     data_overview::{DataOverviewPane, DataOverviewWidget},
     hierarchy::{Hierarchy, HierarchyContent},
     images,
@@ -47,7 +47,7 @@ use super::{
     query_plot::QueryPlotData,
     query_table::{QueryTableData, QueryTablePane, QueryTableWidget},
     schematic::{graph_label, viewport_label},
-    video_stream::{IsTileVisible, VideoDecoderHandle},
+    video_stream::{IsTileVisible, VideoDecoderHandle, VideoStreamWidgetArgs},
     widgets::{RootWidgetSystem, WidgetSystem, WidgetSystemExt},
 };
 use crate::{
@@ -708,25 +708,20 @@ impl TileState {
     }
 
     pub fn collect_graph_entities(&self) -> Vec<Entity> {
+        self.collect_render_targets().cameras
+    }
+
+    pub fn collect_render_targets(&self) -> PaneRenderTargets {
         fn visit(
             tree: &egui_tiles::Tree<Pane>,
             tile_id: egui_tiles::TileId,
-            out: &mut Vec<Entity>,
+            out: &mut PaneRenderTargets,
         ) {
             let Some(tile) = tree.tiles.get(tile_id) else {
                 return;
             };
             match tile {
-                Tile::Pane(Pane::Graph(graph)) => out.push(graph.id),
-                Tile::Pane(Pane::Viewport(viewport)) => {
-                    if let Some(cam) = viewport.camera {
-                        out.push(cam);
-                    }
-                    if let Some(nav_cam) = viewport.nav_gizmo_camera {
-                        out.push(nav_cam);
-                    }
-                }
-                Tile::Pane(_) => {}
+                Tile::Pane(pane) => pane.collect_render_targets(out),
                 Tile::Container(container) => {
                     for child in container.children() {
                         visit(tree, *child, out);
@@ -735,11 +730,11 @@ impl TileState {
             }
         }
 
-        let mut entities = Vec::new();
+        let mut targets = PaneRenderTargets::default();
         if let Some(root) = self.tree.root() {
-            visit(&self.tree, root, &mut entities);
+            visit(&self.tree, root, &mut targets);
         }
-        entities
+        targets
     }
 
     pub fn create_sidebars_layout(&mut self) {
@@ -839,6 +834,22 @@ impl TileState {
     }
 }
 
+#[derive(Default)]
+pub struct PaneRenderTargets {
+    pub cameras: Vec<Entity>,
+    pub ui_nodes: Vec<Entity>,
+}
+
+impl PaneRenderTargets {
+    fn push_camera(&mut self, entity: Entity) {
+        self.cameras.push(entity);
+    }
+
+    fn push_ui_node(&mut self, entity: Entity) {
+        self.ui_nodes.push(entity);
+    }
+}
+
 #[derive(Clone)]
 pub enum Pane {
     Viewport(ViewportPane),
@@ -856,6 +867,29 @@ pub enum Pane {
 }
 
 impl Pane {
+    fn collect_render_targets(&self, out: &mut PaneRenderTargets) {
+        match self {
+            Pane::Graph(pane) => out.push_camera(pane.id),
+            Pane::QueryPlot(pane) => out.push_camera(pane.entity),
+            Pane::Viewport(pane) => {
+                if let Some(cam) = pane.camera {
+                    out.push_camera(cam);
+                }
+                if let Some(nav_cam) = pane.nav_gizmo_camera {
+                    out.push_camera(nav_cam);
+                }
+            }
+            Pane::VideoStream(pane) => out.push_ui_node(pane.entity),
+            Pane::Dashboard(pane) => out.push_ui_node(pane.entity),
+            Pane::Monitor(_)
+            | Pane::QueryTable(_)
+            | Pane::ActionTile(_)
+            | Pane::Hierarchy
+            | Pane::Inspector
+            | Pane::SchematicTree(_) => {}
+        }
+    }
+
     fn title(
         &self,
         graph_states: &Query<&GraphState>,
@@ -904,6 +938,7 @@ impl Pane {
         icons: &TileIcons,
         world: &mut World,
         tree_actions: &mut SmallVec<[TreeAction; 4]>,
+        target_window: Entity,
     ) -> egui_tiles::UiResponse {
         let content_rect = ui.available_rect_before_wrap();
         match self {
@@ -945,12 +980,22 @@ impl Pane {
                 ui.add_widget_with::<super::video_stream::VideoStreamWidget>(
                     world,
                     "video_stream",
-                    pane.clone(),
+                    VideoStreamWidgetArgs {
+                        entity: pane.entity,
+                        window: target_window,
+                    },
                 );
                 egui_tiles::UiResponse::None
             }
             Pane::Dashboard(pane) => {
-                ui.add_widget_with::<DashboardWidget>(world, "dashboard", pane.entity);
+                ui.add_widget_with::<DashboardWidget>(
+                    world,
+                    "dashboard",
+                    DashboardWidgetArgs {
+                        entity: pane.entity,
+                        window: target_window,
+                    },
+                );
                 egui_tiles::UiResponse::None
             }
             Pane::Hierarchy => {
@@ -1228,7 +1273,7 @@ struct TreeBehavior<'w> {
     world: &'w mut World,
     container_titles: HashMap<TileId, String>,
     read_only: bool,
-    target_window: Option<Entity>,
+    target_window: Entity,
 }
 
 #[derive(Clone)]
@@ -1272,7 +1317,13 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         _tile_id: egui_tiles::TileId,
         pane: &mut Pane,
     ) -> egui_tiles::UiResponse {
-        pane.ui(ui, &self.icons, self.world, &mut self.tree_actions)
+        pane.ui(
+            ui,
+            &self.icons,
+            self.world,
+            &mut self.tree_actions,
+            self.target_window,
+        )
     }
 
     #[allow(clippy::fn_params_excessive_bools)]
@@ -1567,7 +1618,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             layout
                 .cmd_palette_state
                 .open_page(move || palette_items::create_tiles(tile_id));
-            layout.cmd_palette_state.target_window = self.target_window;
+            layout.cmd_palette_state.target_window = Some(self.target_window);
         }
     }
 }
@@ -1869,6 +1920,7 @@ pub struct TileLayout<'w, 's> {
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     viewport_contains_pointer: ResMut<'w, ViewportContainsPointer>,
     editor_cam: Query<'w, 's, &'static mut EditorCam, With<MainCamera>>,
+    primary_window: Single<'w, Entity, With<PrimaryWindow>>,
     cmd_palette_state: ResMut<'w, CommandPaletteState>,
     eql_ctx: Res<'w, EqlContext>,
     node_updater_params: NodeUpdaterParams<'w, 's>,
@@ -1898,6 +1950,11 @@ impl WidgetSystem for TileLayout<'_, '_> {
             read_only,
         } = args;
 
+        let target_window = {
+            let state_mut = state.get_mut(world);
+            window.unwrap_or(*state_mut.primary_window)
+        };
+
         let (tree, mut tree_actions) = {
             let (tab_diffs, container_titles, mut tree) = {
                 let mut state_mut = state.get_mut(world);
@@ -1918,7 +1975,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 tree_actions: tab_diffs,
                 container_titles,
                 read_only,
-                target_window: window,
+                target_window,
             };
             tree.ui(&mut behavior, ui);
             let TreeBehavior { tree_actions, .. } = behavior;

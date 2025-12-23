@@ -60,6 +60,7 @@ use impeller2::types::ComponentId;
 use impeller2_bevy::ComponentValueMap;
 use impeller2_wkt::{ComponentMetadata, ComponentValue, DbConfig, WindowRect};
 
+use crate::ui::window::window_entity_from_target;
 use crate::{
     GridHandle, MainCamera,
     plugins::{
@@ -553,7 +554,7 @@ fn clamp_viewport_to_window(
 }
 
 fn set_camera_viewport(
-    window: Query<(&Window, &bevy_egui::EguiContextSettings), With<PrimaryWindow>>,
+    window: Query<(Entity, &Window, &bevy_egui::EguiContextSettings), With<PrimaryWindow>>,
     mut main_camera_query: Query<
         (Entity, &ViewportRect, Option<&GraphState>, &mut Camera),
         With<MainCamera>,
@@ -572,11 +573,23 @@ fn set_camera_viewport(
     // Stable ordering: non-graph cameras first, then graphs; break ties by entity id.
     entries.sort_by_key(|(entity, is_graph)| (*is_graph, entity.index()));
 
+    let Some((primary_entity, window, egui_settings)) = window.iter().next() else {
+        return;
+    };
+    let scale_factor = window.scale_factor() * egui_settings.scale_factor;
+    let window_size: Vec2 = window.physical_size().as_vec2();
+
     for (entity, is_graph) in &entries {
         let Ok((_, viewport_rect, _graph_state, mut camera)) = main_camera_query.get_mut(*entity)
         else {
             continue;
         };
+        let Some(camera_window) = window_entity_from_target(&camera.target, primary_entity) else {
+            continue;
+        };
+        if camera_window != primary_entity {
+            continue;
+        }
         let order = if *is_graph {
             let order = next_graph_order;
             next_graph_order += 1;
@@ -599,15 +612,10 @@ fn set_camera_viewport(
             continue;
         };
         camera.is_active = true;
-        let Some((window, egui_settings)) = window.iter().next() else {
-            continue;
-        };
-        let scale_factor = window.scale_factor() * egui_settings.scale_factor;
         let viewport_pos = available_rect.left_top().to_vec2() * scale_factor;
         let viewport_size = available_rect.size() * scale_factor;
         let viewport_pos = Vec2::new(viewport_pos.x, viewport_pos.y);
         let viewport_size = Vec2::new(viewport_size.x, viewport_size.y);
-        let window_size: Vec2 = window.physical_size().as_vec2();
         if let Some((clamped_pos, clamped_size)) =
             clamp_viewport_to_window(viewport_pos, viewport_size, window_size)
         {

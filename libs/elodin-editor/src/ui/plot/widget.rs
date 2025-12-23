@@ -22,8 +22,8 @@ use bevy::{
     },
     math::{DVec2, Rect, Vec2},
     prelude::{Component, ResMut},
-    render::camera::{Camera, OrthographicProjection, Projection, RenderTarget, ScalingMode},
-    window::{PrimaryWindow, Window, WindowRef},
+    render::camera::{Camera, OrthographicProjection, Projection, ScalingMode},
+    window::{PrimaryWindow, Window},
 };
 use bevy_egui::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke};
 use impeller2::types::Timestamp;
@@ -48,6 +48,7 @@ use crate::{
         timeline::DurationExt,
         utils::format_num,
         widgets::WidgetSystem,
+        window::window_entity_from_target,
     },
 };
 
@@ -1237,7 +1238,7 @@ pub fn zoom_graph(
     };
 
     for (mut graph_state, camera) in query.iter_mut() {
-        let Some(window_entity) = camera_window_entity(camera, primary_entity) else {
+        let Some(window_entity) = window_entity_from_target(&camera.target, primary_entity) else {
             continue;
         };
         let Some(scroll_offset) = scroll_offsets.get(&window_entity) else {
@@ -1315,7 +1316,7 @@ pub fn pan_graph(
     };
 
     for (entity, mut graph_state, camera, last_pos) in query.iter_mut() {
-        let Some(window_entity) = camera_window_entity(camera, primary_entity) else {
+        let Some(window_entity) = window_entity_from_target(&camera.target, primary_entity) else {
             if let Ok(mut e) = commands.get_entity(entity) {
                 e.try_insert(LastPos(None));
             }
@@ -1419,7 +1420,8 @@ pub fn reset_graph(
         };
 
         for (mut graph_state, camera) in query.iter_mut() {
-            let Some(window_entity) = camera_window_entity(camera, primary_entity) else {
+            let Some(window_entity) = window_entity_from_target(&camera.target, primary_entity)
+            else {
                 continue;
             };
             let Ok((_, window)) = windows.get(window_entity) else {
@@ -1471,16 +1473,6 @@ fn scroll_offsets_from_events(scroll_events: &mut EventReader<MouseWheel>) -> Ha
             .or_insert(delta);
     }
     offsets
-}
-
-fn camera_window_entity(camera: &Camera, primary_entity: Entity) -> Option<Entity> {
-    match &camera.target {
-        RenderTarget::Window(window_ref) => match window_ref {
-            WindowRef::Primary => Some(primary_entity),
-            WindowRef::Entity(entity) => Some(*entity),
-        },
-        _ => None,
-    }
 }
 
 pub trait Vec2Ext {
