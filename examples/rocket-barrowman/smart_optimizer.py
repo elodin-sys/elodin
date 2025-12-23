@@ -215,11 +215,20 @@ class SmartOptimizer:
         # "weighs 50lbs" means total weight, not just payload
         # "50lb payload" means payload only
         weight_patterns = [
-            (r"weighs\s+(\d+\.?\d*)\s*(?:lb|lbs)", lambda m: float(m.group(1)) * 0.4536),  # Total weight
+            (
+                r"weighs\s+(\d+\.?\d*)\s*(?:lb|lbs)",
+                lambda m: float(m.group(1)) * 0.4536,
+            ),  # Total weight
             (r"weighs\s+(\d+\.?\d*)\s*kg", lambda m: float(m.group(1))),  # Total weight
-            (r"(\d+\.?\d*)\s*(?:lb|lbs)\s+payload", lambda m: float(m.group(1)) * 0.4536),  # Payload only
+            (
+                r"(\d+\.?\d*)\s*(?:lb|lbs)\s+payload",
+                lambda m: float(m.group(1)) * 0.4536,
+            ),  # Payload only
             (r"(\d+\.?\d*)\s*kg\s+payload", lambda m: float(m.group(1))),  # Payload only
-            (r"(\d+\.?\d*)\s*(?:lb|lbs)", lambda m: float(m.group(1)) * 0.4536),  # Default: assume payload
+            (
+                r"(\d+\.?\d*)\s*(?:lb|lbs)",
+                lambda m: float(m.group(1)) * 0.4536,
+            ),  # Default: assume payload
             (r"(\d+\.?\d*)\s*kg", lambda m: float(m.group(1))),  # Default: assume payload
         ]
         for pattern, converter in weight_patterns:
@@ -236,9 +245,18 @@ class SmartOptimizer:
 
         # Parse body diameter/airframe size
         diameter_patterns = [
-            (r"(\d+\.?\d*)\s*(?:in|inch|inches)", lambda m: float(m.group(1)) * 0.0254),  # inches to meters
-            (r"(\d+\.?\d*)\s*(?:mm|millimeters?)", lambda m: float(m.group(1)) * 0.001),  # mm to meters
-            (r"(\d+\.?\d*)\s*(?:cm|centimeters?)", lambda m: float(m.group(1)) * 0.01),  # cm to meters
+            (
+                r"(\d+\.?\d*)\s*(?:in|inch|inches)",
+                lambda m: float(m.group(1)) * 0.0254,
+            ),  # inches to meters
+            (
+                r"(\d+\.?\d*)\s*(?:mm|millimeters?)",
+                lambda m: float(m.group(1)) * 0.001,
+            ),  # mm to meters
+            (
+                r"(\d+\.?\d*)\s*(?:cm|centimeters?)",
+                lambda m: float(m.group(1)) * 0.01,
+            ),  # cm to meters
         ]
         for pattern, converter in diameter_patterns:
             match = re.search(pattern, text_lower)
@@ -261,7 +279,7 @@ class SmartOptimizer:
 
     def _get_tube_for_motor(self, motor_diameter: float, prefer_smaller: bool = True) -> Dict:
         """Get tube that fits a motor.
-        
+
         Args:
             motor_diameter: Motor diameter in meters
             prefer_smaller: If True, return smallest fitting tube. If False, return largest fitting tube.
@@ -270,10 +288,10 @@ class SmartOptimizer:
         for tube in self.TUBE_SIZES:
             if tube["id"] >= motor_diameter + 0.003:  # 3mm clearance
                 fitting_tubes.append(tube)
-        
+
         if not fitting_tubes:
             return self.TUBE_SIZES[-1]  # Largest if none fit
-        
+
         if prefer_smaller:
             return fitting_tubes[0]  # Smallest fitting tube
         else:
@@ -391,10 +409,10 @@ class SmartOptimizer:
         # Calculate dimensions - use Calisto-like proportions for stability
         body_radius = tube["od"] / 2
         nose_length = body_radius * 4  # 4:1 fineness (like Calisto)
-        
+
         # Body length calculation - ensure enough space for motor, payload, and structure
         motor_bay_length = motor.length + 0.1
-        
+
         # Payload bay calculation - but cap it to prevent absurdly long rockets
         # For heavy payloads, we need larger tubes, not longer tubes
         payload_volume_needed = requirements.payload_mass_kg / 500.0  # m³ (typical payload density)
@@ -402,22 +420,22 @@ class SmartOptimizer:
         # Cap payload bay to reasonable length (max 2m for any payload)
         # If payload doesn't fit, we need a larger tube (handled by tube selection)
         payload_bay_length = min(max(payload_bay_length, 0.2), 2.0)  # 20cm to 2m
-        
+
         # Minimum body length: ensure stability (L/D ratio)
         # Calisto has body_length = 1.90m for 127mm diameter = 15× diameter
         # Use similar ratio: 12-18× diameter for stability
         min_body_length_by_diameter = body_radius * 2 * 12  # 12× diameter minimum
         min_body_length_by_motor = motor.length + 0.5  # Motor + clearance
-        
+
         # Functional length: motor bay + payload bay + avionics/recovery space
         functional_length = motor_bay_length + payload_bay_length + 0.3
-        
+
         body_length = max(
             functional_length,  # Functional length
             min_body_length_by_diameter,  # Stability requirement
-            min_body_length_by_motor  # Motor requirement
+            min_body_length_by_motor,  # Motor requirement
         )
-        
+
         # Cap body length to prevent absurdly long rockets (max L/D of 40)
         total_length = nose_length + body_length
         max_total_length = body_radius * 2 * 40  # Max L/D of 40
@@ -425,16 +443,20 @@ class SmartOptimizer:
             # Cap at max L/D, but ensure minimum functional length
             body_length = min(
                 max_total_length - nose_length,
-                max(functional_length, min_body_length_by_motor)  # Keep functional minimum
+                max(functional_length, min_body_length_by_motor),  # Keep functional minimum
             )
-        
+
         # Validate dimensions before building
         if body_radius <= 0 or nose_length <= 0 or body_length <= 0:
-            print(f"Warning: Invalid dimensions for {motor.designation}: radius={body_radius}, nose={nose_length}, body={body_length}")
+            print(
+                f"Warning: Invalid dimensions for {motor.designation}: radius={body_radius}, nose={nose_length}, body={body_length}"
+            )
             return (0.0, 0.0, {}, {})
-        
+
         if motor.diameter > tube["id"]:
-            print(f"Warning: Motor {motor.designation} (diameter={motor.diameter*1000:.1f}mm) too large for tube (ID={tube['id']*1000:.1f}mm)")
+            print(
+                f"Warning: Motor {motor.designation} (diameter={motor.diameter * 1000:.1f}mm) too large for tube (ID={tube['id'] * 1000:.1f}mm)"
+            )
             return (0.0, 0.0, {}, {})
 
         # Build rocket
@@ -466,7 +488,7 @@ class SmartOptimizer:
         if fin_root > body_length * 0.25:
             fin_root = body_length * 0.25
             fin_tip = fin_root * 0.5
-        
+
         fins = TrapezoidFinSet(
             name="Fins",
             fin_count=4,
@@ -493,7 +515,7 @@ class SmartOptimizer:
                 # Motor won't fit - this should have been caught earlier, but double-check
                 print(f"Warning: Motor {motor.designation} won't fit in body tube")
                 return (0.0, 0.0, {}, {})
-        
+
         mount = InnerTube(
             name="Mount",
             length=mount_length,
@@ -517,7 +539,7 @@ class SmartOptimizer:
             0.0,  # Don't include payload in structure estimate
             requirements.recovery_type,
         )
-        
+
         # Add payload as actual MassComponent if specified
         if requirements.payload_mass_kg > 0:
             # Payload bay position - in forward section of body
@@ -530,7 +552,7 @@ class SmartOptimizer:
             )
             payload.position.x = payload_position - nose_length  # Relative to body start
             body.add_child(payload)
-        
+
         # Total dry mass = structure + payload
         dry_mass = structure_mass + requirements.payload_mass_kg
         landed_mass = dry_mass + motor.case_mass
@@ -568,18 +590,20 @@ class SmartOptimizer:
         except Exception as e:
             print(f"Warning: Failed to calculate reference values for {motor.designation}: {e}")
             return (0.0, 0.0, {}, {})
-        
+
         # Verify rocket has valid reference values
         if rocket.reference_diameter <= 0 or rocket.reference_length <= 0:
             print(f"Warning: Invalid reference values for {motor.designation}")
             return (0.0, 0.0, {}, {})
-        
+
         # Quick stability check: ensure rocket has reasonable length-to-diameter ratio
         # Too short rockets are unstable, too long are inefficient but can still work
         l_over_d = rocket.reference_length / rocket.reference_diameter
         if l_over_d < 5.0:
             # Rocket too short - likely unstable
-            print(f"Warning: Rocket too short (L/D={l_over_d:.1f}) for {motor.designation}, likely unstable")
+            print(
+                f"Warning: Rocket too short (L/D={l_over_d:.1f}) for {motor.designation}, likely unstable"
+            )
             return (0.0, 0.0, {}, {})
         if l_over_d > 40.0:
             # Rocket very long - might have structural issues, but allow up to 40
@@ -636,14 +660,18 @@ class SmartOptimizer:
                 if result is not None and result.history and len(result.history) > 0:
                     # Get all valid altitudes (filter out NaN/Inf)
                     if np is not None:
-                        altitudes = [s.position[2] for s in result.history if np.isfinite(s.position[2])]
+                        altitudes = [
+                            s.position[2] for s in result.history if np.isfinite(s.position[2])
+                        ]
                     else:
                         # Fallback if numpy not available
-                        altitudes = [s.position[2] for s in result.history if abs(s.position[2]) < 1e10]
-                    
+                        altitudes = [
+                            s.position[2] for s in result.history if abs(s.position[2]) < 1e10
+                        ]
+
                     if altitudes:
                         altitude = max(altitudes)
-                        
+
                         # FIRST: Check if altitude is at clamp boundary (indicates simulation failure)
                         # The flight solver clamps positions to ±1e5 (100000m), so if we see close to 1e5, it's a clamp
                         # Check within 1km of clamp boundary to catch values like 99938m, 99974m, etc.
@@ -660,39 +688,61 @@ class SmartOptimizer:
                                 # Check if trajectory looks reasonable
                                 alt_diff = max(altitudes) - min(altitudes)
                                 if alt_diff < 10:  # No altitude change
-                                    print(f"Warning: No altitude change for {motor.designation}, simulation may have failed")
+                                    print(
+                                        f"Warning: No altitude change for {motor.designation}, simulation may have failed"
+                                    )
                                     altitude = 0.0
                                 else:
                                     # Check if many altitudes are at the clamp (indicates widespread failure)
-                                    clamped_count = sum(1 for alt in altitudes if abs(alt - 1e5) < 1.0 or abs(alt + 1e5) < 1.0)
-                                    if clamped_count > len(altitudes) * 0.1:  # More than 10% clamped
-                                        print(f"Warning: Many positions clamped for {motor.designation} - simulation failed")
+                                    clamped_count = sum(
+                                        1
+                                        for alt in altitudes
+                                        if abs(alt - 1e5) < 1.0 or abs(alt + 1e5) < 1.0
+                                    )
+                                    if (
+                                        clamped_count > len(altitudes) * 0.1
+                                    ):  # More than 10% clamped
+                                        print(
+                                            f"Warning: Many positions clamped for {motor.designation} - simulation failed"
+                                        )
                                         altitude = 0.0
                                     else:
-                                        print(f"Warning: Invalid altitude {altitude:.0f}m for {motor.designation}, treating as failure")
+                                        print(
+                                            f"Warning: Invalid altitude {altitude:.0f}m for {motor.designation}, treating as failure"
+                                        )
                                         altitude = 0.0
                             else:
-                                print(f"Warning: Invalid altitude {altitude:.0f}m for {motor.designation}, treating as failure")
+                                print(
+                                    f"Warning: Invalid altitude {altitude:.0f}m for {motor.designation}, treating as failure"
+                                )
                                 altitude = 0.0
                         elif np is not None and not np.isfinite(altitude):
-                            print(f"Warning: Non-finite altitude for {motor.designation}, treating as failure")
+                            print(
+                                f"Warning: Non-finite altitude for {motor.designation}, treating as failure"
+                            )
                             altitude = 0.0
                         else:
                             # Valid altitude - check if simulation ran long enough
                             if len(result.history) < 10:
-                                print(f"Warning: Very short simulation ({len(result.history)} points) for {motor.designation}")
+                                print(
+                                    f"Warning: Very short simulation ({len(result.history)} points) for {motor.designation}"
+                                )
                                 altitude = 0.0
                             # Check if final altitude is reasonable (should be near ground after impact)
                             final_alt = result.history[-1].position[2]
                             if final_alt > 1000 and len(result.history) > 100:
                                 # Simulation didn't reach impact - might be stuck
-                                print(f"Warning: Simulation didn't reach impact (final alt={final_alt:.0f}m) for {motor.designation}")
+                                print(
+                                    f"Warning: Simulation didn't reach impact (final alt={final_alt:.0f}m) for {motor.designation}"
+                                )
                                 # Still use the max altitude if it's reasonable
                                 if altitude > 50000:
                                     altitude = 0.0
                     else:
                         # All altitudes were NaN/Inf
-                        print(f"Warning: All altitudes invalid for {motor.designation}, treating as failure")
+                        print(
+                            f"Warning: All altitudes invalid for {motor.designation}, treating as failure"
+                        )
                         altitude = 0.0
                 else:
                     print(f"Warning: No simulation history for {motor.designation}")
@@ -700,10 +750,15 @@ class SmartOptimizer:
         except Exception as e:
             # Log the error for debugging but don't crash
             import traceback
+
             error_msg = str(e)
             print(f"Simulation error for {motor.designation}: {error_msg}")
-            print(f"  Rocket: {body_length:.2f}m body, {body_radius*2*1000:.1f}mm diameter, {nose_length:.2f}m nose")
-            print(f"  Motor: {motor.designation}, {motor.total_impulse:.0f} N·s, {motor.diameter*1000:.1f}mm")
+            print(
+                f"  Rocket: {body_length:.2f}m body, {body_radius * 2 * 1000:.1f}mm diameter, {nose_length:.2f}m nose"
+            )
+            print(
+                f"  Motor: {motor.designation}, {motor.total_impulse:.0f} N·s, {motor.diameter * 1000:.1f}mm"
+            )
             # Only print full traceback for unexpected errors, not validation errors
             if "Invalid" not in error_msg and "dimension" not in error_msg.lower():
                 traceback.print_exc()
@@ -775,7 +830,7 @@ class SmartOptimizer:
         # Estimate impulse range we need
         # Altitude/impulse ratio depends heavily on rocket mass and drag:
         # - Light rockets (<5kg): ~1.0-2.0 m/Ns
-        # - Medium rockets (5-15kg): ~0.5-1.0 m/Ns  
+        # - Medium rockets (5-15kg): ~0.5-1.0 m/Ns
         # - Heavy rockets (15-30kg): ~0.2-0.5 m/Ns
         # - Very heavy rockets (>30kg): ~0.1-0.3 m/Ns
         #
@@ -786,13 +841,13 @@ class SmartOptimizer:
         # - Structure: ~7kg (35% of total)
         # - Motor: ~3-5kg (varies by motor)
         # - Total at launch: ~25-30kg
-        # 
+        #
         # If "50lb payload" means payload only:
         # - Payload: 22.7kg
         # - Structure: ~10-15kg (scales with size)
         # - Motor: ~3-8kg
         # - Total at launch: ~35-45kg
-        
+
         # Estimate structure mass based on payload
         if requirements.payload_mass_kg > 15:
             # Heavy rocket - structure is ~40-50% of payload for large rockets
@@ -803,13 +858,15 @@ class SmartOptimizer:
         else:
             # Light rocket - structure is ~60-80% of payload
             estimated_structure_mass = max(2.0, requirements.payload_mass_kg * 0.7)
-        
+
         # Estimate motor mass (varies by impulse class)
         # For K/L/M motors: 3-8kg typical
         estimated_motor_mass = 5.0  # Average for K/L/M motors
-        
-        estimated_total_mass_kg = requirements.payload_mass_kg + estimated_structure_mass + estimated_motor_mass
-        
+
+        estimated_total_mass_kg = (
+            requirements.payload_mass_kg + estimated_structure_mass + estimated_motor_mass
+        )
+
         # Altitude/impulse ratio - calibrated from Calisto (19kg loaded, 6026 N·s, 3350m = 0.556 m/N·s)
         # Real-world data shows heavier rockets get MORE altitude per impulse (better mass ratio)
         if estimated_total_mass_kg < 5:
@@ -817,10 +874,12 @@ class SmartOptimizer:
         elif estimated_total_mass_kg < 15:
             altitude_per_impulse = 0.7  # Medium rocket (was 0.8, too optimistic)
         elif estimated_total_mass_kg < 30:
-            altitude_per_impulse = 0.55  # Heavy rocket - Calisto is 0.556 at 19kg (was 0.4, too low!)
+            altitude_per_impulse = (
+                0.55  # Heavy rocket - Calisto is 0.556 at 19kg (was 0.4, too low!)
+            )
         else:
             altitude_per_impulse = 0.45  # Very heavy rocket (was 0.25, way too low!)
-        
+
         # Add drag penalty for larger diameters (6" = 152mm is large)
         # Larger diameter = more drag = lower altitude per impulse
         if requirements.body_diameter_m and requirements.body_diameter_m > 0.1:  # >100mm
@@ -829,9 +888,11 @@ class SmartOptimizer:
                 altitude_per_impulse *= 0.85  # 15% penalty for very large
             else:
                 altitude_per_impulse *= 0.92  # 8% penalty for 6"
-        elif requirements.payload_mass_kg > 20:  # Likely a large rocket even if diameter not specified
+        elif (
+            requirements.payload_mass_kg > 20
+        ):  # Likely a large rocket even if diameter not specified
             altitude_per_impulse *= 0.92  # 8% drag penalty
-        
+
         # Calculate impulse needed - use tighter margins to avoid overshooting
         # Calisto: 3350m target would need ~6000 N·s (actual), but we estimate ~6000 N·s
         # So use 1.0-1.1× for optimistic, 0.85-0.9× for pessimistic
@@ -843,9 +904,10 @@ class SmartOptimizer:
             m
             for m in self.motors_by_impulse
             if m.total_impulse >= min_impulse_needed * 0.7  # Allow slightly smaller motors
-            and m.total_impulse <= max_impulse_needed * 1.5  # Allow larger motors (up to O class if needed)
+            and m.total_impulse
+            <= max_impulse_needed * 1.5  # Allow larger motors (up to O class if needed)
         ]
-        
+
         # If no viable motors found, expand the range significantly
         if len(viable_motors) == 0:
             log.append(f"⚠ No motors in initial range, expanding search...")
@@ -867,17 +929,19 @@ class SmartOptimizer:
         # Phase 1: Coarse sampling to find viable range quickly
         # Phase 2: Dense search around successful designs
         # Phase 3: Refinement of best design
-        
+
         successful_designs = []
         consecutive_failures = 0
         max_consecutive_failures = 15  # Allow more failures before stopping (was 5)
-        
+
         # Phase 1: Sample motors across the range for initial exploration
         # For heavy rockets, try more motors to find working designs
         if len(viable_motors) > 15:
             sample_count = min(15, len(viable_motors))  # Try more motors (was 8)
             step = max(1, len(viable_motors) // sample_count)
-            phase1_motors = [viable_motors[i] for i in range(0, len(viable_motors), step)][:sample_count]
+            phase1_motors = [viable_motors[i] for i in range(0, len(viable_motors), step)][
+                :sample_count
+            ]
             # Also include smallest, largest, and middle
             if viable_motors[0] not in phase1_motors:
                 phase1_motors.insert(0, viable_motors[0])
@@ -890,11 +954,11 @@ class SmartOptimizer:
             log.append(f"Phase 1: Coarse search with {len(phase1_motors)} sampled motors")
         else:
             phase1_motors = viable_motors
-        
+
         phase2_motors = []
         phase2_triggered = False
         tested_motors = set()
-        
+
         iteration = 0
         for motor in phase1_motors:
             if iteration >= max_iterations:
@@ -915,10 +979,10 @@ class SmartOptimizer:
                     if tube_candidate["id"] / 2 >= min_payload_radius:
                         min_tube_for_payload = tube_candidate
                         break
-            
+
             # Get tube that fits motor
             tube_for_motor = self._get_tube_for_motor(motor.diameter, prefer_smaller=True)
-            
+
             # Use larger of motor-fit tube or payload-fit tube
             if min_tube_for_payload and min_tube_for_payload["id"] > tube_for_motor["id"]:
                 tube = min_tube_for_payload
@@ -953,13 +1017,15 @@ class SmartOptimizer:
             altitude, dry_mass, rocket_config, motor_config = self._build_and_simulate(
                 tube, motor, requirements
             )
-            
+
             # Track failures
             if altitude <= 0:
                 consecutive_failures += 1
                 # Only stop if we've found at least one working design OR too many failures
                 if consecutive_failures >= max_consecutive_failures and best is not None:
-                    log.append(f"  → Found working design, stopping after {consecutive_failures} failures")
+                    log.append(
+                        f"  → Found working design, stopping after {consecutive_failures} failures"
+                    )
                     break
                 # If no working designs yet, keep trying even with failures
                 continue
@@ -996,32 +1062,41 @@ class SmartOptimizer:
                     best = design
                     best_cost = cost.total
                     log.append(f"      → New best! ${cost.total:.0f}")
-                    
+
                     # Trigger Phase 2: Dense search around successful designs
                     if not phase2_triggered and len(successful_designs) >= 2:
                         phase2_triggered = True
                         # Find motors in the successful impulse range
-                        min_viable_impulse = min(d.motor_impulse_ns for d in successful_designs) * 0.85
-                        max_viable_impulse = max(d.motor_impulse_ns for d in successful_designs) * 1.15
+                        min_viable_impulse = (
+                            min(d.motor_impulse_ns for d in successful_designs) * 0.85
+                        )
+                        max_viable_impulse = (
+                            max(d.motor_impulse_ns for d in successful_designs) * 1.15
+                        )
                         phase2_motors = [
-                            m for m in viable_motors
+                            m
+                            for m in viable_motors
                             if min_viable_impulse <= m.total_impulse <= max_viable_impulse
                             and m.designation not in tested_motors
                         ]
                         # Sort by proximity to best design's impulse, then by cost
-                        phase2_motors.sort(key=lambda m: (
-                            abs(m.total_impulse - best.motor_impulse_ns),
-                            self._estimate_motor_cost(m)
-                        ))
-                        log.append(f"Phase 2: Fine search with {len(phase2_motors)} motors near best (impulse {min_viable_impulse:.0f}-{max_viable_impulse:.0f} N·s)")
+                        phase2_motors.sort(
+                            key=lambda m: (
+                                abs(m.total_impulse - best.motor_impulse_ns),
+                                self._estimate_motor_cost(m),
+                            )
+                        )
+                        log.append(
+                            f"Phase 2: Fine search with {len(phase2_motors)} motors near best (impulse {min_viable_impulse:.0f}-{max_viable_impulse:.0f} N·s)"
+                        )
 
         # Phase 2: Dense search around successful designs
         if phase2_motors and best:
             log.append(f"Phase 2: Refining search around best design")
-            for motor in phase2_motors[:max(15, max_iterations - iteration)]:
+            for motor in phase2_motors[: max(15, max_iterations - iteration)]:
                 if iteration >= max_iterations:
                     break
-                
+
                 # Get appropriate tube (same logic as Phase 1)
                 min_tube_for_payload = None
                 if requirements.payload_mass_kg > 5:
@@ -1032,39 +1107,39 @@ class SmartOptimizer:
                         if tube_candidate["id"] / 2 >= min_payload_radius:
                             min_tube_for_payload = tube_candidate
                             break
-                
+
                 tube_for_motor = self._get_tube_for_motor(motor.diameter, prefer_smaller=True)
                 if min_tube_for_payload and min_tube_for_payload["id"] > tube_for_motor["id"]:
                     tube = min_tube_for_payload
                 else:
                     tube = tube_for_motor
                 iteration += 1
-                
+
                 body_radius = tube["od"] / 2
                 nose_length = body_radius * 4
                 # Ensure minimum body length for stability
                 min_body_length = max(body_radius * 6, motor.length + 0.5)
                 body_length = max(motor.length + 0.6, min_body_length)
-                
+
                 cost = self._calculate_costs(
                     tube, body_length, nose_length, motor, requirements.recovery_type
                 )
-                
+
                 if requirements.max_budget_usd and cost.total > requirements.max_budget_usd:
                     continue
-                
+
                 if best and cost.total >= best_cost * 1.05:  # Allow 5% margin for exploration
                     continue
-                
+
                 altitude, dry_mass, rocket_config, motor_config = self._build_and_simulate(
                     tube, motor, requirements
                 )
-                
+
                 if altitude <= 0:
                     continue
-                
+
                 tested_motors.add(motor.designation)
-                
+
                 design = DesignPoint(
                     body_diameter_m=tube["od"],
                     body_length_m=body_length,
@@ -1078,16 +1153,16 @@ class SmartOptimizer:
                     motor_config=motor_config,
                 )
                 designs.append(design)
-                
+
                 status = "✓" if design.meets_target else "✗"
                 log.append(
                     f"  {status} [{iteration}] {motor.designation} ({tube['name']}): "
                     f"{altitude:.0f}m, ${cost.total:.0f}, {motor.total_impulse:.0f} N·s"
                 )
-                
+
                 if callback:
                     callback(iteration, max_iterations, design)
-                
+
                 if design.meets_target and cost.total < best_cost:
                     best = design
                     best_cost = cost.total
@@ -1097,31 +1172,39 @@ class SmartOptimizer:
         log.append("")
         if best:
             log.append(f"✅ BEST DESIGN: {best.motor_designation}")
-            log.append(f"   Altitude: {best.simulated_altitude_m:.0f}m (target: {target:.0f}m ± {tol*100:.0f}%)")
+            log.append(
+                f"   Altitude: {best.simulated_altitude_m:.0f}m (target: {target:.0f}m ± {tol * 100:.0f}%)"
+            )
             log.append(f"   Total cost: ${best.cost.total:.0f}")
             log.append(f"   - Motor: ${best.cost.motor_cost:.0f}")
             log.append(f"   - Body: ${best.cost.body_tube_cost:.0f}")
             log.append(
                 f"   - Other: ${best.cost.total - best.cost.motor_cost - best.cost.body_tube_cost:.0f}"
             )
-            log.append(f"   Body: {best.body_diameter_m*1000:.0f}mm × {best.body_length_m:.2f}m")
+            log.append(f"   Body: {best.body_diameter_m * 1000:.0f}mm × {best.body_length_m:.2f}m")
             log.append(f"   Impulse: {best.motor_impulse_ns:.0f} N·s")
             if successful_designs:
-                log.append(f"   Tested {len(successful_designs)} successful designs out of {len(designs)} total")
+                log.append(
+                    f"   Tested {len(successful_designs)} successful designs out of {len(designs)} total"
+                )
         else:
             log.append("❌ No design found within tolerance and budget")
             if designs:
                 # Find closest designs (both above and below target)
                 above_target = [d for d in designs if d.simulated_altitude_m > max_alt]
                 below_target = [d for d in designs if d.simulated_altitude_m < min_alt]
-                
+
                 if above_target:
                     closest_above = min(above_target, key=lambda d: d.simulated_altitude_m)
-                    log.append(f"   Closest above: {closest_above.motor_designation} at {closest_above.simulated_altitude_m:.0f}m (${closest_above.cost.total:.0f})")
+                    log.append(
+                        f"   Closest above: {closest_above.motor_designation} at {closest_above.simulated_altitude_m:.0f}m (${closest_above.cost.total:.0f})"
+                    )
                 if below_target:
                     closest_below = max(below_target, key=lambda d: d.simulated_altitude_m)
-                    log.append(f"   Closest below: {closest_below.motor_designation} at {closest_below.simulated_altitude_m:.0f}m (${closest_below.cost.total:.0f})")
-                
+                    log.append(
+                        f"   Closest below: {closest_below.motor_designation} at {closest_below.simulated_altitude_m:.0f}m (${closest_below.cost.total:.0f})"
+                    )
+
                 if not above_target and not below_target:
                     closest = min(designs, key=lambda d: abs(d.simulated_altitude_m - target))
                     log.append(

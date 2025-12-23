@@ -336,20 +336,20 @@ class FlightSolver:
 
         while t <= max_time_limit:
             snapshot = self._state_to_snapshot(t, state)
-            
+
             # Stop when rocket hits ground (after initial launch)
             if snapshot.z < 0.0 and t > 1.0:
                 # Clamp to ground level and add final impact snapshot
                 snapshot.position[2] = 0.0  # Modify position array directly
                 history.append(snapshot)
                 break
-            
+
             # Early detection: if position is at clamp boundary, simulation has failed
             if np.any(np.abs(state[0:3]) >= 1e5 - 1.0):
                 # Position is at or near clamp boundary - simulation failed
                 # Don't add this snapshot, just stop
                 break
-            
+
             history.append(snapshot)
 
             state = self._rk4_step(t, state, self.dt)
@@ -359,12 +359,12 @@ class FlightSolver:
             if not np.isfinite(state).all():
                 # Don't print - too verbose for optimizer
                 break
-            
+
             # Early detection: check if position was clamped (indicates failure)
             if np.any(np.abs(state[0:3]) >= 1e5 - 1.0):
                 # Position is at clamp boundary - simulation failed
                 break
-            
+
             # Check impact after time step (in case we overshoot ground)
             if state[2] < 0.0 and t > 1.0:  # z position is state[2]
                 # Clamp position to ground
@@ -733,25 +733,25 @@ class FlightSolver:
                 failed_state = state.copy()
                 failed_state[0:3] = np.array([1e6, 1e6, 1e6])  # Will be clamped to 1e5
                 return failed_state
-            
+
             k2 = self._derivatives(time + 0.5 * dt, state + 0.5 * dt * k1)
             if not np.isfinite(k2).all():
                 failed_state = state.copy()
                 failed_state[0:3] = np.array([1e6, 1e6, 1e6])
                 return failed_state
-            
+
             k3 = self._derivatives(time + 0.5 * dt, state + 0.5 * dt * k2)
             if not np.isfinite(k3).all():
                 failed_state = state.copy()
                 failed_state[0:3] = np.array([1e6, 1e6, 1e6])
                 return failed_state
-            
+
             k4 = self._derivatives(time + dt, state + dt * k3)
             if not np.isfinite(k4).all():
                 failed_state = state.copy()
                 failed_state[0:3] = np.array([1e6, 1e6, 1e6])
                 return failed_state
-            
+
             next_state = state + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
         except Exception:
             # Derivatives calculation failed - simulation has failed

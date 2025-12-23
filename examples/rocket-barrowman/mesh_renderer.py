@@ -119,7 +119,7 @@ def create_fin(
     thickness: float,
 ) -> "trimesh.Trimesh":
     """Create a single trapezoidal fin.
-    
+
     Fin is created in the YZ plane (matching rocket coordinate system):
     - Y axis: span direction (0 to span, extends radially outward from body)
     - Z axis: chord direction (0 to root_chord, along rocket axis)
@@ -196,7 +196,7 @@ def create_fin_set(
         # - Y = span direction (radial, outward from body, 0 to span)
         # - Z = chord direction (along rocket axis, 0 to root_chord)
         # - X = thickness direction (perpendicular to fin)
-        
+
         # Rotate around Z axis (rocket axis) to position fin radially
         angle = 2 * np.pi * i / fin_count
         rotation = trimesh.transformations.rotation_matrix(angle, [0, 0, 1])
