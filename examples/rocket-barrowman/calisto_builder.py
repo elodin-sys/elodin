@@ -13,7 +13,18 @@ Specifications from RocketPy:
 
 import math
 import numpy as np
-from openrocket_components import *
+from openrocket_components import (
+    BodyTube,
+    CenteringRing,
+    InnerTube,
+    MATERIALS,
+    MassComponent,
+    NoseCone,
+    Parachute,
+    Rocket,
+    TrapezoidFinSet,
+    Transition,
+)
 from openrocket_motor import Motor as ORMotor
 
 
@@ -78,8 +89,9 @@ def build_calisto_rocket():
         thickness=0.005,
     )
     fins.material = MATERIALS["Fiberglass"]
-    # Position at end of body - 0.120m (root chord length)
-    fins.position.x = 0.55829 + 1.90 - 0.120
+    # Position relative to body start: body length - fin root chord
+    # Body starts at 0.55829m, so fins should be at body_end - fin_root relative to body
+    fins.position.x = 1.90 - 0.120  # Relative to body start, not absolute
     body.add_child(fins)
 
     # ============================================================================
@@ -94,7 +106,8 @@ def build_calisto_rocket():
         thickness=0.003,
     )
     tail.material = MATERIALS["Fiberglass"]
-    tail.position.x = 0.55829 + 1.90 - 0.060
+    # Position relative to body start
+    tail.position.x = 1.90 - 0.060
     body.add_child(tail)
 
     # ============================================================================
@@ -109,7 +122,8 @@ def build_calisto_rocket():
         thickness=0.003,
     )
     motor_mount.material = MATERIALS["Fiberglass"]
-    motor_mount.position.x = 0.55829 + 1.90 - 0.650  # At tail end
+    # Position relative to body start
+    motor_mount.position.x = 1.90 - 0.650  # At tail end
     motor_mount.motor_mount = True
     body.add_child(motor_mount)
 
@@ -121,7 +135,8 @@ def build_calisto_rocket():
     )
     ring_fwd.length = 0.010
     ring_fwd.material = MATERIALS["Plywood (birch)"]
-    ring_fwd.position.x = 0.55829 + 1.90 - 0.650
+    # Position relative to body start
+    ring_fwd.position.x = 1.90 - 0.650
     body.add_child(ring_fwd)
 
     ring_aft = CenteringRing(
@@ -131,7 +146,8 @@ def build_calisto_rocket():
     )
     ring_aft.length = 0.010
     ring_aft.material = MATERIALS["Plywood (birch)"]
-    ring_aft.position.x = 0.55829 + 1.90 - 0.010
+    # Position relative to body start
+    ring_aft.position.x = 1.90 - 0.010
     body.add_child(ring_aft)
 
     # ============================================================================
@@ -320,14 +336,14 @@ if __name__ == "__main__":
     ref_diameter = rocket.reference_diameter
     ref_area = math.pi * (ref_diameter / 2.0) ** 2
 
-    print(f"\nRocket:")
+    print("\nRocket:")
     print(f"  Total length: {rocket.reference_length:.3f} m")
     print(f"  Diameter: {ref_diameter * 1000:.1f} mm")
     print(f"  Reference area: {ref_area * 10000:.2f} cm²")
     print(f"  Dry mass: {rocket.get_total_mass():.3f} kg")
     print(f"  Dry CG: {rocket.get_total_cg():.3f} m from nose")
 
-    print(f"\nMotor (Cesaroni M1670):")
+    print("\nMotor (Cesaroni M1670):")
     print(f"  Diameter: {motor.diameter * 1000:.1f} mm")
     print(f"  Length: {motor.length * 1000:.1f} mm")
     print(f"  Dry mass: {motor.case_mass:.3f} kg")
@@ -338,10 +354,10 @@ if __name__ == "__main__":
     print(f"  Max thrust: {max_thrust:.1f} N")
     print(f"  Total impulse: {motor.total_impulse:.1f} Ns")
 
-    print(f"\nLoaded Rocket:")
+    print("\nLoaded Rocket:")
     print(f"  Total mass: {rocket.get_total_mass() + motor.total_mass_initial:.3f} kg")
-    print(f"  Expected apogee: ~3350 m (AGL)")
-    print(f"  Expected max velocity: ~280 m/s")
-    print(f"  Expected burnout altitude: ~660 m")
+    print("  Expected apogee: ~3350 m (AGL)")
+    print("  Expected max velocity: ~280 m/s")
+    print("  Expected burnout altitude: ~660 m")
 
     print("\n" + "=" * 70)

@@ -22,7 +22,7 @@ try:
 except ImportError:
     OPENAI_AVAILABLE = False
     OpenAI = None
-    print("Warning: OpenAI library not installed. Install with: pip install openai")
+    # OpenAI is optional - AI Builder will show a message in the UI if unavailable
 
 
 @dataclass
@@ -320,31 +320,27 @@ IMPORTANT:
             (r"(\d+\.?\d*)\s*kilometers?", 1000.0),
             (r"(\d+\.?\d*)\s*m\b(?!s)", 1.0),  # meters (not m/s)
             (r"(\d+\.?\d*)\s*meters?", 1.0),
-            # Patterns with context words
-            (r"goes?\s+to\s+(\d+\.?\d*)", 0.3048),  # Assume feet if no unit
-            (r"reach\s+(\d+\.?\d*)", 0.3048),
-            (r"altitude\s+of\s+(\d+\.?\d*)", 0.3048),
+            # Patterns with context words (no explicit unit - need heuristic)
+            # Use None as multiplier to signal "apply heuristic"
+            (r"goes?\s+to\s+(\d+\.?\d*)", None),  # No unit - apply heuristic
+            (r"reach\s+(\d+\.?\d*)", None),
+            (r"altitude\s+of\s+(\d+\.?\d*)", None),
             (r"(\d+\.?\d*)\s*(?:thousand|k)\s*(?:feet|ft)", 304.8),
         ]
         for pattern, multiplier in altitude_patterns:
             match = re.search(pattern, text_normalized)
             if match:
                 value = float(match.group(1))
-                # Apply multiplier based on pattern
-                if (
-                    "ft" in pattern
-                    or "feet" in pattern
-                    or "thousand" in pattern
-                    or "k\s*ft" in pattern
-                ):
-                    req.target_altitude_m = value * multiplier
-                elif "km" in pattern or "kilometer" in pattern:
-                    req.target_altitude_m = value * multiplier
-                elif "m\b" in pattern or "meter" in pattern:
-                    req.target_altitude_m = value
+                if multiplier is None:
+                    # Heuristic for patterns without explicit units:
+                    # Large values (>1000) are likely meters, smaller values are likely feet
+                    if value > 1000:
+                        req.target_altitude_m = value  # Interpret as meters
+                    else:
+                        req.target_altitude_m = value * 0.3048  # Interpret as feet
                 else:
-                    # Default assumption: if number is large (>1000), assume meters; else feet
-                    req.target_altitude_m = value * (1.0 if value > 1000 else 0.3048)
+                    # Apply the multiplier directly - each pattern has the correct conversion factor
+                    req.target_altitude_m = value * multiplier
                 break
 
         # Extract total rocket mass FIRST (higher priority)
@@ -1353,7 +1349,7 @@ IMPORTANT:
 
         # Convert to Streamlit app format
         config = {
-            "name": f"AI-Designed Rocket",
+            "name": "AI-Designed Rocket",
             "has_nose": True,
             "nose_length": design["nose_length"],
             "nose_thickness": design["nose_thickness"],
@@ -1780,7 +1776,7 @@ IMPORTANT:
                     "clearance_required": f"5 mm minimum clearance around packed chute ({drogue_chute_dia / 25.0 * 1000:.1f} mm diameter)"
                     if has_drogue
                     else "N/A",
-                    "notes": f"Packed in avionics bay, deploys at apogee"
+                    "notes": "Packed in avionics bay, deploys at apogee"
                     if has_drogue
                     else "Not used (single deploy)",
                 },
@@ -1855,7 +1851,7 @@ if __name__ == "__main__":
 
     # Test design
     config, motor = designer.build_rocket_config(req)
-    print(f"\nGenerated rocket configuration:")
+    print("\nGenerated rocket configuration:")
     print(f"  Total length: {config['nose_length'] + config['body_length']:.2f} m")
     print(f"  Body diameter: {config['body_radius'] * 2 * 1000:.1f} mm")
     print(f"  Fin count: {config['fin_count']}")

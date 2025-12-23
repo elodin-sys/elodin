@@ -8,7 +8,7 @@ For a complete mathematical reference, see that document.
 Source papers:
 - Barrowman (1966): "The Theoretical Prediction of the Center of Pressure"
   Available at: http://www.apogeerockets.com/Education/downloads/barrowman_report.pdf
-- Barrowman (1967): "The Practical Calculation of the Aerodynamic Characteristics 
+- Barrowman (1967): "The Practical Calculation of the Aerodynamic Characteristics
   of Slender Finned Vehicles" (M.S. Thesis)
 
 Each function includes references to:
@@ -17,33 +17,39 @@ Each function includes references to:
 """
 
 import math
-from typing import Tuple, Optional
-import numpy as np
-from openrocket_components import *
+from openrocket_components import (
+    BodyTube,
+    EllipticalFinSet,
+    FinishType,
+    NoseCone,
+    Rocket,
+    Transition,
+    TrapezoidFinSet,
+)
 
 
 class AerodynamicCalculator:
     """
     Exact OpenRocket aerodynamic calculations.
     Based on Barrowman reports and OpenRocket source code.
-    
+
     All equations correspond to barrowman_equation.tex in this repository.
     See README.md for a complete equation-to-code mapping.
     """
 
     @staticmethod
     def nose_cone_normal_force(nose: NoseCone, alpha: float) -> float:
-        """
+        r"""
         Nose cone normal force coefficient derivative (per radian).
-        
+
         Theory: barrowman_equation.tex, Section 4.1, Equation (4.1)
         C_{N,B}(\alpha) = K_B \sin\alpha, where K_B = 2 for all nose shapes.
-        
+
         For small angles: CN_alpha = dC_N/d\alpha = K_B = 2.0 per radian.
-        
+
         This is Barrowman's fundamental result: all slender nose cones
         have the same normal force slope, regardless of shape.
-        
+
         Original paper: Barrowman (1966), Equation 12.
         """
         return 2.0
@@ -53,14 +59,14 @@ class AerodynamicCalculator:
         """
         Nose cone center of pressure (from nose tip).
         Exact OpenRocket formulas for each shape.
-        
+
         Theory: barrowman_equation.tex, Section 4.2, Equation (4.3)
         X_B = (l*A(l) - V_B) / (A(l) - A(0))
-        
+
         For a conical nose: X_B = (2/3)*L (see Section 4.3.1)
         For von Karman: X_B = 0.437*L (empirical, matches OpenRocket)
         For ogive: complex formula based on radius of curvature
-        
+
         Original paper: Barrowman (1966), Equation 39 (conical), others are extensions.
         """
         L = nose.length
@@ -102,18 +108,17 @@ class AerodynamicCalculator:
     def transition_normal_force(trans: Transition, body_radius: float) -> float:
         """
         Transition normal force coefficient derivative.
-        
+
         Theory: barrowman_equation.tex, Section 4.1, Equation (4.2)
         K_B = 2*ΔA/S, where ΔA = A(l) - A(0) = π(r2² - r1²)
-        
+
         For a transition (boattail or shoulder):
         CN_alpha = 2*(r2² - r1²)/d²
-        
+
         Original paper: Barrowman (1966), Equation 4-28 (referenced in OpenRocket docs).
         """
         r1 = trans.fore_radius
         r2 = trans.aft_radius
-        L = trans.length
         d = body_radius * 2  # Reference diameter
 
         if d <= 0:
@@ -145,39 +150,32 @@ class AerodynamicCalculator:
         """
         Fin set normal force coefficient derivative (exact OpenRocket).
         Includes compressibility correction and body interference.
-        
+
         Theory: barrowman_equation.tex, Section 5.2, Equation (5.1)
         (C_{Nα})_1 = (2π/β) * (A_f/S) * R / (2 + sqrt(4 + (R/cos(Γ_c))²))
-        
+
         Where:
         - β = sqrt(1-M²) is Prandtl-Glauert compressibility factor
         - R = 4s/(c_r+c_t) is aspect ratio parameter
         - A_f is fin planform area
-        
+
         Body interference: barrowman_equation.tex, Section 5.4, Equation (5.4)
         K_{T(B)} = 1 + r_t/(s+r_t)
-        
+
         For N fins: barrowman_equation.tex, Section 5.3, Equation (5.2)
         (C_{Nα})_N = (N/2) * (C_{Nα})_1
-        
+
         Original paper: Barrowman (1966), Equation 4-37 (referenced in OpenRocket).
         """
         # Fin geometry
         Cr = fin.root_chord
         Ct = fin.tip_chord
         s = fin.span
-        m = fin.sweep  # Sweep distance
         n = fin.fin_count
         d = body_radius * 2
 
         if d <= 0:
             return 0.0
-
-        # Fin mid-chord sweep angle
-        if Cr > Ct:
-            sweep_angle = math.atan(m / s)
-        else:
-            sweep_angle = 0.0
 
         # Fin aspect ratio parameter: barrowman_equation.tex, Section 5.2
         # R = 2s²/A_f = 4s/(c_r+c_t)
@@ -206,20 +204,19 @@ class AerodynamicCalculator:
     def fin_cp(fin: TrapezoidFinSet, body_radius: float) -> float:
         """
         Fin center of pressure from fin root leading edge (exact OpenRocket).
-        
+
         Theory: barrowman_equation.tex, Section 5.6, Equation (5.6)
         Area-weighted quarter-chord location for trapezoidal fins.
-        
+
         For a trapezoid with chord c(y) = c_r + m*y:
         x̄_qc = [∫(x_LE(y) + 0.25*c(y))*c(y)dy] / [∫c(y)dy]
-        
+
         This simplifies to the formula below for linear chord variation.
-        
+
         Original paper: Barrowman (1966), Equation 4-40 (referenced in OpenRocket).
         """
         Cr = fin.root_chord
         Ct = fin.tip_chord
-        s = fin.span
         m = fin.sweep
 
         # barrowman_equation.tex, Section 5.6, Equation (5.6)
@@ -398,10 +395,10 @@ class RocketAerodynamics:
         """
         Calculate total normal force coefficient derivative (per radian).
         Sum contributions from all components.
-        
+
         Theory: barrowman_equation.tex, Section 6.1, Equation (6.1)
         C_{Nα,tot} = (C_{Nα})_B + (C_{Nα})_{T(B)}
-        
+
         Where:
         - (C_{Nα})_B = sum of all body component contributions (nose, transitions)
         - (C_{Nα})_{T(B)} = fin contribution including body interference
@@ -446,10 +443,10 @@ class RocketAerodynamics:
         """
         Calculate center of pressure (from nose tip).
         Weighted average of component CPs by their CN_alpha contribution.
-        
+
         Theory: barrowman_equation.tex, Section 6.2, Equation (6.2)
         X_CP = [X_B*(C_{Nα})_B + X_T*(C_{Nα})_{T(B)}] / C_{Nα,tot}
-        
+
         This is the normal-force-weighted average of all component CPs.
         """
         ref_diameter = self.rocket.reference_diameter
@@ -597,7 +594,7 @@ class RocketAerodynamics:
 
         Theory: barrowman_equation.tex, Section 6.2, Equation (6.3)
         SM = (X_CP - X_CG) / d
-        
+
         Positive = stable (CP behind CG), negative = unstable (CP ahead of CG).
         Typical stable rockets have SM = 1-2 calibers.
         """
