@@ -910,7 +910,7 @@ class SmartOptimizer:
 
         # If no viable motors found, expand the range significantly
         if len(viable_motors) == 0:
-            log.append(f"⚠ No motors in initial range, expanding search...")
+            log.append("⚠ No motors in initial range, expanding search...")
             viable_motors = [
                 m
                 for m in self.motors_by_impulse
@@ -1092,7 +1092,7 @@ class SmartOptimizer:
 
         # Phase 2: Dense search around successful designs
         if phase2_motors and best:
-            log.append(f"Phase 2: Refining search around best design")
+            log.append("Phase 2: Refining search around best design")
             for motor in phase2_motors[: max(15, max_iterations - iteration)]:
                 if iteration >= max_iterations:
                     break
