@@ -146,16 +146,16 @@ world.schematic(
     tabs {
         hsplit name = "Viewport" {
             viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 3,3,3)" look_at="drone.world_pos" show_grid=#true active=#true
-            vsplit share=0.4 {
+            vsplit share=0.3 {
                 graph "drone.motor_command" name="Motor Commands (from Betaflight)"
                 graph "drone.motor_thrust" name="Motor Thrust"
                 graph "drone.accel" name="Accelerometer"
             }
-        }
-        vsplit name="State" {
-            graph "drone.world_pos.linear" name="Position (ENU)"
-            graph "drone.world_vel.linear" name="Velocity"
-            graph "drone.gyro" name="Gyroscope"
+            vsplit share=0.3 {
+                graph "drone.world_pos.linear()" name="Position (ENU)"
+                graph "drone.world_vel.linear()" name="Velocity"
+                graph "drone.gyro" name="Gyroscope"
+            }
         }
     }
     """,
@@ -336,7 +336,7 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
 world.run(
     system,
     sim_time_step=config.sim_time_step,
-    run_time_step=2 * config.sim_time_step,
+    run_time_step=config.sim_time_step,
     max_ticks=int(config.simulation_time / config.sim_time_step),
     post_step=sitl_post_step,
 )
