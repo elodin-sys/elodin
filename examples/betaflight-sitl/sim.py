@@ -323,28 +323,6 @@ def create_world(config: DroneConfig) -> tuple[el.World, el.EntityId]:
         name="drone",
     )
     
-    # Editor schematic for visualization
-    world.schematic(
-        """
-        tabs {
-            hsplit name = "Viewport" {
-                viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 3,3,3)" look_at="drone.world_pos" show_grid=#true active=#true
-                vsplit share=0.4 {
-                    graph "drone.motor_command" name="Motor Commands"
-                    graph "drone.motor_thrust" name="Motor Thrust"
-                    graph "drone.world_pos.linear" name="Position"
-                }
-            }
-            vsplit name="State" {
-                graph "drone.world_vel.linear" name="Velocity"
-                graph "drone.world_vel.angular" name="Angular Velocity"
-                graph "drone.world_pos.angular" name="Attitude (Quat)"
-            }
-        }
-        """,
-        "betaflight-sitl.kdl",
-    )
-    
     return world, drone
 
 

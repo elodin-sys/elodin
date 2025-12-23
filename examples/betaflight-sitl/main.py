@@ -145,7 +145,7 @@ world.schematic(
     """
     tabs {
         hsplit name = "Viewport" {
-            viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 3,3,3)" look_at="drone.world_pos" show_grid=#true active=#true
+            viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 10,10,10)" look_at="drone.world_pos" show_grid=#true active=#true
             vsplit share=0.3 {
                 graph "drone.motor_command" name="Motor Commands (from Betaflight)"
                 graph "drone.motor_thrust" name="Motor Thrust"
@@ -158,7 +158,11 @@ world.schematic(
             }
         }
     }
+    object_3d drone.world_pos {
+        glb path="edu-450-v2-drone.glb" rotate="(180.0, 0.0, 0.0)" translate="(0.0, -1.0, 0.0)" scale=10.0
+    }
     """,
+    "betaflight-sitl.kdl",
 )
 
 
