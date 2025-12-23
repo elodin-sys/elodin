@@ -264,7 +264,7 @@ class FlightAnalyzer:
             static_margin = np.clip(static_margin, -5.0, 10.0)  # Allow negative to show instability
 
             return static_margin
-        except Exception as e:
+        except Exception:
             # Fallback: return constant stable margin
             times = np.array([s.time for s in self.history])
             return np.full_like(times, 1.5)  # Default stable margin
@@ -538,7 +538,6 @@ class FlightAnalyzer:
     def compute_first_order_terms(self) -> Dict[str, np.ndarray]:
         """Compute first-order flight dynamics terms."""
         times = np.array([s.time for s in self.history])
-        positions = np.array([s.position for s in self.history])
         velocities = np.array([s.velocity for s in self.history])
         angular_velocities = np.array([s.angular_velocity for s in self.history])
         aoas = np.array([s.angle_of_attack for s in self.history])

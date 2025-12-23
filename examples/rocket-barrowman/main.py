@@ -39,7 +39,7 @@ from motor_model import Motor
 from rocket_model import Rocket as RocketModel
 from flight_solver import FlightSolver, FlightResult
 from calisto_builder import build_calisto
-from flight_analysis import FlightAnalyzer, FlightMetrics, StabilityDerivatives
+from flight_analysis import FlightAnalyzer
 
 # Try to import mesh renderer for Elodin visualization
 try:
@@ -129,8 +129,6 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
         print(f"  ⚠ Analysis computation failed: {e}")
         analysis_available = False
         metrics = None
-        first_order = None
-        second_order = None
 
     # Generate rocket mesh for Elodin visualization
     if TRIMESH_AVAILABLE and generate_rocket_glb_from_solver:
