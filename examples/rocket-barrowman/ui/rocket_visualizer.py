@@ -73,16 +73,16 @@ def visualize_rocket_3d(config: Dict[str, Any], motor: Optional[Dict] = None) ->
         )
     )
 
-    # 3. Fins
-    for i in range(fin_count):
-        angle = 2 * math.pi * i / fin_count
+    # 3. Fins - properly attached to body at correct angles
+    for fin_idx in range(fin_count):
+        fin_angle = 2 * math.pi * fin_idx / fin_count
         fin_points = _generate_fin_points(
             start_x=fin_start_x,
             root_chord=fin_root_chord,
             tip_chord=fin_tip_chord,
             span=fin_span,
-            sweep_length=fin_sweep,
-            angle=angle,
+            sweep=fin_sweep,
+            angle=fin_angle,
             body_radius=body_radius,
         )
         fig.add_trace(
@@ -90,10 +90,13 @@ def visualize_rocket_3d(config: Dict[str, Any], motor: Optional[Dict] = None) ->
                 x=fin_points["x"],
                 y=fin_points["y"],
                 z=fin_points["z"],
+                i=fin_points["i"],
+                j=fin_points["j"],
+                k=fin_points["k"],
                 color="red",
-                opacity=0.8,
-                name=f"Fin {i + 1}" if i == 0 else "",
-                showlegend=(i == 0),
+                opacity=0.9,
+                name="Fins" if fin_idx == 0 else "",
+                showlegend=(fin_idx == 0),
             )
         )
 
@@ -258,10 +261,11 @@ def visualize_rocket_3d(config: Dict[str, Any], motor: Optional[Dict] = None) ->
             )
         )
 
-    # Set layout
+    # Set layout - horizontal view (rocket along X axis, viewed from above/side)
+    total_length = nose_length + body_length
     fig.update_layout(
         title={
-            "text": f"3D Rocket Visualization - {config.get('name', 'Custom Rocket')}",
+            "text": config.get('name', 'Custom Rocket'),
             "x": 0.5,
             "xanchor": "center",
         },
@@ -270,8 +274,11 @@ def visualize_rocket_3d(config: Dict[str, Any], motor: Optional[Dict] = None) ->
             yaxis_title="Y (m)",
             zaxis_title="Z (m)",
             aspectmode="data",
+            # Camera positioned to view rocket horizontally from slight angle
             camera=dict(
-                eye=dict(x=1.5, y=1.5, z=1.5), center=dict(x=0, y=0, z=0), up=dict(x=0, y=0, z=1)
+                eye=dict(x=0.0, y=-2.0, z=0.8),  # Looking from front-side
+                center=dict(x=total_length / 2, y=0, z=0),  # Center on rocket middle
+                up=dict(x=0, y=0, z=1)  # Z is up
             ),
         ),
         width=800,
@@ -358,19 +365,18 @@ def _generate_fin_points(
     angle: float,
     body_radius: float,
 ) -> Dict:
-    """Generate points for a trapezoidal fin"""
-    # Fin coordinates in fin-local frame
-    # Root chord at body, tip chord at span distance
+    """Generate points for a trapezoidal fin with proper triangulation for Mesh3d"""
     # Fin geometry: sweep moves tip BACKWARD (aft, +x direction)
-    # Root chord at body surface, tip chord at span height
-    fin_points_local = [
-        [0, body_radius, 0],                          # Root leading edge
-        [root_chord, body_radius, 0],                 # Root trailing edge
-        [sweep + tip_chord, body_radius + span, 0],   # Tip trailing edge
-        [sweep, body_radius + span, 0],               # Tip leading edge (swept back)
+    # 4 corner points of the trapezoidal fin in local frame (y = radial, z = 0)
+    # Point indices: 0=root_LE, 1=root_TE, 2=tip_TE, 3=tip_LE
+    fin_corners = [
+        [0, body_radius, 0],                          # 0: Root leading edge
+        [root_chord, body_radius, 0],                 # 1: Root trailing edge
+        [sweep + tip_chord, body_radius + span, 0],   # 2: Tip trailing edge
+        [sweep, body_radius + span, 0],               # 3: Tip leading edge
     ]
 
-    # Transform to rocket frame (rotate by angle, translate by start_x)
+    # Transform to rocket frame (rotate around x-axis by angle, translate by start_x)
     cos_a = math.cos(angle)
     sin_a = math.sin(angle)
 
@@ -378,8 +384,8 @@ def _generate_fin_points(
     y = []
     z = []
 
-    for point in fin_points_local:
-        # Rotate around x-axis
+    for point in fin_corners:
+        # Rotate around x-axis (rocket centerline)
         y_rot = point[1] * cos_a - point[2] * sin_a
         z_rot = point[1] * sin_a + point[2] * cos_a
 
@@ -387,12 +393,13 @@ def _generate_fin_points(
         y.append(y_rot)
         z.append(z_rot)
 
-    # Close the fin
-    x.append(x[0])
-    y.append(y[0])
-    z.append(z[0])
+    # Triangulation: split quad into 2 triangles
+    # Triangle 1: 0-1-2, Triangle 2: 0-2-3
+    i = [0, 0]
+    j = [1, 2]
+    k = [2, 3]
 
-    return {"x": x, "y": y, "z": z}
+    return {"x": x, "y": y, "z": z, "i": i, "j": j, "k": k}
 
 
 def _generate_ring_points(
