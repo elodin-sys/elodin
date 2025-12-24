@@ -5,4 +5,6 @@ numpy>=1.24.0
 requests>=2.31.0
 openai>=1.0.0
 trimesh>=4.0.0
+nrlmsise00>=1.0.0
+netCDF4>=1.6.0
 
