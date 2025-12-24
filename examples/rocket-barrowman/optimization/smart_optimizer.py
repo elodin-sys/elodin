@@ -289,17 +289,25 @@ class SmartOptimizer:
     def _get_tube_for_motor(self, motor_diameter: float, prefer_smaller: bool = True) -> Dict:
         """Get tube that fits a motor.
 
+        Constraint: Body tube outer diameter (OD) must be >= motor diameter.
+        Motor must also fit inside tube inner diameter (ID) with clearance.
+
         Args:
             motor_diameter: Motor diameter in meters
             prefer_smaller: If True, return smallest fitting tube. If False, return largest fitting tube.
         """
         fitting_tubes = []
         for tube in self.TUBE_SIZES:
-            if tube["id"] >= motor_diameter + 0.003:  # 3mm clearance
+            # Motor must fit inside tube ID (with 3mm clearance)
+            motor_fits_id = tube["id"] >= motor_diameter + 0.003
+            # Body tube OD must be >= motor diameter (airframe constraint, no transitions)
+            body_meets_diameter = tube["od"] >= motor_diameter
+            if motor_fits_id and body_meets_diameter:
                 fitting_tubes.append(tube)
 
         if not fitting_tubes:
-            return self.TUBE_SIZES[-1]  # Largest if none fit
+            # If no tube fits, return largest available (will be rejected in validation)
+            return self.TUBE_SIZES[-1]
 
         if prefer_smaller:
             return fitting_tubes[0]  # Smallest fitting tube
@@ -462,9 +470,20 @@ class SmartOptimizer:
             )
             return (0.0, 0.0, {}, {})
 
+        # Constraint: Body tube outer diameter must be >= motor diameter (no transitions yet)
+        body_diameter = tube["od"]
+        if motor.diameter > body_diameter:
+            print(
+                f"Warning: Motor {motor.designation} (diameter={motor.diameter * 1000:.1f}mm) "
+                f"exceeds body tube OD ({body_diameter * 1000:.1f}mm). Airframe must be >= motor diameter."
+            )
+            return (0.0, 0.0, {}, {})
+
+        # Also check motor fits inside tube ID (with clearance)
         if motor.diameter > tube["id"]:
             print(
-                f"Warning: Motor {motor.designation} (diameter={motor.diameter * 1000:.1f}mm) too large for tube (ID={tube['id'] * 1000:.1f}mm)"
+                f"Warning: Motor {motor.designation} (diameter={motor.diameter * 1000:.1f}mm) "
+                f"too large for tube ID ({tube['id'] * 1000:.1f}mm)"
             )
             return (0.0, 0.0, {}, {})
 
