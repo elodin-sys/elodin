@@ -512,6 +512,53 @@ class SmartOptimizer:
         # Build rocket
         rocket = Rocket("Optimized")
 
+        # Initialize structure optimization flags
+        use_thinner_walls = False
+        original_body_length = body_length
+
+        # Estimate dry mass properly - structure + payload
+        # First estimate structure mass (without payload)
+        structure_mass = self._estimate_dry_mass(
+            tube,
+            body_length,
+            nose_length,
+            motor,
+            0.0,  # Don't include payload in structure estimate
+            requirements.recovery_type,
+        )
+
+        # Use heuristics to adjust structure if needed to meet total mass
+        # If total_mass_kg is specified, calculate payload as: total - structure - motor
+        if requirements.total_mass_kg is not None:
+            payload_mass = requirements.total_mass_kg - structure_mass - motor.total_mass
+            
+            # If structure + motor exceeds total, use heuristics to reduce structure
+            if payload_mass < 0:
+                # Heuristic: try reducing body length first (less impact on performance)
+                min_functional_length = motor.length + 0.5
+                if body_length > min_functional_length:
+                    body_length = min_functional_length
+                    structure_mass = self._estimate_dry_mass(
+                        tube, body_length, nose_length, motor, 0.0, requirements.recovery_type
+                    )
+                    payload_mass = requirements.total_mass_kg - structure_mass - motor.total_mass
+                
+                # If still too heavy, use thinner walls (heuristic: 0.002 instead of 0.003)
+                if payload_mass < 0:
+                    use_thinner_walls = True
+                    # Approximate mass reduction from thinner walls (~10% reduction)
+                    structure_mass = structure_mass * 0.9
+                    payload_mass = requirements.total_mass_kg - structure_mass - motor.total_mass
+                    
+                    # If still can't fit, skip this design
+                    if payload_mass < 0:
+                        return (0.0, 0.0, {}, {})
+            
+            requirements.payload_mass_kg = payload_mass
+        else:
+            # Use payload_mass_kg directly (if specified)
+            payload_mass = requirements.payload_mass_kg
+
         # Use thinner walls if we had to reduce structure mass
         wall_thickness = 0.002 if use_thinner_walls else 0.003
         
@@ -602,70 +649,6 @@ class SmartOptimizer:
             requirements.recovery_type,
         )
 
-        # Track if we need to use thinner walls or shorter body
-        use_thinner_walls = False
-        original_body_length = body_length
-
-        # Calculate payload mass based on requirements
-        # If total_mass_kg is specified, calculate payload as: total - structure - motor
-        # Otherwise, use payload_mass_kg directly
-        if requirements.total_mass_kg is not None:
-            # Total mass = payload + structure + motor.total_mass
-            # So: payload = total_mass - structure - motor.total_mass
-            payload_mass = requirements.total_mass_kg - structure_mass - motor.total_mass
-            
-            # If structure + motor exceeds total, reduce structure mass by:
-            # 1. Using thinner walls (reduce from 0.003 to 0.002)
-            # 2. Reducing body length if possible
-            if payload_mass < 0:
-                # Try reducing body length first (less impact on performance)
-                min_functional_length = motor.length + 0.5
-                if body_length > min_functional_length:
-                    # Try with minimum length
-                    body_length_reduced = min_functional_length
-                    structure_mass_reduced = self._estimate_dry_mass(
-                        tube,
-                        body_length_reduced,
-                        nose_length,
-                        motor,
-                        0.0,
-                        requirements.recovery_type,
-                    )
-                    payload_mass_reduced = requirements.total_mass_kg - structure_mass_reduced - motor.total_mass
-                    if payload_mass_reduced >= 0:
-                        body_length = body_length_reduced
-                        structure_mass = structure_mass_reduced
-                        payload_mass = payload_mass_reduced
-                    else:
-                        # Still too heavy, try thinner walls too
-                        use_thinner_walls = True
-                        # Recalculate with thinner walls (0.002 instead of 0.003)
-                        # This reduces mass by ~33% for wall components
-                        wall_thickness_factor = 0.002 / 0.003  # 0.67
-                        # Approximate: wall mass is ~30% of tube/nose/fin mass
-                        structure_mass_thin = structure_mass_reduced * (1 - 0.3 * (1 - wall_thickness_factor))
-                        payload_mass = requirements.total_mass_kg - structure_mass_thin - motor.total_mass
-                        if payload_mass >= 0:
-                            structure_mass = structure_mass_thin
-                        else:
-                            # Still can't fit - skip this design
-                            return (0.0, 0.0, {}, {})
-                else:
-                    # Already at minimum length, try thinner walls
-                    use_thinner_walls = True
-                    wall_thickness_factor = 0.002 / 0.003
-                    structure_mass_thin = structure_mass * (1 - 0.3 * (1 - wall_thickness_factor))
-                    payload_mass = requirements.total_mass_kg - structure_mass_thin - motor.total_mass
-                    if payload_mass >= 0:
-                        structure_mass = structure_mass_thin
-                    else:
-                        # Can't fit even with optimizations
-                        return (0.0, 0.0, {}, {})
-            
-            requirements.payload_mass_kg = payload_mass
-        else:
-            # Use payload_mass_kg directly (if specified)
-            payload_mass = requirements.payload_mass_kg
 
         # Add payload as actual MassComponent if specified
         if payload_mass > 0:
