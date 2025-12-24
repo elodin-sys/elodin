@@ -105,17 +105,21 @@ class FlightAnalyzer:
         moments = np.array([s.moment_world for s in self.history])
         angular_velocities = np.array([s.angular_velocity for s in self.history])
 
-        # Compute stability derivatives
+        # Find apogee - truncate aero analysis here since chutes deploy and airframe separates
+        apogee_idx = np.argmax(positions[:, 2])
+        
+        # Compute stability derivatives ONLY up to apogee
+        # After apogee, chutes deploy and Barrowman aero model doesn't apply
         stability = self._compute_stability_derivatives(
-            times,
-            aoas,
-            sideslips,
-            machs,
-            dynamic_pressures,
-            drag_forces,
-            lift_forces,
-            moments,
-            angular_velocities,
+            times[:apogee_idx + 1],
+            aoas[:apogee_idx + 1],
+            sideslips[:apogee_idx + 1],
+            machs[:apogee_idx + 1],
+            dynamic_pressures[:apogee_idx + 1],
+            drag_forces[:apogee_idx + 1],
+            lift_forces[:apogee_idx + 1],
+            moments[:apogee_idx + 1],
+            angular_velocities[:apogee_idx + 1],
         )
 
         # Performance metrics
@@ -140,10 +144,9 @@ class FlightAnalyzer:
         max_mach = machs[max_mach_idx]
         max_mach_time = times[max_mach_idx]
 
-        # Flight phases
+        # Flight phases (apogee_idx already computed above)
         motor_burn_time = self.solver.motor.burn_time
         boost_phase = motor_burn_time
-        apogee_idx = np.argmax(positions[:, 2])
         apogee_time = times[apogee_idx]
         coast_phase = apogee_time - boost_phase
         descent_phase = times[-1] - apogee_time
@@ -280,7 +283,12 @@ class FlightAnalyzer:
         moments: np.ndarray,
         angular_velocities: np.ndarray,
     ) -> StabilityDerivatives:
-        """Compute stability derivatives from flight data."""
+        """
+        Compute stability derivatives from flight data.
+        
+        Note: Data should be truncated at apogee since after chute deployment
+        and airframe separation, the Barrowman aerodynamic model no longer applies.
+        """
 
         # Reference values
         ref_area = np.pi * (self.solver.rocket.reference_diameter / 2) ** 2
