@@ -306,10 +306,14 @@ class FlightAnalyzer:
         # Transform moments from world frame to body frame
         # Moments are stored in world frame, need body frame for proper analysis
         moments_body = np.zeros_like(moments)
-        velocities_world = np.array([s.velocity for s in self.history])
+        
+        # Only use history up to the length of truncated arrays
+        n_samples = len(moments)
+        velocities_world = np.array([self.history[i].velocity for i in range(n_samples)])
         speeds = np.linalg.norm(velocities_world, axis=1)
 
-        for i, snapshot in enumerate(self.history):
+        for i in range(n_samples):
+            snapshot = self.history[i]
             quaternion = snapshot.quaternion
             # Transformation matrix from world to body (transpose of body to world)
             Kt = Matrix.transformation(quaternion).transpose
