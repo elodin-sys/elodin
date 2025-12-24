@@ -392,16 +392,19 @@ IMPORTANT:
         payload_patterns = [
             r"(\d+[Uu])\b",  # 6U, 3U, etc.
             r"(\d+)\s*unit",
-            r"cubesat",
         ]
         for pattern in payload_patterns:
             match = re.search(pattern, text_normalized)
             if match:
                 if "U" in match.group(1) or "u" in match.group(1):
                     req.payload_size = match.group(1).upper()
-                elif "cubesat" in text_normalized:
-                    req.payload_size = "1U"
+                else:
+                    req.payload_size = f"{match.group(1)}U"
                 break
+        
+        # Handle "cubesat" without size specifier (must be checked separately)
+        if "cubesat" in text_normalized and not req.payload_size:
+            req.payload_size = "1U"
 
         # Extract diameter constraint - handle inches, cm, mm
         diameter_patterns = [
