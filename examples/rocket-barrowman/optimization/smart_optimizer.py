@@ -989,15 +989,18 @@ class SmartOptimizer:
         min_impulse_needed = min_alt / (altitude_per_impulse * 1.1)  # More optimistic (lower bound)
         max_impulse_needed = max_alt / (altitude_per_impulse * 0.8)  # More pessimistic (upper bound)
 
-        # Filter motors to likely range (be more inclusive to find working designs)
-        # For heavy rockets, expand the range more to include larger motors
+        # Filter motors to likely range
+        # For heavy rockets, be more strict about minimum - don't allow motors that are clearly too small
         if estimated_total_mass_kg > 30:
-            # Very heavy rockets - allow wider range to find working designs
+            # Very heavy rockets - need larger motors, don't waste time on L-class
+            # Minimum should be at least 80% of needed impulse (not 60%)
+            # This excludes L-class motors when we clearly need M-class
+            min_impulse_filter = max(min_impulse_needed * 0.8, 5000)  # At least 5k N·s for heavy rockets
             viable_motors = [
                 m
                 for m in self.motors_by_impulse
-                if m.total_impulse >= min_impulse_needed * 0.6  # Allow smaller motors
-                and m.total_impulse <= max_impulse_needed * 2.0  # Allow much larger motors
+                if m.total_impulse >= min_impulse_filter  # Stricter minimum for heavy rockets
+                and m.total_impulse <= max_impulse_needed * 2.0  # Allow larger motors
             ]
         else:
             viable_motors = [
