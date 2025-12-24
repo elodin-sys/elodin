@@ -16,6 +16,9 @@ from typing import TYPE_CHECKING, Optional, Tuple
 if TYPE_CHECKING:
     from .environment import Environment
 
+# Import availability flags
+from .atmospheric_models import NRLMSISE_AVAILABLE
+
 # Try to import optional dependencies
 try:
     import cdsapi
@@ -257,14 +260,18 @@ def create_environment_from_coordinates(
         else:
             # Just weather data
             atmosphere = WeatherDataAtmosphere(data_file=weather_file)
-    elif use_nrlmsise:
+    elif use_nrlmsise and NRLMSISE_AVAILABLE:
         # NRLMSISE-00 only
-        atmosphere = NRLMSISE00Atmosphere(
-            latitude=latitude,
-            longitude=longitude,
-            year=datetime_obj.year,
-            day_of_year=datetime_obj.timetuple().tm_yday,
-        )
+        try:
+            atmosphere = NRLMSISE00Atmosphere(
+                latitude=latitude,
+                longitude=longitude,
+                year=datetime_obj.year,
+                day_of_year=datetime_obj.timetuple().tm_yday,
+            )
+        except ImportError:
+            # Fallback to ISA if NRLMSISE fails
+            atmosphere = ISAAtmosphere()
     else:
         # Fallback to ISA
         atmosphere = ISAAtmosphere()
