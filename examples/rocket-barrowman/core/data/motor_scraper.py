@@ -5,6 +5,7 @@ Uses the official ThrustCurve.org API instead of web scraping.
 
 import requests
 import json
+import math
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 import time
