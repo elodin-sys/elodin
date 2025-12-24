@@ -96,9 +96,9 @@ class Noise:
 #   - 1e-6: Unstable, drone flips
 #
 # Production sensors (drone example) use noise_cov=0.001 (~1.8 deg/s std).
-# SITL requires lower noise (1e-7) for stable lockstep simulation.
-gyro_noise = Noise(0, 0, 1e-7, 1e-7)  # Gyro noise + bias drift
-accel_noise = Noise(0, 1, 1e-7, 0.0)  # Accel noise (no drift)
+# SITL requires lower noise (1e-8) for stable lockstep simulation.
+gyro_noise = Noise(0, 0, 1e-8, 1e-8)  # Gyro noise + bias drift
+accel_noise = Noise(0, 1, 1e-8, 0.0)  # Accel noise (no drift)
 baro_noise = Noise(0, 2, 0.001, 0.0)  # ~0.03m std dev
 
 
