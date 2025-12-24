@@ -863,7 +863,10 @@ class SmartOptimizer:
         max_alt = target * (1 + tol)
 
         log.append(f"Target: {target:.0f}m ± {tol * 100:.0f}% ({min_alt:.0f}m - {max_alt:.0f}m)")
-        log.append(f"Payload: {requirements.payload_mass_kg:.1f}kg")
+        if requirements.total_mass_kg is not None:
+            log.append(f"Total mass: {requirements.total_mass_kg:.1f}kg (payload will be calculated)")
+        else:
+            log.append(f"Payload: {requirements.payload_mass_kg:.1f}kg")
         if requirements.max_budget_usd:
             log.append(f"Budget: ${requirements.max_budget_usd:.0f}")
 
