@@ -1042,17 +1042,22 @@ class SmartOptimizer:
                 payload_volume = requirements.payload_mass_kg / 500.0
                 min_payload_area = payload_volume / 2.0  # Assume max 2m length
                 min_payload_radius = math.sqrt(min_payload_area / math.pi)
-                # Find tube that fits payload
+                # Find tube that fits payload AND meets airframe constraint (OD >= motor diameter)
                 for tube_candidate in self.TUBE_SIZES:
-                    if tube_candidate["id"] / 2 >= min_payload_radius:
+                    if (
+                        tube_candidate["id"] / 2 >= min_payload_radius
+                        and tube_candidate["od"] >= motor.diameter
+                    ):
                         min_tube_for_payload = tube_candidate
                         break
 
-            # Get tube that fits motor
+            # Get tube that fits motor (ensures body OD >= motor diameter)
             tube_for_motor = self._get_tube_for_motor(motor.diameter, prefer_smaller=True)
 
             # Use larger of motor-fit tube or payload-fit tube
+            # Both must meet airframe constraint (OD >= motor diameter)
             if min_tube_for_payload and min_tube_for_payload["id"] > tube_for_motor["id"]:
+                # Payload tube already validated to meet airframe constraint above
                 tube = min_tube_for_payload
             else:
                 tube = tube_for_motor
