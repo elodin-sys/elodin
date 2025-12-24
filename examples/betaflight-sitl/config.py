@@ -127,6 +127,9 @@ class DroneConfig:
     # Total simulation time in seconds
     simulation_time: float = 30.0
 
+    # Enable sensor noise simulation (default: True for realistic behavior)
+    sensor_noise: bool = True
+
     # --- Environment ---
 
     # Gravity acceleration in m/s^2 (positive down in NED, but we use ENU so positive up)

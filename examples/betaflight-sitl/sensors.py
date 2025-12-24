@@ -10,6 +10,14 @@ Sensor Models:
 - (Optional) Barometer: Measures altitude via pressure
 - (Optional) GPS: Provides position and velocity
 
+Noise Model (from proven drone example):
+- Gaussian measurement noise on each sample
+- Bias drift (random walk) for gyroscope
+
+Note: No filtering is applied here - Betaflight handles its own gyro/accel
+filtering. This is a Software-In-The-Loop test, so we want to send realistic
+noisy sensor data and let Betaflight process it.
+
 Coordinate Systems:
 - Elodin: ENU (East-North-Up) with X=forward, Y=left, Z=up
 - Betaflight: NED (North-East-Down) for sensor data
@@ -22,12 +30,73 @@ from dataclasses import dataclass, field
 import elodin as el
 import jax
 import jax.numpy as jnp
+import jax.random as rng
 import numpy as np
 
 from config import DroneConfig
 from comms import FDMPacket
 
+
+# --- Noise Model ---
+
+
+class Noise:
+    """
+    Sensor noise model with Gaussian noise and bias drift.
+
+    Uses JAX random keys seeded deterministically via tick counter
+    for reproducible noise across simulation runs.
+    """
+
+    def __init__(
+        self,
+        seed: int,
+        device: int,
+        noise_covariance: float,
+        bias_drift_covariance: float,
+    ):
+        """
+        Initialize noise model.
+
+        Args:
+            seed: Random seed for reproducibility
+            device: Device index (for different noise streams per sensor)
+            noise_covariance: Variance of measurement noise
+            bias_drift_covariance: Variance of bias drift per timestep
+        """
+        self.noise_covariance = noise_covariance
+        self.bias_drift_covariance = bias_drift_covariance
+        self.key = rng.fold_in(rng.key(seed), device)
+
+    def drift_bias(self, bias: jax.Array, tick: jax.Array, dt: float) -> jax.Array:
+        """Apply random walk to bias (bias drift over time)."""
+        key = rng.fold_in(self.key, tick)
+        std_dev = jnp.sqrt(self.bias_drift_covariance)
+        drift = std_dev * rng.normal(key, shape=bias.shape, dtype=bias.dtype) * dt
+        return bias + drift
+
+    def sample(self, m: jax.Array, bias: jax.Array, tick: jax.Array) -> jax.Array:
+        """Add measurement noise and bias to a measurement."""
+        key = rng.fold_in(self.key, tick)
+        std_dev = jnp.sqrt(self.noise_covariance)
+        noise = std_dev * rng.normal(key, shape=m.shape, dtype=m.dtype)
+        return m + noise + bias
+
+
+# Noise instances with proven parameters from real-world characterized sensors
+gyro_noise = Noise(0, 0, 0.001, 0.001)  # noise_cov=0.001, bias_drift_cov=0.001
+accel_noise = Noise(0, 1, 0.001, 0.0)  # accel has no bias drift in this model
+baro_noise = Noise(0, 2, 0.09, 0.0)  # ~0.3m std dev (typical consumer barometer), no bias drift
+
+
+# Initial gyro bias (typical values from real sensor characterization)
+init_gyro_bias = jnp.array([0.0025, 0.0001, 0.0005])
+
+
 # --- Sensor Component Types ---
+
+# Sensor tick counter for deterministic RNG
+SensorTick = ty.Annotated[jax.Array, el.Component("sensor_tick", el.ComponentType.U64)]
 
 # IMU accelerometer reading in body frame [ax, ay, az] m/s^2
 Accel = ty.Annotated[
@@ -39,6 +108,16 @@ Accel = ty.Annotated[
     ),
 ]
 
+# Accelerometer bias [bx, by, bz] m/s^2
+AccelBias = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "accel_bias",
+        el.ComponentType(el.PrimitiveType.F64, (3,)),
+        metadata={"element_names": "x,y,z"},
+    ),
+]
+
 # IMU gyroscope reading in body frame [wx, wy, wz] rad/s
 Gyro = ty.Annotated[
     jax.Array,
@@ -46,6 +125,16 @@ Gyro = ty.Annotated[
         "gyro",
         el.ComponentType(el.PrimitiveType.F64, (3,)),
         metadata={"element_names": "x,y,z", "priority": 151},
+    ),
+]
+
+# Gyroscope bias [bx, by, bz] rad/s
+GyroBias = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "gyro_bias",
+        el.ComponentType(el.PrimitiveType.F64, (3,)),
+        metadata={"element_names": "x,y,z"},
     ),
 ]
 
@@ -73,13 +162,17 @@ BodyVel = ty.Annotated[
 @dataclass
 class IMU(el.Archetype):
     """
-    IMU sensor archetype.
+    IMU sensor archetype with noise state.
 
-    Stores computed sensor values for the drone entity.
+    Stores computed sensor values and bias state for the drone entity.
+    No filtering state - Betaflight handles its own filtering.
     """
 
-    accel: Accel = field(default_factory=lambda: jnp.zeros(3))
+    sensor_tick: SensorTick = field(default_factory=lambda: jnp.array(0, dtype=jnp.uint64))
     gyro: Gyro = field(default_factory=lambda: jnp.zeros(3))
+    gyro_bias: GyroBias = field(default_factory=lambda: jnp.array(init_gyro_bias))
+    accel: Accel = field(default_factory=lambda: jnp.zeros(3))
+    accel_bias: AccelBias = field(default_factory=lambda: jnp.zeros(3))
     baro: Baro = field(default_factory=lambda: jnp.zeros(1))
     body_vel: BodyVel = field(default_factory=lambda: jnp.zeros(3))
 
@@ -87,39 +180,74 @@ class IMU(el.Archetype):
 # --- Sensor Computation Systems ---
 
 
-def create_imu_system(config: DroneConfig, add_noise: bool = False):
+@el.map
+def advance_sensor_tick(tick: SensorTick) -> SensorTick:
+    """Advance the sensor tick counter for deterministic RNG."""
+    return tick + 1
+
+
+def create_gyro_bias_drift_system(config: DroneConfig):
+    """Create system to drift the gyro bias over time."""
+    dt = config.sim_time_step
+
+    @el.map
+    def update_gyro_bias(tick: SensorTick, bias: GyroBias) -> GyroBias:
+        """Apply random walk to gyro bias."""
+        if config.sensor_noise:
+            return gyro_noise.drift_bias(bias, tick, dt)
+        return bias
+
+    return update_gyro_bias
+
+
+def create_gyro_system(config: DroneConfig):
     """
-    Create the IMU sensor computation system.
+    Create the gyroscope sensor computation system.
 
-    The accelerometer measures:
-    - Specific force = total_force / mass (excluding gravity in free fall)
-    - In body frame
+    The gyroscope measures angular velocity in body frame.
+    Applies noise and bias when enabled. No filtering - Betaflight handles that.
+    """
 
-    The gyroscope measures:
-    - Angular velocity in body frame
+    @el.map
+    def compute_gyro(
+        tick: SensorTick,
+        pos: el.WorldPos,
+        vel: el.WorldVel,
+        bias: GyroBias,
+    ) -> Gyro:
+        """Compute gyroscope reading from physics state."""
+        # Angular velocity is already in body frame in Elodin
+        body_v = pos.angular().inverse() @ vel.angular()
 
-    Args:
-        config: Drone configuration
-        add_noise: Whether to add realistic sensor noise
+        # Add noise and bias if enabled
+        if config.sensor_noise:
+            body_v = gyro_noise.sample(body_v, bias, tick)
 
-    Returns:
-        System that computes IMU readings
+        return body_v
+
+    return compute_gyro
+
+
+def create_accel_system(config: DroneConfig):
+    """
+    Create the accelerometer sensor computation system.
+
+    The accelerometer measures specific force (acceleration minus gravity)
+    in body frame. Applies noise and bias when enabled.
+    No filtering - Betaflight handles that.
     """
     gravity = config.gravity
 
-    # Noise parameters (typical MEMS IMU)
-    accel_noise_std = 0.05 if add_noise else 0.0  # m/s^2
-    gyro_noise_std = 0.001 if add_noise else 0.0  # rad/s
-
     @el.map
-    def compute_imu(
+    def compute_accel(
+        tick: SensorTick,
         pos: el.WorldPos,
-        vel: el.WorldVel,
         force: el.Force,
         inertia: el.Inertia,
-    ) -> tuple[Accel, Gyro, BodyVel]:
+        bias: AccelBias,
+    ) -> Accel:
         """
-        Compute IMU sensor readings from physics state.
+        Compute accelerometer reading from physics state.
 
         The accelerometer measures specific force, which is the total force
         minus gravity, divided by mass. When in free fall, the accelerometer
@@ -129,7 +257,6 @@ def create_imu_system(config: DroneConfig, add_noise: bool = False):
         quat = pos.angular()
         quat_inv = quat.inverse()
 
-        # --- Accelerometer ---
         # Total acceleration from forces (in world frame)
         mass = inertia.mass()
         total_accel_world = force.linear() / mass
@@ -144,53 +271,95 @@ def create_imu_system(config: DroneConfig, add_noise: bool = False):
         specific_force_world = total_accel_world - gravity_world
 
         # Transform to body frame
-        accel_body = quat_inv @ specific_force_world
+        body_a = quat_inv @ specific_force_world
 
-        # --- Gyroscope ---
-        # Angular velocity is already in body frame in Elodin
-        gyro_body = vel.angular()
+        # Add noise and bias if enabled
+        if config.sensor_noise:
+            body_a = accel_noise.sample(body_a, bias, tick)
 
-        # --- Body frame velocity (for reference) ---
-        vel_world = vel.linear()
-        body_vel = quat_inv @ vel_world
+        return body_a
 
-        return accel_body, gyro_body, body_vel
-
-    return compute_imu
+    return compute_accel
 
 
-def create_baro_system(config: DroneConfig, add_noise: bool = False):
+def create_body_vel_system(config: DroneConfig):
+    """Create system to compute body-frame velocity (for reference/debugging)."""
+
+    @el.map
+    def compute_body_vel(pos: el.WorldPos, vel: el.WorldVel) -> BodyVel:
+        """Transform world velocity to body frame."""
+        quat_inv = pos.angular().inverse()
+        return quat_inv @ vel.linear()
+
+    return compute_body_vel
+
+
+def create_baro_system(config: DroneConfig):
     """
     Create barometer sensor system.
 
     Simulates barometric altitude measurement based on height.
+    Applies noise when enabled (~0.3m std dev typical for consumer barometers).
     """
-    # Barometer noise (typical for consumer barometers)
-    baro_noise_std = 0.3 if add_noise else 0.0  # meters
 
     @el.map
-    def compute_baro(pos: el.WorldPos) -> Baro:
+    def compute_baro(tick: SensorTick, pos: el.WorldPos) -> Baro:
         """Compute barometer reading from altitude."""
         # Simple model: altitude = z position
         altitude = pos.linear()[2]
-        return jnp.array([altitude])
+        baro_reading = jnp.array([altitude])
+
+        # Add noise if enabled
+        if config.sensor_noise:
+            # Use zero bias since barometers don't typically have significant drift
+            baro_reading = baro_noise.sample(baro_reading, jnp.zeros(1), tick)
+
+        return baro_reading
 
     return compute_baro
 
 
-def create_sensor_system(config: DroneConfig, add_noise: bool = False) -> el.System:
+def create_imu_system(config: DroneConfig) -> el.System:
+    """
+    Create the complete IMU sensor system with noise model.
+
+    Combines:
+    - Sensor tick advancement
+    - Gyro bias drift
+    - Gyroscope computation with noise
+    - Accelerometer computation with noise
+    - Body velocity computation
+
+    Note: No filtering is applied - Betaflight handles its own filtering.
+    This sends realistic noisy sensor data for SITL testing.
+
+    Args:
+        config: Drone configuration
+
+    Returns:
+        Combined IMU system
+    """
+    return (
+        advance_sensor_tick
+        | create_gyro_bias_drift_system(config)
+        | create_gyro_system(config)
+        | create_accel_system(config)
+        | create_body_vel_system(config)
+    )
+
+
+def create_sensor_system(config: DroneConfig) -> el.System:
     """
     Create the complete sensor system.
 
     Args:
         config: Drone configuration
-        add_noise: Whether to add sensor noise
 
     Returns:
         Combined sensor system
     """
-    imu = create_imu_system(config, add_noise)
-    baro = create_baro_system(config, add_noise)
+    imu = create_imu_system(config)
+    baro = create_baro_system(config)
 
     return imu | baro
 
@@ -284,12 +453,11 @@ def build_fdm_from_components(
     position = np.array(world_pos[4:7])
 
     # Elodin stores world_vel as [wx, wy, wz, vx, vy, vz]
-    angular_vel = np.array(world_vel[:3])
     linear_vel = np.array(world_vel[3:6])
 
     # Use provided sensor readings or compute from velocity
     accel_enu = np.array(accel) if accel is not None else np.array([0.0, 0.0, gravity])
-    gyro_enu = np.array(gyro) if gyro is not None else angular_vel
+    gyro_enu = np.array(gyro) if gyro is not None else np.array(world_vel[:3])
 
     # Convert from Elodin ENU body frame to Betaflight NED body frame
     # ENU to NED: x_ned = y_enu, y_ned = x_enu, z_ned = -z_enu
@@ -414,7 +582,7 @@ if __name__ == "__main__":
     from config import DEFAULT_CONFIG
     from sim import create_physics_system
 
-    print("Testing sensor simulation...")
+    print("Testing sensor simulation with noise model (no filtering)...")
 
     config = DEFAULT_CONFIG
     config.simulation_time = 0.2
@@ -453,7 +621,7 @@ if __name__ == "__main__":
 
     # Create physics + sensor system
     physics = create_physics_system(config)
-    sensors = create_sensor_system(config, add_noise=False)
+    sensors = create_sensor_system(config)
     full_system = physics | sensors
 
     # Run simulation
@@ -461,7 +629,7 @@ if __name__ == "__main__":
     exec.run(200)
 
     # Get sensor history
-    df = exec.history(["drone.accel", "drone.gyro", "drone.baro"])
+    df = exec.history(["drone.accel", "drone.gyro", "drone.baro", "drone.gyro_bias"])
     print(f"Simulated {len(df)} ticks")
 
     # Check accelerometer reading at start (should be ~+g since on ground)
@@ -473,15 +641,24 @@ if __name__ == "__main__":
     print(f"  Last reading:  {last_accel}")
     print(f"  Expected at rest: [0, 0, +{config.gravity:.2f}] m/s^2")
 
-    # Check gyro (should be ~0 for stable drone)
+    # Check gyro (should be ~0 for stable drone, with noise)
     last_gyro = df[-1]["drone.gyro"].to_list()
     print("\nGyroscope (body frame):")
     print(f"  Last reading: {last_gyro}")
-    print("  Expected at rest: [0, 0, 0] rad/s")
+    print("  Expected at rest: [~0, ~0, ~0] rad/s (with noise)")
+
+    # Check gyro bias drift
+    first_bias = df[0]["drone.gyro_bias"].to_list()
+    last_bias = df[-1]["drone.gyro_bias"].to_list()
+    print("\nGyro Bias:")
+    print(f"  Initial: {first_bias}")
+    print(f"  Final:   {last_bias}")
 
     # Check barometer
     last_baro = df[-1]["drone.baro"].to_list()
     print("\nBarometer:")
     print(f"  Last reading: {last_baro} m")
 
-    print("\nSensor test complete!")
+    print(f"\nSensor noise enabled: {config.sensor_noise}")
+    print("No filtering applied - Betaflight handles its own filtering.")
+    print("Sensor test complete!")
