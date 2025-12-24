@@ -652,3 +652,671 @@ class Rocket(RocketComponent):
         traverse(self)
         self.reference_diameter = max_diameter
         self.reference_length = total_length
+
+
+# =============================================================================
+# AIRFOIL PROFILES
+# =============================================================================
+
+class AirfoilType(Enum):
+    """Fin airfoil cross-section types"""
+    SQUARE = "square"           # Flat plate with square edges
+    ROUNDED = "rounded"         # Rounded leading and trailing edges
+    AIRFOIL = "airfoil"         # Subsonic airfoil (rounded LE, sharp TE)
+    DOUBLE_WEDGE = "double_wedge"  # Supersonic diamond profile
+    WEDGE = "wedge"             # Single wedge (sharp LE, flat TE)
+    NACA_4DIGIT = "naca_4digit"  # NACA 4-digit series (e.g., 0012)
+    NACA_5DIGIT = "naca_5digit"  # NACA 5-digit series
+    HEXAGONAL = "hexagonal"     # Hex cross-section for strength
+
+
+@dataclass
+class AirfoilProfile:
+    """
+    Fin airfoil cross-section definition.
+    
+    For NACA profiles, use designation like "0012" for NACA 0012.
+    For wedge/double-wedge, specify half-angle in degrees.
+    """
+    airfoil_type: AirfoilType = AirfoilType.SQUARE
+    thickness_ratio: float = 0.1  # t/c ratio (thickness / chord)
+    naca_designation: str = ""    # e.g., "0012" for NACA 0012
+    wedge_angle_deg: float = 10.0  # Half-angle for wedge profiles
+    leading_edge_radius: float = 0.0  # LE radius as fraction of thickness
+    
+    def get_drag_coefficient_factor(self, mach: float) -> float:
+        """
+        Get drag coefficient multiplier based on airfoil and Mach number.
+        
+        Subsonic (M < 0.8): Rounded profiles lower drag
+        Transonic (0.8 < M < 1.2): All profiles high drag
+        Supersonic (M > 1.2): Sharp profiles (wedge) lower drag
+        """
+        t_c = self.thickness_ratio
+        
+        if mach < 0.8:  # Subsonic
+            if self.airfoil_type in [AirfoilType.AIRFOIL, AirfoilType.NACA_4DIGIT, AirfoilType.NACA_5DIGIT]:
+                return 1.0  # Baseline
+            elif self.airfoil_type == AirfoilType.ROUNDED:
+                return 1.1
+            elif self.airfoil_type == AirfoilType.SQUARE:
+                return 1.3  # Blunt edges increase drag
+            else:  # Wedge types
+                return 1.2
+        elif mach < 1.2:  # Transonic
+            # All profiles suffer in transonic regime
+            return 1.5 + 0.5 * t_c * 10
+        else:  # Supersonic
+            if self.airfoil_type in [AirfoilType.DOUBLE_WEDGE, AirfoilType.WEDGE]:
+                # Sharp profiles better at supersonic
+                return 1.0 + 2 * t_c
+            elif self.airfoil_type == AirfoilType.HEXAGONAL:
+                return 1.1 + 2.5 * t_c
+            else:  # Rounded profiles
+                return 1.2 + 3 * t_c
+
+
+# =============================================================================
+# ADVANCED FIN COMPONENTS
+# =============================================================================
+
+class FinShape(Enum):
+    """Fin planform shapes"""
+    TRAPEZOIDAL = "trapezoidal"
+    ELLIPTICAL = "elliptical"
+    CLIPPED_DELTA = "clipped_delta"
+    DELTA = "delta"
+    RECTANGULAR = "rectangular"
+    FREEFORM = "freeform"
+
+
+class AdvancedFinSet(RocketComponent):
+    """
+    Advanced fin set with airfoil profiles, fillets, and detailed geometry.
+    
+    Supports:
+    - Multiple fin shapes (trapezoidal, elliptical, delta, freeform)
+    - Airfoil cross-sections (NACA, wedge, etc.)
+    - Fin fillets (structural and aerodynamic)
+    - Cant angle for roll stabilization
+    - Tab extensions for through-the-wall mounting
+    """
+    
+    def __init__(
+        self,
+        name: str = "Advanced Fin Set",
+        fin_count: int = 4,
+        shape: FinShape = FinShape.TRAPEZOIDAL,
+        # Planform geometry (for trapezoidal)
+        root_chord: float = 0.1,
+        tip_chord: float = 0.05,
+        span: float = 0.08,
+        sweep_length: float = 0.03,
+        # Airfoil
+        airfoil: AirfoilProfile = None,
+        thickness: float = 0.003,
+        # Fillet
+        fillet_radius: float = 0.0,  # Root fillet radius
+        # Mounting
+        cant_angle_deg: float = 0.0,  # Rotation for roll induction
+        tab_length: float = 0.0,      # Through-wall tab
+        tab_height: float = 0.0,
+        # Freeform points (for FREEFORM shape)
+        freeform_points: List = None,  # List of (x, y) tuples
+    ):
+        super().__init__(name)
+        self.fin_count = fin_count
+        self.shape = shape
+        self.root_chord = root_chord
+        self.tip_chord = tip_chord
+        self.span = span
+        self.sweep_length = sweep_length
+        self.airfoil = airfoil or AirfoilProfile()
+        self.thickness = thickness
+        self.fillet_radius = fillet_radius
+        self.cant_angle_deg = cant_angle_deg
+        self.tab_length = tab_length
+        self.tab_height = tab_height
+        self.freeform_points = freeform_points or []
+        self.material = MATERIALS["Fiberglass"]
+    
+    def calculate_planform_area(self) -> float:
+        """Calculate single fin planform area based on shape"""
+        if self.shape == FinShape.TRAPEZOIDAL or self.shape == FinShape.CLIPPED_DELTA:
+            return 0.5 * (self.root_chord + self.tip_chord) * self.span
+        elif self.shape == FinShape.ELLIPTICAL:
+            return 0.25 * math.pi * self.root_chord * self.span
+        elif self.shape == FinShape.DELTA:
+            return 0.5 * self.root_chord * self.span
+        elif self.shape == FinShape.RECTANGULAR:
+            return self.root_chord * self.span
+        elif self.shape == FinShape.FREEFORM and self.freeform_points:
+            # Shoelace formula for polygon area
+            n = len(self.freeform_points)
+            if n < 3:
+                return 0.0
+            area = 0.0
+            for i in range(n):
+                j = (i + 1) % n
+                area += self.freeform_points[i][0] * self.freeform_points[j][1]
+                area -= self.freeform_points[j][0] * self.freeform_points[i][1]
+            return abs(area) / 2.0
+        return 0.0
+    
+    def calculate_mass(self) -> float:
+        """Calculate total fin set mass including fillets"""
+        # Fin mass
+        fin_area = self.calculate_planform_area()
+        fin_volume = fin_area * self.thickness
+        fin_mass = fin_volume * self.material.density * self.fin_count
+        
+        # Fillet mass (quarter-circle cross-section)
+        if self.fillet_radius > 0:
+            fillet_area = 0.25 * math.pi * self.fillet_radius ** 2
+            fillet_length = self.root_chord
+            fillet_volume = fillet_area * fillet_length * 2  # Both sides
+            fillet_mass = fillet_volume * self.material.density * self.fin_count
+            fin_mass += fillet_mass
+        
+        # Tab mass
+        if self.tab_length > 0 and self.tab_height > 0:
+            tab_volume = self.tab_length * self.tab_height * self.thickness
+            tab_mass = tab_volume * self.material.density * self.fin_count
+            fin_mass += tab_mass
+        
+        return fin_mass
+    
+    def calculate_cg_x(self) -> float:
+        """Calculate fin set CG position"""
+        if self.shape in [FinShape.TRAPEZOIDAL, FinShape.CLIPPED_DELTA]:
+            a = self.root_chord
+            b = self.tip_chord
+            return (a + 2 * b) / (3 * (a + b)) * self.root_chord
+        elif self.shape == FinShape.ELLIPTICAL:
+            return self.root_chord * 0.4  # Approximate
+        elif self.shape == FinShape.DELTA:
+            return self.root_chord / 3
+        return self.root_chord * 0.4
+    
+    def get_flutter_velocity(self, altitude: float = 0.0) -> float:
+        """
+        Estimate fin flutter velocity using NACA method.
+        
+        V_flutter = a * sqrt(G / (AR^3 * (t/c) * (λ+1) / (2*(AR+2)*(λ+1))))
+        
+        Where:
+        - a = speed of sound
+        - G = shear modulus
+        - AR = aspect ratio
+        - t/c = thickness ratio
+        - λ = taper ratio
+        """
+        # Simplified flutter estimate
+        aspect_ratio = self.span / ((self.root_chord + self.tip_chord) / 2)
+        taper_ratio = self.tip_chord / self.root_chord if self.root_chord > 0 else 0
+        t_c = self.thickness / self.root_chord if self.root_chord > 0 else 0.1
+        
+        # Shear modulus estimate (Pa) - varies by material
+        G = 3e9  # Fiberglass approximate
+        if self.material.name == "Carbon fiber":
+            G = 5e9
+        elif self.material.name in ["Plywood (birch)", "Plywood (light)"]:
+            G = 0.7e9
+        
+        # Speed of sound at altitude (simplified)
+        a = 340 - 0.004 * altitude  # Approximate
+        
+        # Flutter velocity (simplified NACA formula)
+        if aspect_ratio > 0 and t_c > 0:
+            flutter_param = (aspect_ratio ** 3) * t_c * (taper_ratio + 1) / (2 * (aspect_ratio + 2))
+            if flutter_param > 0:
+                v_flutter = a * math.sqrt(G / (1.225 * flutter_param * 1e6))
+                return min(v_flutter, 2000)  # Cap at reasonable value
+        
+        return 500  # Default safe value
+
+
+# =============================================================================
+# EXTERNAL PROTUBERANCES
+# =============================================================================
+
+class RailButton(RocketComponent):
+    """
+    Rail button for launch rail guidance.
+    
+    Causes parasitic drag - important for accurate simulation.
+    """
+    
+    def __init__(
+        self,
+        name: str = "Rail Button",
+        outer_diameter: float = 0.010,  # 10mm typical
+        height: float = 0.015,          # Height above body
+        screw_diameter: float = 0.004,  # #8 screw = 4mm
+        standoff: float = 0.002,        # Gap under button
+    ):
+        super().__init__(name)
+        self.outer_diameter = outer_diameter
+        self.height = height
+        self.screw_diameter = screw_diameter
+        self.standoff = standoff
+        self.material = MATERIALS["Nylon"]
+    
+    def calculate_mass(self) -> float:
+        """Rail button mass (approximate as cylinder)"""
+        volume = math.pi * (self.outer_diameter / 2) ** 2 * self.height
+        return volume * self.material.density
+    
+    def get_drag_coefficient(self) -> float:
+        """Parasitic drag coefficient for rail button"""
+        # Approximate as blunt body
+        return 0.8
+    
+    def get_frontal_area(self) -> float:
+        """Frontal area for drag calculation"""
+        return self.outer_diameter * self.height
+
+
+class LaunchLug(RocketComponent):
+    """
+    Launch lug for rod guidance.
+    
+    Typically a tube that slides over launch rod.
+    """
+    
+    def __init__(
+        self,
+        name: str = "Launch Lug",
+        inner_diameter: float = 0.005,   # 3/16" rod = ~5mm
+        outer_diameter: float = 0.008,
+        length: float = 0.030,           # 30mm typical
+    ):
+        super().__init__(name)
+        self.inner_diameter = inner_diameter
+        self.outer_diameter = outer_diameter
+        self.length = length
+        self.material = MATERIALS["Nylon"]
+    
+    def calculate_mass(self) -> float:
+        """Launch lug mass (hollow cylinder)"""
+        outer_area = math.pi * (self.outer_diameter / 2) ** 2
+        inner_area = math.pi * (self.inner_diameter / 2) ** 2
+        volume = (outer_area - inner_area) * self.length
+        return volume * self.material.density
+    
+    def get_drag_coefficient(self) -> float:
+        """Parasitic drag coefficient"""
+        return 1.0  # Cylinder perpendicular to flow
+    
+    def get_frontal_area(self) -> float:
+        """Frontal area"""
+        return self.outer_diameter * self.length
+
+
+class CameraShroud(RocketComponent):
+    """
+    Camera pod/shroud for onboard video.
+    
+    Significant drag source - streamlined or blister type.
+    """
+    
+    class ShroudType(Enum):
+        BLISTER = "blister"       # Dome protruding from body
+        STREAMLINED = "streamlined"  # Teardrop fairing
+        FLUSH = "flush"           # Flush window (minimal drag)
+    
+    def __init__(
+        self,
+        name: str = "Camera Shroud",
+        shroud_type: "CameraShroud.ShroudType" = None,
+        length: float = 0.050,    # Along body axis
+        width: float = 0.030,     # Circumferential
+        height: float = 0.015,    # Radial protrusion
+        window_diameter: float = 0.020,
+    ):
+        super().__init__(name)
+        self.shroud_type = shroud_type or CameraShroud.ShroudType.BLISTER
+        self.length = length
+        self.width = width
+        self.height = height
+        self.window_diameter = window_diameter
+        self.material = MATERIALS["ABS plastic"]
+    
+    def calculate_mass(self) -> float:
+        """Camera shroud mass"""
+        # Approximate as partial cylinder
+        volume = self.length * self.width * self.height * 0.5  # Hollow
+        return volume * self.material.density
+    
+    def get_drag_coefficient(self) -> float:
+        """Parasitic drag based on shroud type"""
+        if self.shroud_type == CameraShroud.ShroudType.FLUSH:
+            return 0.1
+        elif self.shroud_type == CameraShroud.ShroudType.STREAMLINED:
+            return 0.3
+        else:  # BLISTER
+            return 0.6
+    
+    def get_frontal_area(self) -> float:
+        """Frontal area"""
+        return self.width * self.height
+
+
+# =============================================================================
+# RECOVERY SYSTEM COMPONENTS
+# =============================================================================
+
+class Bulkhead(RocketComponent):
+    """
+    Bulkhead plate for compartment separation and load bearing.
+    
+    Used for:
+    - Parachute attachment
+    - Motor retention
+    - Compartment sealing
+    """
+    
+    def __init__(
+        self,
+        name: str = "Bulkhead",
+        diameter: float = 0.098,     # Match body tube ID
+        thickness: float = 0.006,    # 6mm typical for fiberglass
+        has_center_hole: bool = False,
+        center_hole_diameter: float = 0.0,
+    ):
+        super().__init__(name)
+        self.diameter = diameter
+        self.thickness = thickness
+        self.has_center_hole = has_center_hole
+        self.center_hole_diameter = center_hole_diameter
+        self.material = MATERIALS["Fiberglass"]
+    
+    def calculate_mass(self) -> float:
+        """Bulkhead mass"""
+        area = math.pi * (self.diameter / 2) ** 2
+        if self.has_center_hole:
+            area -= math.pi * (self.center_hole_diameter / 2) ** 2
+        volume = area * self.thickness
+        return volume * self.material.density
+
+
+class UBolt(RocketComponent):
+    """
+    U-bolt for shock cord attachment.
+    
+    Critical recovery component - must handle deployment loads.
+    """
+    
+    def __init__(
+        self,
+        name: str = "U-Bolt",
+        thread_diameter: float = 0.006,  # #10-32 = 6mm
+        inside_width: float = 0.020,     # Between threads
+        inside_height: float = 0.025,    # Thread to curve
+    ):
+        super().__init__(name)
+        self.thread_diameter = thread_diameter
+        self.inside_width = inside_width
+        self.inside_height = inside_height
+        self.material = MATERIALS["Steel"]
+    
+    def calculate_mass(self) -> float:
+        """U-bolt mass (approximate)"""
+        # Two straight sections + semicircle
+        straight_length = 2 * (self.inside_height + 0.015)  # Plus thread
+        curve_length = math.pi * (self.inside_width / 2)
+        total_length = straight_length + curve_length
+        wire_area = math.pi * (self.thread_diameter / 2) ** 2
+        volume = wire_area * total_length
+        # Add nut mass estimate
+        nut_volume = 2 * (self.thread_diameter * 2) ** 3 * 0.5
+        return (volume + nut_volume) * self.material.density
+    
+    def get_safe_working_load(self) -> float:
+        """Estimate safe working load in Newtons"""
+        # Based on thread diameter and steel yield strength
+        thread_area = math.pi * (self.thread_diameter / 2) ** 2
+        yield_strength = 250e6  # Pa for typical steel
+        safety_factor = 4.0
+        return 2 * thread_area * yield_strength / safety_factor  # 2 legs
+
+
+class EyeBolt(RocketComponent):
+    """
+    Eye bolt for shock cord attachment.
+    
+    Alternative to U-bolt, single attachment point.
+    """
+    
+    def __init__(
+        self,
+        name: str = "Eye Bolt",
+        thread_diameter: float = 0.006,
+        eye_inner_diameter: float = 0.010,
+        shank_length: float = 0.020,
+    ):
+        super().__init__(name)
+        self.thread_diameter = thread_diameter
+        self.eye_inner_diameter = eye_inner_diameter
+        self.shank_length = shank_length
+        self.material = MATERIALS["Steel"]
+    
+    def calculate_mass(self) -> float:
+        """Eye bolt mass"""
+        # Shank volume
+        shank_volume = math.pi * (self.thread_diameter / 2) ** 2 * self.shank_length
+        # Eye volume (torus section)
+        eye_radius = (self.eye_inner_diameter + self.thread_diameter) / 2
+        eye_volume = 2 * math.pi * eye_radius * math.pi * (self.thread_diameter / 2) ** 2
+        return (shank_volume + eye_volume) * self.material.density
+
+
+class ShockCord(RocketComponent):
+    """
+    Shock cord for parachute deployment.
+    
+    Material types: Nylon, Kevlar, Tubular nylon
+    """
+    
+    class CordType(Enum):
+        ELASTIC = "elastic"           # Bungee-style
+        TUBULAR_NYLON = "tubular_nylon"  # Flat webbing
+        KEVLAR = "kevlar"             # High strength
+        NYLON_ROPE = "nylon_rope"     # Round cross-section
+    
+    def __init__(
+        self,
+        name: str = "Shock Cord",
+        cord_type: "ShockCord.CordType" = None,
+        length: float = 3.0,          # 3m typical
+        width: float = 0.012,         # 1/2" = 12mm webbing
+        thickness: float = 0.002,
+        breaking_strength: float = 5000.0,  # Newtons
+    ):
+        super().__init__(name)
+        self.cord_type = cord_type or ShockCord.CordType.TUBULAR_NYLON
+        self.length = length
+        self.width = width
+        self.thickness = thickness
+        self.breaking_strength = breaking_strength
+    
+    def calculate_mass(self) -> float:
+        """Shock cord mass"""
+        # Typical densities by type
+        if self.cord_type == ShockCord.CordType.KEVLAR:
+            linear_density = 0.015  # kg/m for typical Kevlar cord
+        elif self.cord_type == ShockCord.CordType.TUBULAR_NYLON:
+            linear_density = 0.020  # kg/m
+        elif self.cord_type == ShockCord.CordType.ELASTIC:
+            linear_density = 0.025  # kg/m
+        else:
+            linear_density = 0.018  # kg/m
+        
+        return self.length * linear_density
+
+
+# =============================================================================
+# STRUCTURAL COMPONENTS
+# =============================================================================
+
+class Coupler(SymmetricComponent):
+    """
+    Coupler tube for joining body tube sections.
+    
+    Used for:
+    - Modular rocket assembly
+    - Separation joints
+    - Payload integration
+    """
+    
+    def __init__(
+        self,
+        name: str = "Coupler",
+        length: float = 0.100,
+        outer_diameter: float = 0.096,  # Slightly less than body ID
+        inner_diameter: float = 0.090,
+    ):
+        super().__init__(name, length, outer_diameter / 2.0, (outer_diameter - inner_diameter) / 2.0)
+        self.inner_diameter = inner_diameter
+        self.material = MATERIALS["Fiberglass"]
+    
+    def calculate_mass(self) -> float:
+        """Coupler mass"""
+        outer_area = math.pi * (self.outer_radius) ** 2
+        inner_area = math.pi * (self.inner_diameter / 2) ** 2
+        volume = (outer_area - inner_area) * self.length
+        return volume * self.material.density
+
+
+class MotorRetainer(RocketComponent):
+    """
+    Motor retainer for securing motor in mount.
+    
+    Types: Screw-on, snap-ring, friction fit
+    """
+    
+    class RetainerType(Enum):
+        SCREW_ON = "screw_on"       # Threaded retainer
+        SNAP_RING = "snap_ring"     # E-clip style
+        FRICTION = "friction"       # Tape/friction fit
+        AERO_PACK = "aero_pack"     # Commercial brand
+    
+    def __init__(
+        self,
+        name: str = "Motor Retainer",
+        retainer_type: "MotorRetainer.RetainerType" = None,
+        motor_diameter: float = 0.054,  # 54mm motor
+        length: float = 0.015,
+    ):
+        super().__init__(name)
+        self.retainer_type = retainer_type or MotorRetainer.RetainerType.SCREW_ON
+        self.motor_diameter = motor_diameter
+        self.length = length
+        self.material = MATERIALS["Aluminum"]
+    
+    def calculate_mass(self) -> float:
+        """Motor retainer mass"""
+        # Approximate as ring
+        outer_radius = self.motor_diameter / 2 + 0.003
+        inner_radius = self.motor_diameter / 2
+        volume = math.pi * (outer_radius ** 2 - inner_radius ** 2) * self.length
+        return volume * self.material.density
+
+
+class ThrustPlate(RocketComponent):
+    """
+    Thrust plate for transferring motor thrust to airframe.
+    
+    Critical structural component at aft end of motor mount.
+    """
+    
+    def __init__(
+        self,
+        name: str = "Thrust Plate",
+        outer_diameter: float = 0.098,
+        inner_diameter: float = 0.054,  # Motor OD
+        thickness: float = 0.006,
+    ):
+        super().__init__(name)
+        self.outer_diameter = outer_diameter
+        self.inner_diameter = inner_diameter
+        self.thickness = thickness
+        self.material = MATERIALS["Fiberglass"]
+    
+    def calculate_mass(self) -> float:
+        """Thrust plate mass"""
+        area = math.pi * ((self.outer_diameter / 2) ** 2 - (self.inner_diameter / 2) ** 2)
+        volume = area * self.thickness
+        return volume * self.material.density
+
+
+# =============================================================================
+# AVIONICS COMPONENTS
+# =============================================================================
+
+class AvionicsBay(RocketComponent):
+    """
+    Avionics/electronics bay for flight computers, GPS, telemetry.
+    
+    Contains sled or mounting for electronics.
+    """
+    
+    def __init__(
+        self,
+        name: str = "Avionics Bay",
+        length: float = 0.150,
+        outer_diameter: float = 0.098,
+        sled_mass: float = 0.100,       # Electronics sled
+        electronics_mass: float = 0.200, # Altimeters, GPS, etc.
+    ):
+        super().__init__(name)
+        self.length = length
+        self.outer_diameter = outer_diameter
+        self.sled_mass = sled_mass
+        self.electronics_mass = electronics_mass
+        self.material = MATERIALS["Fiberglass"]
+    
+    def calculate_mass(self) -> float:
+        """Total avionics bay mass"""
+        # Coupler tube
+        wall_thickness = 0.002
+        outer_area = math.pi * (self.outer_diameter / 2) ** 2
+        inner_area = math.pi * (self.outer_diameter / 2 - wall_thickness) ** 2
+        tube_volume = (outer_area - inner_area) * self.length
+        tube_mass = tube_volume * self.material.density
+        
+        # Add bulkheads (top and bottom)
+        bulkhead_volume = math.pi * (self.outer_diameter / 2) ** 2 * 0.006 * 2
+        bulkhead_mass = bulkhead_volume * self.material.density
+        
+        return tube_mass + bulkhead_mass + self.sled_mass + self.electronics_mass
+
+
+class SwitchBand(RocketComponent):
+    """
+    External switch band for arming avionics.
+    
+    Allows external access to arm/disarm switches.
+    """
+    
+    def __init__(
+        self,
+        name: str = "Switch Band",
+        outer_diameter: float = 0.102,  # Slightly larger than body
+        width: float = 0.025,           # Band width
+        num_switches: int = 2,
+    ):
+        super().__init__(name)
+        self.outer_diameter = outer_diameter
+        self.width = width
+        self.num_switches = num_switches
+        self.material = MATERIALS["Aluminum"]
+    
+    def calculate_mass(self) -> float:
+        """Switch band mass"""
+        # Thin ring
+        inner_diameter = self.outer_diameter - 0.004
+        outer_area = math.pi * (self.outer_diameter / 2) ** 2
+        inner_area = math.pi * (inner_diameter / 2) ** 2
+        volume = (outer_area - inner_area) * self.width
+        return volume * self.material.density
