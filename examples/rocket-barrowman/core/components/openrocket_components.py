@@ -1176,8 +1176,12 @@ class Coupler(SymmetricComponent):
         outer_diameter: float = 0.096,  # Slightly less than body ID
         inner_diameter: float = 0.090,
     ):
-        super().__init__(name, length, outer_diameter / 2.0, (outer_diameter - inner_diameter) / 2.0)
+        super().__init__(name)
+        self.length = length
+        self.outer_radius = outer_diameter / 2.0
+        self.outer_diameter = outer_diameter
         self.inner_diameter = inner_diameter
+        self.thickness = (outer_diameter - inner_diameter) / 2.0
         self.material = MATERIALS["Fiberglass"]
     
     def calculate_mass(self) -> float:
