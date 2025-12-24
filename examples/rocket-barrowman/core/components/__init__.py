@@ -10,8 +10,8 @@ from .openrocket_components import (
     LaunchLug,
     Transition,
     Bulkhead,
-    EngineMount,
     InnerTube,
+    CenteringRing,
 )
 from .openrocket_aero import RocketAerodynamics
 from .openrocket_motor import Motor as OpenRocketMotor
@@ -26,8 +26,8 @@ __all__ = [
     "LaunchLug",
     "Transition",
     "Bulkhead",
-    "EngineMount",
     "InnerTube",
+    "CenteringRing",
     "RocketAerodynamics",
     "OpenRocketMotor",
 ]
