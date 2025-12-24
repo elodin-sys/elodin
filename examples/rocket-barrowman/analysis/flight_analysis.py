@@ -440,7 +440,8 @@ class FlightAnalyzer:
         # C_Y_beta: Side force due to sideslip (dC_Y/dbeta)
         # Side force is the y-component of lift force in body frame
         lift_forces_body = np.zeros_like(lift_forces)
-        for i, snapshot in enumerate(self.history):
+        for i in range(n_samples):
+            snapshot = self.history[i]
             quaternion = snapshot.quaternion
             Kt = Matrix.transformation(quaternion).transpose
             lift_world_vec = Vector(lift_forces[i])
