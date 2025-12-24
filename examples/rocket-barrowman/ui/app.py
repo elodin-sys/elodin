@@ -35,6 +35,9 @@ from core.components.openrocket_components import (
     RailButton,
     LaunchLug,
     CameraShroud,
+    Coupler,
+    AirfoilType,
+    AirfoilProfile,
 )
 from core.components.openrocket_motor import Motor as ORMotor
 from core.data.motor_scraper import ThrustCurveScraper
@@ -975,6 +978,29 @@ def build_custom_rocket(config: Dict[str, Any]) -> Rocket:
     body.position.x = config.get("nose_length", 0.5) if config.get("has_nose", True) else 0.0
     rocket.add_child(body)
 
+    # Couplers (join body sections)
+    coupler_configs = config.get("coupler_configs", [])
+    for i, coupler_cfg in enumerate(coupler_configs):
+        body_radius = config.get("body_radius", 0.0635)
+        body_thickness = config.get("body_thickness", 0.003)
+        # Coupler OD should be slightly less than body ID
+        coupler_od = (body_radius - body_thickness) * 2 * 0.98  # 98% of body ID
+        coupler_id = coupler_od - 0.006  # 3mm wall thickness
+        
+        coupler = Coupler(
+            name=f"Coupler {i+1}",
+            length=coupler_cfg.get("length", 0.10),
+            outer_diameter=coupler_od,
+            inner_diameter=coupler_id,
+        )
+        coupler.material = MATERIALS.get(
+            coupler_cfg.get("material", "Fiberglass"), MATERIALS["Fiberglass"]
+        )
+        # Position relative to body tube start
+        nose_length = config.get("nose_length", 0.5) if config.get("has_nose", True) else 0.0
+        coupler.position.x = max(0.0, coupler_cfg.get("position", 0.5) - nose_length)
+        body.add_child(coupler)
+
     # Fins
     if config.get("has_fins", True):
         fins = TrapezoidFinSet(
@@ -1050,13 +1076,13 @@ def build_custom_rocket(config: Dict[str, Any]) -> Rocket:
     num_rail_buttons = config.get("num_rail_buttons", 0)
     if num_rail_buttons > 0:
         rail_size = config.get("rail_button_size", "standard")
-        # Standard rail button dimensions
+        # Standard rail button dimensions (mass calculated from material density)
         rail_dims = {
-            "mini": {"diameter": 0.008, "height": 0.010, "mass": 0.005},
-            "standard": {"diameter": 0.010, "height": 0.015, "mass": 0.010},
-            "1010": {"diameter": 0.010, "height": 0.010, "mass": 0.008},
-            "1515": {"diameter": 0.015, "height": 0.015, "mass": 0.015},
-        }.get(rail_size, {"diameter": 0.010, "height": 0.015, "mass": 0.010})
+            "mini": {"diameter": 0.008, "height": 0.010},
+            "standard": {"diameter": 0.010, "height": 0.015},
+            "1010": {"diameter": 0.010, "height": 0.010},
+            "1515": {"diameter": 0.015, "height": 0.015},
+        }.get(rail_size, {"diameter": 0.010, "height": 0.015})
         
         rail_positions = [
             config.get("rail_btn_pos1", 0.3),
@@ -1068,7 +1094,6 @@ def build_custom_rocket(config: Dict[str, Any]) -> Rocket:
                 name=f"Rail Button {i+1}",
                 outer_diameter=rail_dims["diameter"],
                 height=rail_dims["height"],
-                mass=rail_dims["mass"],
             )
             # Position relative to body tube start
             rail_btn.position.x = max(0.0, rail_positions[i] - nose_length)
@@ -4035,7 +4060,7 @@ def render_sidebar():
             st.markdown("### 📐 Rocket Config")
             
             # Use tabs for compact organization
-            config_tabs = st.tabs(["🔺 Nose", "📦 Body", "🔱 Fins", "🪂 Recovery", "📍 Hardware"])
+            config_tabs = st.tabs(["🔺 Nose", "📦 Body", "🔗 Structure", "🔱 Fins", "🪂 Recovery", "📍 Hardware"])
             
             # TAB 1: Nose Cone
             with config_tabs[0]:
@@ -4057,21 +4082,99 @@ def render_sidebar():
                     body_radius = st.number_input("Radius (m)", 0.01, 0.5, 0.0635, 0.005, key="body_rad")
                 body_material = st.selectbox("Material", list(MATERIALS.keys()), index=3, key="body_mat")
             
-            # TAB 3: Fins
+            # TAB 3: Structure (Couplers, Motor Mount)
             with config_tabs[2]:
-                has_fins = st.checkbox("Include", value=True, key="has_fins_cb")
+                st.caption("Structural components for modular assembly")
+                
+                # Couplers
+                st.markdown("**Couplers**")
+                num_couplers = st.number_input("Number of Couplers", 0, 5, 1, 1, key="num_couplers", 
+                                               help="Couplers join body tube sections")
+                
+                if num_couplers > 0:
+                    coupler_configs = []
+                    for i in range(num_couplers):
+                        with st.container():
+                            cols = st.columns([2, 2, 2])
+                            with cols[0]:
+                                coupler_pos = st.number_input(f"Position {i+1} (m)", 0.1, 5.0, 0.5 + i * 0.5, 0.05, key=f"coup_pos_{i}")
+                            with cols[1]:
+                                coupler_len = st.number_input(f"Length {i+1} (m)", 0.05, 0.3, 0.10, 0.01, key=f"coup_len_{i}")
+                            with cols[2]:
+                                coupler_mat = st.selectbox(f"Material {i+1}", list(MATERIALS.keys()), index=3, key=f"coup_mat_{i}")
+                            coupler_configs.append({
+                                "position": coupler_pos,
+                                "length": coupler_len,
+                                "material": coupler_mat,
+                            })
+                else:
+                    coupler_configs = []
+                
+                st.divider()
+                
+                # Motor mount settings
+                st.markdown("**Motor Mount**")
+                col1, col2 = st.columns(2)
+                with col1:
+                    motor_mount_length = st.number_input("Mount Length (m)", 0.1, 1.0, 0.5, 0.05, key="mm_length")
+                    motor_mount_material = st.selectbox("Mount Material", list(MATERIALS.keys()), index=3, key="mm_mat")
+                with col2:
+                    # Motor mount diameter should match motor (set automatically from motor config)
+                    motor_mount_od = st.number_input("Mount OD (mm)", 20.0, 100.0, 75.0, 1.0, key="mm_od") / 1000
+                    motor_mount_wall = st.number_input("Wall (mm)", 1.0, 5.0, 2.0, 0.5, key="mm_wall") / 1000
+                
+                # Centering rings
+                st.markdown("**Centering Rings**")
+                num_centering_rings = st.number_input("Centering Rings", 1, 5, 2, 1, key="num_cr",
+                                                      help="Number of centering rings for motor mount")
+            
+            # TAB 4: Fins
+            with config_tabs[3]:
+                has_fins = st.checkbox("Include Fins", value=True, key="has_fins_cb")
                 if has_fins:
+                    st.caption("Fin geometry and construction")
                     col1, col2 = st.columns(2)
                     with col1:
                         fin_count = st.number_input("Count", 2, 8, 4, 1, key="fin_count")
-                        fin_root_chord = st.number_input("Root (m)", 0.01, 0.5, 0.12, 0.01, key="fin_root")
+                        fin_root_chord = st.number_input("Root Chord (m)", 0.01, 0.5, 0.12, 0.01, key="fin_root")
                         fin_span = st.number_input("Span (m)", 0.01, 0.5, 0.11, 0.01, key="fin_span")
+                        fin_thickness = st.number_input("Thickness (mm)", 1.0, 15.0, 5.0, 0.5, key="fin_thick") / 1000  # Convert to m
                     with col2:
-                        fin_tip_chord = st.number_input("Tip (m)", 0.01, 0.5, 0.06, 0.01, key="fin_tip")
-                        fin_sweep = st.number_input("Sweep (m)", 0.0, 0.5, 0.06, 0.01, key="fin_sweep")
+                        fin_tip_chord = st.number_input("Tip Chord (m)", 0.01, 0.5, 0.06, 0.01, key="fin_tip")
+                        fin_sweep = st.number_input("Sweep Length (m)", 0.0, 0.5, 0.06, 0.01, key="fin_sweep")
+                        fin_material = st.selectbox("Material", list(MATERIALS.keys()), index=3, key="fin_mat")  # Fiberglass default
+                    
+                    st.divider()
+                    st.caption("Airfoil Profile (affects drag at different Mach numbers)")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        airfoil_type = st.selectbox(
+                            "Airfoil Type",
+                            ["Square", "Rounded", "Airfoil", "Double Wedge", "NACA 4-digit"],
+                            index=0,
+                            key="airfoil_type",
+                            help="Square: Simple flat fins\nRounded: LE/TE rounded\nAirfoil: Low subsonic drag\nDouble Wedge: Best for supersonic\nNACA: Standard airfoil shapes"
+                        )
+                    with col2:
+                        if airfoil_type == "NACA 4-digit":
+                            naca_code = st.text_input("NACA Code", "0012", key="naca_code", help="e.g., 0012 for symmetric 12% thick")
+                            wedge_angle = 10.0  # default
+                            le_radius = 10.0  # default
+                        elif airfoil_type == "Double Wedge":
+                            wedge_angle = st.number_input("Half-angle (°)", 5.0, 30.0, 10.0, 1.0, key="wedge_angle")
+                            naca_code = "0012"  # default
+                            le_radius = 0.0  # sharp edges for wedge
+                        else:
+                            le_radius = st.number_input("LE Radius (%t)", 0.0, 50.0, 10.0, 5.0, key="le_radius", help="Leading edge radius as % of thickness")
+                            naca_code = "0012"  # default
+                            wedge_angle = 10.0  # default
+                else:
+                    fin_count, fin_root_chord, fin_span, fin_tip_chord, fin_sweep = 4, 0.12, 0.11, 0.06, 0.06
+                    fin_thickness, fin_material = 0.005, "Fiberglass"
+                    airfoil_type, naca_code, wedge_angle, le_radius = "Square", "0012", 10.0, 10.0
             
-            # TAB 4: Recovery
-            with config_tabs[3]:
+            # TAB 5: Recovery
+            with config_tabs[4]:
                 col1, col2 = st.columns(2)
                 with col1:
                     has_main_chute = st.checkbox("Main", value=True, key="has_main_cb")
@@ -4083,8 +4186,8 @@ def render_sidebar():
                     if has_drogue:
                         drogue_diameter = st.number_input("Ø Drogue (m)", 0.1, 5.0, 0.99, 0.1, key="drogue_dia")
             
-            # TAB 5: Hardware (Protuberances)
-            with config_tabs[4]:
+            # TAB 6: Hardware (Protuberances)
+            with config_tabs[5]:
                 st.caption("External hardware affects drag (geometry-based CD)")
                 
                 # Rail Buttons
@@ -4155,19 +4258,29 @@ def render_sidebar():
                 "body_radius": body_radius,
                 "body_thickness": 0.003,
                 "body_material": body_material,
+                # Fins
                 "has_fins": has_fins,
                 "fin_count": fin_count if has_fins else 4,
                 "fin_root_chord": fin_root_chord if has_fins else 0.12,
                 "fin_tip_chord": fin_tip_chord if has_fins else 0.06,
                 "fin_span": fin_span if has_fins else 0.11,
                 "fin_sweep": fin_sweep if has_fins else 0.06,
-                "fin_thickness": 0.005,
-                "fin_material": "Fiberglass",
+                "fin_thickness": fin_thickness if has_fins else 0.005,
+                "fin_material": fin_material if has_fins else "Fiberglass",
+                "airfoil_type": airfoil_type if has_fins else "Square",
+                "naca_code": naca_code if (has_fins and airfoil_type == "NACA 4-digit") else "0012",
+                "wedge_angle": wedge_angle if (has_fins and airfoil_type == "Double Wedge") else 10.0,
+                "le_radius": le_radius if has_fins else 10.0,
+                # Structure (Couplers)
+                "num_couplers": num_couplers,
+                "coupler_configs": coupler_configs,
+                # Motor mount
                 "has_motor_mount": True,
-                "motor_mount_length": 0.5,
-                "motor_mount_radius": 0.041,
-                "motor_mount_thickness": 0.003,
-                "motor_mount_material": "Fiberglass",
+                "motor_mount_length": motor_mount_length,
+                "motor_mount_radius": motor_mount_od / 2,
+                "motor_mount_thickness": motor_mount_wall,
+                "motor_mount_material": motor_mount_material,
+                "num_centering_rings": num_centering_rings,
                 "has_main_chute": has_main_chute,
                 "main_chute_diameter": main_chute_diameter if has_main_chute else 2.91,
                 "main_chute_cd": 1.5,
