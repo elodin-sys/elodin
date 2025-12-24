@@ -361,11 +361,13 @@ def _generate_fin_points(
     """Generate points for a trapezoidal fin"""
     # Fin coordinates in fin-local frame
     # Root chord at body, tip chord at span distance
+    # Fin geometry: sweep moves tip BACKWARD (aft, +x direction)
+    # Root chord at body surface, tip chord at span height
     fin_points_local = [
-        [0, body_radius, 0],  # Root leading edge
-        [root_chord, body_radius, 0],  # Root trailing edge
-        [root_chord - sweep, body_radius + span, 0],  # Tip trailing edge
-        [-sweep, body_radius + span, 0],  # Tip leading edge
+        [0, body_radius, 0],                          # Root leading edge
+        [root_chord, body_radius, 0],                 # Root trailing edge
+        [sweep + tip_chord, body_radius + span, 0],   # Tip trailing edge
+        [sweep, body_radius + span, 0],               # Tip leading edge (swept back)
     ]
 
     # Transform to rocket frame (rotate by angle, translate by start_x)
@@ -446,6 +448,7 @@ def visualize_rocket_2d_side_view(
     body_radius = config.get("body_radius", 0.0635)
     fin_count = config.get("fin_count", 4)
     fin_root_chord = config.get("fin_root_chord", 0.12)
+    fin_tip_chord = config.get("fin_tip_chord", 0.06)
     fin_span = config.get("fin_span", 0.11)
     fin_sweep = config.get("fin_sweep", 0.06)
 
@@ -507,12 +510,12 @@ def visualize_rocket_2d_side_view(
         )
     )
 
-    # Fins (show one fin)
+    # Fins (show one fin) - sweep moves tip BACKWARD (aft, +x direction)
     fin_x = [
-        fin_start_x,
-        fin_start_x + fin_root_chord,
-        fin_start_x + fin_root_chord - fin_sweep,
-        fin_start_x - fin_sweep,
+        fin_start_x,                                    # Root leading edge
+        fin_start_x + fin_root_chord,                   # Root trailing edge
+        fin_start_x + fin_sweep + fin_tip_chord,        # Tip trailing edge
+        fin_start_x + fin_sweep,                        # Tip leading edge (swept back)
     ]
     fin_y = [body_radius, body_radius, body_radius + fin_span, body_radius + fin_span]
     fig.add_trace(
