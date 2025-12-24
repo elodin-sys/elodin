@@ -305,8 +305,8 @@ class SmartOptimizer:
         """
         fitting_tubes = []
         for tube in self.TUBE_SIZES:
-            # Motor must fit inside tube ID (with 3mm clearance)
-            motor_fits_id = tube["id"] >= motor_diameter + 0.003
+            # Motor must fit inside tube ID (with 1mm clearance for tight fit)
+            motor_fits_id = tube["id"] >= motor_diameter + 0.001
             # Body tube OD must be >= motor diameter (airframe constraint, no transitions)
             body_meets_diameter = tube["od"] >= motor_diameter
             if motor_fits_id and body_meets_diameter:
@@ -577,17 +577,20 @@ class SmartOptimizer:
         body.position.x = nose_length
         rocket.add_child(body)
 
-        # Fins - use Calisto-like proportions for proven stability
-        # Calisto: root=0.120m (1.89× radius), tip=0.060m (50% of root), span=0.110m (1.73× radius)
-        # Use similar ratios but scale with body radius
-        fin_span = max(body_radius * 1.7, 0.03)  # ~1.7× radius (like Calisto)
-        fin_root = max(body_radius * 1.9, 0.04)  # ~1.9× radius (like Calisto)
-        fin_root = min(fin_root, body_length * 0.20)  # Not more than 20% of body length
-        fin_tip = max(fin_root * 0.5, 0.015)  # 50% of root (like Calisto)
-        # Ensure fin doesn't extend beyond body
-        if fin_root > body_length * 0.25:
-            fin_root = body_length * 0.25
-            fin_tip = fin_root * 0.5
+        # Fin sizing rules (based on body DIAMETER, not radius):
+        # - Root chord = 2 × diameter
+        # - Span = 1 × diameter
+        # - Tip chord = 0.5 × diameter (can be 0.33-0.5)
+        body_diameter = body_radius * 2
+        fin_root = max(body_diameter * 2.0, 0.06)  # 2× diameter
+        fin_span = max(body_diameter * 1.0, 0.03)  # 1× diameter
+        fin_tip = max(body_diameter * 0.4, 0.015)  # 0.4× diameter (between 0.33-0.5)
+        
+        # Ensure fin doesn't extend beyond body (max 30% of body length)
+        if fin_root > body_length * 0.30:
+            scale = (body_length * 0.30) / fin_root
+            fin_root = fin_root * scale
+            fin_tip = fin_tip * scale
 
         # Use thinner fins if we had to reduce structure mass
         fin_thickness = 0.003 if use_thinner_walls else 0.004
@@ -1136,11 +1139,9 @@ class SmartOptimizer:
                         min_tube_for_payload = tube_candidate
                         break
 
-            # Get tube that fits motor (ensures body OD >= motor diameter)
-            # For heavy rockets, prefer larger tubes to avoid long, draggy designs
-            # For very heavy rockets (>30kg), prefer larger tubes even if smaller ones fit
-            prefer_smaller_tube = estimated_total_mass_kg < 30
-            tube_for_motor = self._get_tube_for_motor(motor.diameter, prefer_smaller=prefer_smaller_tube)
+            # Get smallest tube that fits motor (ensures body OD >= motor diameter)
+            # Always prefer smallest tube - use heuristics, don't oversize
+            tube_for_motor = self._get_tube_for_motor(motor.diameter, prefer_smaller=True)
 
             # Validate that the selected tube meets airframe constraint (OD >= motor diameter)
             # This is a hard constraint - we can't use transitions yet
@@ -1156,7 +1157,7 @@ class SmartOptimizer:
             if min_tube_for_payload and min_tube_for_payload["id"] > tube_for_motor["id"]:
                 # Validate payload tube also fits the motor
                 payload_tube_fits_od = min_tube_for_payload["od"] >= motor.diameter
-                payload_tube_fits_id = min_tube_for_payload["id"] >= motor.diameter + 0.003
+                payload_tube_fits_id = min_tube_for_payload["id"] >= motor.diameter + 0.001
                 if payload_tube_fits_od and payload_tube_fits_id:
                     tube = min_tube_for_payload
                 else:
@@ -1290,7 +1291,7 @@ class SmartOptimizer:
                     continue  # Skip motors that exceed tube OD
                 if min_tube_for_payload and min_tube_for_payload["id"] > tube_for_motor["id"]:
                     # Validate payload tube also fits the motor
-                    if min_tube_for_payload["od"] >= motor.diameter and min_tube_for_payload["id"] >= motor.diameter + 0.003:
+                    if min_tube_for_payload["od"] >= motor.diameter and min_tube_for_payload["id"] >= motor.diameter + 0.001:
                         tube = min_tube_for_payload
                     else:
                         tube = tube_for_motor
