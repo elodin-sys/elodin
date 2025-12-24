@@ -19,10 +19,10 @@ from typing import TYPE_CHECKING, Optional, Tuple
 import numpy as np
 
 if TYPE_CHECKING:
-    from .environment import Environment
+    from ..environment.environment import Environment
 
 # Import availability flags
-from .atmospheric_models import NRLMSISE_AVAILABLE
+from ..environment.atmospheric_models import NRLMSISE_AVAILABLE
 
 # Try to import optional dependencies
 try:
@@ -268,14 +268,14 @@ def create_environment_from_coordinates(
         ... )
         >>> print(f"Environment created with weather data from {weather_file}")
     """
-    from .environment import Environment
-    from .atmospheric_models import (
+    from ..environment.environment import Environment
+    from ..environment.atmospheric_models import (
         WeatherDataAtmosphere,
         NRLMSISE00Atmosphere,
         HybridAtmosphere,
         ISAAtmosphere,
     )
-    from .dynamic_wind import DynamicWindModel, ProfilePoint
+    from ..environment.dynamic_wind import DynamicWindModel, ProfilePoint
 
     weather_file = None
     weather_data = None
@@ -339,7 +339,7 @@ def create_environment_from_coordinates(
     wind_model = None
     if weather_data:
         try:
-            from .dynamic_wind import ProfilePoint
+            from ..environment.dynamic_wind import ProfilePoint
 
             # Create wind profile from fetched data
             # Use surface wind data and create a simple profile
@@ -398,7 +398,7 @@ def extract_wind_profile_from_netcdf(
         return None
 
     try:
-        from .dynamic_wind import ProfilePoint
+        from ..environment.dynamic_wind import ProfilePoint
         import math
 
         with netCDF4.Dataset(netcdf_file, "r") as nc:

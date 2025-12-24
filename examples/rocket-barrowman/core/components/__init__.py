@@ -1,6 +1,6 @@
 """OpenRocket-compatible component definitions."""
 
-from .openrocket_components import (
+from ..components.openrocket_components import (
     RocketComponent,
     NoseCone,
     BodyTube,
@@ -13,8 +13,8 @@ from .openrocket_components import (
     InnerTube,
     CenteringRing,
 )
-from .openrocket_aero import RocketAerodynamics
-from .openrocket_motor import Motor as OpenRocketMotor
+from ..components.openrocket_aero import RocketAerodynamics
+from ..components.openrocket_motor import Motor as OpenRocketMotor
 
 __all__ = [
     "RocketComponent",

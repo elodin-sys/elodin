@@ -17,7 +17,7 @@ Each function includes references to:
 """
 
 import math
-from .openrocket_components import (
+from ..components.openrocket_components import (
     BodyTube,
     EllipticalFinSet,
     FinishType,

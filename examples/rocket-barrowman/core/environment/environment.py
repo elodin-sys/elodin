@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable, Optional, Tuple
 
-from .atmospheric_models import (
+from ..environment.atmospheric_models import (
     ISAAtmosphere,
     NRLMSISE00Atmosphere,
     WeatherDataAtmosphere,
@@ -24,7 +24,7 @@ from .atmospheric_models import (
     NRLMSISE_AVAILABLE,
     NETCDF_AVAILABLE,
 )
-from .dynamic_wind import DynamicWindModel
+from ..environment.dynamic_wind import DynamicWindModel
 
 
 @dataclass
@@ -230,7 +230,7 @@ class Environment:
             >>> # Now use env for simulation
             >>> props = env.air_properties(altitude=1000.0)
         """
-        from .weather_fetcher import create_environment_from_coordinates
+        from ..environment.weather_fetcher import create_environment_from_coordinates
 
         env, _ = create_environment_from_coordinates(
             latitude=latitude,

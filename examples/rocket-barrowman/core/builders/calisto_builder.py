@@ -18,7 +18,7 @@ Specifications:
 
 import math
 import numpy as np
-from core.components.openrocket_components import (
+from ..components.openrocket_components import (
     BodyTube,
     CenteringRing,
     InnerTube,
@@ -30,7 +30,7 @@ from core.components.openrocket_components import (
     TrapezoidFinSet,
     Transition,
 )
-from .openrocket_motor import Motor as ORMotor
+from ..components.openrocket_motor import Motor as ORMotor
 
 
 def build_calisto_rocket():

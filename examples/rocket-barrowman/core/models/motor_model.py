@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from .openrocket_motor import Motor as OpenRocketMotor
+from ..components.openrocket_motor import Motor as OpenRocketMotor
 
 
 class Motor:
