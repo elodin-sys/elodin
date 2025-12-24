@@ -306,8 +306,9 @@ class SmartOptimizer:
                 fitting_tubes.append(tube)
 
         if not fitting_tubes:
-            # If no tube fits, return largest available (will be rejected in validation)
-            return self.TUBE_SIZES[-1]
+            # If no tube fits, return None to signal that this motor can't be used
+            # The caller should skip this motor
+            return None
 
         if prefer_smaller:
             return fitting_tubes[0]  # Smallest fitting tube
@@ -537,12 +538,18 @@ class SmartOptimizer:
         mount_length = motor.length + 0.05
         mount_outer_radius = motor.diameter / 2 + 0.005
         # Ensure mount fits inside body (with clearance)
-        if mount_outer_radius >= body_radius - 0.01:
-            mount_outer_radius = body_radius - 0.01
-            if mount_outer_radius <= motor.diameter / 2:
-                # Motor won't fit - this should have been caught earlier, but double-check
-                print(f"Warning: Motor {motor.designation} won't fit in body tube")
-                return (0.0, 0.0, {}, {})
+        # The mount outer radius must be less than body inner radius (tube["id"] / 2)
+        body_inner_radius = tube["id"] / 2
+        if mount_outer_radius >= body_inner_radius - 0.001:
+            # Motor mount won't fit - this should have been caught earlier
+            # This means the motor diameter is too large for the tube ID
+            print(
+                f"Warning: Motor {motor.designation} (diameter={motor.diameter * 1000:.1f}mm) "
+                f"too large for tube ID ({tube['id'] * 1000:.1f}mm). Skipping."
+            )
+            return (0.0, 0.0, {}, {})
+        # Clamp mount outer radius to ensure it fits
+        mount_outer_radius = min(mount_outer_radius, body_inner_radius - 0.001)
 
         mount = InnerTube(
             name="Mount",
@@ -1077,11 +1084,31 @@ class SmartOptimizer:
             prefer_smaller_tube = estimated_total_mass_kg < 30
             tube_for_motor = self._get_tube_for_motor(motor.diameter, prefer_smaller=prefer_smaller_tube)
 
+            # If no tube fits this motor, skip it
+            if tube_for_motor is None:
+                log.append(f"  [{iteration}] {motor.designation}: Skip (no fitting tube)")
+                continue
+
+            # Validate that the selected tube actually fits the motor (double-check)
+            # Check both OD constraint (airframe >= motor) and ID constraint (motor fits inside)
+            motor_fits_od = tube_for_motor["od"] >= motor.diameter
+            motor_fits_id = tube_for_motor["id"] >= motor.diameter + 0.003
+            if not (motor_fits_od and motor_fits_id):
+                # This motor has no fitting tubes - skip it
+                log.append(f"  [{iteration}] {motor.designation}: Skip (tube validation failed)")
+                continue
+
             # Use larger of motor-fit tube or payload-fit tube
             # Both must meet airframe constraint (OD >= motor diameter)
             if min_tube_for_payload and min_tube_for_payload["id"] > tube_for_motor["id"]:
-                # Payload tube already validated to meet airframe constraint above
-                tube = min_tube_for_payload
+                # Validate payload tube also fits the motor
+                payload_tube_fits_od = min_tube_for_payload["od"] >= motor.diameter
+                payload_tube_fits_id = min_tube_for_payload["id"] >= motor.diameter + 0.003
+                if payload_tube_fits_od and payload_tube_fits_id:
+                    tube = min_tube_for_payload
+                else:
+                    # Payload tube doesn't fit motor - use motor-fit tube
+                    tube = tube_for_motor
             else:
                 tube = tube_for_motor
 
