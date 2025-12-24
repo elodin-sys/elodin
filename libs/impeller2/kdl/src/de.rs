@@ -1,6 +1,6 @@
 use crate::color_names::color_from_name;
 use impeller2_wkt::{
-    ArrowThickness, Color, Schematic, SchematicElem, VectorArrow3d, WindowSchematic,
+    ArrowThickness, Color, Schematic, SchematicElem, ThemeConfig, VectorArrow3d, WindowSchematic,
 };
 use kdl::{KdlDocument, KdlNode};
 use std::collections::HashMap;
@@ -24,7 +24,10 @@ pub fn parse_schematic(input: &str) -> Result<Schematic, KdlSchematicError> {
 
     for node in doc.nodes() {
         let elem = parse_schematic_elem(node, input)?;
-        schematic.elems.push(elem);
+        match elem {
+            SchematicElem::Theme(theme) => schematic.theme = Some(theme),
+            other => schematic.elems.push(other),
+        }
     }
 
     Ok(schematic)
@@ -36,6 +39,7 @@ fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlS
         | "action_pane" | "query_table" | "query_plot" | "inspector" | "hierarchy"
         | "schematic_tree" | "dashboard" => Ok(SchematicElem::Panel(parse_panel(node, src)?)),
         "window" => Ok(SchematicElem::Window(parse_window(node, src)?)),
+        "theme" => Ok(SchematicElem::Theme(parse_theme(node, src)?)),
         "object_3d" => Ok(SchematicElem::Object3d(parse_object_3d(node, src)?)),
         "line_3d" => Ok(SchematicElem::Line3d(parse_line_3d(node, src)?)),
         "vector_arrow" => Ok(SchematicElem::VectorArrow(parse_vector_arrow(node, src)?)),
@@ -105,6 +109,27 @@ fn parse_window(node: &KdlNode, src: &str) -> Result<WindowSchematic, KdlSchemat
         screen: screen_idx,
         screen_rect,
     })
+}
+
+fn parse_theme(node: &KdlNode, _src: &str) -> Result<ThemeConfig, KdlSchematicError> {
+    let mode = node
+        .get("mode")
+        .and_then(|v| v.as_string())
+        .or_else(|| {
+            node.entries()
+                .first()
+                .and_then(|entry| entry.value().as_string())
+        })
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty());
+
+    let scheme = node
+        .get("scheme")
+        .and_then(|v| v.as_string())
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty());
+
+    Ok(ThemeConfig { mode, scheme })
 }
 
 fn parse_window_rect(node: &KdlNode, src: &str) -> Result<WindowRect, KdlSchematicError> {
@@ -318,6 +343,8 @@ fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
         })
         .unwrap_or(GraphType::Line);
 
+    let locked = node.get("lock").and_then(|v| v.as_bool()).unwrap_or(false);
+
     let auto_y_range = node
         .get("auto_y_range")
         .and_then(|v| v.as_bool())
@@ -337,6 +364,7 @@ fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
         eql,
         name,
         graph_type,
+        locked,
         auto_y_range,
         y_range,
         aux: (),
@@ -785,23 +813,69 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
     let thickness = parse_arrow_thickness(node, src)?;
 
     let label_position = match node.entry("label_position") {
-        None => 1.0,
+        None => LabelPosition::None,
         Some(entry) => {
             let value = entry.value();
-            let label_position = if let Some(value) = value.as_float() {
-                value as f32
-            } else if let Some(value) = value.as_integer() {
-                value as f32
+            if let Some(s) = value.as_string() {
+                if let Some(prior) = s.strip_suffix("m") {
+                    match prior.parse() {
+                        Ok(v) => LabelPosition::Absolute(v),
+                        Err(e) => {
+                            return Err(KdlSchematicError::InvalidValue {
+                                property: "label_position".to_string(),
+                                node: "vector_arrow".to_string(),
+                                expected: format!(
+                                    "a numeric value before the meter marker 'm' but had error: {e}"
+                                ),
+                                src: src.to_string(),
+                                span: entry.span(),
+                            });
+                        }
+                    }
+                } else {
+                    match s.parse::<f32>() {
+                        Ok(v) => {
+                            if (0.0..=1.0).contains(&v) {
+                                LabelPosition::Proportionate(v)
+                            } else {
+                                return Err(KdlSchematicError::InvalidValue {
+                                    property: "label_position".to_string(),
+                                    node: "vector_arrow".to_string(),
+                                    expected: format!(
+                                        "a numeric value between [0,1] but was {v:.2}"
+                                    ),
+                                    src: src.to_string(),
+                                    span: entry.span(),
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            return Err(KdlSchematicError::InvalidValue {
+                                property: "label_position".to_string(),
+                                node: "vector_arrow".to_string(),
+                                expected: format!("a numeric value expected but had error: {e}"),
+                                src: src.to_string(),
+                                span: entry.span(),
+                            });
+                        }
+                    }
+                }
             } else {
-                return Err(KdlSchematicError::InvalidValue {
-                    property: "label_position".to_string(),
-                    node: "vector_arrow".to_string(),
-                    expected: "a numeric value between 0.0 and 1.0".to_string(),
-                    src: src.to_string(),
-                    span: entry.span(),
-                });
-            };
-            label_position.clamp(0.0, 1.0)
+                let label_position = if let Some(value) = value.as_float() {
+                    value as f32
+                } else if let Some(value) = value.as_integer() {
+                    value as f32
+                } else {
+                    return Err(KdlSchematicError::InvalidValue {
+                        property: "label_position".to_string(),
+                        node: "vector_arrow".to_string(),
+                        expected: "a numeric value between 0.0 and 1.0".to_string(),
+                        src: src.to_string(),
+                        span: entry.span(),
+                    });
+                };
+                LabelPosition::Proportionate(label_position.clamp(0.0, 1.0))
+            }
         }
     };
 
@@ -970,8 +1044,34 @@ fn parse_color_children_from_node(node: &KdlNode) -> impl Iterator<Item = Color>
         .filter_map(parse_color_from_node)
 }
 
+fn parse_emissivity_value(value: &kdl::KdlValue) -> Option<f32> {
+    let parsed = if let Some(number) = value.as_float() {
+        number as f32
+    } else if let Some(integer) = value.as_integer() {
+        let Ok(integer) = i64::try_from(integer) else {
+            return None;
+        };
+        integer as f32
+    } else if let Some(text) = value.as_string() {
+        text.parse::<f32>().ok()?
+    } else {
+        return None;
+    };
+
+    Some(parsed.clamp(0.0, 1.0))
+}
+
 fn parse_material_from_node(node: &KdlNode) -> Option<Material> {
-    parse_color_from_node_or_children(node, None).map(|color| Material { base_color: color })
+    parse_color_from_node_or_children(node, None).map(|color| {
+        let emissivity = node
+            .get("emissivity")
+            .and_then(parse_emissivity_value)
+            .unwrap_or(0.0);
+        Material {
+            base_color: color,
+            emissivity,
+        }
+    })
 }
 
 fn parse_dashboard(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
@@ -1488,6 +1588,33 @@ object_3d "a.world_pos" {
     }
 
     #[test]
+    fn test_parse_object_3d_material_emissivity() {
+        let kdl = r#"
+object_3d "a.world_pos" {
+    sphere radius=0.2 emissivity=0.25 {
+        color yellow 128
+    }
+}
+"#;
+
+        let schematic = parse_schematic(kdl).unwrap();
+        assert_eq!(schematic.elems.len(), 1);
+
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            let Object3DMesh::Mesh { material, .. } = &obj.mesh else {
+                panic!("Expected mesh object");
+            };
+            assert!((material.base_color.r - Color::YELLOW.r).abs() < f32::EPSILON);
+            assert!((material.base_color.g - Color::YELLOW.g).abs() < f32::EPSILON);
+            assert!((material.base_color.b - Color::YELLOW.b).abs() < f32::EPSILON);
+            assert!((material.base_color.a - 128.0 / 255.0).abs() < f32::EPSILON);
+            assert!((material.emissivity - 0.25).abs() < f32::EPSILON);
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
     fn test_parse_object_3d_ellipsoid() {
         let kdl = r#"
 object_3d "rocket.world_pos" {
@@ -1512,6 +1639,30 @@ object_3d "rocket.world_pos" {
                 }
                 _ => panic!("Expected ellipsoid mesh"),
             }
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_object_3d_material_emissivity_property() {
+        let kdl = r#"
+object_3d "a.world_pos" {
+    sphere radius=0.2 emissivity=0.5 {
+        color 255 0 0
+    }
+}
+"#;
+
+        let schematic = parse_schematic(kdl).unwrap();
+        assert_eq!(schematic.elems.len(), 1);
+
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            let Object3DMesh::Mesh { material, .. } = &obj.mesh else {
+                panic!("Expected mesh object");
+            };
+            assert!((material.base_color.r - 1.0).abs() < f32::EPSILON);
+            assert!((material.emissivity - 0.5).abs() < f32::EPSILON);
         } else {
             panic!("Expected object_3d");
         }

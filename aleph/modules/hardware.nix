@@ -1,124 +1,60 @@
-{
-  lib,
-  pkgs,
-  config,
-  ...
-}: let
-  overlay = final: prev: let
-    kernel = prev.callPackage ../kernel/default.nix {
-      kernelSource = config.aleph.kernel.source;
-      structuredExtraConfig = with lib.kernel; {
-        USB_GADGET = lib.mkForce yes;
-        USB_G_NCM = lib.mkForce yes;
-        INET = yes;
-
-        # Add these crypto modules needed by iwd
-        CRYPTO = yes;
-        CRYPTO_USER = yes;
-        CRYPTO_USER_API = yes;
-        CRYPTO_USER_API_HASH = yes;
-        CRYPTO_USER_API_SKCIPHER = yes;
-        CRYPTO_MD5 = yes;
-        CRYPTO_SHA1 = yes;
-        CRYPTO_SHA256 = yes;
-        CRYPTO_SHA512 = yes;
-        CRYPTO_AES = yes;
-        CRYPTO_CMAC = yes;
-        CRYPTO_HMAC = yes;
-
-        # ARM-specific optimized implementations for Orin
-        CRYPTO_SHA1_ARM64_CE = yes;
-        CRYPTO_SHA2_ARM64_CE = yes;
-        CRYPTO_SHA512_ARM64_CE = yes;
-        CRYPTO_AES_ARM64_CE = yes;
-        CRYPTO_GHASH_ARM64_CE = yes;
-      };
-      l4t-xusb-firmware = prev.nvidia-jetpack.l4t-xusb-firmware;
-      kernelPatches = [];
-    };
-  in {
-    aleph.kernelPackages = prev.linuxPackagesFor kernel;
-  };
-in {
-  options.aleph.kernel = {
-    source = lib.mkOption {
-      type = lib.types.enum ["default" "no_otg"];
-      default = "default";
-      description = ''
-        Select alternate kernel configurations. Available options:
-        - default: Default kernel configuration (usbc-1 as ethernet gadget)
-        - no_otg: Alternate configuration where usbc-1 is a standard host port
-      '';
-    };
-  };
-
+{lib, ...}: {
+  # Add double-dtb-buffer-size patch to systemd-boot to provide
+  # space for the addition of larger device tree blobs during boot
+  # as of 2026-01 this is required for booting over usb
+  # ref: https://github.com/anduril/jetpack-nixos/issues/111#issuecomment-2054146506
+  nixpkgs.overlays = [
+    (final: prev: let
+      patch = ./systemd-boot-double-dtb-buffer-size.patch;
+      addPatch = pkg:
+        pkg.overrideAttrs (old: {
+          patches = (old.patches or []) ++ [patch];
+        });
+    in {
+      systemd = addPatch prev.systemd;
+      systemd-minimal = addPatch prev.systemd-minimal;
+    })
+  ];
   imports = [
     ./systemd-boot-dtb.nix
   ];
+  boot.loader.systemd-boot-dtb.enable = true;
+  # End systemd-boot-dtb patch
 
-  # Avoids a bunch ofeextra modules we don't have in the tegra_defconfig, like "ata_piix",
+  boot.loader.systemd-boot.enable = true;
+  boot.loader.systemd-boot.installDeviceTree = true;
+  boot.loader.efi.canTouchEfiVariables = false;
+  boot.loader.grub.enable = false;
+
+  boot.kernelParams = [
+    "console=tty0"
+    "fbcon=map:0"
+    "video=efifb:off"
+    "console=ttyTCU0,115200"
+    "nohibernate"
+    "loglevel=4"
+  ];
+
+  # Kernel modules to include for the initramfs
+  boot.initrd.availableKernelModules = lib.mkForce [
+    # Tegra-specific modules for NVMe boot
+    "phy_tegra194_p2u"
+    "pcie_tegra194"
+    # Tegra-specific modules required for usb/sdimage boot
+    "xhci-tegra"
+  ];
+
+  # Avoids a bunch of extra modules we don't have in the tegra_defconfig, like "ata_piix",
   disabledModules = ["profiles/all-hardware.nix"];
 
-  config = {
-    nixpkgs.overlays = [
-      overlay
-      (final: prev: {
-        systemd = prev.systemd.overrideAttrs (prevAttrs: {
-          patches =
-            prevAttrs.patches
-            ++ [
-              ./systemd-boot-double-dtb-buffer-size.patch
-            ];
-        });
-        systemd-minimal = prev.systemd-minimal.overrideAttrs (prevAttrs: {
-          patches =
-            prevAttrs.patches
-            ++ [
-              ./systemd-boot-double-dtb-buffer-size.patch
-            ];
-        });
-      })
-    ];
-    sdImage.compressImage = true;
-    boot.loader.systemd-boot.enable = true;
-    boot.loader.systemd-boot.installDeviceTree = true;
-    boot.loader.systemd-boot-dtb.enable = true;
-    boot.loader.efi.canTouchEfiVariables = false;
-    boot.loader.grub.enable = false;
-    boot.kernelPackages = lib.mkForce pkgs.aleph.kernelPackages;
-    boot.kernelParams = [
-      "console=tty0"
-      "fbcon=map:0"
-      "video=efifb:off"
-      "console=ttyTCU0,115200"
-      "nohibernate"
-      "loglevel=4"
-    ];
-    boot.extraModulePackages = lib.mkForce [];
-
-    # Explicitly set available kernel modules to avoid missing modules like ata_piix
-    boot.initrd.availableKernelModules = lib.mkForce [
-      # Storage
-      "ahci"
-      "xhci_pci"
-      "usb_storage"
-      "sd_mod"
-      "nvme"
-      # Filesystems
-      "ext4"
-      # USB
-      "xhci_hcd"
-      # Note: ata_piix is explicitly NOT included as it's not available in tegra kernel
-    ];
-
-    #hardware.deviceTree.name = "tegra234-p3767-0003-p3509-a02.dtb";
-    hardware.deviceTree.name = "tegra234-p3767-0000-aleph.dtb";
-    hardware.nvidia-jetpack = {
-      enable = true;
-      som = "orin-nx";
-      carrierBoard = "devkit";
-      #kernel.realtime = true;
-    };
-    hardware.firmware = [pkgs.linux-firmware];
+  hardware.nvidia-jetpack = {
+    enable = true;
+    majorVersion = "6";
+    som = "orin-nx";
+    carrierBoard = "devkit";
+    kernel.realtime = true;
   };
+
+  # Configure device tree for Orin NX devkit (p3767-0000)
+  hardware.deviceTree.name = "tegra234-p3767-0000-aleph.dtb";
 }

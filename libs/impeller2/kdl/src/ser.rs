@@ -5,6 +5,10 @@ use kdl::{KdlDocument, KdlEntry, KdlNode};
 pub fn serialize_schematic<T>(schematic: &Schematic<T>) -> String {
     let mut doc = KdlDocument::new();
 
+    if let Some(theme) = schematic.theme.as_ref() {
+        doc.nodes_mut().push(serialize_theme(theme));
+    }
+
     for elem in &schematic.elems {
         let node = serialize_schematic_elem(elem);
         doc.nodes_mut().push(node);
@@ -23,6 +27,7 @@ fn serialize_schematic_elem<T>(elem: &SchematicElem<T>) -> KdlNode {
         SchematicElem::Line3d(line) => serialize_line_3d(line),
         SchematicElem::VectorArrow(arrow) => serialize_vector_arrow(arrow),
         SchematicElem::Window(window) => serialize_window(window),
+        SchematicElem::Theme(theme) => serialize_theme(theme),
     }
 }
 
@@ -177,6 +182,19 @@ fn serialize_window(window: &WindowSchematic) -> KdlNode {
     node
 }
 
+fn serialize_theme(theme: &ThemeConfig) -> KdlNode {
+    let mut node = KdlNode::new("theme");
+    if let Some(mode) = &theme.mode {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("mode", mode.clone()));
+    }
+    if let Some(scheme) = &theme.scheme {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("scheme", scheme.clone()));
+    }
+    node
+}
+
 fn serialize_graph<T>(graph: &Graph<T>) -> KdlNode {
     let mut node = KdlNode::new("graph");
 
@@ -201,6 +219,10 @@ fn serialize_graph<T>(graph: &Graph<T>) -> KdlNode {
     if !graph.auto_y_range {
         node.entries_mut()
             .push(KdlEntry::new_prop("auto_y_range", false));
+    }
+
+    if graph.locked {
+        node.entries_mut().push(KdlEntry::new_prop("lock", true));
     }
 
     // Only serialize y_range if auto_y_range is false and range is not default
@@ -448,11 +470,20 @@ fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
         ));
     }
 
-    if (arrow.label_position - 1.0).abs() > f32::EPSILON {
-        node.entries_mut().push(KdlEntry::new_prop(
-            "label_position",
-            arrow.label_position as f64,
-        ));
+    match arrow.label_position {
+        LabelPosition::None => {}
+        LabelPosition::Proportionate(label_position) => {
+            node.entries_mut().push(KdlEntry::new_prop(
+                "label_position",
+                format!("{:.2}", label_position),
+            ));
+        }
+        LabelPosition::Absolute(length) => {
+            node.entries_mut().push(KdlEntry::new_prop(
+                "label_position",
+                format!("{:.2}m", length),
+            ));
+        }
     }
 
     serialize_color_to_node(&mut node, &arrow.color);
@@ -492,6 +523,11 @@ fn serialize_color_to_node_named(node: &mut KdlNode, color: &Color, name: Option
 }
 
 fn serialize_material_to_node(node: &mut KdlNode, material: &Material) {
+    let emissivity = material.emissivity.clamp(0.0, 1.0);
+    if emissivity > 0.0 {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("emissivity", emissivity as f64));
+    }
     serialize_color_to_node(node, &material.base_color);
 }
 
@@ -850,6 +886,7 @@ mod tests {
                 eql: "a.world_pos".to_string(),
                 name: Some("Position Graph".to_string()),
                 graph_type: GraphType::Line,
+                locked: false,
                 auto_y_range: true,
                 y_range: 0.0..1.0,
                 aux: (),
@@ -878,6 +915,7 @@ mod tests {
                 eql: "rocket.fins[2], rocket.fins[3]".to_string(),
                 name: None,
                 graph_type: GraphType::Line,
+                locked: false,
                 auto_y_range: true,
                 y_range: 0.0..1.0,
                 aux: (),
@@ -927,9 +965,7 @@ graph "value" {
             eql: "a.world_pos".to_string(),
             mesh: Object3DMesh::Mesh {
                 mesh: Mesh::Sphere { radius: 0.2 },
-                material: Material {
-                    base_color: Color::rgb(1.0, 0.0, 0.0),
-                },
+                material: Material::with_color(Color::rgb(1.0, 0.0, 0.0)),
             },
             aux: (),
         }));
@@ -967,9 +1003,7 @@ graph "value" {
                     width: 15.0,
                     depth: 20.0,
                 },
-                material: Material {
-                    base_color: Color::rgb(0.0, 0.5, 1.0),
-                },
+                material: Material::with_color(Color::rgb(0.0, 0.5, 1.0)),
             },
             aux: (),
         }));
@@ -995,6 +1029,34 @@ graph "value" {
         assert_eq!(material.base_color.r, 0.0);
         assert!((material.base_color.g - 128.0 / 255.0).abs() < f32::EPSILON);
         assert_eq!(material.base_color.b, 1.0);
+    }
+
+    #[test]
+    fn test_serialize_object_3d_material_emissivity() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "a.world_pos".to_string(),
+            mesh: Object3DMesh::Mesh {
+                mesh: Mesh::Sphere { radius: 0.2 },
+                material: Material::color_with_emissivity(1.0, 1.0, 0.0, 0.25),
+            },
+            aux: (),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("emissivity=0.25"),
+            "serialized output should expose emissivity on the mesh node, got:\n{serialized}"
+        );
+
+        let parsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Object3d(obj) = &parsed.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        let Object3DMesh::Mesh { material, .. } = &obj.mesh else {
+            panic!("Expected mesh object");
+        };
+        assert!((material.emissivity - 0.25).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -1050,6 +1112,7 @@ graph "value" {
                 eql: "data.position".to_string(),
                 name: Some("Position".to_string()),
                 graph_type: GraphType::Line,
+                locked: false,
                 auto_y_range: true,
                 y_range: 0.0..1.0,
                 aux: (),
@@ -1121,7 +1184,7 @@ graph "value" {
                 normalize: true,
                 show_name: false,
                 thickness: ArrowThickness::new(1.23456),
-                label_position: 1.0,
+                label_position: LabelPosition::None,
                 aux: (),
             }));
 

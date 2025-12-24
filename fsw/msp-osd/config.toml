@@ -18,9 +18,38 @@ refresh_rate_hz = 20.0
 # Use "ned" when connecting to real aviation hardware with standard conventions.
 coordinate_frame = "enu"
 
+# Character aspect ratio (height/width) for horizon line rendering.
+# HD OSD systems like Walksnail Avatar use ~12x18 pixel characters (ratio 1.5).
+# This compensates for non-square characters so the horizon tilt angle
+# matches the actual aircraft roll angle.
+#
+# Common values:
+#   1.5 - Walksnail Avatar, DJI HD (default)
+#   2.0 - Standard SD analog OSD
+#   1.0 - Square characters (no compensation)
+char_aspect_ratio = 1.5
+
+# Pitch scale in degrees per row for the artificial horizon.
+# Lower values = more sensitive pitch response (horizon moves more per degree).
+# Should be calibrated to match camera vertical FOV for accurate overlay.
+#
+# Formula: pitch_scale ≈ camera_vertical_fov / osd_rows
+# Example: 90° VFOV / 18 rows ≈ 5° per row
+#
+# Common values:
+#   5.0 - ~90° VFOV camera (default, good for Walksnail Avatar)
+#   6.0 - ~108° VFOV camera
+#   4.0 - ~72° VFOV camera (narrower FOV)
+pitch_scale = 5.0
+
 [serial]
 port = "/dev/ttyTHS7"
 baud = 115200
+
+# Automatically start DVR recording on the VTX when msp-osd starts.
+# Uses MSP2_COMMON_SET_RECORDING command (Walksnail Avatar compatible).
+# Only applies when running in serial mode.
+auto_record = false
 
 # Input mappings define how to extract OSD telemetry from Elodin-DB components.
 # Each mapping specifies a component name and the array indices for each value.

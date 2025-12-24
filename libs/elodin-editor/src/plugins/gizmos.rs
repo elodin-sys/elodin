@@ -20,7 +20,7 @@ use big_space::FloatingOriginSettings;
 use impeller2::types::ComponentId;
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::{
-    BodyAxes, Color as WktColor, ComponentValue as WktComponentValue, VectorArrow3d,
+    BodyAxes, Color as WktColor, ComponentValue as WktComponentValue, LabelPosition, VectorArrow3d,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -77,7 +77,7 @@ pub struct EvaluatedVectorArrow {
     pub end: DVec3,
     pub color: Color,
     pub name: Option<String>,
-    pub label_position: f32,
+    pub label_position: LabelPosition,
 }
 
 pub struct GizmoPlugin;
@@ -205,7 +205,7 @@ pub fn evaluate_vector_arrow(
     }
 
     let end_world = start_world + direction;
-    let label_position = arrow.label_position.clamp(0.0, 1.0);
+    let label_position = arrow.label_position.clone();
 
     Some(EvaluatedVectorArrow {
         start: start_world,
@@ -412,16 +412,26 @@ fn render_vector_arrow(
         // Calculate and cache label offset from arrow root for the UI system.
         // Store as offset from arrow start so UI can use arrow's GlobalTransform.
         if arrow.show_name && result.name.is_some() {
-            // Place the label near the arrow tip by biasing toward the end of the vector
-            let label_t = result.label_position.max(0.8);
-            let label_offset = direction_world * label_t;
-            // Keep a small separation to avoid overlapping the head
-            let total_offset = label_offset + dir_norm * 0.08;
-
+            let total_offset = match result.label_position {
+                LabelPosition::Proportionate(label_position) => {
+                    // Place the label near the arrow tip by biasing toward the end of the vector
+                    let label_t = label_position.max(0.8);
+                    let label_offset = direction_world * label_t;
+                    // Keep a small separation to avoid overlapping the head
+                    label_offset + dir_norm * 0.08
+                }
+                LabelPosition::Absolute(length) => {
+                    direction_world.normalize() * length + dir_norm * 0.08
+                }
+                LabelPosition::None => {
+                    let length = 0.1; // meters
+                    direction_world.normalize() * length + dir_norm * 0.08
+                }
+            };
             // Store just the offset from the arrow root
             state.label_grid_pos = Some((0, 0, 0, total_offset));
             state.label_name = result.name.clone();
-            state.label_color = Some(base_color);
+            state.label_color = None;
             state.label_scope = arrow_scope;
         } else {
             state.label_grid_pos = None;
@@ -576,15 +586,6 @@ fn lighten_color(color: Color, factor: f32) -> Color {
 }
 
 /// Convert arrow color to a readable label color (ensure good contrast)
-fn readable_label_color(color: Color) -> Color {
-    let linear = color.to_linear();
-    // Brighten the color for better visibility
-    let r = (linear.red * 1.5 + 0.3).clamp(0.0, 1.0);
-    let g = (linear.green * 1.5 + 0.3).clamp(0.0, 1.0);
-    let b = (linear.blue * 1.5 + 0.3).clamp(0.0, 1.0);
-    Color::linear_rgba(r, g, b, 1.0)
-}
-
 /// Get the window entity from a camera's render target.
 fn window_from_camera_target(
     target: &RenderTarget,
@@ -684,10 +685,10 @@ fn update_arrow_label_ui(
             continue;
         };
 
-        let label_color = arrow_state
-            .label_color
-            .map(readable_label_color)
-            .unwrap_or(Color::WHITE);
+        let label_color = {
+            use crate::ui::colors::ColorExt;
+            crate::ui::colors::get_scheme().text_primary.into_bevy()
+        };
         let label_offset = arrow_state
             .label_grid_pos
             .map(|(_, _, _, offset)| offset)

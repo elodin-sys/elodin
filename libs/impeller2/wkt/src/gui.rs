@@ -14,6 +14,8 @@ use strum::{EnumString, IntoStaticStr, VariantNames};
 #[cfg_attr(feature = "bevy", type_path = "impeller2::wkt::gui::Schematic")]
 pub struct Schematic<T = ()> {
     pub elems: Vec<SchematicElem<T>>,
+    #[serde(default)]
+    pub theme: Option<ThemeConfig>,
 }
 
 #[cfg(feature = "bevy")]
@@ -28,6 +30,7 @@ impl<T> Default for Schematic<T> {
     fn default() -> Self {
         Self {
             elems: Default::default(),
+            theme: None,
         }
     }
 }
@@ -40,6 +43,7 @@ pub enum SchematicElem<T = ()> {
     Line3d(Line3d<T>),
     VectorArrow(VectorArrow3d<T>),
     Window(WindowSchematic),
+    Theme(ThemeConfig),
 }
 
 impl<T> SchematicElem<T> {
@@ -50,6 +54,7 @@ impl<T> SchematicElem<T> {
             SchematicElem::Line3d(line) => SchematicElem::Line3d(line.map_aux(|_| ())),
             SchematicElem::VectorArrow(arrow) => SchematicElem::VectorArrow(arrow.map_aux(|_| ())),
             SchematicElem::Window(window) => SchematicElem::Window(window),
+            SchematicElem::Theme(theme) => SchematicElem::Theme(theme.clone()),
         }
     }
 }
@@ -70,6 +75,12 @@ pub struct WindowSchematic {
     pub screen: Option<u32>,
     #[serde(default)]
     pub screen_rect: Option<WindowRect>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct ThemeConfig {
+    pub mode: Option<String>,
+    pub scheme: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -249,6 +260,8 @@ pub struct Graph<T = ()> {
     pub name: Option<String>,
     #[serde(default)]
     pub graph_type: GraphType,
+    #[serde(default)]
+    pub locked: bool,
     pub auto_y_range: bool,
     pub y_range: Range<f64>,
     pub aux: T,
@@ -261,6 +274,7 @@ impl<T> Graph<T> {
             eql: self.eql.clone(),
             name: self.name.clone(),
             graph_type: self.graph_type,
+            locked: self.locked,
             auto_y_range: self.auto_y_range,
             y_range: self.y_range.clone(),
             aux: f(&self.aux),
@@ -326,8 +340,20 @@ pub struct VectorArrow3d<T = ()> {
     #[serde(default = "VectorArrow3d::<T>::default_thickness")]
     pub thickness: ArrowThickness,
     #[serde(default = "VectorArrow3d::<T>::default_label_position")]
-    pub label_position: f32,
+    pub label_position: LabelPosition,
     pub aux: T,
+}
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+/// The position of a label.
+pub enum LabelPosition {
+    /// No label position.
+    #[default]
+    None,
+    /// A value from [0, 1] meant to represent some proportion of a whole.
+    Proportionate(f32),
+    /// An absolute magnitude in meters.
+    Absolute(f32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -454,8 +480,8 @@ impl<T> VectorArrow3d<T> {
         ArrowThickness::default()
     }
 
-    fn default_label_position() -> f32 {
-        1.0
+    fn default_label_position() -> LabelPosition {
+        LabelPosition::default()
     }
 
     pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> VectorArrow3d<U> {
@@ -469,7 +495,7 @@ impl<T> VectorArrow3d<T> {
             normalize: self.normalize,
             show_name: self.show_name,
             thickness: self.thickness,
-            label_position: self.label_position,
+            label_position: self.label_position.clone(),
             aux: f(&self.aux),
         }
     }
@@ -529,22 +555,40 @@ impl Asset for Glb {
     const NAME: &'static str = "glb";
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Material {
     pub base_color: Color,
+    #[serde(default)]
+    pub emissivity: f32,
 }
 
 impl Material {
     pub fn color(r: f32, g: f32, b: f32) -> Self {
         Material {
             base_color: Color::rgb(r, g, b),
+            emissivity: 0.0,
         }
     }
 
     pub fn color_with_alpha(r: f32, g: f32, b: f32, a: f32) -> Self {
         Material {
             base_color: Color::rgba(r, g, b, a),
+            emissivity: 0.0,
+        }
+    }
+
+    pub fn color_with_emissivity(r: f32, g: f32, b: f32, emissivity: f32) -> Self {
+        Material {
+            base_color: Color::rgb(r, g, b),
+            emissivity,
+        }
+    }
+
+    pub fn with_color(color: Color) -> Self {
+        Material {
+            base_color: color,
+            emissivity: 0.0,
         }
     }
 }

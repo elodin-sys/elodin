@@ -16,7 +16,14 @@ order = 6
 
 - Top-level nodes: `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `window`.
 - EQL: expressions are evaluated in the runtime EQL context. Vector-like fields expect 3 components; `world_pos` is a 7-component array (quat + position).
-- Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `red`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional; can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
+- Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `red`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional. Colors can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
+
+### theme
+- Optional top-level node that sets the session UI appearance.
+- `mode`: `"dark"` (default) or `"light"`; drives window decorations and picks the dark/light variant of the color scheme. If a preset does not ship a light variant, the theme stays in dark.
+- `scheme`: name of a color preset. Built-ins are `default`, `eggplant`, `catppuccini-macchiato`, `catppuccini-mocha`, `catppuccini-latte`, and `matrix`; user presets are picked up from any `color_schemes` folder in the asset directory or data directory. Unknown names fall back to `default`. If a user preset shares a name with a built-in, the user version wins. See [color-schemes](./color-schemes.md) for the file layout.
+- Applies to the whole session; a secondary file can set its own `mode` for its windows, but the active scheme stays the one from the primary schematic.
+- Controls both egui styling (palette) and the window decoration theme (Dark/Light).
 
 ### window
 - `path`/`file`/`name`: optional secondary schematic file. Relative paths resolve against the parent schematic directory (or CWD). If absent, the entry configures the primary window instead of loading a secondary file.
@@ -30,7 +37,7 @@ order = 6
 
 ### panel content
 - `viewport`: `fov` (default 45.0), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `hdr` (default false), `name` (optional label), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera.
-- `graph`: positional `eql` (required), `name` (optional), `type` (`line`/`point`/`bar`, default `line`), `auto_y_range` (default true), `y_min`/`y_max` (default `0.0..1.0`), child `color` nodes (optional list; otherwise palette).
+- `graph`: positional `eql` (required), `name` (optional), `type` (`line`/`point`/`bar`, default `line`), `lock` (default false), `auto_y_range` (default true), `y_min`/`y_max` (default `0.0..1.0`), child `color` nodes (optional list; otherwise palette).
 - `component_monitor`: `component_name` (required).
 - `action_pane`: positional `label` (required), `lua` script (required).
 - `query_table`: positional `query` (defaults to empty), `type` (`eql` default, or `sql`).
@@ -48,6 +55,8 @@ order = 6
   - `plane`: `width`/`depth` (default `size` if set, else 10.0); optional `size` shorthand; `color` (default white).
   - `ellipsoid`: `scale` (EQL string, default `"(1, 1, 1)"`), `color` (default white).
 
+  Mesh nodes support an optional `emissivity=<value>` property (0.0–1.0) to make the material glow (e.g., `sphere radius=0.2 emissivity=0.25 { color yellow }`).
+
 ### line_3d
 - Positional `eql`: required; expects 3 values (or 7 where the last 3 are XYZ).
 - `line_width`: default 1.0.
@@ -64,7 +73,9 @@ order = 6
 - `name`: label text; used for legend/overlay (optional).
 - `show_name`: show/hide overlay label (default true).
 - `arrow_thickness`: numeric thickness multiplier with 3-decimal precision (default `0.1`).
-- `label_position`: 0.0–1.0 along the arrow (0=base, 1=tip) for label anchor (default 1.0).
+- `label_position`: proportionately 0.0–1.0 along the arrow (0=base, 1=tip) for
+   label anchor, or absolutely by specifying a number in a string with an 'm'
+   suffix, .e.g., "0.3m" for 0.3 meters from origin (default "0.1m").
 
 ## Schema at a glance
 
@@ -72,12 +83,17 @@ Legend: parentheses group alternatives; `|` means “or”; square brackets `[..
 
 ```kdl
 schematic =
-  ( window
+  ( theme
+  | window
   | panel
   | object_3d
   | line_3d
   | vector_arrow
   )*
+
+theme = "theme"
+      [mode=dark|light]
+      [scheme=string]
 
 window = "window"
        [path|file|name=string]
@@ -115,11 +131,12 @@ viewport = "viewport"
          [name=string]
          [pos=eql]
          [look_at=eql]
-         { vector_arrow }        ; optional local arrows render only in this viewport
+         { vector_arrow }
 
 graph = "graph" eql
       [name=string]
       [type=line|point|bar]
+      [lock=bool]
       [auto_y_range=bool]
       [y_min=float]
       [y_max=float]
@@ -158,6 +175,7 @@ object_3d = "object_3d"
           | plane
           | ellipsoid
           }
+          [emissivity=float]
 
 line_3d = "line_3d"
         <eql>
@@ -188,6 +206,8 @@ color = "color"
 Minimal viewport + graph:
 
 ```kdl
+theme mode="light" scheme="matrix"
+
 viewport name="Main"
          fov=45.0
          active=#true

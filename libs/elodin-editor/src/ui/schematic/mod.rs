@@ -4,7 +4,7 @@ use crate::{
     GridHandle,
     object_3d::Object3DState,
     ui::{
-        HdrEnabled, actions,
+        HdrEnabled, actions, colors,
         colors::EColor,
         inspector, plot, query_plot, query_table,
         tiles::{self, Pane},
@@ -156,6 +156,7 @@ impl SchematicParam<'_, '_> {
                         eql,
                         name: Some(graph_state.label.clone()),
                         graph_type: graph_state.graph_type,
+                        locked: graph_state.locked,
                         auto_y_range: graph_state.auto_y_range,
                         y_range: graph_state.y_range.clone(),
                         aux: graph.id,
@@ -187,6 +188,7 @@ impl SchematicParam<'_, '_> {
 
                 // Not exported
                 Pane::VideoStream(_) => None,
+                Pane::DataOverview(_) => None,
 
                 // Structural panes
                 Pane::Hierarchy => Some(Panel::Hierarchy),
@@ -325,6 +327,15 @@ pub fn tiles_to_schematic(
     }
 
     schematic.elems.extend(window_elems);
+    if let Ok((state, _)) = param.windows_state.get(*param.primary_window)
+        && let Some(mode) = state.descriptor.mode.clone()
+    {
+        let selection = colors::current_selection();
+        schematic.theme = Some(impeller2_wkt::ThemeConfig {
+            mode: Some(mode),
+            scheme: Some(selection.scheme),
+        });
+    }
 }
 
 pub struct SchematicPlugin;

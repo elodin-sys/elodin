@@ -19,6 +19,26 @@ impl ComponentMetadata {
             .map(|v| v.as_str())
             .unwrap_or_default()
     }
+
+    /// Returns true if this component is a timestamp source field.
+    /// Timestamp source components contain raw clock values used as timestamps
+    /// for other components, and should be excluded from time range calculations.
+    pub fn is_timestamp_source(&self) -> bool {
+        self.metadata
+            .get("_is_timestamp_source")
+            .map(|v| v == "true")
+            .unwrap_or(false)
+    }
+
+    /// Marks this component as a timestamp source field.
+    pub fn set_timestamp_source(&mut self, is_source: bool) {
+        if is_source {
+            self.metadata
+                .insert("_is_timestamp_source".to_string(), "true".to_string());
+        } else {
+            self.metadata.remove("_is_timestamp_source");
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Schema)]

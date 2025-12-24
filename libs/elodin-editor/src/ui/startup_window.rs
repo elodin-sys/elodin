@@ -1,7 +1,8 @@
 use bevy::{
     ecs::system::SystemParam,
     prelude::*,
-    window::{EnabledButtons, PrimaryWindow, WindowResolution, WindowTheme},
+    render::camera::RenderTarget,
+    window::{EnabledButtons, PrimaryWindow, WindowRef, WindowResolution},
 };
 use bevy_egui::EguiContexts;
 use egui::{Color32, CornerRadius, RichText, Stroke, load::SizedTexture};
@@ -19,13 +20,13 @@ use std::{
     sync::Arc,
 };
 
-use crate::{VERSION, dirs, ui::DEFAULT_PRESENT_MODE};
+use crate::{VERSION, create_egui_context, dirs, ui::base_window};
 
 use super::{
     button::EButton,
     colors::{self, ColorExt, get_scheme},
     images,
-    theme::{self, corner_radius_sm},
+    theme::corner_radius_sm,
     widgets::{RootWidgetSystem, RootWidgetSystemExt},
 };
 
@@ -39,13 +40,9 @@ fn create_startup_window(
 ) {
     commands.insert_resource(recent_files());
     if status.status() == ConnectionStatus::NoConnection {
-        let composite_alpha_mode = if cfg!(target_os = "macos") {
-            bevy::window::CompositeAlphaMode::PostMultiplied
-        } else {
-            bevy::window::CompositeAlphaMode::Opaque
-        };
+        let egui_context = create_egui_context();
 
-        commands.spawn((
+        let mut window = commands.spawn((
             Window {
                 title: "Elodin".to_owned(),
                 resolution: WindowResolution::new(730.0, 470.0),
@@ -55,18 +52,24 @@ fn create_startup_window(
                     max_width: 730.0,
                     max_height: 470.0,
                 },
-                present_mode: DEFAULT_PRESENT_MODE,
-                window_theme: Some(WindowTheme::Dark),
                 enabled_buttons: EnabledButtons {
                     minimize: false,
                     maximize: false,
                     close: true,
                 },
-                composite_alpha_mode,
-                ..Default::default()
+                ..base_window()
             },
             StartupWindow,
+            egui_context,
+            Camera2d,
         ));
+
+        let camera = Camera {
+            target: RenderTarget::Window(WindowRef::Entity(window.id())),
+            ..Default::default()
+        };
+
+        window.insert(camera);
     } else if let Ok(mut primary) = primary.single_mut() {
         primary.visible = true
     }
@@ -270,7 +273,6 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
             .contexts
             .add_image(state.images.icon_ip_addr.clone_weak());
 
-        theme::set_theme(ctx);
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
