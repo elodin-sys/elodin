@@ -739,6 +739,8 @@ IMPORTANT:
                     # Getting worse after a few iterations, use best config
                     config = best_config.copy()
                     motor = config.get("motor")
+                    # Update local body_radius to match restored config
+                    body_radius = config["body_radius"]
                     # Recalculate mass for final config
                     mass_breakdown = self._calculate_comprehensive_mass(config, requirements)
                     config["dry_mass"] = mass_breakdown["total_dry_mass"]
@@ -973,7 +975,8 @@ IMPORTANT:
         # Nosecone shape (default to VON_KARMAN for efficiency)
         config["nose_shape"] = "VON_KARMAN"  # Can be expanded later based on requirements
 
-        # Thickness based on size
+        # Thickness based on size - use config value to ensure consistency
+        body_radius = config.get("body_radius", body_radius)
         if body_radius > 0.05:
             thickness = 0.003
         else:
