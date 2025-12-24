@@ -23,7 +23,7 @@ from .atmospheric_models import (
     NRLMSISE_AVAILABLE,
     NETCDF_AVAILABLE,
 )
-from dynamic_wind import DynamicWindModel
+from .dynamic_wind import DynamicWindModel
 
 
 @dataclass

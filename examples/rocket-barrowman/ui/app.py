@@ -40,7 +40,7 @@ from core.openrocket_components import (
 )
 from core.openrocket_motor import Motor as ORMotor
 from core.motor_scraper import ThrustCurveScraper
-from calisto_builder import build_calisto
+from core.calisto_builder import build_calisto
 from ui.rocket_visualizer import visualize_rocket_3d, visualize_rocket_2d_side_view
 from optimization.ai_rocket_builder import RocketDesigner
 from optimization.smart_optimizer import SmartOptimizer

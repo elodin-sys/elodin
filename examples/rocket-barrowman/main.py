@@ -35,7 +35,7 @@ except ImportError:
 
 # Import our rocket simulation
 from core import Environment, Motor, Rocket as RocketModel, FlightSolver, FlightResult
-from calisto_builder import build_calisto
+from core.calisto_builder import build_calisto
 from analysis import FlightAnalyzer
 
 # Try to import mesh renderer for Elodin visualization

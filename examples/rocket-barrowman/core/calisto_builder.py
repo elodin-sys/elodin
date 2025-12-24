@@ -1,14 +1,19 @@
 """
-Build the Calisto rocket matching RocketPy's getting_started.ipynb exactly.
+Calisto Rocket Builder - Default rocket configuration.
 
-Specifications from RocketPy:
-- Radius: 127/2000 = 0.0635 m
+This module provides the default Calisto rocket configuration, matching
+RocketPy's getting_started.ipynb specifications. The Calisto is a well-documented
+educational rocket used for validation and testing.
+
+Specifications:
+- Radius: 127/2000 = 0.0635 m (127 mm diameter)
 - Mass: 14.426 kg (without motor)
 - Inertia: (6.321, 6.321, 0.034) kg·m²
 - Motor: Cesaroni M1670 at position -1.255 m
-- Nose: von Karman, 0.55829 m length, position 1.278 m
-- Fins: 4x trapezoidal, root=0.120m, tip=0.060m, span=0.110m, position=-1.04956m
-- Tail: top_radius=0.0635m, bottom_radius=0.0435m, length=0.060m, position=-1.194656m
+- Nose: von Karman, 0.55829 m length
+- Fins: 4x trapezoidal, root=0.120m, tip=0.060m, span=0.110m
+- Tail: Transition (boat tail), length=0.060m
+- Expected apogee: ~3350 m with M1670 motor
 """
 
 import math
@@ -25,7 +30,7 @@ from core.openrocket_components import (
     TrapezoidFinSet,
     Transition,
 )
-from core.openrocket_motor import Motor as ORMotor
+from .openrocket_motor import Motor as ORMotor
 
 
 def build_calisto_rocket():
@@ -232,15 +237,26 @@ def build_calisto_rocket():
 
 def build_cesaroni_m1670():
     """
-    Create Cesaroni M1670 motor matching RocketPy specs.
+    Create Cesaroni M1670 motor matching RocketPy specifications.
 
-    Specs from RocketPy:
-    - Dry mass: 1.815 kg
+    The M1670 is a high-performance M-class motor commonly used with the Calisto
+    rocket for educational demonstrations.
+
+    Specifications:
+    - Designation: M1670
+    - Manufacturer: Cesaroni Technology
+    - Diameter: 75 mm
+    - Length: 0.640 m
+    - Dry mass: 1.815 kg (case)
     - Propellant mass: 2.956 kg
+    - Total mass: 4.771 kg
     - Burn time: 3.9 s
     - Max thrust: 2200 N (at 0.15s)
-    - Total impulse: 6026 Ns
-    - Average thrust: 1545 N
+    - Total impulse: ~6026 N·s
+    - Average thrust: ~1545 N
+
+    Returns:
+        Motor: Configured M1670 motor object
     """
 
     # Thrust curve from RocketPy M1670 profile
@@ -318,7 +334,20 @@ def build_cesaroni_m1670():
 
 
 def build_calisto():
-    """Build complete Calisto rocket with M1670 motor."""
+    """
+    Build complete Calisto rocket system with M1670 motor.
+
+    This is the main entry point for creating a fully configured Calisto rocket
+    ready for simulation. It combines the rocket structure with the default motor.
+
+    Returns:
+        tuple: (Rocket, Motor) - Complete rocket and motor objects
+
+    Example:
+        >>> rocket, motor = build_calisto()
+        >>> print(f"Rocket mass: {rocket.get_total_mass():.2f} kg")
+        >>> print(f"Motor impulse: {motor.total_impulse:.0f} N·s")
+    """
     rocket = build_calisto_rocket()
     motor = build_cesaroni_m1670()
     return rocket, motor

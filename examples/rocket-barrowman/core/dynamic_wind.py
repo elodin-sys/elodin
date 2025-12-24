@@ -1,13 +1,21 @@
-"""Dynamic wind model inspired by RocketPy's implementation.
+"""
+Dynamic Wind Model - Deterministic wind field for rocket simulations.
 
-This module provides a deterministic wind field that captures:
-- Altitude dependent mean wind profile (power law or custom profile points)
+This module provides a sophisticated wind model that captures:
+- Altitude-dependent mean wind profile (power law or custom profile points)
 - Directional shear with altitude
-- Deterministic pseudo-gusts along, cross and vertical components using
-  sinusoidal harmonics (similar in spirit to RocketPy's Dryden-based gust model)
+- Deterministic pseudo-gusts using sinusoidal harmonics
+- Time-varying wind components
 
-The model intentionally avoids random numbers inside the simulation loop so that
-it can be integrated with JAX/Elodin without breaking purity assumptions.
+The model is deterministic (no random numbers in simulation loop) to enable
+integration with JAX/Elodin for differentiable simulations and Monte Carlo analysis.
+
+Features:
+- Power-law wind profile (1/7 rule by default)
+- Custom wind profile from measurement data
+- Deterministic gust model (similar to RocketPy's Dryden model)
+- Altitude-dependent turbulence decay
+- Support for vertical wind components (updrafts/downdrafts)
 """
 
 from __future__ import annotations
@@ -196,7 +204,24 @@ class DynamicWindModel:
     # ------------------------------------------------------------------
 
     def get_wind(self, altitude: float, time: float) -> Tuple[float, float, float]:
-        """Compute wind vector (north, east, up) at a given altitude and time."""
+        """
+        Compute wind velocity vector at given altitude and time.
+
+        Args:
+            altitude: Altitude above ground level (m)
+            time: Simulation time (s)
+
+        Returns:
+            Tuple of (north, east, up) wind velocity components (m/s)
+            - north: Wind component in north direction (positive = northward)
+            - east: Wind component in east direction (positive = eastward)
+            - up: Vertical wind component (positive = upward)
+
+        Example:
+            >>> wind = DynamicWindModel(surface_speed=5.0, surface_direction_deg=90.0)
+            >>> v_north, v_east, v_up = wind.get_wind(altitude=100.0, time=10.0)
+            >>> print(f"Wind at 100m: {v_east:.2f} m/s eastward")
+        """
 
         north_mean, east_mean, up_mean = self._mean_components(altitude)
         base_speed = math.hypot(north_mean, east_mean)
