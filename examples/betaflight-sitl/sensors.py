@@ -207,17 +207,17 @@ def extract_sensor_data(
 ) -> dict:
     """
     Extract and format sensor data for Betaflight communication.
-    
+
     This function takes raw sensor values and prepares them for
     transmission to Betaflight SITL via the UDP bridge.
-    
+
     Args:
         world_pos: Position [qx, qy, qz, qw, x, y, z] (Elodin scalar-last format)
         world_vel: Velocity [wx, wy, wz, vx, vy, vz] (angular first in Elodin)
         accel: Accelerometer [ax, ay, az] in body frame
         gyro: Gyroscope [wx, wy, wz] in body frame
         baro: Barometer [altitude]
-        
+
     Returns:
         Dictionary with formatted sensor data for FDM packet
     """
