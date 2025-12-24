@@ -286,7 +286,7 @@ class SmartOptimizer:
 
         return req
 
-    def _get_tube_for_motor(self, motor_diameter: float, prefer_smaller: bool = True) -> Dict:
+    def _get_tube_for_motor(self, motor_diameter: float, prefer_smaller: bool = True) -> Optional[Dict]:
         """Get tube that fits a motor.
 
         Constraint: Body tube outer diameter (OD) must be >= motor diameter.
