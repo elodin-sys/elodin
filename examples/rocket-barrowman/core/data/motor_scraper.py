@@ -91,10 +91,14 @@ class ThrustCurveScraper:
                             else str(motor.get("manufacturer", "Unknown")),
                             "diameter": motor.get("diameter", 0.0) / 1000.0,  # mm to m
                             "length": motor.get("length", 0.0) / 1000.0,  # mm to m
-                            "totalImpulse": motor.get("totalImpulse", 0.0),
-                            "avgThrust": motor.get("avgThrust", 0.0),
-                            "maxThrust": motor.get("maxThrust", 0.0),
-                            "burnTime": motor.get("burnTime", 0.0),
+                            "totalImpulse": motor.get("totalImpulse", 0.0) or motor.get("totImpulseNs", 0.0),
+                            "avgThrust": motor.get("avgThrust", 0.0) or motor.get("avgThrustN", 0.0),
+                            "maxThrust": motor.get("maxThrust", 0.0) or motor.get("maxThrustN", 0.0),
+                            "burnTime": motor.get("burnTime", 0.0) or motor.get("burnTimeS", 0.0),
+                            # API returns weights in grams, convert to kg
+                            "totalWeightG": motor.get("totalWeightG", 0.0),
+                            "propWeightG": motor.get("propWeightG", 0.0),
+                            # Also check for old field names (in kg)
                             "propellantMass": motor.get("propellantMass", 0.0),
                             "totalMass": motor.get("totalMass", 0.0),
                             "caseMass": motor.get("caseMass", 0.0),
@@ -267,23 +271,43 @@ class ThrustCurveScraper:
                 diameter = motor_info.get("diameter", 0.0) / 1000.0
                 length = motor_info.get("length", 0.0) / 1000.0
 
-            # Extract mass data - try both camelCase and snake_case, and both sources
-            # Mass data might be in search_result or download_result
-            total_mass = (
-                motor_info.get("totalMass") or 
-                motor_info.get("total_mass") or 
-                0.0
-            )
-            propellant_mass = (
-                motor_info.get("propellantMass") or 
-                motor_info.get("propellant_mass") or 
-                0.0
-            )
-            case_mass = (
-                motor_info.get("caseMass") or 
-                motor_info.get("case_mass") or 
-                0.0
-            )
+            # Extract mass data - API returns totalWeightG and propWeightG in grams
+            # Convert to kg, or use existing kg values if present
+            total_weight_g = motor_info.get("totalWeightG") or motor_info.get("total_weight_g")
+            prop_weight_g = motor_info.get("propWeightG") or motor_info.get("prop_weight_g")
+            
+            if total_weight_g and total_weight_g > 0:
+                # Convert from grams to kg
+                total_mass = total_weight_g / 1000.0
+            else:
+                # Fallback to kg values if grams not available
+                total_mass = (
+                    motor_info.get("totalMass") or 
+                    motor_info.get("total_mass") or 
+                    0.0
+                )
+            
+            if prop_weight_g and prop_weight_g > 0:
+                # Convert from grams to kg
+                propellant_mass = prop_weight_g / 1000.0
+            else:
+                # Fallback to kg values if grams not available
+                propellant_mass = (
+                    motor_info.get("propellantMass") or 
+                    motor_info.get("propellant_mass") or 
+                    0.0
+                )
+            
+            # Case mass: if we have total and propellant, calculate it
+            if total_mass > 0 and propellant_mass > 0:
+                case_mass = total_mass - propellant_mass
+            else:
+                # Fallback to existing case mass or estimate
+                case_mass = (
+                    motor_info.get("caseMass") or 
+                    motor_info.get("case_mass") or 
+                    0.0
+                )
 
             # If mass data is missing, estimate from impulse, diameter, and length
             if total_mass <= 0 or propellant_mass <= 0:
