@@ -1333,7 +1333,7 @@ def visualize_results(result: FlightResult, solver: Optional[FlightSolver] = Non
         st.session_state.current_analysis_tab = "Trajectory"
 
     # Comprehensive analysis tabs
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
         [
             "📈 Trajectory",
             "⚡ Performance",
@@ -1342,6 +1342,7 @@ def visualize_results(result: FlightResult, solver: Optional[FlightSolver] = Non
             "📊 Dynamics",
             "🔬 Advanced",
             "🌍 3D Path",
+            "🌤️ Environment",
         ]
     )
 
@@ -2930,6 +2931,332 @@ def visualize_results(result: FlightResult, solver: Optional[FlightSolver] = Non
         )
         st.plotly_chart(fig, use_container_width=True)
 
+    with tab8:  # Environment
+        st.markdown("### 🌤️ Environment Analysis")
+        st.caption("Atmospheric conditions, wind profiles, and environmental factors")
+
+        solver = st.session_state.get("solver", None)
+        if solver and solver.environment:
+            env = solver.environment
+
+            # Environment info cards
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.markdown(
+                    f"""
+                <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; border-left: 3px solid {COLORS["primary"]};">
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">Elevation</div>
+                    <div style="font-size: 1.2rem; font-weight: 600; margin-top: 0.5rem;">{env.elevation:.0f} m</div>
+                </div>
+                """,
+                    unsafe_allow_html=True,
+                )
+
+            with col2:
+                atmosphere_type = type(env.atmosphere).__name__
+                st.markdown(
+                    f"""
+                <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; border-left: 3px solid {COLORS["secondary"]};">
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">Atmospheric Model</div>
+                    <div style="font-size: 1.0rem; font-weight: 600; margin-top: 0.5rem;">{atmosphere_type}</div>
+                </div>
+                """,
+                    unsafe_allow_html=True,
+                )
+
+            with col3:
+                wind_type = type(env.wind_model).__name__
+                st.markdown(
+                    f"""
+                <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; border-left: 3px solid {COLORS["success"]};">
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">Wind Model</div>
+                    <div style="font-size: 1.0rem; font-weight: 600; margin-top: 0.5rem;">{wind_type}</div>
+                </div>
+                """,
+                    unsafe_allow_html=True,
+                )
+
+            with col4:
+                # Check if weather data is being used
+                has_weather = "Weather" in atmosphere_type or "Hybrid" in atmosphere_type
+                status = "✓ Real Data" if has_weather else "ISA Model"
+                status_color = COLORS["success"] if has_weather else COLORS["text_muted"]
+                st.markdown(
+                    f"""
+                <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; border-left: 3px solid {status_color};">
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">Data Source</div>
+                    <div style="font-size: 1.0rem; font-weight: 600; margin-top: 0.5rem;">{status}</div>
+                </div>
+                """,
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown("---")
+
+            # Atmospheric properties profile
+            st.markdown("#### Atmospheric Properties Profile")
+            altitudes_profile = np.linspace(0, max(altitudes) if len(altitudes) > 0 else 30000, 100)
+            temperatures = []
+            pressures = []
+            densities = []
+            speeds_of_sound = []
+
+            for alt in altitudes_profile:
+                props = env.air_properties(alt)
+                temperatures.append(props["temperature"])
+                pressures.append(props["pressure"] / 1000.0)  # Convert to kPa
+                densities.append(props["density"])
+                speeds_of_sound.append(props["speed_of_sound"])
+
+            # Temperature profile
+            col1, col2 = st.columns(2)
+            with col1:
+                fig = go.Figure()
+                fig.add_trace(
+                    go.Scatter(
+                        x=temperatures,
+                        y=altitudes_profile / 1000.0,  # Convert to km
+                        mode="lines",
+                        name="Temperature",
+                        line=dict(color=COLORS["primary"], width=3),
+                        fill="tozerox",
+                        fillcolor="rgba(0, 212, 255, 0.1)",
+                    )
+                )
+                fig.update_layout(
+                    **create_chart_layout("Temperature Profile", "Temperature (K)", "Altitude (km)")
+                )
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+
+            with col2:
+                fig = go.Figure()
+                fig.add_trace(
+                    go.Scatter(
+                        x=pressures,
+                        y=altitudes_profile / 1000.0,
+                        mode="lines",
+                        name="Pressure",
+                        line=dict(color=COLORS["secondary"], width=3),
+                        fill="tozerox",
+                        fillcolor="rgba(123, 47, 255, 0.1)",
+                    )
+                )
+                fig.update_layout(
+                    **create_chart_layout("Pressure Profile", "Pressure (kPa)", "Altitude (km)")
+                )
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+
+            # Density and speed of sound
+            col1, col2 = st.columns(2)
+            with col1:
+                fig = go.Figure()
+                fig.add_trace(
+                    go.Scatter(
+                        x=densities,
+                        y=altitudes_profile / 1000.0,
+                        mode="lines",
+                        name="Density",
+                        line=dict(color=COLORS["success"], width=3),
+                        fill="tozerox",
+                        fillcolor="rgba(0, 255, 127, 0.1)",
+                    )
+                )
+                fig.update_layout(
+                    **create_chart_layout("Density Profile", "Density (kg/m³)", "Altitude (km)")
+                )
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+
+            with col2:
+                fig = go.Figure()
+                fig.add_trace(
+                    go.Scatter(
+                        x=speeds_of_sound,
+                        y=altitudes_profile / 1000.0,
+                        mode="lines",
+                        name="Speed of Sound",
+                        line=dict(color=COLORS["warning"], width=3),
+                        fill="tozerox",
+                        fillcolor="rgba(255, 193, 7, 0.1)",
+                    )
+                )
+                fig.update_layout(
+                    **create_chart_layout(
+                        "Speed of Sound Profile", "Speed of Sound (m/s)", "Altitude (km)"
+                    )
+                )
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+
+            # Wind profile
+            st.markdown("#### Wind Profile")
+            wind_altitudes = altitudes_profile
+            wind_speeds = []
+            wind_directions = []
+            wind_u = []
+            wind_v = []
+            wind_w = []
+
+            for alt in wind_altitudes:
+                wind = env.wind_velocity(alt, 0.0)  # Use t=0 for static profile
+                wind_u.append(wind[0])
+                wind_v.append(wind[1])
+                wind_w.append(wind[2])
+                wind_speed = np.sqrt(wind[0] ** 2 + wind[1] ** 2 + wind[2] ** 2)
+                wind_speeds.append(wind_speed)
+                wind_direction = np.degrees(np.arctan2(wind[1], wind[0]))
+                wind_directions.append(wind_direction)
+
+            col1, col2 = st.columns(2)
+            with col1:
+                fig = go.Figure()
+                fig.add_trace(
+                    go.Scatter(
+                        x=wind_speeds,
+                        y=wind_altitudes / 1000.0,
+                        mode="lines",
+                        name="Wind Speed",
+                        line=dict(color=COLORS["primary"], width=3),
+                        fill="tozerox",
+                        fillcolor="rgba(0, 212, 255, 0.1)",
+                    )
+                )
+                fig.update_layout(
+                    **create_chart_layout("Wind Speed Profile", "Wind Speed (m/s)", "Altitude (km)")
+                )
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+
+            with col2:
+                fig = go.Figure()
+                fig.add_trace(
+                    go.Scatter(
+                        x=wind_directions,
+                        y=wind_altitudes / 1000.0,
+                        mode="lines",
+                        name="Wind Direction",
+                        line=dict(color=COLORS["secondary"], width=3),
+                    )
+                )
+                fig.update_layout(
+                    **create_chart_layout(
+                        "Wind Direction Profile", "Direction (deg)", "Altitude (km)"
+                    )
+                )
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+
+            # Wind components
+            st.markdown("#### Wind Components")
+            fig = go.Figure()
+            fig.add_trace(
+                go.Scatter(
+                    x=wind_u,
+                    y=wind_altitudes / 1000.0,
+                    mode="lines",
+                    name="U (East)",
+                    line=dict(color=COLORS["primary"], width=2),
+                )
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=wind_v,
+                    y=wind_altitudes / 1000.0,
+                    mode="lines",
+                    name="V (North)",
+                    line=dict(color=COLORS["success"], width=2),
+                )
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=wind_w,
+                    y=wind_altitudes / 1000.0,
+                    mode="lines",
+                    name="W (Up)",
+                    line=dict(color=COLORS["warning"], width=2),
+                )
+            )
+            fig.update_layout(
+                **create_chart_layout("Wind Components", "Wind Velocity (m/s)", "Altitude (km)")
+            )
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Flight conditions during simulation
+            if len(history) > 0:
+                st.markdown("#### Flight Conditions During Simulation")
+                flight_temps = []
+                flight_densities = []
+                flight_winds = []
+
+                for snapshot in history:
+                    alt = snapshot.z
+                    props = env.air_properties(alt)
+                    flight_temps.append(props["temperature"])
+                    flight_densities.append(props["density"])
+                    wind = env.wind_velocity(alt, snapshot.time)
+                    flight_winds.append(np.sqrt(wind[0] ** 2 + wind[1] ** 2 + wind[2] ** 2))
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    fig = go.Figure()
+                    fig.add_trace(
+                        go.Scatter(
+                            x=times,
+                            y=flight_temps,
+                            mode="lines",
+                            name="Temperature",
+                            line=dict(color=COLORS["primary"], width=2),
+                        )
+                    )
+                    fig.update_layout(
+                        **create_chart_layout(
+                            "Temperature During Flight", "Time (s)", "Temperature (K)"
+                        )
+                    )
+                    fig.update_layout(height=300)
+                    st.plotly_chart(fig, use_container_width=True)
+
+                with col2:
+                    fig = go.Figure()
+                    fig.add_trace(
+                        go.Scatter(
+                            x=times,
+                            y=flight_densities,
+                            mode="lines",
+                            name="Density",
+                            line=dict(color=COLORS["secondary"], width=2),
+                        )
+                    )
+                    fig.update_layout(
+                        **create_chart_layout(
+                            "Density During Flight", "Time (s)", "Density (kg/m³)"
+                        )
+                    )
+                    fig.update_layout(height=300)
+                    st.plotly_chart(fig, use_container_width=True)
+
+                fig = go.Figure()
+                fig.add_trace(
+                    go.Scatter(
+                        x=times,
+                        y=flight_winds,
+                        mode="lines",
+                        name="Wind Speed",
+                        line=dict(color=COLORS["warning"], width=2),
+                    )
+                )
+                fig.update_layout(
+                    **create_chart_layout("Wind Speed During Flight", "Time (s)", "Wind Speed (m/s)")
+                )
+                fig.update_layout(height=300)
+                st.plotly_chart(fig, use_container_width=True)
+
+        else:
+            st.info("Environment analysis requires solver data. Run a simulation first.")
+
 
 def launch_elodin_editor(result: FlightResult, solver: FlightSolver):
     """Launch Elodin editor with simulation results."""
@@ -3464,6 +3791,56 @@ def render_sidebar():
         render_divider()
         st.markdown("### 🌍 Environment")
 
+        # Weather data configuration
+        use_weather_data = st.checkbox(
+            "Use Real Weather Data",
+            value=False,
+            help="Fetch weather data from ECMWF ERA5 based on location and date/time. Requires CDS API credentials.",
+        )
+
+        if use_weather_data:
+            st.markdown("#### 📅 Launch Date & Time")
+            launch_date = st.date_input("Launch Date", value=None)
+            launch_time = st.time_input("Launch Time", value=None)
+
+            st.markdown("#### 📍 Launch Coordinates")
+            col_lat, col_lon = st.columns(2)
+            with col_lat:
+                latitude = st.number_input(
+                    "Latitude (°)",
+                    -90.0,
+                    90.0,
+                    33.0,
+                    0.1,
+                    help="Latitude in degrees (-90 to 90). Spaceport America: 33.0°N",
+                )
+            with col_lon:
+                longitude = st.number_input(
+                    "Longitude (°)",
+                    -180.0,
+                    180.0,
+                    -106.5,
+                    0.1,
+                    help="Longitude in degrees (-180 to 180). Spaceport America: -106.5°W",
+                )
+
+            use_nrlmsise = st.checkbox(
+                "Use NRLMSISE-00 for High Altitudes",
+                value=True,
+                help="Use NRLMSISE-00 atmospheric model for altitudes above 86 km",
+            )
+
+            # Validate date/time if weather data is enabled
+            if launch_date is None or launch_time is None:
+                st.warning("⚠️ Please specify launch date and time to use weather data")
+                use_weather_data = False
+        else:
+            latitude = 33.0
+            longitude = -106.5
+            launch_date = None
+            launch_time = None
+            use_nrlmsise = False
+
         with st.expander("Launch Conditions", expanded=False):
             elevation = st.number_input("Elevation (m)", 0.0, 5000.0, 1400.0, 10.0)
             rail_length = st.number_input("Rail Length (m)", 0.5, 20.0, 5.2, 0.1)
@@ -3481,7 +3858,21 @@ def render_sidebar():
 
         # Return current rocket type from session state
         rocket_type = st.session_state.get("last_selected_rocket", "Calisto (Default)")
-        return rocket_type, elevation, rail_length, inclination_deg, heading_deg, max_time, dt
+        return (
+            rocket_type,
+            elevation,
+            rail_length,
+            inclination_deg,
+            heading_deg,
+            max_time,
+            dt,
+            use_weather_data,
+            latitude,
+            longitude,
+            launch_date,
+            launch_time,
+            use_nrlmsise,
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -3492,9 +3883,21 @@ def render_sidebar():
 def main():
     """Main application."""
     # Render sidebar and get configuration
-    rocket_type, elevation, rail_length, inclination_deg, heading_deg, max_time, dt = (
-        render_sidebar()
-    )
+    (
+        rocket_type,
+        elevation,
+        rail_length,
+        inclination_deg,
+        heading_deg,
+        max_time,
+        dt,
+        use_weather_data,
+        latitude,
+        longitude,
+        launch_date,
+        launch_time,
+        use_nrlmsise,
+    ) = render_sidebar()
 
     # Hero section
     render_hero()
@@ -3868,7 +4271,29 @@ def main():
 
                     rocket = RocketModel(rocket_raw)
                     motor = Motor.from_openrocket(motor_raw)
-                    env = Environment(elevation=elevation)
+
+                    # Create environment with weather data if specified
+                    if use_weather_data and launch_date and launch_time:
+                        from datetime import datetime
+
+                        launch_datetime = datetime.combine(launch_date, launch_time)
+                        try:
+                            env = Environment.from_coordinates(
+                                latitude=latitude,
+                                longitude=longitude,
+                                datetime_obj=launch_datetime,
+                                elevation=elevation,
+                                use_weather_data=True,
+                                use_nrlmsise=use_nrlmsise,
+                            )
+                            st.info(
+                                f"✓ Using weather data for {latitude:.2f}°N, {longitude:.2f}°E at {launch_datetime.strftime('%Y-%m-%d %H:%M')}"
+                            )
+                        except Exception as e:
+                            st.warning(f"Could not fetch weather data: {e}. Using ISA model.")
+                            env = Environment(elevation=elevation)
+                    else:
+                        env = Environment(elevation=elevation)
 
                     solver = FlightSolver(
                         rocket=rocket,
