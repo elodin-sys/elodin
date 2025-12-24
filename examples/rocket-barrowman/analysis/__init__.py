@@ -5,11 +5,14 @@ from .structural_analysis import (
     StructuralAnalyzer,
     StructuralAnalysisResult,
     FinFlutterAnalyzer,
+    StructuralLoadsAnalyzer,
+    StressAnalyzer,
     FlutterResult,
     LoadsResult,
     StressResult,
     MaterialProperties,
     STRUCTURAL_MATERIALS,
+    MATERIAL_PROPERTIES,
 )
 
 __all__ = [
@@ -22,10 +25,13 @@ __all__ = [
     "StructuralAnalyzer",
     "StructuralAnalysisResult",
     "FinFlutterAnalyzer",
+    "StructuralLoadsAnalyzer",
+    "StressAnalyzer",
     "FlutterResult",
     "LoadsResult",
     "StressResult",
     "MaterialProperties",
     "STRUCTURAL_MATERIALS",
+    "MATERIAL_PROPERTIES",
 ]
 

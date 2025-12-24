@@ -44,6 +44,14 @@ from ..components.openrocket_components import (
 )
 from ..components.openrocket_aero import RocketAerodynamics
 from ..components.openrocket_motor import Motor as OpenRocketMotor
+from ..components.protuberance_aero import (
+    ProtuberanceAerodynamics,
+    ProtuberanceGeometry,
+    ProtuberanceType,
+    create_standard_rail_button,
+    create_standard_launch_lug,
+    create_camera_shroud,
+)
 
 __all__ = [
     # Base classes
@@ -89,5 +97,12 @@ __all__ = [
     # Aero
     "RocketAerodynamics",
     "OpenRocketMotor",
+    # Protuberance aerodynamics
+    "ProtuberanceAerodynamics",
+    "ProtuberanceGeometry",
+    "ProtuberanceType",
+    "create_standard_rail_button",
+    "create_standard_launch_lug",
+    "create_camera_shroud",
 ]
 

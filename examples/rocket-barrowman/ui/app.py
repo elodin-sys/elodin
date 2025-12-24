@@ -16,6 +16,7 @@ _rocket_dir = str(Path(__file__).parent.parent)
 if _rocket_dir not in sys.path:
     sys.path.insert(0, _rocket_dir)
 
+import math
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -31,6 +32,9 @@ from core.components.openrocket_components import (
     InnerTube,
     Parachute,
     MATERIALS,
+    RailButton,
+    LaunchLug,
+    CameraShroud,
 )
 from core.components.openrocket_motor import Motor as ORMotor
 from core.data.motor_scraper import ThrustCurveScraper
@@ -1037,6 +1041,87 @@ def build_custom_rocket(config: Dict[str, Any]) -> Rocket:
         else:
             body.add_child(drogue)
 
+    # External Hardware (Protuberances)
+    nose_length = config.get("nose_length", 0.5) if config.get("has_nose", True) else 0.0
+    body_length = config.get("body_length", 1.5)
+    body_radius = config.get("body_radius", 0.0635)
+    
+    # Rail buttons
+    num_rail_buttons = config.get("num_rail_buttons", 0)
+    if num_rail_buttons > 0:
+        rail_size = config.get("rail_button_size", "standard")
+        # Standard rail button dimensions
+        rail_dims = {
+            "mini": {"diameter": 0.008, "height": 0.010, "mass": 0.005},
+            "standard": {"diameter": 0.010, "height": 0.015, "mass": 0.010},
+            "1010": {"diameter": 0.010, "height": 0.010, "mass": 0.008},
+            "1515": {"diameter": 0.015, "height": 0.015, "mass": 0.015},
+        }.get(rail_size, {"diameter": 0.010, "height": 0.015, "mass": 0.010})
+        
+        rail_positions = [
+            config.get("rail_btn_pos1", 0.3),
+            config.get("rail_btn_pos2", 1.5),
+        ]
+        
+        for i in range(min(num_rail_buttons, 2)):
+            rail_btn = RailButton(
+                name=f"Rail Button {i+1}",
+                outer_diameter=rail_dims["diameter"],
+                height=rail_dims["height"],
+                mass=rail_dims["mass"],
+            )
+            # Position relative to body tube start
+            rail_btn.position.x = max(0.0, rail_positions[i] - nose_length)
+            body.add_child(rail_btn)
+    
+    # Launch lugs
+    num_lugs = config.get("num_launch_lugs", 0)
+    if num_lugs > 0:
+        rod_size = config.get("lug_rod_size", "3/16")
+        rod_diameters = {
+            "1/8": 0.0032,
+            "3/16": 0.0048,
+            "1/4": 0.0064,
+        }
+        rod_dia = rod_diameters.get(rod_size, 0.0048)
+        outer_dia = rod_dia + 0.003  # 3mm wall
+        lug_length = config.get("lug_length", 0.03)
+        
+        lug_positions = [
+            config.get("lug_pos1", 0.3),
+            config.get("lug_pos2", 1.5),
+        ]
+        
+        for i in range(min(num_lugs, 2)):
+            lug = LaunchLug(
+                name=f"Launch Lug {i+1}",
+                length=lug_length,
+                inner_diameter=rod_dia,
+                outer_diameter=outer_dia,
+            )
+            lug.position.x = max(0.0, lug_positions[i] - nose_length)
+            body.add_child(lug)
+    
+    # Camera shroud
+    if config.get("has_camera", False):
+        shroud_type_str = config.get("camera_type", "blister").upper()
+        shroud_type_map = {
+            "BLISTER": CameraShroud.ShroudType.BLISTER,
+            "STREAMLINED": CameraShroud.ShroudType.STREAMLINED,
+            "FLUSH": CameraShroud.ShroudType.FLUSH,
+        }
+        shroud_type = shroud_type_map.get(shroud_type_str, CameraShroud.ShroudType.BLISTER)
+        
+        camera = CameraShroud(
+            name="Camera",
+            length=config.get("camera_length", 0.05),
+            width=config.get("camera_width", 0.03),
+            height=config.get("camera_height", 0.015),
+            shroud_type=shroud_type,
+        )
+        camera.position.x = max(0.0, config.get("camera_pos", 0.5) - nose_length)
+        body.add_child(camera)
+
     rocket.calculate_reference_values()
     return rocket
 
@@ -1333,7 +1418,7 @@ def visualize_results(result: FlightResult, solver: Optional[FlightSolver] = Non
         st.session_state.current_analysis_tab = "Trajectory"
 
     # Comprehensive analysis tabs
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(
         [
             "📈 Trajectory",
             "⚡ Performance",
@@ -1343,6 +1428,7 @@ def visualize_results(result: FlightResult, solver: Optional[FlightSolver] = Non
             "🔬 Advanced",
             "🌍 3D Path",
             "🌤️ Environment",
+            "🏗️ Structural",
         ]
     )
 
@@ -3257,6 +3343,323 @@ def visualize_results(result: FlightResult, solver: Optional[FlightSolver] = Non
         else:
             st.info("Environment analysis requires solver data. Run a simulation first.")
 
+    with tab9:  # Structural Analysis
+        st.markdown("### 🏗️ Structural Analysis")
+        st.caption("Fin flutter, body loads, stress analysis")
+        
+        if solver:
+            try:
+                from analysis.structural_analysis import (
+                    FinFlutterAnalyzer,
+                    StructuralLoadsAnalyzer,
+                    StressAnalyzer,
+                    STRUCTURAL_MATERIALS,
+                )
+                
+                rocket = solver.rocket
+                
+                # Get rocket config from session state for material info
+                rocket_config = st.session_state.get("rocket_config", {})
+                fin_material = rocket_config.get("fin_material", "Fiberglass")
+                body_material = rocket_config.get("body_material", "Fiberglass")
+                
+                # Get material properties
+                fin_mat_props = STRUCTURAL_MATERIALS.get(fin_material, STRUCTURAL_MATERIALS['Fiberglass'])
+                body_mat_props = STRUCTURAL_MATERIALS.get(body_material, STRUCTURAL_MATERIALS['Fiberglass'])
+                
+                # Flutter Analysis
+                st.markdown("#### 🦋 Fin Flutter Analysis")
+                st.caption("NACA TN-4197 method - critical for high-speed flight")
+                
+                # Get fin properties
+                fin_root = rocket_config.get("fin_root_chord", 0.12)
+                fin_tip = rocket_config.get("fin_tip_chord", 0.06)
+                fin_span = rocket_config.get("fin_span", 0.11)
+                fin_thickness = rocket_config.get("fin_thickness", 0.005)
+                body_radius = rocket_config.get("body_radius", 0.0635)
+                
+                flutter_analyzer = FinFlutterAnalyzer(
+                    root_chord=fin_root,
+                    tip_chord=fin_tip,
+                    span=fin_span,
+                    thickness=fin_thickness,
+                    shear_modulus=fin_mat_props.shear_modulus,
+                    body_radius=body_radius,
+                )
+                
+                # Calculate flutter at max-Q conditions
+                max_q_idx = int(np.argmax(dynamic_pressures))
+                max_q_alt = float(altitudes[max_q_idx])
+                max_flight_vel = float(np.max(velocities))
+                
+                # Calculate flutter velocity
+                flutter_result = flutter_analyzer.calculate_flutter_velocity(altitude=max_q_alt)
+                flutter_vel = flutter_result.flutter_velocity
+                divergence_vel = flutter_result.divergence_velocity
+                
+                flutter_margin = flutter_vel / max_flight_vel if max_flight_vel > 0 else float('inf')
+                divergence_margin = divergence_vel / max_flight_vel if max_flight_vel > 0 else float('inf')
+                
+                # Flutter results
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    flutter_color = COLORS["success"] if flutter_margin > 1.5 else (COLORS["warning"] if flutter_margin > 1.0 else COLORS["danger"])
+                    st.markdown(f"""
+                    <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; border-left: 3px solid {flutter_color};">
+                        <div style="font-size: 0.85rem; color: var(--text-muted);">Flutter Velocity</div>
+                        <div style="font-size: 1.4rem; font-weight: 600; color: {flutter_color};">{flutter_vel:.1f} m/s</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">Safety margin: {flutter_margin:.2f}x</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col2:
+                    diverge_color = COLORS["success"] if divergence_margin > 2.0 else (COLORS["warning"] if divergence_margin > 1.0 else COLORS["danger"])
+                    st.markdown(f"""
+                    <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; border-left: 3px solid {diverge_color};">
+                        <div style="font-size: 0.85rem; color: var(--text-muted);">Divergence Velocity</div>
+                        <div style="font-size: 1.4rem; font-weight: 600; color: {diverge_color};">{divergence_vel:.1f} m/s</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">Safety margin: {divergence_margin:.2f}x</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col3:
+                    st.markdown(f"""
+                    <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; border-left: 3px solid {COLORS['primary']};">
+                        <div style="font-size: 0.85rem; color: var(--text-muted);">Max Flight Velocity</div>
+                        <div style="font-size: 1.4rem; font-weight: 600; color: {COLORS['primary']};">{max_flight_vel:.1f} m/s</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">At Max-Q: {max_q_alt:.0f}m</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                # Flutter status message
+                if flutter_margin < 1.0:
+                    st.error("⚠️ **FLUTTER RISK**: Fin flutter velocity exceeded during flight! Consider thicker fins or stiffer material.")
+                elif flutter_margin < 1.25:
+                    st.warning("⚠️ Flutter margin is low. Consider increasing fin thickness or using stiffer material.")
+                else:
+                    st.success(f"✅ Flutter margin adequate ({flutter_margin:.2f}x safety factor)")
+                
+                # Fin parameters
+                taper_ratio = fin_tip / fin_root if fin_root > 0 else 0.5
+                aspect_ratio = 2 * fin_span / (fin_root + fin_tip) if (fin_root + fin_tip) > 0 else 1.0
+                st.markdown(f"""
+                | Parameter | Value |
+                |-----------|-------|
+                | Flutter Frequency | {flutter_result.flutter_frequency:.1f} Hz |
+                | Critical Altitude | {flutter_result.critical_altitude:.0f} m |
+                | Taper Ratio (λ) | {taper_ratio:.2f} |
+                | Aspect Ratio | {aspect_ratio:.2f} |
+                | Material Shear Modulus | {fin_mat_props.shear_modulus/1e9:.1f} GPa |
+                """)
+                
+                st.divider()
+                
+                # Structural Loads Analysis
+                st.markdown("#### 📊 Structural Loads Analysis")
+                st.caption("Axial, bending, and shear loads throughout flight")
+                
+                body_length = rocket_config.get("body_length", 1.5)
+                body_thickness = rocket_config.get("body_thickness", 0.003)
+                
+                # Get mass properties
+                rocket_mass = solver.mass_model.total_mass(0) if hasattr(solver, 'mass_model') else 10.0
+                ref_area = math.pi * body_radius ** 2
+                
+                loads_analyzer = StructuralLoadsAnalyzer(
+                    rocket_mass=rocket_mass,
+                    rocket_length=body_length,
+                    reference_area=ref_area,
+                )
+                
+                # Find max load conditions
+                max_accel_idx = 0
+                max_accel = 0.0
+                for i, s in enumerate(history):
+                    accel_mag = np.linalg.norm(s.acceleration)
+                    if accel_mag > max_accel:
+                        max_accel = accel_mag
+                        max_accel_idx = i
+                
+                # Get flight data at max acceleration
+                max_state = history[max_accel_idx]
+                motor_thrust = solver.motor.max_thrust if hasattr(solver.motor, 'max_thrust') else 2000.0
+                
+                loads_result = loads_analyzer.calculate_loads(
+                    time=max_state.time,
+                    altitude=max_state.z,
+                    velocity=np.linalg.norm(max_state.velocity),
+                    acceleration=max_accel,
+                    thrust=motor_thrust,
+                    drag=max_state.drag_force,
+                    angle_of_attack=max_state.angle_of_attack,
+                    angular_velocity=np.linalg.norm(max_state.angular_velocity),
+                )
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Max Axial Load", f"{loads_result.axial_load/1000:.2f} kN")
+                with col2:
+                    st.metric("Max Bending Moment", f"{loads_result.bending_moment:.2f} N·m")
+                with col3:
+                    st.metric("Max Shear Load", f"{loads_result.shear_load:.2f} N")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Axial Acceleration", f"{loads_result.axial_acceleration:.1f} G")
+                with col2:
+                    st.metric("Lateral Acceleration", f"{loads_result.lateral_acceleration:.2f} G")
+                
+                st.divider()
+                
+                # Stress Analysis
+                st.markdown("#### 💪 Stress Analysis")
+                st.caption("Body tube and fin stress margins")
+                
+                # Body tube stress calculation
+                inner_radius = body_radius - body_thickness
+                cross_section_area = math.pi * (body_radius**2 - inner_radius**2)
+                moment_of_inertia = (math.pi / 4) * (body_radius**4 - inner_radius**4)
+                
+                # Axial stress
+                axial_stress = abs(loads_result.axial_load) / cross_section_area if cross_section_area > 0 else 0
+                
+                # Bending stress (max at outer surface)
+                bending_stress = loads_result.bending_moment * body_radius / moment_of_inertia if moment_of_inertia > 0 else 0
+                
+                # Combined stress (von Mises approximation)
+                body_stress = math.sqrt(axial_stress**2 + bending_stress**2 + axial_stress * bending_stress)
+                
+                yield_stress = body_mat_props.yield_strength
+                body_margin = yield_stress / body_stress if body_stress > 0 else float('inf')
+                
+                # Fin stress (bending at root from aero load)
+                q_max = loads_result.dynamic_pressure
+                fin_aero_load = q_max * fin_root * fin_span * 0.5  # Simplified lift load
+                fin_moment = fin_aero_load * fin_span / 2  # Moment at root
+                fin_section_modulus = fin_root * fin_thickness**2 / 6  # Rectangular section
+                fin_stress = fin_moment / fin_section_modulus if fin_section_modulus > 0 else 0
+                fin_yield = fin_mat_props.yield_strength
+                fin_margin = fin_yield / fin_stress if fin_stress > 0 else float('inf')
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    body_color = COLORS["success"] if body_margin > 2.0 else (COLORS["warning"] if body_margin > 1.5 else COLORS["danger"])
+                    st.markdown(f"""
+                    <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; border-left: 3px solid {body_color};">
+                        <div style="font-size: 0.85rem; color: var(--text-muted);">Body Tube Stress</div>
+                        <div style="font-size: 1.2rem; font-weight: 600; color: {body_color};">{body_stress/1e6:.1f} MPa</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">Yield: {yield_stress/1e6:.0f} MPa | Margin: {body_margin:.2f}x</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col2:
+                    fin_color = COLORS["success"] if fin_margin > 2.0 else (COLORS["warning"] if fin_margin > 1.5 else COLORS["danger"])
+                    st.markdown(f"""
+                    <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; border-left: 3px solid {fin_color};">
+                        <div style="font-size: 0.85rem; color: var(--text-muted);">Fin Root Stress</div>
+                        <div style="font-size: 1.2rem; font-weight: 600; color: {fin_color};">{fin_stress/1e6:.1f} MPa</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">Yield: {fin_yield/1e6:.0f} MPa | Margin: {fin_margin:.2f}x</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                # Recommendations
+                st.markdown("#### 💡 Structural Recommendations")
+                recommendations = []
+                
+                if flutter_margin < 1.5:
+                    recommendations.append(f"• **Fin Flutter**: Increase fin thickness from {fin_thickness*1000:.1f}mm to {fin_thickness*1000*1.5:.1f}mm or use stiffer material (Carbon Fiber recommended)")
+                
+                if body_margin < 2.0:
+                    recommendations.append(f"• **Body Stress**: Increase wall thickness from {body_thickness*1000:.1f}mm or upgrade material")
+                
+                if fin_margin < 2.0:
+                    recommendations.append(f"• **Fin Stress**: Consider thicker fins or fiberglass reinforcement at root")
+                
+                if divergence_margin < 2.0:
+                    recommendations.append("• **Divergence**: Reduce fin span or increase torsional stiffness")
+                
+                if recommendations:
+                    for rec in recommendations:
+                        st.markdown(rec)
+                else:
+                    st.success("✅ All structural margins adequate for flight envelope")
+                
+                # Protuberance drag breakdown
+                st.divider()
+                st.markdown("#### 📍 Protuberance Drag Breakdown")
+                st.caption("Drag contribution from external hardware (geometry-based CD)")
+                
+                # Calculate protuberance drag contribution
+                prot_info = []
+                if rocket_config.get("num_rail_buttons", 0) > 0:
+                    btn_size = rocket_config.get("rail_button_size", "standard")
+                    btn_dims = {"mini": {"d": 0.008, "h": 0.010}, "standard": {"d": 0.010, "h": 0.015}, 
+                               "1010": {"d": 0.010, "h": 0.010}, "1515": {"d": 0.015, "h": 0.015}}.get(btn_size, {"d": 0.010, "h": 0.015})
+                    # CD based on h/d ratio (Hoerner)
+                    h_d = btn_dims["h"] / btn_dims["d"]
+                    cd_btn = 0.9 if h_d < 1.0 else 0.8 if h_d < 2.0 else 0.7
+                    frontal = btn_dims["d"] * btn_dims["h"]
+                    num_btns = rocket_config.get("num_rail_buttons", 0)
+                    prot_info.append({
+                        "Component": f"Rail Buttons ({num_btns}x {btn_size})",
+                        "CD": f"{cd_btn:.2f}",
+                        "Frontal Area": f"{frontal*1e4*num_btns:.3f} cm²",
+                        "Notes": f"h/d={h_d:.1f}"
+                    })
+                
+                if rocket_config.get("num_launch_lugs", 0) > 0:
+                    lug_len = rocket_config.get("lug_length", 0.03)
+                    rod_size = rocket_config.get("lug_rod_size", "3/16")
+                    outer_dia = {"1/8": 0.0062, "3/16": 0.0078, "1/4": 0.0094}.get(rod_size, 0.0078)
+                    # CD for cylinder in crossflow (Hoerner)
+                    cd_lug = 1.0  # Typical for subcritical Re
+                    frontal = outer_dia * lug_len
+                    num_lugs = rocket_config.get("num_launch_lugs", 0)
+                    prot_info.append({
+                        "Component": f"Launch Lugs ({num_lugs}x {rod_size}\")",
+                        "CD": f"{cd_lug:.2f}",
+                        "Frontal Area": f"{frontal*1e4*num_lugs:.3f} cm²",
+                        "Notes": f"L={lug_len*1000:.0f}mm"
+                    })
+                
+                if rocket_config.get("has_camera", False):
+                    cam_type = rocket_config.get("camera_type", "blister")
+                    # CD based on shroud type
+                    cd_cam = {"blister": 0.45, "streamlined": 0.12, "flush": 0.03}.get(cam_type, 0.45)
+                    cam_h = rocket_config.get("camera_height", 0.015)
+                    cam_w = rocket_config.get("camera_width", 0.03)
+                    frontal = cam_h * cam_w
+                    prot_info.append({
+                        "Component": f"Camera ({cam_type.title()})",
+                        "CD": f"{cd_cam:.2f}",
+                        "Frontal Area": f"{frontal*1e4:.3f} cm²",
+                        "Notes": f"{cam_h*1000:.0f}×{cam_w*1000:.0f}mm"
+                    })
+                
+                if prot_info:
+                    df_prot = pd.DataFrame(prot_info)
+                    st.dataframe(df_prot, use_container_width=True, hide_index=True)
+                    
+                    # Calculate total parasitic drag contribution
+                    total_prot_frontal = sum([
+                        float(row["Frontal Area"].replace(" cm²", "")) 
+                        for _, row in df_prot.iterrows()
+                    ]) / 1e4  # Convert back to m²
+                    rocket_ref_area = math.pi * body_radius**2
+                    prot_drag_ratio = total_prot_frontal / rocket_ref_area * 100
+                    st.caption(f"Total protuberance frontal area: {total_prot_frontal*1e4:.3f} cm² ({prot_drag_ratio:.1f}% of reference area)")
+                else:
+                    st.info("No external protuberances configured. Add rail buttons, launch lugs, or camera in the Hardware tab.")
+                    
+            except ImportError as e:
+                st.warning(f"Structural analysis module not available: {e}")
+            except Exception as e:
+                st.error(f"Structural analysis error: {e}")
+                import traceback
+                st.code(traceback.format_exc())
+        else:
+            st.info("Structural analysis requires solver data. Run a simulation first.")
+
 
 def launch_elodin_editor(result: FlightResult, solver: FlightSolver):
     """Launch Elodin editor with simulation results."""
@@ -3632,7 +4035,7 @@ def render_sidebar():
             st.markdown("### 📐 Rocket Config")
             
             # Use tabs for compact organization
-            config_tabs = st.tabs(["🔺 Nose", "📦 Body", "🔱 Fins", "🪂 Recovery"])
+            config_tabs = st.tabs(["🔺 Nose", "📦 Body", "🔱 Fins", "🪂 Recovery", "📍 Hardware"])
             
             # TAB 1: Nose Cone
             with config_tabs[0]:
@@ -3679,6 +4082,66 @@ def render_sidebar():
                     has_drogue = st.checkbox("Drogue", value=True, key="has_drogue_cb")
                     if has_drogue:
                         drogue_diameter = st.number_input("Ø Drogue (m)", 0.1, 5.0, 0.99, 0.1, key="drogue_dia")
+            
+            # TAB 5: Hardware (Protuberances)
+            with config_tabs[4]:
+                st.caption("External hardware affects drag (geometry-based CD)")
+                
+                # Rail Buttons
+                col1, col2 = st.columns(2)
+                with col1:
+                    num_rail_buttons = st.number_input("Rail Buttons", 0, 4, 2, 1, key="num_rail_btns")
+                with col2:
+                    rail_btn_size = st.selectbox("Size", ["mini", "standard", "1010", "1515"], index=1, key="rail_size")
+                
+                if num_rail_buttons > 0:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        rail_btn_pos1 = st.number_input("Btn 1 pos (m)", 0.1, 5.0, 0.3, 0.05, key="rail_pos1")
+                    with col2:
+                        if num_rail_buttons > 1:
+                            rail_btn_pos2 = st.number_input("Btn 2 pos (m)", 0.1, 5.0, 1.5, 0.05, key="rail_pos2")
+                        else:
+                            rail_btn_pos2 = 0.0
+                else:
+                    rail_btn_pos1, rail_btn_pos2 = 0.0, 0.0
+                
+                st.divider()
+                
+                # Launch Lugs (alternative to rail)
+                col1, col2 = st.columns(2)
+                with col1:
+                    num_launch_lugs = st.number_input("Launch Lugs", 0, 2, 0, 1, key="num_lugs")
+                with col2:
+                    lug_rod_size = st.selectbox("Rod", ["1/8", "3/16", "1/4"], index=1, key="lug_rod")
+                
+                if num_launch_lugs > 0:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        lug_length = st.number_input("Length (m)", 0.01, 0.1, 0.03, 0.005, key="lug_len")
+                        lug_pos1 = st.number_input("Lug 1 pos (m)", 0.1, 5.0, 0.3, 0.05, key="lug_pos1")
+                    with col2:
+                        if num_launch_lugs > 1:
+                            lug_pos2 = st.number_input("Lug 2 pos (m)", 0.1, 5.0, 1.5, 0.05, key="lug_pos2")
+                        else:
+                            lug_pos2 = 0.0
+                else:
+                    lug_length, lug_pos1, lug_pos2 = 0.03, 0.0, 0.0
+                
+                st.divider()
+                
+                # Camera Shroud
+                has_camera = st.checkbox("Camera Shroud", value=False, key="has_camera")
+                if has_camera:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        camera_type = st.selectbox("Type", ["blister", "streamlined", "flush"], key="cam_type")
+                        camera_pos = st.number_input("Position (m)", 0.1, 5.0, 0.5, 0.05, key="cam_pos")
+                    with col2:
+                        camera_length = st.number_input("Length (m)", 0.02, 0.2, 0.05, 0.01, key="cam_len")
+                        camera_height = st.number_input("Height (m)", 0.005, 0.05, 0.015, 0.005, key="cam_ht")
+                else:
+                    camera_type, camera_pos, camera_length, camera_height = "blister", 0.5, 0.05, 0.015
 
             # Store config
             rocket_config = {
@@ -3717,6 +4180,22 @@ def render_sidebar():
                 "drogue_deployment_event": "APOGEE",
                 "drogue_deployment_altitude": 0.0,
                 "drogue_deployment_delay": 1.5,
+                # External hardware (protuberances)
+                "num_rail_buttons": num_rail_buttons,
+                "rail_button_size": rail_btn_size,
+                "rail_btn_pos1": rail_btn_pos1,
+                "rail_btn_pos2": rail_btn_pos2,
+                "num_launch_lugs": num_launch_lugs,
+                "lug_rod_size": lug_rod_size,
+                "lug_length": lug_length,
+                "lug_pos1": lug_pos1,
+                "lug_pos2": lug_pos2,
+                "has_camera": has_camera,
+                "camera_type": camera_type,
+                "camera_pos": camera_pos,
+                "camera_length": camera_length,
+                "camera_height": camera_height,
+                "camera_width": body_radius * 2 * 0.3,  # 30% of diameter
             }
             st.session_state.rocket_config = rocket_config
 

@@ -579,7 +579,8 @@ class RocketAerodynamics:
         cd_total += cd_base
 
         # Parasitic drag from protuberances (rail buttons, launch lugs, cameras)
-        cd_parasitic = self._calculate_parasitic_drag(velocity, rho, mu, ref_area)
+        # Uses geometry-based model with Re, Mach, interference effects
+        cd_parasitic = self._calculate_parasitic_drag(velocity, rho, mu, ref_area, mach)
         cd_total += cd_parasitic
 
         # Angle of attack drag increase
@@ -592,56 +593,141 @@ class RocketAerodynamics:
         return cd_total
     
     def _calculate_parasitic_drag(
-        self, velocity: float, rho: float, mu: float, ref_area: float
+        self, velocity: float, rho: float, mu: float, ref_area: float, mach: float = 0.0
     ) -> float:
         """
         Calculate parasitic drag from external protuberances.
         
-        Includes: rail buttons, launch lugs, camera shrouds, switch bands
+        Uses geometry-based drag coefficients with:
+        - Reynolds number effects
+        - Mach number effects
+        - Boundary layer state corrections
+        - Interference effects between protuberances
         """
-        cd_parasitic = 0.0
-        
-        def traverse(component):
-            nonlocal cd_parasitic
-            
-            # Import here to avoid circular imports
+        # Use the comprehensive protuberance aero module if available
+        try:
+            from .protuberance_aero import (
+                ProtuberanceAerodynamics,
+                ProtuberanceGeometry,
+                ProtuberanceType,
+            )
             from .openrocket_components import (
                 RailButton, LaunchLug, CameraShroud, SwitchBand
             )
             
-            if isinstance(component, RailButton):
-                # Blunt body drag
-                frontal_area = component.get_frontal_area()
-                cd_button = component.get_drag_coefficient()
-                cd_parasitic += cd_button * frontal_area / ref_area
-                
-            elif isinstance(component, LaunchLug):
-                # Cylinder perpendicular to flow
-                frontal_area = component.get_frontal_area()
-                cd_lug = component.get_drag_coefficient()
-                cd_parasitic += cd_lug * frontal_area / ref_area
-                
-            elif isinstance(component, CameraShroud):
-                # Depends on shroud type
-                frontal_area = component.get_frontal_area()
-                cd_shroud = component.get_drag_coefficient()
-                cd_parasitic += cd_shroud * frontal_area / ref_area
-                
-            elif isinstance(component, SwitchBand):
-                # Small protuberance
-                # Approximate as 10% of band height * circumference
-                circum = math.pi * component.outer_diameter
-                frontal_area = component.width * 0.002  # 2mm protrusion
-                cd_band = 0.5  # Streamlined
-                cd_parasitic += cd_band * frontal_area / ref_area
+            # Create protuberance analyzer
+            prot_aero = ProtuberanceAerodynamics(
+                body_diameter=self.rocket.reference_diameter,
+                body_length=self.rocket.reference_length,
+            )
             
-            for child in getattr(component, 'children', []):
-                traverse(child)
+            def traverse(component):
+                # Check for protuberance components and add them
+                if isinstance(component, RailButton):
+                    prot = ProtuberanceGeometry(
+                        protuberance_type=ProtuberanceType.RAIL_BUTTON,
+                        axial_position=component.get_absolute_position(),
+                        height=component.height,
+                        diameter=component.outer_diameter,
+                        leading_edge_radius=component.outer_diameter / 4,
+                    )
+                    prot_aero.add_protuberance(prot)
+                    
+                elif isinstance(component, LaunchLug):
+                    prot = ProtuberanceGeometry(
+                        protuberance_type=ProtuberanceType.LAUNCH_LUG,
+                        axial_position=component.get_absolute_position(),
+                        height=component.outer_diameter,
+                        length=component.length,
+                        diameter=component.outer_diameter,
+                    )
+                    prot_aero.add_protuberance(prot)
+                    
+                elif isinstance(component, CameraShroud):
+                    # Map shroud type
+                    if component.shroud_type == CameraShroud.ShroudType.STREAMLINED:
+                        prot_type = ProtuberanceType.CAMERA_STREAMLINED
+                    elif component.shroud_type == CameraShroud.ShroudType.FLUSH:
+                        prot_type = ProtuberanceType.CAMERA_FLUSH
+                    else:
+                        prot_type = ProtuberanceType.CAMERA_BLISTER
+                    
+                    prot = ProtuberanceGeometry(
+                        protuberance_type=prot_type,
+                        axial_position=component.get_absolute_position(),
+                        height=component.height,
+                        length=component.length,
+                        width=component.width,
+                    )
+                    prot_aero.add_protuberance(prot)
+                    
+                elif isinstance(component, SwitchBand):
+                    prot = ProtuberanceGeometry(
+                        protuberance_type=ProtuberanceType.SWITCH_BAND,
+                        axial_position=component.get_absolute_position(),
+                        height=0.002,  # Typical switch protrusion
+                        width=component.width,
+                    )
+                    prot_aero.add_protuberance(prot)
+                
+                for child in getattr(component, 'children', []):
+                    traverse(child)
+            
+            traverse(self.rocket)
+            
+            # Calculate total parasitic drag
+            if prot_aero.protuberances:
+                cd_total, breakdown = prot_aero.calculate_total_drag_coefficient(
+                    velocity=velocity,
+                    rho=rho,
+                    mu=mu,
+                    mach=mach,
+                    reference_area=ref_area,
+                )
+                return cd_total
+            
+            return 0.0
+            
+        except ImportError:
+            # Fallback to simple method if module not available
+            return self._calculate_parasitic_drag_simple(velocity, rho, mu, ref_area)
+    
+    def _calculate_parasitic_drag_simple(
+        self, velocity: float, rho: float, mu: float, ref_area: float
+    ) -> float:
+        """Simple fallback method for parasitic drag calculation."""
+        cd_parasitic = 0.0
         
         try:
+            from .openrocket_components import (
+                RailButton, LaunchLug, CameraShroud, SwitchBand
+            )
+            
+            def traverse(component):
+                nonlocal cd_parasitic
+                
+                if isinstance(component, RailButton):
+                    frontal_area = component.get_frontal_area()
+                    cd_parasitic += 0.8 * frontal_area / ref_area
+                    
+                elif isinstance(component, LaunchLug):
+                    frontal_area = component.get_frontal_area()
+                    cd_parasitic += 1.0 * frontal_area / ref_area
+                    
+                elif isinstance(component, CameraShroud):
+                    frontal_area = component.get_frontal_area()
+                    cd_parasitic += component.get_drag_coefficient() * frontal_area / ref_area
+                    
+                elif isinstance(component, SwitchBand):
+                    frontal_area = component.width * 0.002
+                    cd_parasitic += 0.5 * frontal_area / ref_area
+                
+                for child in getattr(component, 'children', []):
+                    traverse(child)
+            
             traverse(self.rocket)
         except ImportError:
-            pass  # Components not available
+            pass
         
         return cd_parasitic
 

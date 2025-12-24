@@ -722,3 +722,7 @@ class StructuralAnalyzer:
         
         return sum_mass(self.rocket)
 
+
+# Alias for backwards compatibility and clearer naming
+MATERIAL_PROPERTIES = STRUCTURAL_MATERIALS
+
