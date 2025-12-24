@@ -32,13 +32,21 @@ from config import DroneConfig
 
 # Motor commands from Betaflight (normalized 0-1)
 # Marked as external_control so Betaflight can write to it via Elodin-DB
+#
+# Motor order matches Betaflight Quad-X configuration:
+#   Index 0: Front Right (FR) - CCW
+#   Index 1: Back Right (BR) - CW
+#   Index 2: Back Left (BL) - CCW
+#   Index 3: Front Left (FL) - CW
+#
+# See config.py for motor positions and spin directions.
 MotorCommand = ty.Annotated[
     jax.Array,
     el.Component(
         "motor_command",
         el.ComponentType(el.PrimitiveType.F64, (4,)),
         metadata={
-            "element_names": "m0,m1,m2,m3",
+            "element_names": "FR,BR,BL,FL",  # Betaflight Quad-X order
             "priority": 100,
             "external_control": "true",  # Allows external writes from Betaflight bridge
         },
@@ -46,12 +54,13 @@ MotorCommand = ty.Annotated[
 ]
 
 # Current motor thrust state (for dynamics)
+# Same motor order as MotorCommand: FR(0), BR(1), BL(2), FL(3)
 MotorThrust = ty.Annotated[
     jax.Array,
     el.Component(
         "motor_thrust",
         el.ComponentType(el.PrimitiveType.F64, (4,)),
-        metadata={"element_names": "t0,t1,t2,t3", "priority": 99},
+        metadata={"element_names": "FR,BR,BL,FL", "priority": 99},
     ),
 ]
 

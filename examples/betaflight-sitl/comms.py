@@ -829,41 +829,6 @@ class BetaflightSyncBridge:
         return False
 
 
-# Betaflight motor remapping for Quad-X configuration
-# Betaflight motor order (looking from above, front is top):
-#   1(FR)  2(BR)
-#   4(FL)  3(BL)
-# Elodin standard order:
-#   0(FR)  1(FL)
-#   2(BR)  3(BL)
-BETAFLIGHT_TO_ELODIN_MOTOR_MAP = [0, 2, 3, 1]  # BF[0]->EL[0], BF[1]->EL[2], etc.
-ELODIN_TO_BETAFLIGHT_MOTOR_MAP = [0, 3, 1, 2]  # EL[0]->BF[0], EL[1]->BF[3], etc.
-
-
-def remap_motors_betaflight_to_elodin(bf_motors: np.ndarray) -> np.ndarray:
-    """
-    Remap motor indices from Betaflight order to Elodin order.
-
-    Betaflight Quad-X (looking from above):
-        Motor 1 (FR) = index 0
-        Motor 2 (BR) = index 1
-        Motor 3 (BL) = index 2
-        Motor 4 (FL) = index 3
-
-    Elodin standard (looking from above):
-        Motor 0 (FR)
-        Motor 1 (FL)
-        Motor 2 (BR)
-        Motor 3 (BL)
-    """
-    return bf_motors[BETAFLIGHT_TO_ELODIN_MOTOR_MAP]
-
-
-def remap_motors_elodin_to_betaflight(el_motors: np.ndarray) -> np.ndarray:
-    """Remap motor indices from Elodin order to Betaflight order."""
-    return el_motors[ELODIN_TO_BETAFLIGHT_MOTOR_MAP]
-
-
 if __name__ == "__main__":
     # Simple test - print packet sizes
     print("Betaflight SITL Packet Sizes:")

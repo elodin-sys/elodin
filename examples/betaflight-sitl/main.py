@@ -39,7 +39,6 @@ from sensors import IMU, create_sensor_system, SensorDataBuffer
 from comms import (
     BetaflightSyncBridge,
     RCPacket,
-    remap_motors_betaflight_to_elodin,
     MAX_RC_CHANNELS,
 )
 
@@ -327,8 +326,9 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
 
     try:
         # Synchronous lockstep: send FDM+RC, wait for motor response
-        motors_bf = b.step(fdm, rc)
-        s.motors = remap_motors_betaflight_to_elodin(motors_bf)
+        # Motor order matches Betaflight Quad-X: FR(0), BR(1), BL(2), FL(3)
+        # The physics simulation (config.py) uses the same motor layout
+        s.motors = b.step(fdm, rc)
         s.max_motor = max(s.max_motor, np.max(s.motors))
 
         # Write motor commands back to Elodin-DB for physics simulation
