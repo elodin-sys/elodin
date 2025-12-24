@@ -207,22 +207,23 @@ def extract_sensor_data(
 ) -> dict:
     """
     Extract and format sensor data for Betaflight communication.
-
+    
     This function takes raw sensor values and prepares them for
     transmission to Betaflight SITL via the UDP bridge.
-
+    
     Args:
-        world_pos: Position [qw, qx, qy, qz, x, y, z]
+        world_pos: Position [qx, qy, qz, qw, x, y, z] (Elodin scalar-last format)
         world_vel: Velocity [vx, vy, vz, wx, wy, wz]
         accel: Accelerometer [ax, ay, az] in body frame
         gyro: Gyroscope [wx, wy, wz] in body frame
         baro: Barometer [altitude]
-
+        
     Returns:
         Dictionary with formatted sensor data for FDM packet
     """
-    # Extract quaternion (Elodin format: [qw, qx, qy, qz])
-    quat = world_pos[:4]
+    # Extract quaternion from Elodin format [qx, qy, qz, qw] and convert to [qw, qx, qy, qz]
+    quat_xyzw = world_pos[:4]
+    quat = np.array([quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]])  # [w, x, y, z]
     position = world_pos[4:7]
     velocity = world_vel[:3]
 
@@ -255,13 +256,13 @@ def build_fdm_from_components(
 
     This is the primary function for extracting sensor data from the simulation
     and packaging it for Betaflight. It handles:
-    - Quaternion extraction from world_pos
+    - Quaternion extraction from world_pos (Elodin scalar-last to Betaflight scalar-first)
     - Velocity extraction from world_vel
     - ENU to NED coordinate conversion for gyro/accel
     - Pressure calculation from altitude
 
     Args:
-        world_pos: Position array [qw, qx, qy, qz, x, y, z]
+        world_pos: Position array [qx, qy, qz, qw, x, y, z] (Elodin scalar-last format)
         world_vel: Velocity array [wx, wy, wz, vx, vy, vz] (angular first in Elodin)
         accel: Accelerometer [ax, ay, az] in body frame (ENU)
         gyro: Gyroscope [wx, wy, wz] in body frame (ENU)
@@ -274,8 +275,9 @@ def build_fdm_from_components(
     # Import here to avoid circular dependency
     from comms import FDMPacket
 
-    # Extract quaternion [w, x, y, z]
-    quat = np.array(world_pos[:4])
+    # Extract quaternion from Elodin format [qx, qy, qz, qw] and convert to [qw, qx, qy, qz]
+    quat_xyzw = np.array(world_pos[:4])
+    quat = np.array([quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]])  # [w, x, y, z]
 
     # Extract position [x, y, z] (ENU)
     position = np.array(world_pos[4:7])
@@ -364,7 +366,8 @@ class SensorDataBuffer:
     """
 
     def __init__(self):
-        self.world_pos = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        # Elodin format: [qx, qy, qz, qw, x, y, z] - identity quaternion is [0,0,0,1]
+        self.world_pos = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0])
         self.world_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.accel = np.array([0.0, 0.0, 9.80665])  # 1g upward at rest
         self.gyro = np.array([0.0, 0.0, 0.0])

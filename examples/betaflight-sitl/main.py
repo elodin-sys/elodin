@@ -361,13 +361,13 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
             force = np.array(ctx.read_component("drone.force"))
             world_pos = np.array(ctx.read_component("drone.world_pos"))
             # body_thrust layout: [τx, τy, τz, fx, fy, fz]
-            # world_pos layout: [qw, qx, qy, qz, x, y, z]
-            quat = world_pos[:4]
+            # world_pos layout: [qx, qy, qz, qw, x, y, z] (Elodin scalar-last format)
+            quat_xyzw = world_pos[:4]
             debug_str = (
                 f"\n    [DEBUG] motor_cmd={motor_cmd_db.sum():.3f} thrust={motor_thrust.sum():.2f}N"
                 f"\n    [DEBUG] body_thrust=[{body_thrust[3]:.1f},{body_thrust[4]:.1f},{body_thrust[5]:.1f}]N (linear xyz)"
                 f"\n    [DEBUG] force=[{force[3]:.1f},{force[4]:.1f},{force[5]:.1f}]N (linear xyz)"
-                f"\n    [DEBUG] quat=[{quat[0]:.3f},{quat[1]:.3f},{quat[2]:.3f},{quat[3]:.3f}]"
+                f"\n    [DEBUG] quat(xyzw)=[{quat_xyzw[0]:.3f},{quat_xyzw[1]:.3f},{quat_xyzw[2]:.3f},{quat_xyzw[3]:.3f}]"
             )
         except Exception as e:
             debug_str = f"\n    [DEBUG] read failed: {e}"

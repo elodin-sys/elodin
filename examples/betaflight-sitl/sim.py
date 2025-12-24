@@ -395,7 +395,7 @@ if __name__ == "__main__":
     df = exec.history(["drone.world_pos", "drone.world_vel", "drone.sim_time"])
     print(f"Simulated {len(df)} ticks")
 
-    # world_pos is [qw, qx, qy, qz, x, y, z] - extract using polars
+    # world_pos is [qx, qy, qz, qw, x, y, z] (Elodin scalar-last format) - extract using polars
     df_expanded = df.select(
         pl.col("drone.world_pos").arr.get(6).alias("z"),
         pl.col("drone.world_vel").arr.get(2).alias("vz"),

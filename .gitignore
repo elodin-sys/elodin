@@ -28,3 +28,6 @@ out-with-envs.yaml
 .buildkite/pipeline.json
 
 __pycache__
+
+# examples
+betaflight_*
