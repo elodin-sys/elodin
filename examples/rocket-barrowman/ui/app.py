@@ -9,9 +9,10 @@ Modern, polished UI with aerospace-inspired design
 import sys
 import os
 from pathlib import Path
+from typing import Dict, Any, Optional
 
-# Add the rocket-barrowman directory to path (but not if it's already there)
-_rocket_dir = os.path.dirname(os.path.abspath(__file__))
+# Add parent directory to path for imports
+_rocket_dir = str(Path(__file__).parent.parent)
 if _rocket_dir not in sys.path:
     sys.path.insert(0, _rocket_dir)
 
@@ -19,13 +20,6 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from typing import Dict, Any, Optional
-
-import sys
-from pathlib import Path
-
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import rocket simulation components
 from core import Environment, Motor, Rocket as RocketModel, FlightSolver, FlightResult
@@ -54,7 +48,6 @@ try:
     )
 except ImportError:
     TRIMESH_AVAILABLE = False
-import os
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION & THEMING
