@@ -213,7 +213,7 @@ def extract_sensor_data(
     
     Args:
         world_pos: Position [qx, qy, qz, qw, x, y, z] (Elodin scalar-last format)
-        world_vel: Velocity [vx, vy, vz, wx, wy, wz]
+        world_vel: Velocity [wx, wy, wz, vx, vy, vz] (angular first in Elodin)
         accel: Accelerometer [ax, ay, az] in body frame
         gyro: Gyroscope [wx, wy, wz] in body frame
         baro: Barometer [altitude]
@@ -225,7 +225,8 @@ def extract_sensor_data(
     quat_xyzw = world_pos[:4]
     quat = np.array([quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]])  # [w, x, y, z]
     position = world_pos[4:7]
-    velocity = world_vel[:3]
+    # Elodin stores world_vel as [wx, wy, wz, vx, vy, vz] (angular first)
+    velocity = world_vel[3:6]
 
     # Barometric pressure from altitude
     # Standard atmosphere: P = P0 * (1 - L*h/T0)^(g*M/(R*L))
