@@ -135,7 +135,6 @@ uv pip install -r examples/rocket-barrowman/requirements.txt
 rocket-barrowman/
 ├── README.md                 # This file
 ├── main.py                   # Elodin integration entry point
-├── calisto_builder.py        # Default rocket definition
 ├── requirements.txt          # Python dependencies
 ├── run_streamlit.sh          # Launcher script
 │

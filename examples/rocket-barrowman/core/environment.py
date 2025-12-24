@@ -14,8 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Optional, Tuple
 
-from .atmospheric_models import ISAAtmosphere
 from .atmospheric_models import (
+    ISAAtmosphere,
     NRLMSISE00Atmosphere,
     WeatherDataAtmosphere,
     HybridAtmosphere,

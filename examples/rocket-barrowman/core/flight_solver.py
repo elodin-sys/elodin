@@ -19,7 +19,13 @@ from .math_utils import Matrix, Vector
 
 try:
     # Optional: Calisto-specific drag curve (if available)
-    from ..calisto_drag_curve import get_calisto_cd  # noqa: F401
+    # This would be in the parent directory if it exists
+    import sys
+    import os
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if parent_dir not in sys.path:
+        sys.path.insert(0, parent_dir)
+    from calisto_drag_curve import get_calisto_cd  # noqa: F401
 
     USE_CALISTO_DRAG = True
 except ImportError:
