@@ -1232,8 +1232,14 @@ class SmartOptimizer:
                             break
 
                 tube_for_motor = self._get_tube_for_motor(motor.diameter, prefer_smaller=True)
+                if tube_for_motor is None:
+                    continue  # Skip motors with no fitting tubes
                 if min_tube_for_payload and min_tube_for_payload["id"] > tube_for_motor["id"]:
-                    tube = min_tube_for_payload
+                    # Validate payload tube also fits the motor
+                    if min_tube_for_payload["od"] >= motor.diameter and min_tube_for_payload["id"] >= motor.diameter + 0.003:
+                        tube = min_tube_for_payload
+                    else:
+                        tube = tube_for_motor
                 else:
                     tube = tube_for_motor
                 iteration += 1
