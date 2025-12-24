@@ -638,16 +638,21 @@ class FlightSolver:
         total_force = thrust_world + aero_force_world + gravity
         acceleration = total_force / mass_total
 
-        # Moments from lift forces (RocketPy aero_surface.py line 148)
-        # M1 = -cpz * lift_yb, M2 = cpz * lift_xb
-        # This method uses the actual lift forces (R1, R2) which are already calculated
-        # from the aerodynamic model, ensuring consistency with the force calculations
-        cpz = cp  # CP position along z-axis
+        # Moments from lift forces about CG
+        # The moment arm is (CP - CG), NOT just CP!
+        # M = F_lift × (X_cp - X_cg)
+        # 
+        # Convention:
+        # - Positive moment arm (CP behind CG): lift creates restoring moment (stable)
+        # - Negative moment arm (CP ahead of CG): lift creates destabilizing moment (unstable)
         ref_length = self.rocket.reference_length
         ref_area = self.rocket.reference_area
+        
+        # Moment arm from CG to CP (critical for stability!)
+        moment_arm = cp - cg  # Positive if CP is behind CG (stable), negative if ahead (unstable)
 
-        M1 = -cpz * R2  # Pitch moment
-        M2 = cpz * R1  # Yaw moment
+        M1 = -moment_arm * R2  # Pitch moment about CG
+        M2 = moment_arm * R1   # Yaw moment about CG
         M3 = 0.0  # Roll moment
 
         # Apply full aerodynamic moments - no artificial scaling
