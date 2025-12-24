@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import simulation components
 from core import Environment, Motor, Rocket as RocketModel, FlightSolver
-from core.openrocket_components import (
+from core.components.openrocket_components import (
     Rocket,
     NoseCone,
     BodyTube,
@@ -37,7 +37,7 @@ from core.openrocket_components import (
     Parachute,
     MATERIALS,
 )
-from core.openrocket_motor import Motor as ORMotor
+from core.components.openrocket_motor import Motor as ORMotor
 
 # Try to import OpenAI for NLP parsing
 try:
@@ -1036,7 +1036,7 @@ def design_rocket(
 
 if __name__ == "__main__":
     # Test the optimizer
-    from core.motor_scraper import ThrustCurveScraper
+    from core.data.motor_scraper import ThrustCurveScraper
 
     print("Loading motor database...")
     scraper = ThrustCurveScraper()

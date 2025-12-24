@@ -24,7 +24,7 @@ except ImportError:
     np = None
 
 if TYPE_CHECKING:
-    from core.motor_scraper import MotorData
+    from core.data.motor_scraper import MotorData
 
 import sys
 from pathlib import Path
@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import simulation components
 from core import Environment, Motor, Rocket as RocketModel, FlightSolver
-from core.openrocket_components import (
+from core.components.openrocket_components import (
     Rocket,
     NoseCone,
     BodyTube,
@@ -44,7 +44,7 @@ from core.openrocket_components import (
     MassComponent,
     MATERIALS,
 )
-from core.openrocket_motor import Motor as ORMotor
+from core.components.openrocket_motor import Motor as ORMotor
 
 # Try OpenAI
 try:
@@ -1228,7 +1228,7 @@ class SmartOptimizer:
 
 
 if __name__ == "__main__":
-    from core.motor_scraper import ThrustCurveScraper
+    from core.data.motor_scraper import ThrustCurveScraper
 
     print("Loading motors...")
     scraper = ThrustCurveScraper()

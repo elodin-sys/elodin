@@ -7,8 +7,8 @@ from typing import List
 import math
 import numpy as np
 
-from .openrocket_aero import RocketAerodynamics
-from .openrocket_components import (
+from ..components.openrocket_aero import RocketAerodynamics
+from ..components.openrocket_components import (
     Parachute as ORParachute,
     InnerTube,
     BodyTube,

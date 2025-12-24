@@ -35,7 +35,7 @@ except ImportError:
 
 # Import our rocket simulation
 from core import Environment, Motor, Rocket as RocketModel, FlightSolver, FlightResult
-from core.calisto_builder import build_calisto
+from core.builders import build_calisto
 from analysis import FlightAnalyzer
 
 # Try to import mesh renderer for Elodin visualization
@@ -701,7 +701,7 @@ if __name__ == "__main__":
             solver_data = pickle.load(f)
 
         # Reconstruct FlightResult from dict
-        from flight_solver import FlightResult, StateSnapshot
+        from solvers.barrowman.flight_solver import FlightResult, StateSnapshot
         import numpy as np
 
         history = []

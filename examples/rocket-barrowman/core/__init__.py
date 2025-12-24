@@ -1,38 +1,62 @@
-"""Core physics and rocket modeling components."""
+"""Core physics and rocket modeling components.
 
-from .environment import Environment
-from .motor_model import Motor
-from .rocket_model import Rocket
-from .flight_solver import FlightSolver, FlightResult, StateSnapshot
-from .math_utils import Matrix, Vector
-from .dynamic_wind import DynamicWindModel, ProfilePoint
-from .calisto_builder import build_calisto, build_calisto_rocket, build_cesaroni_m1670
-from .atmospheric_models import (
+Reorganized structure:
+- physics/ - Flight solver and numerical methods
+- models/ - Rocket and motor models
+- components/ - OpenRocket-compatible components
+- environment/ - Atmospheric and wind models
+- builders/ - Rocket configuration builders
+- data/ - Motor database and data sources
+"""
+
+# Re-export everything for backward compatibility
+from .physics import FlightSolver, FlightResult, StateSnapshot, Matrix, Vector
+from .models import Rocket, Motor
+from .environment import (
+    Environment,
     ISAAtmosphere,
     NRLMSISE00Atmosphere,
     WeatherDataAtmosphere,
     HybridAtmosphere,
     AtmosphericProperties,
+    NRLMSISE_AVAILABLE,
+    NETCDF_AVAILABLE,
+    DynamicWindModel,
+    ProfilePoint,
+    create_environment_from_coordinates,
 )
+from .builders import build_calisto, build_calisto_rocket, build_cesaroni_m1670
+from .data import MotorDatabase, search_motors, get_motor_data
 
 __all__ = [
-    "Environment",
-    "Motor",
-    "Rocket",
+    # Physics
     "FlightSolver",
     "FlightResult",
     "StateSnapshot",
     "Matrix",
     "Vector",
-    "DynamicWindModel",
-    "ProfilePoint",
-    "build_calisto",
-    "build_calisto_rocket",
-    "build_cesaroni_m1670",
+    # Models
+    "Rocket",
+    "Motor",
+    # Environment
+    "Environment",
     "ISAAtmosphere",
     "NRLMSISE00Atmosphere",
     "WeatherDataAtmosphere",
     "HybridAtmosphere",
     "AtmosphericProperties",
+    "NRLMSISE_AVAILABLE",
+    "NETCDF_AVAILABLE",
+    "DynamicWindModel",
+    "ProfilePoint",
+    "create_environment_from_coordinates",
+    # Builders
+    "build_calisto",
+    "build_calisto_rocket",
+    "build_cesaroni_m1670",
+    # Data
+    "MotorDatabase",
+    "search_motors",
+    "get_motor_data",
 ]
 

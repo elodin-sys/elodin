@@ -256,7 +256,7 @@ def create_environment_from_coordinates(
 
     Example:
         >>> from datetime import datetime
-        >>> from core.weather_fetcher import create_environment_from_coordinates
+        >>> from core.environment.weather_fetcher import create_environment_from_coordinates
         >>>
         >>> # Spaceport America: 33.0°N, 106.5°W, elevation 1400m
         >>> launch_time = datetime(2024, 6, 15, 12, 0)  # June 15, 2024, noon

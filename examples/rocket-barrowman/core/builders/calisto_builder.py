@@ -18,7 +18,7 @@ Specifications:
 
 import math
 import numpy as np
-from core.openrocket_components import (
+from core.components.openrocket_components import (
     BodyTube,
     CenteringRing,
     InnerTube,

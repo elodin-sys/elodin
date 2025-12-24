@@ -23,7 +23,7 @@ import plotly.graph_objects as go
 
 # Import rocket simulation components
 from core import Environment, Motor, Rocket as RocketModel, FlightSolver, FlightResult
-from core.openrocket_components import (
+from core.components.openrocket_components import (
     Rocket,
     NoseCone,
     BodyTube,
@@ -32,9 +32,9 @@ from core.openrocket_components import (
     Parachute,
     MATERIALS,
 )
-from core.openrocket_motor import Motor as ORMotor
-from core.motor_scraper import ThrustCurveScraper
-from core.calisto_builder import build_calisto
+from core.components.openrocket_motor import Motor as ORMotor
+from core.data.motor_scraper import ThrustCurveScraper
+from core.builders.calisto_builder import build_calisto
 from ui.rocket_visualizer import visualize_rocket_3d, visualize_rocket_2d_side_view
 from optimization.ai_rocket_builder import RocketDesigner
 from optimization.smart_optimizer import SmartOptimizer
@@ -4275,7 +4275,7 @@ def main():
                     # Create environment with weather data if specified
                     if use_weather_data and launch_date and launch_time:
                         from datetime import datetime
-                        from core.weather_fetcher import create_environment_from_coordinates
+                        from core.environment.weather_fetcher import create_environment_from_coordinates
 
                         launch_datetime = datetime.combine(launch_date, launch_time)
                         try:

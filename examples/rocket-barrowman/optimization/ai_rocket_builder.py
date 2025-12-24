@@ -12,7 +12,7 @@ import math
 import json
 
 if TYPE_CHECKING:
-    from core.motor_scraper import MotorData
+    from core.data.motor_scraper import MotorData
 
 # Try to import OpenAI, but make it optional
 try:

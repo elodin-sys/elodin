@@ -12,9 +12,17 @@ from typing import List, Optional
 
 import numpy as np
 
-from .environment import Environment
-from .motor_model import Motor
-from .rocket_model import Rocket, ParachuteConfig
+import sys
+from pathlib import Path
+
+# Add parent directory to path for imports
+_parent = Path(__file__).parent.parent.parent
+if str(_parent) not in sys.path:
+    sys.path.insert(0, str(_parent))
+
+from core.environment.environment import Environment
+from core.models.motor_model import Motor
+from core.models.rocket_model import Rocket, ParachuteConfig
 from .math_utils import Matrix, Vector
 
 try:
