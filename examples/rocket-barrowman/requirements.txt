@@ -7,4 +7,5 @@ openai>=1.0.0
 trimesh>=4.0.0
 nrlmsise00>=0.1.0
 netCDF4>=1.6.0
+cdsapi>=0.7.0
 

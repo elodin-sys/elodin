@@ -12,6 +12,7 @@ consumed by the RocketPy-style solver. The API mirrors the naming of RocketPy's
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Iterable, Optional, Tuple
 
 from .atmospheric_models import (
@@ -182,3 +183,61 @@ class Environment:
 
     def wind_velocity(self, altitude: float, time: float) -> Tuple[float, float, float]:
         return self.wind_model.get_wind(altitude, time)
+
+    # ------------------------------------------------------------------
+    # Convenience factory methods
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_coordinates(
+        cls,
+        latitude: float,
+        longitude: float,
+        datetime_obj: datetime,
+        elevation: float = 0.0,
+        use_weather_data: bool = True,
+        use_nrlmsise: bool = True,
+    ) -> "Environment":
+        """
+        Create Environment automatically from coordinates and datetime.
+
+        Fetches weather data from national databases (ECMWF ERA5) and sets up
+        atmospheric and wind models automatically.
+
+        Args:
+            latitude: Latitude in degrees (-90 to 90)
+            longitude: Longitude in degrees (-180 to 180)
+            datetime_obj: Datetime object for the requested time
+            elevation: Ground elevation above sea level (m). Default: 0.0
+            use_weather_data: If True, fetch and use weather data. Default: True
+            use_nrlmsise: If True, use NRLMSISE-00 for high altitudes. Default: True
+
+        Returns:
+            Environment object configured with weather data
+
+        Example:
+            >>> from datetime import datetime
+            >>> from core import Environment
+            >>>
+            >>> # Spaceport America launch conditions
+            >>> launch_time = datetime(2024, 6, 15, 12, 0)
+            >>> env = Environment.from_coordinates(
+            ...     latitude=33.0,
+            ...     longitude=-106.5,
+            ...     datetime_obj=launch_time,
+            ...     elevation=1400.0,
+            ... )
+            >>> # Now use env for simulation
+            >>> props = env.air_properties(altitude=1000.0)
+        """
+        from .weather_fetcher import create_environment_from_coordinates
+
+        env, _ = create_environment_from_coordinates(
+            latitude=latitude,
+            longitude=longitude,
+            datetime_obj=datetime_obj,
+            elevation=elevation,
+            use_weather_data=use_weather_data,
+            use_nrlmsise=use_nrlmsise,
+        )
+        return env
