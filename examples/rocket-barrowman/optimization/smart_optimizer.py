@@ -62,7 +62,8 @@ class Requirements:
 
     target_altitude_m: float = 3000.0
     altitude_tolerance: float = 0.15  # ±15%
-    payload_mass_kg: float = 0.0
+    payload_mass_kg: float = 0.0  # Payload mass (if specified separately)
+    total_mass_kg: Optional[float] = None  # Total rocket mass including motor (if "weighs X" specified)
     body_diameter_m: Optional[float] = None  # Target body diameter (if specified)
     max_budget_usd: Optional[float] = None
     recovery_type: str = "dual_deploy"  # "single", "dual_deploy", "none"
@@ -215,8 +216,8 @@ class SmartOptimizer:
                 break
 
         # Parse payload/weight
-        # "weighs 50lbs" means total weight, not just payload
-        # "50lb payload" means payload only
+        # "weighs 80lbs" means TOTAL weight (payload + structure + motor)
+        # "80lb payload" means payload only
         weight_patterns = [
             (
                 r"weighs\s+(\d+\.?\d*)\s*(?:lb|lbs)",
@@ -238,11 +239,16 @@ class SmartOptimizer:
             match = re.search(pattern, text_lower)
             if match:
                 mass_kg = converter(match)
-                # If "weighs" is in the pattern, it's total weight, so estimate payload
+                # If "weighs" is in the pattern, it's TOTAL weight (payload + structure + motor)
                 if "weighs" in pattern:
-                    # Total weight includes structure, so payload is ~60-70% of total
-                    req.payload_mass_kg = mass_kg * 0.65
+                    req.total_mass_kg = mass_kg
+                    # Don't set payload here - it will be calculated during build
+                    # based on: payload = total_mass - structure - motor
+                elif "payload" in pattern:
+                    # Explicit payload specification
+                    req.payload_mass_kg = mass_kg
                 else:
+                    # Default: assume it's payload (backward compatibility)
                     req.payload_mass_kg = mass_kg
                 break
 
@@ -543,13 +549,33 @@ class SmartOptimizer:
             requirements.recovery_type,
         )
 
+        # Calculate payload mass based on requirements
+        # If total_mass_kg is specified, calculate payload as: total - structure - motor
+        # Otherwise, use payload_mass_kg directly
+        if requirements.total_mass_kg is not None:
+            # Total mass = payload + structure + motor.total_mass
+            # So: payload = total_mass - structure - motor.total_mass
+            payload_mass = requirements.total_mass_kg - structure_mass - motor.total_mass
+            # Ensure payload is non-negative (if structure + motor > total, we have a problem)
+            if payload_mass < 0:
+                # Structure + motor already exceeds total mass - this design won't work
+                print(
+                    f"Warning: Structure ({structure_mass:.2f}kg) + Motor ({motor.total_mass:.2f}kg) = "
+                    f"{structure_mass + motor.total_mass:.2f}kg exceeds total mass ({requirements.total_mass_kg:.2f}kg)"
+                )
+                return (0.0, 0.0, {}, {})
+            requirements.payload_mass_kg = payload_mass
+        else:
+            # Use payload_mass_kg directly (if specified)
+            payload_mass = requirements.payload_mass_kg
+
         # Add payload as actual MassComponent if specified
-        if requirements.payload_mass_kg > 0:
+        if payload_mass > 0:
             # Payload bay position - in forward section of body
             payload_position = nose_length + body_length * 0.3  # 30% into body
             payload = MassComponent(
                 name="Payload",
-                mass=requirements.payload_mass_kg,
+                mass=payload_mass,
                 length=0.15,  # Typical payload bay length
                 radius=body_radius * 0.9,  # Slightly smaller than body
             )
@@ -557,8 +583,19 @@ class SmartOptimizer:
             body.add_child(payload)
 
         # Total dry mass = structure + payload
-        dry_mass = structure_mass + requirements.payload_mass_kg
+        dry_mass = structure_mass + payload_mass
         landed_mass = dry_mass + motor.case_mass
+        
+        # Verify total mass matches requirement (if specified)
+        if requirements.total_mass_kg is not None:
+            total_mass = dry_mass + motor.total_mass
+            mass_error = abs(total_mass - requirements.total_mass_kg) / requirements.total_mass_kg
+            if mass_error > 0.05:  # More than 5% error
+                # This shouldn't happen if calculations are correct, but warn if it does
+                print(
+                    f"Warning: Total mass mismatch: calculated {total_mass:.2f}kg, "
+                    f"target {requirements.total_mass_kg:.2f}kg (error: {mass_error*100:.1f}%)"
+                )
 
         # Size for 5 m/s descent - ensure reasonable size
         main_area = (2 * landed_mass * 9.81) / (1.225 * 25 * 1.5)
