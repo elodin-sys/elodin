@@ -33,11 +33,11 @@ from config import DroneConfig
 # Motor commands from Betaflight (normalized 0-1)
 # Marked as external_control so Betaflight can write to it via Elodin-DB
 #
-# Motor order matches Betaflight Quad-X configuration:
-#   Index 0: Front Right (FR) - CCW
-#   Index 1: Back Right (BR) - CW
-#   Index 2: Back Left (BL) - CCW
-#   Index 3: Front Left (FL) - CW
+# Motor order after SITL's Gazebo remapping (see sitl.c pwmCompleteMotorUpdate):
+#   Index 0: Front Right (FR) - CCW  (originally BF Motor 1)
+#   Index 1: Back Left (BL) - CCW    (originally BF Motor 2)
+#   Index 2: Front Left (FL) - CW    (originally BF Motor 3)
+#   Index 3: Back Right (BR) - CW    (originally BF Motor 0)
 #
 # See config.py for motor positions and spin directions.
 MotorCommand = ty.Annotated[
@@ -46,7 +46,7 @@ MotorCommand = ty.Annotated[
         "motor_command",
         el.ComponentType(el.PrimitiveType.F64, (4,)),
         metadata={
-            "element_names": "FR,BR,BL,FL",  # Betaflight Quad-X order
+            "element_names": "FR,BL,FL,BR",  # After SITL Gazebo remapping
             "priority": 100,
             "external_control": "true",  # Allows external writes from Betaflight bridge
         },
@@ -54,13 +54,13 @@ MotorCommand = ty.Annotated[
 ]
 
 # Current motor thrust state (for dynamics)
-# Same motor order as MotorCommand: FR(0), BR(1), BL(2), FL(3)
+# Same motor order as MotorCommand: FR(0), BL(1), FL(2), BR(3)
 MotorThrust = ty.Annotated[
     jax.Array,
     el.Component(
         "motor_thrust",
         el.ComponentType(el.PrimitiveType.F64, (4,)),
-        metadata={"element_names": "FR,BR,BL,FL", "priority": 99},
+        metadata={"element_names": "FR,BL,FL,BR", "priority": 99},
     ),
 ]
 
@@ -249,23 +249,43 @@ def create_apply_forces_system(config: DroneConfig):
 
 def create_ground_constraint_system(config: DroneConfig):
     """
-    Create simple ground collision constraint.
+    Create ground collision constraint with friction.
 
     Prevents the drone from going below ground level.
+    When on/near ground, applies angular damping to simulate ground contact
+    friction that prevents tipping. The damping gradually decreases with
+    altitude to provide a smooth transition from ground to flight.
     """
     ground_level = config.ground_level
+    # Ground contact angular damping factor (0-1, higher = more damping)
+    # 0.95 means 95% of angular velocity is removed each timestep when on ground
+    max_damping = 0.95
+    # Height at which damping starts (on ground)
+    damping_start = ground_level + 0.01
+    # Height at which damping ends (in flight) - gradual transition over 0.5m
+    damping_end = ground_level + 0.5
 
     @el.map
     def ground_constraint(pos: el.WorldPos, vel: el.WorldVel) -> tuple[el.WorldPos, el.WorldVel]:
-        """Apply ground constraint."""
+        """Apply ground constraint with gradual angular damping."""
         p = pos.linear()
         v = vel.linear()
+        omega = vel.angular()
 
         # If below ground, clamp position and zero downward velocity
         below_ground = p[2] < ground_level
-
         new_z = jnp.where(below_ground, ground_level, p[2])
         new_vz = jnp.where(below_ground & (v[2] < 0), 0.0, v[2])
+
+        # Gradual damping transition based on altitude
+        # damping_factor goes from max_damping at ground to 0 at damping_end
+        damping_ratio = jnp.clip((damping_end - p[2]) / (damping_end - damping_start), 0.0, 1.0)
+        damping_factor = max_damping * damping_ratio
+
+        # Apply damping: omega * (1 - damping_factor)
+        # At ground: omega * 0.05 (95% removed)
+        # At 0.5m: omega * 1.0 (no damping)
+        new_omega = omega * (1.0 - damping_factor)
 
         new_pos = el.SpatialTransform(
             linear=jnp.array([p[0], p[1], new_z]),
@@ -273,7 +293,7 @@ def create_ground_constraint_system(config: DroneConfig):
         )
         new_vel = el.SpatialMotion(
             linear=jnp.array([v[0], v[1], new_vz]),
-            angular=vel.angular(),
+            angular=new_omega,
         )
 
         return new_pos, new_vel

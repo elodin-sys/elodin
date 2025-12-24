@@ -36,7 +36,6 @@ import numpy as np
 from config import DroneConfig
 from comms import FDMPacket
 
-
 # --- Noise Model ---
 
 
@@ -83,14 +82,27 @@ class Noise:
         return m + noise + bias
 
 
-# Noise instances with proven parameters from real-world characterized sensors
-gyro_noise = Noise(0, 0, 0.001, 0.001)  # noise_cov=0.001, bias_drift_cov=0.001
-accel_noise = Noise(0, 1, 0.001, 0.0)  # accel has no bias drift in this model
-baro_noise = Noise(0, 2, 0.09, 0.0)  # ~0.3m std dev (typical consumer barometer), no bias drift
+# Noise instances - tuned for Betaflight SITL testing
+#
+# Note: Betaflight's attitude estimator is sensitive to noise during the
+# bootgrace/calibration period. High noise causes attitude drift and
+# motor imbalance at liftoff.
+#
+# Noise sweep results:
+#   - 1e-8: Perfectly stable, motors balanced
+#   - 1e-7: Slightly shaky but stable hover (recommended for SITL)
+#   - 1e-6: Unstable, drone flips
+#
+# Production sensors (drone example) use noise_cov=0.001 (~1.8 deg/s std).
+# SITL requires lower noise (1e-7) for stable lockstep simulation.
+gyro_noise = Noise(0, 0, 1e-7, 1e-7)  # Gyro noise + bias drift
+accel_noise = Noise(0, 1, 1e-7, 0.0)  # Accel noise (no drift)
+baro_noise = Noise(0, 2, 0.001, 0.0)  # ~0.03m std dev
 
 
-# Initial gyro bias (typical values from real sensor characterization)
-init_gyro_bias = jnp.array([0.0025, 0.0001, 0.0005])
+# Initial gyro bias (set to zero for SITL - avoids consistent drift direction)
+# In a real sensor, this would be calibrated out during Betaflight's startup
+init_gyro_bias = jnp.array([0.0, 0.0, 0.0])
 
 
 # --- Sensor Component Types ---
@@ -235,13 +247,18 @@ def create_accel_system(config: DroneConfig):
     The accelerometer measures specific force (acceleration minus gravity)
     in body frame. Applies noise and bias when enabled.
     No filtering - Betaflight handles that.
+
+    Detects ground contact to correctly report +g when at rest (the ground
+    constraint zeros velocity but doesn't add normal force to the Force component).
     """
     gravity = config.gravity
+    ground_level = config.ground_level
 
     @el.map
     def compute_accel(
         tick: SensorTick,
         pos: el.WorldPos,
+        vel: el.WorldVel,
         force: el.Force,
         inertia: el.Inertia,
         bias: AccelBias,
@@ -252,22 +269,39 @@ def create_accel_system(config: DroneConfig):
         The accelerometer measures specific force, which is the total force
         minus gravity, divided by mass. When in free fall, the accelerometer
         reads zero. When sitting on the ground, it reads +g upward (1g).
+
+        Detects ground contact (z ≤ ground_level and not moving up) to correctly
+        show +g when at rest, since the ground constraint zeros velocity but
+        doesn't add a normal force.
         """
         # Get orientation quaternion for frame transformation
         quat = pos.angular()
         quat_inv = quat.inverse()
 
-        # Total acceleration from forces (in world frame)
+        # Check if on ground: position at ground level and not moving upward
+        z = pos.linear()[2]
+        vz = vel.linear()[2]
+        on_ground = (z <= ground_level + 0.01) & (vz <= 0.01)
+
+        # Compute acceleration from forces
         mass = inertia.mass()
-        total_accel_world = force.linear() / mass
+        total_accel_from_force = force.linear() / mass
 
         # Gravity vector in world frame (ENU: +Z is up)
         gravity_world = jnp.array([0.0, 0.0, -gravity])
 
+        # When on ground, effective acceleration is 0 (velocity is clamped)
+        # Otherwise use force-based acceleration
+        total_accel_world = jnp.where(
+            on_ground,
+            jnp.zeros(3),  # On ground: no acceleration (constrained)
+            total_accel_from_force,  # In air: normal physics
+        )
+
         # Specific force in world frame (what accelerometer measures)
         # specific_force = total_accel - gravity
-        # Note: When hovering, total_accel = 0, so specific_force = +g (upward)
-        # When in free fall, total_accel = -g, so specific_force = 0
+        # When on ground: total_accel = 0, so specific_force = 0 - (-g) = +g ✓
+        # When in free fall: total_accel = -g, so specific_force = -g - (-g) = 0 ✓
         specific_force_world = total_accel_world - gravity_world
 
         # Transform to body frame
@@ -459,21 +493,38 @@ def build_fdm_from_components(
     accel_enu = np.array(accel) if accel is not None else np.array([0.0, 0.0, gravity])
     gyro_enu = np.array(gyro) if gyro is not None else np.array(world_vel[:3])
 
-    # Convert from Elodin ENU body frame to Betaflight NED body frame
-    # ENU to NED: x_ned = y_enu, y_ned = x_enu, z_ned = -z_enu
+    # Convert from Elodin FLU body frame to Betaflight FRD body frame
+    #
+    # Betaflight SITL (sitl.c) applies internal sign conversions to incoming data:
+    #   accel: negates all axes (-X, -Y, -Z)
+    #   gyro:  keeps X, negates Y and Z (X, -Y, -Z)
+    #
+    # We pre-compensate so that AFTER BF's conversion, correct FRD values result.
+    #
+    # FLU→FRD conversion (conceptually):
+    #   FRD_x = FLU_x   (forward stays forward)
+    #   FRD_y = -FLU_y  (right = -left)
+    #   FRD_z = -FLU_z  (down = -up)
+    #
+    # Accelerometer: We want [FLU_x, -FLU_y, -FLU_z] after BF negates all.
+    #   Send [-FLU_x, FLU_y, FLU_z] → BF gets [FLU_x, -FLU_y, -FLU_z] ✓
     accel_ned = np.array(
         [
-            accel_enu[1],  # ENU-Y -> NED-X (forward)
-            accel_enu[0],  # ENU-X -> NED-Y (right)
-            -accel_enu[2],  # ENU-Z -> NED-Z (down, inverted)
+            -accel_enu[0],  # BF: -(-X) = X
+            accel_enu[1],  # BF: -Y
+            accel_enu[2],  # BF: -Z
         ]
     )
 
+    # Gyroscope: We want [FLU_x, -FLU_y, -FLU_z] after BF's (X, -Y, -Z).
+    #   Note: Elodin pitch sign is inverted, so we negate Y before conversion.
+    #   Send [FLU_x, -FLU_y, FLU_z] → BF gets [FLU_x, FLU_y, -FLU_z]
+    #   But with pitch already negated: [FLU_x, FLU_y, -FLU_z] (correct FRD)
     gyro_ned = np.array(
         [
-            gyro_enu[1],  # pitch rate
-            gyro_enu[0],  # roll rate
-            -gyro_enu[2],  # yaw rate (inverted)
+            gyro_enu[0],  # Roll: correct sign
+            -gyro_enu[1],  # Pitch: negate (Elodin pitch is inverted)
+            gyro_enu[2],  # Yaw: BF negates to get -Z
         ]
     )
 

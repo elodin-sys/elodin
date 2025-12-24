@@ -182,26 +182,47 @@ Arming disable flags: BOOTGRACE CLI  # These must clear before arming
 
 ## Coordinate Systems
 
-The simulation handles coordinate frame conversions:
+The simulation handles complex coordinate frame conversions:
 
-- **Elodin**: ENU (East-North-Up), X=forward, Y=left, Z=up
-- **Betaflight Sensors**: NED body frame
+- **Elodin Physics**: ENU world frame with FLU (Forward-Left-Up) body frame
+- **Betaflight Sensors**: FRD (Forward-Right-Down) body frame
 - **Betaflight GPS**: ENU for position/velocity
 
-Motor mapping for Betaflight Quad-X:
-```
-    Front
-  1(CCW)  2(CW)
-     \\  /
-      \\/
-      /\\
-     /  \\
-  4(CW)  3(CCW)
-    Back
+### Body Frame Conversion (FLU → FRD)
 
-Betaflight: [0]=FR, [1]=BR, [2]=BL, [3]=FL
-Elodin:     [0]=FR, [1]=FL, [2]=BR, [3]=BL
+Betaflight's SITL (sitl.c) applies internal sign conversions to incoming sensor data:
+- **Accelerometer**: Negates all axes (-X, -Y, -Z)
+- **Gyroscope**: Keeps X, negates Y and Z (X, -Y, -Z)
+
+The simulation pre-compensates for these conversions so that the correct FRD values
+result after Betaflight's processing. Additionally, Elodin's pitch axis convention
+is inverted relative to Betaflight's expectation, requiring explicit negation.
+
+### Motor Mapping (Betaflight Quad-X with SITL Gazebo Remapping)
+
+Betaflight SITL remaps motor indices for Gazebo ArduCopterPlugin compatibility:
+
 ```
+Standard Betaflight Quad-X Layout (looking down):
+         FRONT
+    4 (FL, CW)    2 (FR, CCW)
+           \\    /
+            \\  /
+             \\/
+             /\\
+            /  \\
+           /    \\
+    3 (BL, CCW)    1 (BR, CW)
+         BACK
+
+SITL Gazebo Remapping (what we receive):
+  motor[0] = FR (Front Right, CCW)  - originally BF Motor 1
+  motor[1] = BL (Back Left, CCW)    - originally BF Motor 2
+  motor[2] = FL (Front Left, CW)    - originally BF Motor 3
+  motor[3] = BR (Back Right, CW)    - originally BF Motor 0
+```
+
+See `config.py` for motor positions and spin directions matching this mapping.
 
 ## Configuration
 
@@ -214,13 +235,32 @@ DroneConfig(
     motor_max_thrust=15.0,       # Newtons per motor
     motor_time_constant=0.02,    # seconds
     sim_time_step=0.001,         # 1kHz physics
+    sensor_noise=True,           # Enable realistic sensor noise
 )
 ```
 
 Pre-configured drone types:
 - `create_5inch_racing_quad()` - 5" racing quadcopter
 - `create_3inch_cinewhoop()` - 3" cinewhoop
-- `create_7inch_long_range()` - 7" long range quad    
+- `create_7inch_long_range()` - 7" long range quad
+
+### Sensor Noise
+
+The simulation includes a realistic sensor noise model based on the proven drone example:
+- **Gyroscope**: Gaussian noise + bias drift (random walk)
+- **Accelerometer**: Gaussian noise
+- **Barometer**: Gaussian noise (~0.03m std dev)
+
+Noise levels are tuned for SITL stability (1e-7 covariance). Higher noise levels
+can cause Betaflight's attitude estimator to drift during the bootgrace period,
+leading to motor imbalance at liftoff.
+
+### Ground Physics
+
+The ground constraint includes angular damping to simulate landing gear friction:
+- At ground level: 95% angular velocity damping prevents tipping
+- Smooth transition: Damping gradually decreases from 0.01m to 0.5m altitude
+- Above 0.5m: No artificial damping, normal flight physics    
 
 
 ## Betaflight SITL Elodin Integration Strategy

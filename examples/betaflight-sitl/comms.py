@@ -31,7 +31,6 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 import numpy as np
 
-
 # Port definitions matching Betaflight SITL (sitl.c)
 PORT_PWM_RAW = 9001  # Betaflight -> Simulator (raw PWM)
 PORT_PWM = 9002  # Betaflight -> Simulator (normalized)
@@ -767,20 +766,28 @@ class BetaflightSyncBridge:
         Returns:
             Array of 4 normalized motor values [0.0, 1.0]
         """
-        # Convert from Elodin ENU body frame to Betaflight NED body frame
+        # Convert from Elodin FLU body frame to Betaflight FRD body frame
+        #
+        # Betaflight SITL (sitl.c) applies internal sign conversions:
+        #   accel: negates all axes (-X, -Y, -Z)
+        #   gyro:  keeps X, negates Y and Z (X, -Y, -Z)
+        #
+        # We pre-compensate so AFTER BF's conversion, correct FRD values result.
+        # See sensors.py build_fdm_from_components for detailed explanation.
         accel_ned = np.array(
             [
-                linear_acceleration[1],  # ENU-Y -> NED-X
-                linear_acceleration[0],  # ENU-X -> NED-Y
-                -linear_acceleration[2],  # ENU-Z -> NED-Z (inverted)
+                -linear_acceleration[0],  # BF: -(-X) = X
+                linear_acceleration[1],  # BF: -Y
+                linear_acceleration[2],  # BF: -Z
             ]
         )
 
+        # Gyroscope: Negate pitch due to Elodin's inverted pitch convention
         gyro_ned = np.array(
             [
-                angular_velocity[1],  # pitch rate
-                angular_velocity[0],  # roll rate
-                -angular_velocity[2],  # yaw rate (inverted)
+                angular_velocity[0],  # Roll: correct sign
+                -angular_velocity[1],  # Pitch: negate (Elodin pitch is inverted)
+                angular_velocity[2],  # Yaw: BF negates to get -Z
             ]
         )
 

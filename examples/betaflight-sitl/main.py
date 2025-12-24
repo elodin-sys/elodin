@@ -45,7 +45,7 @@ from comms import (
 
 # --- Configuration ---
 config = DEFAULT_CONFIG
-config.simulation_time = 11.0
+config.simulation_time = 20.0  # Longer for observation
 config.sim_time_step = 0.001  # 1kHz physics
 config.set_as_global()
 
@@ -201,7 +201,7 @@ class SITLState:
 # Test phases (durations in seconds)
 BOOTGRACE = 5.0  # Wait for Betaflight to initialize
 ARM_DUR = 2.0  # Arming phase
-THROTTLE_DUR = 3.0  # Apply throttle
+THROTTLE_DUR = 10.0  # Apply throttle (longer for observation)
 # Remaining time is disarm phase
 
 # Calculate max ticks for completion detection

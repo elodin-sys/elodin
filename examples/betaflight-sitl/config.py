@@ -4,27 +4,36 @@ Drone Configuration for Betaflight SITL Simulation
 This module defines the physical parameters of the simulated quadcopter,
 matching a typical Betaflight Quad-X configuration.
 
-Frame Layout (Betaflight Quad-X, looking from above):
-    Motor 1 (FR, CCW)    Motor 2 (BR, CW)
-            \\          /
-             \\  FRONT /
-              \\      /
-               X-----> Y
-              /      \\
-             /  BACK  \\
-            /          \\
-    Motor 4 (FL, CW)    Motor 3 (BL, CCW)
+Frame Layout (Betaflight Quad-X "props out", looking from above):
 
-Elodin Coordinate System (ENU):
-    X = Forward (East)
-    Y = Left (North)  
+         FRONT
+    4 (FL, CW)    2 (FR, CCW)
+            \\    /
+             \\  /
+              \\/
+              /\\
+             /  \\
+            /    \\
+    3 (BL, CCW)    1 (BR, CW)
+         BACK
+
+Elodin Coordinate System (ENU/FLU body frame):
+    X = Forward
+    Y = Left
     Z = Up
 
-Motor Order (Betaflight):
-    0: Front Right (CCW)
-    1: Back Right (CW)
-    2: Back Left (CCW)
-    3: Front Left (CW)
+IMPORTANT: Betaflight SITL remaps motor indices for Gazebo ArduCopterPlugin
+compatibility in sitl.c pwmCompleteMotorUpdate():
+    pwmPkt.motor_speed[3] = motorsPwm[0]  (REAR_R -> output 3)
+    pwmPkt.motor_speed[0] = motorsPwm[1]  (FRONT_R -> output 0)
+    pwmPkt.motor_speed[1] = motorsPwm[2]  (REAR_L -> output 1)
+    pwmPkt.motor_speed[2] = motorsPwm[3]  (FRONT_L -> output 2)
+
+Motor Index Mapping (what we RECEIVE from SITL, after Gazebo remapping):
+    motor[0] = Front Right (FR, CCW, spin +1) - originally BF motor 1
+    motor[1] = Back Left (BL, CCW, spin +1)   - originally BF motor 2
+    motor[2] = Front Left (FL, CW, spin -1)   - originally BF motor 3
+    motor[3] = Back Right (BR, CW, spin -1)   - originally BF motor 0
 """
 
 from dataclasses import dataclass, field
@@ -158,27 +167,38 @@ class DroneConfig:
         """
         Get motor positions for Betaflight Quad-X layout.
 
-        Looking from above:
-            M1(FR)  M2(BR)
-            M4(FL)  M3(BL)
+        Betaflight Quad-X "props out" (looking from above):
+                  FRONT
+            4(FL)      2(FR)
+                \\    /
+                 \\  /
+                  \\/
+                  /\\
+                 /  \\
+                /    \\
+            3(BL)      1(BR)
+                  BACK
+
+        SITL applies Gazebo remapping, so we receive:
+            motor[0] = FR (Front Right)
+            motor[1] = BL (Back Left)
+            motor[2] = FL (Front Left)
+            motor[3] = BR (Back Right)
 
         Returns:
-            Array of shape (4, 3) with motor positions [x, y, z]
+            Array of shape (4, 3) with motor positions [x, y, z] in body FLU
         """
         # 45 degree arm angles for X configuration
         d = self.arm_length * np.sqrt(2) / 2  # distance in each axis
 
-        # Motor positions: [Forward, Left, Up] in ENU
-        # Motor 0: Front Right (+X, -Y)
-        # Motor 1: Back Right (-X, -Y)
-        # Motor 2: Back Left (-X, +Y)
-        # Motor 3: Front Left (+X, +Y)
+        # Motor positions: [Forward, Left, Up] in body FLU frame
+        # Ordered according to SITL's Gazebo remapping
         return np.array(
             [
-                [d, -d, 0.0],  # Motor 0: FR
-                [-d, -d, 0.0],  # Motor 1: BR
-                [-d, d, 0.0],  # Motor 2: BL
-                [d, d, 0.0],  # Motor 3: FL
+                [d, -d, 0.0],  # motor[0] = Front Right (FR)
+                [-d, d, 0.0],  # motor[1] = Back Left (BL)
+                [d, d, 0.0],  # motor[2] = Front Left (FL)
+                [-d, -d, 0.0],  # motor[3] = Back Right (BR)
             ]
         )
 
@@ -197,15 +217,19 @@ class DroneConfig:
     @property
     def motor_spin_directions(self) -> NDArray[np.float64]:
         """
-        Spin direction for each motor.
+        Spin direction for each motor (Betaflight Quad-X "props out").
 
-        Betaflight Quad-X "props out":
-            M1(FR): CCW = +1
-            M2(BR): CW  = -1
-            M3(BL): CCW = +1
-            M4(FL): CW  = -1
+        Spin direction determines yaw torque reaction:
+            +1 = CCW rotation (produces +Z torque when spinning)
+            -1 = CW rotation (produces -Z torque when spinning)
+
+        After SITL's Gazebo remapping, we receive:
+            motor[0] = FR: CCW = +1
+            motor[1] = BL: CCW = +1
+            motor[2] = FL: CW  = -1
+            motor[3] = BR: CW  = -1
         """
-        return np.array([1.0, -1.0, 1.0, -1.0])
+        return np.array([1.0, 1.0, -1.0, -1.0])
 
     @property
     def motor_torque_axes(self) -> NDArray[np.float64]:
