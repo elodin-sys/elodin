@@ -437,7 +437,24 @@ class ThrustCurveScraper:
 
         with open(db_path, "r") as f:
             data = json.load(f)
-            return [MotorData(**motor) for motor in data]
+            motors = []
+            for motor in data:
+                # Fix incorrect unit conversions in cached data
+                # Motor diameters are typically 13mm-152mm (0.013-0.152m)
+                # Motor lengths are typically 50mm-2000mm (0.05-2.0m)
+                diameter = motor.get("diameter", 0)
+                length = motor.get("length", 0)
+                
+                # If diameter < 0.01m (10mm), it's suspicious - most motors are 13mm+
+                # Likely was incorrectly divided by 1000 when already in meters
+                if 0 < diameter < 0.01:
+                    motor["diameter"] = diameter * 1000.0
+                # If length < 0.01m (10mm), also suspicious - most motors are 50mm+
+                if 0 < length < 0.01:
+                    motor["length"] = length * 1000.0
+                
+                motors.append(MotorData(**motor))
+            return motors
 
 
 if __name__ == "__main__":
