@@ -12,7 +12,7 @@ Reorganized structure:
 # Re-export everything for backward compatibility
 from .physics import FlightSolver, FlightResult, StateSnapshot, Matrix, Vector
 from .models import Rocket, Motor
-from ..environment.environment import (
+from .environment import (
     Environment,
     ISAAtmosphere,
     NRLMSISE00Atmosphere,
