@@ -198,7 +198,14 @@ class ThrustCurveScraper:
                     calculated_avg_thrust = calculated_total_impulse / calculated_burn_time
 
             # Use search_result for metadata, fallback to download_result if available
-            motor_info = search_result if search_result else download_result
+            # Merge both sources to get all available data
+            motor_info = {}
+            if search_result:
+                motor_info.update(search_result)
+            if download_result:
+                # Download result may have additional fields, merge them
+                motor_info.update(download_result)
+            
             if not motor_info:
                 return None
 
@@ -234,7 +241,7 @@ class ThrustCurveScraper:
             # Extract diameter and length - handle unit conversion correctly
             # If search_result is provided, diameter/length are already in meters (converted in search_motors)
             # If from download_result, they're in mm and need conversion
-            if search_result:
+            if search_result and "diameter" in search_result:
                 # Already converted to meters in search_motors
                 diameter = motor_info.get("diameter", 0.0)
                 length = motor_info.get("length", 0.0)
@@ -243,15 +250,33 @@ class ThrustCurveScraper:
                 diameter = motor_info.get("diameter", 0.0) / 1000.0
                 length = motor_info.get("length", 0.0) / 1000.0
 
+            # Extract mass data - try both camelCase and snake_case, and both sources
+            # Mass data might be in search_result or download_result
+            total_mass = (
+                motor_info.get("totalMass") or 
+                motor_info.get("total_mass") or 
+                0.0
+            )
+            propellant_mass = (
+                motor_info.get("propellantMass") or 
+                motor_info.get("propellant_mass") or 
+                0.0
+            )
+            case_mass = (
+                motor_info.get("caseMass") or 
+                motor_info.get("case_mass") or 
+                0.0
+            )
+
             # Create MotorData object
             motor_data = MotorData(
                 designation=motor_info.get("designation", "Unknown"),
                 manufacturer=manufacturer_name,
                 diameter=diameter,
                 length=length,
-                total_mass=motor_info.get("totalMass", 0.0),
-                propellant_mass=motor_info.get("propellantMass", 0.0),
-                case_mass=motor_info.get("caseMass", 0.0),
+                total_mass=total_mass,
+                propellant_mass=propellant_mass,
+                case_mass=case_mass,
                 burn_time=burn_time,
                 total_impulse=total_impulse,
                 avg_thrust=avg_thrust,
