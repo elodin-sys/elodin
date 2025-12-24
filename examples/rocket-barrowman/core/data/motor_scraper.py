@@ -91,10 +91,11 @@ class ThrustCurveScraper:
                             else str(motor.get("manufacturer", "Unknown")),
                             "diameter": motor.get("diameter", 0.0) / 1000.0,  # mm to m
                             "length": motor.get("length", 0.0) / 1000.0,  # mm to m
-                            "totalImpulse": motor.get("totalImpulse", 0.0) or motor.get("totImpulseNs", 0.0),
-                            "avgThrust": motor.get("avgThrust", 0.0) or motor.get("avgThrustN", 0.0),
-                            "maxThrust": motor.get("maxThrust", 0.0) or motor.get("maxThrustN", 0.0),
-                            "burnTime": motor.get("burnTime", 0.0) or motor.get("burnTimeS", 0.0),
+                            # API field names per Swagger spec (try these first)
+                            "totalImpulse": motor.get("totImpulseNs", 0.0) or motor.get("totalImpulse", 0.0),
+                            "avgThrust": motor.get("avgThrustN", 0.0) or motor.get("avgThrust", 0.0),
+                            "maxThrust": motor.get("maxThrustN", 0.0) or motor.get("maxThrust", 0.0),
+                            "burnTime": motor.get("burnTimeS", 0.0) or motor.get("burnTime", 0.0),
                             # API returns weights in grams, convert to kg
                             "totalWeightG": motor.get("totalWeightG", 0.0),
                             "propWeightG": motor.get("propWeightG", 0.0),
