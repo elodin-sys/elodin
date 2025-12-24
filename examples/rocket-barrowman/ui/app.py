@@ -4275,10 +4275,12 @@ def main():
                     # Create environment with weather data if specified
                     if use_weather_data and launch_date and launch_time:
                         from datetime import datetime
+                        from core.weather_fetcher import create_environment_from_coordinates
 
                         launch_datetime = datetime.combine(launch_date, launch_time)
                         try:
-                            env = Environment.from_coordinates(
+                            # Use the factory function directly to avoid potential import/cache issues
+                            env, _ = create_environment_from_coordinates(
                                 latitude=latitude,
                                 longitude=longitude,
                                 datetime_obj=launch_datetime,
