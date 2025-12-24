@@ -26,7 +26,7 @@ from .environment import (
     create_environment_from_coordinates,
 )
 from .builders import build_calisto, build_calisto_rocket, build_cesaroni_m1670
-from .data import MotorDatabase, search_motors, get_motor_data
+from .data import search_motors, get_motor_data
 
 __all__ = [
     # Physics
@@ -55,7 +55,6 @@ __all__ = [
     "build_calisto_rocket",
     "build_cesaroni_m1670",
     # Data
-    "MotorDatabase",
     "search_motors",
     "get_motor_data",
 ]
