@@ -90,7 +90,7 @@ def build_calisto_rocket():
         root_chord=0.120,
         tip_chord=0.060,
         span=0.110,
-        sweep=0.060,
+        sweep_length=0.060,
         thickness=0.005,
     )
     fins.material = MATERIALS["Fiberglass"]

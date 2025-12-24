@@ -577,20 +577,26 @@ class SmartOptimizer:
         body.position.x = nose_length
         rocket.add_child(body)
 
-        # Fin sizing rules (based on body DIAMETER, not radius):
-        # - Root chord = 2 × diameter
-        # - Span = 1 × diameter
-        # - Tip chord = 0.5 × diameter (can be 0.33-0.5)
+        # Fin sizing rules (based on body DIAMETER):
+        #   root_chord ≈ 2 × diameter
+        #   tip_chord ≈ 0.33-0.5 × diameter  
+        #   span ≈ 1 × diameter
+        #   sweep_length = root_chord - tip_chord (gives ~45° leading edge)
         body_diameter = body_radius * 2
-        fin_root = max(body_diameter * 2.0, 0.06)  # 2× diameter
-        fin_span = max(body_diameter * 1.0, 0.03)  # 1× diameter
-        fin_tip = max(body_diameter * 0.4, 0.015)  # 0.4× diameter (between 0.33-0.5)
+        fin_root = max(body_diameter * 2.0, 0.06)      # 2× diameter
+        fin_span = max(body_diameter * 1.0, 0.03)      # 1× diameter
+        fin_tip = max(body_diameter * 0.4, 0.015)      # 0.4× diameter
+        
+        # Sweep length: distance from root LE to tip LE
+        # For clipped delta: sweep ≈ root - tip gives ~45° leading edge
+        fin_sweep = fin_root - fin_tip
         
         # Ensure fin doesn't extend beyond body (max 30% of body length)
         if fin_root > body_length * 0.30:
             scale = (body_length * 0.30) / fin_root
             fin_root = fin_root * scale
             fin_tip = fin_tip * scale
+            fin_sweep = fin_root - fin_tip  # Recalculate sweep
 
         # Use thinner fins if we had to reduce structure mass
         fin_thickness = 0.003 if use_thinner_walls else 0.004
@@ -601,7 +607,7 @@ class SmartOptimizer:
             root_chord=fin_root,
             tip_chord=fin_tip,
             span=fin_span,
-            sweep=fin_root * 0.3,
+            sweep_length=fin_sweep,
             thickness=fin_thickness,
         )
         fins.material = MATERIALS["Fiberglass"]

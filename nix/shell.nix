@@ -72,6 +72,8 @@ in {
           maturin
           bzip2
           libclang
+          # Ensure gfortran is available and prioritized for netlib-src builds
+          gfortran
           ffmpeg-full
           ffmpeg-full.dev
           gst_all_1.gstreamer
@@ -140,6 +142,13 @@ in {
       # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
       # GCC 14 treats -Wincompatible-pointer-types as error by default
       NIX_CFLAGS_COMPILE = common.netlibWorkaround;
+      
+      # Force CMake to use Nix Fortran compiler instead of system one
+      # This fixes netlib-src build failures when system Fortran is incompatible
+      FC = "${pkgs.gfortran}/bin/gfortran";
+      F77 = "${pkgs.gfortran}/bin/gfortran";
+      # Explicitly tell CMake which Fortran compiler to use
+      CMAKE_Fortran_COMPILER = "${pkgs.gfortran}/bin/gfortran";
 
       LLDB_DEBUGSERVER_PATH = lib.optionalString pkgs.stdenv.isDarwin "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/Resources/debugserver";
 
@@ -153,12 +162,35 @@ in {
       shellHook = ''
         case "$(uname -s)" in
           Linux*)
-            export DISPLAY=:0
+            # Use existing DISPLAY if set, otherwise default to :0
+            if [ -z "$DISPLAY" ]; then
+              export DISPLAY=:0
+            fi
             export WINIT_UNIX_BACKEND=x11
             unset WAYLAND_DISPLAY
             export XDG_SESSION_TYPE=x11
+            # Ensure X11 libraries are available
+            export LD_LIBRARY_PATH="${lib.makeLibraryPath (with pkgs; [
+              xorg.libX11
+              xorg.libXcursor
+              xorg.libXrandr
+              xorg.libXi
+              xorg.libXext
+              libxkbcommon
+              mesa
+              libGL
+            ])}:''${LD_LIBRARY_PATH}"
           ;;
         esac
+
+        # Ensure Nix gfortran is in PATH before system Fortran
+        # This is critical for netlib-src builds
+        export PATH="${pkgs.gfortran}/bin:''${PATH}"
+        
+        # Explicitly set Fortran compiler for CMake
+        export FC="${pkgs.gfortran}/bin/gfortran"
+        export F77="${pkgs.gfortran}/bin/gfortran"
+        export CMAKE_Fortran_COMPILER="${pkgs.gfortran}/bin/gfortran"
 
         # start the shell if we're in an interactive shell
         if [[ $- == *i* ]]; then

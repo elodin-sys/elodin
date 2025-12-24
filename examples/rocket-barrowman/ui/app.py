@@ -979,7 +979,7 @@ def build_custom_rocket(config: Dict[str, Any]) -> Rocket:
             root_chord=config.get("fin_root_chord", 0.12),
             tip_chord=config.get("fin_tip_chord", 0.06),
             span=config.get("fin_span", 0.11),
-            sweep=config.get("fin_sweep", 0.06),
+            sweep_length=config.get("fin_sweep", 0.06),
             thickness=config.get("fin_thickness", 0.005),
         )
         fins.material = MATERIALS.get(
@@ -3667,7 +3667,10 @@ def render_sidebar():
                         "Tip Chord (m)", 0.01, 0.5, 0.06, 0.01, key="fin_tip"
                     )
                     fin_span = st.number_input("Span (m)", 0.01, 0.5, 0.11, 0.01, key="fin_span")
-                    fin_sweep = st.number_input("Sweep (m)", 0.0, 0.5, 0.06, 0.01, key="fin_sweep")
+                    fin_sweep = st.number_input(
+                        "Sweep (m)", 0.0, 0.5, 0.06, 0.01, key="fin_sweep",
+                        help="Distance from root leading edge to tip leading edge"
+                    )
 
             # Parachutes
             with st.expander("🪂 Recovery", expanded=False):

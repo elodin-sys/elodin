@@ -286,7 +286,38 @@ class Transition(SymmetricComponent):
 
 
 class TrapezoidFinSet(RocketComponent):
-    """Trapezoidal fin set - OpenRocket standard"""
+    """
+    Trapezoidal fin set - OpenRocket standard.
+    
+    Geometry (side view of single fin):
+    
+            sweep_length
+            |<------->|
+            +---------+  <- tip_chord (length at outer edge)
+           /         /
+          /         /    
+         /         /     span (height from body to tip)
+        /         /      
+       /         /
+      +--------------+   <- root_chord (length at body attachment)
+      
+      |<------------>|
+         root_chord
+    
+    Parameters:
+        root_chord: Length of fin at body tube attachment (m)
+        tip_chord: Length of fin at outer tip (m)  
+        span: Height of fin from body surface to tip (m)
+        sweep_length: Horizontal distance from root leading edge to tip leading edge (m)
+                      (NOT sweep angle! Angle = atan(sweep_length / span))
+        thickness: Fin thickness (m)
+    
+    Typical ratios (relative to body diameter D):
+        root_chord ≈ 2.0 × D
+        tip_chord ≈ 0.33-0.5 × D  
+        span ≈ 1.0 × D
+        sweep_length ≈ root_chord - tip_chord (for ~45° leading edge)
+    """
 
     def __init__(
         self,
@@ -295,7 +326,7 @@ class TrapezoidFinSet(RocketComponent):
         root_chord: float = 0.1,
         tip_chord: float = 0.05,
         span: float = 0.05,
-        sweep: float = 0.03,
+        sweep_length: float = 0.03,
         thickness: float = 0.003,
     ):
         super().__init__(name)
@@ -303,10 +334,27 @@ class TrapezoidFinSet(RocketComponent):
         self.root_chord = root_chord
         self.tip_chord = tip_chord
         self.span = span
-        self.sweep = sweep  # Sweep distance
+        self.sweep_length = sweep_length  # Distance from root LE to tip LE
         self.thickness = thickness
         self.material = MATERIALS["Plywood (birch)"]
         self.cant_angle = 0.0  # radians
+    
+    @property
+    def sweep(self):
+        """Alias for sweep_length for backward compatibility."""
+        return self.sweep_length
+    
+    @sweep.setter
+    def sweep(self, value):
+        self.sweep_length = value
+    
+    @property
+    def sweep_angle_deg(self) -> float:
+        """Leading edge sweep angle in degrees."""
+        import math
+        if self.span > 0:
+            return math.degrees(math.atan(self.sweep_length / self.span))
+        return 0.0
 
     def calculate_mass(self) -> float:
         """Calculate single fin mass, multiply by count"""

@@ -217,7 +217,7 @@ class AerodynamicCalculator:
         """
         Cr = fin.root_chord
         Ct = fin.tip_chord
-        m = fin.sweep
+        m = fin.sweep_length  # Horizontal distance from root LE to tip LE
 
         # barrowman_equation.tex, Section 5.6, Equation (5.6)
         # Simplified form for trapezoidal fins with linear chord variation
@@ -428,7 +428,7 @@ class RocketAerodynamics:
                     root_chord=component.root_chord,
                     tip_chord=component.root_chord * 0.4,
                     span=component.span,
-                    sweep=0.0,
+                    sweep_length=0.0,
                     thickness=component.thickness,
                 )
                 cn_alpha_total += self.calculator.fin_normal_force(equiv_fin, body_radius, mach)
@@ -487,7 +487,7 @@ class RocketAerodynamics:
                     root_chord=component.root_chord,
                     tip_chord=component.root_chord * 0.4,
                     span=component.span,
-                    sweep=0.0,
+                    sweep_length=0.0,
                     thickness=component.thickness,
                 )
                 cn = self.calculator.fin_normal_force(equiv_fin, body_radius, mach)
@@ -562,7 +562,7 @@ class RocketAerodynamics:
                     root_chord=component.root_chord,
                     tip_chord=component.root_chord * 0.4,
                     span=component.span,
-                    sweep=0.0,
+                    sweep_length=0.0,
                     thickness=component.thickness,
                 )
                 cd_fin = self.calculator.fin_drag(equiv_fin, mach, ref_area, velocity, rho, mu)

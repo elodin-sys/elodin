@@ -563,7 +563,7 @@ Be thorough with unit conversions. Return only valid JSON."""
             root_chord=fin_root_chord,
             tip_chord=fin_tip_chord,
             span=fin_span,
-            sweep=fin_sweep,
+            sweep_length=fin_sweep,
             thickness=0.005,
         )
         fins.material = MATERIALS.get(body_material, MATERIALS["Fiberglass"])

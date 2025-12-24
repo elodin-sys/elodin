@@ -81,7 +81,7 @@ def visualize_rocket_3d(config: Dict[str, Any], motor: Optional[Dict] = None) ->
             root_chord=fin_root_chord,
             tip_chord=fin_tip_chord,
             span=fin_span,
-            sweep=fin_sweep,
+            sweep_length=fin_sweep,
             angle=angle,
             body_radius=body_radius,
         )
