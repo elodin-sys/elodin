@@ -595,14 +595,67 @@ class SmartOptimizer:
             # Total mass = payload + structure + motor.total_mass
             # So: payload = total_mass - structure - motor.total_mass
             payload_mass = requirements.total_mass_kg - structure_mass - motor.total_mass
-            # Ensure payload is non-negative (if structure + motor > total, we have a problem)
+            
+            # If structure + motor exceeds total, reduce structure mass by:
+            # 1. Using thinner walls (reduce from 0.003 to 0.002 or 0.0015)
+            # 2. Reducing body length if possible
+            # 3. Using lighter materials
             if payload_mass < 0:
-                # Structure + motor already exceeds total mass - this design won't work
-                print(
-                    f"Warning: Structure ({structure_mass:.2f}kg) + Motor ({motor.total_mass:.2f}kg) = "
-                    f"{structure_mass + motor.total_mass:.2f}kg exceeds total mass ({requirements.total_mass_kg:.2f}kg)"
+                excess_mass = -payload_mass
+                # Try to reduce structure mass to fit
+                # Reduce wall thickness (affects tube, nose, fins)
+                original_thickness = 0.003
+                reduced_thickness = 0.002  # Thinner walls
+                
+                # Recalculate structure with thinner walls
+                tube_volume_thin = math.pi * ((tube["od"] / 2) ** 2 - (tube["id"] / 2) ** 2) * body_length
+                # Adjust for thinner wall (approximate)
+                wall_reduction = (original_thickness - reduced_thickness) / original_thickness
+                tube_mass_reduced = tube_volume_thin * 1850 * (1 - wall_reduction * 0.3)  # ~30% of mass is wall
+                
+                nose_volume_thin = 0.5 * math.pi * (tube["od"] / 2) ** 2 * nose_length * 0.1
+                nose_mass_reduced = nose_volume_thin * 1850 * (1 - wall_reduction * 0.3)
+                
+                fin_mass_reduced = 4 * 0.5 * (tube["od"] * 1.0) * (tube["od"] * 0.8) * reduced_thickness * 1850
+                
+                # Recalculate structure mass with reduced components
+                structure_mass_reduced = (
+                    tube_mass_reduced
+                    + nose_mass_reduced
+                    + fin_mass_reduced
+                    + (0.05 + motor.diameter * 0.5)  # Mount
+                    + (0.3 if requirements.recovery_type == "dual_deploy" else 0.15 if requirements.recovery_type == "single" else 0.0)  # Recovery
+                    + (0.1 + tube["od"] * body_length * 5)  # Hardware
                 )
-                return (0.0, 0.0, {}, {})
+                
+                # Recalculate payload with reduced structure
+                payload_mass = requirements.total_mass_kg - structure_mass_reduced - motor.total_mass
+                
+                # If still negative, try reducing body length
+                if payload_mass < 0:
+                    # Reduce body length to minimum functional length
+                    min_functional_length = motor.length + 0.5
+                    if body_length > min_functional_length:
+                        # Try with minimum length
+                        body_length_reduced = min_functional_length
+                        structure_mass_min = self._estimate_dry_mass(
+                            tube,
+                            body_length_reduced,
+                            nose_length,
+                            motor,
+                            0.0,
+                            requirements.recovery_type,
+                        )
+                        payload_mass = requirements.total_mass_kg - structure_mass_min - motor.total_mass
+                        if payload_mass >= 0:
+                            body_length = body_length_reduced
+                            structure_mass = structure_mass_min
+                
+                # If still can't fit, this design won't work
+                if payload_mass < 0:
+                    # Skip this design - structure + motor too heavy even with optimizations
+                    return (0.0, 0.0, {}, {})
+            
             requirements.payload_mass_kg = payload_mass
         else:
             # Use payload_mass_kg directly (if specified)
