@@ -993,9 +993,9 @@ class SmartOptimizer:
         # For heavy rockets, be more strict about minimum - don't allow motors that are clearly too small
         if estimated_total_mass_kg > 30:
             # Very heavy rockets - need larger motors, don't waste time on L-class
-            # Minimum should be at least 80% of needed impulse (not 60%)
-            # This excludes L-class motors when we clearly need M-class
-            min_impulse_filter = max(min_impulse_needed * 0.8, 5000)  # At least 5k N·s for heavy rockets
+            # Minimum should be at least 85% of needed impulse
+            # L-class max is 5120 N·s, so set minimum to 5200 to exclude all L-class
+            min_impulse_filter = max(min_impulse_needed * 0.85, 5200)  # Exclude L-class (max 5120 N·s)
             viable_motors = [
                 m
                 for m in self.motors_by_impulse
