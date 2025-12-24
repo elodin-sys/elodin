@@ -18,7 +18,8 @@ from .rocket_model import Rocket, ParachuteConfig
 from .math_utils import Matrix, Vector
 
 try:
-    from calisto_drag_curve import get_calisto_cd
+    # Optional: Calisto-specific drag curve (if available)
+    from ..calisto_drag_curve import get_calisto_cd  # noqa: F401
 
     USE_CALISTO_DRAG = True
 except ImportError:
