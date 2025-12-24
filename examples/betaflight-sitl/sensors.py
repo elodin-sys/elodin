@@ -69,14 +69,16 @@ class Noise:
 
     def drift_bias(self, bias: jax.Array, tick: jax.Array, dt: float) -> jax.Array:
         """Apply random walk to bias (bias drift over time)."""
-        key = rng.fold_in(self.key, tick)
+        # Fold in tick, then fold in 0 to differentiate from sample() stream
+        key = rng.fold_in(rng.fold_in(self.key, tick), 0)
         std_dev = jnp.sqrt(self.bias_drift_covariance)
         drift = std_dev * rng.normal(key, shape=bias.shape, dtype=bias.dtype) * dt
         return bias + drift
 
     def sample(self, m: jax.Array, bias: jax.Array, tick: jax.Array) -> jax.Array:
         """Add measurement noise and bias to a measurement."""
-        key = rng.fold_in(self.key, tick)
+        # Fold in tick, then fold in 1 to differentiate from drift_bias() stream
+        key = rng.fold_in(rng.fold_in(self.key, tick), 1)
         std_dev = jnp.sqrt(self.noise_covariance)
         noise = std_dev * rng.normal(key, shape=m.shape, dtype=m.dtype)
         return m + noise + bias
