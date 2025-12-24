@@ -937,16 +937,17 @@ class SmartOptimizer:
 
         # Altitude/impulse ratio - calibrated from Calisto (19kg loaded, 6026 N·s, 3350m = 0.556 m/N·s)
         # Real-world data shows heavier rockets get MORE altitude per impulse (better mass ratio)
+        # Very heavy rockets (30-40kg) with large motors (M/N class) can achieve 0.5-0.6 m/N·s
         if estimated_total_mass_kg < 5:
-            altitude_per_impulse = 1.2  # Light rocket (was 1.5, too optimistic)
+            altitude_per_impulse = 1.2  # Light rocket
         elif estimated_total_mass_kg < 15:
-            altitude_per_impulse = 0.7  # Medium rocket (was 0.8, too optimistic)
+            altitude_per_impulse = 0.7  # Medium rocket
         elif estimated_total_mass_kg < 30:
-            altitude_per_impulse = (
-                0.55  # Heavy rocket - Calisto is 0.556 at 19kg (was 0.4, too low!)
-            )
+            altitude_per_impulse = 0.55  # Heavy rocket - Calisto is 0.556 at 19kg
         else:
-            altitude_per_impulse = 0.45  # Very heavy rocket (was 0.25, way too low!)
+            # Very heavy rockets (30-40kg) with large tubes and motors can still achieve good altitude/impulse
+            # The mass ratio improves because motor mass is a smaller fraction of total
+            altitude_per_impulse = 0.50  # Very heavy rocket (was 0.45, too conservative)
 
         # Add drag penalty for larger diameters (6" = 152mm is large)
         # Larger diameter = more drag = lower altitude per impulse
@@ -961,20 +962,30 @@ class SmartOptimizer:
         ):  # Likely a large rocket even if diameter not specified
             altitude_per_impulse *= 0.92  # 8% drag penalty
 
-        # Calculate impulse needed - use tighter margins to avoid overshooting
-        # Calisto: 3350m target would need ~6000 N·s (actual), but we estimate ~6000 N·s
-        # So use 1.0-1.1× for optimistic, 0.85-0.9× for pessimistic
-        min_impulse_needed = min_alt / (altitude_per_impulse * 1.05)  # Slightly optimistic
-        max_impulse_needed = max_alt / (altitude_per_impulse * 0.85)  # Slightly pessimistic
+        # Calculate impulse needed - use reasonable margins
+        # For heavy rockets, be more inclusive to find working designs
+        # Calisto: 3350m target, 6026 N·s actual = 0.556 m/N·s
+        # Use 1.0-1.1× for optimistic, 0.8-0.9× for pessimistic
+        min_impulse_needed = min_alt / (altitude_per_impulse * 1.1)  # More optimistic (lower bound)
+        max_impulse_needed = max_alt / (altitude_per_impulse * 0.8)  # More pessimistic (upper bound)
 
         # Filter motors to likely range (be more inclusive to find working designs)
-        viable_motors = [
-            m
-            for m in self.motors_by_impulse
-            if m.total_impulse >= min_impulse_needed * 0.7  # Allow slightly smaller motors
-            and m.total_impulse
-            <= max_impulse_needed * 1.5  # Allow larger motors (up to O class if needed)
-        ]
+        # For heavy rockets, expand the range more to include larger motors
+        if estimated_total_mass_kg > 30:
+            # Very heavy rockets - allow wider range to find working designs
+            viable_motors = [
+                m
+                for m in self.motors_by_impulse
+                if m.total_impulse >= min_impulse_needed * 0.6  # Allow smaller motors
+                and m.total_impulse <= max_impulse_needed * 2.0  # Allow much larger motors
+            ]
+        else:
+            viable_motors = [
+                m
+                for m in self.motors_by_impulse
+                if m.total_impulse >= min_impulse_needed * 0.7  # Allow slightly smaller motors
+                and m.total_impulse <= max_impulse_needed * 1.5  # Allow larger motors
+            ]
 
         # If no viable motors found, expand the range significantly
         if len(viable_motors) == 0:
@@ -983,7 +994,7 @@ class SmartOptimizer:
                 m
                 for m in self.motors_by_impulse
                 if m.total_impulse >= min_impulse_needed * 0.5
-                and m.total_impulse <= max_impulse_needed * 2.0
+                and m.total_impulse <= max_impulse_needed * 2.5  # Even wider for heavy rockets
             ]
 
         # Sort by impulse first (smallest to largest), then by cost
@@ -1052,7 +1063,10 @@ class SmartOptimizer:
                         break
 
             # Get tube that fits motor (ensures body OD >= motor diameter)
-            tube_for_motor = self._get_tube_for_motor(motor.diameter, prefer_smaller=True)
+            # For heavy rockets, prefer larger tubes to avoid long, draggy designs
+            # For very heavy rockets (>30kg), prefer larger tubes even if smaller ones fit
+            prefer_smaller_tube = estimated_total_mass_kg < 30
+            tube_for_motor = self._get_tube_for_motor(motor.diameter, prefer_smaller=prefer_smaller_tube)
 
             # Use larger of motor-fit tube or payload-fit tube
             # Both must meet airframe constraint (OD >= motor diameter)
