@@ -268,6 +268,18 @@ class ThrustCurveScraper:
                 0.0
             )
 
+            # If mass data is missing, estimate from impulse, diameter, and length
+            if total_mass <= 0 or propellant_mass <= 0:
+                estimated_masses = self._estimate_motor_mass(
+                    total_impulse, diameter, length, burn_time
+                )
+                if total_mass <= 0:
+                    total_mass = estimated_masses["total_mass"]
+                if propellant_mass <= 0:
+                    propellant_mass = estimated_masses["propellant_mass"]
+                if case_mass <= 0:
+                    case_mass = estimated_masses["case_mass"]
+
             # Create MotorData object
             motor_data = MotorData(
                 designation=motor_info.get("designation", "Unknown"),
@@ -295,6 +307,72 @@ class ThrustCurveScraper:
         except Exception as e:
             print(f"Error getting motor data {motor_id}: {e}")
             return None
+
+    def _estimate_motor_mass(
+        self, total_impulse: float, diameter: float, length: float, burn_time: float
+    ) -> Dict[str, float]:
+        """
+        Estimate motor mass from impulse, dimensions, and burn time.
+        
+        Based on typical rocket motor characteristics:
+        - Propellant density: ~1600-1800 kg/m³ (APCP)
+        - Case mass: typically 20-40% of propellant mass for composite motors
+        - Total mass = propellant + case + hardware
+        
+        Args:
+            total_impulse: Total impulse in N·s
+            diameter: Motor diameter in meters
+            length: Motor length in meters
+            burn_time: Burn time in seconds
+            
+        Returns:
+            Dict with total_mass, propellant_mass, case_mass in kg
+        """
+        # Estimate propellant mass from impulse
+        # Specific impulse (Isp) for APCP: ~200-250 s (typical for model/high-power rockets)
+        # Isp = total_impulse / (propellant_mass * g)
+        # So: propellant_mass = total_impulse / (Isp * g)
+        # Use Isp = 220 s as typical average
+        isp_typical = 220.0  # seconds
+        g = 9.80665  # m/s²
+        propellant_mass = total_impulse / (isp_typical * g)
+        
+        # Alternative: estimate from volume if dimensions are available
+        if diameter > 0 and length > 0:
+            # Motor volume (approximate as cylinder)
+            volume = math.pi * (diameter / 2) ** 2 * length
+            # Propellant fills ~85-90% of motor volume (rest is case, nozzle, etc.)
+            propellant_volume = volume * 0.87
+            # APCP density: ~1700 kg/m³
+            propellant_density = 1700.0  # kg/m³
+            propellant_mass_from_volume = propellant_volume * propellant_density
+            
+            # Use the larger estimate (more conservative)
+            propellant_mass = max(propellant_mass, propellant_mass_from_volume)
+        
+        # Case mass: typically 25-35% of propellant mass for composite motors
+        # Larger motors have better mass ratios (lower case/propellant ratio)
+        if total_impulse > 5000:  # Large motors (M, N, O class)
+            case_mass_ratio = 0.25
+        elif total_impulse > 2500:  # Medium-large (L class)
+            case_mass_ratio = 0.28
+        elif total_impulse > 1000:  # Medium (K class)
+            case_mass_ratio = 0.30
+        else:  # Small motors (A-J class)
+            case_mass_ratio = 0.35
+        
+        case_mass = propellant_mass * case_mass_ratio
+        
+        # Hardware (nozzle, closures, etc.): ~5-10% of propellant mass
+        hardware_mass = propellant_mass * 0.07
+        
+        total_mass = propellant_mass + case_mass + hardware_mass
+        
+        return {
+            "total_mass": total_mass,
+            "propellant_mass": propellant_mass,
+            "case_mass": case_mass,
+        }
 
     def _download_and_parse_data_file(
         self, motor_id: str, format: str = "eng"
@@ -477,6 +555,22 @@ class ThrustCurveScraper:
                 # If length < 0.01m (10mm), also suspicious - most motors are 50mm+
                 if 0 < length < 0.01:
                     motor["length"] = length * 1000.0
+                
+                # Estimate mass if missing
+                total_mass = motor.get("total_mass", 0.0)
+                propellant_mass = motor.get("propellant_mass", 0.0)
+                if total_mass <= 0 or propellant_mass <= 0:
+                    total_impulse = motor.get("total_impulse", 0.0)
+                    burn_time = motor.get("burn_time", 0.0)
+                    estimated = self._estimate_motor_mass(
+                        total_impulse, motor["diameter"], motor["length"], burn_time
+                    )
+                    if total_mass <= 0:
+                        motor["total_mass"] = estimated["total_mass"]
+                    if propellant_mass <= 0:
+                        motor["propellant_mass"] = estimated["propellant_mass"]
+                    if motor.get("case_mass", 0.0) <= 0:
+                        motor["case_mass"] = estimated["case_mass"]
                 
                 motors.append(MotorData(**motor))
             return motors
