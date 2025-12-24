@@ -7,6 +7,13 @@ from .flight_solver import FlightSolver, FlightResult, StateSnapshot
 from .math_utils import Matrix, Vector
 from .dynamic_wind import DynamicWindModel, ProfilePoint
 from .calisto_builder import build_calisto, build_calisto_rocket, build_cesaroni_m1670
+from .atmospheric_models import (
+    ISAAtmosphere,
+    NRLMSISE00Atmosphere,
+    WeatherDataAtmosphere,
+    HybridAtmosphere,
+    AtmosphericProperties,
+)
 
 __all__ = [
     "Environment",
@@ -22,5 +29,10 @@ __all__ = [
     "build_calisto",
     "build_calisto_rocket",
     "build_cesaroni_m1670",
+    "ISAAtmosphere",
+    "NRLMSISE00Atmosphere",
+    "WeatherDataAtmosphere",
+    "HybridAtmosphere",
+    "AtmosphericProperties",
 ]
 
