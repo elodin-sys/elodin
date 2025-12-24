@@ -394,8 +394,13 @@ class SmartOptimizer:
         tube_volume = math.pi * ((tube["od"] / 2) ** 2 - (tube["id"] / 2) ** 2) * body_length
         tube_mass = tube_volume * 1850
 
-        # Nose (solid fiberglass shell)
-        nose_volume = 0.5 * math.pi * (tube["od"] / 2) ** 2 * nose_length * 0.1  # ~10% solid
+        # Nose (hollow fiberglass shell, not solid)
+        # Typical nose: thin wall (~2mm), hollow inside
+        nose_wall_thickness = 0.002  # 2mm wall
+        nose_outer_radius = tube["od"] / 2
+        nose_inner_radius = nose_outer_radius - nose_wall_thickness
+        # Volume of nose cone shell (approximate as truncated cone)
+        nose_volume = 0.5 * math.pi * (nose_outer_radius**2 - nose_inner_radius**2) * nose_length * 0.7  # ~70% of length is shell
         nose_mass = nose_volume * 1850
 
         # Fins (4 fins)
@@ -405,18 +410,21 @@ class SmartOptimizer:
         fin_mass = 4 * 0.5 * fin_chord * fin_span * fin_thickness * 1850
 
         # Motor mount + centering rings
-        mount_mass = 0.05 + motor.diameter * 0.5
+        # Realistic: ~0.2-0.5kg for typical mounts
+        mount_mass = 0.2 + motor.diameter * 0.3  # More realistic
 
         # Recovery system
+        # Realistic: parachutes are light, altimeter + charges add mass
         if recovery_type == "dual_deploy":
-            recovery_mass = 0.3  # Main + drogue + altimeter + hardware
+            recovery_mass = 0.5  # Main + drogue + altimeter + charges + hardware
         elif recovery_type == "single":
-            recovery_mass = 0.15
+            recovery_mass = 0.3  # Main chute + altimeter
         else:
             recovery_mass = 0.0
 
-        # Hardware
-        hardware_mass = 0.1 + (tube["od"] * body_length * 5)
+        # Hardware (epoxy, fasteners, paint, rail buttons)
+        # Realistic: ~0.5-1kg for typical rockets, scales with size but not linearly
+        hardware_mass = 0.3 + (tube["od"] * body_length * 0.5)  # Much more realistic
 
         total = (
             tube_mass
