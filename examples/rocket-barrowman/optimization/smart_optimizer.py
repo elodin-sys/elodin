@@ -145,6 +145,7 @@ class SmartOptimizer:
     """
 
     # Standard body tube sizes (ID in meters, with typical costs per meter in USD)
+    # Add larger tubes for big motors (7.5", 8", 10")
     TUBE_SIZES = [
         {"name": "29mm", "id": 0.029, "od": 0.032, "cost_per_m": 8},
         {"name": "38mm", "id": 0.038, "od": 0.041, "cost_per_m": 12},
@@ -154,6 +155,9 @@ class SmartOptimizer:
         {"name": "4in", "id": 0.102, "od": 0.108, "cost_per_m": 45},
         {"name": "5in", "id": 0.127, "od": 0.133, "cost_per_m": 60},
         {"name": "6in", "id": 0.152, "od": 0.159, "cost_per_m": 80},
+        {"name": "7.5in", "id": 0.191, "od": 0.197, "cost_per_m": 120},
+        {"name": "8in", "id": 0.203, "od": 0.210, "cost_per_m": 140},
+        {"name": "10in", "id": 0.254, "od": 0.262, "cost_per_m": 200},
     ]
 
     # Motor costs by impulse class
@@ -286,11 +290,14 @@ class SmartOptimizer:
 
         return req
 
-    def _get_tube_for_motor(self, motor_diameter: float, prefer_smaller: bool = True) -> Optional[Dict]:
+    def _get_tube_for_motor(self, motor_diameter: float, prefer_smaller: bool = True) -> Dict:
         """Get tube that fits a motor.
 
         Constraint: Body tube outer diameter (OD) must be >= motor diameter.
         Motor must also fit inside tube inner diameter (ID) with clearance.
+
+        We always return a tube - if motor is larger than our largest tube, we use the largest.
+        The airframe should be designed to fit the motor, not the other way around.
 
         Args:
             motor_diameter: Motor diameter in meters
@@ -306,9 +313,15 @@ class SmartOptimizer:
                 fitting_tubes.append(tube)
 
         if not fitting_tubes:
-            # If no tube fits, return None to signal that this motor can't be used
-            # The caller should skip this motor
-            return None
+            # Motor is larger than our largest tube - use largest available
+            # In practice, we'd need a custom tube, but for optimization we'll use largest standard
+            largest_tube = self.TUBE_SIZES[-1]
+            if motor_diameter > largest_tube["od"]:
+                # Motor exceeds even largest tube OD - this violates airframe constraint
+                # But we'll still return it and let validation catch it
+                return largest_tube
+            # Motor fits in largest tube ID but OD constraint not met - use largest anyway
+            return largest_tube
 
         if prefer_smaller:
             return fitting_tubes[0]  # Smallest fitting tube
@@ -1084,18 +1097,13 @@ class SmartOptimizer:
             prefer_smaller_tube = estimated_total_mass_kg < 30
             tube_for_motor = self._get_tube_for_motor(motor.diameter, prefer_smaller=prefer_smaller_tube)
 
-            # If no tube fits this motor, skip it
-            if tube_for_motor is None:
-                log.append(f"  [{iteration}] {motor.designation}: Skip (no fitting tube)")
-                continue
-
-            # Validate that the selected tube actually fits the motor (double-check)
-            # Check both OD constraint (airframe >= motor) and ID constraint (motor fits inside)
-            motor_fits_od = tube_for_motor["od"] >= motor.diameter
-            motor_fits_id = tube_for_motor["id"] >= motor.diameter + 0.003
-            if not (motor_fits_od and motor_fits_id):
-                # This motor has no fitting tubes - skip it
-                log.append(f"  [{iteration}] {motor.designation}: Skip (tube validation failed)")
+            # Validate that the selected tube meets airframe constraint (OD >= motor diameter)
+            # This is a hard constraint - we can't use transitions yet
+            if tube_for_motor["od"] < motor.diameter:
+                # Motor exceeds tube OD - violates airframe constraint
+                log.append(
+                    f"  [{iteration}] {motor.designation}: Skip (motor {motor.diameter*1000:.0f}mm > tube OD {tube_for_motor['od']*1000:.0f}mm)"
+                )
                 continue
 
             # Use larger of motor-fit tube or payload-fit tube
@@ -1232,8 +1240,9 @@ class SmartOptimizer:
                             break
 
                 tube_for_motor = self._get_tube_for_motor(motor.diameter, prefer_smaller=True)
-                if tube_for_motor is None:
-                    continue  # Skip motors with no fitting tubes
+                # Validate airframe constraint
+                if tube_for_motor["od"] < motor.diameter:
+                    continue  # Skip motors that exceed tube OD
                 if min_tube_for_payload and min_tube_for_payload["id"] > tube_for_motor["id"]:
                     # Validate payload tube also fits the motor
                     if min_tube_for_payload["od"] >= motor.diameter and min_tube_for_payload["id"] >= motor.diameter + 0.003:
