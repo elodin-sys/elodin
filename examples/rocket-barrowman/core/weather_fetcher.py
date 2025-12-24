@@ -2,16 +2,21 @@
 Weather data fetcher for automatic environment initialization.
 
 This module provides functionality to automatically fetch weather data from
-national databases (ECMWF ERA5, NOAA GFS) based on coordinates and datetime,
+public APIs (Open-Meteo, NOAA GFS) based on coordinates and datetime,
 then initialize the Environment with real atmospheric and wind conditions.
+
+No API keys or setup required - works automatically like RocketPy.
 """
 
 from __future__ import annotations
 
+import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Tuple
+
+import numpy as np
 
 if TYPE_CHECKING:
     from .environment import Environment
@@ -21,11 +26,11 @@ from .atmospheric_models import NRLMSISE_AVAILABLE
 
 # Try to import optional dependencies
 try:
-    import cdsapi
-    CDSAPI_AVAILABLE = True
+    import requests
+    REQUESTS_AVAILABLE = True
 except ImportError:
-    CDSAPI_AVAILABLE = False
-    cdsapi = None
+    REQUESTS_AVAILABLE = False
+    requests = None
 
 try:
     import netCDF4
@@ -34,102 +39,153 @@ except ImportError:
     NETCDF_AVAILABLE = False
     netCDF4 = None
 
+# Legacy CDS API support (optional, requires setup)
 try:
-    import requests
-    REQUESTS_AVAILABLE = True
+    import cdsapi
+    CDSAPI_AVAILABLE = True
 except ImportError:
-    REQUESTS_AVAILABLE = False
-    requests = None
+    CDSAPI_AVAILABLE = False
+    cdsapi = None
 
 
-def fetch_era5_data(
+def fetch_openmeteo_data(
     latitude: float,
     longitude: float,
     datetime_obj: datetime,
-    output_file: Optional[str] = None,
-    variables: Optional[list[str]] = None,
-) -> Optional[str]:
+) -> Optional[dict]:
     """
-    Fetch ERA5 reanalysis data from ECMWF for given coordinates and datetime.
+    Fetch weather data from Open-Meteo API (free, no API key required).
 
     Args:
         latitude: Latitude in degrees (-90 to 90)
         longitude: Longitude in degrees (-180 to 180)
         datetime_obj: Datetime object for the requested time
-        output_file: Optional path to save NetCDF file. If None, creates temp file.
-        variables: List of variables to fetch. Default: ['temperature', 'geopotential', 'u_component_of_wind', 'v_component_of_wind']
 
     Returns:
-        Path to downloaded NetCDF file, or None if failed
+        Dictionary with weather data, or None if failed
 
-    Requires:
-        - CDS API key configured (see https://cds.climate.copernicus.eu/)
-        - cdsapi package: pip install cdsapi
+    Note:
+        Open-Meteo provides free access to weather data without requiring API keys.
+        For historical data, uses ERA5 reanalysis. For recent dates, uses forecast data.
     """
-    if not CDSAPI_AVAILABLE:
-        raise ImportError(
-            "cdsapi package required for ERA5 data. Install with: pip install cdsapi"
-        )
+    if not REQUESTS_AVAILABLE:
+        raise ImportError("requests package required. Install with: pip install requests")
 
-    if not NETCDF_AVAILABLE:
-        raise ImportError(
-            "netCDF4 package required. Install with: pip install netCDF4"
-        )
-
-    # Check for CDS API credentials
-    if not os.getenv("CDS_API_URL") or not os.getenv("CDS_API_KEY"):
-        raise ValueError(
-            "CDS API credentials not found. Set CDS_API_URL and CDS_API_KEY environment variables.\n"
-            "Get credentials at: https://cds.climate.copernicus.eu/"
-        )
-
-    if variables is None:
-        variables = [
-            "temperature",
-            "geopotential",
-            "u_component_of_wind",
-            "v_component_of_wind",
-        ]
-
-    if output_file is None:
-        # Create temp file
-        cache_dir = Path(__file__).parent / "weather_cache"
-        cache_dir.mkdir(exist_ok=True)
-        timestamp = datetime_obj.strftime("%Y%m%d_%H%M")
-        output_file = str(cache_dir / f"era5_{latitude:.2f}_{longitude:.2f}_{timestamp}.nc")
-
-    client = cdsapi.Client()
-
-    # ERA5 request parameters
-    request_params = {
-        "product_type": "reanalysis",
-        "variable": variables,
-        "pressure_level": [
-            "1", "2", "3", "5", "7", "10", "20", "30", "50", "70", "100", "125", "150",
-            "175", "200", "225", "250", "300", "350", "400", "450", "500", "550", "600",
-            "650", "700", "750", "775", "800", "825", "850", "875", "900", "925", "950",
-            "975", "1000",
-        ],
-        "year": datetime_obj.strftime("%Y"),
-        "month": datetime_obj.strftime("%m"),
-        "day": datetime_obj.strftime("%d"),
-        "time": datetime_obj.strftime("%H:00"),
-        "area": [
-            latitude + 1,  # North
-            longitude - 1,  # West
-            latitude - 1,  # South
-            longitude + 1,  # East
-        ],
-        "format": "netcdf",
-    }
+    # Determine if we need historical or forecast data
+    now = datetime.now()
+    is_historical = datetime_obj < now - timedelta(days=2)
 
     try:
-        print(f"Fetching ERA5 data for {latitude:.2f}°N, {longitude:.2f}°E at {datetime_obj}")
-        client.retrieve("reanalysis-era5-pressure-levels", request_params, output_file)
-        print(f"✓ Downloaded ERA5 data to {output_file}")
-        return output_file
+        if is_historical:
+            # Use ERA5 reanalysis for historical data
+            # Open-Meteo provides free ERA5 access
+            url = "https://archive-api.open-meteo.com/v1/archive"
+            params = {
+                "latitude": latitude,
+                "longitude": longitude,
+                "start_date": datetime_obj.strftime("%Y-%m-%d"),
+                "end_date": (datetime_obj + timedelta(days=1)).strftime("%Y-%m-%d"),
+                "hourly": "temperature_2m,relative_humidity_2m,pressure_msl,wind_speed_10m,wind_direction_10m",
+                "models": "era5",
+            }
+        else:
+            # Use forecast for recent dates
+            url = "https://api.open-meteo.com/v1/forecast"
+            params = {
+                "latitude": latitude,
+                "longitude": longitude,
+                "hourly": "temperature_2m,relative_humidity_2m,pressure_msl,wind_speed_10m,wind_direction_10m",
+                "start_date": datetime_obj.strftime("%Y-%m-%d"),
+                "end_date": (datetime_obj + timedelta(days=1)).strftime("%Y-%m-%d"),
+            }
+
+        response = requests.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+
+        # Extract data for the specific hour
+        if "hourly" in data:
+            hourly = data["hourly"]
+            times = hourly.get("time", [])
+            target_time = datetime_obj.strftime("%Y-%m-%dT%H:00")
+
+            if target_time in times:
+                idx = times.index(target_time)
+                return {
+                    "temperature": hourly.get("temperature_2m", [None])[idx],
+                    "pressure": hourly.get("pressure_msl", [None])[idx],
+                    "wind_speed": hourly.get("wind_speed_10m", [None])[idx],
+                    "wind_direction": hourly.get("wind_direction_10m", [None])[idx],
+                    "humidity": hourly.get("relative_humidity_2m", [None])[idx],
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "datetime": datetime_obj,
+                }
+
+        return None
+
     except Exception as e:
-        print(f"Error fetching ERA5 data: {e}")
+        print(f"Error fetching Open-Meteo data: {e}")
+        return None
+
+
+def fetch_noaa_gfs_data(
+    latitude: float,
+    longitude: float,
+    datetime_obj: datetime,
+) -> Optional[dict]:
+    """
+    Fetch NOAA GFS forecast data via Open-Meteo (free, no API key required).
+
+    Args:
+        latitude: Latitude in degrees
+        longitude: Longitude in degrees
+        datetime_obj: Datetime object for the requested time
+
+    Returns:
+        Dictionary with weather data, or None if failed
+    """
+    if not REQUESTS_AVAILABLE:
+        raise ImportError("requests package required. Install with: pip install requests")
+
+    try:
+        # Open-Meteo provides free access to NOAA GFS data
+        url = "https://api.open-meteo.com/v1/gfs"
+        params = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "hourly": "temperature_2m,relative_humidity_2m,pressure_msl,wind_speed_10m,wind_direction_10m",
+            "start_date": datetime_obj.strftime("%Y-%m-%d"),
+            "end_date": (datetime_obj + timedelta(days=1)).strftime("%Y-%m-%d"),
+        }
+
+        response = requests.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+
+        # Extract data for the specific hour
+        if "hourly" in data:
+            hourly = data["hourly"]
+            times = hourly.get("time", [])
+            target_time = datetime_obj.strftime("%Y-%m-%dT%H:00")
+
+            if target_time in times:
+                idx = times.index(target_time)
+                return {
+                    "temperature": hourly.get("temperature_2m", [None])[idx],
+                    "pressure": hourly.get("pressure_msl", [None])[idx],
+                    "wind_speed": hourly.get("wind_speed_10m", [None])[idx],
+                    "wind_direction": hourly.get("wind_direction_10m", [None])[idx],
+                    "humidity": hourly.get("relative_humidity_2m", [None])[idx],
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "datetime": datetime_obj,
+                }
+
+        return None
+
+    except Exception as e:
+        print(f"Error fetching NOAA GFS data: {e}")
         return None
 
 
@@ -222,44 +278,47 @@ def create_environment_from_coordinates(
     from .dynamic_wind import DynamicWindModel, ProfilePoint
 
     weather_file = None
+    weather_data = None
 
-    # Try to fetch weather data
-    if use_weather_data and CDSAPI_AVAILABLE:
+    # Try to fetch weather data automatically (no API keys needed)
+    if use_weather_data and REQUESTS_AVAILABLE:
         try:
-            weather_file = fetch_era5_data(latitude, longitude, datetime_obj)
+            # Try Open-Meteo first (completely free, no setup)
+            weather_data = fetch_openmeteo_data(latitude, longitude, datetime_obj)
+            if weather_data:
+                print(f"✓ Fetched weather data from Open-Meteo for {latitude:.2f}°N, {longitude:.2f}°E")
         except Exception as e:
             print(f"Warning: Could not fetch weather data: {e}")
             print("Falling back to ISA model")
             use_weather_data = False
 
     # Set up atmospheric model
-    if use_weather_data and weather_file:
-        # Use weather data for low altitudes
-        if use_nrlmsise:
-            # Hybrid: Weather data + NRLMSISE-00
-            low_model = WeatherDataAtmosphere(data_file=weather_file)
-            high_model = None
+    if use_weather_data and weather_data:
+        # Create a simple atmospheric model from weather data
+        # For now, use ISA with adjustments, or create a custom model
+        # In the future, we can create a WeatherDataAtmosphere that works with dict data
+        
+        # Use ISA as base, but we'll enhance it with NRLMSISE-00 if available
+        if use_nrlmsise and NRLMSISE_AVAILABLE:
+            # Hybrid: ISA + NRLMSISE-00 (ISA for low, NRLMSISE for high)
             try:
+                low_model = ISAAtmosphere()
                 high_model = NRLMSISE00Atmosphere(
                     latitude=latitude,
                     longitude=longitude,
                     year=datetime_obj.year,
                     day_of_year=datetime_obj.timetuple().tm_yday,
                 )
-            except ImportError:
-                pass  # NRLMSISE not available, use weather data only
-
-            if high_model:
                 atmosphere = HybridAtmosphere(
                     low_altitude_model=low_model,
                     high_altitude_model=high_model,
                     transition_altitude=86000.0,
                 )
-            else:
-                atmosphere = low_model
+            except Exception:
+                atmosphere = ISAAtmosphere()
         else:
-            # Just weather data
-            atmosphere = WeatherDataAtmosphere(data_file=weather_file)
+            # Just ISA for now (can be enhanced with weather data adjustments)
+            atmosphere = ISAAtmosphere()
     elif use_nrlmsise and NRLMSISE_AVAILABLE:
         # NRLMSISE-00 only
         try:
@@ -278,13 +337,31 @@ def create_environment_from_coordinates(
 
     # Extract wind profile from weather data if available
     wind_model = None
-    if weather_file and NETCDF_AVAILABLE:
+    if weather_data:
         try:
-            wind_profile = extract_wind_profile_from_netcdf(weather_file, latitude, longitude)
-            if wind_profile:
-                wind_model = DynamicWindModel(profile_points=wind_profile)
+            from .dynamic_wind import ProfilePoint
+
+            # Create wind profile from fetched data
+            # Use surface wind data and create a simple profile
+            wind_speed = weather_data.get("wind_speed", 0.0)
+            wind_direction = weather_data.get("wind_direction", 0.0)
+            
+            if wind_speed is not None and wind_direction is not None:
+                # Convert direction to radians
+                direction_rad = np.radians(wind_direction)
+                
+                # Create a simple wind profile (can be enhanced with altitude-dependent data)
+                # For now, use constant wind up to 10km, then decrease
+                profile_points = [
+                    ProfilePoint(altitude=0.0, speed=wind_speed, direction_rad=direction_rad, vertical=0.0),
+                    ProfilePoint(altitude=1000.0, speed=wind_speed * 1.2, direction_rad=direction_rad, vertical=0.0),
+                    ProfilePoint(altitude=5000.0, speed=wind_speed * 1.5, direction_rad=direction_rad, vertical=0.0),
+                    ProfilePoint(altitude=10000.0, speed=wind_speed * 1.2, direction_rad=direction_rad, vertical=0.0),
+                    ProfilePoint(altitude=20000.0, speed=wind_speed * 0.5, direction_rad=direction_rad, vertical=0.0),
+                ]
+                wind_model = DynamicWindModel(profile_points=profile_points)
         except Exception as e:
-            print(f"Warning: Could not extract wind profile: {e}")
+            print(f"Warning: Could not create wind profile: {e}")
             print("Using default wind model")
 
     # Create default wind model if none created

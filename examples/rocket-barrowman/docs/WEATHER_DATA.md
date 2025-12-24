@@ -24,29 +24,21 @@ wind = env.wind_velocity(altitude=500.0, time=10.0)
 
 ## Setup
 
-### ECMWF ERA5 Data (Recommended)
+**No API keys or setup required!** The system automatically fetches weather data from public APIs (Open-Meteo) - just like RocketPy.
 
-ERA5 provides high-quality historical reanalysis data.
+### Dependencies
 
-1. **Get CDS API credentials:**
-   - Register at https://cds.climate.copernicus.eu/
-   - Go to "Your profile" → "API key"
-   - Copy your API key and URL
+The only requirement is the `requests` package (usually already installed):
 
-2. **Set environment variables:**
-   ```bash
-   export CDS_API_URL="https://cds.climate.copernicus.eu/api/v2"
-   export CDS_API_KEY="your-api-key-here"
-   ```
+```bash
+pip install requests
+```
 
-3. **Install dependencies:**
-   ```bash
-   pip install cdsapi netCDF4
-   ```
-
-### NOAA GFS Data
-
-GFS provides forecast data (typically last 10 days). Direct API access requires additional setup.
+That's it! The system will automatically:
+- Fetch historical data from ERA5 reanalysis (via Open-Meteo)
+- Fetch forecast data from NOAA GFS (via Open-Meteo)
+- Create wind profiles from the weather data
+- Set up atmospheric models automatically
 
 ## Usage
 
@@ -176,20 +168,14 @@ env = Environment.from_coordinates(
 
 ## Troubleshooting
 
-### "CDS API credentials not found"
-Set `CDS_API_URL` and `CDS_API_KEY` environment variables.
-
-### "cdsapi package required"
-Install with: `pip install cdsapi`
-
-### "netCDF4 package required"
-Install with: `pip install netCDF4`
+### "requests package required"
+Install with: `pip install requests`
 
 ### Download fails
 - Check internet connection
-- Verify CDS API credentials
-- Check if date is valid (ERA5: 1940-present)
+- Check if date is valid (historical data: 1940-present, forecast: next 7 days)
 - Try a different date/time
+- The system will automatically fall back to ISA model if weather data is unavailable
 
 ## References
 

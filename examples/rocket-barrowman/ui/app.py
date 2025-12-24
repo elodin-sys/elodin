@@ -3795,7 +3795,7 @@ def render_sidebar():
         use_weather_data = st.checkbox(
             "Use Real Weather Data",
             value=False,
-            help="Fetch weather data from ECMWF ERA5 based on location and date/time. Requires CDS API credentials.",
+            help="Automatically fetch weather data from public APIs (Open-Meteo) based on location and date/time. No API keys required!",
         )
 
         if use_weather_data:
