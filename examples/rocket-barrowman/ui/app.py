@@ -3625,65 +3625,60 @@ def render_sidebar():
                         st.error(str(e))
 
         # ─────────────────────────────────────────────────────────────────────
-        # CUSTOM ROCKET CONFIGURATION
+        # CUSTOM ROCKET CONFIGURATION - Compact tabbed layout
         # ─────────────────────────────────────────────────────────────────────
         if current_rocket_type == "Custom Rocket":
             render_divider()
-            st.markdown("### 📐 Rocket Configuration")
-
-            # Nose Cone
-            with st.expander("🔺 Nose Cone", expanded=True):
-                has_nose = st.checkbox("Include Nose Cone", value=True)
+            st.markdown("### 📐 Rocket Config")
+            
+            # Use tabs for compact organization
+            config_tabs = st.tabs(["🔺 Nose", "📦 Body", "🔱 Fins", "🪂 Recovery"])
+            
+            # TAB 1: Nose Cone
+            with config_tabs[0]:
+                has_nose = st.checkbox("Include", value=True, key="has_nose_cb")
                 if has_nose:
-                    nose_length = st.number_input(
-                        "Length (m)", 0.1, 2.0, 0.558, 0.01, key="nose_len"
-                    )
-                    nose_shape = st.selectbox(
-                        "Shape", ["VON_KARMAN", "OGIVE", "CONICAL", "ELLIPSOID", "HAACK"]
-                    )
-                    nose_material = st.selectbox(
-                        "Material", list(MATERIALS.keys()), index=3, key="nose_mat"
-                    )
-
-            # Body Tube
-            with st.expander("📦 Body Tube", expanded=True):
-                body_length = st.number_input("Length (m)", 0.1, 5.0, 1.5, 0.1, key="body_len")
-                body_radius = st.number_input(
-                    "Radius (m)", 0.01, 0.5, 0.0635, 0.001, key="body_rad"
-                )
-                body_material = st.selectbox(
-                    "Material", list(MATERIALS.keys()), index=3, key="body_mat"
-                )
-
-            # Fins
-            with st.expander("🔱 Fins", expanded=True):
-                has_fins = st.checkbox("Include Fins", value=True)
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        nose_length = st.number_input("Length", 0.1, 2.0, 0.558, 0.01, key="nose_len", format="%.2f")
+                    with col2:
+                        nose_shape = st.selectbox("Shape", ["VON_KARMAN", "OGIVE", "CONICAL", "HAACK"], key="nose_shape")
+                    nose_material = st.selectbox("Material", list(MATERIALS.keys()), index=3, key="nose_mat")
+            
+            # TAB 2: Body Tube
+            with config_tabs[1]:
+                col1, col2 = st.columns(2)
+                with col1:
+                    body_length = st.number_input("Length (m)", 0.1, 5.0, 1.5, 0.1, key="body_len")
+                with col2:
+                    body_radius = st.number_input("Radius (m)", 0.01, 0.5, 0.0635, 0.005, key="body_rad")
+                body_material = st.selectbox("Material", list(MATERIALS.keys()), index=3, key="body_mat")
+            
+            # TAB 3: Fins
+            with config_tabs[2]:
+                has_fins = st.checkbox("Include", value=True, key="has_fins_cb")
                 if has_fins:
-                    fin_count = st.number_input("Count", 2, 8, 4, 1, key="fin_count")
-                    fin_root_chord = st.number_input(
-                        "Root Chord (m)", 0.01, 0.5, 0.12, 0.01, key="fin_root"
-                    )
-                    fin_tip_chord = st.number_input(
-                        "Tip Chord (m)", 0.01, 0.5, 0.06, 0.01, key="fin_tip"
-                    )
-                    fin_span = st.number_input("Span (m)", 0.01, 0.5, 0.11, 0.01, key="fin_span")
-                    fin_sweep = st.number_input(
-                        "Sweep (m)", 0.0, 0.5, 0.06, 0.01, key="fin_sweep",
-                        help="Distance from root leading edge to tip leading edge"
-                    )
-
-            # Parachutes
-            with st.expander("🪂 Recovery", expanded=False):
-                has_main_chute = st.checkbox("Main Parachute", value=True)
-                if has_main_chute:
-                    main_chute_diameter = st.number_input("Main Diameter (m)", 0.1, 10.0, 2.91, 0.1)
-                    main_deployment_altitude = st.number_input(
-                        "Deploy Altitude (m)", 0.0, 10000.0, 800.0, 10.0
-                    )
-
-                has_drogue = st.checkbox("Drogue Parachute", value=True)
-                if has_drogue:
-                    drogue_diameter = st.number_input("Drogue Diameter (m)", 0.1, 5.0, 0.99, 0.1)
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        fin_count = st.number_input("Count", 2, 8, 4, 1, key="fin_count")
+                        fin_root_chord = st.number_input("Root (m)", 0.01, 0.5, 0.12, 0.01, key="fin_root")
+                        fin_span = st.number_input("Span (m)", 0.01, 0.5, 0.11, 0.01, key="fin_span")
+                    with col2:
+                        fin_tip_chord = st.number_input("Tip (m)", 0.01, 0.5, 0.06, 0.01, key="fin_tip")
+                        fin_sweep = st.number_input("Sweep (m)", 0.0, 0.5, 0.06, 0.01, key="fin_sweep")
+            
+            # TAB 4: Recovery
+            with config_tabs[3]:
+                col1, col2 = st.columns(2)
+                with col1:
+                    has_main_chute = st.checkbox("Main", value=True, key="has_main_cb")
+                    if has_main_chute:
+                        main_chute_diameter = st.number_input("Ø Main (m)", 0.1, 10.0, 2.91, 0.1, key="main_dia")
+                        main_deployment_altitude = st.number_input("Deploy (m)", 0.0, 10000.0, 800.0, 50.0, key="main_alt")
+                with col2:
+                    has_drogue = st.checkbox("Drogue", value=True, key="has_drogue_cb")
+                    if has_drogue:
+                        drogue_diameter = st.number_input("Ø Drogue (m)", 0.1, 5.0, 0.99, 0.1, key="drogue_dia")
 
             # Store config
             rocket_config = {
@@ -3845,19 +3840,15 @@ def render_sidebar():
             use_nrlmsise = False
 
         with st.expander("Launch Conditions", expanded=False):
-            elevation = st.number_input("Elevation (m)", 0.0, 5000.0, 1400.0, 10.0)
-            rail_length = st.number_input("Rail Length (m)", 0.5, 20.0, 5.2, 0.1)
-            inclination_deg = st.number_input("Inclination (°)", 0.0, 90.0, 5.0, 1.0)
-            heading_deg = st.number_input("Heading (°)", 0.0, 360.0, 0.0, 1.0)
-            max_time = st.number_input(
-                "Max Time (s)",
-                10.0,
-                1000.0,
-                600.0,
-                10.0,
-                help="Maximum simulation time. Simulation will stop at impact or this time, whichever comes first.",
-            )
-            dt = st.number_input("Time Step (s)", 0.001, 0.1, 0.01, 0.001, format="%.3f")
+            col1, col2 = st.columns(2)
+            with col1:
+                elevation = st.number_input("Elevation (m)", 0.0, 5000.0, 1400.0, 50.0, key="elev")
+                inclination_deg = st.number_input("Inclination (°)", 0.0, 90.0, 5.0, 1.0, key="incl")
+                max_time = st.number_input("Max Time (s)", 10.0, 1000.0, 600.0, 50.0, key="max_t")
+            with col2:
+                rail_length = st.number_input("Rail (m)", 0.5, 20.0, 5.2, 0.5, key="rail")
+                heading_deg = st.number_input("Heading (°)", 0.0, 360.0, 0.0, 10.0, key="head")
+                dt = st.number_input("dt (s)", 0.001, 0.1, 0.01, 0.005, format="%.3f", key="dt")
 
         # Return current rocket type from session state
         rocket_type = st.session_state.get("last_selected_rocket", "Calisto (Default)")

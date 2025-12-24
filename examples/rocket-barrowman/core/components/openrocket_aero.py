@@ -578,6 +578,10 @@ class RocketAerodynamics:
         cd_base = self.calculator.base_drag(mach, base_area, ref_area)
         cd_total += cd_base
 
+        # Parasitic drag from protuberances (rail buttons, launch lugs, cameras)
+        cd_parasitic = self._calculate_parasitic_drag(velocity, rho, mu, ref_area)
+        cd_total += cd_parasitic
+
         # Angle of attack drag increase
         if abs(alpha) > 0.01:
             # Induced drag from normal force
@@ -586,6 +590,60 @@ class RocketAerodynamics:
             cd_total += cd_induced
 
         return cd_total
+    
+    def _calculate_parasitic_drag(
+        self, velocity: float, rho: float, mu: float, ref_area: float
+    ) -> float:
+        """
+        Calculate parasitic drag from external protuberances.
+        
+        Includes: rail buttons, launch lugs, camera shrouds, switch bands
+        """
+        cd_parasitic = 0.0
+        
+        def traverse(component):
+            nonlocal cd_parasitic
+            
+            # Import here to avoid circular imports
+            from .openrocket_components import (
+                RailButton, LaunchLug, CameraShroud, SwitchBand
+            )
+            
+            if isinstance(component, RailButton):
+                # Blunt body drag
+                frontal_area = component.get_frontal_area()
+                cd_button = component.get_drag_coefficient()
+                cd_parasitic += cd_button * frontal_area / ref_area
+                
+            elif isinstance(component, LaunchLug):
+                # Cylinder perpendicular to flow
+                frontal_area = component.get_frontal_area()
+                cd_lug = component.get_drag_coefficient()
+                cd_parasitic += cd_lug * frontal_area / ref_area
+                
+            elif isinstance(component, CameraShroud):
+                # Depends on shroud type
+                frontal_area = component.get_frontal_area()
+                cd_shroud = component.get_drag_coefficient()
+                cd_parasitic += cd_shroud * frontal_area / ref_area
+                
+            elif isinstance(component, SwitchBand):
+                # Small protuberance
+                # Approximate as 10% of band height * circumference
+                circum = math.pi * component.outer_diameter
+                frontal_area = component.width * 0.002  # 2mm protrusion
+                cd_band = 0.5  # Streamlined
+                cd_parasitic += cd_band * frontal_area / ref_area
+            
+            for child in getattr(component, 'children', []):
+                traverse(child)
+        
+        try:
+            traverse(self.rocket)
+        except ImportError:
+            pass  # Components not available
+        
+        return cd_parasitic
 
     def calculate_static_margin(self, cg: float, mach: float = 0.0) -> float:
         """
