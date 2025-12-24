@@ -154,7 +154,7 @@ class SmartOptimizer:
         {"name": "98mm", "id": 0.098, "od": 0.104, "cost_per_m": 40},
         {"name": "4in", "id": 0.102, "od": 0.108, "cost_per_m": 45},
         {"name": "5in", "id": 0.127, "od": 0.133, "cost_per_m": 60},
-        {"name": "6in", "id": 0.152, "od": 0.159, "cost_per_m": 80},
+        {"name": "6in", "id": 0.1477, "od": 0.152, "cost_per_m": 80},  # 0.085" wall (2.16mm)
         {"name": "7.5in", "id": 0.191, "od": 0.197, "cost_per_m": 120},
         {"name": "8in", "id": 0.203, "od": 0.210, "cost_per_m": 140},
         {"name": "10in", "id": 0.254, "od": 0.262, "cost_per_m": 200},
