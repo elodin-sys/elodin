@@ -1,0 +1,57 @@
+{
+  "designation": "229H255-14A",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 2.9e-05,
+  "length": 0.000231,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.936,
+  "total_impulse": 228.868,
+  "avg_thrust": 244.517094017094,
+  "max_thrust": 345.0,
+  "thrust_curve": [
+    [
+      0.018,
+      10.0
+    ],
+    [
+      0.023,
+      345.0
+    ],
+    [
+      0.039,
+      325.0
+    ],
+    [
+      0.05,
+      276.0
+    ],
+    [
+      0.13,
+      287.0
+    ],
+    [
+      0.35,
+      292.0
+    ],
+    [
+      0.75,
+      259.0
+    ],
+    [
+      0.78,
+      265.0
+    ],
+    [
+      0.87,
+      40.0
+    ],
+    [
+      0.936,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000002c4.html"
+}

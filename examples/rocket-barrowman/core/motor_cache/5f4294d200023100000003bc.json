@@ -1,0 +1,53 @@
+{
+  "designation": "1874K740-18A",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 5.4e-05,
+  "length": 0.000404,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.5,
+  "total_impulse": 1847.2004955,
+  "avg_thrust": 738.8801982,
+  "max_thrust": 869.318,
+  "thrust_curve": [
+    [
+      0.02,
+      735.227
+    ],
+    [
+      0.052,
+      853.409
+    ],
+    [
+      0.486,
+      869.318
+    ],
+    [
+      0.893,
+      848.864
+    ],
+    [
+      1.903,
+      735.227
+    ],
+    [
+      2.131,
+      722.727
+    ],
+    [
+      2.32,
+      330.682
+    ],
+    [
+      2.462,
+      101.136
+    ],
+    [
+      2.5,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000003bc.html"
+}

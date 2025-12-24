@@ -1,0 +1,65 @@
+{
+  "designation": "M1200-SF",
+  "manufacturer": "Loki Research",
+  "diameter": 7.6e-05,
+  "length": 0.000785,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 4.5,
+  "total_impulse": 5184.541625,
+  "avg_thrust": 1152.1203611111112,
+  "max_thrust": 1514.51,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.02,
+      1018.47
+    ],
+    [
+      0.5,
+      1203.17
+    ],
+    [
+      1.0,
+      1303.43
+    ],
+    [
+      1.5,
+      1398.42
+    ],
+    [
+      2.0,
+      1514.51
+    ],
+    [
+      2.5,
+      1498.68
+    ],
+    [
+      3.0,
+      1408.97
+    ],
+    [
+      3.5,
+      1203.17
+    ],
+    [
+      4.0,
+      411.609
+    ],
+    [
+      4.25,
+      89.7098
+    ],
+    [
+      4.5,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000002ad.html"
+}

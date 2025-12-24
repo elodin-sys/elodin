@@ -1,0 +1,53 @@
+{
+  "designation": "I400-HP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.0009220000000000001,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.0,
+  "total_impulse": 433.617564697735,
+  "avg_thrust": 433.617564697735,
+  "max_thrust": 898.199,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.00447427,
+      667.233
+    ],
+    [
+      0.0782998,
+      898.199
+    ],
+    [
+      0.116331,
+      598.799
+    ],
+    [
+      0.297539,
+      521.811
+    ],
+    [
+      0.420582,
+      410.605
+    ],
+    [
+      0.559284,
+      487.594
+    ],
+    [
+      0.738255,
+      367.834
+    ],
+    [
+      1.0,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000000d8.html"
+}

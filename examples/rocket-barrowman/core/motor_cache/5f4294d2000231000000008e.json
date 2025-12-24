@@ -1,0 +1,57 @@
+{
+  "designation": "H220T",
+  "manufacturer": "AeroTech",
+  "diameter": 2.9e-05,
+  "length": 0.00023799999999999998,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.96,
+  "total_impulse": 206.99859999999995,
+  "avg_thrust": 215.62354166666663,
+  "max_thrust": 314.1,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      314.1
+    ],
+    [
+      0.1,
+      236.61
+    ],
+    [
+      0.2,
+      269.23
+    ],
+    [
+      0.3,
+      261.06
+    ],
+    [
+      0.4,
+      252.9
+    ],
+    [
+      0.72,
+      252.9
+    ],
+    [
+      0.8,
+      112.58
+    ],
+    [
+      0.9,
+      9.78
+    ],
+    [
+      0.96,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000008e.html"
+}

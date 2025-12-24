@@ -1,0 +1,57 @@
+{
+  "designation": "16803N1560-P",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 9.800000000000001e-05,
+  "length": 0.001239,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 10.823,
+  "total_impulse": 16677.2015145,
+  "avg_thrust": 1540.9037710893467,
+  "max_thrust": 3198.35,
+  "thrust_curve": [
+    [
+      0.007,
+      260.331
+    ],
+    [
+      0.171,
+      3198.35
+    ],
+    [
+      0.291,
+      2826.45
+    ],
+    [
+      0.894,
+      2421.49
+    ],
+    [
+      2.503,
+      2231.41
+    ],
+    [
+      3.866,
+      2041.32
+    ],
+    [
+      5.333,
+      1723.14
+    ],
+    [
+      9.244,
+      570.248
+    ],
+    [
+      10.711,
+      165.289
+    ],
+    [
+      10.823,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000041f.html"
+}

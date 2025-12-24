@@ -1,0 +1,65 @@
+{
+  "designation": "60F50-13A",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 2.4e-05,
+  "length": 0.000133,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.298,
+  "total_impulse": 59.214902,
+  "avg_thrust": 45.6201093990755,
+  "max_thrust": 69.516,
+  "thrust_curve": [
+    [
+      0.015,
+      64.982
+    ],
+    [
+      0.022,
+      69.516
+    ],
+    [
+      0.064,
+      55.537
+    ],
+    [
+      0.118,
+      62.81
+    ],
+    [
+      0.342,
+      62.149
+    ],
+    [
+      0.536,
+      59.41
+    ],
+    [
+      0.743,
+      53.837
+    ],
+    [
+      0.884,
+      46.942
+    ],
+    [
+      0.976,
+      40.047
+    ],
+    [
+      1.096,
+      12.562
+    ],
+    [
+      1.246,
+      2.078
+    ],
+    [
+      1.298,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000003d1.html"
+}

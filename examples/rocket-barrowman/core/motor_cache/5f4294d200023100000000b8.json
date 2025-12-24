@@ -1,0 +1,49 @@
+{
+  "designation": "I210-PVC",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.0009220000000000001,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.72,
+  "total_impulse": 497.92299427000006,
+  "avg_thrust": 183.0599243639706,
+  "max_thrust": 468.96,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      468.96
+    ],
+    [
+      0.464206,
+      386.202
+    ],
+    [
+      0.497763,
+      206.894
+    ],
+    [
+      2.25391,
+      110.343
+    ],
+    [
+      2.34899,
+      41.3788
+    ],
+    [
+      2.40492,
+      13.7929
+    ],
+    [
+      2.72,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000000b8.html"
+}

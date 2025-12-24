@@ -1,0 +1,53 @@
+{
+  "designation": "D9W",
+  "manufacturer": "AeroTech",
+  "diameter": 2.4e-05,
+  "length": 7.000000000000001e-05,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.465,
+  "total_impulse": 20.148689,
+  "avg_thrust": 8.173910344827586,
+  "max_thrust": 17.143,
+  "thrust_curve": [
+    [
+      0.113,
+      13.564
+    ],
+    [
+      0.223,
+      16.976
+    ],
+    [
+      0.426,
+      17.143
+    ],
+    [
+      0.702,
+      15.395
+    ],
+    [
+      0.987,
+      11.484
+    ],
+    [
+      1.343,
+      7.157
+    ],
+    [
+      1.817,
+      3.162
+    ],
+    [
+      2.093,
+      1.498
+    ],
+    [
+      2.465,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000001d.html"
+}

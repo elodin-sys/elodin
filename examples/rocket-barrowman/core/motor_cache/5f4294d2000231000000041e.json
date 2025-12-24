@@ -1,0 +1,61 @@
+{
+  "designation": "4937L395-P",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 7.5e-05,
+  "length": 0.000757,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 12.501,
+  "total_impulse": 4921.587528,
+  "avg_thrust": 393.6955065994721,
+  "max_thrust": 578.734,
+  "thrust_curve": [
+    [
+      0.04,
+      484.229
+    ],
+    [
+      0.129,
+      484.229
+    ],
+    [
+      0.209,
+      578.734
+    ],
+    [
+      0.547,
+      553.644
+    ],
+    [
+      2.043,
+      511.828
+    ],
+    [
+      7.329,
+      439.068
+    ],
+    [
+      8.632,
+      424.014
+    ],
+    [
+      9.573,
+      297.73
+    ],
+    [
+      11.399,
+      100.358
+    ],
+    [
+      12.445,
+      30.108
+    ],
+    [
+      12.501,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000041e.html"
+}

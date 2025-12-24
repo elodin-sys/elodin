@@ -1,0 +1,61 @@
+{
+  "designation": "G339N",
+  "manufacturer": "AeroTech",
+  "diameter": 3.8e-05,
+  "length": 9.7e-05,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.359,
+  "total_impulse": 112.08500000000001,
+  "avg_thrust": 312.21448467966576,
+  "max_thrust": 375.0,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.009,
+      371.0
+    ],
+    [
+      0.05,
+      375.0
+    ],
+    [
+      0.1,
+      375.0
+    ],
+    [
+      0.15,
+      364.0
+    ],
+    [
+      0.2,
+      349.0
+    ],
+    [
+      0.25,
+      310.0
+    ],
+    [
+      0.3,
+      264.0
+    ],
+    [
+      0.324,
+      257.0
+    ],
+    [
+      0.342,
+      39.0
+    ],
+    [
+      0.359,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000001cb.html"
+}

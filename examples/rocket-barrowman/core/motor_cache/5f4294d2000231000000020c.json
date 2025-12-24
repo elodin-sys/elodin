@@ -1,0 +1,49 @@
+{
+  "designation": "M1491-BM",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 7.6e-05,
+  "length": 0.0013720000000000002,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 3.35,
+  "total_impulse": 5613.90765862,
+  "avg_thrust": 1675.7933309313432,
+  "max_thrust": 2725.0,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      2725.0
+    ],
+    [
+      0.481523,
+      2635.66
+    ],
+    [
+      0.81187,
+      2286.82
+    ],
+    [
+      1.33259,
+      1860.47
+    ],
+    [
+      3.0,
+      900.0
+    ],
+    [
+      3.09071,
+      503.876
+    ],
+    [
+      3.35,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000020c.html"
+}

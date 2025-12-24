@@ -1,0 +1,61 @@
+{
+  "designation": "699J145-19A",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 5.4e-05,
+  "length": 0.000236,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 4.944,
+  "total_impulse": 700.7081465,
+  "avg_thrust": 141.72899403317152,
+  "max_thrust": 498.166,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.011,
+      39.12
+    ],
+    [
+      0.018,
+      498.166
+    ],
+    [
+      0.059,
+      224.939
+    ],
+    [
+      0.154,
+      257.335
+    ],
+    [
+      0.488,
+      235.33
+    ],
+    [
+      1.881,
+      180.318
+    ],
+    [
+      3.612,
+      78.851
+    ],
+    [
+      4.669,
+      31.174
+    ],
+    [
+      4.896,
+      22.616
+    ],
+    [
+      4.944,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000041c.html"
+}

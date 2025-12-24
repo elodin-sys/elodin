@@ -34,16 +34,13 @@ except ImportError:
     sys.exit(1)
 
 # Import our rocket simulation
-from environment import Environment
-from motor_model import Motor
-from rocket_model import Rocket as RocketModel
-from flight_solver import FlightSolver, FlightResult
+from core import Environment, Motor, Rocket as RocketModel, FlightSolver, FlightResult
 from calisto_builder import build_calisto
-from flight_analysis import FlightAnalyzer
+from analysis import FlightAnalyzer
 
 # Try to import mesh renderer for Elodin visualization
 try:
-    from mesh_renderer import (
+    from ui.mesh_renderer import (
         generate_rocket_glb_from_solver,
         generate_elodin_assets,
         TRIMESH_AVAILABLE,

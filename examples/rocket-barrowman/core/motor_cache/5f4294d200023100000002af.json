@@ -1,0 +1,49 @@
+{
+  "designation": "K830-SF",
+  "manufacturer": "Loki Research",
+  "diameter": 5.4e-05,
+  "length": 0.000726,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.7,
+  "total_impulse": 2295.178355801,
+  "avg_thrust": 850.0660577040741,
+  "max_thrust": 1136.19,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.02,
+      670.185
+    ],
+    [
+      0.503356,
+      739.3
+    ],
+    [
+      0.998322,
+      840.467
+    ],
+    [
+      1.50168,
+      918.288
+    ],
+    [
+      1.99664,
+      980.545
+    ],
+    [
+      2.49581,
+      1136.19
+    ],
+    [
+      2.7,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000002af.html"
+}

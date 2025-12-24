@@ -1,0 +1,41 @@
+{
+  "designation": "K678-BG",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 7.5e-05,
+  "length": 0.001016,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.8,
+  "total_impulse": 1850.1174284077606,
+  "avg_thrust": 660.7562244313431,
+  "max_thrust": 1163.38,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.00559284,
+      1163.38
+    ],
+    [
+      2.21477,
+      444.822
+    ],
+    [
+      2.32103,
+      256.628
+    ],
+    [
+      2.38814,
+      102.651
+    ],
+    [
+      2.8,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000155.html"
+}

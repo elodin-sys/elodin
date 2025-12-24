@@ -1,0 +1,41 @@
+{
+  "designation": "J242-PVC",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.001227,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 3.1,
+  "total_impulse": 759.8623644073,
+  "avg_thrust": 245.1168917442903,
+  "max_thrust": 448.27,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0111857,
+      448.27
+    ],
+    [
+      1.73937,
+      268.962
+    ],
+    [
+      1.76174,
+      165.515
+    ],
+    [
+      2.97539,
+      48.2753
+    ],
+    [
+      3.1,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000000f6.html"
+}

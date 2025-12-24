@@ -1,0 +1,49 @@
+{
+  "designation": "G234-HP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.000414,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.533,
+  "total_impulse": 118.34485444589998,
+  "avg_thrust": 222.0353741949343,
+  "max_thrust": 540.63,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.00169492,
+      245.419
+    ],
+    [
+      0.0973154,
+      540.63
+    ],
+    [
+      0.183445,
+      526.943
+    ],
+    [
+      0.202461,
+      191.616
+    ],
+    [
+      0.237136,
+      143.712
+    ],
+    [
+      0.260626,
+      136.868
+    ],
+    [
+      0.533,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000071.html"
+}

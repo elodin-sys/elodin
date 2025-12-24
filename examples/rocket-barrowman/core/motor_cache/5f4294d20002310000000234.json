@@ -1,0 +1,33 @@
+{
+  "designation": "G80-LW",
+  "manufacturer": "Loki Research",
+  "diameter": 3.8e-05,
+  "length": 0.000127,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.5,
+  "total_impulse": 119.76070228047,
+  "avg_thrust": 79.84046818698,
+  "max_thrust": 112.069,
+  "thrust_curve": [
+    [
+      0.00931677,
+      112.069
+    ],
+    [
+      0.416149,
+      112.069
+    ],
+    [
+      0.872671,
+      89.6552
+    ],
+    [
+      1.5,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000234.html"
+}

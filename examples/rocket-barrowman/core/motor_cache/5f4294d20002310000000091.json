@@ -1,0 +1,65 @@
+{
+  "designation": "H242T",
+  "manufacturer": "AeroTech",
+  "diameter": 3.8e-05,
+  "length": 0.000152,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.2,
+  "total_impulse": 234.2185,
+  "avg_thrust": 195.18208333333334,
+  "max_thrust": 286.05,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      286.05
+    ],
+    [
+      0.1,
+      255.09
+    ],
+    [
+      0.3,
+      241.88
+    ],
+    [
+      0.4,
+      241.88
+    ],
+    [
+      0.5,
+      233.16
+    ],
+    [
+      0.7,
+      211.15
+    ],
+    [
+      0.8,
+      193.53
+    ],
+    [
+      0.9,
+      171.51
+    ],
+    [
+      1.0,
+      118.76
+    ],
+    [
+      1.1,
+      61.56
+    ],
+    [
+      1.2,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000091.html"
+}

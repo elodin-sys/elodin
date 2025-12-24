@@ -1,0 +1,49 @@
+{
+  "designation": "M900-LR",
+  "manufacturer": "Loki Research",
+  "diameter": 7.6e-05,
+  "length": 0.000785,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 6.0,
+  "total_impulse": 5468.81403,
+  "avg_thrust": 911.4690049999999,
+  "max_thrust": 1060.69,
+  "thrust_curve": [
+    [
+      0.02,
+      807.388
+    ],
+    [
+      1.0,
+      992.084
+    ],
+    [
+      2.0,
+      1050.13
+    ],
+    [
+      3.0,
+      1060.69
+    ],
+    [
+      4.0,
+      992.084
+    ],
+    [
+      5.0,
+      923.483
+    ],
+    [
+      5.5,
+      591.029
+    ],
+    [
+      6.0,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000002f0.html"
+}

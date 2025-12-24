@@ -1,0 +1,65 @@
+{
+  "designation": "176H123-12A",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 2.9e-05,
+  "length": 0.000231,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.53,
+  "total_impulse": 175.8295,
+  "avg_thrust": 114.92124183006536,
+  "max_thrust": 145.0,
+  "thrust_curve": [
+    [
+      0.021,
+      10.0
+    ],
+    [
+      0.028,
+      139.0
+    ],
+    [
+      0.055,
+      139.0
+    ],
+    [
+      0.075,
+      108.0
+    ],
+    [
+      0.13,
+      120.0
+    ],
+    [
+      0.35,
+      132.0
+    ],
+    [
+      0.65,
+      140.0
+    ],
+    [
+      1.0,
+      144.0
+    ],
+    [
+      1.15,
+      143.0
+    ],
+    [
+      1.22,
+      145.0
+    ],
+    [
+      1.35,
+      23.0
+    ],
+    [
+      1.53,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000002a6.html"
+}

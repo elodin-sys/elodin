@@ -1,0 +1,16 @@
+{
+  "designation": "K600TR-P",
+  "manufacturer": "R.A.T.T. Works",
+  "diameter": 6.4e-05,
+  "length": 0.0009080000000000001,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.0,
+  "total_impulse": 0.0,
+  "avg_thrust": 0.0,
+  "max_thrust": 0.0,
+  "thrust_curve": [],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000038c.html"
+}

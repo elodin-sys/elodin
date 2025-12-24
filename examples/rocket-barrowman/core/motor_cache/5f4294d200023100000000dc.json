@@ -1,0 +1,45 @@
+{
+  "designation": "I500-HP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.000719,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.7,
+  "total_impulse": 337.85753028457003,
+  "avg_thrust": 482.6536146922429,
+  "max_thrust": 1155.16,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.00111857,
+      1155.16
+    ],
+    [
+      0.0201342,
+      706.888
+    ],
+    [
+      0.0313199,
+      999.988
+    ],
+    [
+      0.574944,
+      103.447
+    ],
+    [
+      0.623043,
+      120.688
+    ],
+    [
+      0.7,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000000dc.html"
+}

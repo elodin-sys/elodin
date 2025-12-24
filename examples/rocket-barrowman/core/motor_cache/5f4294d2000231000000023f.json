@@ -1,0 +1,33 @@
+{
+  "designation": "H160-LB",
+  "manufacturer": "Loki Research",
+  "diameter": 3.8e-05,
+  "length": 0.00011700000000000001,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.5,
+  "total_impulse": 253.206627945,
+  "avg_thrust": 168.80441863000001,
+  "max_thrust": 288.793,
+  "thrust_curve": [
+    [
+      0.015528,
+      288.793
+    ],
+    [
+      0.599379,
+      237.069
+    ],
+    [
+      1.03106,
+      107.759
+    ],
+    [
+      1.5,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000023f.html"
+}

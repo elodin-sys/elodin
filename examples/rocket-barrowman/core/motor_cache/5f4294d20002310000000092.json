@@ -1,0 +1,41 @@
+{
+  "designation": "H246-HP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.000508,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.9,
+  "total_impulse": 223.80734227375,
+  "avg_thrust": 248.67482474861112,
+  "max_thrust": 609.064,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.00111857,
+      609.064
+    ],
+    [
+      0.0123043,
+      499.57
+    ],
+    [
+      0.502237,
+      253.206
+    ],
+    [
+      0.514541,
+      157.399
+    ],
+    [
+      0.9,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000092.html"
+}

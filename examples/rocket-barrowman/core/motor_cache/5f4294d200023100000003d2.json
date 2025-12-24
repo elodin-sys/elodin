@@ -1,0 +1,53 @@
+{
+  "designation": "75F51-12A",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 2.4e-05,
+  "length": 0.000133,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.577,
+  "total_impulse": 74.49514400000001,
+  "avg_thrust": 47.23851870640458,
+  "max_thrust": 84.148,
+  "thrust_curve": [
+    [
+      0.02,
+      75.924
+    ],
+    [
+      0.031,
+      84.148
+    ],
+    [
+      0.062,
+      70.441
+    ],
+    [
+      0.117,
+      73.659
+    ],
+    [
+      1.211,
+      38.737
+    ],
+    [
+      1.376,
+      14.779
+    ],
+    [
+      1.456,
+      7.271
+    ],
+    [
+      1.532,
+      3.337
+    ],
+    [
+      1.577,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000003d2.html"
+}

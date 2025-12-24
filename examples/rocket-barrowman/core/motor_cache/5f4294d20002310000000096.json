@@ -1,0 +1,49 @@
+{
+  "designation": "H300-HP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.000508,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.62,
+  "total_impulse": 162.901140744,
+  "avg_thrust": 262.7437753935484,
+  "max_thrust": 717.233,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      558.614
+    ],
+    [
+      0.115213,
+      717.233
+    ],
+    [
+      0.12528,
+      268.962
+    ],
+    [
+      0.214765,
+      248.273
+    ],
+    [
+      0.286353,
+      241.376
+    ],
+    [
+      0.334452,
+      227.583
+    ],
+    [
+      0.62,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000096.html"
+}

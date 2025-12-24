@@ -1,0 +1,41 @@
+{
+  "designation": "G100-PVC",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.000406,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.43,
+  "total_impulse": 146.3097760468,
+  "avg_thrust": 102.31452870405596,
+  "max_thrust": 182.756,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      182.756
+    ],
+    [
+      0.199105,
+      177.584
+    ],
+    [
+      0.606264,
+      132.757
+    ],
+    [
+      0.986577,
+      53.4476
+    ],
+    [
+      1.43,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000006b.html"
+}

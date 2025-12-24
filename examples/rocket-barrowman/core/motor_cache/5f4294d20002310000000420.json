@@ -1,0 +1,16 @@
+{
+  "designation": "1337K590-P",
+  "manufacturer": "Animal Motor Works",
+  "diameter": 5.4e-05,
+  "length": 0.00040300000000000004,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.0,
+  "total_impulse": 0.0,
+  "avg_thrust": 0.0,
+  "max_thrust": 0.0,
+  "thrust_curve": [],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000420.html"
+}

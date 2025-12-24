@@ -1,0 +1,53 @@
+{
+  "designation": "K456-BG",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 7.5e-05,
+  "length": 0.0008129999999999999,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 3.7,
+  "total_impulse": 1627.79812023978,
+  "avg_thrust": 439.9454379026432,
+  "max_thrust": 896.541,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.00559284,
+      681.026
+    ],
+    [
+      0.212528,
+      896.541
+    ],
+    [
+      0.503356,
+      775.853
+    ],
+    [
+      1.36465,
+      577.579
+    ],
+    [
+      1.52685,
+      525.856
+    ],
+    [
+      2.51119,
+      370.685
+    ],
+    [
+      2.66779,
+      129.309
+    ],
+    [
+      3.7,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000013d.html"
+}

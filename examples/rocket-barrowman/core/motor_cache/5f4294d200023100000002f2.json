@@ -1,0 +1,49 @@
+{
+  "designation": "N3800-LW",
+  "manufacturer": "Loki Research",
+  "diameter": 9.800000000000001e-05,
+  "length": 0.001016,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 3.25,
+  "total_impulse": 12493.650749999999,
+  "avg_thrust": 3844.2002307692305,
+  "max_thrust": 4965.36,
+  "thrust_curve": [
+    [
+      0.01,
+      4780.6
+    ],
+    [
+      0.5,
+      4572.75
+    ],
+    [
+      1.0,
+      4688.22
+    ],
+    [
+      1.5,
+      4965.36
+    ],
+    [
+      2.0,
+      3972.29
+    ],
+    [
+      2.5,
+      3002.31
+    ],
+    [
+      3.0,
+      1986.14
+    ],
+    [
+      3.25,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000002f2.html"
+}

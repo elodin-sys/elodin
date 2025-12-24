@@ -1,0 +1,53 @@
+{
+  "designation": "H100-SF",
+  "manufacturer": "Loki Research",
+  "diameter": 3.8e-05,
+  "length": 0.000177,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.0,
+  "total_impulse": 199.884127633,
+  "avg_thrust": 99.9420638165,
+  "max_thrust": 150.0,
+  "thrust_curve": [
+    [
+      0.015528,
+      127.586
+    ],
+    [
+      0.151398,
+      127.586
+    ],
+    [
+      0.477484,
+      139.655
+    ],
+    [
+      0.74146,
+      146.552
+    ],
+    [
+      1.00543,
+      150.0
+    ],
+    [
+      1.13742,
+      122.414
+    ],
+    [
+      1.30823,
+      86.2069
+    ],
+    [
+      1.59938,
+      39.6552
+    ],
+    [
+      2.0,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000250.html"
+}

@@ -1,0 +1,29 @@
+{
+  "designation": "I747-HP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.000719,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.45,
+  "total_impulse": 431.4015,
+  "avg_thrust": 958.67,
+  "max_thrust": 1917.34,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      1917.34
+    ],
+    [
+      0.45,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000000de.html"
+}

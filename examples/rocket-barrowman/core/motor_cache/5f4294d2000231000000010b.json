@@ -1,0 +1,49 @@
+{
+  "designation": "J333-HP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.001227,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.4,
+  "total_impulse": 738.3515846626999,
+  "avg_thrust": 307.64649360945833,
+  "max_thrust": 799.99,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      717.233
+    ],
+    [
+      0.204139,
+      799.99
+    ],
+    [
+      0.752237,
+      448.27
+    ],
+    [
+      0.763423,
+      268.962
+    ],
+    [
+      2.16443,
+      62.0682
+    ],
+    [
+      2.23714,
+      27.5859
+    ],
+    [
+      2.4,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000010b.html"
+}

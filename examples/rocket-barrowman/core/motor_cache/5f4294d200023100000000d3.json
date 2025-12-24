@@ -1,0 +1,57 @@
+{
+  "designation": "I357T",
+  "manufacturer": "AeroTech",
+  "diameter": 3.8e-05,
+  "length": 0.000203,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.1,
+  "total_impulse": 341.0000000000001,
+  "avg_thrust": 310.00000000000006,
+  "max_thrust": 465.53,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      465.53
+    ],
+    [
+      0.1,
+      407.97
+    ],
+    [
+      0.4,
+      394.67
+    ],
+    [
+      0.6,
+      363.62
+    ],
+    [
+      0.7,
+      319.23
+    ],
+    [
+      0.8,
+      257.18
+    ],
+    [
+      0.9,
+      190.69
+    ],
+    [
+      1.0,
+      62.09
+    ],
+    [
+      1.1,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000000d3.html"
+}

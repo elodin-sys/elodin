@@ -1,0 +1,53 @@
+{
+  "designation": "J350-SF",
+  "manufacturer": "Loki Research",
+  "diameter": 5.4e-05,
+  "length": 0.00032700000000000003,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.7,
+  "total_impulse": 958.1137953535,
+  "avg_thrust": 354.856961242037,
+  "max_thrust": 445.525,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.02,
+      325.858
+    ],
+    [
+      0.499161,
+      377.432
+    ],
+    [
+      1.00252,
+      445.525
+    ],
+    [
+      1.50168,
+      437.743
+    ],
+    [
+      2.00084,
+      404.669
+    ],
+    [
+      2.20218,
+      383.268
+    ],
+    [
+      2.5,
+      48.8127
+    ],
+    [
+      2.7,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000002b1.html"
+}

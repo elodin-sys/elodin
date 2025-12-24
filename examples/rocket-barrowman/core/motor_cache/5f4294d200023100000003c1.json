@@ -1,0 +1,61 @@
+{
+  "designation": "3683L851-P",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 7.5e-05,
+  "length": 0.000486,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 4.339,
+  "total_impulse": 3650.340246,
+  "avg_thrust": 841.2860672966121,
+  "max_thrust": 980.11,
+  "thrust_curve": [
+    [
+      0.059,
+      971.271
+    ],
+    [
+      0.102,
+      855.249
+    ],
+    [
+      0.485,
+      838.674
+    ],
+    [
+      1.353,
+      911.602
+    ],
+    [
+      1.824,
+      980.11
+    ],
+    [
+      3.107,
+      883.978
+    ],
+    [
+      3.68,
+      816.575
+    ],
+    [
+      4.031,
+      732.597
+    ],
+    [
+      4.128,
+      579.006
+    ],
+    [
+      4.256,
+      246.409
+    ],
+    [
+      4.339,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000003c1.html"
+}

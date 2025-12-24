@@ -1,0 +1,61 @@
+{
+  "designation": "G75J",
+  "manufacturer": "AeroTech",
+  "diameter": 2.9e-05,
+  "length": 0.000194,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.2,
+  "total_impulse": 161.42899999999997,
+  "avg_thrust": 73.37681818181817,
+  "max_thrust": 87.27,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.04
+    ],
+    [
+      0.1,
+      82.64
+    ],
+    [
+      0.2,
+      78.06
+    ],
+    [
+      0.3,
+      78.06
+    ],
+    [
+      0.5,
+      87.27
+    ],
+    [
+      1.5,
+      87.27
+    ],
+    [
+      1.7,
+      82.64
+    ],
+    [
+      1.9,
+      64.27
+    ],
+    [
+      2.0,
+      18.37
+    ],
+    [
+      2.2,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000064.html"
+}

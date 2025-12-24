@@ -134,18 +134,44 @@ uv pip install -r examples/rocket-barrowman/requirements.txt
 ```
 rocket-barrowman/
 ├── README.md                 # This file
-├── app.py                    # Streamlit web interface
-├── main.py                   # Elodin integration
-├── ai_rocket_builder.py      # AI-powered rocket design
-├── flight_solver.py          # 6-DOF physics engine
-├── rocket_model.py           # Rocket properties
-├── motor_model.py            # Motor simulation
-├── motor_scraper.py          # ThrustCurve.org API client
-├── rocket_visualizer.py      # 3D/2D visualization
-├── environment.py            # Atmosphere models
+├── main.py                   # Elodin integration entry point
 ├── calisto_builder.py        # Default rocket definition
 ├── requirements.txt          # Python dependencies
-└── run_streamlit.sh          # Launcher script
+├── run_streamlit.sh          # Launcher script
+│
+├── core/                     # Core physics and modeling
+│   ├── __init__.py
+│   ├── flight_solver.py      # 6-DOF physics engine
+│   ├── rocket_model.py       # Rocket properties
+│   ├── motor_model.py        # Motor simulation
+│   ├── environment.py        # Atmosphere models
+│   ├── math_utils.py         # Math utilities
+│   ├── motor_scraper.py      # ThrustCurve.org API client
+│   └── openrocket_*.py       # OpenRocket compatibility layer
+│
+├── ui/                       # User interface
+│   ├── __init__.py
+│   ├── app.py                # Streamlit web interface
+│   ├── rocket_visualizer.py  # 3D/2D visualization
+│   ├── rocket_renderer.py    # Plotly-based renderer
+│   └── mesh_renderer.py     # Trimesh-based 3D mesh generation
+│
+├── optimization/             # AI-powered design optimization
+│   ├── __init__.py
+│   ├── smart_optimizer.py    # Advanced iterative optimizer
+│   ├── ai_rocket_builder.py  # NLP-based rocket designer
+│   └── ai_rocket_optimizer.py # Legacy optimizer
+│
+├── analysis/                 # Flight analysis and metrics
+│   ├── __init__.py
+│   └── flight_analysis.py   # Aerospace-grade analysis suite
+│
+└── docs/                     # Documentation
+    ├── WHITEPAPER.md         # Technical whitepaper
+    ├── AI_BUILDER_README.md   # AI Builder guide
+    ├── API_INTEGRATION.md    # API integration guide
+    └── sources/              # Source materials
+        └── barrowman_equation.tex
 ```
 
 ## Technical Details

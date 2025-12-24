@@ -1,0 +1,53 @@
+{
+  "designation": "A6",
+  "manufacturer": "Raketenmodellbau Klima",
+  "diameter": 1.7999999999999997e-05,
+  "length": 7.000000000000001e-05,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.71,
+  "total_impulse": 2.4953030000000003,
+  "avg_thrust": 3.5145112676056343,
+  "max_thrust": 10.477,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.088,
+      0.502
+    ],
+    [
+      0.186,
+      4.601
+    ],
+    [
+      0.232,
+      7.089
+    ],
+    [
+      0.314,
+      10.477
+    ],
+    [
+      0.418,
+      6.713
+    ],
+    [
+      0.467,
+      3.011
+    ],
+    [
+      0.501,
+      0.418
+    ],
+    [
+      0.71,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f76951c9503a10004898852.html"
+}

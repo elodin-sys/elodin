@@ -1,0 +1,65 @@
+{
+  "designation": "166H175-14A",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 2.9e-05,
+  "length": 0.000231,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.0,
+  "total_impulse": 165.98649999999998,
+  "avg_thrust": 165.98649999999998,
+  "max_thrust": 236.0,
+  "thrust_curve": [
+    [
+      0.021,
+      13.0
+    ],
+    [
+      0.032,
+      175.0
+    ],
+    [
+      0.057,
+      215.0
+    ],
+    [
+      0.08,
+      180.0
+    ],
+    [
+      0.13,
+      175.0
+    ],
+    [
+      0.4,
+      185.0
+    ],
+    [
+      0.6,
+      190.0
+    ],
+    [
+      0.76,
+      195.0
+    ],
+    [
+      0.84,
+      236.0
+    ],
+    [
+      0.88,
+      150.0
+    ],
+    [
+      0.92,
+      30.0
+    ],
+    [
+      1.0,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000002bb.html"
+}

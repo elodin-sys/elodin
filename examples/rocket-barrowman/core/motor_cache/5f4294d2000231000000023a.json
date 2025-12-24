@@ -1,0 +1,41 @@
+{
+  "designation": "J712-LB",
+  "manufacturer": "Loki Research",
+  "diameter": 3.8e-05,
+  "length": 0.000406,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.2,
+  "total_impulse": 824.2523325454249,
+  "avg_thrust": 686.8769437878541,
+  "max_thrust": 870.69,
+  "thrust_curve": [
+    [
+      0.00931677,
+      870.69
+    ],
+    [
+      0.0496894,
+      810.345
+    ],
+    [
+      0.791925,
+      793.103
+    ],
+    [
+      1.0,
+      706.897
+    ],
+    [
+      1.06211,
+      172.414
+    ],
+    [
+      1.2,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000023a.html"
+}

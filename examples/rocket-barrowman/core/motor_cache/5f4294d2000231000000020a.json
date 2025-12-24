@@ -1,0 +1,45 @@
+{
+  "designation": "K888-BM",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 7.6e-05,
+  "length": 0.001016,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.7,
+  "total_impulse": 2458.57834092,
+  "avg_thrust": 910.584570711111,
+  "max_thrust": 1365.0,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      1365.0
+    ],
+    [
+      0.5,
+      1365.0
+    ],
+    [
+      1.04143,
+      1069.77
+    ],
+    [
+      2.4972,
+      434.109
+    ],
+    [
+      2.54199,
+      124.031
+    ],
+    [
+      2.7,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000020a.html"
+}

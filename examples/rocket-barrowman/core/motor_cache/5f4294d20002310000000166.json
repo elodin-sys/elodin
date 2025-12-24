@@ -1,0 +1,61 @@
+{
+  "designation": "K1100T",
+  "manufacturer": "AeroTech",
+  "diameter": 5.4e-05,
+  "length": 0.000398,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.6,
+  "total_impulse": 1618.856,
+  "avg_thrust": 1011.785,
+  "max_thrust": 1627.57,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      1627.57
+    ],
+    [
+      0.1,
+      1244.55
+    ],
+    [
+      0.4,
+      1196.65
+    ],
+    [
+      0.8,
+      1124.9
+    ],
+    [
+      1.0,
+      1077.04
+    ],
+    [
+      1.1,
+      1053.06
+    ],
+    [
+      1.2,
+      1029.09
+    ],
+    [
+      1.4,
+      660.53
+    ],
+    [
+      1.5,
+      119.65
+    ],
+    [
+      1.6,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000166.html"
+}

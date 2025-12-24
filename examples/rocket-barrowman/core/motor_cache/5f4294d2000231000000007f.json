@@ -1,0 +1,57 @@
+{
+  "designation": "H121-HP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.000516,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.85,
+  "total_impulse": 229.13198518377,
+  "avg_thrust": 123.85512712636216,
+  "max_thrust": 265.514,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.00223714,
+      251.721
+    ],
+    [
+      0.0402685,
+      265.514
+    ],
+    [
+      0.0738255,
+      203.446
+    ],
+    [
+      0.400447,
+      179.308
+    ],
+    [
+      0.60179,
+      134.481
+    ],
+    [
+      1.08949,
+      127.585
+    ],
+    [
+      1.40268,
+      93.1023
+    ],
+    [
+      1.61969,
+      37.9306
+    ],
+    [
+      1.85,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000007f.html"
+}

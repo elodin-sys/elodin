@@ -1,0 +1,53 @@
+{
+  "designation": "K234-BG",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 5.4e-05,
+  "length": 0.0012629999999999998,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 7.05,
+  "total_impulse": 1658.2886412854502,
+  "avg_thrust": 235.21824699084402,
+  "max_thrust": 396.918,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      92.3861
+    ],
+    [
+      0.234899,
+      396.918
+    ],
+    [
+      0.973154,
+      338.749
+    ],
+    [
+      5.97315,
+      171.085
+    ],
+    [
+      6.05145,
+      106.073
+    ],
+    [
+      6.19687,
+      78.6993
+    ],
+    [
+      6.37584,
+      54.7473
+    ],
+    [
+      7.05,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000012e.html"
+}

@@ -1,0 +1,57 @@
+{
+  "designation": "J650-SF",
+  "manufacturer": "Loki Research",
+  "diameter": 3.8e-05,
+  "length": 0.000625,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.45,
+  "total_impulse": 947.9418900000001,
+  "avg_thrust": 653.7530275862069,
+  "max_thrust": 923.483,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.01,
+      744.063
+    ],
+    [
+      0.2,
+      754.617
+    ],
+    [
+      0.4,
+      770.449
+    ],
+    [
+      0.6,
+      833.773
+    ],
+    [
+      0.8,
+      875.989
+    ],
+    [
+      1.0,
+      923.483
+    ],
+    [
+      1.1,
+      401.055
+    ],
+    [
+      1.2,
+      295.515
+    ],
+    [
+      1.45,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000002b2.html"
+}

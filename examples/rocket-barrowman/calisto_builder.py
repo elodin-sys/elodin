@@ -13,7 +13,7 @@ Specifications from RocketPy:
 
 import math
 import numpy as np
-from openrocket_components import (
+from core.openrocket_components import (
     BodyTube,
     CenteringRing,
     InnerTube,
@@ -25,7 +25,7 @@ from openrocket_components import (
     TrapezoidFinSet,
     Transition,
 )
-from openrocket_motor import Motor as ORMotor
+from core.openrocket_motor import Motor as ORMotor
 
 
 def build_calisto_rocket():

@@ -1,0 +1,41 @@
+{
+  "designation": "I155-HP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.000719,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 3.5,
+  "total_impulse": 543.66137966425,
+  "avg_thrust": 155.33182276121428,
+  "max_thrust": 222.411,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0111857,
+      222.411
+    ],
+    [
+      2.71253,
+      150.555
+    ],
+    [
+      2.82998,
+      82.121
+    ],
+    [
+      2.96421,
+      58.1691
+    ],
+    [
+      3.5,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000000ae.html"
+}

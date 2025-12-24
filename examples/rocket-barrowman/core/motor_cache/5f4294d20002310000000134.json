@@ -1,0 +1,49 @@
+{
+  "designation": "K265-SP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 5.4e-05,
+  "length": 0.001219,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 6.26,
+  "total_impulse": 1684.02468254,
+  "avg_thrust": 269.01352756230034,
+  "max_thrust": 470.387,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      470.387
+    ],
+    [
+      2.44068,
+      347.677
+    ],
+    [
+      3.91525,
+      224.968
+    ],
+    [
+      4.77966,
+      173.839
+    ],
+    [
+      5.13559,
+      112.484
+    ],
+    [
+      5.33898,
+      51.129
+    ],
+    [
+      6.26,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000134.html"
+}

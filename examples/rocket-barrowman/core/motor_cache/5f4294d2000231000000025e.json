@@ -1,0 +1,61 @@
+{
+  "designation": "419I800-15A",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 3.8e-05,
+  "length": 0.000303,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.52,
+  "total_impulse": 415.46350000000007,
+  "avg_thrust": 798.9682692307694,
+  "max_thrust": 888.69,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.01,
+      276.1
+    ],
+    [
+      0.02,
+      680.47
+    ],
+    [
+      0.05,
+      741.02
+    ],
+    [
+      0.1,
+      791.43
+    ],
+    [
+      0.2,
+      830.85
+    ],
+    [
+      0.3,
+      851.45
+    ],
+    [
+      0.4,
+      853.81
+    ],
+    [
+      0.5,
+      888.69
+    ],
+    [
+      0.51,
+      760.61
+    ],
+    [
+      0.52,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000025e.html"
+}

@@ -1,0 +1,57 @@
+{
+  "designation": "L780-SF",
+  "manufacturer": "Loki Research",
+  "diameter": 7.6e-05,
+  "length": 0.000498,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 3.8,
+  "total_impulse": 3018.3642,
+  "avg_thrust": 794.3063684210526,
+  "max_thrust": 934.037,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.02,
+      506.596
+    ],
+    [
+      0.5,
+      696.57
+    ],
+    [
+      1.0,
+      844.327
+    ],
+    [
+      1.5,
+      897.098
+    ],
+    [
+      2.0,
+      934.037
+    ],
+    [
+      2.5,
+      918.206
+    ],
+    [
+      3.0,
+      865.435
+    ],
+    [
+      3.5,
+      802.111
+    ],
+    [
+      3.8,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000002ae.html"
+}

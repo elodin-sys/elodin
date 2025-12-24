@@ -1,0 +1,61 @@
+{
+  "designation": "660J381-15A",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 3.8e-05,
+  "length": 0.000419,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.874,
+  "total_impulse": 659.112346,
+  "avg_thrust": 351.71416542155816,
+  "max_thrust": 505.029,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.048,
+      505.029
+    ],
+    [
+      0.111,
+      473.244
+    ],
+    [
+      0.294,
+      461.471
+    ],
+    [
+      0.968,
+      436.75
+    ],
+    [
+      1.353,
+      392.015
+    ],
+    [
+      1.385,
+      366.116
+    ],
+    [
+      1.556,
+      137.735
+    ],
+    [
+      1.662,
+      47.089
+    ],
+    [
+      1.706,
+      22.367
+    ],
+    [
+      1.874,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000287.html"
+}

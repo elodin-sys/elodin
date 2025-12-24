@@ -1,0 +1,45 @@
+{
+  "designation": "M711-BS",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 7.5e-05,
+  "length": 0.001371,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 7.22,
+  "total_impulse": 5569.635373955,
+  "avg_thrust": 771.4176418220222,
+  "max_thrust": 1140.0,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      1140.0
+    ],
+    [
+      1.46697,
+      1069.77
+    ],
+    [
+      4.0,
+      680.0
+    ],
+    [
+      6.47256,
+      589.147
+    ],
+    [
+      6.67413,
+      279.07
+    ],
+    [
+      7.22,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000198.html"
+}

@@ -1,0 +1,37 @@
+{
+  "designation": "I210-LR",
+  "manufacturer": "Loki Research",
+  "diameter": 3.8e-05,
+  "length": 0.000292,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.3,
+  "total_impulse": 492.490997567885,
+  "avg_thrust": 214.12652068168916,
+  "max_thrust": 452.586,
+  "thrust_curve": [
+    [
+      0.00388199,
+      452.586
+    ],
+    [
+      0.0427019,
+      387.931
+    ],
+    [
+      1.00155,
+      271.552
+    ],
+    [
+      1.80901,
+      77.5862
+    ],
+    [
+      2.3,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000023d.html"
+}

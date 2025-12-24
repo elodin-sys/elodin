@@ -1,0 +1,49 @@
+{
+  "designation": "J555-HP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.001227,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.6,
+  "total_impulse": 799.0445771305,
+  "avg_thrust": 499.4028607065625,
+  "max_thrust": 1344.81,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      931.023
+    ],
+    [
+      0.0581655,
+      1344.81
+    ],
+    [
+      0.277405,
+      810.335
+    ],
+    [
+      1.17226,
+      241.376
+    ],
+    [
+      1.2774,
+      68.9647
+    ],
+    [
+      1.31767,
+      51.7235
+    ],
+    [
+      1.6,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000125.html"
+}

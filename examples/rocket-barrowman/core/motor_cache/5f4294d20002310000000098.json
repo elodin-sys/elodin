@@ -1,0 +1,49 @@
+{
+  "designation": "H340-SP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.000719,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.95,
+  "total_impulse": 311.4860915049,
+  "avg_thrust": 327.88009632094736,
+  "max_thrust": 920.322,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      920.322
+    ],
+    [
+      0.0847458,
+      715.806
+    ],
+    [
+      0.101695,
+      345.121
+    ],
+    [
+      0.683051,
+      332.338
+    ],
+    [
+      0.740678,
+      255.645
+    ],
+    [
+      0.766102,
+      153.387
+    ],
+    [
+      0.95,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000098.html"
+}

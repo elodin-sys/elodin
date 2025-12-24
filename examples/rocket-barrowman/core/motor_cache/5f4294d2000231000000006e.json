@@ -1,0 +1,45 @@
+{
+  "designation": "G123-HP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.000406,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.15,
+  "total_impulse": 142.84541652836998,
+  "avg_thrust": 124.21340567684346,
+  "max_thrust": 399.995,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.00223714,
+      217.239
+    ],
+    [
+      0.00671141,
+      399.995
+    ],
+    [
+      0.0201342,
+      220.687
+    ],
+    [
+      0.914989,
+      72.4129
+    ],
+    [
+      0.955257,
+      37.9306
+    ],
+    [
+      1.15,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000006e.html"
+}

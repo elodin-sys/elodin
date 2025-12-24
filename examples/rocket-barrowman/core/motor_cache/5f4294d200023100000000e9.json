@@ -1,0 +1,41 @@
+{
+  "designation": "J150-HP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.0009220000000000001,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 4.1,
+  "total_impulse": 659.7324724315,
+  "avg_thrust": 160.91035912963417,
+  "max_thrust": 266.893,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      266.893
+    ],
+    [
+      2.00224,
+      184.772
+    ],
+    [
+      2.75727,
+      150.555
+    ],
+    [
+      3.00895,
+      92.3861
+    ],
+    [
+      4.1,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000000e9.html"
+}

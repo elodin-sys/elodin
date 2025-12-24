@@ -1,0 +1,69 @@
+{
+  "designation": "4895L1395-P",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 7.5e-05,
+  "length": 0.000621,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 3.45,
+  "total_impulse": 4894.05,
+  "avg_thrust": 1418.5652173913043,
+  "max_thrust": 1800.0,
+  "thrust_curve": [
+    [
+      0.02,
+      100.0
+    ],
+    [
+      0.04,
+      1400.0
+    ],
+    [
+      0.1,
+      1800.0
+    ],
+    [
+      0.2,
+      1500.0
+    ],
+    [
+      0.4,
+      1540.0
+    ],
+    [
+      0.8,
+      1591.0
+    ],
+    [
+      1.1,
+      1641.0
+    ],
+    [
+      2.4,
+      1481.0
+    ],
+    [
+      2.8,
+      1446.0
+    ],
+    [
+      3.0,
+      1500.0
+    ],
+    [
+      3.18,
+      830.0
+    ],
+    [
+      3.35,
+      100.0
+    ],
+    [
+      3.45,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000295.html"
+}

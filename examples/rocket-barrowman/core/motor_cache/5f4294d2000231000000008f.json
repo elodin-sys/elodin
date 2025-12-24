@@ -1,0 +1,49 @@
+{
+  "designation": "H222-HP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.00040699999999999997,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.7,
+  "total_impulse": 160.67255152040002,
+  "avg_thrust": 229.53221645771433,
+  "max_thrust": 684.342,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      684.342
+    ],
+    [
+      0.0302013,
+      656.968
+    ],
+    [
+      0.0525727,
+      574.847
+    ],
+    [
+      0.0581655,
+      349.014
+    ],
+    [
+      0.346756,
+      260.05
+    ],
+    [
+      0.364653,
+      191.616
+    ],
+    [
+      0.7,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000008f.html"
+}

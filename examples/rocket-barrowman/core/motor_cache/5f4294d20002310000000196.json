@@ -1,0 +1,41 @@
+{
+  "designation": "L1500T",
+  "manufacturer": "AeroTech",
+  "diameter": 9.800000000000001e-05,
+  "length": 0.000443,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.41,
+  "total_impulse": 3616.4550000000004,
+  "avg_thrust": 1500.6037344398342,
+  "max_thrust": 2381.0,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.2,
+      1800.0
+    ],
+    [
+      0.5,
+      2381.0
+    ],
+    [
+      0.51,
+      2372.0
+    ],
+    [
+      2.0,
+      1072.0
+    ],
+    [
+      2.41,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000196.html"
+}

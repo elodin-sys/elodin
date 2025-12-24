@@ -1,0 +1,65 @@
+{
+  "designation": "164H90-12A",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 2.9e-05,
+  "length": 0.000187,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.85,
+  "total_impulse": 163.9905,
+  "avg_thrust": 88.64351351351351,
+  "max_thrust": 155.0,
+  "thrust_curve": [
+    [
+      0.021,
+      10.0
+    ],
+    [
+      0.028,
+      154.0
+    ],
+    [
+      0.055,
+      155.0
+    ],
+    [
+      0.075,
+      108.0
+    ],
+    [
+      0.13,
+      120.0
+    ],
+    [
+      0.35,
+      115.0
+    ],
+    [
+      1.4,
+      83.0
+    ],
+    [
+      1.48,
+      84.0
+    ],
+    [
+      1.56,
+      73.0
+    ],
+    [
+      1.69,
+      22.0
+    ],
+    [
+      1.76,
+      8.0
+    ],
+    [
+      1.85,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000299.html"
+}

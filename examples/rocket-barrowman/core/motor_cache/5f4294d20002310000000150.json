@@ -1,0 +1,53 @@
+{
+  "designation": "K630-SP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 7.5e-05,
+  "length": 0.0008129999999999999,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.2,
+  "total_impulse": 1422.9963711688802,
+  "avg_thrust": 646.8165323494909,
+  "max_thrust": 889.644,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.00559284,
+      307.954
+    ],
+    [
+      0.0978747,
+      573.136
+    ],
+    [
+      0.500559,
+      889.644
+    ],
+    [
+      1.75336,
+      667.233
+    ],
+    [
+      1.85403,
+      410.605
+    ],
+    [
+      1.93792,
+      239.52
+    ],
+    [
+      2.04978,
+      128.314
+    ],
+    [
+      2.2,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000150.html"
+}

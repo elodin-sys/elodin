@@ -1,0 +1,57 @@
+{
+  "designation": "74F85-15A",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 2.4e-05,
+  "length": 0.000133,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.873,
+  "total_impulse": 72.789148,
+  "avg_thrust": 83.37817640320733,
+  "max_thrust": 102.402,
+  "thrust_curve": [
+    [
+      0.01,
+      76.074
+    ],
+    [
+      0.023,
+      100.185
+    ],
+    [
+      0.04,
+      92.425
+    ],
+    [
+      0.118,
+      100.878
+    ],
+    [
+      0.283,
+      102.402
+    ],
+    [
+      0.51,
+      96.443
+    ],
+    [
+      0.688,
+      87.436
+    ],
+    [
+      0.787,
+      25.912
+    ],
+    [
+      0.852,
+      7.206
+    ],
+    [
+      0.873,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000003bb.html"
+}

@@ -1,0 +1,53 @@
+{
+  "designation": "H277-HP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.000719,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.15,
+  "total_impulse": 295.85639108725,
+  "avg_thrust": 257.26642703239133,
+  "max_thrust": 765.508,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      765.508
+    ],
+    [
+      0.0738255,
+      703.44
+    ],
+    [
+      0.118568,
+      337.927
+    ],
+    [
+      0.917226,
+      179.308
+    ],
+    [
+      0.957494,
+      75.8612
+    ],
+    [
+      0.995526,
+      41.3788
+    ],
+    [
+      1.02908,
+      48.2753
+    ],
+    [
+      1.15,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000095.html"
+}

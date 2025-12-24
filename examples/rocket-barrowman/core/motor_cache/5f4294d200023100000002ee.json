@@ -1,0 +1,61 @@
+{
+  "designation": "J1000-LW",
+  "manufacturer": "Loki Research",
+  "diameter": 3.8e-05,
+  "length": 0.000625,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.25,
+  "total_impulse": 1220.3585249999999,
+  "avg_thrust": 976.2868199999999,
+  "max_thrust": 1400.0,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.014556,
+      1400.0
+    ],
+    [
+      0.1,
+      1350.0
+    ],
+    [
+      0.2,
+      1300.0
+    ],
+    [
+      0.4,
+      1300.0
+    ],
+    [
+      0.6,
+      1335.09
+    ],
+    [
+      0.7,
+      1271.77
+    ],
+    [
+      0.8,
+      1134.56
+    ],
+    [
+      1.0,
+      395.778
+    ],
+    [
+      1.1,
+      105.541
+    ],
+    [
+      1.25,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000002ee.html"
+}

@@ -1,0 +1,53 @@
+{
+  "designation": "M2281-BF",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 7.5e-05,
+  "length": 0.001524,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.14,
+  "total_impulse": 5536.1500049999995,
+  "avg_thrust": 2586.9859836448595,
+  "max_thrust": 4550.0,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      2725.0
+    ],
+    [
+      0.2,
+      4550.0
+    ],
+    [
+      0.6,
+      4550.0
+    ],
+    [
+      0.8,
+      4550.0
+    ],
+    [
+      0.9,
+      4000.0
+    ],
+    [
+      0.95,
+      2725.0
+    ],
+    [
+      1.98768,
+      116.279
+    ],
+    [
+      2.14,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000001b5.html"
+}

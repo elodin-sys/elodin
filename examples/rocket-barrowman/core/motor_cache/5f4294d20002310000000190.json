@@ -1,0 +1,45 @@
+{
+  "designation": "L1222-SM",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 7.5e-05,
+  "length": 0.001371,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 3.1,
+  "total_impulse": 3693.875,
+  "avg_thrust": 1191.5725806451612,
+  "max_thrust": 2725.0,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      455.0
+    ],
+    [
+      0.25,
+      455.0
+    ],
+    [
+      0.5,
+      2725.0
+    ],
+    [
+      0.75,
+      1816.0
+    ],
+    [
+      2.75,
+      680.0
+    ],
+    [
+      3.1,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000190.html"
+}

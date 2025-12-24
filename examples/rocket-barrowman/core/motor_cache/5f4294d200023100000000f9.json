@@ -1,0 +1,49 @@
+{
+  "designation": "I250-HP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.000719,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.7,
+  "total_impulse": 431.25701068433506,
+  "avg_thrust": 253.6805945201971,
+  "max_thrust": 622.751,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.00447427,
+      622.751
+    ],
+    [
+      0.0246085,
+      437.979
+    ],
+    [
+      1.00447,
+      273.737
+    ],
+    [
+      1.02237,
+      171.085
+    ],
+    [
+      1.20134,
+      157.399
+    ],
+    [
+      1.23937,
+      136.868
+    ],
+    [
+      1.7,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000000f9.html"
+}

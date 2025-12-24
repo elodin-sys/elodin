@@ -1,0 +1,61 @@
+{
+  "designation": "G104T",
+  "manufacturer": "AeroTech",
+  "diameter": 2.9e-05,
+  "length": 0.000125,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.9,
+  "total_impulse": 82.86200000000001,
+  "avg_thrust": 92.06888888888889,
+  "max_thrust": 118.5,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      118.5
+    ],
+    [
+      0.1,
+      114.14
+    ],
+    [
+      0.2,
+      114.14
+    ],
+    [
+      0.3,
+      109.91
+    ],
+    [
+      0.4,
+      109.91
+    ],
+    [
+      0.5,
+      105.68
+    ],
+    [
+      0.6,
+      84.56
+    ],
+    [
+      0.7,
+      71.83
+    ],
+    [
+      0.8,
+      59.2
+    ],
+    [
+      0.9,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000006d.html"
+}

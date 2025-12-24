@@ -1,0 +1,49 @@
+{
+  "designation": "M1575-BG",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 9.800000000000001e-05,
+  "length": 0.001524,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 4.2,
+  "total_impulse": 6862.2489006549995,
+  "avg_thrust": 1633.8687858702378,
+  "max_thrust": 2976.89,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.139821,
+      2429.41
+    ],
+    [
+      0.503356,
+      2976.89
+    ],
+    [
+      2.95302,
+      1402.9
+    ],
+    [
+      3.06488,
+      923.861
+    ],
+    [
+      3.21029,
+      376.388
+    ],
+    [
+      3.31096,
+      205.303
+    ],
+    [
+      4.2,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000001ab.html"
+}

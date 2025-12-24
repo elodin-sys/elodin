@@ -1,0 +1,61 @@
+{
+  "designation": "1711K520-17A",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 5.4e-05,
+  "length": 0.000404,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 3.34,
+  "total_impulse": 1710.201132,
+  "avg_thrust": 512.0362670658683,
+  "max_thrust": 615.459,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.007,
+      121.739
+    ],
+    [
+      0.023,
+      591.787
+    ],
+    [
+      0.075,
+      615.459
+    ],
+    [
+      0.151,
+      580.797
+    ],
+    [
+      1.629,
+      568.116
+    ],
+    [
+      2.177,
+      535.145
+    ],
+    [
+      2.903,
+      476.812
+    ],
+    [
+      2.993,
+      414.251
+    ],
+    [
+      3.242,
+      97.222
+    ],
+    [
+      3.34,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000419.html"
+}

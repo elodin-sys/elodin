@@ -1,0 +1,49 @@
+{
+  "designation": "I430-LB",
+  "manufacturer": "Loki Research",
+  "diameter": 3.8e-05,
+  "length": 0.000292,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.2,
+  "total_impulse": 522.3366154222899,
+  "avg_thrust": 435.28051285190827,
+  "max_thrust": 534.483,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.00931677,
+      534.483
+    ],
+    [
+      0.0310559,
+      448.276
+    ],
+    [
+      0.0962733,
+      465.517
+    ],
+    [
+      0.372671,
+      456.897
+    ],
+    [
+      0.748447,
+      439.655
+    ],
+    [
+      1.14907,
+      422.414
+    ],
+    [
+      1.2,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000240.html"
+}

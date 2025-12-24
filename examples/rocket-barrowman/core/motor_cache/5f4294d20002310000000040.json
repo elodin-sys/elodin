@@ -1,0 +1,57 @@
+{
+  "designation": "F25W",
+  "manufacturer": "AeroTech",
+  "diameter": 2.9e-05,
+  "length": 9.800000000000001e-05,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.69,
+  "total_impulse": 70.766831,
+  "avg_thrust": 26.30737211895911,
+  "max_thrust": 57.631,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.039,
+      57.631
+    ],
+    [
+      0.187,
+      53.491
+    ],
+    [
+      0.342,
+      51.239
+    ],
+    [
+      0.5,
+      47.86
+    ],
+    [
+      1.0,
+      33.806
+    ],
+    [
+      1.5,
+      22.94
+    ],
+    [
+      2.0,
+      10.135
+    ],
+    [
+      2.207,
+      4.504
+    ],
+    [
+      2.69,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000040.html"
+}

@@ -1,0 +1,49 @@
+{
+  "designation": "J292-SP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 5.4e-05,
+  "length": 0.000719,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.53,
+  "total_impulse": 739.74788947202,
+  "avg_thrust": 292.3904701470435,
+  "max_thrust": 552.193,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.00847458,
+      552.193
+    ],
+    [
+      0.262712,
+      480.612
+    ],
+    [
+      0.423729,
+      419.258
+    ],
+    [
+      0.762712,
+      337.451
+    ],
+    [
+      1.97458,
+      245.419
+    ],
+    [
+      2.07627,
+      143.161
+    ],
+    [
+      2.53,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000102.html"
+}

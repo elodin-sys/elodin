@@ -1,0 +1,53 @@
+{
+  "designation": "L1482-LB",
+  "manufacturer": "Loki Research",
+  "diameter": 7.6e-05,
+  "length": 0.000497,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.6,
+  "total_impulse": 3857.5085219266,
+  "avg_thrust": 1483.657123817923,
+  "max_thrust": 1758.62,
+  "thrust_curve": [
+    [
+      0.00776398,
+      1344.83
+    ],
+    [
+      0.0465839,
+      1241.38
+    ],
+    [
+      0.48913,
+      1551.72
+    ],
+    [
+      1.01708,
+      1568.97
+    ],
+    [
+      1.99534,
+      1603.45
+    ],
+    [
+      2.3913,
+      1586.21
+    ],
+    [
+      2.48447,
+      1758.62
+    ],
+    [
+      2.50776,
+      103.448
+    ],
+    [
+      2.6,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000023b.html"
+}

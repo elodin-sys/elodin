@@ -1,0 +1,57 @@
+{
+  "designation": "K1499N",
+  "manufacturer": "AeroTech",
+  "diameter": 7.5e-05,
+  "length": 0.00026000000000000003,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.88,
+  "total_impulse": 1320.4204,
+  "avg_thrust": 1500.4777272727272,
+  "max_thrust": 1720.12,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.01,
+      1450.0
+    ],
+    [
+      0.2,
+      1720.12
+    ],
+    [
+      0.35,
+      1700.0
+    ],
+    [
+      0.5,
+      1600.0
+    ],
+    [
+      0.6,
+      1575.0
+    ],
+    [
+      0.7,
+      1500.0
+    ],
+    [
+      0.82,
+      1400.0
+    ],
+    [
+      0.84,
+      250.0
+    ],
+    [
+      0.88,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000001c6.html"
+}

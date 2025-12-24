@@ -1,0 +1,41 @@
+{
+  "designation": "J345-PVC",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.001227,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.7,
+  "total_impulse": 928.52818872394,
+  "avg_thrust": 343.8993291570148,
+  "max_thrust": 881.09,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.00559284,
+      881.09
+    ],
+    [
+      0.0782998,
+      667.233
+    ],
+    [
+      1.21924,
+      376.388
+    ],
+    [
+      1.26398,
+      359.279
+    ],
+    [
+      2.7,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000010c.html"
+}

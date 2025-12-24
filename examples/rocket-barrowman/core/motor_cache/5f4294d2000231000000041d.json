@@ -1,0 +1,61 @@
+{
+  "designation": "5198M1101-P",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 7.5e-05,
+  "length": 0.000621,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 4.736,
+  "total_impulse": 5199.182101,
+  "avg_thrust": 1097.800274704392,
+  "max_thrust": 1436.62,
+  "thrust_curve": [
+    [
+      0.003,
+      281.69
+    ],
+    [
+      0.05,
+      1436.62
+    ],
+    [
+      0.121,
+      1363.38
+    ],
+    [
+      0.366,
+      1263.85
+    ],
+    [
+      0.59,
+      1230.05
+    ],
+    [
+      1.745,
+      1322.07
+    ],
+    [
+      2.835,
+      1166.2
+    ],
+    [
+      4.0,
+      974.648
+    ],
+    [
+      4.158,
+      839.437
+    ],
+    [
+      4.668,
+      82.629
+    ],
+    [
+      4.736,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000041d.html"
+}

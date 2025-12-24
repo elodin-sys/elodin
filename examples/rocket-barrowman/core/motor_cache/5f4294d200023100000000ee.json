@@ -1,0 +1,65 @@
+{
+  "designation": "J180T",
+  "manufacturer": "AeroTech",
+  "diameter": 5.4e-05,
+  "length": 0.00023,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 4.5,
+  "total_impulse": 825.7734999999999,
+  "avg_thrust": 183.5052222222222,
+  "max_thrust": 360.56,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.04
+    ],
+    [
+      0.1,
+      360.56
+    ],
+    [
+      0.2,
+      341.61
+    ],
+    [
+      0.5,
+      351.08
+    ],
+    [
+      1.0,
+      327.37
+    ],
+    [
+      1.7,
+      265.68
+    ],
+    [
+      2.6,
+      142.34
+    ],
+    [
+      3.5,
+      52.17
+    ],
+    [
+      3.7,
+      33.23
+    ],
+    [
+      4.3,
+      4.76
+    ],
+    [
+      4.5,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000000ee.html"
+}

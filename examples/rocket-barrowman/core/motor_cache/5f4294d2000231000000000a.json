@@ -1,0 +1,41 @@
+{
+  "designation": "A6",
+  "manufacturer": "Quest Aerospace",
+  "diameter": 1.7999999999999997e-05,
+  "length": 7.000000000000001e-05,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.41,
+  "total_impulse": 2.0753,
+  "avg_thrust": 5.061707317073171,
+  "max_thrust": 11.82,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.1,
+      4.8
+    ],
+    [
+      0.2,
+      11.82
+    ],
+    [
+      0.23,
+      7.9
+    ],
+    [
+      0.3,
+      4.8
+    ],
+    [
+      0.41,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000000a.html"
+}

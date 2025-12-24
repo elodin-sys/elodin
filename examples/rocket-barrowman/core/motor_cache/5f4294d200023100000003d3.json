@@ -1,0 +1,61 @@
+{
+  "designation": "1013J453-16A",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 3.8e-05,
+  "length": 0.0005,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.364,
+  "total_impulse": 1012.0170725,
+  "avg_thrust": 428.09520833333335,
+  "max_thrust": 725.18,
+  "thrust_curve": [
+    [
+      0.018,
+      663.789
+    ],
+    [
+      0.04,
+      725.18
+    ],
+    [
+      0.105,
+      630.216
+    ],
+    [
+      0.23,
+      578.417
+    ],
+    [
+      0.451,
+      543.885
+    ],
+    [
+      1.454,
+      535.252
+    ],
+    [
+      1.797,
+      291.607
+    ],
+    [
+      1.91,
+      188.969
+    ],
+    [
+      2.088,
+      128.537
+    ],
+    [
+      2.276,
+      19.185
+    ],
+    [
+      2.364,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000003d3.html"
+}

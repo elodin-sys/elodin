@@ -1,0 +1,49 @@
+{
+  "designation": "K404-SP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 7.5e-05,
+  "length": 0.001016,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 6.4,
+  "total_impulse": 2446.0999963801996,
+  "avg_thrust": 382.20312443440616,
+  "max_thrust": 670.655,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0111857,
+      670.655
+    ],
+    [
+      4.63087,
+      335.328
+    ],
+    [
+      4.80984,
+      205.303
+    ],
+    [
+      4.9217,
+      130.025
+    ],
+    [
+      5.0783,
+      82.121
+    ],
+    [
+      5.26846,
+      41.0605
+    ],
+    [
+      6.4,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000013a.html"
+}

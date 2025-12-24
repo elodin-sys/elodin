@@ -1,0 +1,65 @@
+{
+  "designation": "220H160-14A",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 2.9e-05,
+  "length": 0.00027600000000000004,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.383,
+  "total_impulse": 219.78699999999998,
+  "avg_thrust": 158.92046276211133,
+  "max_thrust": 185.0,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.01,
+      10.0
+    ],
+    [
+      0.02,
+      160.0
+    ],
+    [
+      0.03,
+      185.0
+    ],
+    [
+      0.09,
+      170.0
+    ],
+    [
+      0.25,
+      168.0
+    ],
+    [
+      0.5,
+      176.0
+    ],
+    [
+      0.9,
+      184.0
+    ],
+    [
+      1.1,
+      185.0
+    ],
+    [
+      1.16,
+      180.0
+    ],
+    [
+      1.31,
+      28.0
+    ],
+    [
+      1.383,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000002a7.html"
+}

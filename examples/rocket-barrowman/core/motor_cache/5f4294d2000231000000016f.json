@@ -1,0 +1,45 @@
+{
+  "designation": "L369-SP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 7.5e-05,
+  "length": 0.0008129999999999999,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 10.6,
+  "total_impulse": 3836.5408765071,
+  "avg_thrust": 361.9378185384057,
+  "max_thrust": 540.63,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0223714,
+      540.63
+    ],
+    [
+      1.45414,
+      533.787
+    ],
+    [
+      8.92617,
+      260.05
+    ],
+    [
+      9.08277,
+      130.025
+    ],
+    [
+      9.28412,
+      68.4342
+    ],
+    [
+      10.6,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000016f.html"
+}

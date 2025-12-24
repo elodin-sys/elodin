@@ -1,0 +1,49 @@
+{
+  "designation": "D13W",
+  "manufacturer": "AeroTech",
+  "diameter": 1.7999999999999997e-05,
+  "length": 7.000000000000001e-05,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.7,
+  "total_impulse": 19.18275,
+  "avg_thrust": 11.283970588235293,
+  "max_thrust": 22.25,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.01,
+      22.25
+    ],
+    [
+      0.2,
+      22.25
+    ],
+    [
+      0.4,
+      20.0
+    ],
+    [
+      0.8,
+      12.5
+    ],
+    [
+      1.0,
+      8.0
+    ],
+    [
+      1.4,
+      1.34
+    ],
+    [
+      1.7,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000021.html"
+}

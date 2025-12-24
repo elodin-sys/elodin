@@ -1,0 +1,41 @@
+{
+  "designation": "G130-PVC",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.000406,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.86,
+  "total_impulse": 103.11917113294001,
+  "avg_thrust": 119.90601294527909,
+  "max_thrust": 662.061,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      662.061
+    ],
+    [
+      0.0145414,
+      448.27
+    ],
+    [
+      0.0234899,
+      241.376
+    ],
+    [
+      0.642058,
+      41.3788
+    ],
+    [
+      0.86,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000070.html"
+}

@@ -1,0 +1,41 @@
+{
+  "designation": "HP-G69-SF",
+  "manufacturer": "Loki Research",
+  "diameter": 3.8e-05,
+  "length": 0.000127,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.6,
+  "total_impulse": 110.3358991844,
+  "avg_thrust": 68.95993699025,
+  "max_thrust": 97.9215,
+  "thrust_curve": [
+    [
+      0.01,
+      97.9215
+    ],
+    [
+      0.2,
+      96.5358
+    ],
+    [
+      0.4,
+      94.2263
+    ],
+    [
+      0.799544,
+      76.6744
+    ],
+    [
+      1.2,
+      58.1986
+    ],
+    [
+      1.6,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000002f3.html"
+}

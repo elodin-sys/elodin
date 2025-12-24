@@ -1,0 +1,57 @@
+{
+  "designation": "M2800-BG",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 9.800000000000001e-05,
+  "length": 0.001524,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.3,
+  "total_impulse": 6075.122360576,
+  "avg_thrust": 2641.3575480765217,
+  "max_thrust": 5611.6,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.00838926,
+      2395.2
+    ],
+    [
+      0.251678,
+      2805.8
+    ],
+    [
+      0.545302,
+      3695.45
+    ],
+    [
+      0.75783,
+      5611.6
+    ],
+    [
+      0.911633,
+      4311.35
+    ],
+    [
+      1.1745,
+      3558.58
+    ],
+    [
+      1.4094,
+      2258.33
+    ],
+    [
+      1.70861,
+      1505.55
+    ],
+    [
+      2.3,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000001bd.html"
+}

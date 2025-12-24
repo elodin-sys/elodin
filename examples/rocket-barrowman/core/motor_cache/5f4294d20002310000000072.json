@@ -1,0 +1,45 @@
+{
+  "designation": "G300-PVC",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.000406,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.25,
+  "total_impulse": 101.129918687805,
+  "avg_thrust": 404.51967475122,
+  "max_thrust": 814.367,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.00111857,
+      602.221
+    ],
+    [
+      0.0497763,
+      814.367
+    ],
+    [
+      0.100671,
+      670.655
+    ],
+    [
+      0.114094,
+      266.893
+    ],
+    [
+      0.158837,
+      239.52
+    ],
+    [
+      0.25,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000072.html"
+}

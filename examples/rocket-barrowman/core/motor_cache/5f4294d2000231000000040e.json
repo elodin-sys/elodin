@@ -1,0 +1,61 @@
+{
+  "designation": "53F70-14A",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 2.4e-05,
+  "length": 0.000101,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.816,
+  "total_impulse": 52.84449150000001,
+  "avg_thrust": 64.76040625000002,
+  "max_thrust": 96.149,
+  "thrust_curve": [
+    [
+      0.001,
+      8.303
+    ],
+    [
+      0.013,
+      85.68
+    ],
+    [
+      0.023,
+      96.149
+    ],
+    [
+      0.052,
+      78.821
+    ],
+    [
+      0.1,
+      83.634
+    ],
+    [
+      0.379,
+      77.858
+    ],
+    [
+      0.641,
+      62.575
+    ],
+    [
+      0.665,
+      55.716
+    ],
+    [
+      0.706,
+      23.947
+    ],
+    [
+      0.744,
+      9.146
+    ],
+    [
+      0.816,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000040e.html"
+}

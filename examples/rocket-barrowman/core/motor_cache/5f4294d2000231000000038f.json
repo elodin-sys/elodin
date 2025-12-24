@@ -1,0 +1,65 @@
+{
+  "designation": "I170G",
+  "manufacturer": "AeroTech",
+  "diameter": 5.4e-05,
+  "length": 0.00014709999999999997,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.4,
+  "total_impulse": 402.9375,
+  "avg_thrust": 167.890625,
+  "max_thrust": 207.3,
+  "thrust_curve": [
+    [
+      0.06,
+      89.0
+    ],
+    [
+      0.16,
+      169.0
+    ],
+    [
+      0.25,
+      184.6
+    ],
+    [
+      0.5,
+      202.4
+    ],
+    [
+      0.75,
+      207.3
+    ],
+    [
+      1.0,
+      202.4
+    ],
+    [
+      1.5,
+      177.9
+    ],
+    [
+      2.18,
+      137.9
+    ],
+    [
+      2.25,
+      139.7
+    ],
+    [
+      2.3,
+      131.2
+    ],
+    [
+      2.35,
+      22.2
+    ],
+    [
+      2.4,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000038f.html"
+}

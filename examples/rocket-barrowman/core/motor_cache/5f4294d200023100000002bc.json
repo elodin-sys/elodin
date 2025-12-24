@@ -1,0 +1,61 @@
+{
+  "designation": "206H237-13A",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 2.9e-05,
+  "length": 0.00027600000000000004,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.937,
+  "total_impulse": 206.09199999999998,
+  "avg_thrust": 219.94877267876197,
+  "max_thrust": 296.0,
+  "thrust_curve": [
+    [
+      0.026,
+      10.0
+    ],
+    [
+      0.028,
+      154.0
+    ],
+    [
+      0.033,
+      238.0
+    ],
+    [
+      0.055,
+      270.0
+    ],
+    [
+      0.07,
+      234.0
+    ],
+    [
+      0.71,
+      259.0
+    ],
+    [
+      0.78,
+      296.0
+    ],
+    [
+      0.8,
+      280.0
+    ],
+    [
+      0.87,
+      50.0
+    ],
+    [
+      0.9,
+      10.0
+    ],
+    [
+      0.937,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000002bc.html"
+}

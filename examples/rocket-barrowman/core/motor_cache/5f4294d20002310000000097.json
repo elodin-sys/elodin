@@ -1,0 +1,49 @@
+{
+  "designation": "H303-PVC",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.000508,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.6,
+  "total_impulse": 171.6366760615,
+  "avg_thrust": 286.06112676916666,
+  "max_thrust": 780.15,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      663.812
+    ],
+    [
+      0.0447427,
+      780.15
+    ],
+    [
+      0.108501,
+      704.872
+    ],
+    [
+      0.111857,
+      342.171
+    ],
+    [
+      0.176734,
+      328.484
+    ],
+    [
+      0.196868,
+      307.954
+    ],
+    [
+      0.6,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000097.html"
+}

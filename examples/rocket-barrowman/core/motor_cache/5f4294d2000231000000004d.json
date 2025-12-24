@@ -1,0 +1,53 @@
+{
+  "designation": "F62T",
+  "manufacturer": "AeroTech",
+  "diameter": 2.9e-05,
+  "length": 8.9e-05,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.0,
+  "total_impulse": 50.9985,
+  "avg_thrust": 50.9985,
+  "max_thrust": 59.51,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      47.82
+    ],
+    [
+      0.2,
+      59.51
+    ],
+    [
+      0.5,
+      59.51
+    ],
+    [
+      0.6,
+      55.56
+    ],
+    [
+      0.7,
+      51.55
+    ],
+    [
+      0.8,
+      43.63
+    ],
+    [
+      0.9,
+      43.63
+    ],
+    [
+      1.0,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000004d.html"
+}

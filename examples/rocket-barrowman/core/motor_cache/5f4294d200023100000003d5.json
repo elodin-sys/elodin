@@ -1,0 +1,57 @@
+{
+  "designation": "2833L805-P",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 5.4e-05,
+  "length": 0.0006490000000000001,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 3.827,
+  "total_impulse": 2846.5980855000003,
+  "avg_thrust": 743.8197244577999,
+  "max_thrust": 1618.1,
+  "thrust_curve": [
+    [
+      0.012,
+      1618.1
+    ],
+    [
+      0.037,
+      1171.8
+    ],
+    [
+      0.173,
+      1027.97
+    ],
+    [
+      0.388,
+      994.125
+    ],
+    [
+      0.626,
+      985.664
+    ],
+    [
+      2.318,
+      886.251
+    ],
+    [
+      3.054,
+      448.414
+    ],
+    [
+      3.464,
+      126.91
+    ],
+    [
+      3.608,
+      40.188
+    ],
+    [
+      3.827,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000003d5.html"
+}

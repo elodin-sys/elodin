@@ -1,0 +1,33 @@
+{
+  "designation": "H90-LR",
+  "manufacturer": "Loki Research",
+  "diameter": 3.8e-05,
+  "length": 0.00011700000000000001,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.6087,
+  "total_impulse": 233.09360986356,
+  "avg_thrust": 89.3524015270288,
+  "max_thrust": 146.552,
+  "thrust_curve": [
+    [
+      0.0543478,
+      146.552
+    ],
+    [
+      1.51398,
+      94.8276
+    ],
+    [
+      2.1972,
+      44.8276
+    ],
+    [
+      2.6087,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000023c.html"
+}

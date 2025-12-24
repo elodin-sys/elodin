@@ -1,0 +1,45 @@
+{
+  "designation": "I221-PVC",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.000719,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.74,
+  "total_impulse": 359.2805079255,
+  "avg_thrust": 206.48305053189654,
+  "max_thrust": 482.753,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      482.753
+    ],
+    [
+      0.503356,
+      358.616
+    ],
+    [
+      0.519016,
+      179.308
+    ],
+    [
+      1.49217,
+      103.447
+    ],
+    [
+      1.53691,
+      27.5859
+    ],
+    [
+      1.74,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000000bc.html"
+}

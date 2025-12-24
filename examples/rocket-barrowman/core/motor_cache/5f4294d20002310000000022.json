@@ -1,0 +1,45 @@
+{
+  "designation": "D15T",
+  "manufacturer": "AeroTech",
+  "diameter": 2.4e-05,
+  "length": 7.000000000000001e-05,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.4,
+  "total_impulse": 19.6175,
+  "avg_thrust": 14.012500000000001,
+  "max_thrust": 28.5,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.01,
+      26.0
+    ],
+    [
+      0.1,
+      28.5
+    ],
+    [
+      0.4,
+      23.0
+    ],
+    [
+      0.8,
+      11.2
+    ],
+    [
+      1.0,
+      4.5
+    ],
+    [
+      1.4,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000022.html"
+}

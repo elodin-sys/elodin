@@ -1,0 +1,37 @@
+{
+  "designation": "K543-BS",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 7.6e-05,
+  "length": 0.0008129999999999999,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 3.6,
+  "total_impulse": 2117.2598222799998,
+  "avg_thrust": 588.127728411111,
+  "max_thrust": 900.0,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      900.0
+    ],
+    [
+      2.98992,
+      472.868
+    ],
+    [
+      3.1243,
+      108.527
+    ],
+    [
+      3.6,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d20002310000000209.html"
+}

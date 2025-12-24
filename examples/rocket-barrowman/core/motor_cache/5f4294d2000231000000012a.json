@@ -1,0 +1,53 @@
+{
+  "designation": "J800-HP",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.001227,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.2,
+  "total_impulse": 930.3131681054201,
+  "avg_thrust": 775.2609734211835,
+  "max_thrust": 1830.61,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.00223714,
+      1830.61
+    ],
+    [
+      0.52349,
+      889.644
+    ],
+    [
+      0.639821,
+      650.125
+    ],
+    [
+      0.740492,
+      444.822
+    ],
+    [
+      0.823266,
+      273.737
+    ],
+    [
+      0.90604,
+      153.977
+    ],
+    [
+      0.997763,
+      136.868
+    ],
+    [
+      1.2,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000012a.html"
+}

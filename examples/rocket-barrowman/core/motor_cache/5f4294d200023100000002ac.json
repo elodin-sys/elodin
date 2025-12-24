@@ -1,0 +1,49 @@
+{
+  "designation": "I316-SF",
+  "manufacturer": "Loki Research",
+  "diameter": 3.8e-05,
+  "length": 0.000292,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.5,
+  "total_impulse": 474.044344552085,
+  "avg_thrust": 316.02956303472337,
+  "max_thrust": 500.0,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.00931677,
+      448.276
+    ],
+    [
+      0.127329,
+      491.379
+    ],
+    [
+      0.242236,
+      500.0
+    ],
+    [
+      0.347826,
+      482.759
+    ],
+    [
+      0.484472,
+      439.655
+    ],
+    [
+      1.0,
+      258.621
+    ],
+    [
+      1.5,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000002ac.html"
+}

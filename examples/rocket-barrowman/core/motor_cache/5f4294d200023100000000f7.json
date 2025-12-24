@@ -1,0 +1,49 @@
+{
+  "designation": "J245-BG",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 5.4e-05,
+  "length": 0.000719,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.62,
+  "total_impulse": 643.7055393200001,
+  "avg_thrust": 245.6891371450382,
+  "max_thrust": 444.822,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      444.822
+    ],
+    [
+      0.139821,
+      355.858
+    ],
+    [
+      1.05145,
+      307.954
+    ],
+    [
+      2.06376,
+      184.772
+    ],
+    [
+      2.15884,
+      102.651
+    ],
+    [
+      2.28188,
+      68.4342
+    ],
+    [
+      2.62,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000000f7.html"
+}

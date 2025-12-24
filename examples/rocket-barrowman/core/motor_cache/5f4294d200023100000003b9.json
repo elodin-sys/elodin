@@ -1,0 +1,57 @@
+{
+  "designation": "114G100-14A",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 2.4e-05,
+  "length": 0.000228,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 1.186,
+  "total_impulse": 113.52903500000001,
+  "avg_thrust": 95.72431281618888,
+  "max_thrust": 178.207,
+  "thrust_curve": [
+    [
+      0.009,
+      148.468
+    ],
+    [
+      0.024,
+      178.207
+    ],
+    [
+      0.061,
+      145.289
+    ],
+    [
+      0.475,
+      117.367
+    ],
+    [
+      0.63,
+      106.243
+    ],
+    [
+      0.833,
+      85.131
+    ],
+    [
+      0.961,
+      51.759
+    ],
+    [
+      1.024,
+      29.966
+    ],
+    [
+      1.125,
+      13.848
+    ],
+    [
+      1.186,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000003b9.html"
+}

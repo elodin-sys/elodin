@@ -1,0 +1,65 @@
+{
+  "designation": "286H100-15A",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 3.8e-05,
+  "length": 0.000186,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.77,
+  "total_impulse": 286.427,
+  "avg_thrust": 103.40324909747294,
+  "max_thrust": 118.0,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.016,
+      68.0
+    ],
+    [
+      0.056,
+      116.0
+    ],
+    [
+      0.09,
+      118.0
+    ],
+    [
+      0.14,
+      115.0
+    ],
+    [
+      0.5,
+      116.0
+    ],
+    [
+      0.6,
+      114.0
+    ],
+    [
+      1.25,
+      113.0
+    ],
+    [
+      2.32,
+      99.0
+    ],
+    [
+      2.44,
+      100.0
+    ],
+    [
+      2.55,
+      89.0
+    ],
+    [
+      2.77,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d200023100000002cb.html"
+}

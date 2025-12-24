@@ -1,0 +1,61 @@
+{
+  "designation": "1597K400-14A",
+  "manufacturer": "Cesaroni Technology",
+  "diameter": 5.4e-05,
+  "length": 0.000404,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 4.017,
+  "total_impulse": 1594.814516,
+  "avg_thrust": 397.0163096838436,
+  "max_thrust": 475.4,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.014,
+      359.164
+    ],
+    [
+      0.102,
+      475.4
+    ],
+    [
+      1.193,
+      444.649
+    ],
+    [
+      2.807,
+      384.994
+    ],
+    [
+      3.364,
+      370.234
+    ],
+    [
+      3.599,
+      363.469
+    ],
+    [
+      3.693,
+      329.028
+    ],
+    [
+      3.859,
+      169.742
+    ],
+    [
+      3.967,
+      57.196
+    ],
+    [
+      4.017,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000037c.html"
+}

@@ -1,0 +1,57 @@
+{
+  "designation": "K707-BG",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 7.5e-05,
+  "length": 0.0008129999999999999,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 2.0,
+  "total_impulse": 1391.036789704,
+  "avg_thrust": 695.518394852,
+  "max_thrust": 1351.58,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0111857,
+      684.342
+    ],
+    [
+      0.195749,
+      1351.58
+    ],
+    [
+      0.288031,
+      1180.49
+    ],
+    [
+      0.369128,
+      1129.16
+    ],
+    [
+      1.50168,
+      496.148
+    ],
+    [
+      1.566,
+      307.954
+    ],
+    [
+      1.63591,
+      171.085
+    ],
+    [
+      1.68345,
+      119.76
+    ],
+    [
+      2.0,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000015b.html"
+}

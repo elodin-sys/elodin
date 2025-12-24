@@ -1,0 +1,53 @@
+{
+  "designation": "H211-PVC",
+  "manufacturer": "Contrail Rockets",
+  "diameter": 3.8e-05,
+  "length": 0.000516,
+  "total_mass": 0.0,
+  "propellant_mass": 0.0,
+  "case_mass": 0.0,
+  "burn_time": 0.97,
+  "total_impulse": 208.477683200925,
+  "avg_thrust": 214.92544659889174,
+  "max_thrust": 634.475,
+  "thrust_curve": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.00111857,
+      531.028
+    ],
+    [
+      0.0190157,
+      634.475
+    ],
+    [
+      0.0223714,
+      593.096
+    ],
+    [
+      0.033557,
+      544.821
+    ],
+    [
+      0.296421,
+      317.238
+    ],
+    [
+      0.313199,
+      186.205
+    ],
+    [
+      0.743848,
+      96.5506
+    ],
+    [
+      0.97,
+      0.0
+    ]
+  ],
+  "delays": [],
+  "url": "https://www.thrustcurve.org/motors/5f4294d2000231000000008d.html"
+}
