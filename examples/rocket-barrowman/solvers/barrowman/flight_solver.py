@@ -407,6 +407,10 @@ class FlightSolver:
         state[3:6] = 0.1 * direction
         # Orientation
         state[6:10] = self.initial_orientation
+        # Angular velocity: small initial perturbation to reveal stability issues
+        # Real rockets have small wobbles from rail departure, wind, thrust asymmetry
+        # ~0.02 rad/s ≈ 1 deg/s - enough to trigger unstable behavior if margin is negative
+        state[10:13] = np.array([0.02, 0.02, 0.0])  # pitch, yaw, roll rates
         # Motor mass
         state[13] = self.motor.mass(0.0)
         return state
@@ -646,16 +650,14 @@ class FlightSolver:
         M2 = cpz * R1  # Yaw moment
         M3 = 0.0  # Roll moment
 
-        # For simplified dynamics: scale down restoring moments to prevent instability
-        # This scaling was empirically tuned to match observed flight behavior
-        # The moments are correct in magnitude but need damping to prevent oscillation
-        restoring_scale = 0.01  # 1% of calculated moment (empirically tuned)
-        M1 *= restoring_scale
-        M2 *= restoring_scale
-
-        # Aerodynamic damping to prevent oscillation
-        # Damping coefficient based on dynamic pressure and geometry
-        damping_coef = 0.5 * rho * speed * ref_area * ref_length**2 * 0.1
+        # Apply full aerodynamic moments - no artificial scaling
+        # This allows unstable rockets to show realistic divergent behavior
+        # which is critical for making informed design decisions
+        
+        # Aerodynamic damping (pitch/yaw rate damping)
+        # Physical damping from fins and body surfaces resisting rotation
+        # C_m_q ~ (l_total / d_ref)^2 for rockets, scaled by dynamic pressure
+        damping_coef = 0.5 * rho * speed * ref_area * ref_length**2 * 0.5
         M1 -= damping_coef * state_omega_rp[0]  # Pitch damping
         M2 -= damping_coef * state_omega_rp[1]  # Yaw damping
 
@@ -668,7 +670,7 @@ class FlightSolver:
         M3_damping = (
             0.5 * rho * stream_speed * ref_area * (ref_length**2) * cld_omega_sum * omega_roll / 2.0
         )
-        M3 = (M3_forcing - M3_damping) * 0.01  # Scale down for simplified dynamics
+        M3 = M3_forcing - M3_damping  # Full roll moments
 
         moment_body_rp = np.array([M1, M2, M3])
 
