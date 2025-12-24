@@ -891,24 +891,30 @@ class SmartOptimizer:
         # - Motor: ~3-8kg
         # - Total at launch: ~35-45kg
 
-        # Estimate structure mass based on payload
-        if requirements.payload_mass_kg > 15:
-            # Heavy rocket - structure is ~40-50% of payload for large rockets
-            estimated_structure_mass = requirements.payload_mass_kg * 0.45
-        elif requirements.payload_mass_kg > 5:
-            # Medium rocket - structure is ~50-60% of payload
-            estimated_structure_mass = requirements.payload_mass_kg * 0.55
+        # Mass estimation for impulse calculation
+        # If total_mass_kg is specified, use it directly
+        # Otherwise, estimate from payload_mass_kg
+        if requirements.total_mass_kg is not None:
+            estimated_total_mass_kg = requirements.total_mass_kg
         else:
-            # Light rocket - structure is ~60-80% of payload
-            estimated_structure_mass = max(2.0, requirements.payload_mass_kg * 0.7)
+            # Estimate structure mass based on payload
+            if requirements.payload_mass_kg > 15:
+                # Heavy rocket - structure is ~40-50% of payload for large rockets
+                estimated_structure_mass = requirements.payload_mass_kg * 0.45
+            elif requirements.payload_mass_kg > 5:
+                # Medium rocket - structure is ~50-60% of payload
+                estimated_structure_mass = requirements.payload_mass_kg * 0.55
+            else:
+                # Light rocket - structure is ~60-80% of payload
+                estimated_structure_mass = max(2.0, requirements.payload_mass_kg * 0.7)
 
-        # Estimate motor mass (varies by impulse class)
-        # For K/L/M motors: 3-8kg typical
-        estimated_motor_mass = 5.0  # Average for K/L/M motors
+            # Estimate motor mass (varies by impulse class)
+            # For K/L/M motors: 3-8kg typical
+            estimated_motor_mass = 5.0  # Average for K/L/M motors
 
-        estimated_total_mass_kg = (
-            requirements.payload_mass_kg + estimated_structure_mass + estimated_motor_mass
-        )
+            estimated_total_mass_kg = (
+                requirements.payload_mass_kg + estimated_structure_mass + estimated_motor_mass
+            )
 
         # Altitude/impulse ratio - calibrated from Calisto (19kg loaded, 6026 N·s, 3350m = 0.556 m/N·s)
         # Real-world data shows heavier rockets get MORE altitude per impulse (better mass ratio)
