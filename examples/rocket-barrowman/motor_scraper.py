@@ -216,12 +216,24 @@ class ThrustCurveScraper:
                 else motor_info.get("maxThrust", 0.0)
             )
 
+            # Extract diameter and length - handle unit conversion correctly
+            # If search_result is provided, diameter/length are already in meters (converted in search_motors)
+            # If from download_result, they're in mm and need conversion
+            if search_result:
+                # Already converted to meters in search_motors
+                diameter = motor_info.get("diameter", 0.0)
+                length = motor_info.get("length", 0.0)
+            else:
+                # From download API, convert from mm to m
+                diameter = motor_info.get("diameter", 0.0) / 1000.0
+                length = motor_info.get("length", 0.0) / 1000.0
+
             # Create MotorData object
             motor_data = MotorData(
                 designation=motor_info.get("designation", "Unknown"),
                 manufacturer=manufacturer_name,
-                diameter=motor_info.get("diameter", 0.0) / 1000.0,  # mm to m
-                length=motor_info.get("length", 0.0) / 1000.0,  # mm to m
+                diameter=diameter,
+                length=length,
                 total_mass=motor_info.get("totalMass", 0.0),
                 propellant_mass=motor_info.get("propellantMass", 0.0),
                 case_mass=motor_info.get("caseMass", 0.0),
