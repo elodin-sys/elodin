@@ -145,6 +145,22 @@ class ThrustCurveScraper:
                     if 0 < length < 0.01:
                         data["length"] = length * 1000.0
                     
+                    # Estimate mass if missing
+                    total_mass = data.get("total_mass", 0.0)
+                    propellant_mass = data.get("propellant_mass", 0.0)
+                    if total_mass <= 0 or propellant_mass <= 0:
+                        total_impulse = data.get("total_impulse", 0.0)
+                        burn_time = data.get("burn_time", 0.0)
+                        estimated = self._estimate_motor_mass(
+                            total_impulse, data["diameter"], data["length"], burn_time
+                        )
+                        if total_mass <= 0:
+                            data["total_mass"] = estimated["total_mass"]
+                        if propellant_mass <= 0:
+                            data["propellant_mass"] = estimated["propellant_mass"]
+                        if data.get("case_mass", 0.0) <= 0:
+                            data["case_mass"] = estimated["case_mass"]
+                    
                     return MotorData(**data)
             except Exception:
                 pass
