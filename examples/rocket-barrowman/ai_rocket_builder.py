@@ -1271,8 +1271,23 @@ IMPORTANT:
         # 13. Wire harnesses
         mass_breakdown["wiring"] = 0.02  # 20g
 
-        # Total dry mass
-        total_dry_mass = sum(mass_breakdown.values())
+        # Total dry mass - exclude volume values (they're in m³, not kg)
+        mass_keys = [
+            "nose_cone",
+            "body_tube",
+            "fins",
+            "motor_mount_tube",
+            "centering_rings",
+            "bulkheads",
+            "recovery_system",
+            "avionics_bay",
+            "payload_bay",
+            "fasteners",
+            "adhesives",
+            "paint",
+            "wiring",
+        ]
+        total_dry_mass = sum(mass_breakdown.get(key, 0.0) for key in mass_keys)
         mass_breakdown["total_dry_mass"] = total_dry_mass
 
         return mass_breakdown
