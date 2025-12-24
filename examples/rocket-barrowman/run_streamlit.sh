@@ -12,4 +12,4 @@ echo "🚀 Starting Streamlit..."
 echo "   Open http://localhost:8501 in your browser"
 echo ""
 
-streamlit run app.py
+streamlit run ui/app.py
