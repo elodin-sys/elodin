@@ -1014,14 +1014,23 @@ class SmartOptimizer:
         max_consecutive_failures = 15  # Allow more failures before stopping (was 5)
 
         # Phase 1: Sample motors across the range for initial exploration
-        # For heavy rockets, try more motors to find working designs
+        # For heavy rockets, try more motors and prioritize larger motors
         if len(viable_motors) > 15:
-            sample_count = min(15, len(viable_motors))  # Try more motors (was 8)
+            sample_count = min(20, len(viable_motors))  # Try even more motors for heavy rockets
             step = max(1, len(viable_motors) // sample_count)
             phase1_motors = [viable_motors[i] for i in range(0, len(viable_motors), step)][
                 :sample_count
             ]
-            # Also include smallest, largest, and middle
+            # For heavy rockets, prioritize larger motors (they're more likely to work)
+            if estimated_total_mass_kg > 30:
+                # Include largest motors first, then sample evenly
+                if viable_motors[-1] not in phase1_motors:
+                    phase1_motors.insert(0, viable_motors[-1])  # Largest first
+                # Also include motors in upper 75th percentile
+                upper_75_idx = int(len(viable_motors) * 0.75)
+                if upper_75_idx < len(viable_motors) and viable_motors[upper_75_idx] not in phase1_motors:
+                    phase1_motors.insert(0, viable_motors[upper_75_idx])
+            # Always include smallest, largest, and middle
             if viable_motors[0] not in phase1_motors:
                 phase1_motors.insert(0, viable_motors[0])
             if viable_motors[-1] not in phase1_motors:
