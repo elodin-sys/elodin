@@ -1,6 +1,8 @@
 """Data sources: motor database, scraping, caching."""
 
-from .motor_scraper import search_motors, get_motor_data
+# Import functions from motor_scraper module
+from . import motor_scraper
 
-__all__ = ["search_motors", "get_motor_data"]
+# Re-export commonly used functions
+__all__ = []
 

@@ -26,7 +26,8 @@ from .environment import (
     create_environment_from_coordinates,
 )
 from .builders import build_calisto, build_calisto_rocket, build_cesaroni_m1670
-from .data import search_motors, get_motor_data
+# Data module - import directly from motor_scraper if needed
+# from .data import motor_scraper
 
 __all__ = [
     # Physics
@@ -54,8 +55,6 @@ __all__ = [
     "build_calisto",
     "build_calisto_rocket",
     "build_cesaroni_m1670",
-    # Data
-    "search_motors",
-    "get_motor_data",
+    # Data - import from core.data.motor_scraper directly
 ]
 
