@@ -1,12 +1,14 @@
 #![doc = include_str!("README.md")]
 
 mod abs;
+mod angular;
 mod arccos;
 mod atan2;
 mod clip;
 mod degrees;
 mod fft;
 mod fftfreq;
+mod linear;
 mod norm;
 mod rotate;
 mod rotate_world;
@@ -16,12 +18,14 @@ mod time_slice;
 mod translate;
 mod translate_world;
 pub use abs::*;
+pub use angular::*;
 pub use arccos::*;
 pub use atan2::*;
 pub use clip::*;
 pub use degrees::*;
 pub use fft::*;
 pub use fftfreq::*;
+pub use linear::*;
 pub use norm::*;
 pub use rotate::*;
 pub use rotate_world::*;
@@ -130,12 +134,14 @@ pub fn create_default_registry() -> FormulaRegistry {
 
     // Register all built-in formulas
     registry.register(Abs);
+    registry.register(Angular);
     registry.register(Arccos);
     registry.register(Atan2);
     registry.register(Clip);
     registry.register(Degrees);
     registry.register(Fft);
     registry.register(FftFreq);
+    registry.register(Linear);
     registry.register(Norm);
     registry.register(RotateX);
     registry.register(RotateY);

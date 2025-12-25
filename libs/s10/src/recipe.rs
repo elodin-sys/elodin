@@ -89,7 +89,8 @@ impl GroupRecipe {
             })
             .collect::<Result<_, Error>>()?;
 
-        if let Some(res) = recipes.join_next().await {
+        // Wait for ALL recipes to complete, not just one
+        while let Some(res) = recipes.join_next().await {
             res.unwrap()?;
         }
         Ok(())
@@ -105,7 +106,8 @@ impl GroupRecipe {
             })
             .collect::<Result<_, Error>>()?;
 
-        if let Some(res) = recipes.join_next().await {
+        // Wait for ALL recipes to complete, not just one
+        while let Some(res) = recipes.join_next().await {
             res.unwrap()?;
         }
         Ok(())

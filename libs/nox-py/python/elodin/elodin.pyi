@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import (
     Any,
     ClassVar,
@@ -21,6 +21,49 @@ class PrimitiveType:
 class Integrator:
     Rk4: Integrator
     SemiImplicit: Integrator
+
+class PostStepContext:
+    """Context object passed to post_step callbacks, providing direct DB read/write access.
+
+    This enables SITL workflows to read sensor data and write component data (like motor
+    commands from Betaflight) back to the database within the same process.
+    """
+    @property
+    def tick(self) -> int:
+        """Current simulation tick count."""
+        ...
+    @property
+    def timestamp(self) -> int:
+        """Current simulation timestamp (nanoseconds since epoch)."""
+        ...
+    def write_component(self, pair_name: str, data: jax.typing.ArrayLike) -> None:
+        """Write component data to the database.
+
+        Args:
+            pair_name: The full component name in "entity.component" format
+                      (e.g., "drone.motor_command")
+            data: NumPy array containing the component data to write
+
+        Raises:
+            RuntimeError: If the component doesn't exist in the database
+            ValueError: If the data size doesn't match the component schema
+        """
+        ...
+    def read_component(self, pair_name: str) -> jax.Array:
+        """Read the latest component data from the database.
+
+        Args:
+            pair_name: The full component name in "entity.component" format
+                      (e.g., "drone.accel", "drone.gyro", "drone.world_pos")
+
+        Returns:
+            NumPy array containing the component data (dtype matches component schema).
+            The array is always 1D; reshape if needed.
+
+        Raises:
+            RuntimeError: If the component doesn't exist or has no data
+        """
+        ...
 
 class ComponentType:
     def __init__(self, ty: PrimitiveType, shape: Tuple[int, ...]): ...
@@ -53,8 +96,8 @@ class WorldBuilder:
         default_playback_speed: float = 1.0,
         max_ticks: Optional[int] = None,
         optimize: bool = False,
-        is_canceled: Optional[callable] = None,
-        post_step: Optional[callable] = None,
+        is_canceled: Optional[Callable[[], bool]] = None,
+        post_step: Optional[Callable[[int, PostStepContext], None]] = None,
         db_path: Optional[str] = None,
         interactive: bool = True,
     ): ...
@@ -249,7 +292,10 @@ class Impeller:
 
 class Exec:
     def run(
-        self, ticks: int = 1, show_progress: bool = True, is_canceled: Optional[callable] = None
+        self,
+        ticks: int = 1,
+        show_progress: bool = True,
+        is_canceled: Optional[Callable[[], bool]] = None,
     ): ...
     def profile(self) -> dict[str, float]: ...
     def save_archive(self, path: str, format: str): ...
