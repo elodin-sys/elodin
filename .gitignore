@@ -27,7 +27,17 @@ out-with-envs.yaml
 .buildkite/__pycache__
 .buildkite/pipeline.json
 
+# python
 __pycache__
+*.pyc
+*.pyo
+*.pyd
+**/venv/
+**/.venv/
 
 # examples
 betaflight_*
+
+examples/rocket-barrowman/motor_cache/
+examples/rocket-barrowman/*.log
+**/rocket.glb
