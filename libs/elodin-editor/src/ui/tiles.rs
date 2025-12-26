@@ -1616,10 +1616,10 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         ui.add_space(5.0);
         let resp = ui.add(EImageButton::new(self.icons.add).scale(1.4, 1.4));
         if resp.clicked() {
+            layout.cmd_palette_state.target_window = Some(self.target_window);
             layout
                 .cmd_palette_state
                 .open_page(move || palette_items::create_tiles(tile_id));
-            layout.cmd_palette_state.target_window = Some(self.target_window);
         }
     }
 }
@@ -1799,8 +1799,9 @@ impl RootWidgetSystem for TileSystem<'_, '_> {
 }
 
 #[derive(SystemParam)]
-pub struct TileLayoutEmpty<'w> {
+pub struct TileLayoutEmpty<'w, 's> {
     cmd_palette_state: ResMut<'w, CommandPaletteState>,
+    primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
 }
 
 #[derive(Clone)]
@@ -1809,7 +1810,7 @@ pub struct TileLayoutEmptyArgs {
     pub window: Option<Entity>,
 }
 
-impl WidgetSystem for TileLayoutEmpty<'_> {
+impl WidgetSystem for TileLayoutEmpty<'_, '_> {
     type Args = TileLayoutEmptyArgs;
     type Output = ();
 
@@ -1854,6 +1855,7 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
         let desired_size = egui::vec2(button_width * 3.0 + button_spacing * 2.0, button_height);
 
         let mut state_mut = state.get_mut(world);
+        let target_window = window.or_else(|| state_mut.primary_window.iter().next());
 
         ui.allocate_new_ui(
             UiBuilder::new().max_rect(egui::Rect::from_center_size(
@@ -1872,10 +1874,10 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
                     );
 
                     if create_viewport_btn.clicked() {
+                        state_mut.cmd_palette_state.target_window = target_window;
                         state_mut
                             .cmd_palette_state
                             .open_item(palette_items::create_viewport(None));
-                        state_mut.cmd_palette_state.target_window = window;
                     }
 
                     let create_graph_btn = ui.add(
@@ -1886,10 +1888,10 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
                     );
 
                     if create_graph_btn.clicked() {
+                        state_mut.cmd_palette_state.target_window = target_window;
                         state_mut
                             .cmd_palette_state
                             .open_item(palette_items::create_graph(None));
-                        state_mut.cmd_palette_state.target_window = window;
                     }
 
                     let create_monitor_btn = ui.add(
@@ -1900,10 +1902,10 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
                     );
 
                     if create_monitor_btn.clicked() {
+                        state_mut.cmd_palette_state.target_window = target_window;
                         state_mut
                             .cmd_palette_state
                             .open_item(palette_items::create_monitor(None));
-                        state_mut.cmd_palette_state.target_window = window;
                     }
                 });
             },

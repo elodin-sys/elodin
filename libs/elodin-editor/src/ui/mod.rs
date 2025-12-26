@@ -12,7 +12,7 @@ use bevy::{
     log::{error, info},
     prelude::*,
     render::camera::{RenderTarget, Viewport},
-    window::{Monitor, NormalizedWindowRef, PrimaryWindow},
+    window::{Monitor, NormalizedWindowRef, PrimaryWindow, WindowFocused},
 };
 use bevy_defer::AsyncPlugin;
 use bevy_egui::{
@@ -120,6 +120,9 @@ pub struct HdrEnabled(pub bool);
 #[derive(Resource, Default)]
 pub struct Paused(pub bool);
 
+#[derive(Resource, Default, Clone, Copy, Debug)]
+pub struct FocusedWindow(pub Option<Entity>);
+
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
 pub enum SelectedObject {
     #[default]
@@ -203,6 +206,19 @@ pub fn shortcuts(
     }
 }
 
+pub fn update_focused_window(
+    mut focused_window: ResMut<FocusedWindow>,
+    mut focus_events: EventReader<WindowFocused>,
+) {
+    for event in focus_events.read() {
+        if event.focused {
+            focused_window.0 = Some(event.window);
+        } else if focused_window.0 == Some(event.window) {
+            focused_window.0 = None;
+        }
+    }
+}
+
 pub type EntityData<'a> = (
     &'a ComponentId,
     Entity,
@@ -251,12 +267,14 @@ impl Plugin for UiPlugin {
             .init_resource::<InspectorAnchor>()
             .init_resource::<SettingModalState>()
             .init_resource::<HdrEnabled>()
+            .init_resource::<FocusedWindow>()
             .init_resource::<timeline_slider::UITick>()
             .init_resource::<timeline::StreamTickOrigin>()
             .init_resource::<command_palette::CommandPaletteState>()
             .add_event::<DialogEvent>()
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, actions::spawn_lua_actor)
+            .add_systems(Update, update_focused_window)
             .add_systems(Update, shortcuts)
             .add_systems(PreUpdate, sync_windows.before(EguiPreUpdateSet::BeginPass))
             .add_systems(
@@ -451,10 +469,14 @@ pub fn render_layout(
             widget_id.clear();
             let _ = write!(widget_id, "secondary_window_{}", window_id.0);
             world.add_root_widget_to::<tiles::TileSystem>(id, &widget_id, Some(id));
-            widget_id.clear();
-            let _ = write!(widget_id, "secondary_command_palette_{}", window_id.0);
-            world.add_root_widget_to::<command_palette::PaletteWindow>(id, &widget_id, Some(id));
         }
+        widget_id.clear();
+        if window_id.is_primary() {
+            widget_id.push_str("command_palette_window");
+        } else {
+            let _ = write!(widget_id, "secondary_command_palette_{}", window_id.0);
+        }
+        world.add_root_widget_to::<command_palette::PaletteWindow>(id, &widget_id, Some(id));
     }
 }
 
