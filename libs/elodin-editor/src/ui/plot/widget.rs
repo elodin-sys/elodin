@@ -647,13 +647,19 @@ impl TimeseriesPlot {
         let mut font_id = egui::TextStyle::Monospace.resolve(ui.style());
 
         // Check if we have data
-        let has_data = match &data_source {
-            PlotDataSource::Timeseries { .. } => !graph_state.components.is_empty(),
+        let (has_data, xy_point_count) = match &data_source {
+            PlotDataSource::Timeseries { .. } => (!graph_state.components.is_empty(), 0),
             PlotDataSource::XY {
                 xy_lines,
                 xy_line_handle,
                 ..
-            } => xy_lines.get(xy_line_handle).is_some(),
+            } => {
+                let count = xy_lines
+                    .get(xy_line_handle)
+                    .map(|line| line.point_count())
+                    .unwrap_or(0);
+                (count > 1, count)
+            }
         };
 
         if !has_data {
@@ -662,7 +668,13 @@ impl TimeseriesPlot {
                 egui::Align2::CENTER_CENTER,
                 match &data_source {
                     PlotDataSource::Timeseries { .. } => "NO DATA POINTS SELECTED",
-                    PlotDataSource::XY { .. } => "NO DATA",
+                    PlotDataSource::XY { .. } => {
+                        if xy_point_count > 0 {
+                            "NOT ENOUGH POINTS"
+                        } else {
+                            "NO DATA"
+                        }
+                    }
                 },
                 font_id.clone(),
                 get_scheme().text_primary,

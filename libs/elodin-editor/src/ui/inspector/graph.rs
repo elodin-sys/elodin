@@ -226,6 +226,15 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     }
                     ui.separator();
                     ui.label(egui::RichText::new("Color").color(get_scheme().text_secondary));
+                    let scheme_color = get_scheme().highlight;
+                    let mut auto_color = query_plot.auto_color;
+                    if ui.checkbox(&mut auto_color, "Use scheme color").changed() {
+                        query_plot.auto_color = auto_color;
+                        if auto_color {
+                            query_plot.data.color =
+                                impeller2_wkt::Color::from_color32(scheme_color);
+                        }
+                    }
                     let color_id = ui.auto_id_with("color");
                     let btn_resp = ui.add(EButton::new("Set Color"));
                     if btn_resp.clicked() {
@@ -233,7 +242,8 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     }
 
                     if ui.memory(|mem| mem.is_popup_open(color_id)) {
-                        let mut color = query_plot.data.color.into_color32();
+                        let prev_color = query_plot.data.color.into_color32();
+                        let mut color = prev_color;
                         let popup_response =
                             color_popup(ui, &mut color, color_id, btn_resp.rect.min);
                         if !btn_resp.clicked()
@@ -242,7 +252,10 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                         {
                             ui.memory_mut(|mem| mem.close_popup());
                         }
-                        query_plot.data.color = impeller2_wkt::Color::from_color32(color);
+                        if color != prev_color {
+                            query_plot.data.color = impeller2_wkt::Color::from_color32(color);
+                            query_plot.auto_color = false;
+                        }
                     }
                 });
         } else {
