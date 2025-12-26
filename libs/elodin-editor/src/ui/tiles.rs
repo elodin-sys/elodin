@@ -1014,7 +1014,6 @@ impl Pane {
             Pane::Inspector => {
                 let inspector_icons = InspectorIcons {
                     chart: icons.chart,
-                    add: icons.add,
                     subtract: icons.subtract,
                     setting: icons.setting,
                     search: icons.search,

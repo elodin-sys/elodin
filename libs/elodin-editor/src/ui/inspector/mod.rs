@@ -31,7 +31,6 @@ use self::{
 
 pub struct InspectorIcons {
     pub chart: egui::TextureId,
-    pub add: egui::TextureId,
     pub subtract: egui::TextureId,
     pub setting: egui::TextureId,
     pub search: egui::TextureId,
