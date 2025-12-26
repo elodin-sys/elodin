@@ -686,7 +686,7 @@ pub fn array_iter(array_ref: &ArrayRef) -> Box<dyn Iterator<Item = f64> + '_> {
                 Box::new(std::iter::empty())
             } else {
                 let values = list_array.values();
-                let inner_values: Vec<f64> = array_iter(values).collect();
+                let inner_values: Vec<f64> = array_iter(&values).collect();
                 if inner_values.is_empty() {
                     println!("Unsupported list data type: {:?}", values.data_type());
                     Box::new(std::iter::empty())
