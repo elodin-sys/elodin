@@ -25,7 +25,7 @@ the focused window; when launched from the "+" add-tab menu, they target that ta
 - Enter to run the selected command; Escape to close.
 - Backspace on an empty input returns to the previous page when available.
 
-### Create
+## Create
 
 - `Create Window`: prompt for a title, then opens a new secondary window.
 - `Create Viewport`: add a viewport pane to the current container.
@@ -44,18 +44,18 @@ the focused window; when launched from the "+" add-tab menu, they target that ta
 - `Create 3D Object`: prompt for an EQL expression, pick a mesh type (GLTF or primitives), then
   optionally enter dimensions and color.
 
-### Viewport
+## Viewport
 
 - `Toggle Wireframe`: enable/disable global wireframe.
 - `Toggle HDR`: enable/disable HDR.
 - `Toggle Grid`: show/hide the infinite grid.
 - `Reset Cameras`: reset all viewports or pick a specific viewport to reset.
 
-### Simulation
+## Simulation
 
 - `Toggle Recording`: start/stop recording on the connected database.
 
-### Time
+## Time
 
 - `Set Playback Speed`: pick a preset playback speed.
 - `Goto Tick...`: jump to a specific tick (pauses playback).
@@ -63,7 +63,7 @@ the focused window; when launched from the "+" add-tab menu, they target that ta
 - `Set Time Range`: set start/end offsets using `+`, `-`, or `=` formats (e.g. `+5m`, `-10s`,
   `=2023-01-01T00:00:00Z`).
 
-### Presets
+## Presets
 
 - `Save DB`: create a native DB snapshot (prompts for a directory name).
 - `Save Schematic`: save to the current schematic path (if set).
@@ -74,7 +74,7 @@ the focused window; when launched from the "+" add-tab menu, they target that ta
 - `Set Color Scheme Mode`: switch between Dark/Light if the scheme supports it.
 - `Set Color Scheme`: select a color scheme preset.
 
-### Help
+## Help
 
 - `Documentation`: opens the docs site in a browser.
 - `Release Notes`: opens the changelog in a browser.
