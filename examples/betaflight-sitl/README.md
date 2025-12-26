@@ -24,7 +24,7 @@ The simulation provides:
 
 ## Quick Start
 
-### Prerequisites
+### Prerequisites (*from repo root*)
 
 1. Nix development environment:
    ```bash
