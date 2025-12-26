@@ -40,7 +40,7 @@ use crate::{
     EqlContext, MainCamera, Offset, SelectedTimeRange, TimeRangeBehavior, TimeRangeError,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        HdrEnabled, Paused, colors,
+        FocusedWindow, HdrEnabled, Paused, colors,
         command_palette::CommandPaletteState,
         plot::{GraphBundle, default_component_values},
         schematic::{
@@ -325,11 +325,14 @@ fn reset_editor_cam(transform: &mut Transform, editor_cam: &mut EditorCam) {
 pub struct TileParam<'w, 's> {
     windows_state: Query<'w, 's, &'static mut tiles::WindowState>,
     primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
+    focused_window: Res<'w, FocusedWindow>,
 }
 
 impl<'w, 's> TileParam<'w, 's> {
     pub fn target(&mut self, target: Option<Entity>) -> Option<Mut<'_, tiles::TileState>> {
-        let target_id = target.or_else(|| self.primary_window.iter().next());
+        let target_id = target
+            .or(self.focused_window.0)
+            .or_else(|| self.primary_window.iter().next());
         target_id.and_then(|target_id| {
             self.windows_state
                 .get_mut(target_id)

@@ -1616,10 +1616,11 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         ui.add_space(5.0);
         let resp = ui.add(EImageButton::new(self.icons.add).scale(1.4, 1.4));
         if resp.clicked() {
-            layout.cmd_palette_state.target_window = Some(self.target_window);
             layout
                 .cmd_palette_state
-                .open_page(move || palette_items::create_tiles(tile_id));
+                .open_page_for_window(Some(self.target_window), move || {
+                    palette_items::create_tiles(tile_id)
+                });
         }
     }
 }
@@ -1874,10 +1875,9 @@ impl WidgetSystem for TileLayoutEmpty<'_, '_> {
                     );
 
                     if create_viewport_btn.clicked() {
-                        state_mut.cmd_palette_state.target_window = target_window;
                         state_mut
                             .cmd_palette_state
-                            .open_item(palette_items::create_viewport(None));
+                            .open_for_window(target_window, palette_items::create_viewport(None));
                     }
 
                     let create_graph_btn = ui.add(
@@ -1888,10 +1888,9 @@ impl WidgetSystem for TileLayoutEmpty<'_, '_> {
                     );
 
                     if create_graph_btn.clicked() {
-                        state_mut.cmd_palette_state.target_window = target_window;
                         state_mut
                             .cmd_palette_state
-                            .open_item(palette_items::create_graph(None));
+                            .open_for_window(target_window, palette_items::create_graph(None));
                     }
 
                     let create_monitor_btn = ui.add(
@@ -1902,10 +1901,9 @@ impl WidgetSystem for TileLayoutEmpty<'_, '_> {
                     );
 
                     if create_monitor_btn.clicked() {
-                        state_mut.cmd_palette_state.target_window = target_window;
                         state_mut
                             .cmd_palette_state
-                            .open_item(palette_items::create_monitor(None));
+                            .open_for_window(target_window, palette_items::create_monitor(None));
                     }
                 });
             },

@@ -43,6 +43,11 @@ pub struct CommandPaletteState {
 }
 
 impl CommandPaletteState {
+    pub fn open_for_window(&mut self, target_window: Option<Entity>, item: PaletteItem) {
+        self.target_window = target_window;
+        self.open_item(item);
+    }
+
     pub fn open_item(&mut self, item: PaletteItem) {
         let target_window = self.target_window;
         *self = CommandPaletteState::default();
@@ -54,7 +59,19 @@ impl CommandPaletteState {
     }
 
     pub fn open_page(&mut self, page: impl Fn() -> PalettePage + Send + Sync + 'static) {
-        self.open_item(PaletteItem::new("", "", move |_: In<String>| page().into()));
+        let target_window = self.target_window;
+        self.open_page_for_window(target_window, page);
+    }
+
+    pub fn open_page_for_window(
+        &mut self,
+        target_window: Option<Entity>,
+        page: impl Fn() -> PalettePage + Send + Sync + 'static,
+    ) {
+        self.open_for_window(
+            target_window,
+            PaletteItem::new("", "", move |_: In<String>| page().into()),
+        );
     }
 
     pub fn handle_event(&mut self, event: PaletteEvent) {
