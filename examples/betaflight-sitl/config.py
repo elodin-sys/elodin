@@ -130,14 +130,33 @@ class DroneConfig:
 
     # --- Simulation Settings ---
 
-    # Physics time step in seconds (1kHz default)
-    sim_time_step: float = 0.001
+    # Physics time step in seconds (8kHz for high-performance Betaflight PID loop)
+    #sim_time_step: float = 0.000125  # 8kHz = 125µs
+    #sim_time_step: float = 0.000250  # 4kHz = 250µs
+    #sim_time_step: float = 0.000500  # 2kHz = 500µs
+    sim_time_step: float = 0.001000  # 1kHz = 1000µs
 
     # Total simulation time in seconds
-    simulation_time: float = 30.0
+    simulation_time: float = 15.0  # Reduced for 8kHz testing
 
     # Enable sensor noise simulation (default: True for realistic behavior)
     sensor_noise: bool = True
+
+    # --- Sensor Update Rates (Hz) ---
+    # Based on Elodin Aleph flight controller hardware specifications.
+    # See README.md "Sensor Simulation Rates" section for details.
+
+    # Gyroscope rate - drives PID loop (BMI270: 6.4kHz × 3 IMUs = ~19.2kHz effective)
+    gyro_rate: float = 8000.0  # Must match PID loop rate
+
+    # Accelerometer rate (BMI270: 1.6kHz × 3 IMUs = ~4.8kHz effective)
+    accel_rate: float = 4800.0
+
+    # Barometer rate (BMP581: up to 480Hz continuous mode)
+    baro_rate: float = 480.0
+
+    # Magnetometer rate (BMM350: ~200Hz)
+    mag_rate: float = 200.0
 
     # --- Environment ---
 
@@ -158,9 +177,34 @@ class DroneConfig:
         return self.sim_time_step
 
     @property
+    def pid_rate(self) -> float:
+        """PID loop rate in Hz (inverse of time step)."""
+        return 1.0 / self.sim_time_step
+
+    @property
     def total_sim_ticks(self) -> int:
         """Total number of simulation ticks."""
         return int(self.simulation_time / self.dt)
+
+    @property
+    def gyro_tick_interval(self) -> int:
+        """Ticks between gyro updates (1 = every tick)."""
+        return max(1, round(self.pid_rate / self.gyro_rate))
+
+    @property
+    def accel_tick_interval(self) -> int:
+        """Ticks between accelerometer updates."""
+        return max(1, round(self.pid_rate / self.accel_rate))
+
+    @property
+    def baro_tick_interval(self) -> int:
+        """Ticks between barometer updates."""
+        return max(1, round(self.pid_rate / self.baro_rate))
+
+    @property
+    def mag_tick_interval(self) -> int:
+        """Ticks between magnetometer updates."""
+        return max(1, round(self.pid_rate / self.mag_rate))
 
     @property
     def motor_positions(self) -> NDArray[np.float64]:
@@ -341,8 +385,12 @@ if __name__ == "__main__":
         print(f"  Motor {i}: [{pos[0]:+.3f}, {pos[1]:+.3f}, {pos[2]:+.3f}] ({spin})")
     print()
     print("Simulation Settings:")
-    print(
-        f"  Time step:    {config.sim_time_step * 1000:.1f} ms ({1 / config.sim_time_step:.0f} Hz)"
-    )
+    print(f"  Time step:    {config.sim_time_step * 1e6:.1f} µs ({config.pid_rate:.0f} Hz)")
     print(f"  Duration:     {config.simulation_time:.1f} s")
     print(f"  Total ticks:  {config.total_sim_ticks}")
+    print()
+    print("Sensor Update Rates (Aleph hardware):")
+    print(f"  Gyroscope:     {config.gyro_rate:.0f} Hz (every {config.gyro_tick_interval} tick)")
+    print(f"  Accelerometer: {config.accel_rate:.0f} Hz (every {config.accel_tick_interval} ticks)")
+    print(f"  Barometer:     {config.baro_rate:.0f} Hz (every {config.baro_tick_interval} ticks)")
+    print(f"  Magnetometer:  {config.mag_rate:.0f} Hz (every {config.mag_tick_interval} ticks)")

@@ -9,7 +9,8 @@ The simulation provides:
 - **6-DOF Physics**: Rigid body dynamics with motor thrust, drag, and gravity
 - **Betaflight Integration**: Real Betaflight flight controller running as SITL
 - **UDP Communication**: Bidirectional sensor/motor data exchange
-- **1kHz+ Update Rate**: High-frequency control loop support
+- **8kHz PID Loop**: High-performance control matching Betaflight's fastest rate
+- **Multi-Rate Sensors**: Realistic sensor update rates (gyro 8kHz, accel 4.8kHz, baro 480Hz, mag 200Hz)
 
 ```
 ┌─────────────────────┐        UDP        ┌─────────────────────┐
@@ -24,8 +25,9 @@ The simulation provides:
 
 ## Quick Start
 
-### Prerequisites (*from repo root*)
+### Prerequisites 
 
+(*from repo root*)
 1. Nix development environment:
    ```bash
    nix develop
@@ -69,15 +71,22 @@ This only needs to be done once - the config is saved to `eeprom.bin`.
    screen /tmp/bf
    ```
 
-3. **Configure ARM switch** (in screen session):
+3. **Configure Betaflight for 8kHz operation** (in screen session):
    ```
    #
    status
+   
+   # Configure ARM switch (AUX1 channel, activated when > 1700)
    aux 0 0 0 1700 2100 0 0
+   
+   # Configure 8kHz gyro/PID loop rate
+   set gyro_hardware_lpf = NORMAL
+   set pid_process_denom = 1
+   
    save
    ```
    
-   This sets ARM mode on AUX1 channel (activated when AUX1 > 1700).
+   This sets ARM mode on AUX1 channel and configures Betaflight for 8kHz PID loop operation.
 
 4. **Exit screen**: Press `Ctrl+A` then `K` then `Y`
 
@@ -234,8 +243,13 @@ DroneConfig(
     arm_length=0.12,             # meters
     motor_max_thrust=15.0,       # Newtons per motor
     motor_time_constant=0.02,    # seconds
-    sim_time_step=0.001,         # 1kHz physics
+    sim_time_step=0.000125,      # 8kHz physics (matches Betaflight PID)
     sensor_noise=True,           # Enable realistic sensor noise
+    # Sensor rates (Aleph hardware defaults)
+    gyro_rate=8000.0,            # 8kHz (BMI270 3x IMU)
+    accel_rate=4800.0,           # 4.8kHz (BMI270 3x IMU)
+    baro_rate=480.0,             # 480Hz (BMP581)
+    mag_rate=200.0,              # 200Hz (BMM350)
 )
 ```
 
@@ -481,10 +495,11 @@ lsof -i :5761
 
 ### Performance
 
-**Simulation too slow**: The simulation runs faster than real-time by default.
-For 10kHz control loops, ensure:
-- `sim_time_step = 0.0001` (10kHz)
-- Sufficient CPU for both Elodin and Betaflight
+**Simulation too slow**: The simulation runs at 8kHz by default to match Betaflight's
+high-performance PID loop. For optimal performance:
+- `sim_time_step = 0.000125` (8kHz) is the default
+- Ensure sufficient CPU for both Elodin and Betaflight
+- 8kHz produces ~160,000 ticks for a 20-second simulation
 
 ## Development
 
@@ -510,6 +525,77 @@ For custom Betaflight setups:
 
 **Note**: The Betaflight Configurator GUI (10.10.0+) doesn't support direct TCP
 connections on macOS. Use the CLI method described above.
+
+## Sensor Simulation Rates
+
+This simulation models realistic sensor update rates based on the Elodin Aleph flight
+controller hardware. Different sensors update at different frequencies within the
+high-rate physics/PID loop.
+
+### Default Rates (Aleph Hardware)
+
+| Sensor | Hardware | Rate | Datasheet |
+|--------|----------|------|-----------|
+| Gyroscope | BMI270 (3x with timing offset) | 8 kHz | [bst-bmi270-ds000.pdf](../../ai-context/bst-bmi270-ds000.pdf) |
+| Accelerometer | BMI270 (3x with timing offset) | 4.8 kHz | [bst-bmi270-ds000.pdf](../../ai-context/bst-bmi270-ds000.pdf) |
+| Barometer | BMP581 | 480 Hz | [bst_bmp581_ds004.pdf](../../ai-context/bst_bmp581_ds004.pdf) |
+| Magnetometer | BMM350 | 200 Hz | [bst-bmm350-ds001.pdf](../../ai-context/bst-bmm350-ds001.pdf) |
+
+### Why Multi-Rate?
+
+Real sensors don't all sample at the same frequency. The PID loop runs at 8kHz driven
+by gyroscope data, but other sensors update less frequently:
+
+- **Gyroscope (8 kHz)**: Drives the PID loop. The BMI270 supports up to 6.4 kHz per
+  sensor; with 3 IMUs running with timing offsets, effective rate exceeds 8 kHz.
+- **Accelerometer (4.8 kHz)**: Used for attitude estimation. BMI270 accelerometer
+  tops out at 1.6 kHz per sensor; 3x IMUs give ~4.8 kHz effective.
+- **Barometer (480 Hz)**: Used for altitude hold. BMP581 supports up to 480 Hz in
+  continuous mode.
+- **Magnetometer (200 Hz)**: Used for heading reference. BMM350 operates at ~200 Hz.
+
+### How It Works
+
+The simulation uses tick decimation with `jax.lax.cond` to update sensors at their
+native rates while the physics/PID loop runs at 8kHz:
+
+```python
+tick_interval = round(PID_RATE / SENSOR_RATE)
+
+# Sensor updates only when tick is divisible by interval
+sensor_out = jax.lax.cond(
+    tick % tick_interval == 0,
+    lambda _: new_reading,
+    lambda _: previous_reading,
+    None,
+)
+```
+
+For example, with 8 kHz PID and 200 Hz magnetometer: `tick_interval = 40`
+(magnetometer updates every 40th physics tick).
+
+### Customizing for Different Hardware
+
+To simulate different sensor hardware, modify the rate constants in `config.py`:
+
+```python
+DroneConfig(
+    # ... other parameters ...
+    
+    # Sensor update rates (Hz)
+    gyro_rate=8000.0,    # Must match PID loop rate
+    accel_rate=4800.0,   # BMI270: 1.6kHz × 3 IMUs
+    baro_rate=480.0,     # BMP581 continuous mode
+    mag_rate=200.0,      # BMM350
+)
+```
+
+The simulation automatically calculates tick decimation from these rates. You can
+verify the computed intervals by running:
+
+```bash
+python3 examples/betaflight-sitl/config.py
+```
 
 ## References
 

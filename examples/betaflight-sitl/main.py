@@ -45,8 +45,6 @@ from comms import (
 
 # --- Configuration ---
 config = DEFAULT_CONFIG
-config.simulation_time = 20.0  # Longer for observation
-config.sim_time_step = 0.001  # 1kHz physics
 config.set_as_global()
 
 
@@ -178,7 +176,8 @@ betaflight_recipe = el.s10.PyRecipe.process(
 world.recipe(betaflight_recipe)
 
 print(f"Betaflight SITL: {BETAFLIGHT_PATH.name}")
-print(f"Simulation: {config.simulation_time}s at {1 / config.sim_time_step:.0f}Hz")
+print(f"Simulation: {config.simulation_time}s at {config.pid_rate:.0f}Hz PID loop")
+print(f"Sensor rates: gyro={config.gyro_rate:.0f}Hz, accel={config.accel_rate:.0f}Hz, baro={config.baro_rate:.0f}Hz, mag={config.mag_rate:.0f}Hz")
 
 
 # --- SITL State ---
@@ -249,15 +248,16 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
         warmup_rc = RCPacket(timestamp=0.0, channels=warmup_channels)
 
         warmup_count = 0
-        for i in range(500):  # 500ms of warmup at ~1ms per packet
+        warmup_packets = int(0.5 / config.sim_time_step)  # 500ms of warmup at PID rate
+        for i in range(warmup_packets):
             try:
-                warmup_fdm.timestamp = i * 0.001
-                warmup_rc.timestamp = i * 0.001
+                warmup_fdm.timestamp = i * config.sim_time_step
+                warmup_rc.timestamp = i * config.sim_time_step
                 bridge[0].step(warmup_fdm, warmup_rc)
                 warmup_count += 1
             except TimeoutError:
                 pass  # Expected during initial warmup
-        print(f"[SITL] Warmup complete ({warmup_count} responses)")
+        print(f"[SITL] Warmup complete ({warmup_count} responses at {config.pid_rate:.0f}Hz)")
         print("[SITL] Bridge ready")
 
     if start_time[0] is None:
@@ -273,7 +273,6 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
     t = s.sim_time
 
     # Read actual sensor data from physics simulation
-    # CRITICAL: These are essential for Betaflight's PID loop
     try:
         accel = np.array(ctx.read_component("drone.accel"))  # Body-frame accelerometer
         gyro = np.array(ctx.read_component("drone.gyro"))  # Body-frame gyroscope
