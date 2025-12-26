@@ -405,6 +405,7 @@ impl TimeseriesPlot {
                     }),
             )
             .show(ui.ctx(), |ui| {
+                ui.visuals_mut().override_text_color = Some(get_scheme().text_primary);
                 match data_source {
                     PlotDataSource::Timeseries {
                         lines,

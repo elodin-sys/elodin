@@ -109,8 +109,37 @@ pub const ALL_COLORS_DARK: &[Color32] = &[
     Color32::from_rgb(0x16, 0x20, 0x2C),
 ];
 
+static ALL_COLORS_LIGHT: OnceLock<Vec<Color32>> = OnceLock::new();
+
+fn scale_color(color: Color32, scale: f32) -> Color32 {
+    let [r, g, b, a] = color.to_srgba_unmultiplied();
+    let scale = scale.clamp(0.0, 1.0);
+    Color32::from_rgba_unmultiplied(
+        (r as f32 * scale) as u8,
+        (g as f32 * scale) as u8,
+        (b as f32 * scale) as u8,
+        a,
+    )
+}
+
+pub fn all_colors() -> &'static [Color32] {
+    let mode = current_selection().mode;
+    if mode.eq_ignore_ascii_case("light") {
+        ALL_COLORS_LIGHT.get_or_init(|| {
+            ALL_COLORS_DARK
+                .iter()
+                .copied()
+                .map(|color| scale_color(color, 0.85))
+                .collect()
+        })
+    } else {
+        ALL_COLORS_DARK
+    }
+}
+
 pub fn get_color_by_index_all(index: usize) -> Color32 {
-    ALL_COLORS_DARK[index % ALL_COLORS_DARK.len()]
+    let colors = all_colors();
+    colors[index % colors.len()]
 }
 
 pub fn with_opacity(color: Color32, opacity: f32) -> Color32 {
