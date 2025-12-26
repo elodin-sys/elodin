@@ -81,7 +81,7 @@ use bevy_egui::{EguiContexts, egui};
 
 use crate::ui::{
     Dialog, DialogAction, DialogButton, DialogEvent, InspectorAnchor, SettingModal,
-    SettingModalState, colors::get_scheme, images,
+    SettingModalState, colors::get_scheme, images, utils::MarginSides,
 };
 use bevy::prelude::*;
 
@@ -166,13 +166,12 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
                 })
                 .fixed_rect(modal_rect)
                 .show(ctx, |ui| {
-                    if let SettingModal::Dialog(dialog) = setting_modal_state {
-                        ui.add_widget_with::<ModalDialog>(
-                            world,
-                            "modal_dialog",
-                            (close_icon, dialog.clone()),
-                        );
-                    }
+                    let SettingModal::Dialog(dialog) = setting_modal_state;
+                    ui.add_widget_with::<ModalDialog>(
+                        world,
+                        "modal_dialog",
+                        (close_icon, dialog.clone()),
+                    );
                 });
         }
     }

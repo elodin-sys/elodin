@@ -522,16 +522,6 @@ fn monitor_parts(
         .collect()
 }
 
-fn toggle_body_axes() -> PaletteItem {
-    PaletteItem::new("Toggle Body Axes", VIEWPORT_LABEL, |_: In<String>| {
-        // TODO: This functionality needs to be updated once BodyAxes is migrated from EntityId to ComponentId
-        // For now, return an empty page
-        PalettePage::new(vec![])
-            .prompt("Body axes functionality is temporarily disabled during refactor")
-            .into()
-    })
-}
-
 fn reset_cameras() -> PaletteItem {
     PaletteItem::new(
         "Reset Cameras",
@@ -1699,7 +1689,6 @@ impl Default for PalettePage {
                     PaletteEvent::Exit
                 },
             ),
-            toggle_body_axes(),
             reset_cameras(),
             PaletteItem::new(
                 "Toggle Recording",
