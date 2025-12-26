@@ -1647,7 +1647,6 @@ pub fn create_tiles(tile_id: TileId) -> PalettePage {
         create_dashboard(Some(tile_id)),
         create_data_overview(Some(tile_id)),
         create_inspector(Some(tile_id)),
-        create_sidebars(),
     ])
 }
 
@@ -1719,7 +1718,6 @@ impl Default for PalettePage {
             create_schematic_tree(None),
             create_dashboard(None),
             create_data_overview(None),
-            create_sidebars(),
             create_3d_object(),
             save_db_native(),
             save_schematic(),
