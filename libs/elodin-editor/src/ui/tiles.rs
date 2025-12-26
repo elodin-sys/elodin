@@ -886,7 +886,8 @@ impl Pane {
             | Pane::ActionTile(_)
             | Pane::Hierarchy
             | Pane::Inspector
-            | Pane::SchematicTree(_) => {}
+            | Pane::SchematicTree(_)
+            | Pane::DataOverview(_) => {}
         }
     }
 
