@@ -49,10 +49,9 @@ pub fn sync_windows(
         if let Some(mut window) = window_maybe {
             window.window_theme = window_theme_for_mode(state.descriptor.mode.as_deref());
             existing_map.insert(*marker, entity);
-            let window_ref = WindowRef::Entity(entity);
             for (index, &graph) in state.graph_entities.iter().enumerate() {
                 if let Ok(mut camera) = cameras.get_mut(graph) {
-                    camera.target = RenderTarget::Window(window_ref);
+                    retarget_camera(&mut camera, entity);
                     camera.is_active = true;
                     let base_order = window_graph_order_base(*marker);
                     camera.order = base_order + index as isize;
@@ -172,15 +171,26 @@ pub fn sync_windows(
             "Created window entity {window_entity} with window id {:?}",
             marker
         );
-        let window_ref = WindowRef::Entity(window_entity);
         for (index, &graph) in state.graph_entities.iter().enumerate() {
             if let Ok(mut camera) = cameras.get_mut(graph) {
-                camera.target = RenderTarget::Window(window_ref);
+                retarget_camera(&mut camera, window_entity);
                 camera.is_active = true;
                 let base_order = window_graph_order_base(*marker);
                 camera.order = base_order + index as isize;
             }
         }
+    }
+}
+
+fn retarget_camera(camera: &mut Camera, window_entity: Entity) {
+    let matches_target = matches!(
+        camera.target,
+        RenderTarget::Window(WindowRef::Entity(entity)) if entity == window_entity
+    );
+    if !matches_target {
+        // Force bevy's camera_system to recompute target_info after window retargeting.
+        camera.target = RenderTarget::Window(WindowRef::Entity(window_entity));
+        camera.computed = Default::default();
     }
 }
 
