@@ -12,12 +12,6 @@ icon = ""
 order = 8
 +++
 
-## Overview
-
-The command palette provides fast access to common actions and creation flows. Commands can be
-single-step (toggle, set) or multi-step (prompt for input, then execute). Creation commands target
-the focused window; when launched from the "+" add-tab menu, they target that tab container.
-
 ## Usage
 
 - Open: `Cmd+P` on macOS, `Ctrl+P` on Windows/Linux.
