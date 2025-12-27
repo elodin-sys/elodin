@@ -19,13 +19,11 @@ Prerequisites:
     2. (Optional) Configure Betaflight via CLI: socat + screen
 """
 
-import atexit
 import os
-import signal
+import re
 import subprocess
 import sys
 import time
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -57,55 +55,22 @@ if not BETAFLIGHT_PATH.exists():
     sys.exit(1)
 
 
-# --- Clean up stale processes ---
-def cleanup_stale_processes():
-    """Kill any stale Betaflight SITL processes and free ports."""
-    # Kill Betaflight
+# --- Clean up stale processes from previous runs ---
+# This runs BEFORE s10 starts, so it only affects leftover processes from
+# previous interrupted simulations, not the current run's Betaflight.
+def cleanup_stale_betaflight():
+    """Kill any stale Betaflight SITL processes from previous runs."""
     try:
         subprocess.run(["pkill", "-f", "betaflight_SITL"], capture_output=True, timeout=5)
-    except Exception:
-        pass
-
-    # Free elodin-db port (2240)
-    try:
-        result = subprocess.run(["lsof", "-ti:2240"], capture_output=True, text=True, timeout=5)
-        if result.stdout.strip():
-            pids = result.stdout.strip().split("\n")
-            for pid in pids:
-                try:
-                    subprocess.run(["kill", "-9", pid], capture_output=True, timeout=2)
-                except Exception:
-                    pass
-    except Exception:
-        pass
-
-    time.sleep(0.5)
-
-
-def cleanup_on_exit():
-    """Cleanup handler for exit - kills Betaflight processes."""
-    try:
-        subprocess.run(["pkill", "-9", "-f", "betaflight_SITL"], capture_output=True, timeout=2)
+        time.sleep(0.1)  # Brief pause to let the process terminate
     except Exception:
         pass
 
 
-def signal_handler(signum, frame):
-    """Handle Ctrl+C by cleaning up and exiting."""
-    print("\n[SITL] Caught interrupt, cleaning up...")
-    cleanup_on_exit()
-    sys.exit(0)
-
-
-# Register cleanup handlers
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
-atexit.register(cleanup_on_exit)
-
-# Only cleanup stale processes when NOT running under s10 orchestration
-# When s10 manages us, it passes --no-s10 flag, and it starts Betaflight separately
+# Only cleanup when running with s10 (without --no-s10 flag)
+# s10 will start a fresh Betaflight after world.run() begins
 if "--no-s10" not in sys.argv:
-    cleanup_stale_processes()
+    cleanup_stale_betaflight()
 
 
 # --- World Creation ---
@@ -470,8 +435,6 @@ world.run(
 # `world.run()` won't reach here unless `interactive` is false.
 print(f"Wrote database to: {db_filename}")
 
-# --- Cleanup (fallback if world.run() returns without triggering post_step exit) ---
-cleanup_on_exit()
 if not bridge[0]:
     print("\nNo simulation ticks executed.")
     print("Usage: python3 examples/betaflight-sitl/main.py run")
