@@ -67,31 +67,31 @@
 
 	
 
-<title>Coordinate Systems | Elodin</title>
-<meta name="description" content="Coordinate Systems in Elodin">
-<link rel="canonical" href="/reference/coords/">
+<title>Command Palette | Elodin</title>
+<meta name="description" content="Command palette reference">
+<link rel="canonical" href="/reference/command-palette/">
 
 
   <meta name="twitter:card" content="summary_large_image">
   
     <meta name="twitter:image" content="//logo.png">
   
-  <meta name="twitter:title" content="Coordinate Systems">
-  <meta name="twitter:description" content="Coordinate Systems in Elodin">
+  <meta name="twitter:title" content="Command Palette">
+  <meta name="twitter:description" content="Command palette reference">
   <meta name="twitter:site" content="@elodinsystems">
   <meta name="twitter:creator" content="@elodinsystems">
 
-  <meta property="og:title" content="Coordinate Systems">
-  <meta property="og:description" content="Coordinate Systems in Elodin">
+  <meta property="og:title" content="Command Palette">
+  <meta property="og:description" content="Command palette reference">
   <meta property="og:type" content="article">
-  <meta property="og:url" content="/reference/coords/">
+  <meta property="og:url" content="/reference/command-palette/">
 
   
     <meta property="og:image" content="//logo.png">
   
 
   <meta property="og:updated_time" content="">
-  <meta property="og:site_name" content="Coordinate Systems">
+  <meta property="og:site_name" content="Command Palette">
 
   
 
@@ -149,13 +149,16 @@
         
         
         
+        
+        
+        
           
           
           {
             "@type": "ListItem",
             "position":  3 ,
-            "name": "Coords",
-            "item": ":///reference/coords/"
+            "name": "Command Palette",
+            "item": ":///reference/command-palette/"
           },
         
       
@@ -308,7 +311,7 @@
             
             <li>
                 <a
-                    class="docs-link active"
+                    class="docs-link "
                     href="/reference/coords/"
                     >Coordinate Systems</a
                 >
@@ -356,7 +359,7 @@
             
             <li>
                 <a
-                    class="docs-link "
+                    class="docs-link active"
                     href="/reference/command-palette/"
                     >Command Palette</a
                 >
@@ -392,31 +395,37 @@
             <ul>
                 
                 <li>
-                    <a href="/reference/coords/#local-geodetic-world-frame">Local Geodetic World Frame</a>
+                    <a href="/reference/command-palette/#usage">Usage</a>
                     
                 </li>
                 
                 <li>
-                    <a href="/reference/coords/#geocentric-world-frame">Geocentric World Frame</a>
-                    
-                    <ul>
-                        
-                        <li>
-                            <a href="/reference/coords/#ecef">ECEF</a>
-                            
-                        </li>
-                        
-                        <li>
-                            <a href="/reference/coords/#eci">ECI</a>
-                            
-                        </li>
-                        
-                    </ul>
+                    <a href="/reference/command-palette/#create">Create</a>
                     
                 </li>
                 
                 <li>
-                    <a href="/reference/coords/#body-frame">Body Frame</a>
+                    <a href="/reference/command-palette/#viewport">Viewport</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="/reference/command-palette/#simulation">Simulation</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="/reference/command-palette/#time">Time</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="/reference/command-palette/#presets">Presets</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="/reference/command-palette/#help">Help</a>
                     
                 </li>
                 
@@ -426,94 +435,80 @@
 </nav>
  
               <main class="docs-content col-lg-11 col-xxl-10">
-                  <h1>Coordinate Systems</h1>
-                   <p>The default coordinate systems used in Elodin align with the editor's representation of the (X, Y, Z)
-axes as (red, green, blue) respectively. Also, all coordinate systems are right-handed.</p>
-<h3 id="local-geodetic-world-frame">Local Geodetic World Frame</h3>
-<p>
-    <img class="light-only" src="&#x2F;assets&#x2F;coordinates-light.png" alt="Elodin Default Coordinate System Light" />
-    <img class="dark-only" src="&#x2F;assets&#x2F;coordinates-dark.png" alt="Elodin Default Coordinate System Dark" />
-</p>
-<p>A local geodetic world frame is commonly used for terrestrial vehicles and is represented using
-the <a href="https://en.wikipedia.org/wiki/Local_tangent_plane_coordinates#Local_east,_north,_up_(ENU)_coordinates">East, North, Up (ENU)</a>
-coordinate system where:</p>
+                  <h1>Command Palette</h1>
+                   <h2 id="usage">Usage</h2>
 <ul>
-<li>+X: East</li>
-<li>+Y: North</li>
-<li>+Z: Up</li>
+<li>Open: <code>Cmd+P</code> on macOS, <code>Ctrl+P</code> on Windows/Linux.</li>
+<li>Type to filter; use Up/Down arrows to move selection.</li>
+<li>Enter to run the selected command; Escape to close.</li>
+<li>Backspace on an empty input returns to the previous page when available.</li>
 </ul>
-<h3 id="geocentric-world-frame">Geocentric World Frame</h3>
-<p>A geodetic world frame is represented using either the <a href="https://en.wikipedia.org/wiki/Earth-centered,_Earth-fixed_coordinate_system">Earth-Centered, Earth-Fixed (ECEF)</a>
-or the <a href="https://en.wikipedia.org/wiki/Earth-centered_inertial">Earth-Centered Inertial (ECI)</a> coordinate system. ECEF is useful for
-Earth-relative positioning (e.g. GPS, mapping) while ECI is useful for Earth-orbiting space vehicles. The main difference between
-ECEF and ECI is in how they handle the rotation of the Earth. In ECEF, the Earth is fixed and the coordinate system rotates with
-the Earth. In ECI, the coordinate system is fixed with respect to the stars and does not rotate with the Earth.</p>
-<h4 id="ecef">ECEF</h4>
-<p>ECEF is loosely defined as:</p>
+<h2 id="create">Create</h2>
 <ul>
-<li>+X: along the equatorial plane towards the prime meridian (0° longitude)</li>
-<li>+Y: along the equatorial plane towards 90°E longitude</li>
-<li>+Z: perpendicular to the equatorial plane towards the North Pole</li>
+<li><code>Create Window</code>: prompt for a title, then opens a new secondary window.</li>
+<li><code>Create Viewport</code>: add a viewport pane to the current container.</li>
+<li><code>Create Graph</code>: pick a component and create a graph pane for it.</li>
+<li><code>Create Monitor</code>: pick a component and create a component monitor pane.</li>
+<li><code>Create Query Table</code>: add an empty query table pane.</li>
+<li><code>Create Query Plot</code>: add an empty query plot pane.</li>
+<li><code>Create Action</code>: prompt for a label, then choose a <code>send_msg</code> preset or enter a custom Lua
+command to create an action pane.</li>
+<li><code>Create Video Stream</code>: prompt for the message name, then create a video stream pane.</li>
+<li><code>Create Hierarchy</code>: add a hierarchy pane.</li>
+<li><code>Create Inspector</code>: add an inspector pane.</li>
+<li><code>Create Schematic Tree</code>: add a schematic tree pane.</li>
+<li><code>Create Dashboard</code>: add a dashboard pane.</li>
+<li><code>Create Data Overview</code>: add a data overview pane.</li>
+<li><code>Create 3D Object</code>: prompt for an EQL expression, pick a mesh type (GLTF or primitives), then
+optionally enter dimensions and color.</li>
 </ul>
-<p>However, the terms "equatorial plane", "prime meridian", "North Pole", and "origin" are not precisely defined in the ECEF
-coordinate system. The <a href="https://en.wikipedia.org/wiki/International_Terrestrial_Reference_System_and_Frame">International Terrestrial Reference Frame</a> provides a more precise definition of the ECEF coordinate system:</p>
+<h2 id="viewport">Viewport</h2>
 <ul>
-<li>Origin: center of mass for the whole Earth (including oceans and atmosphere)</li>
-<li>+Z: direction of the IERS Reference Pole (IRP)</li>
-<li>+X: intersection of the IERS Reference Meridian (IRM) and the plane passing through the origin and normal to the IRP</li>
-<li>+Y: completes the right-handed coordinate system</li>
+<li><code>Toggle Wireframe</code>: enable/disable global wireframe.</li>
+<li><code>Toggle HDR</code>: enable/disable HDR.</li>
+<li><code>Toggle Grid</code>: show/hide the infinite grid.</li>
+<li><code>Reset Cameras</code>: reset all viewports or pick a specific viewport to reset.</li>
 </ul>
-<h4 id="eci">ECI</h4>
-<p>ECI is loosely defined as:</p>
+<h2 id="simulation">Simulation</h2>
 <ul>
-<li>+X: along the equatorial plane and permanently fixed in a direction relative to the celestial sphere</li>
-<li>+Y: along the equatorial plane pointing 90° East about the celestial equator</li>
-<li>+Z: perpendicular to the equatorial plane towards the North Pole</li>
+<li><code>Toggle Recording</code>: start/stop recording on the connected database.</li>
 </ul>
-<p>Similar to ECEF, ECI itself is not a precise coordinate system. <a href="https://en.wikipedia.org/wiki/Barycentric_and_geocentric_celestial_reference_systems">GCRS</a> is a specific realization of the ECI coordinate system where:</p>
+<h2 id="time">Time</h2>
 <ul>
-<li>Origin: center of mass for the whole Earth (including oceans and atmosphere)</li>
-<li>+Z: points towards the Earth's north celestial pole as it was at noon on January 1, 2000</li>
-<li>+X: points towards the vernal equinox (also called the first point of Aries) as it was at noon on January 1, 2000, in the Terrestrial Time scale</li>
-<li>+Y: completes the right-handed coordinate system</li>
+<li><code>Set Playback Speed</code>: pick a preset playback speed.</li>
+<li><code>Goto Tick...</code>: jump to a specific tick (pauses playback).</li>
+<li><code>Fix Current Time Range</code>: lock the current selected range as fixed start/end.</li>
+<li><code>Set Time Range</code>: set start/end offsets using <code>+</code>, <code>-</code>, or <code>=</code> formats (e.g. <code>+5m</code>, <code>-10s</code>,
+<code>=2023-01-01T00:00:00Z</code>).</li>
 </ul>
-<div class="el-info warning container-fluid">
-    <div class="row g-0 align-items-center">
-        <div class="col-1" style="padding: 4px">
-            <i class="bx bx-info-circle" style="font-size: 1.5rem"></i>
-        </div>
-        <div class="col-15"><p>"J2000" refers to 4 related but different frames: J2000 proper is barycentric, not earth centric; ICRF which is barycentric &amp; offset from
-J2000 by 0.1 arc seconds; "J2000 earth-centric" is aligned with "J2000", but centered on earth; finally GCRS/GCRF is signed with ICRF but
-centered on Earth. We typically use ICRF as the default ECI frame in Elodin examples. References:
-<a href="https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/Tutorials/pdf/individual_docs/17_frames_and_coordinate_systems.pdf">(1)</a>
-<a href="https://space.stackexchange.com/questions/26259/what-is-the-difference-between-gcrs-and-j2000-frames">(2)</a>
-<a href="https://en.wikipedia.org/wiki/Barycentric_and_geocentric_celestial_reference_systems">(3)</a></p>
-</div>
-    </div>
-</div>
-<h3 id="body-frame">Body Frame</h3>
-<p>For vehicles, the body frame is represented as a right-handed coordinate system with:</p>
+<h2 id="presets">Presets</h2>
 <ul>
-<li>+X: along the body centerline towards the nose</li>
-<li>+Y: left when looking forward</li>
-<li>+Z: up when looking forward</li>
+<li><code>Save DB</code>: create a native DB snapshot (prompts for a directory name).</li>
+<li><code>Save Schematic</code>: save to the current schematic path (if set).</li>
+<li><code>Save Schematic As...</code>: save to a new schematic file name.</li>
+<li><code>Save Schematic To DB</code>: write the current schematic to DB metadata.</li>
+<li><code>Load Schematic</code>: load a schematic from the default directory or via a file dialog.</li>
+<li><code>Clear Schematic</code>: clear the current schematic.</li>
+<li><code>Set Color Scheme Mode</code>: switch between Dark/Light if the scheme supports it.</li>
+<li><code>Set Color Scheme</code>: select a color scheme preset.</li>
 </ul>
-<p>This is because vehicle attitude is typically defined in terms of roll, pitch, and yaw angles in that order. A consequence of this is that a positive yaw angle corresponds to a counterclockwise rotation and a positive pitch angle corresponds to a nose-down rotation.</p>
-<div class="el-notice warning container-fluid">
-    <div class="row g-0 align-items-center">
-        <div class="col-1" style="padding: 4px">
-            <i class="bx bx-error-circle" style="font-size: 1.5rem"></i>
-        </div>
-        <div class="col-15"><p>The world frame can be aligned with the body frame by considering the (+X, +Y) axes in the world frame as (forward, left) respectively with the (+Z) axis pointing up.</p>
-</div>
-    </div>
-</div>
+<h2 id="help">Help</h2>
+<ul>
+<li><code>Documentation</code>: opens the docs site in a browser.</li>
+<li><code>Release Notes</code>: opens the changelog in a browser.</li>
+</ul>
 
                   
 <div class="footer-line-padding"></div>
 <div class="footer-line"></div>
 <div class="docs-navigation d-flex justify-content-between">
-                
+           
+    <a href="&#x2F;reference&#x2F;migration&#x2F;to-0-15&#x2F;">
+        <div>
+            <div class="footer-card">&larr; v0.14 to v0.15</div>
+        </div>
+    </a>
+         
 </div>
 
               </main>
