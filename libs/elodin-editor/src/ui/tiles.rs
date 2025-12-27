@@ -466,7 +466,7 @@ impl TileState {
     fn has_non_sidebar_content(&self) -> bool {
         fn visit(tree: &egui_tiles::Tree<Pane>, id: TileId) -> bool {
             match tree.tiles.get(id) {
-                Some(Tile::Pane(Pane::Hierarchy | Pane::Inspector)) => false,
+                Some(Tile::Pane(pane)) if pane.is_sidebar() => false,
                 Some(Tile::Pane(_)) => true,
                 Some(Tile::Container(container)) => {
                     container.children().any(|child| visit(tree, *child))
@@ -802,7 +802,7 @@ impl TileState {
             .tree
             .root()
             .and_then(|root_id| match self.tree.tiles.get(root_id) {
-                Some(Tile::Pane(Pane::Hierarchy | Pane::Inspector)) => None,
+                Some(Tile::Pane(pane)) if pane.is_sidebar() => None,
                 _ => Some(root_id),
             });
 
@@ -982,6 +982,18 @@ pub enum Pane {
 }
 
 impl Pane {
+    pub(crate) fn is_sidebar(&self) -> bool {
+        matches!(self, Pane::Hierarchy | Pane::Inspector)
+    }
+
+    pub(crate) fn sidebar_kind(&self) -> Option<SidebarKind> {
+        match self {
+            Pane::Hierarchy => Some(SidebarKind::Hierarchy),
+            Pane::Inspector => Some(SidebarKind::Inspector),
+            _ => None,
+        }
+    }
+
     fn collect_render_targets(&self, out: &mut PaneRenderTargets) {
         match self {
             Pane::Graph(pane) => out.push_camera(pane.id),
@@ -2344,13 +2356,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                         SelectedObject::Viewport { camera };
                                 }
                             }
-                            Pane::Hierarchy => {
-                                unmask_sidebar_by_kind(&mut ui_state, SidebarKind::Hierarchy);
-                            }
-                            Pane::Inspector => {
-                                unmask_sidebar_by_kind(&mut ui_state, SidebarKind::Inspector);
-                            }
                             _ => {}
+                        }
+                        if let Some(kind) = pane.sidebar_kind() {
+                            unmask_sidebar_by_kind(&mut ui_state, kind);
                         }
                         unmask_sidebar_by_kind(&mut ui_state, SidebarKind::Inspector);
                     }

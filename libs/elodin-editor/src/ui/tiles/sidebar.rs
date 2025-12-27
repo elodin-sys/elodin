@@ -95,8 +95,7 @@ pub fn collect_sidebar_gutter_updates(
     impl<'a> GutterCtx<'a> {
         fn sidebar_kind(&self, id: TileId) -> Option<SidebarKind> {
             match self.tree.tiles.get(id) {
-                Some(Tile::Pane(Pane::Hierarchy)) => Some(SidebarKind::Hierarchy),
-                Some(Tile::Pane(Pane::Inspector)) => Some(SidebarKind::Inspector),
+                Some(Tile::Pane(pane)) => pane.sidebar_kind(),
                 Some(Tile::Container(Container::Tabs(tabs))) => {
                     for child in tabs.children.iter() {
                         if let Some(kind) = self.sidebar_kind(*child) {
@@ -521,7 +520,7 @@ pub fn sidebar_content_ui<R>(
 
 pub fn tile_is_sidebar(tiles: &Tiles<Pane>, tile_id: TileId) -> bool {
     match tiles.get(tile_id) {
-        Some(Tile::Pane(Pane::Hierarchy | Pane::Inspector)) => true,
+        Some(Tile::Pane(pane)) => pane.is_sidebar(),
         Some(Tile::Container(Container::Tabs(tabs))) => {
             !tabs.children.is_empty()
                 && tabs

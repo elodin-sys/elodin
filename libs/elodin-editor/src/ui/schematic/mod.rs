@@ -191,7 +191,6 @@ impl SchematicParam<'_, '_> {
                 Pane::DataOverview(_) => None,
 
                 // Structural panes
-                Pane::Hierarchy | Pane::Inspector => None,
                 Pane::SchematicTree(_) => Some(Panel::SchematicTree),
 
                 // Dashboard
@@ -199,6 +198,7 @@ impl SchematicParam<'_, '_> {
                     let dashboard = self.dashboards.get(dash.entity).ok()?;
                     Some(Panel::Dashboard(Box::new(dashboard.clone())))
                 }
+                _ => None,
             },
 
             // ---- Containers ----
