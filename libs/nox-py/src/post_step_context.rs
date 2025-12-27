@@ -13,11 +13,7 @@ use pyo3::types::PyDict;
 use crate::Error;
 
 /// Helper function to convert a byte buffer to a numpy array based on primitive type.
-fn buf_to_numpy_array<'py>(
-    py: Python<'py>,
-    buf: &[u8],
-    prim_type: PrimType,
-) -> Bound<'py, PyAny> {
+fn buf_to_numpy_array<'py>(py: Python<'py>, buf: &[u8], prim_type: PrimType) -> Bound<'py, PyAny> {
     match prim_type {
         PrimType::F64 => {
             let data: Vec<f64> = buf
