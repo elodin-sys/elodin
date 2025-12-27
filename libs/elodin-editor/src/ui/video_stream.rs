@@ -1,10 +1,8 @@
-use crate::ui::PrimaryWindow;
 use bevy::asset::Assets;
 use bevy::asset::RenderAssetUsages;
 use bevy::ecs::query::QueryData;
 use bevy::ecs::system::InRef;
 use bevy::image::Image;
-use bevy::prelude::With;
 use bevy::render::render_resource::Extent3d;
 use bevy::render::render_resource::TextureDimension;
 use bevy::ui::Display;
@@ -30,6 +28,12 @@ use super::colors::{ColorExt, get_scheme};
 pub struct VideoStreamPane {
     pub entity: Entity,
     pub label: String,
+}
+
+#[derive(Clone, Copy)]
+pub struct VideoStreamWidgetArgs {
+    pub entity: Entity,
+    pub window: Entity,
 }
 
 #[derive(Component)]
@@ -211,18 +215,18 @@ pub struct VideoStreamWidget<'w, 's> {
     stream_id: Res<'w, CurrentStreamId>,
     current_time: Res<'w, CurrentTimestamp>,
     images: ResMut<'w, Assets<Image>>,
-    window: Query<'w, 's, &'static bevy_egui::EguiContextSettings, With<PrimaryWindow>>,
+    window_settings: Query<'w, 's, &'static bevy_egui::EguiContextSettings>,
 }
 
 impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
-    type Args = VideoStreamPane;
+    type Args = VideoStreamWidgetArgs;
     type Output = ();
 
     fn ui_system(
         world: &mut World,
         state: &mut bevy::ecs::system::SystemState<Self>,
         ui: &mut egui::Ui,
-        VideoStreamPane { entity, .. }: Self::Args,
+        VideoStreamWidgetArgs { entity, window }: Self::Args,
     ) -> Self::Output {
         let mut state = state.get_mut(world);
 
@@ -266,7 +270,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
 
         let max_rect = ui.max_rect();
 
-        let Some(egui_settings) = state.window.iter().next() else {
+        let Ok(egui_settings) = state.window_settings.get(window) else {
             return;
         };
 

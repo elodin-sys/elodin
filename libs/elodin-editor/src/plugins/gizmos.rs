@@ -28,6 +28,7 @@ use crate::{
     MainCamera, WorldPosExt,
     object_3d::ComponentArrayExt,
     ui::tiles::ViewportConfig,
+    ui::window::window_entity_from_target,
     vector_arrow::{
         ArrowLabelScope, ArrowVisual, VectorArrowState, ViewportArrow, component_value_tail_to_vec3,
     },
@@ -586,18 +587,6 @@ fn lighten_color(color: Color, factor: f32) -> Color {
 }
 
 /// Convert arrow color to a readable label color (ensure good contrast)
-/// Get the window entity from a camera's render target.
-fn window_from_camera_target(
-    target: &RenderTarget,
-    primary_window: Option<Entity>,
-) -> Option<Entity> {
-    match target {
-        RenderTarget::Window(WindowRef::Primary) => primary_window,
-        RenderTarget::Window(WindowRef::Entity(e)) => Some(*e),
-        _ => None,
-    }
-}
-
 /// Bevy UI system to render arrow labels as screen-space text nodes.
 /// Spawns a label for each viewport where the arrow is visible, targeting the correct window's UI camera.
 #[allow(clippy::too_many_arguments)]
@@ -614,14 +603,16 @@ fn update_arrow_label_ui(
     mut label_map: Local<HashMap<(Entity, Entity), Entity>>,
 ) {
     let edge = floating_origin.grid_edge_length();
-    let primary = primary_window.iter().next();
+    let Some(primary_entity) = primary_window.iter().next() else {
+        return;
+    };
 
     let mut window_cameras: HashMap<Entity, Vec<_>> = HashMap::new();
     for (entity, cam, gt, cell, config) in cameras.iter() {
         if !cam.is_active {
             continue;
         }
-        let Some(window) = window_from_camera_target(&cam.target, primary) else {
+        let Some(window) = window_entity_from_target(&cam.target, primary_entity) else {
             continue;
         };
         window_cameras
@@ -642,7 +633,7 @@ fn update_arrow_label_ui(
 
     let mut window_ui_camera: HashMap<Entity, Entity> = HashMap::new();
     for (ui_cam_entity, ui_cam) in ui_cameras.iter() {
-        if let Some(window) = window_from_camera_target(&ui_cam.target, primary)
+        if let Some(window) = window_entity_from_target(&ui_cam.target, primary_entity)
             && window_cameras.contains_key(&window)
         {
             window_ui_camera.insert(window, ui_cam_entity);
@@ -657,7 +648,7 @@ fn update_arrow_label_ui(
                 .spawn((
                     Camera2d,
                     Camera {
-                        target: RenderTarget::Window(if Some(*window) == primary {
+                        target: RenderTarget::Window(if *window == primary_entity {
                             WindowRef::Primary
                         } else {
                             WindowRef::Entity(*window)

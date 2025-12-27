@@ -694,10 +694,12 @@ impl LoadSchematicParams<'_, '_> {
                     BTreeMap::default(),
                     plot.label.clone(),
                 );
+                let auto_color = plot.color.into_color32() == colors::get_scheme().highlight;
                 let entity = self
                     .commands
                     .spawn(QueryPlotData {
                         data: plot.clone(),
+                        auto_color,
                         // Set last_refresh to None so the query executes immediately on first render
                         last_refresh: None,
                         ..Default::default()

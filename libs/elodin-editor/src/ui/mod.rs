@@ -12,7 +12,7 @@ use bevy::{
     log::{error, info},
     prelude::*,
     render::camera::{RenderTarget, Viewport},
-    window::{Monitor, NormalizedWindowRef, PrimaryWindow},
+    window::{Monitor, NormalizedWindowRef, PrimaryWindow, WindowFocused},
 };
 use bevy_defer::AsyncPlugin;
 use bevy_egui::{
@@ -60,6 +60,7 @@ use impeller2::types::ComponentId;
 use impeller2_bevy::ComponentValueMap;
 use impeller2_wkt::{ComponentMetadata, ComponentValue, DbConfig, WindowRect};
 
+use crate::ui::window::window_entity_from_target;
 use crate::{
     GridHandle, MainCamera,
     plugins::{
@@ -118,6 +119,9 @@ pub struct HdrEnabled(pub bool);
 
 #[derive(Resource, Default)]
 pub struct Paused(pub bool);
+
+#[derive(Resource, Default, Clone, Copy, Debug)]
+pub struct FocusedWindow(pub Option<Entity>);
 
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
 pub enum SelectedObject {
@@ -202,6 +206,19 @@ pub fn shortcuts(
     }
 }
 
+pub fn update_focused_window(
+    mut focused_window: ResMut<FocusedWindow>,
+    mut focus_events: EventReader<WindowFocused>,
+) {
+    for event in focus_events.read() {
+        if event.focused {
+            focused_window.0 = Some(event.window);
+        } else if focused_window.0 == Some(event.window) {
+            focused_window.0 = None;
+        }
+    }
+}
+
 pub type EntityData<'a> = (
     &'a ComponentId,
     Entity,
@@ -250,12 +267,14 @@ impl Plugin for UiPlugin {
             .init_resource::<InspectorAnchor>()
             .init_resource::<SettingModalState>()
             .init_resource::<HdrEnabled>()
+            .init_resource::<FocusedWindow>()
             .init_resource::<timeline_slider::UITick>()
             .init_resource::<timeline::StreamTickOrigin>()
             .init_resource::<command_palette::CommandPaletteState>()
             .add_event::<DialogEvent>()
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, actions::spawn_lua_actor)
+            .add_systems(Update, update_focused_window)
             .add_systems(Update, shortcuts)
             .add_systems(PreUpdate, sync_windows.before(EguiPreUpdateSet::BeginPass))
             .add_systems(
@@ -450,10 +469,14 @@ pub fn render_layout(
             widget_id.clear();
             let _ = write!(widget_id, "secondary_window_{}", window_id.0);
             world.add_root_widget_to::<tiles::TileSystem>(id, &widget_id, Some(id));
-            widget_id.clear();
-            let _ = write!(widget_id, "secondary_command_palette_{}", window_id.0);
-            world.add_root_widget_to::<command_palette::PaletteWindow>(id, &widget_id, Some(id));
         }
+        widget_id.clear();
+        if window_id.is_primary() {
+            widget_id.push_str("command_palette_window");
+        } else {
+            let _ = write!(widget_id, "secondary_command_palette_{}", window_id.0);
+        }
+        world.add_root_widget_to::<command_palette::PaletteWindow>(id, &widget_id, Some(id));
     }
 }
 
@@ -553,7 +576,7 @@ fn clamp_viewport_to_window(
 }
 
 fn set_camera_viewport(
-    window: Query<(&Window, &bevy_egui::EguiContextSettings), With<PrimaryWindow>>,
+    window: Query<(Entity, &Window, &bevy_egui::EguiContextSettings), With<PrimaryWindow>>,
     mut main_camera_query: Query<
         (Entity, &ViewportRect, Option<&GraphState>, &mut Camera),
         With<MainCamera>,
@@ -572,11 +595,23 @@ fn set_camera_viewport(
     // Stable ordering: non-graph cameras first, then graphs; break ties by entity id.
     entries.sort_by_key(|(entity, is_graph)| (*is_graph, entity.index()));
 
+    let Some((primary_entity, window, egui_settings)) = window.iter().next() else {
+        return;
+    };
+    let scale_factor = window.scale_factor() * egui_settings.scale_factor;
+    let window_size: Vec2 = window.physical_size().as_vec2();
+
     for (entity, is_graph) in &entries {
         let Ok((_, viewport_rect, _graph_state, mut camera)) = main_camera_query.get_mut(*entity)
         else {
             continue;
         };
+        let Some(camera_window) = window_entity_from_target(&camera.target, primary_entity) else {
+            continue;
+        };
+        if camera_window != primary_entity {
+            continue;
+        }
         let order = if *is_graph {
             let order = next_graph_order;
             next_graph_order += 1;
@@ -599,15 +634,10 @@ fn set_camera_viewport(
             continue;
         };
         camera.is_active = true;
-        let Some((window, egui_settings)) = window.iter().next() else {
-            continue;
-        };
-        let scale_factor = window.scale_factor() * egui_settings.scale_factor;
         let viewport_pos = available_rect.left_top().to_vec2() * scale_factor;
         let viewport_size = available_rect.size() * scale_factor;
         let viewport_pos = Vec2::new(viewport_pos.x, viewport_pos.y);
         let viewport_size = Vec2::new(viewport_size.x, viewport_size.y);
-        let window_size: Vec2 = window.physical_size().as_vec2();
         if let Some((clamped_pos, clamped_size)) =
             clamp_viewport_to_window(viewport_pos, viewport_size, window_size)
         {

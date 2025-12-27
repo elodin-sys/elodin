@@ -42,7 +42,7 @@ fn empty_inspector_ui(ui: &mut egui::Ui) -> egui::Response {
         egui::Layout::centered_and_justified(egui::Direction::TopDown),
         |ui| {
             let text = egui::RichText::new("SELECT AN ENTITY OR TABLE TO INSPECT")
-                .color(colors::with_opacity(colors::WHITE, 0.1));
+                .color(colors::with_opacity(get_scheme().text_tertiary, 0.6));
             ui.add(egui::Label::new(text));
         },
     )
