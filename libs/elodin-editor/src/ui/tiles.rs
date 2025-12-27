@@ -18,7 +18,7 @@ use egui::UiBuilder;
 use egui::response::Flags;
 use egui_tiles::{Container, Tile, TileId, Tiles};
 use impeller2_wkt::{Dashboard, Graph, Viewport, WindowRect};
-use smallvec::SmallVec;
+use smallvec::{SmallVec, smallvec};
 use std::collections::{BTreeMap, HashMap};
 use std::{
     fmt::Write as _,
@@ -60,6 +60,10 @@ use crate::{
     },
     ui::dashboard::NodeUpdaterParams,
 };
+
+mod sidebar;
+
+use sidebar::{SidebarKind, SidebarMaskState, apply_share_updates, collect_sidebar_gutter_updates};
 
 pub(crate) fn plugin(app: &mut App) {
     app.register_type::<WindowId>()
@@ -109,12 +113,15 @@ pub struct TileIcons {
     pub entity: egui::TextureId,
 }
 
+const SIDEBAR_COLLAPSED_SHARE: f32 = 0.01;
+
 #[derive(Clone)]
 pub struct TileState {
     pub tree: egui_tiles::Tree<Pane>,
-    pub tree_actions: smallvec::SmallVec<[TreeAction; 4]>,
+    pub tree_actions: SmallVec<[TreeAction; 4]>,
     pub graphs: HashMap<TileId, Entity>,
     pub container_titles: HashMap<TileId, String>,
+    pub sidebar_state: SidebarMaskState,
     tree_id: Id,
 }
 
@@ -453,17 +460,22 @@ pub struct DashboardPane {
 }
 
 impl TileState {
-    pub fn has_inspector(&self) -> bool {
-        self.tree
-            .tiles
-            .iter()
-            .any(|(_, tile)| matches!(tile, Tile::Pane(Pane::Inspector)))
-    }
+    fn has_non_sidebar_content(&self) -> bool {
+        fn visit(tree: &egui_tiles::Tree<Pane>, id: TileId) -> bool {
+            match tree.tiles.get(id) {
+                Some(Tile::Pane(Pane::Hierarchy | Pane::Inspector)) => false,
+                Some(Tile::Pane(_)) => true,
+                Some(Tile::Container(container)) => {
+                    container.children().any(|child| visit(tree, *child))
+                }
+                None => false,
+            }
+        }
 
-    pub fn inspector_pending(&self) -> bool {
-        self.tree_actions
-            .iter()
-            .any(|action| matches!(action, TreeAction::AddInspector(_)))
+        self.tree
+            .root()
+            .map(|root| visit(&self.tree, root))
+            .unwrap_or(false)
     }
 
     pub fn insert_tile(
@@ -644,14 +656,6 @@ impl TileState {
         ));
     }
 
-    pub fn create_hierarchy_tile(&mut self, tile_id: Option<TileId>) {
-        self.tree_actions.push(TreeAction::AddHierarchy(tile_id));
-    }
-
-    pub fn create_inspector_tile(&mut self, tile_id: Option<TileId>) {
-        self.tree_actions.push(TreeAction::AddInspector(tile_id));
-    }
-
     pub fn create_tree_tile(&mut self, tile_id: Option<TileId>) {
         self.tree_actions
             .push(TreeAction::AddSchematicTree(tile_id));
@@ -741,8 +745,117 @@ impl TileState {
         self.tree_actions.push(TreeAction::AddSidebars);
     }
 
+    fn apply_sidebars_layout(&mut self) {
+        let mut has_hierarchy = false;
+        let mut has_inspector = false;
+        let mut sidebar_ids = Vec::new();
+        for (id, tile) in self.tree.tiles.iter() {
+            match tile {
+                Tile::Pane(Pane::Hierarchy) => {
+                    has_hierarchy = true;
+                    sidebar_ids.push(*id);
+                }
+                Tile::Pane(Pane::Inspector) => {
+                    has_inspector = true;
+                    sidebar_ids.push(*id);
+                }
+                _ => {}
+            }
+        }
+
+        if has_hierarchy && has_inspector {
+            return;
+        }
+
+        if !sidebar_ids.is_empty() {
+            let container_ids: Vec<TileId> = self
+                .tree
+                .tiles
+                .iter()
+                .filter_map(|(id, tile)| matches!(tile, Tile::Container(_)).then_some(*id))
+                .collect();
+
+            for container_id in container_ids {
+                if let Some(Tile::Container(container)) = self.tree.tiles.get_mut(container_id) {
+                    match container {
+                        Container::Tabs(tabs) => {
+                            tabs.children.retain(|child| !sidebar_ids.contains(child));
+                            if let Some(active) = tabs.active
+                                && !tabs.children.contains(&active)
+                            {
+                                tabs.active = tabs.children.first().copied();
+                            }
+                        }
+                        Container::Linear(linear) => {
+                            linear.children.retain(|child| !sidebar_ids.contains(child));
+                        }
+                        Container::Grid(_) => {}
+                    }
+                }
+            }
+        }
+
+        let root_id = self
+            .tree
+            .root()
+            .and_then(|root_id| match self.tree.tiles.get(root_id) {
+                Some(Tile::Pane(Pane::Hierarchy | Pane::Inspector)) => None,
+                _ => Some(root_id),
+            });
+
+        let mut main_content = root_id.unwrap_or_else(|| {
+            let tabs_container = Tile::Container(Container::new_tabs(vec![]));
+            let tabs_id = self.tree.tiles.insert_new(tabs_container);
+            self.tree.root = Some(tabs_id);
+            tabs_id
+        });
+
+        if matches!(self.tree.tiles.get(main_content), Some(Tile::Pane(_))) {
+            let mut tabs = egui_tiles::Tabs::new(vec![main_content]);
+            tabs.set_active(main_content);
+            main_content = self
+                .tree
+                .tiles
+                .insert_new(Tile::Container(Container::Tabs(tabs)));
+        }
+
+        let hierarchy = self.tree.tiles.insert_new(Tile::Pane(Pane::Hierarchy));
+        let inspector = self.tree.tiles.insert_new(Tile::Pane(Pane::Inspector));
+
+        let hier_default = self.sidebar_state.last_hierarchy_share.get_or_insert(0.2);
+        let insp_default = self.sidebar_state.last_inspector_share.get_or_insert(0.2);
+        let hier_share = if self.sidebar_state.hierarchy_masked {
+            SIDEBAR_COLLAPSED_SHARE
+        } else {
+            *hier_default
+        };
+        let insp_share = if self.sidebar_state.inspector_masked {
+            SIDEBAR_COLLAPSED_SHARE
+        } else {
+            *insp_default
+        };
+        let mut center_share = 1.0 - (hier_share + insp_share);
+        if center_share <= 0.0 {
+            center_share = 0.1;
+        }
+
+        let mut linear = egui_tiles::Linear::new(
+            egui_tiles::LinearDir::Horizontal,
+            vec![hierarchy, main_content, inspector],
+        );
+        linear.shares.set_share(hierarchy, hier_share);
+        linear.shares.set_share(main_content, center_share);
+        linear.shares.set_share(inspector, insp_share);
+
+        let root = self
+            .tree
+            .tiles
+            .insert_new(Tile::Container(Container::Linear(linear)));
+        self.tree.root = Some(root);
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.tree.active_tiles().is_empty()
+        !self.has_non_sidebar_content()
     }
 
     pub fn clear(
@@ -801,7 +914,6 @@ impl TileState {
         };
         self.graphs.clear();
         self.container_titles.clear();
-        self.tree_actions.clear();
         self.reset_tree();
     }
 
@@ -1249,15 +1361,18 @@ impl TileState {
     pub fn new(tree_id: Id) -> Self {
         Self {
             tree: egui_tiles::Tree::new_tabs(tree_id, vec![]),
-            tree_actions: SmallVec::new(),
+            tree_actions: smallvec![TreeAction::AddSidebars],
             graphs: HashMap::new(),
             container_titles: HashMap::new(),
+            sidebar_state: SidebarMaskState::default(),
             tree_id,
         }
     }
 
     fn reset_tree(&mut self) {
         self.tree = egui_tiles::Tree::new_tabs(self.tree_id, vec![]);
+        self.tree_actions = smallvec![TreeAction::AddSidebars];
+        self.sidebar_state = SidebarMaskState::default();
     }
 }
 
@@ -1276,6 +1391,8 @@ struct TreeBehavior<'w> {
     target_window: Entity,
 }
 
+type ShareUpdate = (TileId, TileId, TileId, f32, f32);
+
 #[derive(Clone)]
 pub enum TreeAction {
     AddViewport(Option<TileId>),
@@ -1286,8 +1403,6 @@ pub enum TreeAction {
     AddActionTile(Option<TileId>, String, String),
     AddVideoStream(Option<TileId>, [u8; 2], String),
     AddDashboard(Option<TileId>, Box<impeller2_wkt::Dashboard>, String),
-    AddHierarchy(Option<TileId>),
-    AddInspector(Option<TileId>),
     AddSchematicTree(Option<TileId>),
     AddDataOverview(Option<TileId>),
     AddSidebars,
@@ -1643,13 +1758,18 @@ impl<'w, 's> TileSystem<'w, 's> {
         let mut contexts = params.contexts;
         let images = params.images;
         let target_id = target.unwrap_or_else(|| *params.primary_window);
-        let is_empty = params
+        let is_empty_tile_tree = params
             .window_states
             .get(target_id)
-            .map(|(_, _, s)| s.tile_state.is_empty() && s.tile_state.tree_actions.is_empty())
-            .ok();
-
-        let is_empty_tile_tree = is_empty?;
+            .map(|(_, _, s)| {
+                let pending_non_sidebar = s
+                    .tile_state
+                    .tree_actions
+                    .iter()
+                    .any(|action| !matches!(action, TreeAction::AddSidebars));
+                !pending_non_sidebar && !s.tile_state.has_non_sidebar_content()
+            })
+            .ok()?;
 
         let icons = TileIcons {
             add: contexts.add_image(images.icon_add.clone_weak()),
@@ -1955,8 +2075,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
             window.unwrap_or(*state_mut.primary_window)
         };
 
-        let (tree, mut tree_actions) = {
-            let (tab_diffs, container_titles, mut tree) = {
+        let (tree, mut tree_actions, sidebar_state, share_updates) = {
+            let (tab_diffs, container_titles, mut tree, sidebar_state) = {
                 let mut state_mut = state.get_mut(world);
                 let Some(mut ui_state) = state_mut.tile_param.target(window) else {
                     return;
@@ -1966,6 +2086,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     std::mem::take(&mut ui_state.tree_actions),
                     ui_state.container_titles.clone(),
                     std::mem::replace(&mut ui_state.tree, empty_tree),
+                    ui_state.sidebar_state,
                 )
             };
             let mut behavior = TreeBehavior {
@@ -1978,8 +2099,19 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 target_window,
             };
             tree.ui(&mut behavior, ui);
+            let window_width = ui.ctx().screen_rect().width();
+            let gutter_width = (window_width * 0.02).max(12.0);
+            let painter = ui.painter_at(ui.max_rect());
+            let mut sidebar_state = sidebar_state;
+            let share_updates = collect_sidebar_gutter_updates(
+                &mut tree,
+                ui,
+                painter,
+                gutter_width,
+                &mut sidebar_state,
+            );
             let TreeBehavior { tree_actions, .. } = behavior;
-            (tree, tree_actions)
+            (tree, tree_actions, sidebar_state, share_updates)
         };
 
         let mut state_mut = state.get_mut(world);
@@ -1987,6 +2119,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
             return;
         };
         let _ = std::mem::replace(&mut ui_state.tree, tree);
+        apply_share_updates(&mut ui_state.tree, &share_updates);
+        ui_state.sidebar_state = sidebar_state;
         state_mut.viewport_contains_pointer.0 = ui.ui_contains_pointer();
 
         for mut editor_cam in state_mut.editor_cam.iter_mut() {
@@ -2185,17 +2319,11 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             Pane::Graph(graph) => {
                                 *state_mut.selected_object =
                                     SelectedObject::Graph { graph_id: graph.id };
-                                if !ui_state.has_inspector() && !ui_state.inspector_pending() {
-                                    ui_state.tree_actions.push(TreeAction::AddInspector(None));
-                                }
                             }
                             Pane::QueryPlot(plot) => {
                                 *state_mut.selected_object = SelectedObject::Graph {
                                     graph_id: plot.entity,
                                 };
-                                if !ui_state.has_inspector() && !ui_state.inspector_pending() {
-                                    ui_state.tree_actions.push(TreeAction::AddInspector(None));
-                                }
                             }
                             Pane::Viewport(viewport) => {
                                 if let Some(camera) = viewport.camera {
@@ -2203,8 +2331,15 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                         SelectedObject::Viewport { camera };
                                 }
                             }
+                            Pane::Hierarchy => {
+                                unmask_sidebar_by_kind(&mut ui_state, SidebarKind::Hierarchy);
+                            }
+                            Pane::Inspector => {
+                                unmask_sidebar_by_kind(&mut ui_state, SidebarKind::Inspector);
+                            }
                             _ => {}
                         }
+                        unmask_sidebar_by_kind(&mut ui_state, SidebarKind::Inspector);
                     }
                 }
                 TreeAction::AddActionTile(parent_tile_id, button_name, lua_code) => {
@@ -2258,26 +2393,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         ui_state.tree.make_active(|id, _| id == tile_id);
                     }
                 }
-                TreeAction::AddHierarchy(parent_tile_id) => {
-                    if read_only {
-                        continue;
-                    }
-                    if let Some(tile_id) =
-                        ui_state.insert_tile(Tile::Pane(Pane::Hierarchy), parent_tile_id, true)
-                    {
-                        ui_state.tree.make_active(|id, _| id == tile_id);
-                    }
-                }
-                TreeAction::AddInspector(parent_tile_id) => {
-                    if read_only {
-                        continue;
-                    }
-                    if let Some(tile_id) =
-                        ui_state.insert_tile(Tile::Pane(Pane::Inspector), parent_tile_id, true)
-                    {
-                        ui_state.tree.make_active(|id, _| id == tile_id);
-                    }
-                }
                 TreeAction::AddSchematicTree(parent_tile_id) => {
                     if read_only {
                         continue;
@@ -2308,24 +2423,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     if read_only {
                         continue;
                     }
-                    let hierarchy = ui_state.tree.tiles.insert_new(Tile::Pane(Pane::Hierarchy));
-                    let inspector = ui_state.tree.tiles.insert_new(Tile::Pane(Pane::Inspector));
-
-                    let mut linear = egui_tiles::Linear::new(
-                        egui_tiles::LinearDir::Horizontal,
-                        vec![hierarchy, inspector],
-                    );
-                    if let Some(root) = ui_state.tree.root() {
-                        linear.children.insert(1, root);
-                        linear.shares.set_share(hierarchy, 0.2);
-                        linear.shares.set_share(root, 0.6);
-                        linear.shares.set_share(inspector, 0.2);
-                    }
-                    let root = ui_state
-                        .tree
-                        .tiles
-                        .insert_new(Tile::Container(Container::Linear(linear)));
-                    ui_state.tree.root = Some(root);
+                    ui_state.apply_sidebars_layout();
                 }
                 TreeAction::RenameContainer(tile_id, title) => {
                     if read_only {
@@ -2391,6 +2489,92 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 Pane::DataOverview(_) => {}
             }
         }
+    }
+}
+
+fn unmask_sidebar_on_select(ui_state: &mut TileState, sidebar_tile: TileId, kind: SidebarKind) {
+    fn build_parent_map(tiles: &Tiles<Pane>) -> HashMap<TileId, TileId> {
+        let mut parents = HashMap::new();
+        for (id, tile) in tiles.iter() {
+            if let Tile::Container(container) = tile {
+                for child in container.children() {
+                    parents.insert(*child, *id);
+                }
+            }
+        }
+        parents
+    }
+
+    fn rebalance_linear_shares(
+        linear: &mut egui_tiles::Linear,
+        target_child: TileId,
+        target_frac: f32,
+        min_share: f32,
+    ) {
+        let share_sum: f32 = linear
+            .shares
+            .iter()
+            .map(|(_, s)| s)
+            .sum::<f32>()
+            .max(min_share);
+        let old = linear.shares[target_child];
+        let others_sum = (share_sum - old).max(0.0);
+        let mut target = (share_sum * target_frac).max(min_share);
+        let min_others = min_share * (linear.children.len().saturating_sub(1) as f32);
+        if target > share_sum - min_others {
+            target = (share_sum - min_others).max(min_share);
+        }
+        let factor = if others_sum > 0.0 {
+            (share_sum - target) / others_sum
+        } else {
+            0.0
+        };
+        let children = linear.children.clone();
+        for child in children {
+            if child == target_child {
+                linear.shares.set_share(child, target.max(min_share));
+            } else {
+                let new = (linear.shares[child] * factor).max(min_share);
+                linear.shares.set_share(child, new);
+            }
+        }
+    }
+
+    let target_frac = ui_state.sidebar_state.last_share(kind).unwrap_or(0.2);
+    let min_share = SIDEBAR_COLLAPSED_SHARE;
+    let parents = build_parent_map(&ui_state.tree.tiles);
+    let mut current = Some(sidebar_tile);
+    while let Some(child) = current {
+        let Some(parent) = parents.get(&child).copied() else {
+            break;
+        };
+        if let Some(Tile::Container(Container::Linear(linear))) =
+            ui_state.tree.tiles.get_mut(parent)
+        {
+            rebalance_linear_shares(linear, child, target_frac, min_share);
+        }
+        current = Some(parent);
+    }
+
+    ui_state.sidebar_state.set_masked(kind, false);
+    ui_state
+        .sidebar_state
+        .set_last_share(kind, Some(target_frac));
+}
+
+fn unmask_sidebar_by_kind(ui_state: &mut TileState, kind: SidebarKind) {
+    let target = ui_state
+        .tree
+        .tiles
+        .iter()
+        .find_map(|(id, tile)| match (kind, tile) {
+            (SidebarKind::Hierarchy, Tile::Pane(Pane::Hierarchy)) => Some(*id),
+            (SidebarKind::Inspector, Tile::Pane(Pane::Inspector)) => Some(*id),
+            _ => None,
+        });
+
+    if let Some(tile_id) = target {
+        unmask_sidebar_on_select(ui_state, tile_id, kind);
     }
 }
 

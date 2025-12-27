@@ -30,8 +30,6 @@ order = 8
 - `Create Action`: prompt for a label, then choose a `send_msg` preset or enter a custom Lua
   command to create an action pane.
 - `Create Video Stream`: prompt for the message name, then create a video stream pane.
-- `Create Hierarchy`: add a hierarchy pane.
-- `Create Inspector`: add an inspector pane.
 - `Create Schematic Tree`: add a schematic tree pane.
 - `Create Dashboard`: add a dashboard pane.
 - `Create Data Overview`: add a data overview pane.

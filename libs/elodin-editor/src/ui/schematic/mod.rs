@@ -191,8 +191,7 @@ impl SchematicParam<'_, '_> {
                 Pane::DataOverview(_) => None,
 
                 // Structural panes
-                Pane::Hierarchy => Some(Panel::Hierarchy),
-                Pane::Inspector => Some(Panel::Inspector),
+                Pane::Hierarchy | Pane::Inspector => None,
                 Pane::SchematicTree(_) => Some(Panel::SchematicTree),
 
                 // Dashboard
