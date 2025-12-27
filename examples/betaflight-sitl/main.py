@@ -242,22 +242,19 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
 
     # Read actual sensor data from physics simulation using batch operation
     # This acquires the DB lock once for all reads, improving performance at high tick rates
-    # Cache these values for potential use in status printing (avoids redundant reads)
-    cached_world_pos = None
-    cached_world_vel = None
     try:
         sensor_data = ctx.component_batch_operation(
             reads=["drone.accel", "drone.gyro", "drone.world_pos", "drone.world_vel"]
         )
         accel = np.array(sensor_data["drone.accel"])  # Body-frame accelerometer
         gyro = np.array(sensor_data["drone.gyro"])  # Body-frame gyroscope
-        cached_world_pos = np.array(sensor_data["drone.world_pos"])  # GPS simulation
-        cached_world_vel = np.array(sensor_data["drone.world_vel"])  # GPS velocity
+        world_pos = np.array(sensor_data["drone.world_pos"])  # GPS simulation
+        world_vel = np.array(sensor_data["drone.world_vel"])  # GPS velocity
 
         # Update sensor buffer with real physics data
         buf.update(
-            world_pos=cached_world_pos,
-            world_vel=cached_world_vel,
+            world_pos=world_pos,
+            world_vel=world_vel,
             accel=accel,
             gyro=gyro,
             timestamp=t,

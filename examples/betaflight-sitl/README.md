@@ -536,10 +536,10 @@ high-rate physics/PID loop.
 
 | Sensor | Hardware | Rate | Datasheet |
 |--------|----------|------|-----------|
-| Gyroscope | BMI270 (3x with timing offset) | 8 kHz | [bst-bmi270-ds000.pdf](../../ai-context/bst-bmi270-ds000.pdf) |
-| Accelerometer | BMI270 (3x with timing offset) | 4.8 kHz | [bst-bmi270-ds000.pdf](../../ai-context/bst-bmi270-ds000.pdf) |
-| Barometer | BMP581 | 480 Hz | [bst_bmp581_ds004.pdf](../../ai-context/bst_bmp581_ds004.pdf) |
-| Magnetometer | BMM350 | 200 Hz | [bst-bmm350-ds001.pdf](../../ai-context/bst-bmm350-ds001.pdf) |
+| Gyroscope | BMI270 (3x with timing offset) | 8 kHz | [bst-bmi270-ds000.pdf](https://www.mouser.com/datasheet/3/1046/1/bst-bmi270-ds000.pdf) |
+| Accelerometer | BMI270 (3x with timing offset) | 4.8 kHz | [bst-bmi270-ds000.pdf](https://www.mouser.com/datasheet/3/1046/1/bst-bmi270-ds000.pdf) |
+| Barometer | BMP581 | 480 Hz | [bst_bmp581_ds004.pdf](https://www.mouser.com/datasheet/3/1046/1/bst_bmp581_ds004.pdf) |
+| Magnetometer | BMM350 | 200 Hz | [bst-bmm350-ds001.pdf](https://www.mouser.com/datasheet/3/1046/1/bst-bmm350-ds001.pdf) |
 
 ### Why Multi-Rate?
 
