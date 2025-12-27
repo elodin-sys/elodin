@@ -522,16 +522,6 @@ fn monitor_parts(
         .collect()
 }
 
-fn toggle_body_axes() -> PaletteItem {
-    PaletteItem::new("Toggle Body Axes", VIEWPORT_LABEL, |_: In<String>| {
-        // TODO: This functionality needs to be updated once BodyAxes is migrated from EntityId to ComponentId
-        // For now, return an empty page
-        PalettePage::new(vec![])
-            .prompt("Body axes functionality is temporarily disabled during refactor")
-            .into()
-    })
-}
-
 fn reset_cameras() -> PaletteItem {
     PaletteItem::new(
         "Reset Cameras",
@@ -1657,7 +1647,6 @@ pub fn create_tiles(tile_id: TileId) -> PalettePage {
         create_dashboard(Some(tile_id)),
         create_data_overview(Some(tile_id)),
         create_inspector(Some(tile_id)),
-        create_sidebars(),
     ])
 }
 
@@ -1699,7 +1688,6 @@ impl Default for PalettePage {
                     PaletteEvent::Exit
                 },
             ),
-            toggle_body_axes(),
             reset_cameras(),
             PaletteItem::new(
                 "Toggle Recording",
@@ -1730,7 +1718,6 @@ impl Default for PalettePage {
             create_schematic_tree(None),
             create_dashboard(None),
             create_data_overview(None),
-            create_sidebars(),
             create_3d_object(),
             save_db_native(),
             save_schematic(),
