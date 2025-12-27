@@ -142,7 +142,9 @@ world.recipe(betaflight_recipe)
 
 print(f"Betaflight SITL: {BETAFLIGHT_PATH.name}")
 print(f"Simulation: {config.simulation_time}s at {config.pid_rate:.0f}Hz PID loop")
-print(f"Sensor rates: gyro={config.gyro_rate:.0f}Hz, accel={config.accel_rate:.0f}Hz, baro={config.baro_rate:.0f}Hz, mag={config.mag_rate:.0f}Hz")
+print(
+    f"Sensor rates: gyro={config.gyro_rate:.0f}Hz, accel={config.accel_rate:.0f}Hz, baro={config.baro_rate:.0f}Hz, mag={config.mag_rate:.0f}Hz"
+)
 
 
 # --- SITL State ---
