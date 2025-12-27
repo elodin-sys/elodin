@@ -1,6 +1,6 @@
 use super::{Pane, ShareUpdate, TileId};
 use egui::{Color32, Stroke};
-use egui_tiles::{Container, Tile};
+use egui_tiles::{Container, Tile, Tiles};
 
 pub const MIN_SIDEBAR_FRACTION: f32 = 0.05;
 pub const MIN_SIDEBAR_PX: f32 = 16.0;
@@ -495,4 +495,52 @@ pub fn apply_share_updates(tree: &mut egui_tiles::Tree<Pane>, updates: &[ShareUp
             linear.shares.set_share(*right_id, *right_share);
         }
     }
+}
+
+pub fn tile_is_sidebar(tiles: &Tiles<Pane>, tile_id: TileId) -> bool {
+    match tiles.get(tile_id) {
+        Some(Tile::Pane(Pane::Hierarchy | Pane::Inspector)) => true,
+        Some(Tile::Container(Container::Tabs(tabs))) => {
+            !tabs.children.is_empty()
+                && tabs
+                    .children
+                    .iter()
+                    .all(|child| tile_is_sidebar(tiles, *child))
+        }
+        Some(Tile::Container(Container::Linear(linear))) => {
+            !linear.children.is_empty()
+                && linear
+                    .children
+                    .iter()
+                    .all(|child| tile_is_sidebar(tiles, *child))
+        }
+        Some(Tile::Container(Container::Grid(grid))) => {
+            let mut any = false;
+            let all = grid.children().all(|child| {
+                any = true;
+                tile_is_sidebar(tiles, *child)
+            });
+            any && all
+        }
+        _ => false,
+    }
+}
+
+pub fn tabs_are_sidebar_only(tiles: &Tiles<Pane>, tabs: &egui_tiles::Tabs) -> bool {
+    !tabs.children.is_empty()
+        && tabs
+            .children
+            .iter()
+            .all(|child| tile_is_sidebar(tiles, *child))
+}
+
+pub fn tab_title_visible(tiles: &Tiles<Pane>, tile_id: TileId) -> bool {
+    !tile_is_sidebar(tiles, tile_id)
+}
+
+pub fn tab_add_visible(tiles: &Tiles<Pane>, tabs: &egui_tiles::Tabs) -> bool {
+    let active_is_sidebar = tabs
+        .active
+        .is_some_and(|active| tile_is_sidebar(tiles, active));
+    !(active_is_sidebar || tabs_are_sidebar_only(tiles, tabs))
 }
