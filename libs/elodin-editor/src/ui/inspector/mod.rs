@@ -12,6 +12,7 @@ use crate::ui::{
     InspectorAnchor, SelectedObject,
     colors::{self, get_scheme},
     tiles::TreeAction,
+    tiles::sidebar::sidebar_content_ui,
 };
 
 pub mod action;
@@ -83,68 +84,71 @@ impl WidgetSystem for InspectorContent<'_> {
         ui.painter()
             .rect_filled(ui.max_rect(), CornerRadius::ZERO, get_scheme().bg_primary);
 
-        egui::ScrollArea::vertical()
-            .max_width(ui.available_width())
-            .show(ui, |ui| {
-                egui::Frame::NONE
-                    .fill(get_scheme().bg_primary)
-                    .inner_margin(16.0)
-                    .show(ui, |ui| {
-                        ui.vertical(|ui| match selected_object {
-                            SelectedObject::None => {
-                                ui.add(empty_inspector());
-                                Default::default()
-                            }
-                            SelectedObject::Entity(pair) => ui.add_widget_with::<InspectorEntity>(
-                                world,
-                                "inspector_entity",
-                                (icons, pair),
-                            ),
-                            SelectedObject::Viewport { camera, .. } => {
-                                ui.add_widget_with::<InspectorViewport>(
-                                    world,
-                                    "inspector_viewport",
-                                    camera,
-                                );
-                                Default::default()
-                            }
-                            SelectedObject::Graph { graph_id, .. } => {
-                                ui.add_widget_with::<InspectorGraph>(
-                                    world,
-                                    "inspector_graph",
-                                    (icons, graph_id),
-                                );
-                                Default::default()
-                            }
-                            SelectedObject::Action { action_id, .. } => {
-                                ui.add_widget_with::<InspectorAction>(
-                                    world,
-                                    "inspector_action",
-                                    action_id,
-                                );
-                                Default::default()
-                            }
-                            SelectedObject::Object3D { entity, .. } => {
-                                ui.add_widget_with::<InspectorObject3D>(
-                                    world,
-                                    "inspector_object3d",
-                                    (icons, entity),
-                                );
-                                Default::default()
-                            }
-                            SelectedObject::DashboardNode { entity } => {
-                                ui.add_widget_with::<InspectorDashboardNode>(
-                                    world,
-                                    "inspector_dashboard_node",
-                                    entity,
-                                );
-                                Default::default()
-                            }
+        sidebar_content_ui(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .max_width(ui.available_width())
+                .show(ui, |ui| {
+                    egui::Frame::NONE
+                        .fill(get_scheme().bg_primary)
+                        .inner_margin(16.0)
+                        .show(ui, |ui| {
+                            ui.vertical(|ui| match selected_object {
+                                SelectedObject::None => {
+                                    ui.add(empty_inspector());
+                                    Default::default()
+                                }
+                                SelectedObject::Entity(pair) => ui
+                                    .add_widget_with::<InspectorEntity>(
+                                        world,
+                                        "inspector_entity",
+                                        (icons, pair),
+                                    ),
+                                SelectedObject::Viewport { camera, .. } => {
+                                    ui.add_widget_with::<InspectorViewport>(
+                                        world,
+                                        "inspector_viewport",
+                                        camera,
+                                    );
+                                    Default::default()
+                                }
+                                SelectedObject::Graph { graph_id, .. } => {
+                                    ui.add_widget_with::<InspectorGraph>(
+                                        world,
+                                        "inspector_graph",
+                                        (icons, graph_id),
+                                    );
+                                    Default::default()
+                                }
+                                SelectedObject::Action { action_id, .. } => {
+                                    ui.add_widget_with::<InspectorAction>(
+                                        world,
+                                        "inspector_action",
+                                        action_id,
+                                    );
+                                    Default::default()
+                                }
+                                SelectedObject::Object3D { entity, .. } => {
+                                    ui.add_widget_with::<InspectorObject3D>(
+                                        world,
+                                        "inspector_object3d",
+                                        (icons, entity),
+                                    );
+                                    Default::default()
+                                }
+                                SelectedObject::DashboardNode { entity } => {
+                                    ui.add_widget_with::<InspectorDashboardNode>(
+                                        world,
+                                        "inspector_dashboard_node",
+                                        entity,
+                                    );
+                                    Default::default()
+                                }
+                            })
                         })
-                    })
-                    .inner
-                    .inner
-            })
-            .inner
+                        .inner
+                        .inner
+                })
+                .inner
+        })
     }
 }

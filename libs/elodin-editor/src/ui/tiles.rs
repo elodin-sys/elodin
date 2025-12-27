@@ -61,7 +61,7 @@ use crate::{
     ui::dashboard::NodeUpdaterParams,
 };
 
-mod sidebar;
+pub(crate) mod sidebar;
 
 use sidebar::{
     SidebarKind, SidebarMaskState, apply_share_updates, collect_sidebar_gutter_updates,

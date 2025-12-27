@@ -1,11 +1,12 @@
 use super::{Pane, ShareUpdate, TileId};
-use egui::{Color32, Stroke};
+use egui::{Color32, Stroke, UiBuilder};
 use egui_tiles::{Container, Tile, Tiles};
 
 pub const MIN_SIDEBAR_FRACTION: f32 = 0.05;
 pub const MIN_SIDEBAR_PX: f32 = 16.0;
 pub const MIN_SIDEBAR_MASKED_PX: f32 = 4.0;
 pub const MIN_OTHER_PX: f32 = 32.0;
+pub const SIDEBAR_CONTENT_PAD_LEFT: f32 = 8.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SidebarKind {
@@ -495,6 +496,27 @@ pub fn apply_share_updates(tree: &mut egui_tiles::Tree<Pane>, updates: &[ShareUp
             linear.shares.set_share(*right_id, *right_share);
         }
     }
+}
+
+pub fn sidebar_content_ui<R>(
+    ui: &mut egui::Ui,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    let mut rect = ui.max_rect();
+    let width = rect.width();
+    let height = rect.height();
+    if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+        return add_contents(ui);
+    }
+
+    let pad = SIDEBAR_CONTENT_PAD_LEFT.min(width);
+    if !pad.is_finite() || pad <= 0.0 {
+        return add_contents(ui);
+    }
+
+    rect.min.x = (rect.min.x + pad).min(rect.max.x);
+    ui.allocate_new_ui(UiBuilder::new().max_rect(rect), add_contents)
+        .inner
 }
 
 pub fn tile_is_sidebar(tiles: &Tiles<Pane>, tile_id: TileId) -> bool {

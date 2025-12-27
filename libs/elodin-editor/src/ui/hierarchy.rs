@@ -10,7 +10,9 @@ use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2_bevy::EntityMap;
 use std::collections::BTreeMap;
 
-use super::{inspector::search, schematic::Branch, widgets::WidgetSystem};
+use super::{
+    inspector::search, schematic::Branch, tiles::sidebar::sidebar_content_ui, widgets::WidgetSystem,
+};
 
 #[derive(SystemParam)]
 pub struct HierarchyContent<'w> {
@@ -50,15 +52,17 @@ impl WidgetSystem for HierarchyContent<'_> {
         } = state.get_mut(world);
 
         let search_text = entity_filter.0.clone();
-        header(ui, entity_filter, icons.search);
-        entity_list(
-            ui,
-            &eql_ctx,
-            &entity_map,
-            &mut selected_object,
-            &search_text,
-            icons,
-        );
+        sidebar_content_ui(ui, |ui| {
+            header(ui, entity_filter, icons.search);
+            entity_list(
+                ui,
+                &eql_ctx,
+                &entity_map,
+                &mut selected_object,
+                &search_text,
+                icons,
+            );
+        });
     }
 }
 
