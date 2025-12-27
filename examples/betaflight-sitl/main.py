@@ -213,6 +213,9 @@ state = [None]
 start_time = [None]
 last_print = [0.0]
 
+# Pre-allocated buffers to avoid allocation in hot loop
+_rc_channels_buffer = np.full(MAX_RC_CHANNELS, 1500, dtype=np.uint16)
+
 
 def sitl_post_step(tick: int, ctx: el.PostStepContext):
     """
@@ -272,17 +275,24 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
     s.sim_time = tick * config.sim_time_step
     t = s.sim_time
 
-    # Read actual sensor data from physics simulation
+    # Read actual sensor data from physics simulation using batch operation
+    # This acquires the DB lock once for all reads, improving performance at high tick rates
+    # Cache these values for potential use in status printing (avoids redundant reads)
+    cached_world_pos = None
+    cached_world_vel = None
     try:
-        accel = np.array(ctx.read_component("drone.accel"))  # Body-frame accelerometer
-        gyro = np.array(ctx.read_component("drone.gyro"))  # Body-frame gyroscope
-        world_pos = np.array(ctx.read_component("drone.world_pos"))  # GPS simulation
-        world_vel = np.array(ctx.read_component("drone.world_vel"))  # GPS velocity
+        sensor_data = ctx.component_batch_operation(
+            reads=["drone.accel", "drone.gyro", "drone.world_pos", "drone.world_vel"]
+        )
+        accel = np.array(sensor_data["drone.accel"])  # Body-frame accelerometer
+        gyro = np.array(sensor_data["drone.gyro"])  # Body-frame gyroscope
+        cached_world_pos = np.array(sensor_data["drone.world_pos"])  # GPS simulation
+        cached_world_vel = np.array(sensor_data["drone.world_vel"])  # GPS velocity
 
         # Update sensor buffer with real physics data
         buf.update(
-            world_pos=world_pos,
-            world_vel=world_vel,
+            world_pos=cached_world_pos,
+            world_vel=cached_world_vel,
             accel=accel,
             gyro=gyro,
             timestamp=t,
@@ -311,8 +321,8 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
         s.arm = 1000  # Disarm
         s.throttle = 1000
 
-    # Build RC packet with all channels
-    channels = np.full(MAX_RC_CHANNELS, 1500, dtype=np.uint16)
+    # Build RC packet with all channels (reuse pre-allocated buffer)
+    channels = _rc_channels_buffer
     channels[0] = 1500  # Roll (center)
     channels[1] = 1500  # Pitch (center)
     channels[2] = s.throttle  # Throttle

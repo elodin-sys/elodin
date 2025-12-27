@@ -64,6 +64,29 @@ class PostStepContext:
             RuntimeError: If the component doesn't exist or has no data
         """
         ...
+    def component_batch_operation(
+        self,
+        reads: list[str] = [],
+        writes: Optional[dict[str, jax.typing.ArrayLike]] = None,
+    ) -> dict[str, jax.Array]:
+        """Perform multiple component reads and writes in a single DB operation.
+
+        This is more efficient than calling read_component/write_component multiple
+        times, as it only acquires the database lock once for all operations.
+
+        Args:
+            reads: List of component names to read (e.g., ["drone.accel", "drone.gyro"])
+            writes: Dict mapping component names to numpy arrays to write
+                   (e.g., {"drone.motor_command": motors_array})
+
+        Returns:
+            Dict mapping read component names to their numpy array values.
+
+        Raises:
+            RuntimeError: If any component doesn't exist or has no data
+            ValueError: If any write data size doesn't match the component schema
+        """
+        ...
 
 class ComponentType:
     def __init__(self, ty: PrimitiveType, shape: Tuple[int, ...]): ...

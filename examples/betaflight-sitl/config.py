@@ -131,13 +131,13 @@ class DroneConfig:
     # --- Simulation Settings ---
 
     # Physics time step in seconds (8kHz for high-performance Betaflight PID loop)
-    #sim_time_step: float = 0.000125  # 8kHz = 125µs
+    sim_time_step: float = 0.000125  # 8kHz = 125µs
     #sim_time_step: float = 0.000250  # 4kHz = 250µs
     #sim_time_step: float = 0.000500  # 2kHz = 500µs
-    sim_time_step: float = 0.001000  # 1kHz = 1000µs
+    #sim_time_step: float = 0.001000  # 1kHz = 1000µs
 
     # Total simulation time in seconds
-    simulation_time: float = 15.0  # Reduced for 8kHz testing
+    simulation_time: float = 15.0
 
     # Enable sensor noise simulation (default: True for realistic behavior)
     sensor_noise: bool = True
