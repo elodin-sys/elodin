@@ -735,6 +735,10 @@ impl LoadSchematicParams<'_, '_> {
     /// Create a default Data Overview panel when no schematic is found.
     /// This provides immediate visibility into the database contents.
     pub fn load_default_data_overview(&mut self) {
+        if self.eql.0.component_parts.is_empty() {
+            return;
+        }
+
         let primary_window = *self.primary_window;
         let mut window_state = self
             .window_states
