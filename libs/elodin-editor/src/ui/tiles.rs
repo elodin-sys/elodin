@@ -1393,6 +1393,50 @@ struct TreeBehavior<'w> {
 
 type ShareUpdate = (TileId, TileId, TileId, f32, f32);
 
+impl TreeBehavior<'_> {
+    fn tile_is_sidebar(tiles: &Tiles<Pane>, tile_id: TileId) -> bool {
+        match tiles.get(tile_id) {
+            Some(Tile::Pane(Pane::Hierarchy | Pane::Inspector)) => true,
+            Some(Tile::Container(Container::Tabs(tabs))) => {
+                !tabs.children.is_empty()
+                    && tabs
+                        .children
+                        .iter()
+                        .all(|child| Self::tile_is_sidebar(tiles, *child))
+            }
+            Some(Tile::Container(Container::Linear(linear))) => {
+                !linear.children.is_empty()
+                    && linear
+                        .children
+                        .iter()
+                        .all(|child| Self::tile_is_sidebar(tiles, *child))
+            }
+            Some(Tile::Container(Container::Grid(grid))) => {
+                let mut any = false;
+                let all = grid.children().all(|child| {
+                    any = true;
+                    Self::tile_is_sidebar(tiles, *child)
+                });
+                any && all
+            }
+            _ => false,
+        }
+    }
+
+    fn tabs_are_sidebar_only(tiles: &Tiles<Pane>, tile_id: TileId) -> bool {
+        match tiles.get(tile_id) {
+            Some(Tile::Container(Container::Tabs(tabs))) => {
+                !tabs.children.is_empty()
+                    && tabs
+                        .children
+                        .iter()
+                        .all(|child| Self::tile_is_sidebar(tiles, *child))
+            }
+            _ => false,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum TreeAction {
     AddViewport(Option<TileId>),
@@ -1450,6 +1494,13 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         tile_id: egui_tiles::TileId,
         state: &egui_tiles::TabState,
     ) -> egui::Response {
+        if Self::tile_is_sidebar(tiles, tile_id) {
+            let min_width = self.tab_title_spacing(ui.visuals()) * 2.0;
+            let (_, rect) = ui.allocate_space(vec2(min_width, ui.available_height()));
+            let response = ui.interact(rect, id, egui::Sense::click_and_drag());
+            return self.on_tab_button(tiles, tile_id, response);
+        }
+
         let tab_state = if state.active {
             TabState::Selected
         } else {
@@ -1706,13 +1757,19 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
     fn top_bar_right_ui(
         &mut self,
-        _tiles: &Tiles<Pane>,
+        tiles: &Tiles<Pane>,
         ui: &mut Ui,
         tile_id: TileId,
-        _tabs: &egui_tiles::Tabs,
+        tabs: &egui_tiles::Tabs,
         _scroll_offset: &mut f32,
     ) {
         if self.read_only {
+            return;
+        }
+        let active_is_sidebar = tabs
+            .active
+            .is_some_and(|active| Self::tile_is_sidebar(tiles, active));
+        if active_is_sidebar || Self::tabs_are_sidebar_only(tiles, tile_id) {
             return;
         }
         let mut layout = SystemState::<TileLayout>::new(self.world);
