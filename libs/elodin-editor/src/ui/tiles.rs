@@ -65,7 +65,7 @@ pub(crate) mod sidebar;
 
 use sidebar::{
     SidebarKind, SidebarMaskState, apply_share_updates, collect_sidebar_gutter_updates,
-    tab_add_visible, tab_title_visible,
+    tab_add_visible, tab_title_visible, tile_is_sidebar,
 };
 
 pub(crate) fn plugin(app: &mut App) {
@@ -1397,6 +1397,18 @@ impl Default for TileState {
     }
 }
 
+fn main_content_rect(tree: &egui_tiles::Tree<Pane>) -> Option<egui::Rect> {
+    let root = tree.root()?;
+    if let Some(Tile::Container(Container::Linear(linear))) = tree.tiles.get(root) {
+        for child in &linear.children {
+            if !tile_is_sidebar(&tree.tiles, *child) {
+                return tree.tiles.rect(*child);
+            }
+        }
+    }
+    tree.tiles.rect(root)
+}
+
 struct TreeBehavior<'w> {
     icons: TileIcons,
     tree_actions: SmallVec<[TreeAction; 4]>,
@@ -1685,6 +1697,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
         egui_tiles::SimplificationOptions {
+            prune_empty_tabs: false,
             all_panes_must_have_tabs: true,
             join_nested_linear_containers: true,
             prune_single_child_tabs: false, // Keep tabs container even with single child
@@ -1824,18 +1837,7 @@ impl<'w, 's> TileSystem<'w, 's> {
         is_empty_tile_tree: bool,
         read_only: bool,
     ) {
-        if is_empty_tile_tree && !read_only {
-            ui.add_widget_with::<TileLayoutEmpty>(
-                world,
-                "tile_layout_empty",
-                TileLayoutEmptyArgs {
-                    icons: icons.clone(),
-                    window: target,
-                },
-            );
-            return;
-        }
-
+        let show_empty_overlay = is_empty_tile_tree && !read_only;
         ui.add_widget_with::<TileLayout>(
             world,
             "tile_layout",
@@ -1843,6 +1845,7 @@ impl<'w, 's> TileSystem<'w, 's> {
                 icons,
                 window: target,
                 read_only,
+                show_empty_overlay,
             },
         );
     }
@@ -2077,6 +2080,7 @@ pub struct TileLayoutArgs {
     pub icons: TileIcons,
     pub window: Option<Entity>,
     pub read_only: bool,
+    pub show_empty_overlay: bool,
 }
 
 impl WidgetSystem for TileLayout<'_, '_> {
@@ -2093,6 +2097,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
             icons,
             window,
             read_only,
+            show_empty_overlay,
         } = args;
 
         let target_window = {
@@ -2100,10 +2105,17 @@ impl WidgetSystem for TileLayout<'_, '_> {
             window.unwrap_or(*state_mut.primary_window)
         };
 
-        let (tree, mut tree_actions, sidebar_state, share_updates) = {
+        let (
+            tree,
+            mut tree_actions,
+            sidebar_state,
+            share_updates,
+            empty_overlay_rect,
+            overlay_icons,
+        ) = {
             let (tab_diffs, container_titles, mut tree, sidebar_state) = {
                 let mut state_mut = state.get_mut(world);
-                let Some(mut ui_state) = state_mut.tile_param.target(window) else {
+                let Some(mut ui_state) = state_mut.tile_param.target(Some(target_window)) else {
                     return;
                 };
                 let empty_tree = egui_tiles::Tree::empty(ui_state.tree_id);
@@ -2114,6 +2126,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     ui_state.sidebar_state,
                 )
             };
+            let overlay_icons = icons.clone();
             let mut behavior = TreeBehavior {
                 icons,
                 // This world here makes getting ui_state difficult.
@@ -2124,6 +2137,11 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 target_window,
             };
             tree.ui(&mut behavior, ui);
+            let empty_overlay_rect = if show_empty_overlay {
+                main_content_rect(&tree).or_else(|| Some(ui.max_rect()))
+            } else {
+                None
+            };
             let window_width = ui.ctx().screen_rect().width();
             let gutter_width = (window_width * 0.02).max(12.0);
             let painter = ui.painter_at(ui.max_rect());
@@ -2136,11 +2154,18 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 &mut sidebar_state,
             );
             let TreeBehavior { tree_actions, .. } = behavior;
-            (tree, tree_actions, sidebar_state, share_updates)
+            (
+                tree,
+                tree_actions,
+                sidebar_state,
+                share_updates,
+                empty_overlay_rect,
+                overlay_icons,
+            )
         };
 
         let mut state_mut = state.get_mut(world);
-        let Some(mut ui_state) = state_mut.tile_param.target(window) else {
+        let Some(mut ui_state) = state_mut.tile_param.target(Some(target_window)) else {
             return;
         };
         let _ = std::mem::replace(&mut ui_state.tree, tree);
@@ -2509,6 +2534,23 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     }
                 }
                 Pane::DataOverview(_) => {}
+            }
+        }
+
+        drop(state_mut);
+
+        if show_empty_overlay {
+            if let Some(rect) = empty_overlay_rect {
+                ui.allocate_new_ui(UiBuilder::new().max_rect(rect), |ui| {
+                    ui.add_widget_with::<TileLayoutEmpty>(
+                        world,
+                        "tile_layout_empty",
+                        TileLayoutEmptyArgs {
+                            icons: overlay_icons,
+                            window: Some(target_window),
+                        },
+                    );
+                });
             }
         }
     }
