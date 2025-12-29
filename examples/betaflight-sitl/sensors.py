@@ -5,10 +5,16 @@ This module simulates the IMU (Inertial Measurement Unit) and other sensors
 that provide data to Betaflight's flight controller algorithms.
 
 Sensor Models:
-- Accelerometer: Measures linear acceleration in body frame
-- Gyroscope: Measures angular velocity in body frame
-- (Optional) Barometer: Measures altitude via pressure
-- (Optional) GPS: Provides position and velocity
+- Gyroscope: Measures angular velocity in body frame (8 kHz - drives PID)
+- Accelerometer: Measures linear acceleration in body frame (4.8 kHz)
+- Barometer: Measures altitude via pressure (480 Hz)
+- Magnetometer: Measures heading reference (200 Hz)
+
+Multi-Rate Simulation:
+Sensors update at their realistic hardware rates based on Aleph flight controller
+specs (BMI270 IMU, BMP581 barometer, BMM350 magnetometer). The simulation runs
+at 8kHz to match Betaflight's high-performance PID loop, but slower sensors
+only update at their native rates using tick decimation.
 
 Noise Model (from proven drone example):
 - Gaussian measurement noise on each sample
@@ -35,8 +41,6 @@ import numpy as np
 
 from config import DroneConfig
 from comms import FDMPacket
-
-# --- Noise Model ---
 
 
 class Noise:
@@ -89,17 +93,10 @@ class Noise:
 # Note: Betaflight's attitude estimator is sensitive to noise during the
 # bootgrace/calibration period. High noise causes attitude drift and
 # motor imbalance at liftoff.
-#
-# Noise sweep results:
-#   - 1e-8: Perfectly stable, motors balanced
-#   - 1e-7: Slightly shaky but stable hover (recommended for SITL)
-#   - 1e-6: Unstable, drone flips
-#
-# Production sensors (drone example) use noise_cov=0.001 (~1.8 deg/s std).
-# SITL requires lower noise (1e-8) for stable lockstep simulation.
-gyro_noise = Noise(0, 0, 1e-8, 1e-8)  # Gyro noise + bias drift
-accel_noise = Noise(0, 1, 1e-8, 0.0)  # Accel noise (no drift)
-baro_noise = Noise(0, 2, 0.001, 0.0)  # ~0.03m std dev
+gyro_noise = Noise(0, 0, 0.01, 0.001)  # Gyro noise + bias drift
+accel_noise = Noise(0, 1, 0.01, 0.001)  # Accel noise (no drift)
+baro_noise = Noise(0, 2, 0.01, 0.001)  # ~0.03m std dev
+mag_noise = Noise(0, 3, 0.01, 0.001)  # Magnetometer noise (very low)
 
 
 # Initial gyro bias (set to zero for SITL - avoids consistent drift direction)
@@ -172,23 +169,72 @@ BodyVel = ty.Annotated[
     ),
 ]
 
+# Magnetometer reading in body frame [mx, my, mz] (normalized)
+Mag = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "mag",
+        el.ComponentType(el.PrimitiveType.F64, (3,)),
+        metadata={"element_names": "x,y,z", "priority": 154},
+    ),
+]
+
+# Previous sensor readings (for multi-rate simulation - hold values between updates)
+PrevAccel = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "prev_accel",
+        el.ComponentType(el.PrimitiveType.F64, (3,)),
+        metadata={"element_names": "x,y,z"},
+    ),
+]
+
+PrevBaro = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "prev_baro",
+        el.ComponentType(el.PrimitiveType.F64, (1,)),
+    ),
+]
+
+PrevMag = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "prev_mag",
+        el.ComponentType(el.PrimitiveType.F64, (3,)),
+        metadata={"element_names": "x,y,z"},
+    ),
+]
+
 
 @dataclass
 class IMU(el.Archetype):
     """
-    IMU sensor archetype with noise state.
+    IMU sensor archetype with noise state and multi-rate support.
 
     Stores computed sensor values and bias state for the drone entity.
     No filtering state - Betaflight handles its own filtering.
+
+    Multi-rate simulation: Sensors update at different frequencies matching
+    Aleph hardware (BMI270, BMP581, BMM350). Previous values are held between
+    updates via prev_* components.
     """
 
     sensor_tick: SensorTick = field(default_factory=lambda: jnp.array(0, dtype=jnp.uint64))
+
+    # Current sensor readings (updated at sensor-specific rates)
     gyro: Gyro = field(default_factory=lambda: jnp.zeros(3))
     gyro_bias: GyroBias = field(default_factory=lambda: jnp.array(init_gyro_bias))
-    accel: Accel = field(default_factory=lambda: jnp.zeros(3))
+    accel: Accel = field(default_factory=lambda: jnp.array([0.0, 0.0, 9.80665]))  # 1g at rest
     accel_bias: AccelBias = field(default_factory=lambda: jnp.zeros(3))
     baro: Baro = field(default_factory=lambda: jnp.zeros(1))
+    mag: Mag = field(default_factory=lambda: jnp.array([1.0, 0.0, 0.0]))  # North
     body_vel: BodyVel = field(default_factory=lambda: jnp.zeros(3))
+
+    # Previous readings for multi-rate hold (sensors slower than PID loop)
+    prev_accel: PrevAccel = field(default_factory=lambda: jnp.array([0.0, 0.0, 9.80665]))
+    prev_baro: PrevBaro = field(default_factory=lambda: jnp.zeros(1))
+    prev_mag: PrevMag = field(default_factory=lambda: jnp.array([1.0, 0.0, 0.0]))
 
 
 # --- Sensor Computation Systems ---
@@ -244,38 +290,31 @@ def create_gyro_system(config: DroneConfig):
 
 def create_accel_system(config: DroneConfig):
     """
-    Create the accelerometer sensor computation system.
+    Create the accelerometer sensor computation system with multi-rate support.
 
     The accelerometer measures specific force (acceleration minus gravity)
     in body frame. Applies noise and bias when enabled.
     No filtering - Betaflight handles that.
+
+    Multi-rate: Updates at ~4.8kHz (BMI270 1.6kHz × 3 IMUs). Between updates,
+    the previous reading is held.
 
     Detects ground contact to correctly report +g when at rest (the ground
     constraint zeros velocity but doesn't add normal force to the Force component).
     """
     gravity = config.gravity
     ground_level = config.ground_level
+    tick_interval = config.accel_tick_interval
 
-    @el.map
-    def compute_accel(
-        tick: SensorTick,
-        pos: el.WorldPos,
-        vel: el.WorldVel,
-        force: el.Force,
-        inertia: el.Inertia,
-        bias: AccelBias,
-    ) -> Accel:
-        """
-        Compute accelerometer reading from physics state.
-
-        The accelerometer measures specific force, which is the total force
-        minus gravity, divided by mass. When in free fall, the accelerometer
-        reads zero. When sitting on the ground, it reads +g upward (1g).
-
-        Detects ground contact (z ≤ ground_level and not moving up) to correctly
-        show +g when at rest, since the ground constraint zeros velocity but
-        doesn't add a normal force.
-        """
+    def _compute_accel_reading(
+        tick: jax.Array,
+        pos: el.SpatialTransform,
+        vel: el.SpatialMotion,
+        force: el.SpatialForce,
+        inertia: el.SpatialInertia,
+        bias: jax.Array,
+    ) -> jax.Array:
+        """Internal: Compute fresh accelerometer reading."""
         # Get orientation quaternion for frame transformation
         quat = pos.angular()
         quat_inv = quat.inverse()
@@ -301,9 +340,6 @@ def create_accel_system(config: DroneConfig):
         )
 
         # Specific force in world frame (what accelerometer measures)
-        # specific_force = total_accel - gravity
-        # When on ground: total_accel = 0, so specific_force = 0 - (-g) = +g ✓
-        # When in free fall: total_accel = -g, so specific_force = -g - (-g) = 0 ✓
         specific_force_world = total_accel_world - gravity_world
 
         # Transform to body frame
@@ -314,6 +350,34 @@ def create_accel_system(config: DroneConfig):
             body_a = accel_noise.sample(body_a, bias, tick)
 
         return body_a
+
+    @el.map
+    def compute_accel(
+        tick: SensorTick,
+        pos: el.WorldPos,
+        vel: el.WorldVel,
+        force: el.Force,
+        inertia: el.Inertia,
+        bias: AccelBias,
+        prev_accel: PrevAccel,
+    ) -> tuple[Accel, PrevAccel]:
+        """
+        Compute accelerometer reading with multi-rate decimation.
+
+        Updates at accel_tick_interval (e.g., every 2 ticks for 4.8kHz at 8kHz PID).
+        Returns previous reading when not updating.
+        """
+        new_reading = _compute_accel_reading(tick, pos, vel, force, inertia, bias)
+
+        # Update only on tick intervals; otherwise hold previous value
+        accel_out = jax.lax.cond(
+            tick % tick_interval == 0,
+            lambda _: new_reading,
+            lambda _: prev_accel,
+            None,
+        )
+
+        return accel_out, accel_out
 
     return compute_accel
 
@@ -332,27 +396,108 @@ def create_body_vel_system(config: DroneConfig):
 
 def create_baro_system(config: DroneConfig):
     """
-    Create barometer sensor system.
+    Create barometer sensor system with multi-rate support.
 
     Simulates barometric altitude measurement based on height.
     Applies noise when enabled (~0.3m std dev typical for consumer barometers).
-    """
 
-    @el.map
-    def compute_baro(tick: SensorTick, pos: el.WorldPos) -> Baro:
-        """Compute barometer reading from altitude."""
+    Multi-rate: Updates at 480Hz (BMP581 continuous mode). Between updates,
+    the previous reading is held.
+    """
+    tick_interval = config.baro_tick_interval
+
+    def _compute_baro_reading(tick: jax.Array, pos: el.SpatialTransform) -> jax.Array:
+        """Internal: Compute fresh barometer reading."""
         # Simple model: altitude = z position
         altitude = pos.linear()[2]
         baro_reading = jnp.array([altitude])
 
         # Add noise if enabled
         if config.sensor_noise:
-            # Use zero bias since barometers don't typically have significant drift
             baro_reading = baro_noise.sample(baro_reading, jnp.zeros(1), tick)
 
         return baro_reading
 
+    @el.map
+    def compute_baro(
+        tick: SensorTick,
+        pos: el.WorldPos,
+        prev_baro: PrevBaro,
+    ) -> tuple[Baro, PrevBaro]:
+        """
+        Compute barometer reading with multi-rate decimation.
+
+        Updates at baro_tick_interval (e.g., every 17 ticks for 480Hz at 8kHz PID).
+        Returns previous reading when not updating.
+        """
+        new_reading = _compute_baro_reading(tick, pos)
+
+        # Update only on tick intervals; otherwise hold previous value
+        baro_out = jax.lax.cond(
+            tick % tick_interval == 0,
+            lambda _: new_reading,
+            lambda _: prev_baro,
+            None,
+        )
+
+        return baro_out, baro_out
+
     return compute_baro
+
+
+def create_mag_system(config: DroneConfig):
+    """
+    Create magnetometer sensor system with multi-rate support.
+
+    Simulates magnetometer reading for heading reference.
+    Applies noise when enabled.
+
+    Multi-rate: Updates at 200Hz (BMM350). Between updates,
+    the previous reading is held.
+    """
+    tick_interval = config.mag_tick_interval
+
+    # Earth's magnetic field reference (normalized, pointing North in world frame)
+    # In ENU: North is +Y direction
+    world_mag_ref = jnp.array([0.0, 1.0, 0.0])
+
+    def _compute_mag_reading(tick: jax.Array, pos: el.SpatialTransform) -> jax.Array:
+        """Internal: Compute fresh magnetometer reading."""
+        # Transform world magnetic field to body frame
+        quat_inv = pos.angular().inverse()
+        body_mag = quat_inv @ world_mag_ref
+
+        # Add noise if enabled
+        if config.sensor_noise:
+            body_mag = mag_noise.sample(body_mag, jnp.zeros(3), tick)
+
+        return body_mag
+
+    @el.map
+    def compute_mag(
+        tick: SensorTick,
+        pos: el.WorldPos,
+        prev_mag: PrevMag,
+    ) -> tuple[Mag, PrevMag]:
+        """
+        Compute magnetometer reading with multi-rate decimation.
+
+        Updates at mag_tick_interval (e.g., every 40 ticks for 200Hz at 8kHz PID).
+        Returns previous reading when not updating.
+        """
+        new_reading = _compute_mag_reading(tick, pos)
+
+        # Update only on tick intervals; otherwise hold previous value
+        mag_out = jax.lax.cond(
+            tick % tick_interval == 0,
+            lambda _: new_reading,
+            lambda _: prev_mag,
+            None,
+        )
+
+        return mag_out, mag_out
+
+    return compute_mag
 
 
 def create_imu_system(config: DroneConfig) -> el.System:
@@ -386,7 +531,13 @@ def create_imu_system(config: DroneConfig) -> el.System:
 
 def create_sensor_system(config: DroneConfig) -> el.System:
     """
-    Create the complete sensor system.
+    Create the complete sensor system with multi-rate simulation.
+
+    Combines sensors at their realistic hardware rates:
+    - Gyroscope: 8 kHz (matches PID loop, driven by 3x BMI270)
+    - Accelerometer: 4.8 kHz (3x BMI270 @ 1.6 kHz each)
+    - Barometer: 480 Hz (BMP581 continuous mode)
+    - Magnetometer: 200 Hz (BMM350)
 
     Args:
         config: Drone configuration
@@ -396,8 +547,9 @@ def create_sensor_system(config: DroneConfig) -> el.System:
     """
     imu = create_imu_system(config)
     baro = create_baro_system(config)
+    mag = create_mag_system(config)
 
-    return imu | baro
+    return imu | baro | mag
 
 
 # --- Sensor Data Extraction ---
@@ -682,7 +834,7 @@ if __name__ == "__main__":
     exec.run(200)
 
     # Get sensor history
-    df = exec.history(["drone.accel", "drone.gyro", "drone.baro", "drone.gyro_bias"])
+    df = exec.history(["drone.accel", "drone.gyro", "drone.baro", "drone.mag", "drone.gyro_bias"])
     print(f"Simulated {len(df)} ticks")
 
     # Check accelerometer reading at start (should be ~+g since on ground)
@@ -712,6 +864,17 @@ if __name__ == "__main__":
     print("\nBarometer:")
     print(f"  Last reading: {last_baro} m")
 
+    # Check magnetometer
+    last_mag = df[-1]["drone.mag"].to_list()
+    print("\nMagnetometer (body frame):")
+    print(f"  Last reading: {last_mag}")
+    print("  Expected pointing North: [0, 1, 0] (in ENU world frame)")
+
     print(f"\nSensor noise enabled: {config.sensor_noise}")
-    print("No filtering applied - Betaflight handles its own filtering.")
+    print("\nMulti-rate sensor simulation:")
+    print(f"  Gyroscope:     {config.gyro_rate:.0f} Hz (every {config.gyro_tick_interval} tick)")
+    print(f"  Accelerometer: {config.accel_rate:.0f} Hz (every {config.accel_tick_interval} ticks)")
+    print(f"  Barometer:     {config.baro_rate:.0f} Hz (every {config.baro_tick_interval} ticks)")
+    print(f"  Magnetometer:  {config.mag_rate:.0f} Hz (every {config.mag_tick_interval} ticks)")
+    print("\nNo filtering applied - Betaflight handles its own filtering.")
     print("Sensor test complete!")

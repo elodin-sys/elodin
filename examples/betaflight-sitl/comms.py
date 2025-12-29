@@ -610,6 +610,7 @@ class BetaflightSyncBridge:
         self._started = False
         self._step_count = 0
         self._last_motors = np.zeros(4)
+        self._current_timeout_ms = timeout_ms  # Cache current timeout to avoid redundant syscalls
 
     def start(self) -> None:
         """Start the bridge and prepare sockets."""
@@ -708,8 +709,11 @@ class BetaflightSyncBridge:
         self._rc_socket.sendto(rc_data, (self.host, self.rc_port))
 
         # Wait for motor response (blocking)
-        timeout = (timeout_ms or self.timeout_ms) / 1000.0
-        self._pwm_socket.settimeout(timeout)
+        # Only update timeout if explicitly changed (avoid syscall every step)
+        effective_timeout_ms = timeout_ms or self.timeout_ms
+        if effective_timeout_ms != self._current_timeout_ms:
+            self._pwm_socket.settimeout(effective_timeout_ms / 1000.0)
+            self._current_timeout_ms = effective_timeout_ms
 
         try:
             data, addr = self._pwm_socket.recvfrom(ServoPacket.SIZE)
@@ -725,7 +729,7 @@ class BetaflightSyncBridge:
                 # During initialization, just return zeros
                 return np.zeros(4)
             raise TimeoutError(
-                f"No motor response from Betaflight within {timeout * 1000:.0f}ms "
+                f"No motor response from Betaflight within {self._current_timeout_ms:.0f}ms "
                 f"(step {self._step_count})"
             )
 

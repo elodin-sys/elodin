@@ -37,6 +37,7 @@ __pycache__
 
 # examples
 betaflight_*
+eeprom.bin
 
 examples/rocket-barrowman/motor_cache/
 examples/rocket-barrowman/*.log

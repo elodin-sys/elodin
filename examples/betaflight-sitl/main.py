@@ -19,13 +19,11 @@ Prerequisites:
     2. (Optional) Configure Betaflight via CLI: socat + screen
 """
 
-import atexit
 import os
-import signal
+import re
 import subprocess
 import sys
 import time
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,8 +43,6 @@ from comms import (
 
 # --- Configuration ---
 config = DEFAULT_CONFIG
-config.simulation_time = 20.0  # Longer for observation
-config.sim_time_step = 0.001  # 1kHz physics
 config.set_as_global()
 
 
@@ -59,55 +55,22 @@ if not BETAFLIGHT_PATH.exists():
     sys.exit(1)
 
 
-# --- Clean up stale processes ---
-def cleanup_stale_processes():
-    """Kill any stale Betaflight SITL processes and free ports."""
-    # Kill Betaflight
+# --- Clean up stale processes from previous runs ---
+# This runs BEFORE s10 starts, so it only affects leftover processes from
+# previous interrupted simulations, not the current run's Betaflight.
+def cleanup_stale_betaflight():
+    """Kill any stale Betaflight SITL processes from previous runs."""
     try:
         subprocess.run(["pkill", "-f", "betaflight_SITL"], capture_output=True, timeout=5)
-    except Exception:
-        pass
-
-    # Free elodin-db port (2240)
-    try:
-        result = subprocess.run(["lsof", "-ti:2240"], capture_output=True, text=True, timeout=5)
-        if result.stdout.strip():
-            pids = result.stdout.strip().split("\n")
-            for pid in pids:
-                try:
-                    subprocess.run(["kill", "-9", pid], capture_output=True, timeout=2)
-                except Exception:
-                    pass
-    except Exception:
-        pass
-
-    time.sleep(0.5)
-
-
-def cleanup_on_exit():
-    """Cleanup handler for exit - kills Betaflight processes."""
-    try:
-        subprocess.run(["pkill", "-9", "-f", "betaflight_SITL"], capture_output=True, timeout=2)
+        time.sleep(0.1)  # Brief pause to let the process terminate
     except Exception:
         pass
 
 
-def signal_handler(signum, frame):
-    """Handle Ctrl+C by cleaning up and exiting."""
-    print("\n[SITL] Caught interrupt, cleaning up...")
-    cleanup_on_exit()
-    sys.exit(0)
-
-
-# Register cleanup handlers
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
-atexit.register(cleanup_on_exit)
-
-# Only cleanup stale processes when NOT running under s10 orchestration
-# When s10 manages us, it passes --no-s10 flag, and it starts Betaflight separately
+# Only cleanup when running with s10 (without --no-s10 flag)
+# s10 will start a fresh Betaflight after world.run() begins
 if "--no-s10" not in sys.argv:
-    cleanup_stale_processes()
+    cleanup_stale_betaflight()
 
 
 # --- World Creation ---
@@ -178,7 +141,10 @@ betaflight_recipe = el.s10.PyRecipe.process(
 world.recipe(betaflight_recipe)
 
 print(f"Betaflight SITL: {BETAFLIGHT_PATH.name}")
-print(f"Simulation: {config.simulation_time}s at {1 / config.sim_time_step:.0f}Hz")
+print(f"Simulation: {config.simulation_time}s at {config.pid_rate:.0f}Hz PID loop")
+print(
+    f"Sensor rates: gyro={config.gyro_rate:.0f}Hz, accel={config.accel_rate:.0f}Hz, baro={config.baro_rate:.0f}Hz, mag={config.mag_rate:.0f}Hz"
+)
 
 
 # --- SITL State ---
@@ -213,6 +179,9 @@ sensor_buf = [None]
 state = [None]
 start_time = [None]
 last_print = [0.0]
+
+# Pre-allocated buffers to avoid allocation in hot loop
+_rc_channels_buffer = np.full(MAX_RC_CHANNELS, 1500, dtype=np.uint16)
 
 
 def sitl_post_step(tick: int, ctx: el.PostStepContext):
@@ -249,15 +218,16 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
         warmup_rc = RCPacket(timestamp=0.0, channels=warmup_channels)
 
         warmup_count = 0
-        for i in range(500):  # 500ms of warmup at ~1ms per packet
+        warmup_packets = int(0.5 / config.sim_time_step)  # 500ms of warmup at PID rate
+        for i in range(warmup_packets):
             try:
-                warmup_fdm.timestamp = i * 0.001
-                warmup_rc.timestamp = i * 0.001
+                warmup_fdm.timestamp = i * config.sim_time_step
+                warmup_rc.timestamp = i * config.sim_time_step
                 bridge[0].step(warmup_fdm, warmup_rc)
                 warmup_count += 1
             except TimeoutError:
                 pass  # Expected during initial warmup
-        print(f"[SITL] Warmup complete ({warmup_count} responses)")
+        print(f"[SITL] Warmup complete ({warmup_count} responses at {config.pid_rate:.0f}Hz)")
         print("[SITL] Bridge ready")
 
     if start_time[0] is None:
@@ -272,13 +242,16 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
     s.sim_time = tick * config.sim_time_step
     t = s.sim_time
 
-    # Read actual sensor data from physics simulation
-    # CRITICAL: These are essential for Betaflight's PID loop
+    # Read actual sensor data from physics simulation using batch operation
+    # This acquires the DB lock once for all reads, improving performance at high tick rates
     try:
-        accel = np.array(ctx.read_component("drone.accel"))  # Body-frame accelerometer
-        gyro = np.array(ctx.read_component("drone.gyro"))  # Body-frame gyroscope
-        world_pos = np.array(ctx.read_component("drone.world_pos"))  # GPS simulation
-        world_vel = np.array(ctx.read_component("drone.world_vel"))  # GPS velocity
+        sensor_data = ctx.component_batch_operation(
+            reads=["drone.accel", "drone.gyro", "drone.world_pos", "drone.world_vel"]
+        )
+        accel = np.array(sensor_data["drone.accel"])  # Body-frame accelerometer
+        gyro = np.array(sensor_data["drone.gyro"])  # Body-frame gyroscope
+        world_pos = np.array(sensor_data["drone.world_pos"])  # GPS simulation
+        world_vel = np.array(sensor_data["drone.world_vel"])  # GPS velocity
 
         # Update sensor buffer with real physics data
         buf.update(
@@ -312,8 +285,8 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
         s.arm = 1000  # Disarm
         s.throttle = 1000
 
-    # Build RC packet with all channels
-    channels = np.full(MAX_RC_CHANNELS, 1500, dtype=np.uint16)
+    # Build RC packet with all channels (reuse pre-allocated buffer)
+    channels = _rc_channels_buffer
     channels[0] = 1500  # Roll (center)
     channels[1] = 1500  # Pitch (center)
     channels[2] = s.throttle  # Throttle
@@ -461,8 +434,6 @@ world.run(
 # `world.run()` won't reach here unless `interactive` is false.
 print(f"Wrote database to: {db_filename}")
 
-# --- Cleanup (fallback if world.run() returns without triggering post_step exit) ---
-cleanup_on_exit()
 if not bridge[0]:
     print("\nNo simulation ticks executed.")
     print("Usage: python3 examples/betaflight-sitl/main.py run")
