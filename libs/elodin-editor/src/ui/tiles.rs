@@ -1055,6 +1055,49 @@ impl Pane {
         }
     }
 
+    fn set_title(&mut self, title: &str) -> PaneTitleTargets {
+        let mut targets = PaneTitleTargets::default();
+        match self {
+            Pane::Viewport(viewport) => {
+                viewport.label = title.to_string();
+            }
+            Pane::Graph(graph) => {
+                graph.label = title.to_string();
+                targets.graph_id = Some(graph.id);
+            }
+            Pane::Monitor(monitor) => {
+                monitor.label = title.to_string();
+            }
+            Pane::QueryTable(table) => {
+                table.label = title.to_string();
+                targets.query_table_id = Some(table.entity);
+            }
+            Pane::QueryPlot(plot) => {
+                targets.graph_id = Some(plot.entity);
+                targets.query_plot_id = Some(plot.entity);
+            }
+            Pane::ActionTile(action) => {
+                action.label = title.to_string();
+                targets.action_tile_id = Some(action.entity);
+            }
+            Pane::VideoStream(video) => {
+                video.label = title.to_string();
+            }
+            Pane::Dashboard(dashboard) => {
+                dashboard.label = title.to_string();
+                targets.dashboard_id = Some(dashboard.entity);
+            }
+            Pane::SchematicTree(tree) => {
+                tree.label = title.to_string();
+            }
+            Pane::DataOverview(pane) => {
+                pane.label = title.to_string();
+            }
+            Pane::Hierarchy | Pane::Inspector => {}
+        }
+        targets
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn ui(
         &mut self,
@@ -1172,6 +1215,57 @@ impl Pane {
                 egui_tiles::UiResponse::None
             }
         }
+    }
+}
+
+#[derive(Default)]
+struct PaneTitleTargets {
+    graph_id: Option<Entity>,
+    query_plot_id: Option<Entity>,
+    query_table_id: Option<Entity>,
+    action_tile_id: Option<Entity>,
+    dashboard_id: Option<Entity>,
+}
+
+fn apply_pane_title_updates(
+    title: &str,
+    targets: PaneTitleTargets,
+    graph_states: &mut Query<'_, '_, &'static mut GraphState>,
+    query_plots: &mut Query<'_, '_, &'static mut QueryPlotData>,
+    query_tables: &mut Query<'_, '_, &'static mut QueryTableData>,
+    action_tiles: &mut Query<'_, '_, &'static mut ActionTile>,
+    dashboards: &mut Query<'_, '_, &'static mut Dashboard<Entity>>,
+) {
+    let title = title.to_string();
+
+    if let Some(graph_id) = targets.graph_id
+        && let Ok(mut graph_state) = graph_states.get_mut(graph_id)
+    {
+        graph_state.label = title.clone();
+    }
+
+    if let Some(query_plot_id) = targets.query_plot_id
+        && let Ok(mut plot_data) = query_plots.get_mut(query_plot_id)
+    {
+        plot_data.data.name = title.clone();
+    }
+
+    if let Some(query_table_id) = targets.query_table_id
+        && let Ok(mut table) = query_tables.get_mut(query_table_id)
+    {
+        table.data.name = Some(title.clone());
+    }
+
+    if let Some(action_tile_id) = targets.action_tile_id
+        && let Ok(mut action_tile) = action_tiles.get_mut(action_tile_id)
+    {
+        action_tile.button_name = title.clone();
+    }
+
+    if let Some(dashboard_id) = targets.dashboard_id
+        && let Ok(mut dashboard) = dashboards.get_mut(dashboard_id)
+    {
+        dashboard.root.name = Some(title);
     }
 }
 
@@ -2503,87 +2597,17 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         let Some(tile) = ui_state.tree.tiles.get_mut(tile_id) else {
                             continue;
                         };
-                        let mut graph_id = None;
-                        let mut query_plot_id = None;
-                        let mut query_table_id = None;
-                        let mut action_tile_id = None;
-                        let mut dashboard_id = None;
-
                         if let Tile::Pane(pane) = tile {
-                            match pane {
-                                Pane::Viewport(viewport) => {
-                                    viewport.label = title.clone();
-                                }
-                                Pane::Graph(graph) => {
-                                    graph.label = title.clone();
-                                    graph_id = Some(graph.id);
-                                }
-                                Pane::Monitor(monitor) => {
-                                    monitor.label = title.clone();
-                                }
-                                Pane::QueryTable(table) => {
-                                    table.label = title.clone();
-                                    query_table_id = Some(table.entity);
-                                }
-                                Pane::QueryPlot(plot) => {
-                                    query_plot_id = Some(plot.entity);
-                                }
-                                Pane::ActionTile(action) => {
-                                    action.label = title.clone();
-                                    action_tile_id = Some(action.entity);
-                                }
-                                Pane::VideoStream(video) => {
-                                    video.label = title.clone();
-                                }
-                                Pane::Dashboard(dashboard) => {
-                                    dashboard.label = title.clone();
-                                    dashboard_id = Some(dashboard.entity);
-                                }
-                                Pane::SchematicTree(tree) => {
-                                    tree.label = title.clone();
-                                }
-                                Pane::DataOverview(pane) => {
-                                    pane.label = title.clone();
-                                }
-                                Pane::Hierarchy | Pane::Inspector => {}
-                            }
-                        }
-
-                        if let Some(graph_id) = graph_id
-                            && let Ok(mut graph_state) = state_mut.graph_states.get_mut(graph_id)
-                        {
-                            graph_state.label = title.clone();
-                        }
-
-                        if let Some(query_plot_id) = query_plot_id {
-                            if let Ok(mut graph_state) =
-                                state_mut.graph_states.get_mut(query_plot_id)
-                            {
-                                graph_state.label = title.clone();
-                            }
-                            if let Ok(mut plot_data) = state_mut.query_plots.get_mut(query_plot_id)
-                            {
-                                plot_data.data.name = title.clone();
-                            }
-                        }
-
-                        if let Some(query_table_id) = query_table_id
-                            && let Ok(mut table) = state_mut.query_tables.get_mut(query_table_id)
-                        {
-                            table.data.name = Some(title.clone());
-                        }
-
-                        if let Some(action_tile_id) = action_tile_id
-                            && let Ok(mut action_tile) =
-                                state_mut.action_tiles.get_mut(action_tile_id)
-                        {
-                            action_tile.button_name = title.clone();
-                        }
-
-                        if let Some(dashboard_id) = dashboard_id
-                            && let Ok(mut dashboard) = state_mut.dashboards.get_mut(dashboard_id)
-                        {
-                            dashboard.root.name = Some(title.clone());
+                            let targets = pane.set_title(&title);
+                            apply_pane_title_updates(
+                                &title,
+                                targets,
+                                &mut state_mut.graph_states,
+                                &mut state_mut.query_plots,
+                                &mut state_mut.query_tables,
+                                &mut state_mut.action_tiles,
+                                &mut state_mut.dashboards,
+                            );
                         }
                     }
                 }
