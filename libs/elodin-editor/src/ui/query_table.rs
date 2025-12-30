@@ -28,6 +28,7 @@ use super::{
 #[derive(Clone)]
 pub struct QueryTablePane {
     pub entity: Entity,
+    pub label: String,
 }
 
 #[derive(Component, Default)]
@@ -156,7 +157,7 @@ impl WidgetSystem for QueryTableWidget<'_, '_> {
         world: &mut bevy::prelude::World,
         state: &mut bevy::ecs::system::SystemState<Self>,
         ui: &mut egui::Ui,
-        QueryTablePane { entity }: Self::Args,
+        QueryTablePane { entity, .. }: Self::Args,
     ) -> Self::Output {
         let QueryTableWidget {
             mut states,

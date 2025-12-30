@@ -648,7 +648,11 @@ impl LoadSchematicParams<'_, '_> {
                 tile_state.insert_tile(Tile::Pane(Pane::Graph(graph)), parent_id, false)
             }
             Panel::ComponentMonitor(monitor) => {
-                let pane = MonitorPane::new("Monitor".to_string(), monitor.component_name.clone());
+                let label = monitor
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| monitor.component_name.clone());
+                let pane = MonitorPane::new(label, monitor.component_name.clone());
                 tile_state.insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
             }
             Panel::QueryTable(data) => {
@@ -659,7 +663,12 @@ impl LoadSchematicParams<'_, '_> {
                         ..Default::default()
                     })
                     .id();
-                let pane = super::query_table::QueryTablePane { entity };
+                let label = data
+                    .name
+                    .clone()
+                    .filter(|name| !name.trim().is_empty())
+                    .unwrap_or_else(|| "Query".to_string());
+                let pane = super::query_table::QueryTablePane { entity, label };
                 tile_state.insert_tile(Tile::Pane(Pane::QueryTable(pane)), parent_id, false)
             }
             Panel::ActionPane(action) => {
@@ -673,7 +682,7 @@ impl LoadSchematicParams<'_, '_> {
                     .id();
                 let pane = super::tiles::ActionTilePane {
                     entity,
-                    label: "Action".to_string(),
+                    label: action.label.clone(),
                 };
                 tile_state.insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false)
             }

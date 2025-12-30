@@ -373,6 +373,10 @@ fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
 }
 
 fn parse_component_monitor(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
+    let name = node
+        .get("name")
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string());
     let component_name = node
         .get("component_name")
         .and_then(|v| v.as_string())
@@ -385,22 +389,28 @@ fn parse_component_monitor(node: &KdlNode, src: &str) -> Result<Panel, KdlSchema
 
     Ok(Panel::ComponentMonitor(ComponentMonitor {
         component_name: component_name.to_string(),
+        name,
     }))
 }
 
 fn parse_action_pane(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
     let label = node
-        .entries()
-        .iter()
-        .find(|e| e.name().is_none())
-        .and_then(|e| e.value().as_string())
+        .get("name")
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            node.entries()
+                .iter()
+                .find(|e| e.name().is_none())
+                .and_then(|e| e.value().as_string())
+                .map(|s| s.to_string())
+        })
         .ok_or_else(|| KdlSchematicError::MissingProperty {
-            property: "label".to_string(),
+            property: "name".to_string(),
             node: "action_pane".to_string(),
             src: src.to_string(),
             span: node.span(),
-        })?
-        .to_string();
+        })?;
 
     let lua = node
         .get("lua")
@@ -417,6 +427,10 @@ fn parse_action_pane(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicErr
 }
 
 fn parse_query_table(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
+    let name = node
+        .get("name")
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string());
     let query = node
         .entries()
         .iter()
@@ -435,21 +449,31 @@ fn parse_query_table(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
         })
         .unwrap_or(QueryType::EQL);
 
-    Ok(Panel::QueryTable(QueryTable { query, query_type }))
+    Ok(Panel::QueryTable(QueryTable {
+        name,
+        query,
+        query_type,
+    }))
 }
 
 fn parse_query_plot(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
     let label = node
-        .entries()
-        .iter()
-        .find(|e| e.name().is_none())
+        .get("name")
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            node.entries()
+                .iter()
+                .find(|e| e.name().is_none())
+                .and_then(|e| e.value().as_string())
+                .map(|s| s.to_string())
+        })
         .ok_or_else(|| KdlSchematicError::MissingProperty {
-            property: "label".to_string(),
+            property: "name".to_string(),
             node: "query_plot".to_string(),
             src: src.to_string(),
             span: node.span(),
-        })?
-        .to_string();
+        })?;
 
     let query = node
         .get("query")

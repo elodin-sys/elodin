@@ -166,16 +166,23 @@ impl SchematicParam<'_, '_> {
 
                 Pane::Monitor(monitor) => Some(Panel::ComponentMonitor(ComponentMonitor {
                     component_name: monitor.component_name.clone(),
+                    name: Some(monitor.label.clone()),
                 })),
 
                 Pane::QueryTable(query_table) => {
-                    let query_table = self.query_tables.get(query_table.entity).ok()?;
-                    Some(Panel::QueryTable(query_table.data.clone()))
+                    let query_table_data = self.query_tables.get(query_table.entity).ok()?;
+                    let mut data = query_table_data.data.clone();
+                    data.name = Some(query_table.label.clone());
+                    Some(Panel::QueryTable(data))
                 }
 
                 Pane::QueryPlot(plot) => {
                     let query_plot = self.query_plots.get(plot.entity).ok()?;
-                    Some(Panel::QueryPlot(query_plot.data.map_aux(|_| plot.entity)))
+                    let mut query_plot = query_plot.data.map_aux(|_| plot.entity);
+                    if let Ok(graph_state) = self.graph_states.get(plot.entity) {
+                        query_plot.label = graph_state.label.clone();
+                    }
+                    Some(Panel::QueryPlot(query_plot))
                 }
 
                 Pane::ActionTile(action) => {

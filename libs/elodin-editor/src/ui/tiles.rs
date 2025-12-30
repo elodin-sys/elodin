@@ -689,7 +689,7 @@ impl TileState {
                             Pane::Viewport(viewport) => ("Viewport", viewport.label.as_str()),
                             Pane::Graph(graph) => ("Graph", graph.label.as_str()),
                             Pane::Monitor(monitor) => ("Monitor", monitor.label.as_str()),
-                            Pane::QueryTable(_) => ("QueryTable", "QueryTable"),
+                            Pane::QueryTable(table) => ("QueryTable", table.label.as_str()),
                             Pane::QueryPlot(_) => ("QueryPlot", "QueryPlot"),
                             Pane::ActionTile(action) => ("Action", action.label.as_str()),
                             Pane::VideoStream(video) => ("VideoStream", video.label.as_str()),
@@ -1032,7 +1032,7 @@ impl Pane {
             }
             Pane::Viewport(viewport) => viewport.label.to_string(),
             Pane::Monitor(monitor) => monitor.label.to_string(),
-            Pane::QueryTable(..) => "Query".to_string(),
+            Pane::QueryTable(table) => table.label.to_string(),
             Pane::QueryPlot(query_plot) => {
                 if let Ok(graph_state) = graph_states.get(query_plot.entity) {
                     return graph_state.label.to_string();
@@ -2300,7 +2300,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if read_only {
                             continue;
                         }
-                        let monitor = MonitorPane::new("Monitor".to_string(), eql);
+                        let monitor = MonitorPane::new(eql.clone(), eql);
 
                         let pane = Pane::Monitor(monitor);
                         if let Some(tile_id) =
@@ -2392,6 +2392,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         }
                     }
                     TreeAction::AddActionTile(parent_tile_id, button_name, lua_code) => {
+                        let label = button_name.clone();
                         let entity = state_mut
                             .commands
                             .spawn(super::actions::ActionTile {
@@ -2402,7 +2403,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             .id();
                         let pane = Pane::ActionTile(ActionTilePane {
                             entity,
-                            label: "Action".to_string(),
+                            label,
                         });
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
@@ -2412,7 +2413,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     }
                     TreeAction::AddQueryTable(parent_tile_id) => {
                         let entity = state_mut.commands.spawn(QueryTableData::default()).id();
-                        let pane = Pane::QueryTable(QueryTablePane { entity });
+                        let pane = Pane::QueryTable(QueryTablePane {
+                            entity,
+                            label: "Query".to_string(),
+                        });
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {

@@ -38,10 +38,10 @@ order = 6
 ### panel content
 - `viewport`: `fov` (default 45.0), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `hdr` (default false), `name` (optional label), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera.
 - `graph`: positional `eql` (required), `name` (optional), `type` (`line`/`point`/`bar`, default `line`), `lock` (default false), `auto_y_range` (default true), `y_min`/`y_max` (default `0.0..1.0`), child `color` nodes (optional list; otherwise palette).
-- `component_monitor`: `component_name` (required).
-- `action_pane`: positional `label` (required), `lua` script (required).
-- `query_table`: positional `query` (defaults to empty), `type` (`eql` default, or `sql`).
-- `query_plot`: positional `label` (required), `query` (required), `refresh_interval` in ms (default 1000), `auto_refresh` (default false), `color` (default white), `type` (`eql` default, or `sql`).
+- `component_monitor`: `component_name` (required), `name` (optional).
+- `action_pane`: `name` (required), `lua` script (required).
+- `query_table`: `name` (optional), positional `query` (defaults to empty), `type` (`eql` default, or `sql`).
+- `query_plot`: `name` (required), `query` (required), `refresh_interval` in ms (default 1000), `auto_refresh` (default false), `color` (default white), `type` (`eql` default, or `sql`).
 - `schematic_tree`: no properties. (Hierarchy/Inspector sidebars are implicit and not serialized.)
 - `dashboard`: layout node (Bevy UI style). Key properties: `label` (optional), `display` (`flex` default, or `grid`/`block`/`none`), `box_sizing` (`border-box` default or `content-box`), `position_type` (`relative` default or `absolute`), `overflow` (per-axis; defaults visible), `overflow_clip_margin` (visual_box + margin, defaults content-box / 0), sizing (`left`/`right`/`top`/`bottom`/`width`/`height`/`min_*`/`max_*` accept `auto`, `px`, `%`, `vw`, `vh`, `vmin`, `vmax`; default `auto`), `aspect_ratio` (optional f32), alignment (`align_items`/`justify_items`/`align_self`/`justify_self`/`align_content`/`justify_content`, all default to `default` variants), flex (`flex_direction`, `flex_wrap`, `flex_grow` default 0, `flex_shrink` default 1, `flex_basis` default `auto`, `row_gap`/`column_gap` default `auto`), `children` (nested dashboard nodes), colors via `bg`/`background` child (default transparent), `text` (optional), `font_size` (default 16), `text_color` child (default white), spacing via `margin`/`padding`/`border` children with `left`/`right`/`top`/`bottom`.
 
@@ -141,18 +141,20 @@ graph = "graph" eql
       { color }*
 
 component_monitor = "component_monitor"
+                  [name=string]
                   [component_name=string]
 
 action_pane = "action_pane"
-            <label>
+            [name=string]
             [lua=string]
 
 query_table = "query_table"
+            [name=string]
             [query=string]
             [type=eql|sql]
 
 query_plot = "query_plot"
-           <label>
+           [name=string]
            [query=string]
            [refresh_interval=ms]
            [auto_refresh=bool]

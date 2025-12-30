@@ -242,6 +242,10 @@ fn serialize_graph<T>(graph: &Graph<T>) -> KdlNode {
 
 fn serialize_component_monitor(monitor: &ComponentMonitor) -> KdlNode {
     let mut node = KdlNode::new("component_monitor");
+    if let Some(name) = monitor.name.as_ref() {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("name", name.clone()));
+    }
     node.entries_mut().push(KdlEntry::new_prop(
         "component_name",
         monitor.component_name.clone(),
@@ -252,9 +256,8 @@ fn serialize_component_monitor(monitor: &ComponentMonitor) -> KdlNode {
 fn serialize_action_pane(action_pane: &ActionPane) -> KdlNode {
     let mut node = KdlNode::new("action_pane");
 
-    // Add the label as the first unnamed entry
     node.entries_mut()
-        .push(KdlEntry::new(action_pane.label.clone()));
+        .push(KdlEntry::new_prop("name", action_pane.label.clone()));
 
     node.entries_mut()
         .push(KdlEntry::new_prop("lua", action_pane.lua.clone()));
@@ -264,6 +267,11 @@ fn serialize_action_pane(action_pane: &ActionPane) -> KdlNode {
 
 fn serialize_query_table(query_table: &QueryTable) -> KdlNode {
     let mut node = KdlNode::new("query_table");
+
+    if let Some(name) = query_table.name.as_ref() {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("name", name.clone()));
+    }
 
     // Add the query as the first unnamed entry
     if !query_table.query.is_empty() {
@@ -284,9 +292,8 @@ fn serialize_query_table(query_table: &QueryTable) -> KdlNode {
 fn serialize_query_plot<T>(query_plot: &QueryPlot<T>) -> KdlNode {
     let mut node = KdlNode::new("query_plot");
 
-    // Add the label as the first unnamed entry
     node.entries_mut()
-        .push(KdlEntry::new(query_plot.label.clone()));
+        .push(KdlEntry::new_prop("name", query_plot.label.clone()));
 
     node.entries_mut()
         .push(KdlEntry::new_prop("query", query_plot.query.clone()));

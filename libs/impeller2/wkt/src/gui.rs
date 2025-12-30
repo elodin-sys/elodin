@@ -105,13 +105,16 @@ pub enum Panel<T = ()> {
 impl<T> Panel<T> {
     pub fn label(&self) -> &str {
         match self {
-            Panel::Viewport(_) => "Viewport",
+            Panel::Viewport(viewport) => viewport.name.as_deref().unwrap_or("Viewport"),
             Panel::VSplit(_) => "Vertical Split",
             Panel::HSplit(_) => "Horizontal Split",
-            Panel::Graph(_) => "Graph",
-            Panel::ComponentMonitor(_) => "Component Monitor",
-            Panel::ActionPane(_) => "Action Pane",
-            Panel::QueryTable(_) => "Query Table",
+            Panel::Graph(graph) => graph.name.as_deref().unwrap_or("Graph"),
+            Panel::ComponentMonitor(monitor) => monitor
+                .name
+                .as_deref()
+                .unwrap_or(&monitor.component_name),
+            Panel::ActionPane(action_pane) => action_pane.label.as_str(),
+            Panel::QueryTable(query_table) => query_table.name.as_deref().unwrap_or("Query Table"),
             Panel::QueryPlot(query_plot) => &query_plot.label,
             Panel::Tabs(_) => "Tabs",
             Panel::Inspector => "Inspector",
@@ -684,11 +687,13 @@ pub struct ComponentMonitor {
     /// NOTE: It may be nice to allow this to be an EQL expression that we
     /// monitor, which can be a simple component_name.
     pub component_name: String,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct QueryTable {
+    pub name: Option<String>,
     pub query: String,
     pub query_type: QueryType,
 }
