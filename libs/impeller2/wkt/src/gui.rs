@@ -99,6 +99,7 @@ pub enum Panel<T = ()> {
     Inspector,
     Hierarchy,
     SchematicTree,
+    DataOverview,
     Dashboard(Box<Dashboard<T>>),
 }
 
@@ -120,6 +121,7 @@ impl<T> Panel<T> {
             Panel::Inspector => "Inspector",
             Panel::Hierarchy => "Hierarchy",
             Panel::SchematicTree => "Tree",
+            Panel::DataOverview => "Data Overview",
             Panel::Dashboard(d) => d.root.label.as_deref().unwrap_or("Dashboard"),
         }
     }
@@ -162,6 +164,7 @@ impl<T> Panel<T> {
             Panel::Hierarchy => Panel::Hierarchy,
             Panel::SchematicTree => Panel::SchematicTree,
             Panel::Inspector => Panel::Inspector,
+            Panel::DataOverview => Panel::DataOverview,
             Panel::Viewport(v) => Panel::Viewport(v.map_aux(f)),
             Panel::Dashboard(d) => Panel::Dashboard(Box::new(d.map_aux(f))),
         }

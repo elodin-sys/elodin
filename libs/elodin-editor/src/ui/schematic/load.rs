@@ -692,6 +692,10 @@ impl LoadSchematicParams<'_, '_> {
                 let pane = TreePane { entity };
                 tile_state.insert_tile(Tile::Pane(Pane::SchematicTree(pane)), parent_id, false)
             }
+            Panel::DataOverview => {
+                let pane = Pane::DataOverview(DataOverviewPane::default());
+                tile_state.insert_tile(Tile::Pane(pane), parent_id, false)
+            }
             Panel::QueryPlot(plot) => {
                 let graph_bundle = GraphBundle::new(
                     &mut self.render_layer_alloc,

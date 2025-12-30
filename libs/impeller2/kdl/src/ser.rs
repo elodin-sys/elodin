@@ -55,6 +55,7 @@ fn serialize_panel<T>(panel: &Panel<T>) -> KdlNode {
         Panel::Inspector => KdlNode::new("inspector"),
         Panel::Hierarchy => KdlNode::new("hierarchy"),
         Panel::SchematicTree => KdlNode::new("schematic_tree"),
+        Panel::DataOverview => KdlNode::new("data_overview"),
         Panel::Dashboard(dashboard) => serialize_dashboard(dashboard),
     }
 }

@@ -141,6 +141,7 @@ fn panel(
         Panel::Inspector => icons.viewport,
         Panel::Hierarchy => icons.viewport,
         Panel::SchematicTree => icons.viewport,
+        Panel::DataOverview => icons.viewport,
         Panel::Dashboard(_) => icons.viewport,
     };
     let children = p.children();

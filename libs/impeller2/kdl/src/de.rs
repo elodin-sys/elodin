@@ -37,7 +37,9 @@ fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlS
     match node.name().value() {
         "tabs" | "hsplit" | "vsplit" | "viewport" | "graph" | "component_monitor"
         | "action_pane" | "query_table" | "query_plot" | "inspector" | "hierarchy"
-        | "schematic_tree" | "dashboard" => Ok(SchematicElem::Panel(parse_panel(node, src)?)),
+        | "schematic_tree" | "data_overview" | "dashboard" => {
+            Ok(SchematicElem::Panel(parse_panel(node, src)?))
+        }
         "window" => Ok(SchematicElem::Window(parse_window(node, src)?)),
         "theme" => Ok(SchematicElem::Theme(parse_theme(node, src)?)),
         "object_3d" => Ok(SchematicElem::Object3d(parse_object_3d(node, src)?)),
@@ -209,6 +211,7 @@ fn parse_panel(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError
         "inspector" => Ok(Panel::Inspector),
         "hierarchy" => Ok(Panel::Hierarchy),
         "schematic_tree" => Ok(Panel::SchematicTree),
+        "data_overview" => Ok(Panel::DataOverview),
         "dashboard" => parse_dashboard(node),
         _ => Err(KdlSchematicError::UnknownNode {
             node_type: node.name().to_string(),
