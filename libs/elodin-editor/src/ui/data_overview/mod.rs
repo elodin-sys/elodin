@@ -20,7 +20,7 @@ use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery};
 
 use crate::{EqlContext, SelectedTimeRange, ui::widgets::WidgetSystem};
 
-use super::colors::get_scheme;
+use super::{PaneName, colors::get_scheme};
 
 // Re-export for use in component collection
 use eql;
@@ -85,7 +85,7 @@ pub enum TimeRangeQueryState {
 /// Pane data for the DataOverview panel
 #[derive(Clone)]
 pub struct DataOverviewPane {
-    pub label: String,
+    pub name: PaneName,
     /// Cached screen rect for rendering
     pub rect: Option<egui::Rect>,
     /// Vertical scroll offset for component list
@@ -107,7 +107,7 @@ pub struct DataOverviewPane {
 impl Default for DataOverviewPane {
     fn default() -> Self {
         Self {
-            label: "Data Overview".to_string(),
+            name: "Data Overview".to_string(),
             rect: None,
             scroll_offset: 0.0,
             zoom_factor: 1.0,

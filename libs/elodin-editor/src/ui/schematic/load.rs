@@ -668,7 +668,10 @@ impl LoadSchematicParams<'_, '_> {
                     .clone()
                     .filter(|name| !name.trim().is_empty())
                     .unwrap_or_else(|| "Query".to_string());
-                let pane = super::query_table::QueryTablePane { entity, label };
+                let pane = super::query_table::QueryTablePane {
+                    entity,
+                    name: label,
+                };
                 tile_state.insert_tile(Tile::Pane(Pane::QueryTable(pane)), parent_id, false)
             }
             Panel::ActionPane(action) => {
@@ -682,7 +685,7 @@ impl LoadSchematicParams<'_, '_> {
                     .id();
                 let pane = super::tiles::ActionTilePane {
                     entity,
-                    label: action.name.clone(),
+                    name: action.name.clone(),
                 };
                 tile_state.insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false)
             }
@@ -690,13 +693,16 @@ impl LoadSchematicParams<'_, '_> {
             Panel::SchematicTree(name) => {
                 let entity = self.commands.spawn(super::TreeWidgetState::default()).id();
                 let label = name.clone().unwrap_or_else(|| "Tree".to_string());
-                let pane = TreePane { entity, label };
+                let pane = TreePane {
+                    entity,
+                    name: label,
+                };
                 tile_state.insert_tile(Tile::Pane(Pane::SchematicTree(pane)), parent_id, false)
             }
             Panel::DataOverview(name) => {
                 let mut pane = DataOverviewPane::default();
                 if let Some(name) = name.clone() {
-                    pane.label = name;
+                    pane.name = name;
                 }
                 let pane = Pane::DataOverview(pane);
                 tile_state.insert_tile(Tile::Pane(pane), parent_id, false)
@@ -745,7 +751,7 @@ impl LoadSchematicParams<'_, '_> {
                 tile_state.insert_tile(
                     Tile::Pane(Pane::Dashboard(DashboardPane {
                         entity: dashboard_entity,
-                        label,
+                        name: label,
                     })),
                     parent_id,
                     false,

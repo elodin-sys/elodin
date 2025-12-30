@@ -292,7 +292,7 @@ fn collect_viewport_entries(
         Tile::Pane(tiles::Pane::Viewport(viewport)) => {
             if let Some(camera) = viewport.camera {
                 entries.push(ViewportEntry {
-                    label: viewport_display_label(&viewport.label, window_label),
+                    label: viewport_display_label(&viewport.name, window_label),
                     camera,
                 });
             }

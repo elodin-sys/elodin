@@ -35,6 +35,8 @@ const PRIMARY_GRAPH_ORDER_BASE: isize = 100;
 pub const UI_ORDER_BASE: isize = 200_000;
 const NAV_GIZMO_ORDER_OFFSET: isize = 1;
 
+pub type PaneName = String;
+
 #[cfg(target_os = "linux")]
 mod platform {
     pub const LINUX_MULTI_WINDOW: bool = true;

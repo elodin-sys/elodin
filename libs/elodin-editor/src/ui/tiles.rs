@@ -32,7 +32,7 @@ use winit::{
 };
 
 use super::{
-    SelectedObject, ViewportRect,
+    PaneName, SelectedObject, ViewportRect,
     actions::{ActionTile, ActionTileWidget},
     button::{EImageButton, ETileButton},
     colors::{self, get_scheme, with_opacity},
@@ -448,19 +448,19 @@ pub struct ViewportContainsPointer(pub bool);
 #[derive(Clone)]
 pub struct ActionTilePane {
     pub entity: Entity,
-    pub label: String,
+    pub name: PaneName,
 }
 
 #[derive(Clone)]
 pub struct TreePane {
     pub entity: Entity,
-    pub label: String,
+    pub name: PaneName,
 }
 
 #[derive(Clone)]
 pub struct DashboardPane {
     pub entity: Entity,
-    pub label: String,
+    pub name: PaneName,
 }
 
 impl TileState {
@@ -640,24 +640,21 @@ impl TileState {
     pub fn create_video_stream_tile(
         &mut self,
         msg_id: [u8; 2],
-        label: String,
+        name: PaneName,
         tile_id: Option<TileId>,
     ) {
         self.tree_actions
-            .push(TreeAction::AddVideoStream(tile_id, msg_id, label));
+            .push(TreeAction::AddVideoStream(tile_id, msg_id, name));
     }
 
     pub fn create_dashboard_tile(
         &mut self,
         dashboard: impeller2_wkt::Dashboard,
-        label: String,
+        name: PaneName,
         tile_id: Option<TileId>,
     ) {
-        self.tree_actions.push(TreeAction::AddDashboard(
-            tile_id,
-            Box::new(dashboard),
-            label,
-        ));
+        self.tree_actions
+            .push(TreeAction::AddDashboard(tile_id, Box::new(dashboard), name));
     }
 
     pub fn create_tree_tile(&mut self, tile_id: Option<TileId>) {
@@ -687,18 +684,18 @@ impl TileState {
                     }
                     Tile::Pane(pane) => {
                         let (kind, label): (&str, &str) = match pane {
-                            Pane::Viewport(viewport) => ("Viewport", viewport.label.as_str()),
-                            Pane::Graph(graph) => ("Graph", graph.label.as_str()),
-                            Pane::Monitor(monitor) => ("Monitor", monitor.label.as_str()),
-                            Pane::QueryTable(table) => ("QueryTable", table.label.as_str()),
+                            Pane::Viewport(viewport) => ("Viewport", viewport.name.as_str()),
+                            Pane::Graph(graph) => ("Graph", graph.name.as_str()),
+                            Pane::Monitor(monitor) => ("Monitor", monitor.name.as_str()),
+                            Pane::QueryTable(table) => ("QueryTable", table.name.as_str()),
                             Pane::QueryPlot(_) => ("QueryPlot", "QueryPlot"),
-                            Pane::ActionTile(action) => ("Action", action.label.as_str()),
-                            Pane::VideoStream(video) => ("VideoStream", video.label.as_str()),
-                            Pane::Dashboard(dashboard) => ("Dashboard", dashboard.label.as_str()),
+                            Pane::ActionTile(action) => ("Action", action.name.as_str()),
+                            Pane::VideoStream(video) => ("VideoStream", video.name.as_str()),
+                            Pane::Dashboard(dashboard) => ("Dashboard", dashboard.name.as_str()),
                             Pane::Hierarchy => ("Hierarchy", "Hierarchy"),
                             Pane::Inspector => ("Inspector", "Inspector"),
-                            Pane::SchematicTree(pane) => ("SchematicTree", pane.label.as_str()),
-                            Pane::DataOverview(pane) => ("DataOverview", pane.label.as_str()),
+                            Pane::SchematicTree(pane) => ("SchematicTree", pane.name.as_str()),
+                            Pane::DataOverview(pane) => ("DataOverview", pane.name.as_str()),
                         };
                         let _ = writeln!(out, "{}Pane::{} ({})", indent, kind, label);
                     }
@@ -1029,19 +1026,19 @@ impl Pane {
                 if let Ok(graph_state) = graph_states.get(pane.id) {
                     return graph_state.label.to_string();
                 }
-                pane.label.to_string()
+                pane.name.to_string()
             }
-            Pane::Viewport(viewport) => viewport.label.to_string(),
-            Pane::Monitor(monitor) => monitor.label.to_string(),
-            Pane::QueryTable(table) => table.label.to_string(),
+            Pane::Viewport(viewport) => viewport.name.to_string(),
+            Pane::Monitor(monitor) => monitor.name.to_string(),
+            Pane::QueryTable(table) => table.name.to_string(),
             Pane::QueryPlot(query_plot) => {
                 if let Ok(graph_state) = graph_states.get(query_plot.entity) {
                     return graph_state.label.to_string();
                 }
                 "Query Plot".to_string()
             }
-            Pane::ActionTile(action) => action.label.to_string(),
-            Pane::VideoStream(video_stream) => video_stream.label.to_string(),
+            Pane::ActionTile(action) => action.name.to_string(),
+            Pane::VideoStream(video_stream) => video_stream.name.to_string(),
             Pane::Dashboard(dashboard) => {
                 if let Ok(dash) = dashboards.get(dashboard.entity) {
                     return dash.root.name.as_deref().unwrap_or("Dashboard").to_string();
@@ -1050,8 +1047,8 @@ impl Pane {
             }
             Pane::Hierarchy => "Entities".to_string(),
             Pane::Inspector => "Inspector".to_string(),
-            Pane::SchematicTree(pane) => pane.label.to_string(),
-            Pane::DataOverview(pane) => pane.label.to_string(),
+            Pane::SchematicTree(pane) => pane.name.to_string(),
+            Pane::DataOverview(pane) => pane.name.to_string(),
         }
     }
 
@@ -1059,17 +1056,17 @@ impl Pane {
         let mut targets = PaneTitleTargets::default();
         match self {
             Pane::Viewport(viewport) => {
-                viewport.label = title.to_string();
+                viewport.name = title.to_string();
             }
             Pane::Graph(graph) => {
-                graph.label = title.to_string();
+                graph.name = title.to_string();
                 targets.graph_id = Some(graph.id);
             }
             Pane::Monitor(monitor) => {
-                monitor.label = title.to_string();
+                monitor.name = title.to_string();
             }
             Pane::QueryTable(table) => {
-                table.label = title.to_string();
+                table.name = title.to_string();
                 targets.query_table_id = Some(table.entity);
             }
             Pane::QueryPlot(plot) => {
@@ -1077,21 +1074,21 @@ impl Pane {
                 targets.query_plot_id = Some(plot.entity);
             }
             Pane::ActionTile(action) => {
-                action.label = title.to_string();
+                action.name = title.to_string();
                 targets.action_tile_id = Some(action.entity);
             }
             Pane::VideoStream(video) => {
-                video.label = title.to_string();
+                video.name = title.to_string();
             }
             Pane::Dashboard(dashboard) => {
-                dashboard.label = title.to_string();
+                dashboard.name = title.to_string();
                 targets.dashboard_id = Some(dashboard.entity);
             }
             Pane::SchematicTree(tree) => {
-                tree.label = title.to_string();
+                tree.name = title.to_string();
             }
             Pane::DataOverview(pane) => {
-                pane.label = title.to_string();
+                pane.name = title.to_string();
             }
             Pane::Hierarchy | Pane::Inspector => {}
         }
@@ -1275,7 +1272,7 @@ pub struct ViewportPane {
     pub nav_gizmo: Option<Entity>,
     pub nav_gizmo_camera: Option<Entity>,
     pub rect: Option<egui::Rect>,
-    pub label: String,
+    pub name: PaneName,
     pub grid_layer: Option<usize>,
     pub viewport_layer: Option<usize>,
 }
@@ -1290,7 +1287,7 @@ impl ViewportPane {
         render_layer_alloc: &mut ResMut<RenderLayerAlloc>,
         eql_ctx: &eql::Context,
         viewport: &Viewport,
-        label: String,
+        name: PaneName,
     ) -> Self {
         let mut main_camera_layers = RenderLayers::default().with(GIZMO_RENDER_LAYER);
         let mut grid_layers = RenderLayers::none();
@@ -1438,7 +1435,7 @@ impl ViewportPane {
             nav_gizmo,
             nav_gizmo_camera,
             rect: None,
-            label,
+            name,
             grid_layer,
             viewport_layer,
         }
@@ -1448,15 +1445,15 @@ impl ViewportPane {
 #[derive(Clone)]
 pub struct GraphPane {
     pub id: Entity,
-    pub label: String,
+    pub name: PaneName,
     pub rect: Option<egui::Rect>,
 }
 
 impl GraphPane {
-    pub fn new(graph_id: Entity, label: String) -> Self {
+    pub fn new(graph_id: Entity, name: PaneName) -> Self {
         Self {
             id: graph_id,
-            label,
+            name,
             rect: None,
         }
     }
@@ -1514,12 +1511,12 @@ type ShareUpdate = (TileId, TileId, TileId, f32, f32);
 pub enum TreeAction {
     AddViewport(Option<TileId>),
     AddGraph(Option<TileId>, Box<Option<GraphBundle>>),
-    AddMonitor(Option<TileId>, String),
+    AddMonitor(Option<TileId>, PaneName),
     AddQueryTable(Option<TileId>),
     AddQueryPlot(Option<TileId>),
-    AddActionTile(Option<TileId>, String, String),
-    AddVideoStream(Option<TileId>, [u8; 2], String),
-    AddDashboard(Option<TileId>, Box<impeller2_wkt::Dashboard>, String),
+    AddActionTile(Option<TileId>, PaneName, String),
+    AddVideoStream(Option<TileId>, [u8; 2], PaneName),
+    AddDashboard(Option<TileId>, Box<impeller2_wkt::Dashboard>, PaneName),
     AddSchematicTree(Option<TileId>),
     AddDataOverview(Option<TileId>),
     AddSidebars,
@@ -2415,7 +2412,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             ui_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
-                    TreeAction::AddVideoStream(parent_tile_id, msg_id, label) => {
+                    TreeAction::AddVideoStream(parent_tile_id, msg_id, name) => {
                         if read_only {
                             continue;
                         }
@@ -2439,7 +2436,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             .id();
                         let pane = Pane::VideoStream(super::video_stream::VideoStreamPane {
                             entity,
-                            label: label.clone(),
+                            name: name.clone(),
                         });
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
@@ -2447,7 +2444,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             ui_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
-                    TreeAction::AddDashboard(parent_tile_id, dashboard, label) => {
+                    TreeAction::AddDashboard(parent_tile_id, dashboard, name) => {
                         if read_only {
                             continue;
                         }
@@ -2460,7 +2457,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             Ok(entity) => entity,
                             Err(_) => state_mut.commands.spawn(bevy::ui::Node::default()).id(),
                         };
-                        let pane = Pane::Dashboard(DashboardPane { entity, label });
+                        let pane = Pane::Dashboard(DashboardPane { entity, name });
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
@@ -2498,7 +2495,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         }
                     }
                     TreeAction::AddActionTile(parent_tile_id, button_name, lua_code) => {
-                        let label = button_name.clone();
+                        let name = button_name.clone();
                         let entity = state_mut
                             .commands
                             .spawn(super::actions::ActionTile {
@@ -2507,7 +2504,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 status: Default::default(),
                             })
                             .id();
-                        let pane = Pane::ActionTile(ActionTilePane { entity, label });
+                        let pane = Pane::ActionTile(ActionTilePane { entity, name });
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
@@ -2518,7 +2515,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         let entity = state_mut.commands.spawn(QueryTableData::default()).id();
                         let pane = Pane::QueryTable(QueryTablePane {
                             entity,
-                            label: "Query".to_string(),
+                            name: "Query".to_string(),
                         });
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
@@ -2559,7 +2556,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             .id();
                         let pane = Pane::SchematicTree(TreePane {
                             entity,
-                            label: "Tree".to_string(),
+                            name: "Tree".to_string(),
                         });
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)

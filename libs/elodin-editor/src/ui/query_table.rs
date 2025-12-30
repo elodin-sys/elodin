@@ -18,6 +18,7 @@ use impeller2_wkt::{
 use crate::{EqlContext, SelectedTimeRange};
 
 use super::{
+    PaneName,
     button::EButton,
     colors::{ColorExt, get_scheme},
     inspector::eql_autocomplete,
@@ -28,7 +29,7 @@ use super::{
 #[derive(Clone)]
 pub struct QueryTablePane {
     pub entity: Entity,
-    pub label: String,
+    pub name: PaneName,
 }
 
 #[derive(Component, Default)]

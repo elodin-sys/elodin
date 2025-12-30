@@ -5,18 +5,18 @@ use impeller2_bevy::ComponentValue;
 use impeller2_bevy::ComponentValueExt;
 use impeller2_bevy::{ComponentMetadataRegistry, EntityMap};
 
-use super::{colors::get_scheme, widgets::WidgetSystem};
+use super::{PaneName, colors::get_scheme, widgets::WidgetSystem};
 
 #[derive(Clone)]
 pub struct MonitorPane {
-    pub label: String,
+    pub name: PaneName,
     pub component_name: String,
 }
 
 impl MonitorPane {
-    pub fn new(label: String, component_name: String) -> Self {
+    pub fn new(name: PaneName, component_name: String) -> Self {
         Self {
-            label,
+            name,
             component_name,
         }
     }

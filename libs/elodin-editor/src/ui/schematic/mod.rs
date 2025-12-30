@@ -121,7 +121,7 @@ impl SchematicParam<'_, '_> {
                         show_grid,
                         show_arrows,
                         hdr: self.hdr_enabled.0,
-                        name: Some(viewport.label.clone()),
+                        name: Some(viewport.name.clone()),
                         pos: Some(viewport_data.pos.eql.clone()),
                         look_at: Some(viewport_data.look_at.eql.clone()),
                         local_arrows,
@@ -166,13 +166,13 @@ impl SchematicParam<'_, '_> {
 
                 Pane::Monitor(monitor) => Some(Panel::ComponentMonitor(ComponentMonitor {
                     component_name: monitor.component_name.clone(),
-                    name: Some(monitor.label.clone()),
+                    name: Some(monitor.name.clone()),
                 })),
 
                 Pane::QueryTable(query_table) => {
                     let query_table_data = self.query_tables.get(query_table.entity).ok()?;
                     let mut data = query_table_data.data.clone();
-                    data.name = Some(query_table.label.clone());
+                    data.name = Some(query_table.name.clone());
                     Some(Panel::QueryTable(data))
                 }
 
@@ -195,10 +195,10 @@ impl SchematicParam<'_, '_> {
 
                 // Not exported
                 Pane::VideoStream(_) => None,
-                Pane::DataOverview(pane) => Some(Panel::DataOverview(Some(pane.label.clone()))),
+                Pane::DataOverview(pane) => Some(Panel::DataOverview(Some(pane.name.clone()))),
 
                 // Structural panes
-                Pane::SchematicTree(pane) => Some(Panel::SchematicTree(Some(pane.label.clone()))),
+                Pane::SchematicTree(pane) => Some(Panel::SchematicTree(Some(pane.name.clone()))),
 
                 // Dashboard
                 Pane::Dashboard(dash) => {
