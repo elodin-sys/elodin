@@ -33,7 +33,7 @@ use winit::{
 
 use super::{
     SelectedObject, ViewportRect,
-    actions::ActionTileWidget,
+    actions::{ActionTile, ActionTileWidget},
     button::{EImageButton, ETileButton},
     colors::{self, get_scheme, with_opacity},
     command_palette::{CommandPaletteState, palette_items},
@@ -454,6 +454,7 @@ pub struct ActionTilePane {
 #[derive(Clone)]
 pub struct TreePane {
     pub entity: Entity,
+    pub label: String,
 }
 
 #[derive(Clone)]
@@ -696,8 +697,8 @@ impl TileState {
                             Pane::Dashboard(dashboard) => ("Dashboard", dashboard.label.as_str()),
                             Pane::Hierarchy => ("Hierarchy", "Hierarchy"),
                             Pane::Inspector => ("Inspector", "Inspector"),
-                            Pane::SchematicTree(_) => ("SchematicTree", "SchematicTree"),
-                            Pane::DataOverview(_) => ("DataOverview", "DataOverview"),
+                            Pane::SchematicTree(pane) => ("SchematicTree", pane.label.as_str()),
+                            Pane::DataOverview(pane) => ("DataOverview", pane.label.as_str()),
                         };
                         let _ = writeln!(out, "{}Pane::{} ({})", indent, kind, label);
                     }
@@ -1054,8 +1055,8 @@ impl Pane {
             }
             Pane::Hierarchy => "Entities".to_string(),
             Pane::Inspector => "Inspector".to_string(),
-            Pane::SchematicTree(_) => "Tree".to_string(),
-            Pane::DataOverview(_) => "Data Overview".to_string(),
+            Pane::SchematicTree(pane) => pane.label.to_string(),
+            Pane::DataOverview(pane) => pane.label.to_string(),
         }
     }
 
@@ -1436,6 +1437,7 @@ pub enum TreeAction {
     DeleteTab(TileId),
     SelectTile(TileId),
     RenameContainer(TileId, String),
+    RenamePane(TileId, String),
 }
 
 enum TabState {
@@ -1549,7 +1551,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             resp
         };
 
-        if !self.read_only && is_container && state.active && response.clicked() && !is_editing {
+        if !self.read_only && state.active && response.double_clicked() && !is_editing {
             ui.ctx()
                 .data_mut(|d| d.insert_temp(edit_buf_id, title_str.clone()));
             ui.ctx().data_mut(|d| d.insert_temp(edit_flag_id, true));
@@ -1570,7 +1572,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
             ui.painter().rect_filled(rect, 0.0, bg_color);
 
-            if !self.read_only && is_container && is_editing {
+            if !self.read_only && is_editing {
                 let label_rect =
                     egui::Align2::LEFT_CENTER.align_size_within_rect(galley.size(), text_rect);
                 let edit_rect = label_rect.expand(1.0);
@@ -1598,18 +1600,28 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                 let lost_focus = resp.lost_focus();
 
                 if enter_pressed || lost_focus {
-                    let new_title = buf.trim().to_owned();
+                    let trimmed = buf.trim();
+                    let new_title = if trimmed.is_empty() {
+                        title_str.clone()
+                    } else {
+                        trimmed.to_owned()
+                    };
 
                     ui.ctx().data_mut(|d| d.insert_temp(edit_flag_id, false));
                     ui.ctx()
                         .data_mut(|d| d.insert_temp(edit_buf_id, new_title.clone()));
-                    ui.ctx()
-                        .data_mut(|d| d.insert_temp(persist_id, new_title.clone()));
                     ui.memory_mut(|m| m.surrender_focus(resp.id));
 
                     if !self.read_only {
-                        self.tree_actions
-                            .push(TreeAction::RenameContainer(tile_id, new_title.clone()));
+                        if is_container {
+                            ui.ctx()
+                                .data_mut(|d| d.insert_temp(persist_id, new_title.clone()));
+                            self.tree_actions
+                                .push(TreeAction::RenameContainer(tile_id, new_title.clone()));
+                        } else {
+                            self.tree_actions
+                                .push(TreeAction::RenamePane(tile_id, new_title.clone()));
+                        }
                     }
 
                     galley = egui::WidgetText::from(new_title).into_galley(
@@ -2073,6 +2085,11 @@ pub struct TileLayout<'w, 's> {
     eql_ctx: Res<'w, EqlContext>,
     node_updater_params: NodeUpdaterParams<'w, 's>,
     tile_param: crate::ui::command_palette::palette_items::TileParam<'w, 's>,
+    graph_states: Query<'w, 's, &'static mut GraphState>,
+    query_plots: Query<'w, 's, &'static mut QueryPlotData>,
+    query_tables: Query<'w, 's, &'static mut QueryTableData>,
+    action_tiles: Query<'w, 's, &'static mut ActionTile>,
+    dashboards: Query<'w, 's, &'static mut Dashboard<Entity>>,
 }
 
 #[derive(Clone)]
@@ -2454,7 +2471,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             .commands
                             .spawn(super::schematic::tree::TreeWidgetState::default())
                             .id();
-                        let pane = Pane::SchematicTree(TreePane { entity });
+                        let pane = Pane::SchematicTree(TreePane {
+                            entity,
+                            label: "Tree".to_string(),
+                        });
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
@@ -2483,6 +2503,98 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             continue;
                         }
                         ui_state.set_container_title(tile_id, title);
+                    }
+                    TreeAction::RenamePane(tile_id, title) => {
+                        if read_only {
+                            continue;
+                        }
+                        let Some(tile) = ui_state.tree.tiles.get_mut(tile_id) else {
+                            continue;
+                        };
+                        let mut graph_id = None;
+                        let mut query_plot_id = None;
+                        let mut query_table_id = None;
+                        let mut action_tile_id = None;
+                        let mut dashboard_id = None;
+
+                        if let Tile::Pane(pane) = tile {
+                            match pane {
+                                Pane::Viewport(viewport) => {
+                                    viewport.label = title.clone();
+                                }
+                                Pane::Graph(graph) => {
+                                    graph.label = title.clone();
+                                    graph_id = Some(graph.id);
+                                }
+                                Pane::Monitor(monitor) => {
+                                    monitor.label = title.clone();
+                                }
+                                Pane::QueryTable(table) => {
+                                    table.label = title.clone();
+                                    query_table_id = Some(table.entity);
+                                }
+                                Pane::QueryPlot(plot) => {
+                                    query_plot_id = Some(plot.entity);
+                                }
+                                Pane::ActionTile(action) => {
+                                    action.label = title.clone();
+                                    action_tile_id = Some(action.entity);
+                                }
+                                Pane::VideoStream(video) => {
+                                    video.label = title.clone();
+                                }
+                                Pane::Dashboard(dashboard) => {
+                                    dashboard.label = title.clone();
+                                    dashboard_id = Some(dashboard.entity);
+                                }
+                                Pane::SchematicTree(tree) => {
+                                    tree.label = title.clone();
+                                }
+                                Pane::DataOverview(pane) => {
+                                    pane.label = title.clone();
+                                }
+                                Pane::Hierarchy | Pane::Inspector => {}
+                            }
+                        }
+
+                        if let Some(graph_id) = graph_id {
+                            if let Ok(mut graph_state) = state_mut.graph_states.get_mut(graph_id) {
+                                graph_state.label = title.clone();
+                            }
+                        }
+
+                        if let Some(query_plot_id) = query_plot_id {
+                            if let Ok(mut graph_state) =
+                                state_mut.graph_states.get_mut(query_plot_id)
+                            {
+                                graph_state.label = title.clone();
+                            }
+                            if let Ok(mut plot_data) = state_mut.query_plots.get_mut(query_plot_id) {
+                                plot_data.data.name = title.clone();
+                            }
+                        }
+
+                        if let Some(query_table_id) = query_table_id {
+                            if let Ok(mut table) = state_mut.query_tables.get_mut(query_table_id) {
+                                table.data.name = Some(title.clone());
+                            }
+                        }
+
+                        if let Some(action_tile_id) = action_tile_id {
+                            if let Ok(mut action_tile) =
+                                state_mut.action_tiles.get_mut(action_tile_id)
+                            {
+                                action_tile.button_name = title.clone();
+                            }
+                        }
+
+                        if let Some(dashboard_id) = dashboard_id {
+                            if let Ok(mut dashboard) =
+                                state_mut.dashboards.get_mut(dashboard_id)
+                            {
+                                dashboard.root.label = Some(title.clone());
+                            }
+                        }
                     }
                 }
             }

@@ -195,10 +195,10 @@ impl SchematicParam<'_, '_> {
 
                 // Not exported
                 Pane::VideoStream(_) => None,
-                Pane::DataOverview(_) => Some(Panel::DataOverview),
+                Pane::DataOverview(pane) => Some(Panel::DataOverview(Some(pane.label.clone()))),
 
                 // Structural panes
-                Pane::SchematicTree(_) => Some(Panel::SchematicTree),
+                Pane::SchematicTree(pane) => Some(Panel::SchematicTree(Some(pane.label.clone()))),
 
                 // Dashboard
                 Pane::Dashboard(dash) => {

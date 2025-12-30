@@ -54,8 +54,16 @@ fn serialize_panel<T>(panel: &Panel<T>) -> KdlNode {
         Panel::QueryPlot(query_plot) => serialize_query_plot(query_plot),
         Panel::Inspector => KdlNode::new("inspector"),
         Panel::Hierarchy => KdlNode::new("hierarchy"),
-        Panel::SchematicTree => KdlNode::new("schematic_tree"),
-        Panel::DataOverview => KdlNode::new("data_overview"),
+        Panel::SchematicTree(name) => {
+            let mut node = KdlNode::new("schematic_tree");
+            push_optional_name_prop(&mut node, name.as_deref());
+            node
+        }
+        Panel::DataOverview(name) => {
+            let mut node = KdlNode::new("data_overview");
+            push_optional_name_prop(&mut node, name.as_deref());
+            node
+        }
         Panel::Dashboard(dashboard) => serialize_dashboard(dashboard),
     }
 }

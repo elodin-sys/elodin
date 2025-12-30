@@ -98,8 +98,8 @@ pub enum Panel<T = ()> {
     Tabs(Vec<Panel<T>>),
     Inspector,
     Hierarchy,
-    SchematicTree,
-    DataOverview,
+    SchematicTree(Option<String>),
+    DataOverview(Option<String>),
     Dashboard(Box<Dashboard<T>>),
 }
 
@@ -120,8 +120,8 @@ impl<T> Panel<T> {
             Panel::Tabs(_) => "Tabs",
             Panel::Inspector => "Inspector",
             Panel::Hierarchy => "Hierarchy",
-            Panel::SchematicTree => "Tree",
-            Panel::DataOverview => "Data Overview",
+            Panel::SchematicTree(name) => name.as_deref().unwrap_or("Tree"),
+            Panel::DataOverview(name) => name.as_deref().unwrap_or("Data Overview"),
             Panel::Dashboard(d) => d.root.label.as_deref().unwrap_or("Dashboard"),
         }
     }
@@ -162,9 +162,9 @@ impl<T> Panel<T> {
             Panel::QueryTable(query_table) => Panel::QueryTable(query_table.clone()),
             Panel::QueryPlot(query_plot) => Panel::QueryPlot(query_plot.map_aux(f)),
             Panel::Hierarchy => Panel::Hierarchy,
-            Panel::SchematicTree => Panel::SchematicTree,
+            Panel::SchematicTree(name) => Panel::SchematicTree(name.clone()),
             Panel::Inspector => Panel::Inspector,
-            Panel::DataOverview => Panel::DataOverview,
+            Panel::DataOverview(name) => Panel::DataOverview(name.clone()),
             Panel::Viewport(v) => Panel::Viewport(v.map_aux(f)),
             Panel::Dashboard(d) => Panel::Dashboard(Box::new(d.map_aux(f))),
         }

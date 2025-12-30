@@ -210,8 +210,8 @@ fn parse_panel(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError
         "query_plot" => parse_query_plot(node, kdl_src),
         "inspector" => Ok(Panel::Inspector),
         "hierarchy" => Ok(Panel::Hierarchy),
-        "schematic_tree" => Ok(Panel::SchematicTree),
-        "data_overview" => Ok(Panel::DataOverview),
+        "schematic_tree" => Ok(Panel::SchematicTree(parse_name(node))),
+        "data_overview" => Ok(Panel::DataOverview(parse_name(node))),
         "dashboard" => parse_dashboard(node),
         _ => Err(KdlSchematicError::UnknownNode {
             node_type: node.name().to_string(),

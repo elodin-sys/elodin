@@ -687,13 +687,18 @@ impl LoadSchematicParams<'_, '_> {
                 tile_state.insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false)
             }
             Panel::Inspector | Panel::Hierarchy => None,
-            Panel::SchematicTree => {
+            Panel::SchematicTree(name) => {
                 let entity = self.commands.spawn(super::TreeWidgetState::default()).id();
-                let pane = TreePane { entity };
+                let label = name.clone().unwrap_or_else(|| "Tree".to_string());
+                let pane = TreePane { entity, label };
                 tile_state.insert_tile(Tile::Pane(Pane::SchematicTree(pane)), parent_id, false)
             }
-            Panel::DataOverview => {
-                let pane = Pane::DataOverview(DataOverviewPane::default());
+            Panel::DataOverview(name) => {
+                let mut pane = DataOverviewPane::default();
+                if let Some(name) = name.clone() {
+                    pane.label = name;
+                }
+                let pane = Pane::DataOverview(pane);
                 tile_state.insert_tile(Tile::Pane(pane), parent_id, false)
             }
             Panel::QueryPlot(plot) => {

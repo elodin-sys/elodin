@@ -140,8 +140,8 @@ fn panel(
         Panel::Tabs(_) => icons.container,
         Panel::Inspector => icons.viewport,
         Panel::Hierarchy => icons.viewport,
-        Panel::SchematicTree => icons.viewport,
-        Panel::DataOverview => icons.viewport,
+        Panel::SchematicTree(_) => icons.viewport,
+        Panel::DataOverview(_) => icons.viewport,
         Panel::Dashboard(_) => icons.viewport,
     };
     let children = p.children();

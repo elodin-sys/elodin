@@ -85,6 +85,7 @@ pub enum TimeRangeQueryState {
 /// Pane data for the DataOverview panel
 #[derive(Clone)]
 pub struct DataOverviewPane {
+    pub label: String,
     /// Cached screen rect for rendering
     pub rect: Option<egui::Rect>,
     /// Vertical scroll offset for component list
@@ -106,6 +107,7 @@ pub struct DataOverviewPane {
 impl Default for DataOverviewPane {
     fn default() -> Self {
         Self {
+            label: "Data Overview".to_string(),
             rect: None,
             scroll_offset: 0.0,
             zoom_factor: 1.0,
