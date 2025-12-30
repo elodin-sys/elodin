@@ -59,6 +59,16 @@ fn serialize_panel<T>(panel: &Panel<T>) -> KdlNode {
     }
 }
 
+fn push_name_prop(node: &mut KdlNode, name: &str) {
+    node.entries_mut().push(KdlEntry::new_prop("name", name));
+}
+
+fn push_optional_name_prop(node: &mut KdlNode, name: Option<&str>) {
+    if let Some(name) = name {
+        push_name_prop(node, name);
+    }
+}
+
 fn serialize_split<T>(split: &Split<T>, is_horizontal: bool) -> KdlNode {
     let node_name = if is_horizontal { "hsplit" } else { "vsplit" };
     let mut node = KdlNode::new(node_name);
@@ -67,10 +77,7 @@ fn serialize_split<T>(split: &Split<T>, is_horizontal: bool) -> KdlNode {
         node.entries_mut().push(KdlEntry::new_prop("active", true));
     }
 
-    if let Some(ref name) = split.name {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("name", name.clone()));
-    }
+    push_optional_name_prop(&mut node, split.name.as_deref());
 
     let mut children = KdlDocument::new();
 
@@ -93,10 +100,7 @@ fn serialize_split<T>(split: &Split<T>, is_horizontal: bool) -> KdlNode {
 fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
     let mut node = KdlNode::new("viewport");
 
-    if let Some(ref name) = viewport.name {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("name", name.clone()));
-    }
+    push_optional_name_prop(&mut node, viewport.name.as_deref());
 
     if viewport.fov != 45.0 {
         node.entries_mut()
@@ -201,10 +205,7 @@ fn serialize_graph<T>(graph: &Graph<T>) -> KdlNode {
     // Add the EQL query as the first unnamed entry
     node.entries_mut().push(KdlEntry::new(graph.eql.clone()));
 
-    if let Some(ref name) = graph.name {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("name", name.clone()));
-    }
+    push_optional_name_prop(&mut node, graph.name.as_deref());
 
     match graph.graph_type {
         GraphType::Line => {} // Default, don't serialize
@@ -242,10 +243,7 @@ fn serialize_graph<T>(graph: &Graph<T>) -> KdlNode {
 
 fn serialize_component_monitor(monitor: &ComponentMonitor) -> KdlNode {
     let mut node = KdlNode::new("component_monitor");
-    if let Some(name) = monitor.name.as_ref() {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("name", name.clone()));
-    }
+    push_optional_name_prop(&mut node, monitor.name.as_deref());
     node.entries_mut().push(KdlEntry::new_prop(
         "component_name",
         monitor.component_name.clone(),
@@ -256,8 +254,7 @@ fn serialize_component_monitor(monitor: &ComponentMonitor) -> KdlNode {
 fn serialize_action_pane(action_pane: &ActionPane) -> KdlNode {
     let mut node = KdlNode::new("action_pane");
 
-    node.entries_mut()
-        .push(KdlEntry::new_prop("name", action_pane.label.clone()));
+    push_name_prop(&mut node, &action_pane.label);
 
     node.entries_mut()
         .push(KdlEntry::new_prop("lua", action_pane.lua.clone()));
@@ -268,10 +265,7 @@ fn serialize_action_pane(action_pane: &ActionPane) -> KdlNode {
 fn serialize_query_table(query_table: &QueryTable) -> KdlNode {
     let mut node = KdlNode::new("query_table");
 
-    if let Some(name) = query_table.name.as_ref() {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("name", name.clone()));
-    }
+    push_optional_name_prop(&mut node, query_table.name.as_deref());
 
     // Add the query as the first unnamed entry
     if !query_table.query.is_empty() {
@@ -292,8 +286,7 @@ fn serialize_query_table(query_table: &QueryTable) -> KdlNode {
 fn serialize_query_plot<T>(query_plot: &QueryPlot<T>) -> KdlNode {
     let mut node = KdlNode::new("query_plot");
 
-    node.entries_mut()
-        .push(KdlEntry::new_prop("name", query_plot.label.clone()));
+    push_name_prop(&mut node, &query_plot.name);
 
     node.entries_mut()
         .push(KdlEntry::new_prop("query", query_plot.query.clone()));
@@ -449,10 +442,7 @@ fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
             .push(KdlEntry::new_prop("scale", arrow.scale));
     }
 
-    if let Some(name) = &arrow.name {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("name", name.clone()));
-    }
+    push_optional_name_prop(&mut node, arrow.name.as_deref());
 
     if arrow.body_frame {
         node.entries_mut()

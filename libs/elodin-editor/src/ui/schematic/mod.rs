@@ -180,7 +180,7 @@ impl SchematicParam<'_, '_> {
                     let query_plot = self.query_plots.get(plot.entity).ok()?;
                     let mut query_plot = query_plot.data.map_aux(|_| plot.entity);
                     if let Ok(graph_state) = self.graph_states.get(plot.entity) {
-                        query_plot.label = graph_state.label.clone();
+                        query_plot.name = graph_state.label.clone();
                     }
                     Some(Panel::QueryPlot(query_plot))
                 }

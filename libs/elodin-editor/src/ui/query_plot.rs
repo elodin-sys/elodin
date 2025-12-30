@@ -53,14 +53,14 @@ pub struct QueryPlotData {
     pub x_offset: f64,
     pub y_offset: f64,
     pub last_refresh: Option<Instant>,
-    pub earliest_timestamp: Option<impeller2::types::Timestamp>, // Store earliest timestamp for relative time conversion
+    pub earliest_timestamp: Option<impeller2::types::Timestamp>,
 }
 
 impl Default for QueryPlotData {
     fn default() -> Self {
         Self {
             data: QueryPlot {
-                label: "Query Plot".to_string(),
+                name: "Query Plot".to_string(),
                 query: Default::default(),
                 refresh_interval: Duration::from_millis(500),
                 auto_refresh: Default::default(),
@@ -98,9 +98,6 @@ impl QueryPlotData {
         let x_col = batch.column(0);
         let y_col = batch.column(1);
 
-        // Convert timestamp X column to seconds for proper time axis display
-        // Also track the earliest absolute timestamp for relative time conversion
-        // IMPORTANT: earliest_timestamp must be in microseconds (as expected by impeller2::types::Timestamp)
         let (x_values, earliest_abs_timestamp_micros): (Vec<f64>, Option<i64>) = match x_col
             .data_type()
         {
@@ -164,8 +161,6 @@ impl QueryPlotData {
             }
         };
 
-        // Store earliest timestamp if this is the first batch or if we found an earlier one
-        // earliest_abs_timestamp_micros is already converted to microseconds
         if let Some(earliest_micros) = earliest_abs_timestamp_micros
             && (self.earliest_timestamp.is_none()
                 || Some(impeller2::types::Timestamp(earliest_micros)) < self.earliest_timestamp)
@@ -173,7 +168,6 @@ impl QueryPlotData {
             self.earliest_timestamp = Some(impeller2::types::Timestamp(earliest_micros));
         }
 
-        // Filter out NaN and infinite values for offset calculation
         let finite_x_values: Vec<f64> = x_values
             .iter()
             .copied()
@@ -181,10 +175,7 @@ impl QueryPlotData {
             .collect();
 
         self.x_offset = finite_x_values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
-        // IMPORTANT: For query plots, we should NOT offset Y values as this would
-        // remove any intentional offset applied in the query (like -90 for angle of attack).
-        // Only offset X (time) values to start at 0.
-        self.y_offset = 0.0; // Don't auto-offset Y values for query plots
+        self.y_offset = 0.0;
 
         if !self.x_offset.is_finite() {
             self.x_offset = 0.0;
@@ -201,7 +192,6 @@ impl QueryPlotData {
             y_values: vec![],
         };
 
-        // Only add finite x and y pairs to avoid breaking rendering
         let mut y_iter = array_iter(y_col);
         let mut points: Vec<(f64, f64)> = Vec::new();
 
@@ -214,10 +204,6 @@ impl QueryPlotData {
             }
         }
 
-        // Skip initial points that have the same timestamp (initialization artifacts)
-        // These are typically default values before the simulation actually starts
-        // NOTE: This handles legitimate data quality issues, not timestamp normalization bugs.
-        // The timestamp normalization bug (now fixed) affected absolute timestamp storage
         // but not relative time calculations used for plotting.
         let skip_initial_points = if points.len() > 2 {
             // Find how many initial points share the same timestamp.
@@ -434,7 +420,7 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                 };
 
                 // Store values we need before borrowing plot
-                let query_label = plot.data.label.clone();
+                let query_label = plot.data.name.clone();
                 let query_color = plot.data.color.into_color32();
                 let offset_y = plot.offset().y;
                 let earliest_timestamp = plot

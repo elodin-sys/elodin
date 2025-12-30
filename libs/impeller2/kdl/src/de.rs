@@ -132,6 +132,21 @@ fn parse_theme(node: &KdlNode, _src: &str) -> Result<ThemeConfig, KdlSchematicEr
     Ok(ThemeConfig { mode, scheme })
 }
 
+fn parse_name(node: &KdlNode) -> Option<String> {
+    node.get("name")
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string())
+}
+
+fn require_name(node: &KdlNode, src: &str) -> Result<String, KdlSchematicError> {
+    parse_name(node).ok_or_else(|| KdlSchematicError::MissingProperty {
+        property: "name".to_string(),
+        node: node.name().to_string(),
+        src: src.to_string(),
+        span: node.span(),
+    })
+}
+
 fn parse_window_rect(node: &KdlNode, src: &str) -> Result<WindowRect, KdlSchematicError> {
     if node.entries().len() != 4 {
         return Err(KdlSchematicError::InvalidValue {
@@ -229,10 +244,7 @@ fn parse_split(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let name = node
-        .get("name")
-        .and_then(|v| v.as_string())
-        .map(|s| s.to_string());
+    let name = parse_name(node);
 
     let split = Split {
         panels,
@@ -256,10 +268,7 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let name = node
-        .get("name")
-        .and_then(|v| v.as_string())
-        .map(|s| s.to_string());
+    let name = parse_name(node);
     let show_grid = node
         .get("show_grid")
         .and_then(|v| v.as_bool())
@@ -327,10 +336,7 @@ fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
         })?
         .to_string();
 
-    let name = node
-        .get("name")
-        .and_then(|v| v.as_string())
-        .map(|s| s.to_string());
+    let name = parse_name(node);
 
     let graph_type = node
         .get("type")
@@ -373,10 +379,7 @@ fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
 }
 
 fn parse_component_monitor(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
-    let name = node
-        .get("name")
-        .and_then(|v| v.as_string())
-        .map(|s| s.to_string());
+    let name = parse_name(node);
     let component_name = node
         .get("component_name")
         .and_then(|v| v.as_string())
@@ -394,23 +397,7 @@ fn parse_component_monitor(node: &KdlNode, src: &str) -> Result<Panel, KdlSchema
 }
 
 fn parse_action_pane(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
-    let label = node
-        .get("name")
-        .and_then(|v| v.as_string())
-        .map(|s| s.to_string())
-        .or_else(|| {
-            node.entries()
-                .iter()
-                .find(|e| e.name().is_none())
-                .and_then(|e| e.value().as_string())
-                .map(|s| s.to_string())
-        })
-        .ok_or_else(|| KdlSchematicError::MissingProperty {
-            property: "name".to_string(),
-            node: "action_pane".to_string(),
-            src: src.to_string(),
-            span: node.span(),
-        })?;
+    let label = require_name(node, src)?;
 
     let lua = node
         .get("lua")
@@ -427,10 +414,7 @@ fn parse_action_pane(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicErr
 }
 
 fn parse_query_table(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
-    let name = node
-        .get("name")
-        .and_then(|v| v.as_string())
-        .map(|s| s.to_string());
+    let name = parse_name(node);
     let query = node
         .entries()
         .iter()
@@ -457,23 +441,7 @@ fn parse_query_table(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
 }
 
 fn parse_query_plot(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
-    let label = node
-        .get("name")
-        .and_then(|v| v.as_string())
-        .map(|s| s.to_string())
-        .or_else(|| {
-            node.entries()
-                .iter()
-                .find(|e| e.name().is_none())
-                .and_then(|e| e.value().as_string())
-                .map(|s| s.to_string())
-        })
-        .ok_or_else(|| KdlSchematicError::MissingProperty {
-            property: "name".to_string(),
-            node: "query_plot".to_string(),
-            src: src.to_string(),
-            span: node.span(),
-        })?;
+    let name = require_name(node, src)?;
 
     let query = node
         .get("query")
@@ -510,7 +478,7 @@ fn parse_query_plot(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicErro
         .unwrap_or(QueryType::EQL);
 
     Ok(Panel::QueryPlot(QueryPlot {
-        label,
+        name,
         query,
         refresh_interval,
         auto_refresh,
@@ -812,10 +780,7 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         }
     };
 
-    let name = node
-        .get("name")
-        .and_then(|v| v.as_string())
-        .map(|s| s.to_string());
+    let name = parse_name(node);
 
     let body_frame = node
         .get("body_frame")

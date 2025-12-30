@@ -115,7 +115,7 @@ impl<T> Panel<T> {
                 .unwrap_or(&monitor.component_name),
             Panel::ActionPane(action_pane) => action_pane.label.as_str(),
             Panel::QueryTable(query_table) => query_table.name.as_deref().unwrap_or("Query Table"),
-            Panel::QueryPlot(query_plot) => &query_plot.label,
+            Panel::QueryPlot(query_plot) => &query_plot.name,
             Panel::Tabs(_) => "Tabs",
             Panel::Inspector => "Inspector",
             Panel::Hierarchy => "Hierarchy",
@@ -709,7 +709,7 @@ pub struct ActionPane {
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 #[serde(bound = "T: Serialize + DeserializeOwned")]
 pub struct QueryPlot<T = ()> {
-    pub label: String,
+    pub name: String,
     pub query: String,
     pub refresh_interval: Duration,
     pub auto_refresh: bool,
@@ -721,7 +721,7 @@ pub struct QueryPlot<T = ()> {
 impl<T> QueryPlot<T> {
     pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> QueryPlot<U> {
         QueryPlot {
-            label: self.label.clone(),
+            name: self.name.clone(),
             query: self.query.clone(),
             refresh_interval: self.refresh_interval,
             auto_refresh: self.auto_refresh,

@@ -696,7 +696,7 @@ impl LoadSchematicParams<'_, '_> {
                 let graph_bundle = GraphBundle::new(
                     &mut self.render_layer_alloc,
                     BTreeMap::default(),
-                    plot.label.clone(),
+                    plot.name.clone(),
                 );
                 let auto_color = plot.color.into_color32() == colors::get_scheme().highlight;
                 let entity = self
@@ -704,7 +704,6 @@ impl LoadSchematicParams<'_, '_> {
                     .spawn(QueryPlotData {
                         data: plot.clone(),
                         auto_color,
-                        // Set last_refresh to None so the query executes immediately on first render
                         last_refresh: None,
                         ..Default::default()
                     })
