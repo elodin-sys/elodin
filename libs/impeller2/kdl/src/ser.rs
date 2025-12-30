@@ -263,7 +263,7 @@ fn serialize_component_monitor(monitor: &ComponentMonitor) -> KdlNode {
 fn serialize_action_pane(action_pane: &ActionPane) -> KdlNode {
     let mut node = KdlNode::new("action_pane");
 
-    push_name_prop(&mut node, &action_pane.label);
+    push_name_prop(&mut node, &action_pane.name);
 
     node.entries_mut()
         .push(KdlEntry::new_prop("lua", action_pane.lua.clone()));

@@ -113,7 +113,7 @@ impl<T> Panel<T> {
             Panel::ComponentMonitor(monitor) => {
                 monitor.name.as_deref().unwrap_or(&monitor.component_name)
             }
-            Panel::ActionPane(action_pane) => action_pane.label.as_str(),
+            Panel::ActionPane(action_pane) => action_pane.name.as_str(),
             Panel::QueryTable(query_table) => query_table.name.as_deref().unwrap_or("Query Table"),
             Panel::QueryPlot(query_plot) => &query_plot.name,
             Panel::Tabs(_) => "Tabs",
@@ -703,7 +703,7 @@ pub struct QueryTable {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct ActionPane {
-    pub label: String,
+    pub name: String,
     pub lua: String,
 }
 

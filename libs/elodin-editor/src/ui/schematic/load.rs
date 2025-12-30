@@ -675,14 +675,14 @@ impl LoadSchematicParams<'_, '_> {
                 let entity = self
                     .commands
                     .spawn(super::actions::ActionTile {
-                        button_name: action.label.clone(),
+                        button_name: action.name.clone(),
                         lua: action.lua.clone(),
                         status: Default::default(),
                     })
                     .id();
                 let pane = super::tiles::ActionTilePane {
                     entity,
-                    label: action.label.clone(),
+                    label: action.name.clone(),
                 };
                 tile_state.insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false)
             }

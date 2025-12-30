@@ -400,7 +400,7 @@ fn parse_component_monitor(node: &KdlNode, src: &str) -> Result<Panel, KdlSchema
 }
 
 fn parse_action_pane(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
-    let label = require_name(node, src)?;
+    let name = require_name(node, src)?;
 
     let lua = node
         .get("lua")
@@ -413,7 +413,7 @@ fn parse_action_pane(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicErr
         })?
         .to_string();
 
-    Ok(Panel::ActionPane(ActionPane { label, lua }))
+    Ok(Panel::ActionPane(ActionPane { name, lua }))
 }
 
 fn parse_query_table(node: &KdlNode) -> Result<Panel, KdlSchematicError> {

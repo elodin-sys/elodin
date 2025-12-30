@@ -188,7 +188,7 @@ impl SchematicParam<'_, '_> {
                 Pane::ActionTile(action) => {
                     let action_tile = self.action_tiles.get(action.entity).ok()?;
                     Some(Panel::ActionPane(ActionPane {
-                        label: action_tile.button_name.clone(),
+                        name: action_tile.button_name.clone(),
                         lua: action_tile.lua.clone(),
                     }))
                 }
