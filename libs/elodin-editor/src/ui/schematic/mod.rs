@@ -66,6 +66,35 @@ pub struct SchematicParam<'w, 's> {
 }
 
 impl SchematicParam<'_, '_> {
+    fn export_pane_name(&self, pane: &Pane) -> Option<String> {
+        match pane {
+            Pane::Viewport(viewport) => Some(viewport.name.clone()),
+            Pane::Graph(graph) => self
+                .graph_states
+                .get(graph.id)
+                .ok()
+                .map(|state| state.label.clone()),
+            Pane::Monitor(monitor) => Some(monitor.name.clone()),
+            Pane::QueryTable(table) => Some(table.name.clone()),
+            Pane::QueryPlot(plot) => self
+                .graph_states
+                .get(plot.entity)
+                .ok()
+                .map(|state| state.label.clone())
+                .or_else(|| {
+                    self.query_plots
+                        .get(plot.entity)
+                        .ok()
+                        .map(|data| data.data.name.clone())
+                }),
+            Pane::ActionTile(action) => Some(action.name.clone()),
+            Pane::Dashboard(dashboard) => Some(dashboard.name.clone()),
+            Pane::SchematicTree(pane) => Some(pane.name.clone()),
+            Pane::DataOverview(pane) => Some(pane.name.clone()),
+            Pane::VideoStream(_) | Pane::Hierarchy | Pane::Inspector => None,
+        }
+    }
+
     pub fn get_panel(&self, tile_id: TileId) -> Option<Panel<Entity>> {
         self.windows_state
             .get(*self.primary_window)
@@ -84,129 +113,135 @@ impl SchematicParam<'_, '_> {
         let tile = tiles.get(tile_id)?;
 
         match tile {
-            Tile::Pane(pane) => match pane {
-                // ---- Viewport ----
-                Pane::Viewport(viewport) => {
-                    let cam_entity = viewport.camera?;
-                    let viewport_data = self.viewports.get(cam_entity).ok()?;
-                    let mut show_grid = false;
-                    if let Ok(grid_handle) = self.camera_grids.get(cam_entity)
-                        && let Ok(visibility) = self.grid_visibility.get(grid_handle.grid)
-                    {
-                        show_grid = matches!(*visibility, Visibility::Visible);
-                    }
-
-                    let show_arrows = self
-                        .viewport_configs
-                        .get(cam_entity)
-                        .map(|config| config.show_arrows)
-                        .unwrap_or(true);
-
-                    let local_arrows: Vec<VectorArrow3d> = self
-                        .vector_arrows
-                        .iter()
-                        .filter(|(_, _, viewport_arrow)| {
-                            if let Some(viewport_arrow) = viewport_arrow {
-                                viewport_arrow.camera == cam_entity
-                            } else {
-                                false
-                            }
-                        })
-                        .map(|(_, arrow, _)| arrow.clone())
-                        .collect();
-
-                    Some(Panel::Viewport(Viewport {
-                        fov: 45.0,
-                        active: false,
-                        show_grid,
-                        show_arrows,
-                        hdr: self.hdr_enabled.0,
-                        name: Some(viewport.name.clone()),
-                        pos: Some(viewport_data.pos.eql.clone()),
-                        look_at: Some(viewport_data.look_at.eql.clone()),
-                        local_arrows,
-                        aux: cam_entity,
-                    }))
-                }
-
-                // ---- Graph ----
-                Pane::Graph(graph) => {
-                    let graph_state = self.graph_states.get(graph.id).ok()?;
-                    let mut eql = String::new();
-                    let mut colors: Vec<impeller2_wkt::Color> = vec![];
-                    let mut parts: Vec<String> = Vec::new();
-
-                    for (component_path, component_values) in &graph_state.components {
-                        for (index, (enabled, color)) in component_values.iter().enumerate() {
-                            if !*enabled {
-                                continue;
-                            }
-                            parts.push(component_expr(component_path, index, &self.metadata));
-                            colors.push(impeller2_wkt::Color::from_color32(*color));
+            Tile::Pane(pane) => {
+                let pane_name = self.export_pane_name(pane);
+                match pane {
+                    // ---- Viewport ----
+                    Pane::Viewport(viewport) => {
+                        let cam_entity = viewport.camera?;
+                        let viewport_data = self.viewports.get(cam_entity).ok()?;
+                        let mut show_grid = false;
+                        if let Ok(grid_handle) = self.camera_grids.get(cam_entity)
+                            && let Ok(visibility) = self.grid_visibility.get(grid_handle.grid)
+                        {
+                            show_grid = matches!(*visibility, Visibility::Visible);
                         }
+
+                        let show_arrows = self
+                            .viewport_configs
+                            .get(cam_entity)
+                            .map(|config| config.show_arrows)
+                            .unwrap_or(true);
+
+                        let local_arrows: Vec<VectorArrow3d> = self
+                            .vector_arrows
+                            .iter()
+                            .filter(|(_, _, viewport_arrow)| {
+                                if let Some(viewport_arrow) = viewport_arrow {
+                                    viewport_arrow.camera == cam_entity
+                                } else {
+                                    false
+                                }
+                            })
+                            .map(|(_, arrow, _)| arrow.clone())
+                            .collect();
+
+                        Some(Panel::Viewport(Viewport {
+                            fov: 45.0,
+                            active: false,
+                            show_grid,
+                            show_arrows,
+                            hdr: self.hdr_enabled.0,
+                            name: pane_name,
+                            pos: Some(viewport_data.pos.eql.clone()),
+                            look_at: Some(viewport_data.look_at.eql.clone()),
+                            local_arrows,
+                            aux: cam_entity,
+                        }))
                     }
 
-                    if !parts.is_empty() {
-                        eql = parts.join(", ");
-                    } else if !graph_state.label.is_empty() {
-                        eql = graph_state.label.clone();
+                    // ---- Graph ----
+                    Pane::Graph(graph) => {
+                        let graph_state = self.graph_states.get(graph.id).ok()?;
+                        let mut eql = String::new();
+                        let mut colors: Vec<impeller2_wkt::Color> = vec![];
+                        let mut parts: Vec<String> = Vec::new();
+
+                        for (component_path, component_values) in &graph_state.components {
+                            for (index, (enabled, color)) in component_values.iter().enumerate() {
+                                if !*enabled {
+                                    continue;
+                                }
+                                parts.push(component_expr(component_path, index, &self.metadata));
+                                colors.push(impeller2_wkt::Color::from_color32(*color));
+                            }
+                        }
+
+                        if !parts.is_empty() {
+                            eql = parts.join(", ");
+                        } else if !graph_state.label.is_empty() {
+                            eql = graph_state.label.clone();
+                        }
+
+                        Some(Panel::Graph(impeller2_wkt::Graph {
+                            eql,
+                            name: pane_name,
+                            graph_type: graph_state.graph_type,
+                            locked: graph_state.locked,
+                            auto_y_range: graph_state.auto_y_range,
+                            y_range: graph_state.y_range.clone(),
+                            aux: graph.id,
+                            colors,
+                        }))
                     }
 
-                    Some(Panel::Graph(impeller2_wkt::Graph {
-                        eql,
-                        name: Some(graph_state.label.clone()),
-                        graph_type: graph_state.graph_type,
-                        locked: graph_state.locked,
-                        auto_y_range: graph_state.auto_y_range,
-                        y_range: graph_state.y_range.clone(),
-                        aux: graph.id,
-                        colors,
-                    }))
-                }
+                    Pane::Monitor(monitor) => Some(Panel::ComponentMonitor(ComponentMonitor {
+                        component_name: monitor.component_name.clone(),
+                        name: pane_name,
+                    })),
 
-                Pane::Monitor(monitor) => Some(Panel::ComponentMonitor(ComponentMonitor {
-                    component_name: monitor.component_name.clone(),
-                    name: Some(monitor.name.clone()),
-                })),
-
-                Pane::QueryTable(query_table) => {
-                    let query_table_data = self.query_tables.get(query_table.entity).ok()?;
-                    let mut data = query_table_data.data.clone();
-                    data.name = Some(query_table.name.clone());
-                    Some(Panel::QueryTable(data))
-                }
-
-                Pane::QueryPlot(plot) => {
-                    let query_plot = self.query_plots.get(plot.entity).ok()?;
-                    let mut query_plot = query_plot.data.map_aux(|_| plot.entity);
-                    if let Ok(graph_state) = self.graph_states.get(plot.entity) {
-                        query_plot.name = graph_state.label.clone();
+                    Pane::QueryTable(query_table) => {
+                        let query_table_data = self.query_tables.get(query_table.entity).ok()?;
+                        let mut data = query_table_data.data.clone();
+                        data.name = pane_name;
+                        Some(Panel::QueryTable(data))
                     }
-                    Some(Panel::QueryPlot(query_plot))
+
+                    Pane::QueryPlot(plot) => {
+                        let query_plot = self.query_plots.get(plot.entity).ok()?;
+                        let mut query_plot = query_plot.data.map_aux(|_| plot.entity);
+                        if let Some(name) = pane_name {
+                            query_plot.name = name;
+                        }
+                        Some(Panel::QueryPlot(query_plot))
+                    }
+
+                    Pane::ActionTile(action) => {
+                        let action_tile = self.action_tiles.get(action.entity).ok()?;
+                        Some(Panel::ActionPane(ActionPane {
+                            name: pane_name.unwrap_or_else(|| action_tile.button_name.clone()),
+                            lua: action_tile.lua.clone(),
+                        }))
+                    }
+
+                    // Not exported
+                    Pane::VideoStream(_) => None,
+                    Pane::DataOverview(_) => Some(Panel::DataOverview(pane_name)),
+
+                    // Structural panes
+                    Pane::SchematicTree(_) => Some(Panel::SchematicTree(pane_name)),
+
+                    // Dashboard
+                    Pane::Dashboard(dash) => {
+                        let mut dashboard = self.dashboards.get(dash.entity).ok()?.clone();
+                        if let Some(name) = pane_name {
+                            dashboard.root.name = Some(name);
+                        }
+                        Some(Panel::Dashboard(Box::new(dashboard)))
+                    }
+                    _ => None,
                 }
-
-                Pane::ActionTile(action) => {
-                    let action_tile = self.action_tiles.get(action.entity).ok()?;
-                    Some(Panel::ActionPane(ActionPane {
-                        name: action_tile.button_name.clone(),
-                        lua: action_tile.lua.clone(),
-                    }))
-                }
-
-                // Not exported
-                Pane::VideoStream(_) => None,
-                Pane::DataOverview(pane) => Some(Panel::DataOverview(Some(pane.name.clone()))),
-
-                // Structural panes
-                Pane::SchematicTree(pane) => Some(Panel::SchematicTree(Some(pane.name.clone()))),
-
-                // Dashboard
-                Pane::Dashboard(dash) => {
-                    let dashboard = self.dashboards.get(dash.entity).ok()?;
-                    Some(Panel::Dashboard(Box::new(dashboard.clone())))
-                }
-                _ => None,
-            },
+            }
 
             // ---- Containers ----
             Tile::Container(container) => match container {

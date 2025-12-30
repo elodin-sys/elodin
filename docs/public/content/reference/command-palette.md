@@ -27,7 +27,7 @@ order = 8
 - `Create Monitor`: pick a component and create a component monitor pane.
 - `Create Query Table`: add an empty query table pane.
 - `Create Query Plot`: add an empty query plot pane.
-- `Create Action`: prompt for a label, then choose a `send_msg` preset or enter a custom Lua
+- `Create Action`: prompt for a name, then choose a `send_msg` preset or enter a custom Lua
   command to create an action pane.
 - `Create Video Stream`: prompt for the message name, then create a video stream pane.
 - `Create Schematic Tree`: add a schematic tree pane.
