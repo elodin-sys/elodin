@@ -1044,12 +1044,7 @@ impl Pane {
             Pane::VideoStream(video_stream) => video_stream.label.to_string(),
             Pane::Dashboard(dashboard) => {
                 if let Ok(dash) = dashboards.get(dashboard.entity) {
-                    return dash
-                        .root
-                        .label
-                        .as_deref()
-                        .unwrap_or("Dashboard")
-                        .to_string();
+                    return dash.root.name.as_deref().unwrap_or("Dashboard").to_string();
                 }
                 "Dashboard".to_string()
             }
@@ -2418,10 +2413,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 status: Default::default(),
                             })
                             .id();
-                        let pane = Pane::ActionTile(ActionTilePane {
-                            entity,
-                            label,
-                        });
+                        let pane = Pane::ActionTile(ActionTilePane { entity, label });
                         if let Some(tile_id) =
                             ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
@@ -2557,10 +2549,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             }
                         }
 
-                        if let Some(graph_id) = graph_id {
-                            if let Ok(mut graph_state) = state_mut.graph_states.get_mut(graph_id) {
-                                graph_state.label = title.clone();
-                            }
+                        if let Some(graph_id) = graph_id
+                            && let Ok(mut graph_state) = state_mut.graph_states.get_mut(graph_id)
+                        {
+                            graph_state.label = title.clone();
                         }
 
                         if let Some(query_plot_id) = query_plot_id {
@@ -2569,31 +2561,29 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             {
                                 graph_state.label = title.clone();
                             }
-                            if let Ok(mut plot_data) = state_mut.query_plots.get_mut(query_plot_id) {
+                            if let Ok(mut plot_data) = state_mut.query_plots.get_mut(query_plot_id)
+                            {
                                 plot_data.data.name = title.clone();
                             }
                         }
 
-                        if let Some(query_table_id) = query_table_id {
-                            if let Ok(mut table) = state_mut.query_tables.get_mut(query_table_id) {
-                                table.data.name = Some(title.clone());
-                            }
+                        if let Some(query_table_id) = query_table_id
+                            && let Ok(mut table) = state_mut.query_tables.get_mut(query_table_id)
+                        {
+                            table.data.name = Some(title.clone());
                         }
 
-                        if let Some(action_tile_id) = action_tile_id {
-                            if let Ok(mut action_tile) =
+                        if let Some(action_tile_id) = action_tile_id
+                            && let Ok(mut action_tile) =
                                 state_mut.action_tiles.get_mut(action_tile_id)
-                            {
-                                action_tile.button_name = title.clone();
-                            }
+                        {
+                            action_tile.button_name = title.clone();
                         }
 
-                        if let Some(dashboard_id) = dashboard_id {
-                            if let Ok(mut dashboard) =
-                                state_mut.dashboards.get_mut(dashboard_id)
-                            {
-                                dashboard.root.name = Some(title.clone());
-                            }
+                        if let Some(dashboard_id) = dashboard_id
+                            && let Ok(mut dashboard) = state_mut.dashboards.get_mut(dashboard_id)
+                        {
+                            dashboard.root.name = Some(title.clone());
                         }
                     }
                 }
