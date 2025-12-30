@@ -453,7 +453,7 @@ pub fn spawn_node<T>(
     }
     let node = node.id();
     let node = DashboardNode {
-        label: source.label.clone(),
+        name: source.name.clone(),
         display: source.display,
         box_sizing: source.box_sizing,
         position_type: source.position_type,

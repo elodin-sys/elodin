@@ -592,9 +592,9 @@ fn serialize_dashboard_node<T>(dashboard_node: &DashboardNode<T>) -> KdlNode {
 }
 
 fn serialize_dashboard_node_properties<T>(node: &mut KdlNode, dashboard_node: &DashboardNode<T>) {
-    if let Some(label) = dashboard_node.label.as_ref() {
+    if let Some(name) = dashboard_node.name.as_ref() {
         node.entries_mut()
-            .push(KdlEntry::new_prop("label", label.as_str()));
+            .push(KdlEntry::new_prop("name", name.as_str()));
     }
 
     if !matches!(dashboard_node.display, Display::Flex) {
@@ -1305,7 +1305,7 @@ object_3d a.world_pos {
         let mut schematic = Schematic::default();
         let dashboard = Dashboard {
             root: DashboardNode {
-                label: Some("Styled Dashboard".to_string()),
+                name: Some("Styled Dashboard".to_string()),
                 display: Display::Flex,
                 flex_direction: FlexDirection::Column,
                 text: Some("Hello World".to_string()),
@@ -1333,7 +1333,7 @@ object_3d a.world_pos {
 
         assert_eq!(parsed.elems.len(), 1);
         if let SchematicElem::Panel(Panel::Dashboard(dashboard)) = &parsed.elems[0] {
-            assert_eq!(dashboard.root.label, Some("Styled Dashboard".to_string()));
+            assert_eq!(dashboard.root.name, Some("Styled Dashboard".to_string()));
             assert_eq!(dashboard.root.font_size, 24.0);
             assert_color_close(dashboard.root.text_color, Color::TURQUOISE);
             assert_eq!(dashboard.root.text, Some("Hello World".to_string()));

@@ -726,7 +726,12 @@ impl LoadSchematicParams<'_, '_> {
                 tile_state.insert_tile(Tile::Pane(pane), parent_id, false)
             }
             Panel::Dashboard(dashboard) => {
-                let Ok(dashboard) = spawn_dashboard(
+                let label = dashboard
+                    .root
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "Dashboard".to_string());
+                let Ok(dashboard_entity) = spawn_dashboard(
                     dashboard,
                     &self.eql.0,
                     &mut self.commands,
@@ -739,8 +744,8 @@ impl LoadSchematicParams<'_, '_> {
                 };
                 tile_state.insert_tile(
                     Tile::Pane(Pane::Dashboard(DashboardPane {
-                        entity: dashboard,
-                        label: "dashboard".to_string(),
+                        entity: dashboard_entity,
+                        label,
                     })),
                     parent_id,
                     false,

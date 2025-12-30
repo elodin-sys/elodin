@@ -2592,7 +2592,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             if let Ok(mut dashboard) =
                                 state_mut.dashboards.get_mut(dashboard_id)
                             {
-                                dashboard.root.label = Some(title.clone());
+                                dashboard.root.name = Some(title.clone());
                             }
                         }
                     }

@@ -122,7 +122,7 @@ impl<T> Panel<T> {
             Panel::Hierarchy => "Hierarchy",
             Panel::SchematicTree(name) => name.as_deref().unwrap_or("Tree"),
             Panel::DataOverview(name) => name.as_deref().unwrap_or("Data Overview"),
-            Panel::Dashboard(d) => d.root.label.as_deref().unwrap_or("Dashboard"),
+            Panel::Dashboard(d) => d.root.name.as_deref().unwrap_or("Dashboard"),
         }
     }
 
@@ -761,7 +761,7 @@ impl<T> Dashboard<T> {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct DashboardNode<T> {
-    pub label: Option<String>,
+    pub name: Option<String>,
     pub display: Display,
     pub box_sizing: BoxSizing,
     pub position_type: PositionType,
@@ -805,7 +805,7 @@ pub struct DashboardNode<T> {
 impl<T> DashboardNode<T> {
     pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> DashboardNode<U> {
         DashboardNode {
-            label: self.label.clone(),
+            name: self.name.clone(),
             display: self.display,
             box_sizing: self.box_sizing,
             position_type: self.position_type,

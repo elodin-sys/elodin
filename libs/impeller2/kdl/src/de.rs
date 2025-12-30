@@ -1236,10 +1236,7 @@ fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode<()>, KdlSchemati
         .map(|f| f as f32)
         .unwrap_or(16.0);
 
-    let label = node
-        .get("label")
-        .and_then(|v| v.as_string())
-        .map(|s| s.to_string());
+    let name = parse_name(node);
 
     let mut margin = UiRect::default();
     let mut padding = UiRect::default();
@@ -1274,7 +1271,7 @@ fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode<()>, KdlSchemati
     }
 
     Ok(DashboardNode {
-        label,
+        name,
         display,
         box_sizing,
         position_type,
@@ -1853,7 +1850,7 @@ object_3d "a.world_pos" {
     #[test]
     fn test_parse_dashboard_with_font_and_color() {
         let kdl = r#"
-dashboard label="Styled Dashboard" {
+dashboard name="Styled Dashboard" {
     node display="flex" flex_direction="column" text="Hello World" font_size=24.0  {
         text_color color="blue"
         node width="100px" height="50px" text="Child Text" font_size=12.0 {
@@ -1866,7 +1863,7 @@ dashboard label="Styled Dashboard" {
 
         assert_eq!(schematic.elems.len(), 1);
         if let SchematicElem::Panel(Panel::Dashboard(dashboard)) = &schematic.elems[0] {
-            assert_eq!(dashboard.root.label, Some("Styled Dashboard".to_string()));
+            assert_eq!(dashboard.root.name, Some("Styled Dashboard".to_string()));
             assert_eq!(dashboard.root.children.len(), 1);
 
             let node = &dashboard.root.children[0];
@@ -1888,7 +1885,7 @@ dashboard label="Styled Dashboard" {
     #[test]
     fn test_parse_dashboard() {
         let kdl = r#"
-dashboard label="Test Dashboard" {
+dashboard name="Test Dashboard" {
     node display="flex" flex_direction="column" {
         text "Hello World"
         node width="100px" height="50px" {
@@ -1901,7 +1898,7 @@ dashboard label="Test Dashboard" {
 
         assert_eq!(schematic.elems.len(), 1);
         if let SchematicElem::Panel(Panel::Dashboard(dashboard)) = &schematic.elems[0] {
-            assert_eq!(dashboard.root.label, Some("Test Dashboard".to_string()));
+            assert_eq!(dashboard.root.name, Some("Test Dashboard".to_string()));
             assert_eq!(dashboard.root.children.len(), 1);
 
             let node = &dashboard.root.children[0];

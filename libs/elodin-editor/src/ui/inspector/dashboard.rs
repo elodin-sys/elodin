@@ -69,7 +69,7 @@ impl WidgetSystem for InspectorDashboardNode<'_, '_> {
         label::editable_label_with_buttons(
             ui,
             [],
-            node.label.get_or_insert_with(|| {
+            node.name.get_or_insert_with(|| {
                 if path.path.is_empty() {
                     "Dashboard".to_string()
                 } else {
