@@ -367,11 +367,12 @@ pub fn tiles_to_schematic(
             file_name = Some(format!("{unique_stem}.kdl"));
 
             let mut window_schematic = Schematic::default();
-            window_schematic
-                .elems
-                .extend(param.root_panels_from_state(&state.tile_state).into_iter().map(
-                    SchematicElem::Panel,
-                ));
+            window_schematic.elems.extend(
+                param
+                    .root_panels_from_state(&state.tile_state)
+                    .into_iter()
+                    .map(SchematicElem::Panel),
+            );
             if let Some(file_name) = &file_name {
                 secondary.0.push(SecondarySchematic {
                     file_name: file_name.clone(),

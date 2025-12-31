@@ -385,7 +385,9 @@ impl LoadSchematicParams<'_, '_> {
                             let panel_count = sec_schematic
                                 .elems
                                 .iter()
-                                .filter(|elem| matches!(elem, impeller2_wkt::SchematicElem::Panel(_)))
+                                .filter(|elem| {
+                                    matches!(elem, impeller2_wkt::SchematicElem::Panel(_))
+                                })
                                 .count();
                             let tabs_parent = if panel_count > 1 {
                                 tile_state.tree.root()
