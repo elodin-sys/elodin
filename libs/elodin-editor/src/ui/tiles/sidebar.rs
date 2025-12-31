@@ -207,6 +207,34 @@ pub fn collect_sidebar_gutter_updates(
                 pair_sum * MIN_SIDEBAR_FRACTION
             };
 
+            let mut sidebar_masked = self.mask_state.masked(sidebar_kind);
+            if sidebar_masked {
+                let collapsed_px = gutter_draw_width;
+                let collapsed_share = if share_per_px > 0.0 {
+                    collapsed_px * share_per_px
+                } else {
+                    pair_sum * 0.01
+                };
+                let (target_left, target_right) = self.compute_sidebar_shares(
+                    pair_sum,
+                    min_other_share,
+                    collapsed_share,
+                    collapsed_share,
+                    sidebar_on_left,
+                );
+                if (share_left - target_left).abs() > 0.0001
+                    || (share_right - target_right).abs() > 0.0001
+                {
+                    self.apply_shares(
+                        pair.container_id,
+                        pair.left_id,
+                        pair.right_id,
+                        target_left,
+                        target_right,
+                    );
+                }
+            }
+
             let gap = pair.right_rect.min.x - pair.left_rect.max.x;
             let mut center_x = (pair.left_rect.max.x + pair.right_rect.min.x) * 0.5;
             if gap < gutter_draw_width {
@@ -261,8 +289,6 @@ pub fn collect_sidebar_gutter_updates(
                 self.ui
                     .output_mut(|o| o.cursor_icon = egui::CursorIcon::PointingHand);
             }
-
-            let mut sidebar_masked = self.mask_state.masked(sidebar_kind);
 
             let click_inside_gutter = response.clicked_by(egui::PointerButton::Primary)
                 && self
