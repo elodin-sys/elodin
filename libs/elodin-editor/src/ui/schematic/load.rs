@@ -259,10 +259,21 @@ impl LoadSchematicParams<'_, '_> {
         let theme_mode_str = theme_mode.as_deref();
         let mut main_window_descriptor = None;
 
+        let panel_count = schematic
+            .elems
+            .iter()
+            .filter(|elem| matches!(elem, impeller2_wkt::SchematicElem::Panel(_)))
+            .count();
+        let tabs_parent = if panel_count > 1 {
+            main_state.tree.root()
+        } else {
+            None
+        };
+
         for elem in &schematic.elems {
             match elem {
                 impeller2_wkt::SchematicElem::Panel(p) => {
-                    self.spawn_panel(&mut main_state, p, None, PanelContext::Main);
+                    self.spawn_panel(&mut main_state, p, tabs_parent, PanelContext::Main);
                 }
                 impeller2_wkt::SchematicElem::Object3d(object_3d) => {
                     self.spawn_object_3d(object_3d.clone());
@@ -371,12 +382,23 @@ impl LoadSchematicParams<'_, '_> {
                             let id = WindowId::default();
                             let mut tile_state =
                                 TileState::new(Id::new(("secondary_tab_tree", id.0)));
+                            let panel_count = sec_schematic
+                                .elems
+                                .iter()
+                                .filter(|elem| matches!(elem, impeller2_wkt::SchematicElem::Panel(_)))
+                                .count();
+                            let tabs_parent = if panel_count > 1 {
+                                tile_state.tree.root()
+                            } else {
+                                None
+                            };
+
                             for elem in &sec_schematic.elems {
                                 if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
                                     self.spawn_panel(
                                         &mut tile_state,
                                         panel,
-                                        None,
+                                        tabs_parent,
                                         PanelContext::Secondary(id),
                                     );
                                 }

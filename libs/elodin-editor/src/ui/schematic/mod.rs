@@ -95,6 +95,18 @@ impl SchematicParam<'_, '_> {
         }
     }
 
+    fn root_panels_from_state(&self, state: &tiles::TileState) -> Vec<Panel<Entity>> {
+        let Some(root_id) = state.tree.root() else {
+            return Vec::new();
+        };
+
+        match self.get_panel_from_state(state, root_id) {
+            Some(Panel::Tabs(tabs)) => tabs,
+            Some(panel) => vec![panel],
+            None => Vec::new(),
+        }
+    }
+
     pub fn get_panel(&self, tile_id: TileId) -> Option<Panel<Entity>> {
         self.windows_state
             .get(*self.primary_window)
@@ -312,15 +324,15 @@ pub fn tiles_to_schematic(
 ) {
     schematic.elems.clear();
 
-    if let Some(tile_id) = param
+    if let Some(root_panels) = param
         .windows_state
         .get(*param.primary_window)
         .ok()
-        .and_then(|(window_state, _)| window_state.tile_state.tree.root())
+        .map(|(window_state, _)| param.root_panels_from_state(&window_state.tile_state))
     {
         schematic
             .elems
-            .extend(param.get_panel(tile_id).map(SchematicElem::Panel))
+            .extend(root_panels.into_iter().map(SchematicElem::Panel))
     }
     schematic.elems.extend(
         param
@@ -355,11 +367,11 @@ pub fn tiles_to_schematic(
             file_name = Some(format!("{unique_stem}.kdl"));
 
             let mut window_schematic = Schematic::default();
-            if let Some(root_id) = state.tile_state.tree.root()
-                && let Some(panel) = param.get_panel_from_state(&state.tile_state, root_id)
-            {
-                window_schematic.elems.push(SchematicElem::Panel(panel));
-            }
+            window_schematic
+                .elems
+                .extend(param.root_panels_from_state(&state.tile_state).into_iter().map(
+                    SchematicElem::Panel,
+                ));
             if let Some(file_name) = &file_name {
                 secondary.0.push(SecondarySchematic {
                     file_name: file_name.clone(),
