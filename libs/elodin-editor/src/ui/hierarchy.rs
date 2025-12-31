@@ -1,10 +1,11 @@
 use crate::EqlContext;
+use crate::ui::tiles::WindowState;
 use crate::ui::{EntityFilter, EntityPair, SelectedObject, colors::get_scheme};
 use bevy::ecs::{
-    system::{ResMut, SystemParam, SystemState},
+    system::{SystemParam, SystemState},
     world::World,
 };
-use bevy::prelude::Res;
+use bevy::prelude::{Entity, Query, Res};
 use bevy_egui::egui;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2_bevy::EntityMap;
@@ -15,9 +16,8 @@ use super::{
 };
 
 #[derive(SystemParam)]
-pub struct HierarchyContent<'w> {
-    entity_filter: ResMut<'w, EntityFilter>,
-    selected_object: ResMut<'w, SelectedObject>,
+pub struct HierarchyContent<'w, 's> {
+    window_states: Query<'w, 's, &'static mut WindowState>,
     eql_ctx: Res<'w, EqlContext>,
     entity_map: Res<'w, EntityMap>,
 }
@@ -28,15 +28,15 @@ pub struct Hierarchy {
     pub chevron: egui::TextureId,
 }
 
-impl WidgetSystem for HierarchyContent<'_> {
-    type Args = Hierarchy;
+impl WidgetSystem for HierarchyContent<'_, '_> {
+    type Args = (Hierarchy, Entity);
     type Output = ();
 
     fn ui_system(
         world: &mut World,
         state: &mut SystemState<Self>,
         ui: &mut egui::Ui,
-        icons: Self::Args,
+        (icons, target_window): Self::Args,
     ) {
         ui.painter().rect_filled(
             ui.max_rect(),
@@ -45,20 +45,23 @@ impl WidgetSystem for HierarchyContent<'_> {
         );
 
         let HierarchyContent {
-            entity_filter,
-            mut selected_object,
+            mut window_states,
             eql_ctx,
             entity_map,
         } = state.get_mut(world);
+        let Ok(mut window_state) = window_states.get_mut(target_window) else {
+            return;
+        };
+        let ui_state = &mut window_state.ui_state;
 
-        let search_text = entity_filter.0.clone();
         sidebar_content_ui(ui, |ui| {
-            header(ui, entity_filter, icons.search);
+            header(ui, &mut ui_state.entity_filter, icons.search);
+            let search_text = ui_state.entity_filter.0.clone();
             entity_list(
                 ui,
                 &eql_ctx,
                 &entity_map,
-                &mut selected_object,
+                &mut ui_state.selected_object,
                 &search_text,
                 icons,
             );
@@ -68,7 +71,7 @@ impl WidgetSystem for HierarchyContent<'_> {
 
 pub fn header(
     ui: &mut egui::Ui,
-    mut entity_filter: ResMut<EntityFilter>,
+    entity_filter: &mut EntityFilter,
     search_icon: egui::TextureId,
 ) -> egui::Response {
     egui::Frame::NONE
@@ -83,7 +86,7 @@ pub fn entity_list(
     ui: &mut egui::Ui,
     eql_ctx: &EqlContext,
     entity_map: &EntityMap,
-    selected_object: &mut ResMut<SelectedObject>,
+    selected_object: &mut SelectedObject,
     entity_filter: &str,
     icons: Hierarchy,
 ) -> egui::Response {

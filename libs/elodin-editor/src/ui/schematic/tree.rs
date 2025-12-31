@@ -6,6 +6,7 @@ use crate::ui::colors::{ColorExt, get_scheme};
 use crate::ui::dashboard::{DashboardNodePath, NodeUpdaterParams, spawn_node};
 use crate::ui::inspector::dashboard::DashboardExt;
 use crate::ui::inspector::search;
+use crate::ui::tiles::WindowState;
 use crate::ui::widgets::WidgetSystem;
 
 use super::CurrentSchematic;
@@ -22,7 +23,7 @@ use smallvec::smallvec;
 pub struct TreeWidget<'w, 's> {
     schematic: ResMut<'w, CurrentSchematic>,
     state: Query<'w, 's, &'static mut TreeWidgetState>,
-    selected_object: ResMut<'w, SelectedObject>,
+    window_states: Query<'w, 's, &'static mut WindowState>,
     spawn_node_params: SpawnNodeParams<'w, 's>,
 }
 
@@ -49,7 +50,7 @@ pub struct TreeWidgetState {
 }
 
 impl WidgetSystem for TreeWidget<'_, '_> {
-    type Args = (TreeIcons, Entity);
+    type Args = (TreeIcons, Entity, Entity);
 
     type Output = ();
 
@@ -57,14 +58,18 @@ impl WidgetSystem for TreeWidget<'_, '_> {
         world: &mut bevy::ecs::world::World,
         state: &mut bevy::ecs::system::SystemState<Self>,
         ui: &mut egui::Ui,
-        (icons, entity): Self::Args,
+        (icons, entity, target_window): Self::Args,
     ) -> Self::Output {
         let TreeWidget {
             schematic,
             mut state,
-            mut selected_object,
+            mut window_states,
             mut spawn_node_params,
         } = state.get_mut(world);
+        let Ok(mut window_state) = window_states.get_mut(target_window) else {
+            return;
+        };
+        let selected_object = &mut window_state.ui_state.selected_object;
         let Ok(mut tree_state) = state.get_mut(entity) else {
             return;
         };
@@ -86,7 +91,7 @@ impl WidgetSystem for TreeWidget<'_, '_> {
                         max_rect,
                         &icons,
                         p,
-                        &mut selected_object,
+                        selected_object,
                         &mut spawn_node_params,
                     ),
                     impeller2_wkt::SchematicElem::Object3d(object_3d) => {

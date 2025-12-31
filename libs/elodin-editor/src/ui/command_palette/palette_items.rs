@@ -329,16 +329,16 @@ pub struct TileParam<'w, 's> {
 }
 
 impl<'w, 's> TileParam<'w, 's> {
-    pub fn target(&mut self, target: Option<Entity>) -> Option<Mut<'_, tiles::TileState>> {
+    pub fn target_state(&mut self, target: Option<Entity>) -> Option<Mut<'_, tiles::WindowState>> {
         let target_id = target
             .or(self.focused_window.0)
             .or_else(|| self.primary_window.iter().next());
-        target_id.and_then(|target_id| {
-            self.windows_state
-                .get_mut(target_id)
-                .ok()
-                .map(|s| s.map_unchanged(|s| &mut s.tile_state))
-        })
+        target_id.and_then(|target_id| self.windows_state.get_mut(target_id).ok())
+    }
+
+    pub fn target(&mut self, target: Option<Entity>) -> Option<Mut<'_, tiles::TileState>> {
+        self.target_state(target)
+            .map(|s| s.map_unchanged(|s| &mut s.tile_state))
     }
 }
 

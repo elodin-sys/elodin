@@ -22,13 +22,14 @@ use impeller2_wkt::{ArrowIPC, ErrorResponse, QueryPlot, QueryType, SQLQuery};
 use itertools::Itertools;
 
 use crate::{
-    EqlContext, SelectedObject, SelectedTimeRange, TimeRangeBehavior,
+    EqlContext, SelectedTimeRange, TimeRangeBehavior,
     ui::{
         colors::{ColorExt, EColor, get_scheme},
         plot::{
             GraphState, PlotBounds, PlotDataSource, TimeseriesPlot, XYLine, get_inner_rect,
             gpu::{LineBundle, LineConfig, LineHandle, LineUniform, LineWidgetWidth},
         },
+        tiles::WindowState,
         widgets::WidgetSystem,
     },
 };
@@ -282,8 +283,8 @@ pub struct QueryPlotWidget<'w, 's> {
     selected_time_range: Res<'w, SelectedTimeRange>,
     earliest_timestamp: Res<'w, EarliestTimestamp>,
     current_timestamp: Res<'w, CurrentTimestamp>,
-    selected_object: ResMut<'w, SelectedObject>,
     time_range_behavior: ResMut<'w, TimeRangeBehavior>,
+    window_states: Query<'w, 's, &'static mut WindowState>,
 }
 
 trait Vec2Ext {
@@ -297,17 +298,18 @@ impl Vec2Ext for egui::Vec2 {
 }
 
 impl WidgetSystem for QueryPlotWidget<'_, '_> {
-    type Args = QueryPlotPane;
+    type Args = (QueryPlotPane, Entity);
     type Output = ();
 
     fn ui_system(
         world: &mut bevy::prelude::World,
         state: &mut bevy::ecs::system::SystemState<Self>,
         ui: &mut egui::Ui,
-        QueryPlotPane {
-            entity, scrub_icon, ..
-        }: Self::Args,
+        (pane, target_window): Self::Args,
     ) -> Self::Output {
+        let QueryPlotPane {
+            entity, scrub_icon, ..
+        } = pane;
         // Use a default texture ID if scrub_icon is not provided
         // This should only happen during initialization, and will be set properly in the UI
         let scrub_icon = scrub_icon.unwrap_or(egui::TextureId::default());
@@ -487,13 +489,16 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                     query_color,
                 };
 
+                let Ok(mut window_state) = state.window_states.get_mut(target_window) else {
+                    return;
+                };
                 plot_renderer.render(
                     ui,
                     data_source,
                     &mut graph_state,
                     &scrub_icon,
                     entity,
-                    state.selected_object.as_mut(),
+                    &mut window_state.ui_state.selected_object,
                     state.time_range_behavior.as_mut(),
                 );
             }

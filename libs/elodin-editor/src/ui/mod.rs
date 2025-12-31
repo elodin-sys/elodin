@@ -168,11 +168,18 @@ impl SelectedObject {
 #[derive(Resource, Default)]
 pub struct HoveredEntity(pub Option<EntityPair>);
 
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Clone, Debug)]
 pub struct EntityFilter(pub String);
 
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Clone, Debug)]
 pub struct InspectorAnchor(pub Option<egui::Pos2>);
+
+#[derive(Default, Clone, Debug)]
+pub struct WindowUiState {
+    pub selected_object: SelectedObject,
+    pub entity_filter: EntityFilter,
+    pub inspector_anchor: InspectorAnchor,
+}
 
 #[derive(Component, Clone)]
 pub struct ViewportRect(pub Option<egui::Rect>);
@@ -262,11 +269,8 @@ impl Plugin for UiPlugin {
         }
 
         app.init_resource::<Paused>()
-            .init_resource::<SelectedObject>()
             .init_resource::<HoveredEntity>()
-            .init_resource::<EntityFilter>()
             .init_resource::<ComponentFilter>()
-            .init_resource::<InspectorAnchor>()
             .init_resource::<SettingModalState>()
             .init_resource::<HdrEnabled>()
             .init_resource::<FocusedWindow>()

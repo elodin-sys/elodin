@@ -1,15 +1,17 @@
 use action::InspectorAction;
 use bevy::ecs::{
-    system::{ResMut, SystemParam, SystemState},
+    system::{SystemParam, SystemState},
     world::World,
 };
+use bevy::prelude::{Entity, Query};
 use bevy_egui::egui;
 use egui::CornerRadius;
 use smallvec::SmallVec;
 
 use super::widgets::{WidgetSystem, WidgetSystemExt};
+use crate::ui::tiles::WindowState;
 use crate::ui::{
-    InspectorAnchor, SelectedObject,
+    SelectedObject,
     colors::{self, get_scheme},
     tiles::TreeAction,
     tiles::sidebar::sidebar_content_ui,
@@ -54,13 +56,12 @@ pub fn empty_inspector() -> impl egui::Widget {
 }
 
 #[derive(SystemParam)]
-pub struct InspectorContent<'w> {
-    inspector_anchor: ResMut<'w, InspectorAnchor>,
-    selected_object: ResMut<'w, SelectedObject>,
+pub struct InspectorContent<'w, 's> {
+    window_states: Query<'w, 's, &'static mut WindowState>,
 }
 
-impl WidgetSystem for InspectorContent<'_> {
-    type Args = (InspectorIcons, bool);
+impl WidgetSystem for InspectorContent<'_, '_> {
+    type Args = (InspectorIcons, bool, Entity);
     type Output = SmallVec<[TreeAction; 4]>;
 
     fn ui_system(
@@ -69,17 +70,20 @@ impl WidgetSystem for InspectorContent<'_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) -> Self::Output {
-        let state_mut = state.get_mut(world);
+        let mut state_mut = state.get_mut(world);
 
-        let (icons, is_side_panel) = args;
-
-        let mut inspector_anchor = state_mut.inspector_anchor;
-        let selected_object = state_mut.selected_object.to_owned();
-
-        inspector_anchor.0 = if is_side_panel {
-            Some(ui.max_rect().min)
-        } else {
-            None
+        let (icons, is_side_panel, target_window) = args;
+        let selected_object = {
+            let Ok(mut window_state) = state_mut.window_states.get_mut(target_window) else {
+                return Default::default();
+            };
+            let ui_state = &mut window_state.ui_state;
+            ui_state.inspector_anchor.0 = if is_side_panel {
+                Some(ui.max_rect().min)
+            } else {
+                None
+            };
+            ui_state.selected_object.clone()
         };
         ui.painter()
             .rect_filled(ui.max_rect(), CornerRadius::ZERO, get_scheme().bg_primary);
@@ -139,7 +143,7 @@ impl WidgetSystem for InspectorContent<'_> {
                                     ui.add_widget_with::<InspectorDashboardNode>(
                                         world,
                                         "inspector_dashboard_node",
-                                        entity,
+                                        (entity, target_window),
                                     );
                                     Default::default()
                                 }

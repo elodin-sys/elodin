@@ -13,6 +13,7 @@ use crate::{
         inspector::{eql_textfield, node_color_picker},
         label,
         theme::{configure_combo_box, configure_combo_item, configure_input_with_border},
+        tiles::WindowState,
         widgets::WidgetSystem,
     },
 };
@@ -23,12 +24,12 @@ pub struct InspectorDashboardNode<'w, 's> {
     pub dashboards: Query<'w, 's, &'static mut Dashboard<Entity>>,
     pub eql_ctx: Res<'w, EqlContext>,
     pub commands: Commands<'w, 's>,
-    pub selected_object: ResMut<'w, SelectedObject>,
+    pub window_states: Query<'w, 's, &'static mut WindowState>,
     pub node_updater_params: NodeUpdaterParams<'w, 's>,
 }
 
 impl WidgetSystem for InspectorDashboardNode<'_, '_> {
-    type Args = Entity;
+    type Args = (Entity, Entity);
 
     type Output = ();
 
@@ -36,14 +37,14 @@ impl WidgetSystem for InspectorDashboardNode<'_, '_> {
         world: &mut World,
         state: &mut bevy::ecs::system::SystemState<Self>,
         ui: &mut egui::Ui,
-        entity: Self::Args,
+        (entity, target_window): Self::Args,
     ) -> Self::Output {
         let InspectorDashboardNode {
             paths,
             mut dashboards,
             eql_ctx,
             mut commands,
-            mut selected_object,
+            mut window_states,
             node_updater_params,
         } = state.get_mut(world);
         let Ok((path, children)) = paths.get(entity) else {
@@ -119,7 +120,10 @@ impl WidgetSystem for InspectorDashboardNode<'_, '_> {
                 path.path.clone(),
                 &node_updater_params,
             ) {
-                *selected_object = SelectedObject::DashboardNode { entity: new.aux };
+                if let Ok(mut window_state) = window_states.get_mut(target_window) {
+                    window_state.ui_state.selected_object =
+                        SelectedObject::DashboardNode { entity: new.aux };
+                }
                 *node = new;
             }
         }

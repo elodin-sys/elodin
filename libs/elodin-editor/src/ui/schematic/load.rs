@@ -31,7 +31,7 @@ use crate::{
     object_3d::Object3DState,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        DEFAULT_SECONDARY_RECT, HdrEnabled, SelectedObject,
+        DEFAULT_SECONDARY_RECT, HdrEnabled,
         colors::{self, EColor},
         dashboard::{NodeUpdaterParams, spawn_dashboard},
         data_overview::DataOverviewPane,
@@ -68,7 +68,6 @@ pub struct LoadSchematicParams<'w, 's> {
     pub hdr_enabled: ResMut<'w, HdrEnabled>,
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
     pub eql: Res<'w, EqlContext>,
-    pub selected_object: ResMut<'w, SelectedObject>,
     pub node_updater_params: NodeUpdaterParams<'w, 's>,
     cameras: Query<'w, 's, &'static mut Camera>,
     objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
@@ -237,11 +236,7 @@ impl LoadSchematicParams<'_, '_> {
                 .2;
             std::mem::take(&mut window_state.tile_state)
         };
-        main_state.clear(
-            &mut self.commands,
-            &mut self.selected_object,
-            &mut self.render_layer_alloc,
-        );
+        main_state.clear(&mut self.commands, &mut self.render_layer_alloc);
         self.hdr_enabled.0 = false;
         for entity in self.objects_3d.iter() {
             self.commands.entity(entity).despawn();
@@ -428,6 +423,7 @@ impl LoadSchematicParams<'_, '_> {
                                 descriptor,
                                 tile_state,
                                 graph_entities,
+                                ui_state: Default::default(),
                             };
                             self.commands.spawn((id, state));
                         }

@@ -36,14 +36,16 @@ use std::{
 };
 
 use crate::{
-    Offset, SelectedObject, SelectedTimeRange, TimeRangeBehavior,
+    Offset, SelectedTimeRange, TimeRangeBehavior,
     plugins::LogicalKeyState,
     ui::{
+        SelectedObject,
         colors::{ColorExt, get_scheme, with_opacity},
         plot::{
             CollectedGraphData, GraphState, Line,
             gpu::{LineBundle, LineConfig, LineUniform},
         },
+        tiles::WindowState,
         time_label::{PrettyDuration, time_label},
         timeline::DurationExt,
         utils::format_num,
@@ -76,18 +78,18 @@ pub struct PlotWidget<'w, 's> {
     current_timestamp: Res<'w, CurrentTimestamp>,
     time_range_behavior: ResMut<'w, TimeRangeBehavior>,
     line_query: Query<'w, 's, &'static LineHandle>,
-    selected_object: ResMut<'w, SelectedObject>,
+    window_states: Query<'w, 's, &'static mut WindowState>,
 }
 
 impl WidgetSystem for PlotWidget<'_, '_> {
-    type Args = (Entity, egui::TextureId);
+    type Args = (Entity, egui::TextureId, Entity);
     type Output = ();
 
     fn ui_system(
         world: &mut bevy::prelude::World,
         state: &mut bevy::ecs::system::SystemState<Self>,
         ui: &mut egui::Ui,
-        (id, scrub_icon): Self::Args,
+        (id, scrub_icon, target_window): Self::Args,
     ) -> Self::Output {
         let PlotWidget {
             collected_graph_data,
@@ -99,7 +101,7 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             current_timestamp,
             mut time_range_behavior,
             line_query,
-            mut selected_object,
+            mut window_states,
         } = state.get_mut(world);
 
         let Ok(mut graph_state) = graphs_state.get_mut(id) else {
@@ -134,13 +136,16 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             line_handles: &line_query,
             collected_graph_data: &collected_graph_data,
         };
+        let Ok(mut window_state) = window_states.get_mut(target_window) else {
+            return;
+        };
         plot.render(
             ui,
             data_source,
             &mut graph_state,
             &scrub_icon,
             id,
-            selected_object.as_mut(),
+            &mut window_state.ui_state.selected_object,
             &mut time_range_behavior,
         );
     }
