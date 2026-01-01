@@ -137,6 +137,62 @@ def create_world() -> tuple[el.World, el.EntityId]:
                 graph "crazyflie.motor_command" name="Motor Command"
             }
         }
+        object_3d crazyflie.world_pos {
+            glb path="crazyflie.glb" rotate="(0.0, 0.0, 0.0)" translate="(-0.01, 0.0, 0.0)" scale=0.7
+        }
+
+        // Crazyflie 2.1 dimensions: 92mm diagonal, arm_length=32.5mm, height~29mm
+        // These arrows show the motor positions to verify GLB scale
+        vector_arrow "(1, 0, 0)" origin="crazyflie.world_pos" scale=0.0325 name="X: 32.5mm (arm)" show_name=#true body_frame=#true {
+            color red 200
+        }
+        vector_arrow "(0, 1, 0)" origin="crazyflie.world_pos" scale=0.0325 name="Y: 32.5mm (arm)" show_name=#true body_frame=#true {
+            color green 200
+        }
+        vector_arrow "(0, 0, 1)" origin="crazyflie.world_pos" scale=0.0145 name="Z: 14.5mm (half height)" show_name=#true body_frame=#true {
+            color blue 200
+        }
+
+        // Motor position indicators (at arm_length diagonals)
+        vector_arrow "(0.707, -0.707, 0)" origin="crazyflie.world_pos" scale=0.046 name="M1: FR" show_name=#true body_frame=#true {
+            color yellow 150
+        }
+        vector_arrow "(0.707, 0.707, 0)" origin="crazyflie.world_pos" scale=0.046 name="M2: FL" show_name=#true body_frame=#true {
+            color yellow 150
+        }
+        vector_arrow "(-0.707, 0.707, 0)" origin="crazyflie.world_pos" scale=0.046 name="M3: BL" show_name=#true body_frame=#true {
+            color yellow 150
+        }
+        vector_arrow "(-0.707, -0.707, 0)" origin="crazyflie.world_pos" scale=0.046 name="M4: BR" show_name=#true body_frame=#true {
+            color yellow 150
+        }
+
+        // Rotor disc visualization (45mm diameter = 0.0225m radius, thin cylinder)
+        // Motor positions: arm_length=0.0325m at 45° diagonals
+        // M1: FR (+0.0325, -0.0325, 0.003)
+        object_3d "crazyflie.world_pos + (0,0,0,0, 0.0325, -0.0325, 0.003)" body_frame=#true {
+            cylinder radius=0.0225 height=0.002 {
+                color cyan 120
+            }
+        }
+        // M2: FL (+0.0325, +0.0325, 0.003)
+        object_3d "crazyflie.world_pos + (0,0,0,0, 0.0325, 0.0325, 0.003)" body_frame=#true {
+            cylinder radius=0.0225 height=0.002 {
+                color red 120
+            }
+        }
+        // M3: BL (-0.0325, +0.0325, 0.003)
+        object_3d "crazyflie.world_pos + (0,0,0,0, -0.0325, 0.0325, 0.003)" body_frame=#true {
+            cylinder radius=0.0225 height=0.002 {
+                color red 120
+            }
+        }
+        // M4: BR (-0.0325, -0.0325, 0.003)
+        object_3d "crazyflie.world_pos + (0,0,0,0, -0.0325, -0.0325, 0.003)" body_frame=#true {
+            cylinder radius=0.0225 height=0.002 {
+                color cyan 120
+            }
+        }
     """
 
     w.schematic(schematic, "crazyflie-edu.kdl")
