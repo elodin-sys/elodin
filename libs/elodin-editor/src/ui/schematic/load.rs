@@ -806,19 +806,19 @@ impl LoadSchematicParams<'_, '_> {
             .2;
 
         // Only add if the tile tree is empty
-        if window_state.tile_state.is_empty() {
-            if let Some(tabs_id) = window_state.tile_state.tree.root() {
-                let pane = Pane::DataOverview(DataOverviewPane::default());
-                if let Some(tile_id) =
-                    window_state
-                        .tile_state
-                        .insert_tile(Tile::Pane(pane), Some(tabs_id), true)
-                {
-                    window_state
-                        .tile_state
-                        .tree
-                        .make_active(|id, _| id == tile_id);
-                }
+        if window_state.tile_state.is_empty()
+            && let Some(tabs_id) = window_state.tile_state.tree.root()
+        {
+            let pane = Pane::DataOverview(DataOverviewPane::default());
+            if let Some(tile_id) =
+                window_state
+                    .tile_state
+                    .insert_tile(Tile::Pane(pane), Some(tabs_id), true)
+            {
+                window_state
+                    .tile_state
+                    .tree
+                    .make_active(|id, _| id == tile_id);
             }
         }
     }
