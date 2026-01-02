@@ -1,5 +1,6 @@
 use super::{Pane, ShareUpdate, TileId};
-use egui::{Color32, Stroke, UiBuilder};
+use crate::ui::colors::get_scheme;
+use egui::{Stroke, UiBuilder};
 use egui_tiles::{Container, Tile, Tiles};
 
 pub const MIN_SIDEBAR_FRACTION: f32 = 0.05;
@@ -254,7 +255,7 @@ pub fn collect_sidebar_gutter_updates(
                 egui::pos2(center_x + half, pair.parent_rect.bottom()),
             );
 
-            let gutter_color = Color32::from_gray(80);
+            let gutter_color = get_scheme().border_primary;
             let fill = gutter_color;
             let stroke = Stroke::new(1.0, gutter_color);
             self.painter.rect_filled(gutter_rect, 0.0, fill);
