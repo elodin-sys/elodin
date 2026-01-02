@@ -54,6 +54,14 @@ enum PanelContext {
     Secondary(WindowId),
 }
 
+fn tabs_parent_for_panels(tile_state: &mut TileState, panel_count: usize) -> Option<TileId> {
+    if panel_count > 1 {
+        tile_state.insert_tile(Tile::Container(Container::new_tabs(vec![])), None, false)
+    } else {
+        None
+    }
+}
+
 #[derive(Component)]
 pub struct SyncedViewport;
 
@@ -259,11 +267,7 @@ impl LoadSchematicParams<'_, '_> {
             .iter()
             .filter(|elem| matches!(elem, impeller2_wkt::SchematicElem::Panel(_)))
             .count();
-        let tabs_parent = if panel_count > 1 {
-            main_state.tree.root()
-        } else {
-            None
-        };
+        let tabs_parent = tabs_parent_for_panels(&mut main_state, panel_count);
 
         for elem in &schematic.elems {
             match elem {
@@ -384,11 +388,7 @@ impl LoadSchematicParams<'_, '_> {
                                     matches!(elem, impeller2_wkt::SchematicElem::Panel(_))
                                 })
                                 .count();
-                            let tabs_parent = if panel_count > 1 {
-                                tile_state.tree.root()
-                            } else {
-                                None
-                            };
+                            let tabs_parent = tabs_parent_for_panels(&mut tile_state, panel_count);
 
                             for elem in &sec_schematic.elems {
                                 if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
