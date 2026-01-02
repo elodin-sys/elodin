@@ -81,6 +81,27 @@ IsArmed = ty.Annotated[
     el.Component("is_armed", el.ComponentType.F64),
 ]
 
+# Thrust visualization vectors (point downward, scaled 0.001-0.1)
+ThrustVizM1 = ty.Annotated[
+    jax.Array,
+    el.Component("thrust_viz_m1", el.ComponentType(el.PrimitiveType.F64, (3,))),
+]
+
+ThrustVizM2 = ty.Annotated[
+    jax.Array,
+    el.Component("thrust_viz_m2", el.ComponentType(el.PrimitiveType.F64, (3,))),
+]
+
+ThrustVizM3 = ty.Annotated[
+    jax.Array,
+    el.Component("thrust_viz_m3", el.ComponentType(el.PrimitiveType.F64, (3,))),
+]
+
+ThrustVizM4 = ty.Annotated[
+    jax.Array,
+    el.Component("thrust_viz_m4", el.ComponentType(el.PrimitiveType.F64, (3,))),
+]
+
 # =============================================================================
 # Archetypes
 # =============================================================================
@@ -97,6 +118,11 @@ class CrazyflieDrone(el.Archetype):
     motor_rpm: MotorRpm = field(default_factory=lambda: jnp.zeros(4))
     motor_pwm: MotorPwm = field(default_factory=lambda: jnp.zeros(4))
     is_armed: IsArmed = field(default_factory=lambda: jnp.array(0.0))
+    # Thrust visualization vectors (point downward from each rotor)
+    thrust_viz_m1: ThrustVizM1 = field(default_factory=lambda: jnp.array([0.0, 0.0, -0.001]))
+    thrust_viz_m2: ThrustVizM2 = field(default_factory=lambda: jnp.array([0.0, 0.0, -0.001]))
+    thrust_viz_m3: ThrustVizM3 = field(default_factory=lambda: jnp.array([0.0, 0.0, -0.001]))
+    thrust_viz_m4: ThrustVizM4 = field(default_factory=lambda: jnp.array([0.0, 0.0, -0.001]))
 
 
 # =============================================================================
@@ -253,6 +279,34 @@ def ground_constraint(pos: el.WorldPos, vel: el.WorldVel) -> tuple[el.WorldPos, 
     new_vel = el.SpatialMotion(linear=new_vel_linear, angular=new_vel_angular)
 
     return new_pos, new_vel
+
+
+@el.map
+def thrust_visualization(
+    thrust: Thrust,
+) -> tuple[ThrustVizM1, ThrustVizM2, ThrustVizM3, ThrustVizM4]:
+    """
+    Compute thrust visualization vectors for each motor.
+
+    Outputs downward-pointing vectors with length proportional to thrust.
+    Length is normalized to 0.001-0.1 range for visualization.
+    """
+    # Normalize thrust to visualization height (0.001 to 0.1)
+    max_thrust = 0.1  # ~100mN, well above hover thrust per motor
+    min_height = 0.001
+    max_height = 0.1
+
+    def normalize(t: jax.Array) -> jax.Array:
+        normalized = jnp.clip(t / max_thrust, 0.0, 1.0)
+        height = min_height + normalized * (max_height - min_height)
+        return jnp.array([0.0, 0.0, -height])  # Point DOWN
+
+    return (
+        normalize(thrust[0]),
+        normalize(thrust[1]),
+        normalize(thrust[2]),
+        normalize(thrust[3]),
+    )
 
 
 # =============================================================================

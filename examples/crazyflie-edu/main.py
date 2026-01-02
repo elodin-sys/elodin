@@ -23,7 +23,7 @@ import jax
 import jax.numpy as jnp
 
 from config import CrazyflieConfig, create_default_config
-from sim import CrazyflieDrone, MotorPwm, IsArmed, create_physics_system
+from sim import CrazyflieDrone, MotorPwm, IsArmed, create_physics_system, thrust_visualization
 from sensors import IMU, create_imu_system
 
 # =============================================================================
@@ -144,16 +144,16 @@ def create_world() -> tuple[el.World, el.EntityId]:
         // Crazyflie 2.1 dimensions: 92mm diagonal, arm_length=32.5mm, height~29mm
         // Motor position indicators (at arm_length diagonals)
         vector_arrow "(0.707, -0.707, 0)" origin="crazyflie.world_pos" scale=0.046 name="M1: FR" show_name=#true body_frame=#true {
-            color yellow 50
+            color yellow 10
         }
         vector_arrow "(0.707, 0.707, 0)" origin="crazyflie.world_pos" scale=0.046 name="M2: FL" show_name=#true body_frame=#true {
-            color yellow 50
+            color yellow 10
         }
         vector_arrow "(-0.707, 0.707, 0)" origin="crazyflie.world_pos" scale=0.046 name="M3: BL" show_name=#true body_frame=#true {
-            color yellow 50
+            color yellow 10
         }
         vector_arrow "(-0.707, -0.707, 0)" origin="crazyflie.world_pos" scale=0.046 name="M4: BR" show_name=#true body_frame=#true {
-            color yellow 50
+            color yellow 10
         }
 
         // Rotor disc visualization (45mm diameter = 0.0225m radius, thin cylinder)
@@ -183,6 +183,24 @@ def create_world() -> tuple[el.World, el.EntityId]:
                 color red 30
             }
         }
+
+        // Thrust visualization - arrows pointing DOWN from each rotor
+        // M1: FR - CW (cyan)
+        vector_arrow "crazyflie.thrust_viz_m1" origin="crazyflie.world_pos + (0,0,0,0, 0.0325, -0.0325, 0.013)" body_frame=#true {
+            color cyan 20
+        }
+        // M2: FL - CCW (magenta/red)
+        vector_arrow "crazyflie.thrust_viz_m2" origin="crazyflie.world_pos + (0,0,0,0, 0.0325, 0.0325, 0.013)" body_frame=#true {
+            color red 20
+        }
+        // M3: BL - CW (cyan)
+        vector_arrow "crazyflie.thrust_viz_m3" origin="crazyflie.world_pos + (0,0,0,0, -0.0325, 0.0325, 0.013)" body_frame=#true {
+            color cyan 20
+        }
+        // M4: BR - CCW (magenta/red)
+        vector_arrow "crazyflie.thrust_viz_m4" origin="crazyflie.world_pos + (0,0,0,0, -0.0325, -0.0325, 0.013)" body_frame=#true {
+            color red 20
+        }
     """
 
     w.schematic(schematic, "crazyflie-edu.kdl")
@@ -211,8 +229,11 @@ def system() -> el.System:
     # Time tracking
     clock = update_sim_time
 
+    # Thrust visualization (compute visualization vectors after physics)
+    visualization = thrust_visualization
+
     # Combine all systems
-    return clock | control | physics | sensors
+    return clock | control | physics | sensors | visualization
 
 
 # =============================================================================
