@@ -22,12 +22,15 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{self};
 use std::time::Instant;
 
-use super::colors::{ColorExt, get_scheme};
+use super::{
+    PaneName,
+    colors::{ColorExt, get_scheme},
+};
 
 #[derive(Clone)]
 pub struct VideoStreamPane {
     pub entity: Entity,
-    pub label: String,
+    pub name: PaneName,
 }
 
 #[derive(Clone, Copy)]

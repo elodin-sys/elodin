@@ -130,6 +130,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         ui.separator();
 
         if let Ok(mut query_plot) = query_plot {
+            query_plot.data.name = graph_state.label.clone();
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(0, 8))
                 .show(ui, |ui| {

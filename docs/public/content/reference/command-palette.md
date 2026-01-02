@@ -27,16 +27,16 @@ order = 8
 - `Create Monitor`: pick a component and create a component monitor pane.
 - `Create Query Table`: add an empty query table pane.
 - `Create Query Plot`: add an empty query plot pane.
-- `Create Action`: prompt for a label, then choose a `send_msg` preset or enter a custom Lua
+- `Create Action`: prompt for a name, then choose a `send_msg` preset or enter a custom Lua
   command to create an action pane.
 - `Create Video Stream`: prompt for the message name, then create a video stream pane.
-- `Create Hierarchy`: add a hierarchy pane.
-- `Create Inspector`: add an inspector pane.
 - `Create Schematic Tree`: add a schematic tree pane.
 - `Create Dashboard`: add a dashboard pane.
 - `Create Data Overview`: add a data overview pane.
 - `Create 3D Object`: prompt for an EQL expression, pick a mesh type (GLTF or primitives), then
   optionally enter dimensions and color.
+- `Hierarchy` and `Inspector` are built-in sidebars; they are always present and do not appear in
+  the command palette.
 
 ## Viewport
 

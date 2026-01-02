@@ -37,7 +37,7 @@ use object_3d::create_object_3d_entity;
 use plugins::gizmos::GizmoPlugin;
 use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc};
 use ui::{
-    SelectedObject, UI_ORDER_BASE,
+    UI_ORDER_BASE,
     colors::{ColorExt, get_scheme},
     create_egui_context,
     inspector::viewport::set_viewport_pos,
@@ -909,7 +909,6 @@ pub fn setup_clear_state(mut packet_handlers: ResMut<PacketHandlers>, mut comman
 fn clear_state_new_connection(
     PacketHandlerInput { packet, .. }: PacketHandlerInput,
     mut entity_map: ResMut<EntityMap>,
-    mut selected_object: ResMut<SelectedObject>,
     mut render_layer_alloc: ResMut<RenderLayerAlloc>,
     mut value_map: Query<&mut ComponentValueMap>,
     mut graph_data: ResMut<CollectedGraphData>,
@@ -956,7 +955,7 @@ fn clear_state_new_connection(
     primary_state
         .1
         .tile_state
-        .clear(&mut commands, &mut selected_object, &mut render_layer_alloc);
+        .clear(&mut commands, &mut render_layer_alloc);
     for (entity, secondary) in &windows_state {
         if entity == primary_id {
             // We don't despawn the primary window ever.

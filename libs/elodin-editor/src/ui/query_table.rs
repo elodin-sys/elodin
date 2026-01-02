@@ -18,6 +18,7 @@ use impeller2_wkt::{
 use crate::{EqlContext, SelectedTimeRange};
 
 use super::{
+    PaneName,
     button::EButton,
     colors::{ColorExt, get_scheme},
     inspector::eql_autocomplete,
@@ -28,6 +29,7 @@ use super::{
 #[derive(Clone)]
 pub struct QueryTablePane {
     pub entity: Entity,
+    pub name: PaneName,
 }
 
 #[derive(Component, Default)]
@@ -156,7 +158,7 @@ impl WidgetSystem for QueryTableWidget<'_, '_> {
         world: &mut bevy::prelude::World,
         state: &mut bevy::ecs::system::SystemState<Self>,
         ui: &mut egui::Ui,
-        QueryTablePane { entity }: Self::Args,
+        QueryTablePane { entity, .. }: Self::Args,
     ) -> Self::Output {
         let QueryTableWidget {
             mut states,
