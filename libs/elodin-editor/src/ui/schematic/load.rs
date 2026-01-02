@@ -54,6 +54,14 @@ enum PanelContext {
     Secondary(WindowId),
 }
 
+fn tabs_parent_for_panels(tile_state: &TileState, panel_count: usize) -> Option<TileId> {
+    if panel_count > 0 {
+        tile_state.tree.root()
+    } else {
+        None
+    }
+}
+
 #[derive(Component)]
 pub struct SyncedViewport;
 
@@ -259,11 +267,7 @@ impl LoadSchematicParams<'_, '_> {
             .iter()
             .filter(|elem| matches!(elem, impeller2_wkt::SchematicElem::Panel(_)))
             .count();
-        let tabs_parent = if panel_count > 1 {
-            main_state.tree.root()
-        } else {
-            None
-        };
+        let tabs_parent = tabs_parent_for_panels(&main_state, panel_count);
 
         for elem in &schematic.elems {
             match elem {
@@ -384,11 +388,7 @@ impl LoadSchematicParams<'_, '_> {
                                     matches!(elem, impeller2_wkt::SchematicElem::Panel(_))
                                 })
                                 .count();
-                            let tabs_parent = if panel_count > 1 {
-                                tile_state.tree.root()
-                            } else {
-                                None
-                            };
+                            let tabs_parent = tabs_parent_for_panels(&tile_state, panel_count);
 
                             for elem in &sec_schematic.elems {
                                 if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
@@ -571,6 +571,17 @@ impl LoadSchematicParams<'_, '_> {
                 tile_id
             }
             Panel::Tabs(tabs) => {
+                if parent_id.is_some_and(|id| {
+                    matches!(
+                        tile_state.tree.tiles.get(id),
+                        Some(Tile::Container(Container::Tabs(_)))
+                    )
+                }) {
+                    tabs.iter().for_each(|panel| {
+                        self.spawn_panel(tile_state, panel, parent_id, context);
+                    });
+                    return parent_id;
+                }
                 let tile_id = tile_state.insert_tile(
                     Tile::Container(Container::new_tabs(vec![])),
                     parent_id,
@@ -795,29 +806,19 @@ impl LoadSchematicParams<'_, '_> {
             .2;
 
         // Only add if the tile tree is empty
-        if window_state.tile_state.is_empty() {
-            // Create a structure that matches how schematics work:
-            // Root → Tabs container → Pane
-            //
-            // egui_tiles only shows tab bars for NESTED Tabs containers, not the root.
-            // So we create a tabs container explicitly (like Panel::Tabs does)
-            // and add our pane inside it.
-            let tabs_container = Tile::Container(Container::new_tabs(vec![]));
-            if let Some(tabs_id) = window_state
-                .tile_state
-                .insert_tile(tabs_container, None, false)
+        if window_state.tile_state.is_empty()
+            && let Some(tabs_id) = window_state.tile_state.tree.root()
+        {
+            let pane = Pane::DataOverview(DataOverviewPane::default());
+            if let Some(tile_id) =
+                window_state
+                    .tile_state
+                    .insert_tile(Tile::Pane(pane), Some(tabs_id), true)
             {
-                let pane = Pane::DataOverview(DataOverviewPane::default());
-                if let Some(tile_id) =
-                    window_state
-                        .tile_state
-                        .insert_tile(Tile::Pane(pane), Some(tabs_id), true)
-                {
-                    window_state
-                        .tile_state
-                        .tree
-                        .make_active(|id, _| id == tile_id);
-                }
+                window_state
+                    .tile_state
+                    .tree
+                    .make_active(|id, _| id == tile_id);
             }
         }
     }
