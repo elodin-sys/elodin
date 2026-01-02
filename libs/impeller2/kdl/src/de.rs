@@ -287,7 +287,15 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
     let pos = node
         .get("pos")
         .and_then(|v| v.as_string())
-        .map(|s| s.to_string());
+        .map(|s| s.to_string())
+        .and_then(|s| {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
 
     let look_at = node
         .get("look_at")
