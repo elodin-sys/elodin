@@ -71,15 +71,10 @@ MotorPwm = ty.Annotated[
     el.Component(
         "motor_pwm",
         el.ComponentType(el.PrimitiveType.F64, (4,)),
-        metadata={"priority": 95, "element_names": "m1,m2,m3,m4"},
+        metadata={"priority": 95, "element_names": "m1,m2,m3,m4", "external_control": "true"},
     ),
 ]
 
-# Arm state for safety (1.0 = armed, 0.0 = disarmed)
-IsArmed = ty.Annotated[
-    jax.Array,
-    el.Component("is_armed", el.ComponentType.F64),
-]
 
 # Thrust visualization vectors (point downward, scaled 0.001-0.1)
 ThrustVizM1 = ty.Annotated[
@@ -117,7 +112,6 @@ class CrazyflieDrone(el.Archetype):
     torque: Torque = field(default_factory=lambda: jnp.zeros(4))
     motor_rpm: MotorRpm = field(default_factory=lambda: jnp.zeros(4))
     motor_pwm: MotorPwm = field(default_factory=lambda: jnp.zeros(4))
-    is_armed: IsArmed = field(default_factory=lambda: jnp.array(0.0))
     # Thrust visualization vectors (point downward from each rotor)
     thrust_viz_m1: ThrustVizM1 = field(default_factory=lambda: jnp.array([0.0, 0.0, -0.001]))
     thrust_viz_m2: ThrustVizM2 = field(default_factory=lambda: jnp.array([0.0, 0.0, -0.001]))
@@ -134,7 +128,6 @@ class CrazyflieDrone(el.Archetype):
 def motor_dynamics(
     pwm: MotorPwm,
     prev_rpm: MotorRpm,
-    is_armed: IsArmed,
 ) -> tuple[MotorRpm, Thrust, Torque]:
     """
     Simulate motor response to PWM commands.
@@ -144,13 +137,24 @@ def motor_dynamics(
     2. First-order motor response (time constant)
     3. RPM to thrust (quadratic relationship)
     4. RPM to torque (quadratic relationship)
+    
+    Note: Safety/arming logic is handled in user_code.py, not here.
+    The simulation applies whatever PWM values are provided.
     """
     config = Config.GLOBAL
     dt = config.fast_loop_time_step
 
+    # PWM threshold - below this, motors are considered OFF
+    # The linear fit (rpm = a + b*pwm) is only valid above a minimum PWM
+    pwm_min_threshold = 5.0
+    
     # Convert PWM to target RPM
-    # rpm = a + b * pwm
-    target_rpm = config.pwm_to_rpm_a + config.pwm_to_rpm_b * pwm
+    # rpm = a + b * pwm (only when PWM is above threshold)
+    target_rpm = jnp.where(
+        pwm > pwm_min_threshold,
+        config.pwm_to_rpm_a + config.pwm_to_rpm_b * pwm,
+        jnp.zeros(4)  # Motors OFF below threshold
+    )
 
     # Clamp to valid range (motors don't spin backwards)
     target_rpm = jnp.maximum(target_rpm, 0.0)
@@ -168,11 +172,6 @@ def motor_dynamics(
     # Calculate torque: tau = kt * omega^2
     # Sign depends on motor rotation direction (handled in body_thrust)
     torque = config.torque_constant * omega**2
-
-    # Zero out if not armed
-    thrust = jnp.where(is_armed, thrust, jnp.zeros(4))
-    torque = jnp.where(is_armed, torque, jnp.zeros(4))
-    rpm = jnp.where(is_armed, rpm, jnp.zeros(4))
 
     return rpm, thrust, torque
 

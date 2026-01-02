@@ -40,7 +40,7 @@ from crazyflie_api import CrazyflieState
 TEAM_ID = 0  # TODO: Set your team ID here!
 
 # Motor command limit for safety during testing
-MOTOR_TEST_LIMIT = 50  # Don't exceed this until you're confident!
+MOTOR_TEST_LIMIT = 500  # Don't exceed this until you're confident!
 
 # =============================================================================
 # Utility Functions
@@ -160,20 +160,18 @@ def main_loop(state: CrazyflieState) -> None:
     # YOUR CODE GOES HERE
     # =========================================================================
 
-    # Lab 1 Example: Turn on motors when blue button is pressed
-    # Uncomment and modify for your experiments
-
-    # if state.is_armed and state.button_blue:
-    #     # Set all motors to a low test value
-    #     state.set_all_motors(MOTOR_TEST_LIMIT)
-    # else:
-    #     # Motors off when not testing
-    #     state.motors_off()
-
-    # =========================================================================
-    # Default behavior: motors off
-    # =========================================================================
-    state.motors_off()
+    # Lab 1 Example: Turn on motors when armed AND blue button is held
+    # This demonstrates the safety pattern you should follow:
+    # - Q key toggles "armed" state
+    # - Left Shift is the "blue button" (dead man switch - must be held)
+    # - Motors only spin when BOTH conditions are met
+    
+    if state.is_armed and state.button_blue:
+        # Set all motors to a test value
+        state.set_all_motors(MOTOR_TEST_LIMIT)
+    else:
+        # Motors off - either not armed or blue button not held
+        state.motors_off()
 
 
 # =============================================================================
