@@ -170,13 +170,15 @@ class CrazyflieConfig:
 
         if self.motor_positions is None:
             # Motor positions in body frame (X forward, Y left, Z up)
+            # Propeller plane is ~12mm above center of mass
             arm = self.arm_length
+            prop_height = 0.012  # 12mm above CG
             self.motor_positions = np.array(
                 [
-                    [arm, -arm, 0.0],  # M1: front-right
-                    [arm, arm, 0.0],  # M2: front-left
-                    [-arm, arm, 0.0],  # M3: back-left
-                    [-arm, -arm, 0.0],  # M4: back-right
+                    [arm, -arm, prop_height],  # M1: front-right (CW)
+                    [arm, arm, prop_height],  # M2: front-left (CCW)
+                    [-arm, arm, prop_height],  # M3: back-left (CW)
+                    [-arm, -arm, prop_height],  # M4: back-right (CCW)
                 ]
             )
 

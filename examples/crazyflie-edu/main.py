@@ -124,7 +124,7 @@ def create_world() -> tuple[el.World, el.EntityId]:
 
         tabs {
             hsplit name="Simulation" {
-                viewport name="3D View" pos="crazyflie.world_pos + (0,0,0,0, 0.5, 0.5, 0.5)" look_at="crazyflie.world_pos" show_grid=#true active=#true
+                viewport name="3D View" pos="crazyflie.world_pos + (0,0,0,0, 0.2, 0.2, 0.2)" look_at="crazyflie.world_pos" show_grid=#true active=#true
                 vsplit share=0.35 {
                     graph "crazyflie.gyro" name="Gyroscope (rad/s)"
                     graph "crazyflie.accel" name="Accelerometer (g)"
@@ -142,55 +142,45 @@ def create_world() -> tuple[el.World, el.EntityId]:
         }
 
         // Crazyflie 2.1 dimensions: 92mm diagonal, arm_length=32.5mm, height~29mm
-        // These arrows show the motor positions to verify GLB scale
-        vector_arrow "(1, 0, 0)" origin="crazyflie.world_pos" scale=0.0325 name="X: 32.5mm (arm)" show_name=#true body_frame=#true {
-            color red 200
-        }
-        vector_arrow "(0, 1, 0)" origin="crazyflie.world_pos" scale=0.0325 name="Y: 32.5mm (arm)" show_name=#true body_frame=#true {
-            color green 200
-        }
-        vector_arrow "(0, 0, 1)" origin="crazyflie.world_pos" scale=0.0145 name="Z: 14.5mm (half height)" show_name=#true body_frame=#true {
-            color blue 200
-        }
-
         // Motor position indicators (at arm_length diagonals)
         vector_arrow "(0.707, -0.707, 0)" origin="crazyflie.world_pos" scale=0.046 name="M1: FR" show_name=#true body_frame=#true {
-            color yellow 150
+            color yellow 50
         }
         vector_arrow "(0.707, 0.707, 0)" origin="crazyflie.world_pos" scale=0.046 name="M2: FL" show_name=#true body_frame=#true {
-            color yellow 150
+            color yellow 50
         }
         vector_arrow "(-0.707, 0.707, 0)" origin="crazyflie.world_pos" scale=0.046 name="M3: BL" show_name=#true body_frame=#true {
-            color yellow 150
+            color yellow 50
         }
         vector_arrow "(-0.707, -0.707, 0)" origin="crazyflie.world_pos" scale=0.046 name="M4: BR" show_name=#true body_frame=#true {
-            color yellow 150
+            color yellow 50
         }
 
         // Rotor disc visualization (45mm diameter = 0.0225m radius, thin cylinder)
-        // Motor positions: arm_length=0.0325m at 45° diagonals
-        // M1: FR (+0.0325, -0.0325, 0.003)
-        object_3d "crazyflie.world_pos + (0,0,0,0, 0.0325, -0.0325, 0.003)" body_frame=#true {
+        // Motor positions: arm_length=0.0325m at 45° diagonals, prop_height=0.012m
+        // Quad-X CW/CCW pairing: M1+M3 are CW (diagonal), M2+M4 are CCW (diagonal)
+        // M1: FR (+0.0325, -0.0325) - CW (cyan)
+        object_3d "crazyflie.world_pos + (0,0,0,0, 0.0325, -0.0325, 0.013)" body_frame=#true {
             cylinder radius=0.0225 height=0.002 {
-                color cyan 120
+                color cyan 30
             }
         }
-        // M2: FL (+0.0325, +0.0325, 0.003)
-        object_3d "crazyflie.world_pos + (0,0,0,0, 0.0325, 0.0325, 0.003)" body_frame=#true {
+        // M2: FL (+0.0325, +0.0325) - CCW (magenta)
+        object_3d "crazyflie.world_pos + (0,0,0,0, 0.0325, 0.0325, 0.013)" body_frame=#true {
             cylinder radius=0.0225 height=0.002 {
-                color red 120
+                color red 30
             }
         }
-        // M3: BL (-0.0325, +0.0325, 0.003)
-        object_3d "crazyflie.world_pos + (0,0,0,0, -0.0325, 0.0325, 0.003)" body_frame=#true {
+        // M3: BL (-0.0325, +0.0325) - CW (cyan) - diagonal from M1
+        object_3d "crazyflie.world_pos + (0,0,0,0, -0.0325, 0.0325, 0.013)" body_frame=#true {
             cylinder radius=0.0225 height=0.002 {
-                color red 120
+                color cyan 30
             }
         }
-        // M4: BR (-0.0325, -0.0325, 0.003)
-        object_3d "crazyflie.world_pos + (0,0,0,0, -0.0325, -0.0325, 0.003)" body_frame=#true {
+        // M4: BR (-0.0325, -0.0325) - CCW (magenta) - diagonal from M2
+        object_3d "crazyflie.world_pos + (0,0,0,0, -0.0325, -0.0325, 0.013)" body_frame=#true {
             cylinder radius=0.0225 height=0.002 {
-                color cyan 120
+                color red 30
             }
         }
     """
