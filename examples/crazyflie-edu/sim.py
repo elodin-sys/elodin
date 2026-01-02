@@ -137,7 +137,7 @@ def motor_dynamics(
     2. First-order motor response (time constant)
     3. RPM to thrust (quadratic relationship)
     4. RPM to torque (quadratic relationship)
-    
+
     Note: Safety/arming logic is handled in user_code.py, not here.
     The simulation applies whatever PWM values are provided.
     """
@@ -147,13 +147,13 @@ def motor_dynamics(
     # PWM threshold - below this, motors are considered OFF
     # The linear fit (rpm = a + b*pwm) is only valid above a minimum PWM
     pwm_min_threshold = 5.0
-    
+
     # Convert PWM to target RPM
     # rpm = a + b * pwm (only when PWM is above threshold)
     target_rpm = jnp.where(
         pwm > pwm_min_threshold,
         config.pwm_to_rpm_a + config.pwm_to_rpm_b * pwm,
-        jnp.zeros(4)  # Motors OFF below threshold
+        jnp.zeros(4),  # Motors OFF below threshold
     )
 
     # Clamp to valid range (motors don't spin backwards)
@@ -409,4 +409,3 @@ def force_from_speed(speed_rad_s: float) -> float:
     """
     config = Config.GLOBAL
     return config.thrust_constant * speed_rad_s**2
-

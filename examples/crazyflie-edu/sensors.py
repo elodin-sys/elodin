@@ -104,7 +104,9 @@ class SensorNoise:
     def drift_bias(self, bias: jax.Array, tick: SensorTick, dt: float) -> jax.Array:
         """Update bias with random walk drift."""
         key = rng.fold_in(self.key, tick)
-        drift = self.bias_drift_std * rng.normal(key, shape=bias.shape, dtype=bias.dtype) * jnp.sqrt(dt)
+        drift = (
+            self.bias_drift_std * rng.normal(key, shape=bias.shape, dtype=bias.dtype) * jnp.sqrt(dt)
+        )
         return bias + drift
 
     def sample(
@@ -253,4 +255,3 @@ def create_imu_system() -> el.System:
 
 # Convenience alias
 imu = create_imu_system()
-

@@ -39,6 +39,7 @@ import user_code
 # Try to import keyboard controller (optional dependency)
 try:
     from keyboard_controller import KeyboardController
+
     KEYBOARD_AVAILABLE = True
 except ImportError:
     KEYBOARD_AVAILABLE = False
@@ -109,7 +110,9 @@ class Control(el.Archetype):
     """Control state archetype for user code interaction."""
 
     motor_command: MotorCommand = field(default_factory=lambda: jnp.zeros(4))
-    is_armed_control: IsArmedControl = field(default_factory=lambda: jnp.array(0.0))  # Start disarmed
+    is_armed_control: IsArmedControl = field(
+        default_factory=lambda: jnp.array(0.0)
+    )  # Start disarmed
     button_blue: ButtonBlue = field(default_factory=lambda: jnp.array(0.0))
     button_yellow: ButtonYellow = field(default_factory=lambda: jnp.array(0.0))
     button_green: ButtonGreen = field(default_factory=lambda: jnp.array(0.0))
@@ -291,7 +294,7 @@ _last_print_time = [0.0]
 def user_code_post_step(tick: int, ctx: el.PostStepContext):
     """
     Post-step callback that integrates user code with the simulation.
-    
+
     This is called after each physics step and:
     1. Reads keyboard input
     2. Updates button/arm state in the simulation
@@ -300,10 +303,10 @@ def user_code_post_step(tick: int, ctx: el.PostStepContext):
     5. Writes motor commands back to the simulation
     """
     global _keyboard_controller
-    
+
     config = CrazyflieConfig.GLOBAL
     sim_time = tick * config.dt
-    
+
     # Initialize keyboard controller on first tick
     if _keyboard_controller is None:
         if KEYBOARD_AVAILABLE:
@@ -314,9 +317,11 @@ def user_code_post_step(tick: int, ctx: el.PostStepContext):
             class DummyController:
                 def get_state(self):
                     from keyboard_controller import ControllerState
+
                     return ControllerState(is_armed=True, button_blue=True)  # Auto-arm for testing
+
             _keyboard_controller = DummyController()
-            
+
         print("\n" + "=" * 60)
         print("  SIMULATION STARTED!")
         print("=" * 60)
@@ -325,7 +330,7 @@ def user_code_post_step(tick: int, ctx: el.PostStepContext):
         print("    Left Shift  - Blue button (hold to enable motors)")
         print("    E/R/T       - Yellow/Green/Red buttons")
         print("=" * 60 + "\n")
-    
+
     # Read keyboard state
     if _keyboard_controller is not None:
         kb_state = _keyboard_controller.get_state()
@@ -341,7 +346,7 @@ def user_code_post_step(tick: int, ctx: el.PostStepContext):
         button_yellow = False
         button_green = False
         button_red = False
-    
+
     # Write control inputs to simulation for graphing/logging
     # (These are purely for visualization - arming logic is in user_code)
     ctx.write_component("crazyflie.is_armed_control", np.array([1.0 if is_armed else 0.0]))
@@ -349,7 +354,7 @@ def user_code_post_step(tick: int, ctx: el.PostStepContext):
     ctx.write_component("crazyflie.button_yellow", np.array([1.0 if button_yellow else 0.0]))
     ctx.write_component("crazyflie.button_green", np.array([1.0 if button_green else 0.0]))
     ctx.write_component("crazyflie.button_red", np.array([1.0 if button_red else 0.0]))
-    
+
     # Read sensor data from simulation
     try:
         gyro = np.array(ctx.read_component("crazyflie.gyro"))
@@ -360,7 +365,7 @@ def user_code_post_step(tick: int, ctx: el.PostStepContext):
         gyro = np.zeros(3)
         accel = np.array([0.0, 0.0, 1.0])  # 1g on z-axis
         motor_cmd = np.zeros(4)
-    
+
     # Create state object for user code
     state = CrazyflieState(
         gyro=gyro,
@@ -374,35 +379,36 @@ def user_code_post_step(tick: int, ctx: el.PostStepContext):
         time=sim_time,
         dt=config.dt,
     )
-    
+
     # Call user code
     user_code.main_loop(state)
-    
+
     # Write motor commands directly to motor_pwm for physics
     motor_cmds = np.array(state.motor_command, dtype=np.float64)
-    
+
     # Write PWM values (user_code sets motor_command, we pass it to physics)
     ctx.write_component("crazyflie.motor_pwm", motor_cmds)
-    
+
     # Also write to motor_command for logging/graphing purposes
     ctx.write_component("crazyflie.motor_command", motor_cmds)
-    
-    
+
     # Print status periodically
     if sim_time - _last_print_time[0] >= 1.0:
         armed_str = "ARMED" if is_armed else "DISARMED"
         motors = state.motor_command
-        
+
         # Read back status
         try:
             thrust = np.array(ctx.read_component("crazyflie.thrust"))
-            
-            print(f"[{sim_time:6.1f}s] {armed_str} | Blue:{int(button_blue)} | "
-                  f"PWM:[{motors[0]:.0f},{motors[1]:.0f},{motors[2]:.0f},{motors[3]:.0f}] | "
-                  f"Thrust:[{thrust[0]:.4f},{thrust[1]:.4f},{thrust[2]:.4f},{thrust[3]:.4f}]")
+
+            print(
+                f"[{sim_time:6.1f}s] {armed_str} | Blue:{int(button_blue)} | "
+                f"PWM:[{motors[0]:.0f},{motors[1]:.0f},{motors[2]:.0f},{motors[3]:.0f}] | "
+                f"Thrust:[{thrust[0]:.4f},{thrust[1]:.4f},{thrust[2]:.4f},{thrust[3]:.4f}]"
+            )
         except Exception as e:
             print(f"[{sim_time:6.1f}s] {armed_str} | Blue:{int(button_blue)} | Read error: {e}")
-        
+
         _last_print_time[0] = sim_time
 
 

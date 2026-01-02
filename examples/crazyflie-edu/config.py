@@ -308,4 +308,3 @@ if __name__ == "__main__":
     print(f"  Time step: {config.sim_time_step * 1000:.1f} ms")
     print(f"  Total time: {config.simulation_time:.1f} s")
     print(f"  Sensor noise: {config.sensor_noise}")
-

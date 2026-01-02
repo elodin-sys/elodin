@@ -285,4 +285,3 @@ def print_status(state: CrazyflieState) -> None:
         f"M3: {state.motor_command[2]:.0f}, M4: {state.motor_command[3]:.0f}"
     )
     print("=" * 50)
-

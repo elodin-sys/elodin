@@ -165,7 +165,7 @@ def main_loop(state: CrazyflieState) -> None:
     # - Q key toggles "armed" state
     # - Left Shift is the "blue button" (dead man switch - must be held)
     # - Motors only spin when BOTH conditions are met
-    
+
     if state.is_armed and state.button_blue:
         # Set all motors to a test value
         state.set_all_motors(MOTOR_TEST_LIMIT)
@@ -192,8 +192,12 @@ def print_status(state: CrazyflieState) -> None:
     print(f"Armed: {'YES' if state.is_armed else 'NO'}")
     print()
     print("Sensor Readings:")
-    print(f"  Gyro (rad/s):  x={state.gyro[0]:+.4f}, y={state.gyro[1]:+.4f}, z={state.gyro[2]:+.4f}")
-    print(f"  Accel (g):     x={state.accel[0]:+.4f}, y={state.accel[1]:+.4f}, z={state.accel[2]:+.4f}")
+    print(
+        f"  Gyro (rad/s):  x={state.gyro[0]:+.4f}, y={state.gyro[1]:+.4f}, z={state.gyro[2]:+.4f}"
+    )
+    print(
+        f"  Accel (g):     x={state.accel[0]:+.4f}, y={state.accel[1]:+.4f}, z={state.accel[2]:+.4f}"
+    )
     print()
     print("Motor Commands (PWM):")
     print(
@@ -206,4 +210,3 @@ def print_status(state: CrazyflieState) -> None:
     print(f"  PWM_TO_SPEED_B = {PWM_TO_SPEED_B}")
     print(f"  THRUST_CONSTANT = {THRUST_CONSTANT:.2e}")
     print("=" * 50)
-
