@@ -893,7 +893,7 @@ if HITL_MODE:
     else:
         print(f"  Crazyflie URI: {DEFAULT_CF_URI}")
         print("  Physics: DISABLED (real world is source of truth)")
-        print(f"  Simulation: {config.simulation_time}s at {1/config.dt:.0f}Hz")
+        print(f"  Simulation: {config.simulation_time}s at {1 / config.dt:.0f}Hz")
         print("=" * 60 + "\n")
 
     # Create system without physics
@@ -915,7 +915,7 @@ else:
         print("Build it with: ./examples/crazyflie-edu/sitl/build.sh\n")
 
     print(f"[Main] SITL binary: {SITL_PATH}")
-    print(f"[Main] Simulation: {config.simulation_time}s at {1/config.dt:.0f}Hz")
+    print(f"[Main] Simulation: {config.simulation_time}s at {1 / config.dt:.0f}Hz")
 
     # Create system with physics
     sys = system(include_physics=True)
