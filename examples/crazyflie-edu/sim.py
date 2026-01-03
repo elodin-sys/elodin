@@ -138,7 +138,7 @@ def motor_dynamics(
     3. RPM to thrust (quadratic relationship)
     4. RPM to torque (quadratic relationship)
 
-    Note: Safety/arming logic is handled in user_code.py, not here.
+    Note: Safety/arming logic is handled in user_code.c, not here.
     The simulation applies whatever PWM values are provided.
     """
     config = Config.GLOBAL

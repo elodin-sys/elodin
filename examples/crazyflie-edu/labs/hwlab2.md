@@ -51,13 +51,13 @@ In this lab you will validate your powertrain model from SimLab2 using real hard
 
 For each PWM command in {40, 80, 120, 160, 200, 240}:
 
-1. **Update firmware** to command that PWM value:
+1. **Update your code** to command that PWM value:
    ```c
-   void userCodeMainLoop(...) {
-       if (buttonGetPressed(BUTTON_BLUE)) {
-           uint16_t cmd = 40 * 257;  // Scale 0-255 to 0-65535
-           motorPwm[0] = cmd;
-           // ... other motors
+   void user_main_loop(user_state_t* state) {
+       if (state->button_blue) {
+           user_set_all_motors(state, 10000);  // Test PWM value
+       } else {
+           user_motors_off(state);
        }
    }
    ```
@@ -228,13 +228,13 @@ static float THRUST_CONSTANT = ???;    // Your calibrated value
 
 4. **Command hover thrust**:
    ```c
-   void userCodeMainLoop(...) {
-       if (buttonGetPressed(BUTTON_BLUE) && isArmed()) {
-           float thrust = (0.027 * 9.81) / 4;  // Hover thrust
-           uint16_t pwm = pwmFromForce(thrust);
-           setAllMotors(pwm);
+   void user_main_loop(user_state_t* state) {
+       if (state->is_armed && state->button_blue) {
+           float thrust = (0.027f * 9.81f) / 4.0f;  // Hover thrust
+           uint16_t pwm = pwm_from_force(thrust);
+           user_set_all_motors(state, pwm);
        } else {
-           setAllMotors(0);
+           user_motors_off(state);
        }
    }
    ```

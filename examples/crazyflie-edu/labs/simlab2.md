@@ -15,7 +15,7 @@ PWM Command → [Motor] → Angular Velocity → [Propeller] → Thrust Force
 ```
 
 You will identify two relationships:
-1. **PWM → Speed**: How motor speed (rad/s) relates to PWM command (0-255)
+1. **PWM → Speed**: How motor speed (rad/s) relates to PWM command (0-65535)
 2. **Speed → Force**: How thrust force (N) relates to motor speed (rad/s)
 
 ### 2.1.1 Why This Matters
@@ -52,12 +52,12 @@ In simulation, we have "measured" the motor speed at various PWM commands using 
 
 | PWM Command | Measured Speed (RPM) | Speed (rad/s) |
 |-------------|---------------------|---------------|
-| 40          | 4340                | 454.5         |
-| 80          | 4610                | 482.8         |
-| 120         | 4880                | 511.1         |
-| 160         | 5150                | 539.4         |
-| 200         | 5420                | 567.6         |
-| 240         | 5690                | 595.9         |
+| 10000       | 4340                | 454.5         |
+| 20000       | 4610                | 482.8         |
+| 30000       | 4880                | 511.1         |
+| 40000       | 5150                | 539.4         |
+| 50000       | 5420                | 567.6         |
+| 60000       | 5690                | 595.9         |
 
 **Note**: Convert RPM to rad/s using: `ω (rad/s) = RPM × 2π / 60`
 
@@ -70,18 +70,18 @@ In simulation, we have "measured" the motor speed at various PWM commands using 
    ω = a + b × PWM
    ```
 
-   You can use least-squares fitting:
+   You can use least-squares fitting (Python for analysis):
    ```python
    import numpy as np
 
-   pwm = np.array([40, 80, 120, 160, 200, 240])
+   pwm = np.array([10000, 20000, 30000, 40000, 50000, 60000])
    rpm = np.array([4340, 4610, 4880, 5150, 5420, 5690])
    omega = rpm * 2 * np.pi / 60  # Convert to rad/s
 
    # Fit: omega = a + b * pwm
    A = np.vstack([np.ones_like(pwm), pwm]).T
    a, b = np.linalg.lstsq(A, omega, rcond=None)[0]
-   print(f"a = {a:.2f}, b = {b:.4f}")
+   print(f"a = {a:.2f}, b = {b:.6f}")
    ```
 
 3. **Implement the inverse function**: To command a desired speed, you need:
@@ -91,21 +91,23 @@ In simulation, we have "measured" the motor speed at various PWM commands using 
 
 ### 2.2.3 Update Your Code
 
-In `user_code.py`, update the constants:
+In `user_code.c`, update the constants:
 
-```python
-# PWM to Speed mapping: omega = PWM_TO_SPEED_A + PWM_TO_SPEED_B * pwm
-PWM_TO_SPEED_A = ???  # Your value here (rad/s at PWM=0)
-PWM_TO_SPEED_B = ???  # Your value here (rad/s per PWM unit)
+```c
+// PWM to Speed mapping: omega = PWM_TO_SPEED_A + PWM_TO_SPEED_B * pwm
+#define PWM_TO_SPEED_A ???  // Your value here (rad/s at PWM=0)
+#define PWM_TO_SPEED_B ???  // Your value here (rad/s per PWM unit)
 ```
 
 And implement the function:
 
-```python
-def pwm_from_speed(desired_speed_rad_s: float) -> float:
-    """Convert desired motor speed (rad/s) to PWM command."""
-    pwm = (desired_speed_rad_s - PWM_TO_SPEED_A) / PWM_TO_SPEED_B
-    return max(0, min(255, pwm))
+```c
+uint16_t pwm_from_speed(float desired_speed_rad_s) {
+    float pwm = (desired_speed_rad_s - PWM_TO_SPEED_A) / PWM_TO_SPEED_B;
+    if (pwm < 0) return 0;
+    if (pwm > 65535) return 65535;
+    return (uint16_t)pwm;
+}
 ```
 
 ---
@@ -139,15 +141,17 @@ accel_z = g × sin(β)  →  sin(β) = accel_z / g
 1. **Enable the force rig** in the simulation (mount the vehicle)
 
 2. **For each test speed**, modify your code to command that speed:
-   ```python
-   TEST_SPEED = 1000  # rad/s - change this for each test
-
-   def main_loop(state: CrazyflieState) -> None:
-       if state.is_armed and state.button_blue:
-           pwm = pwm_from_speed(TEST_SPEED)
-           state.set_all_motors(pwm)
-       else:
-           state.motors_off()
+   ```c
+   #define TEST_SPEED 1000.0f  // rad/s - change this for each test
+   
+   void user_main_loop(user_state_t* state) {
+       if (state->is_armed && state->button_blue) {
+           uint16_t pwm = pwm_from_speed(TEST_SPEED);
+           user_set_all_motors(state, pwm);
+       } else {
+           user_motors_off(state);
+       }
+   }
    ```
 
 3. **Record data** at these speeds: {1000, 1100, 1200, 1300, 1400} rad/s
@@ -189,21 +193,22 @@ For each test point, calculate:
 
 ### 2.3.4 Update Your Code
 
-In `user_code.py`, update:
+In `user_code.c`, update:
 
-```python
-# Thrust constant: force = THRUST_CONSTANT * omega^2
-THRUST_CONSTANT = ???  # Your value (should be ~10^-8 N/(rad/s)^2)
+```c
+// Thrust constant: force = THRUST_CONSTANT * omega^2
+#define THRUST_CONSTANT ???  // Your value (should be ~10^-8 N/(rad/s)^2)
 ```
 
 And implement:
 
-```python
-def speed_from_force(desired_force_n: float) -> float:
-    """Convert desired thrust (N) to motor speed (rad/s)."""
-    if desired_force_n <= 0:
-        return 0.0
-    return math.sqrt(desired_force_n / THRUST_CONSTANT)
+```c
+#include <math.h>
+
+float speed_from_force(float desired_force_n) {
+    if (desired_force_n <= 0) return 0.0f;
+    return sqrtf(desired_force_n / THRUST_CONSTANT);
+}
 ```
 
 ---
@@ -212,7 +217,7 @@ def speed_from_force(desired_force_n: float) -> float:
 
 ### 2.4.1 Test: 90% Hover Thrust
 
-Calculate the PWM needed for 90% of hover thrust:
+Calculate the PWM needed for 90% of hover thrust (use Python for analysis):
 
 ```python
 g = 9.81
@@ -240,15 +245,17 @@ print(f"Required PWM: {test_pwm:.0f}")
 5. Repeat with 110% thrust
 6. **Expected**: Vehicle accelerates upward
 
-```python
-def main_loop(state: CrazyflieState) -> None:
-    if state.is_armed and state.button_blue:
-        # Command 90% hover thrust
-        thrust_per_motor = 0.9 * (0.027 * 9.81) / 4
-        pwm = pwm_from_force(thrust_per_motor)
-        state.set_all_motors(pwm)
-    else:
-        state.motors_off()
+```c
+void user_main_loop(user_state_t* state) {
+    if (state->is_armed && state->button_blue) {
+        // Command 90% hover thrust
+        float thrust_per_motor = 0.9f * (0.027f * 9.81f) / 4.0f;
+        uint16_t pwm = pwm_from_force(thrust_per_motor);
+        user_set_all_motors(state, pwm);
+    } else {
+        user_motors_off(state);
+    }
+}
 ```
 
 ---
@@ -295,7 +302,7 @@ f. Describe your validation results (90% and 110% hover tests).
 
 ### 4. Complete Code
 
-Provide the full listing of your `main_loop()` function and utility functions.
+Provide the full listing of your `user_main_loop()` function and utility functions from `user_code.c`.
 
 ---
 
@@ -304,7 +311,6 @@ Provide the full listing of your `main_loop()` function and utility functions.
 In **HWLab1**, you will:
 - Set up the Crazyflie hardware and radio
 - Flash firmware to the real vehicle
-- Port your Python code to C
+- Verify your simulation code runs on real hardware
 
-**Important**: Make a backup of your working code! Email it to all team members.
-
+**Important**: Make a backup of your working code! Your `user_code.c` will run on both simulation and hardware.

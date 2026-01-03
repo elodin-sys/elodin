@@ -11,7 +11,7 @@ In this lab you will set up the Elodin simulation environment and learn how to c
 Before starting this lab, ensure you have:
 
 1. **Elodin installed** - Follow the repository setup instructions
-2. **Python environment activated** - The simulation runs in Python
+2. **Development environment ready** - Nix + Python + C compiler
 
 ```bash
 # From the repository root
@@ -19,13 +19,22 @@ nix develop
 uv venv --python 3.12
 source .venv/bin/activate
 uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
+uv pip install pynput  # For keyboard input
 ```
 
 ---
 
 ## 1.2 Running the Simulation
 
-### 1.2.1 Starting the Editor
+### 1.2.1 Build the SITL Binary
+
+The simulation uses a C binary that runs your control code. Build it first (from repo root):
+
+```bash
+./examples/crazyflie-edu/sitl/build.sh
+```
+
+### 1.2.2 Starting the Editor
 
 Launch the Elodin editor with the Crazyflie simulation:
 
@@ -38,7 +47,7 @@ You should see:
 - Graph panels for sensors (gyroscope, accelerometer) and motors
 - The simulation paused, ready to run
 
-### 1.2.2 Editor Controls
+### 1.2.3 Editor Controls
 
 | Action | Control |
 |--------|---------|
@@ -49,7 +58,15 @@ You should see:
 | Pan camera | Middle-click + drag |
 | Zoom | Scroll wheel |
 
-### 1.2.3 Understanding the Coordinate System
+### 1.2.4 Keyboard Controls (Runtime)
+
+| Key | Action |
+|-----|--------|
+| Q | Toggle armed state |
+| Left Shift | Blue button (hold to enable motors) |
+| E / R / T | Yellow / Green / Red buttons |
+
+### 1.2.5 Understanding the Coordinate System
 
 The simulation uses:
 - **Body frame**: +X forward, +Y left, +Z up
@@ -67,40 +84,59 @@ Open the `examples/crazyflie-edu/` directory in your editor. The key files are:
 |------|---------|
 | `main.py` | Entry point, sets up simulation |
 | `config.py` | Crazyflie physical parameters |
-| `user_code.py` | **Your code goes here!** |
+| `user_code.c` | **Your code goes here!** |
+| `user_code.h` | API header for your code |
+| `sitl/` | SITL binary (UDP communication) |
 | `sim.py` | Physics simulation |
 | `sensors.py` | IMU sensor simulation |
-| `crazyflie_api.py` | API for reading sensors/writing motors |
 
 ### 1.3.1 The User Code File
 
-Open `user_code.py`. This is where you write your control code. The structure is:
+Open `user_code.c`. This is where you write your control code. The structure is:
 
-```python
-def main_loop(state: CrazyflieState) -> None:
-    """
-    Called every control cycle (500 Hz).
+```c
+#include "user_code.h"
 
-    state.gyro[0], gyro[1], gyro[2]  - Angular velocity (rad/s)
-    state.accel[0], accel[1], accel[2] - Acceleration (g units)
-    state.is_armed      - Vehicle armed state
-    state.button_blue   - Blue button pressed
-
-    state.set_motors(m1, m2, m3, m4)  - Set motor commands (0-255)
-    state.set_all_motors(cmd)         - Set all motors same value
-    state.motors_off()                - Turn all motors off
-    """
-    # YOUR CODE HERE
-    state.motors_off()
+void user_main_loop(user_state_t* state) {
+    /*
+     * Called every control cycle (500 Hz).
+     *
+     * Sensors (read-only):
+     *   state->sensors.gyro.x/y/z  - Angular velocity (rad/s)
+     *   state->sensors.accel.x/y/z - Acceleration (g units)
+     *
+     * Control inputs (read-only):
+     *   state->is_armed      - Vehicle armed state
+     *   state->button_blue   - Blue button pressed (dead man switch)
+     *
+     * Motor control (use helper functions):
+     *   user_set_motors(state, m1, m2, m3, m4)  - Set individual motors
+     *   user_set_all_motors(state, pwm)         - Set all motors same
+     *   user_motors_off(state)                  - Turn all motors off
+     */
+    
+    // YOUR CODE HERE
+    user_motors_off(state);
+}
 ```
 
 ### 1.3.2 Setting Your Team ID
 
-In `user_code.py`, find and set your team ID:
+In `user_code.c`, find and set your team ID:
 
-```python
-TEAM_ID = 0  # TODO: Set your team ID here!
+```c
+#define TEAM_ID 0  // TODO: Set your team ID here!
 ```
+
+### 1.3.3 Rebuilding After Changes
+
+**Important**: After editing `user_code.c`, you must rebuild the SITL binary (from repo root):
+
+```bash
+./examples/crazyflie-edu/sitl/build.sh
+```
+
+Then restart the simulation (Ctrl+C and re-run, or press R in the editor).
 
 ---
 
@@ -108,11 +144,9 @@ TEAM_ID = 0  # TODO: Set your team ID here!
 
 Even in simulation, we practice good safety habits:
 
-1. **The vehicle must be armed** before motors will spin
-2. **The red button** acts as a dead man switch (in hardware, you must hold it)
-3. **Start with low motor commands** (50 or less) until you understand the behavior
-
-To arm the vehicle in simulation, you'll use the GUI controls (coming soon) or set `state.is_armed` programmatically for testing.
+1. **The vehicle must be armed** before motors will spin (press Q)
+2. **The blue button** acts as a dead man switch (hold Left Shift)
+3. **Start with low motor commands** (10000 or less) until you understand the behavior
 
 ---
 
@@ -120,25 +154,29 @@ To arm the vehicle in simulation, you'll use the GUI controls (coming soon) or s
 
 ### 1.5.1 Experiment 1: Turning the Motors On
 
-**Objective**: Write code to turn on motors when the blue button is pressed.
+**Objective**: Write code to turn on motors when armed and blue button is pressed.
 
-In `user_code.py`, modify the `main_loop()` function:
+In `user_code.c`, modify the `user_main_loop()` function:
 
-```python
-def main_loop(state: CrazyflieState) -> None:
-    if state.is_armed and state.button_blue:
-        # Set all motors to a low test value
-        state.set_all_motors(50)  # Don't exceed 50 for now!
-    else:
-        state.motors_off()
+```c
+void user_main_loop(user_state_t* state) {
+    if (state->is_armed && state->button_blue) {
+        // Set all motors to a low test value
+        // PWM range is 0-65535, start with ~15%
+        user_set_all_motors(state, 10000);
+    } else {
+        user_motors_off(state);
+    }
+}
 ```
 
-**Procedure**:
-1. Save your changes to `user_code.py`
-2. Restart the simulation (the editor auto-reloads)
-3. Arm the vehicle
-4. Press the blue button - observe the motors spinning
-5. Release the blue button - motors should stop
+**Procedure** (all commands from repo root):
+1. Save your changes to `user_code.c`
+2. Rebuild: `./examples/crazyflie-edu/sitl/build.sh`
+3. Run the simulation: `elodin editor examples/crazyflie-edu/main.py`
+4. Press Q to arm the vehicle
+5. Hold Left Shift (blue button) - observe the motors spinning
+6. Release Left Shift - motors should stop
 
 **Record**:
 - Observe the motor RPM graph
@@ -149,7 +187,7 @@ def main_loop(state: CrazyflieState) -> None:
 **Objective**: Analyze gyroscope and accelerometer data with motors off.
 
 **Procedure**:
-1. Ensure motors are off (blue button not pressed)
+1. Ensure motors are off (don't hold blue button)
 2. Let the simulation run for at least 30 seconds
 3. Observe the sensor graphs
 
@@ -162,7 +200,7 @@ def main_loop(state: CrazyflieState) -> None:
 **Objective**: Detect vibrations from running motors.
 
 **Procedure**:
-1. Turn on motors at command = 50
+1. Turn on motors (arm + hold blue button)
 2. Let run for 30 seconds while recording data
 3. Compare gyro readings to motors-off case
 
@@ -196,12 +234,6 @@ You can disable noise by modifying `config.py`:
 sensor_noise: bool = False  # Disable noise
 ```
 
-Or run with the `--no-noise` flag:
-
-```bash
-python examples/crazyflie-edu/main.py --no-noise
-```
-
 **Procedure**:
 1. Record 20 seconds with noise enabled
 2. Restart with noise disabled
@@ -227,7 +259,7 @@ For each team member, briefly describe their contribution.
 
 ### 2. Running the Motors [50%]
 
-a. Provide a listing of your `main_loop()` function in `user_code.py`, clearly identifying the code you added.
+a. Provide a listing of your `user_main_loop()` function in `user_code.c`, clearly identifying the code you added.
 
 b. Include a screenshot of the simulation with motors running.
 
@@ -261,8 +293,8 @@ In **SimLab2**, you will:
 
 ## Tips
 
-- **Debugging**: Add `print()` statements in your `main_loop()` - they appear in the terminal
+- **Rebuild after changes**: Always run `./examples/crazyflie-edu/sitl/build.sh` after editing `user_code.c`
+- **Debugging**: Add `printf()` statements in your code - they appear in the terminal
 - **Reset often**: Press 'R' to reset the simulation if things go wrong
-- **Low power first**: Always start with low motor commands (≤50) until you're confident
+- **Low power first**: Always start with low motor commands until you're confident
 - **Save frequently**: Keep backups of working code before making changes
-

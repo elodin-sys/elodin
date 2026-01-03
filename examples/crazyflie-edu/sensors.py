@@ -5,6 +5,7 @@ Simulates the BMI088 IMU (accelerometer and gyroscope) with realistic noise mode
 The Crazyflie 2.1 uses a BMI088 6-axis IMU.
 """
 
+import sys
 import typing as ty
 from dataclasses import dataclass, field
 
@@ -14,6 +15,23 @@ import jax.numpy as jnp
 import jax.random as rng
 
 from config import CrazyflieConfig as Config
+
+# =============================================================================
+# HITL Mode Detection
+# =============================================================================
+
+# In HITL mode, sensor components need external_control=true so that
+# post_step callbacks can write real sensor data from the Crazyflie hardware.
+# In SITL mode, the sensor simulation systems write to these components.
+HITL_MODE = "--hitl" in sys.argv
+
+# Build metadata dict conditionally
+_gyro_metadata: dict[str, str] = {"priority": "90", "element_names": "x,y,z"}
+_accel_metadata: dict[str, str] = {"priority": "89", "element_names": "x,y,z"}
+
+if HITL_MODE:
+    _gyro_metadata["external_control"] = "true"
+    _accel_metadata["external_control"] = "true"
 
 # =============================================================================
 # Component Definitions
@@ -29,7 +47,7 @@ Gyro = ty.Annotated[
     el.Component(
         "gyro",
         el.ComponentType(el.PrimitiveType.F64, (3,)),
-        metadata={"priority": 90, "element_names": "x,y,z"},
+        metadata=_gyro_metadata,
     ),
 ]
 
@@ -47,7 +65,7 @@ Accel = ty.Annotated[
     el.Component(
         "accel",
         el.ComponentType(el.PrimitiveType.F64, (3,)),
-        metadata={"priority": 89, "element_names": "x,y,z"},
+        metadata=_accel_metadata,
     ),
 ]
 

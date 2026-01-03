@@ -1,5 +1,12 @@
 # Crazyflie Firmware Integration Research
 
+> **Implementation Status**: This design document led to the current implementation using
+> "Approach 2: App Layer SITL" (see section below). The implementation includes:
+> - `user_code.c` / `user_code.h` - Portable C control code
+> - `sitl/sitl_main.c` - SITL binary for simulation
+> - `firmware/app_main.c` - Crazyflie app layer integration
+> - HITL mode integrated into `main.py` via cflib
+
 ## Overview
 
 This document explores how students in drone control courses (like ME136 at UC Berkeley) interface with the Crazyflie firmware, and how one might build SITL (Software-In-The-Loop) simulation hooks similar to those provided for Betaflight.

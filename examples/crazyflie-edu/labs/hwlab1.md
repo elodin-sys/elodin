@@ -1,6 +1,6 @@
 # Hardware Lab 1: Programming the Crazyflie
 
-In this lab you will set up the Crazyflie hardware, flash firmware, and port your simulation code to run on the real vehicle.
+In this lab you will set up the Crazyflie hardware, flash firmware, and run your simulation code on the real vehicle.
 
 > ⚠️ **Safety First**: The Crazyflie has spinning propellers that can cause injury. Always:
 > - Keep propellers away from faces and fingers
@@ -29,38 +29,21 @@ The Crazyflie 2.1 includes:
 - Crazyflie 2.1 quadcopter
 - Crazyradio PA USB dongle
 - Micro-USB cable (for charging/flashing)
-- Computer with Python 3.8+
+- Computer with the development environment set up
 
 ---
 
 ## 3.2 Software Setup
 
-### 3.2.1 Install the Crazyflie Client
+### 3.2.1 Install cflib
 
-The `cfclient` provides a GUI for connecting to and controlling the Crazyflie:
-
-```bash
-pip install cfclient
-```
-
-Or use the system package manager:
-```bash
-# Ubuntu/Debian
-sudo apt install python3-cfclient
-
-# macOS
-brew install --cask crazyflie-client
-```
-
-### 3.2.2 Install cflib (Python Library)
-
-For programmatic control:
+For communication with the Crazyflie:
 
 ```bash
-pip install cflib
+uv pip install cflib
 ```
 
-### 3.2.3 USB Permissions (Linux)
+### 3.2.2 USB Permissions (Linux)
 
 On Linux, add udev rules for the Crazyradio:
 
@@ -84,63 +67,16 @@ sudo usermod -a -G plugdev $USER
 
 ---
 
-## 3.3 Connecting to the Crazyflie
+## 3.3 Crazyflie Firmware
 
-### 3.3.1 Power On
-
-1. Insert a charged battery into the Crazyflie
-2. The blue LEDs should blink during startup
-3. When ready, the front-left LED shows battery status
-
-### 3.3.2 Using cfclient
-
-1. Plug in the Crazyradio PA USB dongle
-2. Launch cfclient: `cfclient`
-3. Click "Scan" to find your Crazyflie
-4. Select it and click "Connect"
-
-You should see:
-- Green connection indicator
-- Sensor data updating
-- Battery voltage displayed
-
-### 3.3.3 Basic Controls
-
-With a gamepad connected:
-- Left stick: Throttle (up/down) and Yaw (left/right)
-- Right stick: Pitch (up/down) and Roll (left/right)
-
-**Test without propellers first!**
-
----
-
-## 3.4 Crazyflie Firmware
-
-### 3.4.1 Firmware Overview
-
-The Crazyflie runs open-source firmware written in C:
-- Repository: https://github.com/bitcraze/crazyflie-firmware
-
-The firmware structure:
-```
-crazyflie-firmware/
-├── src/
-│   ├── modules/        # Core modules (estimator, controller, etc.)
-│   ├── drivers/        # Hardware drivers
-│   ├── hal/            # Hardware abstraction layer
-│   └── deck/           # Expansion deck drivers
-├── Makefile
-└── ...
-```
-
-### 3.4.2 Clone the Firmware
+### 3.3.1 Clone the Firmware
 
 ```bash
-git clone --recursive https://github.com/bitcraze/crazyflie-firmware.git
-cd crazyflie-firmware
+git clone --recursive https://github.com/bitcraze/crazyflie-firmware.git ~/crazyflie-firmware
+cd ~/crazyflie-firmware
 ```
 
-### 3.4.3 Build Environment
+### 3.3.2 Build Environment
 
 Install the ARM toolchain:
 
@@ -152,15 +88,54 @@ sudo apt install gcc-arm-none-eabi
 brew install --cask gcc-arm-embedded
 ```
 
-Build the firmware:
+### 3.3.3 Understanding the Code Sharing
+
+**Key insight**: Your `user_code.c` and `user_code.h` work in both simulation (SITL) and hardware (Crazyflie firmware). The API is the same:
+
+| API | Simulation (SITL) | Hardware (Crazyflie) |
+|-----|-------------------|----------------------|
+| `user_main_loop(state)` | Called by SITL binary | Called by `app_main.c` |
+| `state->sensors.gyro` | From Elodin physics | From BMI088 IMU |
+| `user_set_all_motors()` | Sent via UDP to sim | Calls `motorsSetRatio()` |
+
+No code changes required when moving from simulation to hardware!
+
+---
+
+## 3.4 Deploying Your Code
+
+### 3.4.1 Use the Deploy Script
+
+The `firmware/deploy.sh` script copies your code to the Crazyflie firmware (from repo root):
 
 ```bash
-make
+# Deploy to ~/crazyflie-firmware (default location)
+./examples/crazyflie-edu/firmware/deploy.sh
+
+# Or specify a custom firmware path
+./examples/crazyflie-edu/firmware/deploy.sh /path/to/crazyflie-firmware
 ```
 
-This produces `cf2.bin` in the build directory.
+This copies:
+- `user_code.c` → firmware app directory
+- `user_code.h` → firmware app directory
+- `firmware/app_main.c` → firmware app directory
 
-### 3.4.4 Flash Firmware
+### 3.4.2 Build the Firmware
+
+```bash
+cd ~/crazyflie-firmware
+
+# Configure for the user control app
+make app_user_control_defconfig
+
+# Build
+make -j
+```
+
+This produces `build/cf2.bin`.
+
+### 3.4.3 Flash the Firmware
 
 Put the Crazyflie in bootloader mode:
 1. Power off the Crazyflie
@@ -170,156 +145,51 @@ Put the Crazyflie in bootloader mode:
 Flash using cfloader:
 
 ```bash
-# Install cfloader
-pip install cfloader
+# Install cfloader if needed
+uv pip install cfloader
 
-# Flash firmware
-cfloader flash cf2.bin stm32-fw
+# Flash firmware via radio
+cfloader flash build/cf2.bin stm32-fw -w radio://0/80/2M
 ```
-
-Or use cfclient: Connect → Bootloader → Flash new firmware
 
 ---
 
-## 3.5 Porting Your Code to C
+## 3.5 Testing with HITL Mode
 
-### 3.5.1 Code Mapping
+Before flying, verify your code works with real sensors using HITL (Hardware-In-The-Loop) mode:
 
-Your Python simulation code maps directly to C firmware code:
+### 3.5.1 Connect to Crazyflie
 
-| Python (user_code.py) | C (UserCode.c) |
-|-----------------------|----------------|
-| `state.gyro[0]` | `sensorData.gyro.x` |
-| `state.accel[0]` | `sensorData.acc.x` |
-| `state.set_motors(m1,m2,m3,m4)` | `motorsSetRatio(...)` |
-| `state.button_blue` | `buttonGetPressed(BUTTON_BLUE)` |
+1. Plug in the Crazyradio PA USB dongle
+2. Power on the Crazyflie
+3. Run the simulation in HITL mode (from repo root):
 
-### 3.5.2 Create Your User Code
-
-In the firmware directory, create your control module. Start with the template in `firmware/UserCode.c`:
-
-```c
-/**
- * UserCode.c - Student Control Implementation
- *
- * This is the C equivalent of user_code.py from simulation.
- */
-
-#include "UserCode.h"
-#include "motors.h"
-#include "sensors.h"
-#include "param.h"
-#include "log.h"
-
-// Team ID - set your team number
-static uint8_t teamId = 0;
-
-// Motor command limit for safety
-#define MOTOR_TEST_LIMIT 10000  // PWM range is 0-65535
-
-// Powertrain constants (from SimLab2)
-static float PWM_TO_SPEED_A = 426.0f;    // rad/s at PWM=0
-static float PWM_TO_SPEED_B = 6.8f;      // rad/s per PWM unit
-static float THRUST_CONSTANT = 1.8e-8f;  // N/(rad/s)^2
-
-/**
- * Convert desired motor speed (rad/s) to PWM command.
- */
-static uint16_t pwmFromSpeed(float desiredSpeed) {
-    float pwm = (desiredSpeed - PWM_TO_SPEED_A) / PWM_TO_SPEED_B;
-    if (pwm < 0) return 0;
-    if (pwm > 255) return 255;
-    // Scale to 16-bit PWM (0-65535)
-    return (uint16_t)(pwm * 257.0f);
-}
-
-/**
- * Convert desired thrust (N) to motor speed (rad/s).
- */
-static float speedFromForce(float desiredForce) {
-    if (desiredForce <= 0) return 0.0f;
-    return sqrtf(desiredForce / THRUST_CONSTANT);
-}
-
-/**
- * Main control loop - called at 500 Hz
- */
-void userCodeMainLoop(sensorData_t* sensors, uint16_t* motorPwm) {
-    // Read gyroscope (rad/s)
-    float gyroX = sensors->gyro.x;
-    float gyroY = sensors->gyro.y;
-    float gyroZ = sensors->gyro.z;
-
-    // Read accelerometer (g units)
-    float accelX = sensors->acc.x;
-    float accelY = sensors->acc.y;
-    float accelZ = sensors->acc.z;
-
-    // =========================================
-    // YOUR CODE HERE
-    // =========================================
-
-    // Example: Turn on motors when blue button pressed
-    // if (buttonGetPressed(BUTTON_BLUE)) {
-    //     uint16_t cmd = MOTOR_TEST_LIMIT;
-    //     motorPwm[0] = cmd;
-    //     motorPwm[1] = cmd;
-    //     motorPwm[2] = cmd;
-    //     motorPwm[3] = cmd;
-    // } else {
-    //     motorPwm[0] = 0;
-    //     motorPwm[1] = 0;
-    //     motorPwm[2] = 0;
-    //     motorPwm[3] = 0;
-    // }
-
-    // Default: motors off
-    motorPwm[0] = 0;
-    motorPwm[1] = 0;
-    motorPwm[2] = 0;
-    motorPwm[3] = 0;
-}
-
-/**
- * Print status - called when requested
- */
-void userCodePrintStatus(void) {
-    DEBUG_PRINT("Team ID: %d\n", teamId);
-    DEBUG_PRINT("PWM_TO_SPEED_A: %.2f\n", PWM_TO_SPEED_A);
-    DEBUG_PRINT("PWM_TO_SPEED_B: %.4f\n", PWM_TO_SPEED_B);
-    DEBUG_PRINT("THRUST_CONSTANT: %.2e\n", THRUST_CONSTANT);
-}
-
-// Parameter declarations for tuning via cfclient
-PARAM_GROUP_START(userCode)
-PARAM_ADD(PARAM_UINT8, teamId, &teamId)
-PARAM_ADD(PARAM_FLOAT, pwmToSpeedA, &PWM_TO_SPEED_A)
-PARAM_ADD(PARAM_FLOAT, pwmToSpeedB, &PWM_TO_SPEED_B)
-PARAM_ADD(PARAM_FLOAT, thrustConst, &THRUST_CONSTANT)
-PARAM_GROUP_STOP(userCode)
+```bash
+elodin editor examples/crazyflie-edu/main.py --hitl
 ```
 
-### 3.5.3 Integrate with Firmware
+### 3.5.2 What HITL Does
 
-1. Copy your `UserCode.c` and `UserCode.h` to `src/modules/src/`
-2. Add to `Makefile` or `Kbuild`
-3. Hook into the main loop (modify `stabilizer.c` or create an app)
+In HITL mode:
+- **Real sensors**: Gyro and accel data come from the actual Crazyflie hardware
+- **Keyboard controls**: Your Q/Shift/E/R/T keys send commands to the real drone
+- **Visualization**: Elodin shows sensor data from the real world
+- **Physics disabled**: No simulated physics - you're seeing real sensor noise!
 
-For a simpler approach, use the **App Layer**:
+### 3.5.3 Compare Sensors
 
-```c
-// app_usercode.c
-#include "app.h"
-#include "FreeRTOS.h"
-#include "task.h"
+With the Crazyflie stationary, compare sensor readings:
 
-void appMain() {
-    while (1) {
-        // Your code here
-        vTaskDelay(M2T(2));  // 500 Hz
-    }
-}
-```
+| Sensor | Simulation | HITL (Real) |
+|--------|------------|-------------|
+| Gyro X | ~0 | |
+| Gyro Y | ~0 | |
+| Gyro Z | ~0 | |
+| Accel X | ~0 | |
+| Accel Y | ~0 | |
+| Accel Z | ~1g | |
+
+Note any differences - real sensors have different noise characteristics!
 
 ---
 
@@ -328,21 +198,16 @@ void appMain() {
 ### 3.6.1 Motor Test
 
 1. **Remove all propellers**
-2. Connect via cfclient
-3. In the Parameters tab, find your `userCode` parameters
-4. Verify your Team ID is set
+2. Run HITL mode: `elodin editor examples/crazyflie-edu/main.py --hitl`
+3. Press Q to arm
+4. Hold Shift (blue button) - motors should spin
+5. Release Shift - motors should stop immediately
 
-5. Enable motor test mode (without arming):
-   - Your code should command motors when button pressed
-   - Observe motor spinning with fingers safely away
+### 3.6.2 Verify Safety
 
-### 3.6.2 Sensor Verification
-
-Use cfclient's Flight Data tab to observe:
-- Gyroscope readings (should be near zero when stationary)
-- Accelerometer readings (should show ~1g downward)
-
-Compare with your simulation values.
+- [ ] Motors respond correctly to commands
+- [ ] Motors stop immediately when button released
+- [ ] Arming/disarming works correctly
 
 ---
 
@@ -353,34 +218,32 @@ For each team member, describe their contribution.
 
 ### 2. Hardware Setup [30%]
 
-a. Photo of your Crazyflie connected and powered on
+a. Photo of your Crazyflie powered on
 
-b. Screenshot of cfclient showing connection
+b. Screenshot showing successful firmware flash
 
 c. Describe any issues encountered during setup
 
-### 3. Firmware Development [40%]
+### 3. HITL Testing [40%]
 
-a. Provide the complete listing of your `UserCode.c` file
+a. Screenshot of Elodin in HITL mode showing sensor data
 
-b. Describe the process of porting from Python to C
+b. Compare sensor readings between simulation and HITL:
 
-c. What changes were required beyond syntax?
+| Sensor | Simulation | HITL (Real) | Difference |
+|--------|------------|-------------|------------|
+| Gyro X (stationary) | | | |
+| Gyro Y (stationary) | | | |
+| Gyro Z (stationary) | | | |
+| Accel Z (at rest) | | | |
+
+c. Comment on any differences observed (noise, bias, etc.)
 
 ### 4. Motor Test [30%]
 
-a. Video or photo evidence of motors responding to commands
+a. Video or photo evidence of motors responding to keyboard commands
 
-b. Compare sensor readings between simulation and hardware
-
-| Sensor | Simulation | Hardware |
-|--------|------------|----------|
-| Gyro X (stationary) | | |
-| Gyro Y (stationary) | | |
-| Gyro Z (stationary) | | |
-| Accel Z (at rest) | | |
-
-c. Comment on any differences observed
+b. Verify all safety checks pass
 
 ---
 
@@ -405,4 +268,3 @@ In **HWLab2**, you will:
 - Achieve stable hover using your identified parameters
 
 **Warning**: HWLab2 involves spinning propellers. Take all safety precautions seriously.
-
