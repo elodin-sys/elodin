@@ -407,7 +407,7 @@ class SimClock(el.Archetype):
 # Control Components
 # =============================================================================
 
-# Motor commands from SITL (PWM values 0-65535, scaled to 0-255 for physics)
+# Motor commands from SITL (PWM values 0-65535)
 MotorCommand = ty.Annotated[
     jnp.ndarray,
     el.Component(
@@ -733,15 +733,13 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
         button_red=kb_state.button_red,
     )
 
-    # Send to SITL and get motor commands
+    # Send to SITL and get motor commands (PWM range 0-65535)
     motor_pwm = _sitl_bridge.step(sensor_pkt)
 
-    # Scale PWM from 0-65535 to 0-255 for physics
-    motor_pwm_scaled = motor_pwm.astype(np.float64) / 257.0
-
-    # Write motor commands to physics
-    ctx.write_component("crazyflie.motor_pwm", motor_pwm_scaled)
-    ctx.write_component("crazyflie.motor_command", motor_pwm.astype(np.float64))
+    # Write motor commands to physics (no conversion needed - all 0-65535)
+    motor_pwm_f64 = motor_pwm.astype(np.float64)
+    ctx.write_component("crazyflie.motor_pwm", motor_pwm_f64)
+    ctx.write_component("crazyflie.motor_command", motor_pwm_f64)
 
     # Periodic status
     if sim_time - _last_print_time[0] >= 1.0:

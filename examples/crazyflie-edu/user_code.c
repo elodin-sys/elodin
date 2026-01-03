@@ -32,19 +32,20 @@
 
 // Motor command limit for safety during testing
 // PWM range is 0-65535; start low!
-#define MOTOR_TEST_LIMIT 65000  // ~15% of max
+#define MOTOR_TEST_LIMIT 25000  // ~38% of max
 
 // =============================================================================
 // Powertrain Constants (Lab 2)
 // =============================================================================
 
 // PWM to Speed mapping: omega = PWM_TO_SPEED_A + PWM_TO_SPEED_B * pwm
-// where pwm is in 0-255 scale (we convert from 0-65535 internally)
-static const float PWM_TO_SPEED_A = 426.0f;   // rad/s at PWM=0 (placeholder)
-static const float PWM_TO_SPEED_B = 6.8f;     // rad/s per PWM unit (placeholder)
+// PWM range is 0-65535 (16-bit)
+static const float PWM_TO_SPEED_A = 426.0f;    // rad/s at PWM=0 (placeholder)
+static const float PWM_TO_SPEED_B = 0.0265f;   // rad/s per PWM unit (placeholder)
 
 // Thrust constant: force = THRUST_CONSTANT * omega^2
-static const float THRUST_CONSTANT = 1.8e-8f;  // N/(rad/s)^2 (placeholder)
+// Tuned so hover occurs at ~25% PWM for responsive simulation
+static const float THRUST_CONSTANT = 9.0e-8f;  // N/(rad/s)^2 (placeholder)
 
 // Vehicle parameters
 static const float VEHICLE_MASS = 0.027f;  // kg (Crazyflie 2.1)
@@ -66,11 +67,8 @@ static const float GRAVITY = 9.81f;        // m/s^2
 static uint16_t pwm_from_speed(float desired_speed) {
     // Invert the linear relationship: omega = a + b * pwm
     // pwm = (omega - a) / b
-    float pwm_255 = (desired_speed - PWM_TO_SPEED_A) / PWM_TO_SPEED_B;
-    pwm_255 = user_clampf(pwm_255, 0.0f, 255.0f);
-
-    // Scale from 0-255 to 0-65535
-    return user_clamp_pwm(pwm_255 * 257.0f);
+    float pwm = (desired_speed - PWM_TO_SPEED_A) / PWM_TO_SPEED_B;
+    return user_clamp_pwm(pwm);
 }
 
 /**

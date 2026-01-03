@@ -146,7 +146,8 @@ def motor_dynamics(
 
     # PWM threshold - below this, motors are considered OFF
     # The linear fit (rpm = a + b*pwm) is only valid above a minimum PWM
-    pwm_min_threshold = 5.0
+    # PWM range is 0-65535; threshold ~1.5% of range
+    pwm_min_threshold = 1000.0
 
     # Convert PWM to target RPM
     # rpm = a + b * pwm (only when PWM is above threshold)
@@ -355,7 +356,7 @@ def pwm_from_speed(desired_speed_rad_s: float) -> int:
         desired_speed_rad_s: Desired motor angular velocity in rad/s
 
     Returns:
-        PWM command (0-255)
+        PWM command (0-65535)
     """
     config = Config.GLOBAL
 

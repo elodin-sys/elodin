@@ -108,23 +108,24 @@ class CrazyflieConfig:
     # Motor time constant (first-order response) in seconds
     motor_time_constant: float = 0.02
 
-    # PWM range (0-255 for Crazyflie)
+    # PWM range (0-65535 for Crazyflie, 16-bit)
     pwm_min: int = 0
-    pwm_max: int = 255
+    pwm_max: int = 65535
 
     # =========================================================================
     # Powertrain Characteristics
     # =========================================================================
 
     # PWM to RPM mapping (affine fit: rpm = pwm_to_rpm_a + pwm_to_rpm_b * pwm)
+    # PWM range is 0-65535 (16-bit, matching Crazyflie hardware)
     # These are approximate values - students will identify exact values in Lab 2
     pwm_to_rpm_a: float = 4070.0  # RPM at PWM=0 (motor deadband)
-    pwm_to_rpm_b: float = 65.0  # RPM per PWM unit
+    pwm_to_rpm_b: float = 0.253  # RPM per PWM unit (0-65535 scale)
 
     # Thrust constant: thrust = k * omega^2 (N/(rad/s)^2)
     # Students will identify this in Lab 2
-    # Approximate value for 45mm props: ~1.8e-8
-    thrust_constant: float = 1.8e-8
+    # Tuned so hover occurs at ~25% PWM (~16000) for responsive simulation
+    thrust_constant: float = 9.0e-8
 
     # Torque constant: torque = kt * omega^2 (Nm/(rad/s)^2)
     # Typically ~1% of thrust constant
