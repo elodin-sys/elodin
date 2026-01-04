@@ -10,6 +10,7 @@
 #
 package_update: true
 packages:
+  - overlayroot
   - curl
   - ca-certificates
   - gpg
@@ -24,6 +25,31 @@ packages:
   - awscli
 
 write_files:
+  - path: /etc/overlayroot.local.conf
+    permissions: "0644"
+    owner: root:root
+    content: |
+      overlayroot="tmpfs:tmpfs_size=75%"
+
+  - path: /etc/systemd/system/buildkite-bootstrap.service
+    permissions: "0644"
+    owner: root:root
+    content: |
+      [Unit]
+      Description=Buildkite Agent Bootstrap (runs once after overlayroot is active)
+      After=network-online.target
+      Wants=network-online.target
+      ConditionPathExists=!/var/lib/buildkite-bootstrap-complete
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/bootstrap-ci.sh
+      ExecStartPost=/usr/bin/touch /var/lib/buildkite-bootstrap-complete
+      RemainAfterExit=yes
+
+      [Install]
+      WantedBy=multi-user.target
+
   - path: /usr/local/sbin/bootstrap-ci.sh
     permissions: "0755"
     owner: root:root
@@ -146,5 +172,15 @@ write_files:
       systemctl enable --now buildkite-agent
 
 runcmd:
-  # Run the bootstrap script directly (no reboot needed)
-  - [ bash, /usr/local/sbin/bootstrap-ci.sh ]
+  # Configure GRUB and initramfs for overlayroot
+  - [ bash, -lc, 'sed -i "s/^GRUB_FORCE_PARTUUID/#GRUB_FORCE_PARTUUID/" /etc/default/grub.d/40-force-partuuid.cfg' ]
+  - [ bash, -lc, 'update-grub' ]
+  - [ bash, -lc, 'update-initramfs -u' ]
+  # Enable systemd service to run bootstrap script AFTER reboot
+  - [ systemctl, enable, buildkite-bootstrap.service ]
+
+power_state:
+  # Reboot to activate overlayroot, then buildkite-bootstrap.service will run
+  mode: reboot
+  timeout: 30
+  condition: True
