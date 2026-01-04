@@ -8,6 +8,9 @@ pub const MIN_SIDEBAR_PX: f32 = 16.0;
 pub const MIN_SIDEBAR_MASKED_PX: f32 = 4.0;
 pub const MIN_OTHER_PX: f32 = 32.0;
 pub const SIDEBAR_CONTENT_PAD_LEFT: f32 = 8.0;
+pub const COLLAPSED_SHARE_FALLBACK: f32 = 0.01;
+pub const DEFAULT_SIDEBAR_FRACTION: f32 = 0.15;
+pub const MASK_THRESHOLD_MULTIPLIER: f32 = 1.05;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SidebarKind {
@@ -175,7 +178,7 @@ pub fn collect_sidebar_gutter_updates(
             if share_per_px > 0.0 {
                 gutter_draw_width * share_per_px
             } else {
-                pair_sum * 0.01
+                pair_sum * COLLAPSED_SHARE_FALLBACK
             }
         }
 
@@ -245,11 +248,12 @@ pub fn collect_sidebar_gutter_updates(
             }
 
             let (left_share, right_share) = if sidebar_masked {
-                let default_px = (pair.parent_rect.width() * 0.15).max(min_sidebar_px);
+                let default_px =
+                    (pair.parent_rect.width() * DEFAULT_SIDEBAR_FRACTION).max(min_sidebar_px);
                 let restore_share = if share_per_px > 0.0 {
                     default_px * share_per_px
                 } else {
-                    pair_sum * 0.15
+                    pair_sum * DEFAULT_SIDEBAR_FRACTION
                 };
                 self.compute_sidebar_shares(
                     pair_sum,
@@ -382,7 +386,7 @@ pub fn collect_sidebar_gutter_updates(
                     } else {
                         new_right_share
                     };
-                    let mask_threshold = min_sidebar_share * 1.05;
+                    let mask_threshold = min_sidebar_share * MASK_THRESHOLD_MULTIPLIER;
                     if new_sidebar_share <= mask_threshold && !self.mask_state.masked(sidebar_kind)
                     {
                         let prev_last = self.mask_state.last_share(sidebar_kind);
