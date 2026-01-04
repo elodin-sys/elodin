@@ -165,77 +165,27 @@ pub fn collect_sidebar_gutter_updates(
             (left_share.max(0.01), right_share.max(0.01))
         }
 
-        fn process_pair(&mut self, pair: PairInfo) {
-            let left_sidebar = pair.left_kind.is_some();
-            let right_sidebar = pair.right_kind.is_some();
-            if left_sidebar == right_sidebar {
-                return;
+        /// Compute the collapsed share for a sidebar based on gutter width and share ratio.
+        fn compute_collapsed_share(
+            &self,
+            gutter_draw_width: f32,
+            share_per_px: f32,
+            pair_sum: f32,
+        ) -> f32 {
+            if share_per_px > 0.0 {
+                gutter_draw_width * share_per_px
+            } else {
+                pair_sum * 0.01
             }
-            let sidebar_kind = match (pair.left_kind, pair.right_kind) {
-                (Some(k), _) => k,
-                (_, Some(k)) => k,
-                _ => return,
-            };
-            let gutter_draw_width = self.gutter_width.max(MIN_SIDEBAR_MASKED_PX);
-            let sidebar_on_left = left_sidebar;
-            let pair_width = pair.left_rect.width() + pair.right_rect.width();
-            let (share_left, share_right) = match self.tree.tiles.get(pair.container_id) {
-                Some(Tile::Container(Container::Linear(linear))) => {
-                    (linear.shares[pair.left_id], linear.shares[pair.right_id])
-                }
-                _ => return,
-            };
-            let pair_sum = share_left + share_right;
-            if pair_sum <= 0.0 {
-                return;
-            }
-            let share_per_px = if pair_width > 0.0 {
-                pair_sum / pair_width
-            } else {
-                0.0
-            };
-            let min_sidebar_px =
-                (pair.parent_rect.width() * MIN_SIDEBAR_FRACTION).max(MIN_SIDEBAR_PX);
-            let min_other_px = MIN_OTHER_PX;
-            let min_sidebar_share = if share_per_px > 0.0 {
-                min_sidebar_px * share_per_px
-            } else {
-                pair_sum * MIN_SIDEBAR_FRACTION
-            };
-            let min_other_share = if share_per_px > 0.0 {
-                min_other_px * share_per_px
-            } else {
-                pair_sum * MIN_SIDEBAR_FRACTION
-            };
+        }
 
-            let mut sidebar_masked = self.mask_state.masked(sidebar_kind);
-            if sidebar_masked {
-                let collapsed_px = gutter_draw_width;
-                let collapsed_share = if share_per_px > 0.0 {
-                    collapsed_px * share_per_px
-                } else {
-                    pair_sum * 0.01
-                };
-                let (target_left, target_right) = self.compute_sidebar_shares(
-                    pair_sum,
-                    min_other_share,
-                    collapsed_share,
-                    collapsed_share,
-                    sidebar_on_left,
-                );
-                if (share_left - target_left).abs() > 0.0001
-                    || (share_right - target_right).abs() > 0.0001
-                {
-                    self.apply_shares(
-                        pair.container_id,
-                        pair.left_id,
-                        pair.right_id,
-                        target_left,
-                        target_right,
-                    );
-                }
-            }
-
+        /// Draw the gutter between sidebar and main content.
+        fn draw_gutter(
+            &mut self,
+            pair: &PairInfo,
+            gutter_draw_width: f32,
+            left_sidebar: bool,
+        ) -> egui::Rect {
             let gap = pair.right_rect.min.x - pair.left_rect.max.x;
             let mut center_x = (pair.left_rect.max.x + pair.right_rect.min.x) * 0.5;
             if gap < gutter_draw_width {
@@ -262,35 +212,27 @@ pub fn collect_sidebar_gutter_updates(
             self.painter
                 .rect_stroke(gutter_rect, 0.0, stroke, egui::StrokeKind::Inside);
 
-            let id = self.ui.id().with((
-                "sidebar_gutter",
-                pair.container_id,
-                pair.left_id,
-                pair.right_id,
-            ));
-            #[derive(Clone, Copy, Default)]
-            struct DragState {
-                left_width: f32,
-                right_width: f32,
-                start_x: f32,
-                active: bool,
-            }
-            let mut drag_state = self
-                .ui
-                .ctx()
-                .data(|d| d.get_temp::<DragState>(id))
-                .unwrap_or_default();
+            gutter_rect
+        }
 
-            let response = self
-                .ui
-                .interact(gutter_rect, id, egui::Sense::click_and_drag())
-                .on_hover_cursor(egui::CursorIcon::PointingHand);
-
-            if response.hovered() {
-                self.ui
-                    .output_mut(|o| o.cursor_icon = egui::CursorIcon::PointingHand);
-            }
-
+        /// Handle click events on the gutter to toggle sidebar visibility.
+        #[allow(clippy::too_many_arguments)]
+        fn handle_gutter_click(
+            &mut self,
+            pair: &PairInfo,
+            sidebar_kind: SidebarKind,
+            sidebar_on_left: bool,
+            sidebar_masked: bool,
+            share_left: f32,
+            share_right: f32,
+            pair_sum: f32,
+            share_per_px: f32,
+            min_sidebar_px: f32,
+            min_sidebar_share: f32,
+            min_other_share: f32,
+            gutter_rect: egui::Rect,
+            response: &egui::Response,
+        ) -> bool {
             let click_inside_gutter = response.clicked_by(egui::PointerButton::Primary)
                 && self
                     .ui
@@ -298,65 +240,93 @@ pub fn collect_sidebar_gutter_updates(
                     .map(|p| gutter_rect.shrink(1.0).contains(p))
                     .unwrap_or(false);
 
-            if click_inside_gutter {
-                let (left_share, right_share) = if sidebar_masked {
-                    let default_px = (pair.parent_rect.width() * 0.15).max(min_sidebar_px);
-                    let restore_share = if share_per_px > 0.0 {
-                        default_px * share_per_px
-                    } else {
-                        pair_sum * 0.15
-                    };
-                    self.compute_sidebar_shares(
-                        pair_sum,
-                        min_other_share,
-                        min_sidebar_share,
-                        restore_share,
-                        sidebar_on_left,
-                    )
+            if !click_inside_gutter {
+                return sidebar_masked;
+            }
+
+            let (left_share, right_share) = if sidebar_masked {
+                let default_px = (pair.parent_rect.width() * 0.15).max(min_sidebar_px);
+                let restore_share = if share_per_px > 0.0 {
+                    default_px * share_per_px
                 } else {
-                    let current_sidebar_share = if sidebar_on_left {
-                        share_left
-                    } else {
-                        share_right
-                    };
-                    self.mask_state
-                        .set_last_share(sidebar_kind, Some(current_sidebar_share));
-
-                    let collapsed_px = gutter_draw_width;
-                    let collapsed_share = if share_per_px > 0.0 {
-                        collapsed_px * share_per_px
-                    } else {
-                        pair_sum * 0.01
-                    };
-
-                    self.compute_sidebar_shares(
-                        pair_sum,
-                        min_other_share,
-                        collapsed_share,
-                        collapsed_share,
-                        sidebar_on_left,
-                    )
+                    pair_sum * 0.15
                 };
-                self.apply_shares(
-                    pair.container_id,
-                    pair.left_id,
-                    pair.right_id,
-                    left_share,
-                    right_share,
-                );
-                self.mask_state.set_masked(sidebar_kind, !sidebar_masked);
-                sidebar_masked = !sidebar_masked;
+                self.compute_sidebar_shares(
+                    pair_sum,
+                    min_other_share,
+                    min_sidebar_share,
+                    restore_share,
+                    sidebar_on_left,
+                )
+            } else {
+                let current_sidebar_share = if sidebar_on_left {
+                    share_left
+                } else {
+                    share_right
+                };
+                self.mask_state
+                    .set_last_share(sidebar_kind, Some(current_sidebar_share));
+
+                let gutter_draw_width = self.gutter_width.max(MIN_SIDEBAR_MASKED_PX);
+                let collapsed_share =
+                    self.compute_collapsed_share(gutter_draw_width, share_per_px, pair_sum);
+
+                self.compute_sidebar_shares(
+                    pair_sum,
+                    min_other_share,
+                    collapsed_share,
+                    collapsed_share,
+                    sidebar_on_left,
+                )
+            };
+            self.apply_shares(
+                pair.container_id,
+                pair.left_id,
+                pair.right_id,
+                left_share,
+                right_share,
+            );
+            self.mask_state.set_masked(sidebar_kind, !sidebar_masked);
+            !sidebar_masked
+        }
+
+        /// Handle drag events on the gutter to resize the sidebar.
+        #[allow(clippy::too_many_arguments)]
+        fn handle_gutter_drag(
+            &mut self,
+            pair: &PairInfo,
+            sidebar_kind: SidebarKind,
+            sidebar_on_left: bool,
+            left_sidebar: bool,
+            right_sidebar: bool,
+            min_sidebar_share: f32,
+            gutter_rect: egui::Rect,
+            response: &egui::Response,
+        ) {
+            #[derive(Clone, Copy, Default)]
+            struct DragState {
+                left_width: f32,
+                right_width: f32,
+                start_x: f32,
+                active: bool,
             }
 
-            if sidebar_masked {
-                if drag_state.active {
-                    self.ui.ctx().data_mut(|d| d.remove::<DragState>(id));
-                }
-                return;
-            }
+            let id = self.ui.id().with((
+                "sidebar_gutter",
+                pair.container_id,
+                pair.left_id,
+                pair.right_id,
+            ));
+
+            let mut drag_state = self
+                .ui
+                .ctx()
+                .data(|d| d.get_temp::<DragState>(id))
+                .unwrap_or_default();
 
             let pointer_pos = self.ui.input(|i| i.pointer.interact_pos());
             let pointer_down = self.ui.input(|i| i.pointer.primary_down());
+
             if !drag_state.active && pointer_down && response.hovered() {
                 let start_x = pointer_pos.map(|p| p.x).unwrap_or(gutter_rect.center().x);
                 drag_state = DragState {
@@ -430,6 +400,136 @@ pub fn collect_sidebar_gutter_updates(
 
             if drag_state.active && !pointer_down {
                 self.ui.ctx().data_mut(|d| d.remove::<DragState>(id));
+            }
+        }
+
+        fn process_pair(&mut self, pair: PairInfo) {
+            let left_sidebar = pair.left_kind.is_some();
+            let right_sidebar = pair.right_kind.is_some();
+            if left_sidebar == right_sidebar {
+                return;
+            }
+            let sidebar_kind = match (pair.left_kind, pair.right_kind) {
+                (Some(k), _) => k,
+                (_, Some(k)) => k,
+                _ => return,
+            };
+            let gutter_draw_width = self.gutter_width.max(MIN_SIDEBAR_MASKED_PX);
+            let sidebar_on_left = left_sidebar;
+            let pair_width = pair.left_rect.width() + pair.right_rect.width();
+            let (share_left, share_right) = match self.tree.tiles.get(pair.container_id) {
+                Some(Tile::Container(Container::Linear(linear))) => {
+                    (linear.shares[pair.left_id], linear.shares[pair.right_id])
+                }
+                _ => return,
+            };
+            let pair_sum = share_left + share_right;
+            if pair_sum <= 0.0 {
+                return;
+            }
+            let share_per_px = if pair_width > 0.0 {
+                pair_sum / pair_width
+            } else {
+                0.0
+            };
+            let min_sidebar_px =
+                (pair.parent_rect.width() * MIN_SIDEBAR_FRACTION).max(MIN_SIDEBAR_PX);
+            let min_other_px = MIN_OTHER_PX;
+            let min_sidebar_share = if share_per_px > 0.0 {
+                min_sidebar_px * share_per_px
+            } else {
+                pair_sum * MIN_SIDEBAR_FRACTION
+            };
+            let min_other_share = if share_per_px > 0.0 {
+                min_other_px * share_per_px
+            } else {
+                pair_sum * MIN_SIDEBAR_FRACTION
+            };
+
+            let mut sidebar_masked = self.mask_state.masked(sidebar_kind);
+            if sidebar_masked {
+                let collapsed_share =
+                    self.compute_collapsed_share(gutter_draw_width, share_per_px, pair_sum);
+                let (target_left, target_right) = self.compute_sidebar_shares(
+                    pair_sum,
+                    min_other_share,
+                    collapsed_share,
+                    collapsed_share,
+                    sidebar_on_left,
+                );
+                if (share_left - target_left).abs() > 0.0001
+                    || (share_right - target_right).abs() > 0.0001
+                {
+                    self.apply_shares(
+                        pair.container_id,
+                        pair.left_id,
+                        pair.right_id,
+                        target_left,
+                        target_right,
+                    );
+                }
+            }
+
+            let gutter_rect = self.draw_gutter(&pair, gutter_draw_width, left_sidebar);
+            let id = self.ui.id().with((
+                "sidebar_gutter",
+                pair.container_id,
+                pair.left_id,
+                pair.right_id,
+            ));
+            let response = self
+                .ui
+                .interact(gutter_rect, id, egui::Sense::click_and_drag())
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+
+            if response.hovered() {
+                self.ui
+                    .output_mut(|o| o.cursor_icon = egui::CursorIcon::PointingHand);
+            }
+
+            sidebar_masked = self.handle_gutter_click(
+                &pair,
+                sidebar_kind,
+                sidebar_on_left,
+                sidebar_masked,
+                share_left,
+                share_right,
+                pair_sum,
+                share_per_px,
+                min_sidebar_px,
+                min_sidebar_share,
+                min_other_share,
+                gutter_rect,
+                &response,
+            );
+
+            if !sidebar_masked {
+                self.handle_gutter_drag(
+                    &pair,
+                    sidebar_kind,
+                    sidebar_on_left,
+                    left_sidebar,
+                    right_sidebar,
+                    min_sidebar_share,
+                    gutter_rect,
+                    &response,
+                );
+            } else {
+                #[derive(Clone, Copy, Default)]
+                struct DragState {
+                    _left_width: f32,
+                    _right_width: f32,
+                    _start_x: f32,
+                    active: bool,
+                }
+                if self
+                    .ui
+                    .ctx()
+                    .data(|d| d.get_temp::<DragState>(id))
+                    .is_some_and(|ds| ds.active)
+                {
+                    self.ui.ctx().data_mut(|d| d.remove::<DragState>(id));
+                }
             }
         }
 
