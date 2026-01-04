@@ -20,8 +20,8 @@
 stdenv.mkDerivation {
   name = "deepstream";
   src = fetchurl {
-    url = "https://elo-public-misc.s3.us-east-2.amazonaws.com/deepstream-6.3_6.3.0-1_arm64.deb";
-    sha256 = "f3961bc473312d46f5e2568f41b37913cb09a5aef69d905451eaea9cb5ad42cf";
+    url = "https://elo-public-misc.s3.us-east-2.amazonaws.com/deepstream-7.1_7.1.0-1_arm64.deb";
+    sha256 = "8cc657e4784108c1a17da9bb8fbf736bc2ae4017065bb493486548c274465ca4";
   };
   nativeBuildInputs = [dpkg autoPatchelfHook autoAddDriverRunpath];
   buildInputs = [
@@ -57,7 +57,7 @@ stdenv.mkDerivation {
 
   postPatch = ''
     ls -la
-    cp -r opt/nvidia/deepstream/deepstream-6.3/* .
+    cp -r opt/nvidia/deepstream/deepstream-7.1/* .
     rm -rf nvidia
     mv lib/gst-plugins lib/gstreamer-1.0
 
