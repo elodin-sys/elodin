@@ -236,7 +236,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     if egui::Popup::is_id_open(ui.ctx(), color_id) {
                         let mut color = query_plot.data.color.into_color32();
                         if let Some(popup_response) =
-                                color_popup(ui, &mut color, color_id, btn_resp.rect.min) {
+                                color_popup(ui, &mut color, color_id, &btn_resp) {
                             if !btn_resp.clicked()
                                 && (ui.input(|i| i.key_pressed(egui::Key::Escape))
                                     || popup_response.clicked_elsewhere())
@@ -346,7 +346,7 @@ fn component_value(
                 egui::Popup::toggle_id(ui.ctx(), color_id);
             }
             if egui::Popup::is_id_open(ui.ctx(), color_id) {
-                if let Some(popup_response) = color_popup(ui, color, color_id, value_toggle.rect.min) {
+                if let Some(popup_response) = color_popup(ui, color, color_id, &value_toggle) {
                     if !value_toggle.secondary_clicked()
                         && (ui.input(|i| i.key_pressed(egui::Key::Escape))
                             || popup_response.clicked_elsewhere())

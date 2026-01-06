@@ -163,14 +163,10 @@ pub fn color_popup(
     ui: &mut egui::Ui,
     color: &mut egui::Color32,
     color_id: egui::Id,
-    pos: egui::Pos2,
+    target_res: &egui::Response,
 ) -> Option<egui::Response> {
 
-    let anchor = egui::PopupAnchor::Position(pos);
-    let layer_id = ui.auto_id_with("color_popup_layer_id");
-    let layer = egui::LayerId::new(egui::Order::Foreground, layer_id);
-
-    let inner_response = egui::Popup::new(color_id, ui.ctx().clone(), anchor, layer)
+    let inner_response = egui::Popup::new(color_id, ui.ctx().clone(), target_res, target_res.layer_id)
         .kind(egui::PopupKind::Popup)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .width(300.0)
@@ -251,7 +247,7 @@ pub fn node_color_picker(ui: &mut egui::Ui, label: &str, color: &mut impeller2_w
             ui,
             &mut egui_color,
             color_id,
-            res.rect.right_center() - egui::vec2(128.0, 0.0),
+            &res,
         ) {
             if !res.clicked()
                 && (ui.input(|i| i.key_pressed(egui::Key::Escape))
