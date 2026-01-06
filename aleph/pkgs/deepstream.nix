@@ -17,11 +17,10 @@ stdenv.mkDerivation {
   };
   nativeBuildInputs = [dpkg autoPatchelfHook autoAddDriverRunpath];
 
-  
   buildInputs = [
     stdenv.cc.cc.lib
 
-    pkgs.gst_all_1.gst-rtsp-server  
+    pkgs.gst_all_1.gst-rtsp-server
     pkgs.nvidia-jetpack.cudaPackages.cudatoolkit
     pkgs.nvidia-jetpack.cudaPackages.cudnn
     pkgs.nvidia-jetpack.cudaPackages.tensorrt
@@ -29,7 +28,7 @@ stdenv.mkDerivation {
     pkgs.nvidia-jetpack.l4t-core
     pkgs.nvidia-jetpack.l4t-multimedia
     pkgs.nvidia-jetpack.l4t-gstreamer
-    pkgs.json-glib 
+    pkgs.json-glib
     pkgs.jsoncpp
     yaml_0_7
     pkgs.protobuf
@@ -48,7 +47,7 @@ stdenv.mkDerivation {
     # Add gst-rtsp-server library path for deepstream-app
     addAutoPatchelfSearchPath ${pkgs.gst_all_1.gst-rtsp-server}/lib
   '';
-  
+
   # After copying files, we need to ensure DeepStream's own libraries can find each other
   postUnpack = ''
     # Add DeepStream's own lib directory to autoPatchelf search path
@@ -61,7 +60,7 @@ stdenv.mkDerivation {
   postPatch = ''
     ls -la
     cp -r opt/nvidia/deepstream/deepstream-7.1/* .
-    
+
     # Remove all sample apps BEFORE removing opt directory to avoid broken symlinks
     rm -rf sources/apps/sample_apps
     rm -rf sources/objectDetector_FasterRCNN
@@ -72,12 +71,12 @@ stdenv.mkDerivation {
     find bin -name "deepstream-3d-*" -delete || true
     # Clean up any remaining sample-related directories or files
     find sources -type d -name "*sample*" -exec rm -rf {} + || true
-    
+
     # Also remove from original opt structure before we delete it
     rm -rf opt/nvidia/deepstream/deepstream-7.1/sources/apps/sample_apps || true
     rm -rf opt/nvidia/deepstream/deepstream-7.1/sources/objectDetector_FasterRCNN || true
     rm -rf opt/nvidia/deepstream/deepstream-7.1/sources/apps/triton || true
-    
+
     # Now remove the entire opt directory since we've copied what we need
     rm -rf opt
     mv lib/gst-plugins lib/gstreamer-1.0
