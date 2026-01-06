@@ -228,21 +228,23 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     ui.label(egui::RichText::new("Color").color(get_scheme().text_secondary));
                     let color_id = ui.auto_id_with("color");
                     let btn_resp = ui.add(EButton::new("Set Color"));
+
                     if btn_resp.clicked() {
-                        ui.memory_mut(|m| m.toggle_popup(color_id));
+                        egui::Popup::toggle_id(ui.ctx(), color_id);
                     }
 
-                    if ui.memory(|mem| mem.is_popup_open(color_id)) {
+                    if egui::Popup::is_id_open(ui.ctx(), color_id) {
                         let mut color = query_plot.data.color.into_color32();
-                        let popup_response =
-                            color_popup(ui, &mut color, color_id, btn_resp.rect.min);
-                        if !btn_resp.clicked()
-                            && (ui.input(|i| i.key_pressed(egui::Key::Escape))
-                                || popup_response.clicked_elsewhere())
-                        {
-                            ui.memory_mut(|mem| mem.close_popup(color_id));
+                        if let Some(popup_response) =
+                                color_popup(ui, &mut color, color_id, btn_resp.rect.min) {
+                            if !btn_resp.clicked()
+                                && (ui.input(|i| i.key_pressed(egui::Key::Escape))
+                                    || popup_response.clicked_elsewhere())
+                            {
+                                egui::Popup::close_id(ui.ctx(), color_id);
+                            }
+                            query_plot.data.color = impeller2_wkt::Color::from_color32(color);
                         }
-                        query_plot.data.color = impeller2_wkt::Color::from_color32(color);
                     }
                 });
         } else {
@@ -341,15 +343,16 @@ fn component_value(
             }
             let color_id = ui.auto_id_with("color");
             if value_toggle.secondary_clicked() {
-                ui.memory_mut(|mem| mem.toggle_popup(color_id));
+                egui::Popup::toggle_id(ui.ctx(), color_id);
             }
-            if ui.memory(|mem| mem.is_popup_open(color_id)) {
-                let popup_response = color_popup(ui, color, color_id, value_toggle.rect.min);
-                if !value_toggle.secondary_clicked()
-                    && (ui.input(|i| i.key_pressed(egui::Key::Escape))
-                        || popup_response.clicked_elsewhere())
-                {
-                    ui.memory_mut(|mem| mem.close_popup(color_id));
+            if egui::Popup::is_id_open(ui.ctx(), color_id) {
+                if let Some(popup_response) = color_popup(ui, color, color_id, value_toggle.rect.min) {
+                    if !value_toggle.secondary_clicked()
+                        && (ui.input(|i| i.key_pressed(egui::Key::Escape))
+                            || popup_response.clicked_elsewhere())
+                    {
+                        egui::Popup::close_id(ui.ctx(), color_id);
+                    }
                 }
             }
         }

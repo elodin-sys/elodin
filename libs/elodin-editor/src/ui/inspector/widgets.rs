@@ -164,14 +164,18 @@ pub fn color_popup(
     color: &mut egui::Color32,
     color_id: egui::Id,
     pos: egui::Pos2,
-) -> egui::Response {
-    egui::Area::new(color_id)
-        .kind(egui::UiKind::Picker)
-        .order(egui::Order::Foreground)
-        .fixed_pos(pos)
-        .default_width(300.0)
-        .constrain(true)
-        .show(ui.ctx(), |ui| {
+) -> Option<egui::Response> {
+
+    let anchor = egui::PopupAnchor::Position(pos);
+    let layer_id = ui.auto_id_with("color_popup_layer_id");
+    let layer = egui::LayerId::new(egui::Order::Foreground, layer_id);
+
+    let inner_response = egui::Popup::new(color_id, ui.ctx().clone(), anchor, layer)
+        .kind(egui::PopupKind::Popup)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .width(300.0)
+        .open_memory(None)
+        .show(|ui| {
             theme::configure_input_with_border(ui.style_mut());
             ui.spacing_mut().slider_width = 275.;
             ui.spacing_mut().button_padding = egui::vec2(6.0, 4.0);
@@ -189,8 +193,9 @@ pub fn color_popup(
                 ui.add_space(8.0);
                 color_picker_color32(ui, color, Alpha::OnlyBlend);
             });
-        })
-        .response
+        });
+
+    inner_response.map(|ir| ir.response)
 }
 
 pub fn search(
@@ -236,22 +241,24 @@ pub fn node_color_picker(ui: &mut egui::Ui, label: &str, color: &mut impeller2_w
             .text_color(get_scheme().text_secondary)
             .left_label(true),
     );
+
     let color_id = ui.auto_id_with("color");
     if res.clicked() {
-        ui.memory_mut(|mem| mem.toggle_popup(color_id));
+        egui::Popup::toggle_id(ui.ctx(), color_id);
     }
-    if ui.memory(|mem| mem.is_popup_open(color_id)) {
-        let popup_response = color_popup(
+    if egui::Popup::is_id_open(ui.ctx(), color_id) {
+        if let Some(popup_response) = color_popup(
             ui,
             &mut egui_color,
             color_id,
             res.rect.right_center() - egui::vec2(128.0, 0.0),
-        );
-        if !res.clicked()
-            && (ui.input(|i| i.key_pressed(egui::Key::Escape))
-                || popup_response.clicked_elsewhere())
-        {
-            ui.memory_mut(|mem| mem.close_popup(color_id));
+        ) {
+            if !res.clicked()
+                && (ui.input(|i| i.key_pressed(egui::Key::Escape))
+                    || popup_response.clicked_elsewhere())
+            {
+                egui::Popup::close_id(ui.ctx(), color_id);
+            }
         }
     }
 
