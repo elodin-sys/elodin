@@ -68,7 +68,6 @@
       udp-component-receive = ./modules/udp-component-receive.nix;
     };
     devModules = {
-      # Temporarily disabled for nixpkgs 25.05 compatibility (CUDA issues)
       aleph-dev = ./modules/aleph-dev.nix;
     };
     defaultModule = {config, ...}: {
