@@ -119,7 +119,7 @@ pub fn eql_autocomplete(
             let target_res = query_res;
             // These Popup settings were copied from the following URL after
             // popup_below_widget was deprecated:
-            // https://github.com/emilk/egui/blob/af96e0373c18477b77236e2bfc89735af007b1c2/crates/egui/src/containers/old_popup.rs#L144
+            // https://github.com/emilk/egui/blob/af96e0373c18477b77236e2bfc89735af007b1c2/crates/egui/src/containers/old_popup.rs#L189
             egui::Popup::from_response(target_res)
                 .layout(egui::Layout::top_down_justified(egui::Align::LEFT))
                 .open_memory(None)
