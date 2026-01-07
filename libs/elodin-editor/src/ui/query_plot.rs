@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use arrow::{
     array::{
-        Array, ArrayRef, Float32Array, Float64Array, Int32Array, Int64Array,
+        Array, ArrayRef, FixedSizeListArray, Float32Array, Float64Array, Int32Array, Int64Array,
         TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
         TimestampSecondArray, UInt32Array, UInt64Array,
     },
@@ -22,13 +22,14 @@ use impeller2_wkt::{ArrowIPC, ErrorResponse, QueryPlot, QueryType, SQLQuery};
 use itertools::Itertools;
 
 use crate::{
-    EqlContext, SelectedObject, SelectedTimeRange, TimeRangeBehavior,
+    EqlContext, SelectedTimeRange, TimeRangeBehavior,
     ui::{
         colors::{ColorExt, EColor, get_scheme},
         plot::{
             GraphState, PlotBounds, PlotDataSource, TimeseriesPlot, XYLine, get_inner_rect,
             gpu::{LineBundle, LineConfig, LineHandle, LineUniform, LineWidgetWidth},
         },
+        tiles::WindowState,
         widgets::WidgetSystem,
     },
 };
@@ -47,19 +48,20 @@ pub struct QueryPlotPane {
 pub struct QueryPlotData {
     pub data: QueryPlot,
     pub state: QueryPlotState,
+    pub auto_color: bool,
     pub xy_line_handle: Option<Handle<XYLine>>,
     pub line_entity: Option<Entity>,
     pub x_offset: f64,
     pub y_offset: f64,
     pub last_refresh: Option<Instant>,
-    pub earliest_timestamp: Option<impeller2::types::Timestamp>, // Store earliest timestamp for relative time conversion
+    pub earliest_timestamp: Option<impeller2::types::Timestamp>,
 }
 
 impl Default for QueryPlotData {
     fn default() -> Self {
         Self {
             data: QueryPlot {
-                label: "Query Plot".to_string(),
+                name: "Query Plot".to_string(),
                 query: Default::default(),
                 refresh_interval: Duration::from_millis(500),
                 auto_refresh: Default::default(),
@@ -68,6 +70,7 @@ impl Default for QueryPlotData {
                 aux: (),
             },
             state: Default::default(),
+            auto_color: true,
             xy_line_handle: Default::default(),
             line_entity: Default::default(),
             x_offset: Default::default(),
@@ -96,9 +99,6 @@ impl QueryPlotData {
         let x_col = batch.column(0);
         let y_col = batch.column(1);
 
-        // Convert timestamp X column to seconds for proper time axis display
-        // Also track the earliest absolute timestamp for relative time conversion
-        // IMPORTANT: earliest_timestamp must be in microseconds (as expected by impeller2::types::Timestamp)
         let (x_values, earliest_abs_timestamp_micros): (Vec<f64>, Option<i64>) = match x_col
             .data_type()
         {
@@ -162,8 +162,6 @@ impl QueryPlotData {
             }
         };
 
-        // Store earliest timestamp if this is the first batch or if we found an earlier one
-        // earliest_abs_timestamp_micros is already converted to microseconds
         if let Some(earliest_micros) = earliest_abs_timestamp_micros
             && (self.earliest_timestamp.is_none()
                 || Some(impeller2::types::Timestamp(earliest_micros)) < self.earliest_timestamp)
@@ -171,7 +169,6 @@ impl QueryPlotData {
             self.earliest_timestamp = Some(impeller2::types::Timestamp(earliest_micros));
         }
 
-        // Filter out NaN and infinite values for offset calculation
         let finite_x_values: Vec<f64> = x_values
             .iter()
             .copied()
@@ -179,10 +176,7 @@ impl QueryPlotData {
             .collect();
 
         self.x_offset = finite_x_values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
-        // IMPORTANT: For query plots, we should NOT offset Y values as this would
-        // remove any intentional offset applied in the query (like -90 for angle of attack).
-        // Only offset X (time) values to start at 0.
-        self.y_offset = 0.0; // Don't auto-offset Y values for query plots
+        self.y_offset = 0.0;
 
         if !self.x_offset.is_finite() {
             self.x_offset = 0.0;
@@ -199,7 +193,6 @@ impl QueryPlotData {
             y_values: vec![],
         };
 
-        // Only add finite x and y pairs to avoid breaking rendering
         let mut y_iter = array_iter(y_col);
         let mut points: Vec<(f64, f64)> = Vec::new();
 
@@ -212,49 +205,40 @@ impl QueryPlotData {
             }
         }
 
-        // Skip initial points that have the same timestamp (initialization artifacts)
-        // These are typically default values before the simulation actually starts
-        // NOTE: This handles legitimate data quality issues, not timestamp normalization bugs.
-        // The timestamp normalization bug (now fixed) affected absolute timestamp storage
         // but not relative time calculations used for plotting.
         let skip_initial_points = if points.len() > 2 {
-            // Find how many initial points share the same timestamp
+            // Find how many initial points share the same timestamp.
             let first_time = points[0].0;
-            let mut skip_count = 0;
+            let mut last_same = 0usize;
 
-            // Count consecutive points with the same initial timestamp
+            // Count consecutive points with the same initial timestamp.
             for (i, (time, _)) in points.iter().enumerate().skip(1) {
                 if (*time - first_time).abs() < 0.001 {
-                    // Same timestamp (within floating point tolerance)
-                    skip_count = i + 1;
+                    // Same timestamp (within floating point tolerance).
+                    last_same = i;
                 } else {
-                    break; // Found a different timestamp, stop counting
+                    break; // Found a different timestamp, stop counting.
                 }
             }
 
-            // If we found duplicate timestamps, skip all of them
-            if skip_count > 0 {
-                skip_count
-            } else {
-                // No duplicate timestamps, but check for a huge value jump
-                // that indicates initialization artifacts
-                if points.len() >= 3 {
-                    let first_y = points[0].1;
-                    let second_y = points[1].1;
-
-                    // If there's a huge jump from first to second point (> 50 units),
-                    // it's likely an initialization artifact
-                    if (second_y - first_y).abs() > 50.0 {
-                        1 // Skip just the first point
-                    } else {
-                        0 // Keep all points
-                    }
+            if last_same > 0 && last_same + 1 < points.len() {
+                // Only skip if we have data beyond the initial duplicates.
+                last_same + 1
+            } else if points.len() >= 3 {
+                // No duplicate timestamps (or all timestamps are equal), but check for a huge
+                // value jump that indicates initialization artifacts.
+                let first_y = points[0].1;
+                let second_y = points[1].1;
+                if (second_y - first_y).abs() > 50.0 {
+                    1 // Skip just the first point.
                 } else {
-                    0
+                    0 // Keep all points.
                 }
+            } else {
+                0
             }
         } else {
-            0 // Not enough points to analyze
+            0 // Not enough points to analyze.
         };
 
         // Add the points to the plot, skipping initial bad points if needed
@@ -299,8 +283,8 @@ pub struct QueryPlotWidget<'w, 's> {
     selected_time_range: Res<'w, SelectedTimeRange>,
     earliest_timestamp: Res<'w, EarliestTimestamp>,
     current_timestamp: Res<'w, CurrentTimestamp>,
-    selected_object: ResMut<'w, SelectedObject>,
     time_range_behavior: ResMut<'w, TimeRangeBehavior>,
+    window_states: Query<'w, 's, &'static mut WindowState>,
 }
 
 trait Vec2Ext {
@@ -314,17 +298,18 @@ impl Vec2Ext for egui::Vec2 {
 }
 
 impl WidgetSystem for QueryPlotWidget<'_, '_> {
-    type Args = QueryPlotPane;
+    type Args = (QueryPlotPane, Entity);
     type Output = ();
 
     fn ui_system(
         world: &mut bevy::prelude::World,
         state: &mut bevy::ecs::system::SystemState<Self>,
         ui: &mut egui::Ui,
-        QueryPlotPane {
-            entity, scrub_icon, ..
-        }: Self::Args,
+        (pane, target_window): Self::Args,
     ) -> Self::Output {
+        let QueryPlotPane {
+            entity, scrub_icon, ..
+        } = pane;
         // Use a default texture ID if scrub_icon is not provided
         // This should only happen during initialization, and will be set properly in the UI
         let scrub_icon = scrub_icon.unwrap_or(egui::TextureId::default());
@@ -332,6 +317,13 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
         let Ok(mut plot) = state.states.get_mut(entity) else {
             return;
         };
+
+        if plot.auto_color {
+            let scheme_color = get_scheme().highlight;
+            if plot.data.color.into_color32() != scheme_color {
+                plot.data.color = impeller2_wkt::Color::from_color32(scheme_color);
+            }
+        }
 
         ui.vertical(|ui| {
             let should_refresh = if let Some(last_refresh) = plot.last_refresh {
@@ -430,7 +422,7 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                 };
 
                 // Store values we need before borrowing plot
-                let query_label = plot.data.label.clone();
+                let query_label = plot.data.name.clone();
                 let query_color = plot.data.color.into_color32();
                 let offset_y = plot.offset().y;
                 let earliest_timestamp = plot
@@ -497,13 +489,16 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                     query_color,
                 };
 
+                let Ok(mut window_state) = state.window_states.get_mut(target_window) else {
+                    return;
+                };
                 plot_renderer.render(
                     ui,
                     data_source,
                     &mut graph_state,
                     &scrub_icon,
                     entity,
-                    state.selected_object.as_mut(),
+                    &mut window_state.ui_state.selected_object,
                     state.time_range_behavior.as_mut(),
                 );
             }
@@ -554,6 +549,11 @@ pub fn auto_bounds(
                         itertools::MinMaxResult::MinMax(min, max) => (*min, *max),
                         itertools::MinMaxResult::NoElements => continue,
                     };
+                    let (min, max) = if (max - min).abs() < f32::EPSILON {
+                        (min - 1.0, max + 1.0)
+                    } else {
+                        (min, max)
+                    };
 
                     let min = min as f64 + plot.y_offset;
                     let max = max as f64 + plot.y_offset;
@@ -566,6 +566,11 @@ pub fn auto_bounds(
                         itertools::MinMaxResult::OneElement(elem) => (elem - 1.0, elem + 1.0),
                         itertools::MinMaxResult::MinMax(min, max) => (*min, *max),
                         itertools::MinMaxResult::NoElements => continue,
+                    };
+                    let (min, max) = if (max - min).abs() < f32::EPSILON {
+                        (min - 1.0, max + 1.0)
+                    } else {
+                        (min, max)
                     };
                     // For X-axis (time), keep relative values (x_values already have offset subtracted)
                     // Don't add x_offset back - we want time to start from 0
@@ -662,6 +667,68 @@ pub fn array_iter(array_ref: &ArrayRef) -> Box<dyn Iterator<Item = f64> + '_> {
                 .iter()
                 .map(|x| x.unwrap_or_default() as f64),
         ),
+        DataType::FixedSizeList(_, list_size) => {
+            let list_array = array_ref
+                .as_any()
+                .downcast_ref::<FixedSizeListArray>()
+                .unwrap();
+            let list_size = *list_size as usize;
+            if list_size == 0 {
+                Box::new(std::iter::empty())
+            } else {
+                let values = list_array.values();
+                let inner_values: Vec<f64> = array_iter(values).collect();
+                if inner_values.is_empty() {
+                    println!("Unsupported list data type: {:?}", values.data_type());
+                    Box::new(std::iter::empty())
+                } else {
+                    let len = list_array.len();
+                    let mut min_vals = vec![f64::INFINITY; list_size];
+                    let mut max_vals = vec![f64::NEG_INFINITY; list_size];
+                    for row in 0..len {
+                        if list_array.is_null(row) {
+                            continue;
+                        }
+                        let base = row * list_size;
+                        for i in 0..list_size {
+                            if let Some(value) = inner_values.get(base + i)
+                                && value.is_finite()
+                            {
+                                if *value < min_vals[i] {
+                                    min_vals[i] = *value;
+                                }
+                                if *value > max_vals[i] {
+                                    max_vals[i] = *value;
+                                }
+                            }
+                        }
+                    }
+                    let mut selected_index = 0usize;
+                    let mut best_range = f64::NEG_INFINITY;
+                    for i in 0..list_size {
+                        let min = min_vals[i];
+                        let max = max_vals[i];
+                        if min.is_finite() && max.is_finite() {
+                            let range = max - min;
+                            if range > best_range {
+                                best_range = range;
+                                selected_index = i;
+                            }
+                        }
+                    }
+                    Box::new((0..len).map(move |row| {
+                        if list_array.is_null(row) {
+                            0.0
+                        } else {
+                            inner_values
+                                .get(row * list_size + selected_index)
+                                .copied()
+                                .unwrap_or_default()
+                        }
+                    }))
+                }
+            }
+        }
         ty => {
             println!("Unsupported data type: {:?}", ty);
             Box::new(std::iter::empty())

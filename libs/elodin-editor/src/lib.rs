@@ -15,7 +15,7 @@ use bevy::{
     },
     prelude::*,
     render::camera::RenderTarget,
-    window::{PresentMode, PrimaryWindow, WindowRef, WindowResolution, WindowTheme},
+    window::{PresentMode, PrimaryWindow, WindowRef, WindowResolution},
     winit::WinitSettings,
 };
 use bevy_editor_cam::{SyncCameraPosition, controller::component::EditorCam};
@@ -37,7 +37,7 @@ use object_3d::create_object_3d_entity;
 use plugins::gizmos::GizmoPlugin;
 use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc};
 use ui::{
-    SelectedObject, UI_ORDER_BASE,
+    UI_ORDER_BASE,
     colors::{ColorExt, get_scheme},
     create_egui_context,
     inspector::viewport::set_viewport_pos,
@@ -154,7 +154,6 @@ impl Plugin for EditorPlugin {
                 DefaultPlugins
                     .set(WindowPlugin {
                         primary_window: Some(Window {
-                            window_theme: Some(WindowTheme::Dark),
                             title: "Elodin".into(),
                             present_mode: default_present_mode(),
                             canvas: Some("#editor".to_string()),
@@ -225,6 +224,7 @@ impl Plugin for EditorPlugin {
                     .in_set(PositionSync),
             )
             .add_systems(Update, sync_paused)
+            .add_systems(Update, ui::data_overview::trigger_time_range_queries)
             .add_systems(PreUpdate, set_selected_range)
             .add_systems(Update, update_eql_context)
             .add_systems(Update, set_eql_context_range.after(update_eql_context))
@@ -241,6 +241,7 @@ impl Plugin for EditorPlugin {
             .insert_resource(SelectedTimeRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)))
             .init_resource::<EqlContext>()
             .init_resource::<SyncedObject3d>()
+            .init_resource::<ui::data_overview::ComponentTimeRanges>()
             .add_plugins(object_3d::Object3DPlugin);
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
@@ -908,13 +909,13 @@ pub fn setup_clear_state(mut packet_handlers: ResMut<PacketHandlers>, mut comman
 fn clear_state_new_connection(
     PacketHandlerInput { packet, .. }: PacketHandlerInput,
     mut entity_map: ResMut<EntityMap>,
-    mut selected_object: ResMut<SelectedObject>,
     mut render_layer_alloc: ResMut<RenderLayerAlloc>,
     mut value_map: Query<&mut ComponentValueMap>,
     mut graph_data: ResMut<CollectedGraphData>,
     lines: Query<Entity, With<LineHandle>>,
     mut synced_glbs: ResMut<SyncedObject3d>,
     mut eql_context: ResMut<EqlContext>,
+    mut component_time_ranges: ResMut<ui::data_overview::ComponentTimeRanges>,
     mut commands: Commands,
     mut windows_state: Query<(Entity, &mut tiles::WindowState)>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
@@ -924,6 +925,14 @@ fn clear_state_new_connection(
         _ => return,
     }
     eql_context.0.component_parts.clear();
+    // Clear cached component time ranges so they will be re-queried
+    component_time_ranges.ranges.clear();
+    component_time_ranges.row_counts.clear();
+    component_time_ranges.sparklines.clear();
+    component_time_ranges.tables_to_query.clear();
+    component_time_ranges.pending_queries = 0;
+    component_time_ranges.total_queries = 0;
+    component_time_ranges.state = ui::data_overview::TimeRangeQueryState::NotStarted;
     entity_map.0.retain(|_, entity| {
         if let Ok(mut entity_commands) = commands.get_entity(*entity) {
             entity_commands.despawn();
@@ -946,7 +955,7 @@ fn clear_state_new_connection(
     primary_state
         .1
         .tile_state
-        .clear(&mut commands, &mut selected_object, &mut render_layer_alloc);
+        .clear(&mut commands, &mut render_layer_alloc);
     for (entity, secondary) in &windows_state {
         if entity == primary_id {
             // We don't despawn the primary window ever.

@@ -2,7 +2,7 @@ use std::{ops::Range, time::Duration};
 
 use bevy::ecs::{
     entity::Entity,
-    system::{Query, Res, ResMut, SystemParam, SystemState},
+    system::{Query, Res, SystemParam, SystemState},
     world::World,
 };
 use bevy_egui::egui;
@@ -15,7 +15,6 @@ use impeller2_bevy::ComponentMetadataRegistry;
 use crate::{
     EqlContext,
     ui::{
-        SettingModal, SettingModalState,
         button::{EButton, ECheckboxButton},
         colors::{EColor, get_scheme},
         inspector::{color_popup, eql_autocomplete, query},
@@ -32,7 +31,6 @@ use super::InspectorIcons;
 
 #[derive(SystemParam)]
 pub struct InspectorGraph<'w, 's> {
-    setting_modal_state: ResMut<'w, SettingModalState>,
     metadata_store: Res<'w, ComponentMetadataRegistry>,
     graph_states: Query<'w, 's, &'static mut GraphState>,
     query_plots: Query<'w, 's, &'static mut QueryPlotData>,
@@ -54,7 +52,6 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         let (icons, graph_id) = args;
 
         let InspectorGraph {
-            mut setting_modal_state,
             metadata_store,
             mut graph_states,
             mut query_plots,
@@ -68,26 +65,13 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         let graph_state = &mut *graph_state;
         let query_plot = query_plots.get_mut(graph_id);
 
-        if query_plot.is_ok() {
-            label::editable_label_with_buttons(
-                ui,
-                [],
-                &mut graph_state.label,
-                get_scheme().text_primary,
-                graph_label_margin,
-            );
-        } else {
-            let [add_clicked] = label::editable_label_with_buttons(
-                ui,
-                [icons.add],
-                &mut graph_state.label,
-                get_scheme().text_primary,
-                graph_label_margin,
-            );
-            if add_clicked {
-                setting_modal_state.0 = Some(SettingModal::Graph(graph_id, None));
-            }
-        }
+        label::editable_label_with_buttons(
+            ui,
+            [],
+            &mut graph_state.label,
+            get_scheme().text_primary,
+            graph_label_margin,
+        );
 
         ui.separator();
 
@@ -146,6 +130,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         ui.separator();
 
         if let Ok(mut query_plot) = query_plot {
+            query_plot.data.name = graph_state.label.clone();
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(0, 8))
                 .show(ui, |ui| {
@@ -226,6 +211,15 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     }
                     ui.separator();
                     ui.label(egui::RichText::new("Color").color(get_scheme().text_secondary));
+                    let scheme_color = get_scheme().highlight;
+                    let mut auto_color = query_plot.auto_color;
+                    if ui.checkbox(&mut auto_color, "Use scheme color").changed() {
+                        query_plot.auto_color = auto_color;
+                        if auto_color {
+                            query_plot.data.color =
+                                impeller2_wkt::Color::from_color32(scheme_color);
+                        }
+                    }
                     let color_id = ui.auto_id_with("color");
                     let btn_resp = ui.add(EButton::new("Set Color"));
 
@@ -234,16 +228,21 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     }
 
                     if egui::Popup::is_id_open(ui.ctx(), color_id) {
-                        let mut color = query_plot.data.color.into_color32();
+                        let prev_color = query_plot.data.color.into_color32();
+                        let mut color = prev_color;
                         if let Some(popup_response) =
                                 color_popup(ui, &mut color, color_id, &btn_resp) {
+
                             if !btn_resp.clicked()
                                 && (ui.input(|i| i.key_pressed(egui::Key::Escape))
                                     || popup_response.clicked_elsewhere())
                             {
                                 egui::Popup::close_id(ui.ctx(), color_id);
                             }
-                            query_plot.data.color = impeller2_wkt::Color::from_color32(color);
+                            if color != prev_color {
+                                query_plot.data.color = impeller2_wkt::Color::from_color32(color);
+                                query_plot.auto_color = false;
+                            }
                         }
                     }
                 });

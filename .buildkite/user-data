@@ -10,7 +10,6 @@
 #
 package_update: true
 packages:
-  - overlayroot
   - curl
   - ca-certificates
   - gpg
@@ -25,31 +24,6 @@ packages:
   - awscli
 
 write_files:
-  - path: /etc/overlayroot.local.conf
-    permissions: "0644"
-    owner: root:root
-    content: |
-      overlayroot="tmpfs:tmpfs_size=75%"
-
-  - path: /etc/systemd/system/buildkite-bootstrap.service
-    permissions: "0644"
-    owner: root:root
-    content: |
-      [Unit]
-      Description=Buildkite Agent Bootstrap (runs once after overlayroot is active)
-      After=network-online.target
-      Wants=network-online.target
-      ConditionPathExists=!/var/lib/buildkite-bootstrap-complete
-
-      [Service]
-      Type=oneshot
-      ExecStart=/usr/local/sbin/bootstrap-ci.sh
-      ExecStartPost=/usr/bin/touch /var/lib/buildkite-bootstrap-complete
-      RemainAfterExit=yes
-
-      [Install]
-      WantedBy=multi-user.target
-
   - path: /usr/local/sbin/bootstrap-ci.sh
     permissions: "0755"
     owner: root:root
@@ -60,7 +34,7 @@ write_files:
       # --- Nix Installation (non-interactive) ---
       curl --proto '=https' --tlsv1.2 -fsSL -L https://install.determinate.systems/nix \
         | sh -s -- install linux --no-confirm --determinate \
-        --extra-conf "trusted-users = root buildkite-agent @nix-users"
+        --extra-conf "trusted-users = root ubuntu buildkite-agent @nix-users"
 
       # --- Configure Nix Binary Cache Upload ---
       CACHE_SIGNING_KEY_BASE64="LS0tLS1...your-base64-encoded-signing-key-here"
@@ -110,6 +84,7 @@ write_files:
       # Allow agent to talk to nix-daemon
       getent group nix-users >/dev/null || groupadd -r nix-users
       usermod -aG nix-users buildkite-agent
+      usermod -aG nix-users ubuntu
       chgrp nix-users /nix/var/nix/daemon-socket || true
       chmod 770 /nix/var/nix/daemon-socket || true
 
@@ -171,15 +146,5 @@ write_files:
       systemctl enable --now buildkite-agent
 
 runcmd:
-  # Configure GRUB and initramfs for overlayroot
-  - [ bash, -lc, 'sed -i "s/^GRUB_FORCE_PARTUUID/#GRUB_FORCE_PARTUUID/" /etc/default/grub.d/40-force-partuuid.cfg' ]
-  - [ bash, -lc, 'update-grub' ]
-  - [ bash, -lc, 'update-initramfs -u' ]
-  # Enable systemd service to run bootstrap script AFTER reboot
-  - [ systemctl, enable, buildkite-bootstrap.service ]
-
-power_state:
-  # Reboot to activate overlayroot, then buildkite-bootstrap.service will run
-  mode: reboot
-  timeout: 30
-  condition: True
+  # Run the bootstrap script directly (no reboot needed)
+  - [ bash, /usr/local/sbin/bootstrap-ci.sh ]

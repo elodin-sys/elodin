@@ -1,27 +1,26 @@
-From f3b523c80624a164889928bc255c6d16da7b20da Mon Sep 17 00:00:00 2001
-From: Mika Tammi <mika.tammi@unikie.com>
-Date: Thu, 11 Apr 2024 20:23:32 +0300
-Subject: Double the device tree buffer size
+From e8bc7416f0f3e7a606be9afe78c06d69ebdfb857 Mon Sep 17 00:00:00 2001
+From: Brian McGillion <bmg.avoin@gmail.com>
+Date: Thu, 23 Jan 2025 13:08:15 +0400
+Subject: [PATCH] Increase the dtb size
 
-Signed-off-by: Mika Tammi <mika.tammi@unikie.com>
+Signed-off-by: Brian McGillion <bmg.avoin@gmail.com>
 ---
- src/boot/devicetree.c | 9 ++++++++-
- 1 file changed, 8 insertions(+), 1 deletion(-)
+ src/boot/devicetree.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
 
 diff --git a/src/boot/devicetree.c b/src/boot/devicetree.c
-index caafef24d3..8395fd2c79 100644
+index 85fc07c49f..f2e3ca79ed 100644
 --- a/src/boot/devicetree.c
 +++ b/src/boot/devicetree.c
-@@ -4,6 +4,8 @@
+@@ -3,6 +3,7 @@
+ #include "devicetree.h"
  #include "proto/dt-fixup.h"
  #include "util.h"
-
 +#include <endian.h>
-+
+ 
  #define FDT_V1_SIZE (7*4)
  
- static EFI_STATUS devicetree_allocate(struct devicetree_state *state, size_t size) {
-@@ -87,7 +89,8 @@ EFI_STATUS devicetree_install(struct devicetree_state *state, EFI_FILE *root_dir
+@@ -88,7 +89,8 @@ EFI_STATUS devicetree_install(struct devicetree_state *state, EFI_FILE *root_dir
                  /* 32MB device tree blob doesn't seem right */
                  return EFI_INVALID_PARAMETER;
  
@@ -31,7 +30,7 @@ index caafef24d3..8395fd2c79 100644
  
          err = devicetree_allocate(state, len);
          if (err != EFI_SUCCESS)
-@@ -101,6 +104,10 @@ EFI_STATUS devicetree_install(struct devicetree_state *state, EFI_FILE *root_dir
+@@ -102,6 +104,10 @@ EFI_STATUS devicetree_install(struct devicetree_state *state, EFI_FILE *root_dir
          if (err != EFI_SUCCESS)
                  return err;
  
@@ -42,5 +41,5 @@ index caafef24d3..8395fd2c79 100644
          return BS->InstallConfigurationTable(
                          MAKE_GUID_PTR(EFI_DTB_TABLE), PHYSICAL_ADDRESS_TO_POINTER(state->addr));
  }
---
-2.42.0
+-- 
+2.47.1

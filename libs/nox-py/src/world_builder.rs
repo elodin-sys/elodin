@@ -262,6 +262,7 @@ impl WorldBuilder {
                 if !no_s10 {
                     std::thread::spawn(move || {
                         let rt = tokio::runtime::Builder::new_current_thread()
+                            .enable_all() // Enable IO, time, and signal drivers for process spawning
                             .build()
                             .map_err(|err| miette!("rt err {}", err))
                             .unwrap();
@@ -300,14 +301,28 @@ impl WorldBuilder {
                                     terminate_flag.load(Ordering::Relaxed)
                                 }
                             },
-                            move |tick_count| {
+                            move |tick_count, db: &Arc<elodin_db::DB>, timestamp: Timestamp| {
                                 if let Some(ref func) = post_step {
                                     Python::with_gil(|py| {
                                         let tick_count_py = tick_count
                                             .into_bound_py_any(py)
                                             .unwrap_or_else(|_| py.None().into_bound(py));
-                                        if let Err(e) = func.call1(py, (tick_count_py,)) {
-                                            tracing::warn!("post_step error {e}");
+                                        // Create PostStepContext with DB access for writing components
+                                        let ctx =
+                                            PostStepContext::new(db.clone(), timestamp, tick_count);
+                                        match Py::new(py, ctx) {
+                                            Ok(ctx_py) => {
+                                                if let Err(e) =
+                                                    func.call1(py, (tick_count_py, ctx_py))
+                                                {
+                                                    tracing::warn!("post_step error {e}");
+                                                }
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!(
+                                                    "failed to create PostStepContext: {e}"
+                                                );
+                                            }
                                         }
                                     });
                                 }
@@ -320,7 +335,9 @@ impl WorldBuilder {
                 })
             }
             Args::Plan { addr, out_dir } => {
-                let recipe = self.sim_recipe(path, addr, optimize);
+                // Canonicalize the path to ensure s10 can find the file regardless of working directory
+                let canonical_path = std::fs::canonicalize(&path).unwrap_or(path);
+                let recipe = self.sim_recipe(canonical_path, addr, optimize);
                 let toml = toml::to_string_pretty(&recipe)
                     .map_err(|err| PyValueError::new_err(err.to_string()))?;
                 let plan_path = out_dir.join("s10.toml");

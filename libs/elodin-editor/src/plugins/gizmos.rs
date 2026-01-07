@@ -28,6 +28,7 @@ use crate::{
     MainCamera, WorldPosExt,
     object_3d::ComponentArrayExt,
     ui::tiles::ViewportConfig,
+    ui::window::window_entity_from_target,
     vector_arrow::{
         ArrowLabelScope, ArrowVisual, VectorArrowState, ViewportArrow, component_value_tail_to_vec3,
     },
@@ -431,7 +432,7 @@ fn render_vector_arrow(
             // Store just the offset from the arrow root
             state.label_grid_pos = Some((0, 0, 0, total_offset));
             state.label_name = result.name.clone();
-            state.label_color = Some(base_color);
+            state.label_color = None;
             state.label_scope = arrow_scope;
         } else {
             state.label_grid_pos = None;
@@ -586,27 +587,6 @@ fn lighten_color(color: Color, factor: f32) -> Color {
 }
 
 /// Convert arrow color to a readable label color (ensure good contrast)
-fn readable_label_color(color: Color) -> Color {
-    let linear = color.to_linear();
-    // Brighten the color for better visibility
-    let r = (linear.red * 1.5 + 0.3).clamp(0.0, 1.0);
-    let g = (linear.green * 1.5 + 0.3).clamp(0.0, 1.0);
-    let b = (linear.blue * 1.5 + 0.3).clamp(0.0, 1.0);
-    Color::linear_rgba(r, g, b, 1.0)
-}
-
-/// Get the window entity from a camera's render target.
-fn window_from_camera_target(
-    target: &RenderTarget,
-    primary_window: Option<Entity>,
-) -> Option<Entity> {
-    match target {
-        RenderTarget::Window(WindowRef::Primary) => primary_window,
-        RenderTarget::Window(WindowRef::Entity(e)) => Some(*e),
-        _ => None,
-    }
-}
-
 /// Bevy UI system to render arrow labels as screen-space text nodes.
 /// Spawns a label for each viewport where the arrow is visible, targeting the correct window's UI camera.
 #[allow(clippy::too_many_arguments)]
@@ -623,14 +603,16 @@ fn update_arrow_label_ui(
     mut label_map: Local<HashMap<(Entity, Entity), Entity>>,
 ) {
     let edge = floating_origin.grid_edge_length();
-    let primary = primary_window.iter().next();
+    let Some(primary_entity) = primary_window.iter().next() else {
+        return;
+    };
 
     let mut window_cameras: HashMap<Entity, Vec<_>> = HashMap::new();
     for (entity, cam, gt, cell, config) in cameras.iter() {
         if !cam.is_active {
             continue;
         }
-        let Some(window) = window_from_camera_target(&cam.target, primary) else {
+        let Some(window) = window_entity_from_target(&cam.target, primary_entity) else {
             continue;
         };
         window_cameras
@@ -651,7 +633,7 @@ fn update_arrow_label_ui(
 
     let mut window_ui_camera: HashMap<Entity, Entity> = HashMap::new();
     for (ui_cam_entity, ui_cam) in ui_cameras.iter() {
-        if let Some(window) = window_from_camera_target(&ui_cam.target, primary)
+        if let Some(window) = window_entity_from_target(&ui_cam.target, primary_entity)
             && window_cameras.contains_key(&window)
         {
             window_ui_camera.insert(window, ui_cam_entity);
@@ -666,7 +648,7 @@ fn update_arrow_label_ui(
                 .spawn((
                     Camera2d,
                     Camera {
-                        target: RenderTarget::Window(if Some(*window) == primary {
+                        target: RenderTarget::Window(if *window == primary_entity {
                             WindowRef::Primary
                         } else {
                             WindowRef::Entity(*window)
@@ -694,10 +676,10 @@ fn update_arrow_label_ui(
             continue;
         };
 
-        let label_color = arrow_state
-            .label_color
-            .map(readable_label_color)
-            .unwrap_or(Color::WHITE);
+        let label_color = {
+            use crate::ui::colors::ColorExt;
+            crate::ui::colors::get_scheme().text_primary.into_bevy()
+        };
         let label_offset = arrow_state
             .label_grid_pos
             .map(|(_, _, _, offset)| offset)

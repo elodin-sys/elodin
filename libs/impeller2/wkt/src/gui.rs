@@ -14,6 +14,8 @@ use strum::{EnumString, IntoStaticStr, VariantNames};
 #[cfg_attr(feature = "bevy", type_path = "impeller2::wkt::gui::Schematic")]
 pub struct Schematic<T = ()> {
     pub elems: Vec<SchematicElem<T>>,
+    #[serde(default)]
+    pub theme: Option<ThemeConfig>,
 }
 
 #[cfg(feature = "bevy")]
@@ -28,6 +30,7 @@ impl<T> Default for Schematic<T> {
     fn default() -> Self {
         Self {
             elems: Default::default(),
+            theme: None,
         }
     }
 }
@@ -40,6 +43,7 @@ pub enum SchematicElem<T = ()> {
     Line3d(Line3d<T>),
     VectorArrow(VectorArrow3d<T>),
     Window(WindowSchematic),
+    Theme(ThemeConfig),
 }
 
 impl<T> SchematicElem<T> {
@@ -50,6 +54,7 @@ impl<T> SchematicElem<T> {
             SchematicElem::Line3d(line) => SchematicElem::Line3d(line.map_aux(|_| ())),
             SchematicElem::VectorArrow(arrow) => SchematicElem::VectorArrow(arrow.map_aux(|_| ())),
             SchematicElem::Window(window) => SchematicElem::Window(window),
+            SchematicElem::Theme(theme) => SchematicElem::Theme(theme.clone()),
         }
     }
 }
@@ -72,6 +77,12 @@ pub struct WindowSchematic {
     pub screen_rect: Option<WindowRect>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct ThemeConfig {
+    pub mode: Option<String>,
+    pub scheme: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(bound = "T: Serialize + DeserializeOwned")]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
@@ -87,26 +98,30 @@ pub enum Panel<T = ()> {
     Tabs(Vec<Panel<T>>),
     Inspector,
     Hierarchy,
-    SchematicTree,
+    SchematicTree(Option<String>),
+    DataOverview(Option<String>),
     Dashboard(Box<Dashboard<T>>),
 }
 
 impl<T> Panel<T> {
     pub fn label(&self) -> &str {
         match self {
-            Panel::Viewport(_) => "Viewport",
+            Panel::Viewport(viewport) => viewport.name.as_deref().unwrap_or("Viewport"),
             Panel::VSplit(_) => "Vertical Split",
             Panel::HSplit(_) => "Horizontal Split",
-            Panel::Graph(_) => "Graph",
-            Panel::ComponentMonitor(_) => "Component Monitor",
-            Panel::ActionPane(_) => "Action Pane",
-            Panel::QueryTable(_) => "Query Table",
-            Panel::QueryPlot(query_plot) => &query_plot.label,
+            Panel::Graph(graph) => graph.name.as_deref().unwrap_or("Graph"),
+            Panel::ComponentMonitor(monitor) => {
+                monitor.name.as_deref().unwrap_or(&monitor.component_name)
+            }
+            Panel::ActionPane(action_pane) => action_pane.name.as_str(),
+            Panel::QueryTable(query_table) => query_table.name.as_deref().unwrap_or("Query Table"),
+            Panel::QueryPlot(query_plot) => &query_plot.name,
             Panel::Tabs(_) => "Tabs",
             Panel::Inspector => "Inspector",
             Panel::Hierarchy => "Hierarchy",
-            Panel::SchematicTree => "Tree",
-            Panel::Dashboard(d) => d.root.label.as_deref().unwrap_or("Dashboard"),
+            Panel::SchematicTree(name) => name.as_deref().unwrap_or("Tree"),
+            Panel::DataOverview(name) => name.as_deref().unwrap_or("Data Overview"),
+            Panel::Dashboard(d) => d.root.name.as_deref().unwrap_or("Dashboard"),
         }
     }
 
@@ -146,8 +161,9 @@ impl<T> Panel<T> {
             Panel::QueryTable(query_table) => Panel::QueryTable(query_table.clone()),
             Panel::QueryPlot(query_plot) => Panel::QueryPlot(query_plot.map_aux(f)),
             Panel::Hierarchy => Panel::Hierarchy,
-            Panel::SchematicTree => Panel::SchematicTree,
+            Panel::SchematicTree(name) => Panel::SchematicTree(name.clone()),
             Panel::Inspector => Panel::Inspector,
+            Panel::DataOverview(name) => Panel::DataOverview(name.clone()),
             Panel::Viewport(v) => Panel::Viewport(v.map_aux(f)),
             Panel::Dashboard(d) => Panel::Dashboard(Box::new(d.map_aux(f))),
         }
@@ -673,11 +689,13 @@ pub struct ComponentMonitor {
     /// NOTE: It may be nice to allow this to be an EQL expression that we
     /// monitor, which can be a simple component_name.
     pub component_name: String,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct QueryTable {
+    pub name: Option<String>,
     pub query: String,
     pub query_type: QueryType,
 }
@@ -685,7 +703,7 @@ pub struct QueryTable {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct ActionPane {
-    pub label: String,
+    pub name: String,
     pub lua: String,
 }
 
@@ -693,7 +711,7 @@ pub struct ActionPane {
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 #[serde(bound = "T: Serialize + DeserializeOwned")]
 pub struct QueryPlot<T = ()> {
-    pub label: String,
+    pub name: String,
     pub query: String,
     pub refresh_interval: Duration,
     pub auto_refresh: bool,
@@ -705,7 +723,7 @@ pub struct QueryPlot<T = ()> {
 impl<T> QueryPlot<T> {
     pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> QueryPlot<U> {
         QueryPlot {
-            label: self.label.clone(),
+            name: self.name.clone(),
             query: self.query.clone(),
             refresh_interval: self.refresh_interval,
             auto_refresh: self.auto_refresh,
@@ -742,7 +760,7 @@ impl<T> Dashboard<T> {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct DashboardNode<T> {
-    pub label: Option<String>,
+    pub name: Option<String>,
     pub display: Display,
     pub box_sizing: BoxSizing,
     pub position_type: PositionType,
@@ -786,7 +804,7 @@ pub struct DashboardNode<T> {
 impl<T> DashboardNode<T> {
     pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> DashboardNode<U> {
         DashboardNode {
-            label: self.label.clone(),
+            name: self.name.clone(),
             display: self.display,
             box_sizing: self.box_sizing,
             position_type: self.position_type,

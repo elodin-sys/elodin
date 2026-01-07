@@ -6,7 +6,6 @@ use bevy::ui::{
     JustifyContent, JustifyItems, JustifySelf, Node, Overflow, OverflowAxis, OverflowClipBox,
     OverflowClipMargin, PositionType,
 };
-use bevy::window::PrimaryWindow;
 use eql::FmtExpr;
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::{ComponentValue, DashboardNode};
@@ -20,11 +19,17 @@ use crate::ui::widgets::WidgetSystem;
 #[derive(SystemParam)]
 pub struct DashboardWidget<'w, 's> {
     query: Query<'w, 's, &'static mut Node>,
-    window: Query<'w, 's, &'static bevy_egui::EguiContextSettings, With<PrimaryWindow>>,
+    window_settings: Query<'w, 's, &'static bevy_egui::EguiContextSettings>,
+}
+
+#[derive(Clone, Copy)]
+pub struct DashboardWidgetArgs {
+    pub entity: Entity,
+    pub window: Entity,
 }
 
 impl WidgetSystem for DashboardWidget<'_, '_> {
-    type Args = Entity;
+    type Args = DashboardWidgetArgs;
 
     type Output = ();
 
@@ -32,7 +37,7 @@ impl WidgetSystem for DashboardWidget<'_, '_> {
         world: &mut World,
         state: &mut bevy::ecs::system::SystemState<Self>,
         ui: &mut egui::Ui,
-        entity: Self::Args,
+        DashboardWidgetArgs { entity, window }: Self::Args,
     ) -> Self::Output {
         let mut state = state.get_mut(world);
         let Ok(mut ui_node) = state.query.get_mut(entity) else {
@@ -41,7 +46,7 @@ impl WidgetSystem for DashboardWidget<'_, '_> {
 
         let max_rect = ui.max_rect();
 
-        let Some(egui_settings) = state.window.iter().next() else {
+        let Ok(egui_settings) = state.window_settings.get(window) else {
             return;
         };
 
@@ -448,7 +453,7 @@ pub fn spawn_node<T>(
     }
     let node = node.id();
     let node = DashboardNode {
-        label: source.label.clone(),
+        name: source.name.clone(),
         display: source.display,
         box_sizing: source.box_sizing,
         position_type: source.position_type,

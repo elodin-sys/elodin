@@ -23,6 +23,7 @@ pub fn inspector_text_field(query: &mut String, hint_text: &str) -> impl egui::W
     move |ui: &mut egui::Ui| {
         let scheme = get_scheme();
         ui.scope(|ui| {
+            ui.visuals_mut().override_text_color = Some(scheme.text_primary);
             ui.style_mut().visuals.widgets.inactive = egui::style::WidgetVisuals {
                 bg_fill: scheme.bg_primary,
                 weak_bg_fill: scheme.bg_primary,
@@ -187,7 +188,7 @@ pub fn color_popup(
             ui.add_space(8.0);
             egui::Frame::popup(ui.style()).show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    for elem_color in &colors::ALL_COLORS_DARK[..24] {
+                    for elem_color in colors::all_colors().iter().take(24) {
                         if ui.add(EColorButton::new(*elem_color)).clicked() {
                             *color = *elem_color;
                         }

@@ -23,15 +23,18 @@ use std::{
 const NOTIFY_SILENCE: Duration = Duration::from_millis(3000);
 
 #[cfg(not(target_os = "macos"))]
-use crate::ui::WindowRelayout;
+use crate::tiles::WindowRelayout;
+#[cfg(target_os = "macos")]
+use crate::ui::window::placement::apply_physical_screen_rect;
 use crate::{
     EqlContext, MainCamera,
     object_3d::Object3DState,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        DEFAULT_SECONDARY_RECT, HdrEnabled, SelectedObject,
+        DEFAULT_SECONDARY_RECT, HdrEnabled,
         colors::{self, EColor},
         dashboard::{NodeUpdaterParams, spawn_dashboard},
+        data_overview::DataOverviewPane,
         modal::ModalDialog,
         monitor::MonitorPane,
         plot::GraphBundle,
@@ -51,6 +54,14 @@ enum PanelContext {
     Secondary(WindowId),
 }
 
+fn tabs_parent_for_panels(tile_state: &TileState, panel_count: usize) -> Option<TileId> {
+    if panel_count > 0 {
+        tile_state.tree.root()
+    } else {
+        None
+    }
+}
+
 #[derive(Component)]
 pub struct SyncedViewport;
 
@@ -65,7 +76,6 @@ pub struct LoadSchematicParams<'w, 's> {
     pub hdr_enabled: ResMut<'w, HdrEnabled>,
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
     pub eql: Res<'w, EqlContext>,
-    pub selected_object: ResMut<'w, SelectedObject>,
     pub node_updater_params: NodeUpdaterParams<'w, 's>,
     cameras: Query<'w, 's, &'static mut Camera>,
     objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
@@ -107,12 +117,28 @@ pub fn sync_schematic(
             return;
         };
         params.load_schematic(&schematic, None);
+        return;
     }
+
+    // No schematic found - create a default Data Overview panel
+    params.load_default_data_overview();
+}
+
+fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSelection {
+    let current = colors::current_selection();
+    let scheme = theme
+        .and_then(|t| t.scheme.as_deref())
+        .unwrap_or(&current.scheme);
+    let mode = theme
+        .and_then(|t| t.mode.as_deref())
+        .unwrap_or(&current.mode);
+    colors::set_active_scheme(scheme, mode)
 }
 
 fn resolve_window_descriptor(
     window: &WindowSchematic,
     base_dir: Option<&Path>,
+    theme_mode: Option<&str>,
 ) -> Option<WindowDescriptor> {
     let path_str = window.path.as_ref()?;
     let mut resolved = PathBuf::from(path_str);
@@ -129,6 +155,7 @@ fn resolve_window_descriptor(
         path: Some(resolved),
         title: window.title.clone(),
         screen: window.screen.map(|idx| idx as usize),
+        mode: theme_mode.map(|m| m.to_string()),
         screen_rect: window.screen_rect.or(Some(DEFAULT_SECONDARY_RECT)),
     })
 }
@@ -217,11 +244,7 @@ impl LoadSchematicParams<'_, '_> {
                 .2;
             std::mem::take(&mut window_state.tile_state)
         };
-        main_state.clear(
-            &mut self.commands,
-            &mut self.selected_object,
-            &mut self.render_layer_alloc,
-        );
+        main_state.clear(&mut self.commands, &mut self.render_layer_alloc);
         self.hdr_enabled.0 = false;
         for entity in self.objects_3d.iter() {
             self.commands.entity(entity).despawn();
@@ -234,12 +257,22 @@ impl LoadSchematicParams<'_, '_> {
             self.commands.entity(entity).despawn();
         }
         let mut secondary_descriptors: Vec<WindowDescriptor> = Vec::new();
+        let theme_selection = apply_theme(schematic.theme.as_ref());
+        let theme_mode = Some(theme_selection.mode.clone());
+        let theme_mode_str = theme_mode.as_deref();
         let mut main_window_descriptor = None;
+
+        let panel_count = schematic
+            .elems
+            .iter()
+            .filter(|elem| matches!(elem, impeller2_wkt::SchematicElem::Panel(_)))
+            .count();
+        let tabs_parent = tabs_parent_for_panels(&main_state, panel_count);
 
         for elem in &schematic.elems {
             match elem {
                 impeller2_wkt::SchematicElem::Panel(p) => {
-                    self.spawn_panel(&mut main_state, p, None, PanelContext::Main);
+                    self.spawn_panel(&mut main_state, p, tabs_parent, PanelContext::Main);
                 }
                 impeller2_wkt::SchematicElem::Object3d(object_3d) => {
                     self.spawn_object_3d(object_3d.clone());
@@ -251,7 +284,9 @@ impl LoadSchematicParams<'_, '_> {
                     self.spawn_vector_arrow(vector_arrow.clone(), None);
                 }
                 impeller2_wkt::SchematicElem::Window(window) => {
-                    if let Some(descriptor) = resolve_window_descriptor(window, base_dir) {
+                    if let Some(descriptor) =
+                        resolve_window_descriptor(window, base_dir, theme_mode_str)
+                    {
                         secondary_descriptors.push(descriptor);
                     } else {
                         main_window_descriptor = Some(WindowDescriptor {
@@ -261,6 +296,7 @@ impl LoadSchematicParams<'_, '_> {
                         });
                     }
                 }
+                impeller2_wkt::SchematicElem::Theme(_) => {}
             }
         }
 
@@ -308,7 +344,7 @@ impl LoadSchematicParams<'_, '_> {
                     window_state.descriptor.screen_rect,
                 ) {
                     self.commands.spawn_task(move || async move {
-                        crate::ui::apply_physical_screen_rect(primary_window, screen_idx, rect)
+                        apply_physical_screen_rect(primary_window, screen_idx, rect)
                             .await
                             .ok();
                         Ok(())
@@ -319,26 +355,57 @@ impl LoadSchematicParams<'_, '_> {
             }
         }
 
+        if let Some(mode) = theme_mode.as_ref() {
+            for (_entity, _window_id, mut window_state) in self.window_states.iter_mut() {
+                window_state.descriptor.mode = Some(mode.clone());
+            }
+        }
+
         for descriptor in secondary_descriptors {
             if let Some(path) = descriptor.path.as_ref() {
                 match std::fs::read_to_string(path) {
                     Ok(kdl) => match impeller2_wkt::Schematic::from_kdl(&kdl) {
                         Ok(sec_schematic) => {
+                            let theme_mode = sec_schematic
+                                .theme
+                                .as_ref()
+                                .and_then(|t| t.mode.as_deref())
+                                .or(theme_mode.as_deref());
+                            let resolved_mode = theme_mode.map(|mode| {
+                                if colors::scheme_supports_mode(&theme_selection.scheme, mode) {
+                                    mode.to_string()
+                                } else {
+                                    "dark".to_string()
+                                }
+                            });
                             let id = WindowId::default();
                             let mut tile_state =
                                 TileState::new(Id::new(("secondary_tab_tree", id.0)));
+                            let panel_count = sec_schematic
+                                .elems
+                                .iter()
+                                .filter(|elem| {
+                                    matches!(elem, impeller2_wkt::SchematicElem::Panel(_))
+                                })
+                                .count();
+                            let tabs_parent = tabs_parent_for_panels(&tile_state, panel_count);
+
                             for elem in &sec_schematic.elems {
                                 if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
                                     self.spawn_panel(
                                         &mut tile_state,
                                         panel,
-                                        None,
+                                        tabs_parent,
                                         PanelContext::Secondary(id),
                                     );
                                 }
                             }
 
                             let graph_entities = tile_state.collect_graph_entities();
+                            let descriptor = WindowDescriptor {
+                                mode: resolved_mode,
+                                ..descriptor
+                            };
                             info!(
                                 path = ?descriptor.path,
                                 "Loaded secondary schematic"
@@ -356,6 +423,7 @@ impl LoadSchematicParams<'_, '_> {
                                 descriptor,
                                 tile_state,
                                 graph_entities,
+                                ui_state: Default::default(),
                             };
                             self.commands.spawn((id, state));
                         }
@@ -503,6 +571,17 @@ impl LoadSchematicParams<'_, '_> {
                 tile_id
             }
             Panel::Tabs(tabs) => {
+                if parent_id.is_some_and(|id| {
+                    matches!(
+                        tile_state.tree.tiles.get(id),
+                        Some(Tile::Container(Container::Tabs(_)))
+                    )
+                }) {
+                    tabs.iter().for_each(|panel| {
+                        self.spawn_panel(tile_state, panel, parent_id, context);
+                    });
+                    return parent_id;
+                }
                 let tile_id = tile_state.insert_tile(
                     Tile::Container(Container::new_tabs(vec![])),
                     parent_id,
@@ -600,7 +679,11 @@ impl LoadSchematicParams<'_, '_> {
                 tile_state.insert_tile(Tile::Pane(Pane::Graph(graph)), parent_id, false)
             }
             Panel::ComponentMonitor(monitor) => {
-                let pane = MonitorPane::new("Monitor".to_string(), monitor.component_name.clone());
+                let label = monitor
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| monitor.component_name.clone());
+                let pane = MonitorPane::new(label, monitor.component_name.clone());
                 tile_state.insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
             }
             Panel::QueryTable(data) => {
@@ -611,46 +694,62 @@ impl LoadSchematicParams<'_, '_> {
                         ..Default::default()
                     })
                     .id();
-                let pane = super::query_table::QueryTablePane { entity };
+                let label = data
+                    .name
+                    .clone()
+                    .filter(|name| !name.trim().is_empty())
+                    .unwrap_or_else(|| "Query".to_string());
+                let pane = super::query_table::QueryTablePane {
+                    entity,
+                    name: label,
+                };
                 tile_state.insert_tile(Tile::Pane(Pane::QueryTable(pane)), parent_id, false)
             }
             Panel::ActionPane(action) => {
                 let entity = self
                     .commands
                     .spawn(super::actions::ActionTile {
-                        button_name: action.label.clone(),
+                        button_name: action.name.clone(),
                         lua: action.lua.clone(),
                         status: Default::default(),
                     })
                     .id();
                 let pane = super::tiles::ActionTilePane {
                     entity,
-                    label: "Action".to_string(),
+                    name: action.name.clone(),
                 };
                 tile_state.insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false)
             }
-            Panel::Inspector => {
-                tile_state.insert_tile(Tile::Pane(Pane::Inspector), parent_id, false)
-            }
-            Panel::Hierarchy => {
-                tile_state.insert_tile(Tile::Pane(Pane::Hierarchy), parent_id, false)
-            }
-            Panel::SchematicTree => {
+            Panel::Inspector | Panel::Hierarchy => None,
+            Panel::SchematicTree(name) => {
                 let entity = self.commands.spawn(super::TreeWidgetState::default()).id();
-                let pane = TreePane { entity };
+                let label = name.clone().unwrap_or_else(|| "Tree".to_string());
+                let pane = TreePane {
+                    entity,
+                    name: label,
+                };
                 tile_state.insert_tile(Tile::Pane(Pane::SchematicTree(pane)), parent_id, false)
+            }
+            Panel::DataOverview(name) => {
+                let mut pane = DataOverviewPane::default();
+                if let Some(name) = name.clone() {
+                    pane.name = name;
+                }
+                let pane = Pane::DataOverview(pane);
+                tile_state.insert_tile(Tile::Pane(pane), parent_id, false)
             }
             Panel::QueryPlot(plot) => {
                 let graph_bundle = GraphBundle::new(
                     &mut self.render_layer_alloc,
                     BTreeMap::default(),
-                    plot.label.clone(),
+                    plot.name.clone(),
                 );
+                let auto_color = plot.color.into_color32() == colors::get_scheme().highlight;
                 let entity = self
                     .commands
                     .spawn(QueryPlotData {
                         data: plot.clone(),
-                        // Set last_refresh to None so the query executes immediately on first render
+                        auto_color,
                         last_refresh: None,
                         ..Default::default()
                     })
@@ -664,7 +763,12 @@ impl LoadSchematicParams<'_, '_> {
                 tile_state.insert_tile(Tile::Pane(pane), parent_id, false)
             }
             Panel::Dashboard(dashboard) => {
-                let Ok(dashboard) = spawn_dashboard(
+                let label = dashboard
+                    .root
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "Dashboard".to_string());
+                let Ok(dashboard_entity) = spawn_dashboard(
                     dashboard,
                     &self.eql.0,
                     &mut self.commands,
@@ -677,12 +781,44 @@ impl LoadSchematicParams<'_, '_> {
                 };
                 tile_state.insert_tile(
                     Tile::Pane(Pane::Dashboard(DashboardPane {
-                        entity: dashboard,
-                        label: "dashboard".to_string(),
+                        entity: dashboard_entity,
+                        name: label,
                     })),
                     parent_id,
                     false,
                 )
+            }
+        }
+    }
+
+    /// Create a default Data Overview panel when no schematic is found.
+    /// This provides immediate visibility into the database contents.
+    pub fn load_default_data_overview(&mut self) {
+        if self.eql.0.component_parts.is_empty() {
+            return;
+        }
+
+        let primary_window = *self.primary_window;
+        let mut window_state = self
+            .window_states
+            .get_mut(primary_window)
+            .expect("no primary window")
+            .2;
+
+        // Only add if the tile tree is empty
+        if window_state.tile_state.is_empty()
+            && let Some(tabs_id) = window_state.tile_state.tree.root()
+        {
+            let pane = Pane::DataOverview(DataOverviewPane::default());
+            if let Some(tile_id) =
+                window_state
+                    .tile_state
+                    .insert_tile(Tile::Pane(pane), Some(tabs_id), true)
+            {
+                window_state
+                    .tile_state
+                    .tree
+                    .make_active(|id, _| id == tile_id);
             }
         }
     }

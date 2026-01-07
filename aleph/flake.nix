@@ -9,7 +9,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
-    jetpack.url = "github:anduril/jetpack-nixos/de01bba154f27a96b40c7f406f1f84517ee11780";
+    jetpack.url = "github:anduril/jetpack-nixos/6e7aa572e435136a26bcf475d70aafdeef117e2d";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
 
@@ -26,17 +26,27 @@
   }: let
     system = "aarch64-linux";
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ../rust-toolchain.toml;
+    gitJSONOverlay = builtins.fromJSON (builtins.readFile ./gitrepos.json);
+    gitReposOverlay = final: prev: {
+      cudaPackages = prev.cudaPackages_12; # CUDA 12 for JP6
+      nvidia-jetpack = prev.nvidia-jetpack6.overrideScope (jetpackFinal: jetpackPrev: {
+        gitRepos =
+          jetpackPrev.gitRepos
+          // (final.lib.mapAttrs (_: info:
+            final.fetchgit {
+              inherit (info) url rev sha256;
+            })
+          gitJSONOverlay);
+      });
+    };
     overlay = final: prev:
       (prev.lib.packagesFromDirectoryRecursive {
         directory = ./pkgs;
         callPackage = path: args: final.callPackage path (args // {inherit rustToolchain;});
       })
-      // (rust-overlay.overlays.default final prev);
-    # Temporarily disabled for nixpkgs 25.05 compatibility (CUDA issues)
-    # // {
-    #   inherit (final.nvidia-jetpack) cudaPackages;
-    #   opencv4 = prev.opencv4.override {inherit (final) cudaPackages;};
-    # };
+      // (rust-overlay.overlays.default final prev)
+      // (gitReposOverlay final prev);
+
     baseModules = {
       default = defaultModule;
       jetpack = jetpack.nixosModules.default;
@@ -58,7 +68,6 @@
       udp-component-receive = ./modules/udp-component-receive.nix;
     };
     devModules = {
-      # Temporarily disabled for nixpkgs 25.05 compatibility (CUDA issues)
       aleph-dev = ./modules/aleph-dev.nix;
     };
     defaultModule = {config, ...}: {
@@ -119,6 +128,7 @@
       nixosModules = baseModules // fswModules // devModules;
       overlays.default = overlay;
       overlays.jetpack = jetpack.overlays.default;
+      overlays.gitRepos = gitReposOverlay;
       nixosConfigurations = {
         default = nixpkgs.lib.nixosSystem {
           inherit system;
@@ -138,8 +148,8 @@
       packages.x86_64-linux = {
         flash-uefi = nixpkgs.legacyPackages.x86_64-linux.runCommand "flash-uefi" {} ''
           mkdir -p $out
-          cp ${jetpack.outputs.packages.x86_64-linux.flash-orin-nx-devkit}/bin/flash-orin-nx-devkit $out/flash-uefi
-          sed -i '46i\cp ${./tegra234-mb2-bct-misc-p3767-0000.dts} bootloader/t186ref/BCT/tegra234-mb2-bct-misc-p3767-0000.dts' $out/flash-uefi
+          cp ${jetpack.outputs.packages.x86_64-linux.flash-orin-nx-devkit}/bin/flash-orin-nx-devkit-cross $out/flash-uefi
+          sed -i '46i\cp ${./tegra234-mb2-bct-misc-p3767-0000.dts} bootloader/generic/BCT/tegra234-mb2-bct-misc-p3767-0000.dts' $out/flash-uefi
           chmod +x $out/flash-uefi
         '';
       };

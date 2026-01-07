@@ -5,7 +5,7 @@ use impeller2::types::{PacketHeader, PacketTy};
 use impeller2::vtable::builder::{
     OpBuilder, component, raw_field, raw_table, schema, timestamp, vtable,
 };
-use impeller2::vtable::{RealizedField, builder};
+use impeller2::vtable::{Op, RealizedField, builder};
 use impeller2::{
     com_de::Decomponentize,
     registry,
@@ -59,6 +59,47 @@ mod error;
 mod msg_log;
 pub(crate) mod time_series;
 mod vtable_stream;
+
+/// Analyzes a VTable to find byte ranges that are used as timestamp sources.
+/// Returns a vector of (offset, end) tuples representing the byte ranges.
+fn find_timestamp_source_ranges<Ops, Data, Fields>(
+    vtable: &impeller2::vtable::VTable<Ops, Data, Fields>,
+) -> Vec<(usize, usize)>
+where
+    Ops: impeller2::buf::Buf<Op>,
+    Data: impeller2::buf::Buf<u8>,
+    Fields: impeller2::buf::Buf<impeller2::vtable::Field>,
+{
+    let mut ranges = Vec::new();
+    for op in vtable.ops.as_slice() {
+        if let Op::Timestamp { source, .. } = op {
+            // Resolve source to get the actual Table op
+            if let Ok(resolved) = vtable.realize(*source, None)
+                && let Some(range) = resolved.as_table_range()
+            {
+                ranges.push((range.start, range.end));
+            }
+        }
+    }
+    ranges
+}
+
+/// Checks if a field's byte range overlaps with any timestamp source range.
+fn field_overlaps_timestamp_source(
+    field_offset: usize,
+    field_len: usize,
+    timestamp_source_ranges: &[(usize, usize)],
+) -> bool {
+    let field_end = field_offset + field_len;
+    for &(ts_start, ts_end) in timestamp_source_ranges {
+        // Check for overlap: ranges overlap if they are not disjoint
+        // Disjoint means: field_end <= ts_start OR ts_end <= field_offset
+        if !(field_end <= ts_start || ts_end <= field_offset) {
+            return true;
+        }
+    }
+    false
+}
 
 pub struct SnapshotBarrier {
     state: StdMutex<SnapshotState>,
@@ -440,10 +481,24 @@ impl DB {
             trace!("Opening component file {}", path.display());
             let schema = ComponentSchema::read(schema_path)?;
             let component = Component::open(&path, component_id, schema.clone())?;
-            if let Some((timestamp, _)) = component.time_series.latest() {
-                last_updated = timestamp.0.max(last_updated);
-            };
-            start_timestamp = start_timestamp.min(component.time_series.start_timestamp().0);
+
+            // Check if this component is a timestamp source - if so, exclude from time calculations
+            let is_timestamp_source = component_metadata
+                .get(&component_id)
+                .map(|m| m.is_timestamp_source())
+                .unwrap_or(false);
+
+            if !is_timestamp_source {
+                if let Some((timestamp, _)) = component.time_series.latest() {
+                    last_updated = timestamp.0.max(last_updated);
+                };
+                start_timestamp = start_timestamp.min(component.time_series.start_timestamp().0);
+            } else {
+                trace!(
+                    component.id = ?component_id.0,
+                    "Excluding timestamp source component from time range calculations"
+                );
+            }
             components.insert(component_id, component);
         }
         if let Ok(msgs_dir) = std::fs::read_dir(path.join("msgs")) {
@@ -498,16 +553,36 @@ impl DB {
     pub fn insert_vtable(&self, vtable: VTableMsg) -> Result<(), Error> {
         info!(id = ?vtable.id, "inserting vtable");
         let _snapshot_guard = self.snapshot_barrier.enter_writer();
+
+        // Find byte ranges that are used as timestamp sources
+        let timestamp_source_ranges = find_timestamp_source_ranges(&vtable.vtable);
+
         self.with_state_mut(|state| {
-            for res in vtable.vtable.realize_fields(None) {
+            // We need to iterate over fields to get offset/len for timestamp source detection
+            let fields: Vec<_> = vtable.vtable.fields.as_slice().to_vec();
+
+            for (field, res) in fields.iter().zip(vtable.vtable.realize_fields(None)) {
                 let RealizedField {
                     component_id,
                     shape,
                     ty,
                     ..
                 } = res?;
+
+                // Check if this field overlaps with any timestamp source range
+                let is_timestamp_source = field_overlaps_timestamp_source(
+                    field.offset.to_index(),
+                    field.len as usize,
+                    &timestamp_source_ranges,
+                );
+
                 let component_schema = ComponentSchema::new(ty, shape);
-                state.insert_component(component_id, component_schema, &self.path)?;
+                state.insert_component_with_timestamp_source_flag(
+                    component_id,
+                    component_schema,
+                    is_timestamp_source,
+                    &self.path,
+                )?;
                 self.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
             }
             state.vtable_registry.map.insert(vtable.id, vtable.vtable);
@@ -569,6 +644,19 @@ impl State {
         schema: ComponentSchema,
         db_path: &Path,
     ) -> Result<(), Error> {
+        self.insert_component_with_timestamp_source_flag(component_id, schema, false, db_path)
+    }
+
+    /// Inserts a component, optionally marking it as a timestamp source.
+    /// Timestamp source components contain raw clock values used as timestamps
+    /// for other components, and should be excluded from time range calculations.
+    pub fn insert_component_with_timestamp_source_flag(
+        &mut self,
+        component_id: ComponentId,
+        schema: ComponentSchema,
+        is_timestamp_source: bool,
+        db_path: &Path,
+    ) -> Result<(), Error> {
         if let Some(existing_component) = self.components.get(&component_id) {
             if existing_component.schema != schema {
                 warn!( ?existing_component.schema, new_component.schema = ?schema,
@@ -576,14 +664,29 @@ impl State {
                       "schema mismatch");
                 return Err(Error::SchemaMismatch);
             }
+            // If this component is a timestamp source, update the metadata
+            if is_timestamp_source
+                && let Some(existing_meta) = self.component_metadata.get_mut(&component_id)
+                && !existing_meta.is_timestamp_source()
+            {
+                existing_meta.set_timestamp_source(true);
+                // Re-save the metadata
+                let metadata_path = db_path.join(component_id.to_string()).join("metadata");
+                if let Err(err) = existing_meta.write(&metadata_path) {
+                    warn!(?err, "failed to update timestamp source metadata");
+                }
+            }
             return Ok(());
         }
-        info!(component.id = ?component_id.0, "inserting");
-        let component_metadata = ComponentMetadata {
+        info!(component.id = ?component_id.0, is_timestamp_source, "inserting");
+        let mut component_metadata = ComponentMetadata {
             component_id,
             name: component_id.to_string(),
             metadata: Default::default(),
         };
+        if is_timestamp_source {
+            component_metadata.set_timestamp_source(true);
+        }
         let component = Component::create(db_path, component_id, schema, Timestamp::now())?;
         if !self.component_metadata.contains_key(&component_id) {
             self.set_component_metadata(component_metadata, db_path)?;

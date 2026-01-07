@@ -2,7 +2,7 @@ use bevy::{
     ecs::system::SystemParam,
     prelude::*,
     render::camera::RenderTarget,
-    window::{EnabledButtons, PrimaryWindow, WindowRef, WindowResolution, WindowTheme},
+    window::{EnabledButtons, PrimaryWindow, WindowRef, WindowResolution},
 };
 use bevy_egui::EguiContexts;
 use egui::{Color32, CornerRadius, RichText, Stroke, load::SizedTexture};
@@ -20,7 +20,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{VERSION, create_egui_context, dirs, ui::DEFAULT_PRESENT_MODE};
+use crate::{VERSION, create_egui_context, dirs, ui::base_window};
 
 use super::{
     button::EButton,
@@ -40,12 +40,6 @@ fn create_startup_window(
 ) {
     commands.insert_resource(recent_files());
     if status.status() == ConnectionStatus::NoConnection {
-        let composite_alpha_mode = if cfg!(target_os = "macos") {
-            bevy::window::CompositeAlphaMode::PostMultiplied
-        } else {
-            bevy::window::CompositeAlphaMode::Opaque
-        };
-
         let egui_context = create_egui_context();
 
         let mut window = commands.spawn((
@@ -58,15 +52,12 @@ fn create_startup_window(
                     max_width: 730.0,
                     max_height: 470.0,
                 },
-                present_mode: DEFAULT_PRESENT_MODE,
-                window_theme: Some(WindowTheme::Dark),
                 enabled_buttons: EnabledButtons {
                     minimize: false,
                     maximize: false,
                     close: true,
                 },
-                composite_alpha_mode,
-                ..Default::default()
+                ..base_window()
             },
             StartupWindow,
             egui_context,

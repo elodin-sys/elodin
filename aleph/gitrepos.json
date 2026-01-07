@@ -1,0 +1,43 @@
+{
+  "kernel/kernel-jammy-src": {
+    "url": "https://github.com/elodin-sys/aleph-orin-baseboard-kernel.git",
+    "rev": "0ff14d9f9862250d92d7600c2615edc7b2af4fca",
+    "sha256": "sha256-+Ht02FTI1SijLhd0lsr9gBt6i4FsIALaECFbrhrhmqs="
+  },
+  "hardware/nvidia/t23x/nv-public": {
+    "url": "https://github.com/elodin-sys/aleph-jetson-orin-baseboard-nvidia-t23x-public-dts.git",
+    "rev": "7ae899f2404719cc8a38288616067ba094628025",
+    "sha256": "sha256-G0Bw2Hm5cKYK2OP5OIkAFdSkTtkYrskgpi32cpl5Ee4="
+  },
+  "hardware/nvidia/tegra/nv-public": {
+    "url": "https://github.com/OE4T/tegra-public-dts.git",
+    "rev": "8ba5d53ef1e1753f9f2a5b1f7b7b5fc5039de68e",
+    "sha256": "sha256-NMp7UY0OlH2ddBSrUzCUSLkvnWrELhz8xH/dkV86ids="
+  },
+  "hwpm": {
+    "url": "https://github.com/OE4T/linux-hwpm.git",
+    "rev": "d47dc62f4011ffbb0353ba43df5cfb42b967bef2",
+    "sha256": "sha256-otOVFeF+8XKORWMXTRTcXQUXvojdwInVC3jPXTgrk3A="
+  },
+  "kernel-devicetree": {
+    "url": "https://github.com/OE4T/kernel-devicetree.git",
+    "rev": "19952c8e25702e9de23500c3b1fb351bf4380446",
+    "sha256": "sha256-mFmxO7rg1DWnYK+HDFQnc9XLpS4lwXfSXGOibKC4FPY="
+  },
+  "nvdisplay": {
+    "url": "https://github.com/OE4T/nv-kernel-display-driver.git",
+    "rev": "2c448bfbebf4314293fd432d2a0b33f66e5a4815",
+    "sha256": "0adq1wvnv36z2dpl39ixban7wjbzy623s9v0crdyaj3s1f4fi642"
+  },
+  "nvgpu": {
+    "url": "https://github.com/OE4T/linux-nvgpu.git",
+    "rev": "21d928824dc7ca3dc17603a53b11edc6641ace2d",
+    "sha256": "sha256-5OIjSK1grV/nz3hHkeZKRb7dXIQAokNcChGCtzlfBKs="
+  },
+  "nvidia-oot": {
+    "url": "https://nv-tegra.nvidia.com/linux-nv-oot.git",
+    "rev": "efa698bed82f27e403537b7ecf82743e696d17ef",
+    "sha256": "1x5czgiclfkgi999rld7dg57qffw1qjhawvyj1hjkmqrdr2r4nb3"
+  }
+}
+

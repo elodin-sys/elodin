@@ -25,7 +25,10 @@ def world(seed: int = 0) -> el.World:
     world.schematic(
         """
         hsplit {
-            viewport name=Viewport pos="(0,0,0,0, 8,2,4)" look_at="(0,0,0,0, 0,0,3)" hdr=#true show_grid=#true active=#true
+            tabs {
+                viewport name=Viewport pos="(0,0,0,0, 8,2,4)" look_at="(0,0,0,0, 0,0,3)" hdr=#true show_grid=#true active=#true
+                inspector
+            }
         }
         object_3d ball.world_pos {
             sphere radius=0.2 {

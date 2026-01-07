@@ -40,14 +40,14 @@ use crate::{
     EqlContext, MainCamera, Offset, SelectedTimeRange, TimeRangeBehavior, TimeRangeError,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        HdrEnabled, Paused, colors,
+        FocusedWindow, HdrEnabled, Paused, colors,
         command_palette::CommandPaletteState,
         plot::{GraphBundle, default_component_values},
         schematic::{
             CurrentSchematic, CurrentSecondarySchematics, LoadSchematicParams,
             SchematicLiveReloadRx, load_schematic_file,
         },
-        tiles,
+        tiles::{self, set_mode_all},
         timeline::{StreamTickOrigin, timeline_slider::UITick},
     },
 };
@@ -292,7 +292,7 @@ fn collect_viewport_entries(
         Tile::Pane(tiles::Pane::Viewport(viewport)) => {
             if let Some(camera) = viewport.camera {
                 entries.push(ViewportEntry {
-                    label: viewport_display_label(&viewport.label, window_label),
+                    label: viewport_display_label(&viewport.name, window_label),
                     camera,
                 });
             }
@@ -325,17 +325,20 @@ fn reset_editor_cam(transform: &mut Transform, editor_cam: &mut EditorCam) {
 pub struct TileParam<'w, 's> {
     windows_state: Query<'w, 's, &'static mut tiles::WindowState>,
     primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
+    focused_window: Res<'w, FocusedWindow>,
 }
 
 impl<'w, 's> TileParam<'w, 's> {
+    pub fn target_state(&mut self, target: Option<Entity>) -> Option<Mut<'_, tiles::WindowState>> {
+        let target_id = target
+            .or(self.focused_window.0)
+            .or_else(|| self.primary_window.iter().next());
+        target_id.and_then(|target_id| self.windows_state.get_mut(target_id).ok())
+    }
+
     pub fn target(&mut self, target: Option<Entity>) -> Option<Mut<'_, tiles::TileState>> {
-        let target_id = target.or_else(|| self.primary_window.iter().next());
-        target_id.and_then(|target_id| {
-            self.windows_state
-                .get_mut(target_id)
-                .ok()
-                .map(|s| s.map_unchanged(|s| &mut s.tile_state))
-        })
+        self.target_state(target)
+            .map(|s| s.map_unchanged(|s| &mut s.tile_state))
     }
 }
 
@@ -519,16 +522,6 @@ fn monitor_parts(
         .collect()
 }
 
-fn toggle_body_axes() -> PaletteItem {
-    PaletteItem::new("Toggle Body Axes", VIEWPORT_LABEL, |_: In<String>| {
-        // TODO: This functionality needs to be updated once BodyAxes is migrated from EntityId to ComponentId
-        // For now, return an empty page
-        PalettePage::new(vec![])
-            .prompt("Body axes functionality is temporarily disabled during refactor")
-            .into()
-    })
-}
-
 fn reset_cameras() -> PaletteItem {
     PaletteItem::new(
         "Reset Cameras",
@@ -658,34 +651,6 @@ pub fn create_query_plot(tile_id: Option<TileId>) -> PaletteItem {
     )
 }
 
-pub fn create_hierarchy(tile_id: Option<TileId>) -> PaletteItem {
-    PaletteItem::new(
-        "Create Hierarchy",
-        TILES_LABEL,
-        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
-            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
-                return PaletteEvent::Error("Secondary window unavailable".to_string());
-            };
-            tile_state.create_hierarchy_tile(tile_id);
-            PaletteEvent::Exit
-        },
-    )
-}
-
-pub fn create_inspector(tile_id: Option<TileId>) -> PaletteItem {
-    PaletteItem::new(
-        "Create Inspector",
-        TILES_LABEL,
-        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
-            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
-                return PaletteEvent::Error("Secondary window unavailable".to_string());
-            };
-            tile_state.create_inspector_tile(tile_id);
-            PaletteEvent::Exit
-        },
-    )
-}
-
 pub fn create_schematic_tree(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Schematic Tree",
@@ -709,6 +674,20 @@ pub fn create_dashboard(tile_id: Option<TileId>) -> PaletteItem {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
             tile_state.create_dashboard_tile(Default::default(), "Dashboard".to_string(), tile_id);
+            PaletteEvent::Exit
+        },
+    )
+}
+
+pub fn create_data_overview(tile_id: Option<TileId>) -> PaletteItem {
+    PaletteItem::new(
+        "Create Data Overview",
+        TILES_LABEL,
+        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
+            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
+                return PaletteEvent::Error("Secondary window unavailable".to_string());
+            };
+            tile_state.create_data_overview_tile(tile_id);
             PaletteEvent::Exit
         },
     )
@@ -1292,19 +1271,59 @@ fn load_schematic_inner(path: &Path) -> Option<PaletteItem> {
 
 pub fn set_color_scheme() -> PaletteItem {
     PaletteItem::new("Set Color Scheme", PRESETS_LABEL, |_: In<String>| {
-        let schemes = [
-            ("DARK", &colors::DARK),
-            ("LIGHT", &colors::LIGHT),
-            ("CATPPUCINI LATTE", &colors::CATPPUCINI_LATTE),
-            ("CATPPUCINI MOCHA", &colors::CATPPUCINI_MOCHA),
-            ("CATPPUCINI MACCHIATO", &colors::CATPPUCINI_MACCHIATO),
-        ];
+        let presets = colors::available_presets();
         let mut items = vec![];
-        for (name, schema) in schemes {
-            items.push(PaletteItem::new(name, "", move |_: In<String>| {
-                colors::set_schema(schema);
-                PaletteEvent::Exit
-            }));
+        for preset in presets {
+            let name = preset.name.to_string();
+            let label = preset.label.to_string();
+            items.push(PaletteItem::new(
+                label,
+                "",
+                move |_: In<String>, mut windows_state: Query<&mut tiles::WindowState>| {
+                    let current = colors::current_selection();
+                    let desired_mode = if colors::scheme_supports_mode(&name, &current.mode) {
+                        current.mode
+                    } else {
+                        "dark".to_string()
+                    };
+                    let selection = colors::apply_scheme_and_mode(&name, &desired_mode);
+                    set_mode_all(&selection.mode, &mut windows_state);
+                    PaletteEvent::Exit
+                },
+            ));
+        }
+        PalettePage::new(items).into()
+    })
+}
+
+pub fn set_color_scheme_mode() -> PaletteItem {
+    PaletteItem::new("Set Color Scheme Mode", PRESETS_LABEL, |_: In<String>| {
+        let current = colors::current_selection();
+        let scheme_name = current.scheme.clone();
+        let options = [("Dark", "dark"), ("Light", "light")];
+        let mut items = vec![];
+        for (label, mode) in options {
+            let available = colors::scheme_supports_mode(&scheme_name, mode);
+            let display_label = if available {
+                label.to_string()
+            } else {
+                format!("{label} (unavailable)")
+            };
+            let scheme_name = scheme_name.clone();
+            items.push(PaletteItem::new(
+                display_label,
+                "",
+                move |_: In<String>, mut windows_state: Query<&mut tiles::WindowState>| {
+                    if !colors::scheme_supports_mode(&scheme_name, mode) {
+                        return PaletteEvent::Error(
+                            "This scheme does not provide that variant".to_string(),
+                        );
+                    }
+                    let selection = colors::apply_scheme_and_mode(&scheme_name, mode);
+                    set_mode_all(&selection.mode, &mut windows_state);
+                    PaletteEvent::Exit
+                },
+            ));
         }
         PalettePage::new(items).into()
     })
@@ -1595,11 +1614,9 @@ pub fn create_tiles(tile_id: TileId) -> PalettePage {
         create_query_table(Some(tile_id)),
         create_query_plot(Some(tile_id)),
         create_video_stream(Some(tile_id)),
-        create_hierarchy(Some(tile_id)),
         create_schematic_tree(Some(tile_id)),
         create_dashboard(Some(tile_id)),
-        create_inspector(Some(tile_id)),
-        create_sidebars(),
+        create_data_overview(Some(tile_id)),
     ])
 }
 
@@ -1641,7 +1658,6 @@ impl Default for PalettePage {
                     PaletteEvent::Exit
                 },
             ),
-            toggle_body_axes(),
             reset_cameras(),
             PaletteItem::new(
                 "Toggle Recording",
@@ -1667,11 +1683,9 @@ impl Default for PalettePage {
             create_query_table(None),
             create_query_plot(None),
             create_video_stream(None),
-            create_hierarchy(None),
-            create_inspector(None),
             create_schematic_tree(None),
             create_dashboard(None),
-            create_sidebars(),
+            create_data_overview(None),
             create_3d_object(),
             save_db_native(),
             save_schematic(),
@@ -1679,6 +1693,7 @@ impl Default for PalettePage {
             save_schematic_db(),
             load_schematic(),
             clear_schematic(),
+            set_color_scheme_mode(),
             set_color_scheme(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {
                 let _ = opener::open("https://docs.elodin.systems");

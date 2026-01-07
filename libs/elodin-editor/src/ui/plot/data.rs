@@ -525,6 +525,10 @@ pub struct XYLine {
 }
 
 impl XYLine {
+    pub fn point_count(&self) -> usize {
+        self.x_values.iter().map(|c| c.cpu().len()).sum()
+    }
+
     pub fn queue_load(&mut self, render_queue: &RenderQueue, render_device: &RenderDevice) {
         let x_shard_alloc = self.x_shard_alloc.get_or_insert_with(|| {
             BufferShardAlloc::with_nan_chunk(CHUNK_COUNT, CHUNK_LEN, render_device, render_queue)

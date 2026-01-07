@@ -5,6 +5,10 @@ use kdl::{KdlDocument, KdlEntry, KdlNode};
 pub fn serialize_schematic<T>(schematic: &Schematic<T>) -> String {
     let mut doc = KdlDocument::new();
 
+    if let Some(theme) = schematic.theme.as_ref() {
+        doc.nodes_mut().push(serialize_theme(theme));
+    }
+
     for elem in &schematic.elems {
         let node = serialize_schematic_elem(elem);
         doc.nodes_mut().push(node);
@@ -23,6 +27,7 @@ fn serialize_schematic_elem<T>(elem: &SchematicElem<T>) -> KdlNode {
         SchematicElem::Line3d(line) => serialize_line_3d(line),
         SchematicElem::VectorArrow(arrow) => serialize_vector_arrow(arrow),
         SchematicElem::Window(window) => serialize_window(window),
+        SchematicElem::Theme(theme) => serialize_theme(theme),
     }
 }
 
@@ -49,8 +54,27 @@ fn serialize_panel<T>(panel: &Panel<T>) -> KdlNode {
         Panel::QueryPlot(query_plot) => serialize_query_plot(query_plot),
         Panel::Inspector => KdlNode::new("inspector"),
         Panel::Hierarchy => KdlNode::new("hierarchy"),
-        Panel::SchematicTree => KdlNode::new("schematic_tree"),
+        Panel::SchematicTree(name) => {
+            let mut node = KdlNode::new("schematic_tree");
+            push_optional_name_prop(&mut node, name.as_deref());
+            node
+        }
+        Panel::DataOverview(name) => {
+            let mut node = KdlNode::new("data_overview");
+            push_optional_name_prop(&mut node, name.as_deref());
+            node
+        }
         Panel::Dashboard(dashboard) => serialize_dashboard(dashboard),
+    }
+}
+
+fn push_name_prop(node: &mut KdlNode, name: &str) {
+    node.entries_mut().push(KdlEntry::new_prop("name", name));
+}
+
+fn push_optional_name_prop(node: &mut KdlNode, name: Option<&str>) {
+    if let Some(name) = name {
+        push_name_prop(node, name);
     }
 }
 
@@ -62,10 +86,7 @@ fn serialize_split<T>(split: &Split<T>, is_horizontal: bool) -> KdlNode {
         node.entries_mut().push(KdlEntry::new_prop("active", true));
     }
 
-    if let Some(ref name) = split.name {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("name", name.clone()));
-    }
+    push_optional_name_prop(&mut node, split.name.as_deref());
 
     let mut children = KdlDocument::new();
 
@@ -88,10 +109,7 @@ fn serialize_split<T>(split: &Split<T>, is_horizontal: bool) -> KdlNode {
 fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
     let mut node = KdlNode::new("viewport");
 
-    if let Some(ref name) = viewport.name {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("name", name.clone()));
-    }
+    push_optional_name_prop(&mut node, viewport.name.as_deref());
 
     if viewport.fov != 45.0 {
         node.entries_mut()
@@ -177,16 +195,26 @@ fn serialize_window(window: &WindowSchematic) -> KdlNode {
     node
 }
 
+fn serialize_theme(theme: &ThemeConfig) -> KdlNode {
+    let mut node = KdlNode::new("theme");
+    if let Some(mode) = &theme.mode {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("mode", mode.clone()));
+    }
+    if let Some(scheme) = &theme.scheme {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("scheme", scheme.clone()));
+    }
+    node
+}
+
 fn serialize_graph<T>(graph: &Graph<T>) -> KdlNode {
     let mut node = KdlNode::new("graph");
 
     // Add the EQL query as the first unnamed entry
     node.entries_mut().push(KdlEntry::new(graph.eql.clone()));
 
-    if let Some(ref name) = graph.name {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("name", name.clone()));
-    }
+    push_optional_name_prop(&mut node, graph.name.as_deref());
 
     match graph.graph_type {
         GraphType::Line => {} // Default, don't serialize
@@ -224,6 +252,7 @@ fn serialize_graph<T>(graph: &Graph<T>) -> KdlNode {
 
 fn serialize_component_monitor(monitor: &ComponentMonitor) -> KdlNode {
     let mut node = KdlNode::new("component_monitor");
+    push_optional_name_prop(&mut node, monitor.name.as_deref());
     node.entries_mut().push(KdlEntry::new_prop(
         "component_name",
         monitor.component_name.clone(),
@@ -234,9 +263,7 @@ fn serialize_component_monitor(monitor: &ComponentMonitor) -> KdlNode {
 fn serialize_action_pane(action_pane: &ActionPane) -> KdlNode {
     let mut node = KdlNode::new("action_pane");
 
-    // Add the label as the first unnamed entry
-    node.entries_mut()
-        .push(KdlEntry::new(action_pane.label.clone()));
+    push_name_prop(&mut node, &action_pane.name);
 
     node.entries_mut()
         .push(KdlEntry::new_prop("lua", action_pane.lua.clone()));
@@ -246,6 +273,8 @@ fn serialize_action_pane(action_pane: &ActionPane) -> KdlNode {
 
 fn serialize_query_table(query_table: &QueryTable) -> KdlNode {
     let mut node = KdlNode::new("query_table");
+
+    push_optional_name_prop(&mut node, query_table.name.as_deref());
 
     // Add the query as the first unnamed entry
     if !query_table.query.is_empty() {
@@ -266,9 +295,7 @@ fn serialize_query_table(query_table: &QueryTable) -> KdlNode {
 fn serialize_query_plot<T>(query_plot: &QueryPlot<T>) -> KdlNode {
     let mut node = KdlNode::new("query_plot");
 
-    // Add the label as the first unnamed entry
-    node.entries_mut()
-        .push(KdlEntry::new(query_plot.label.clone()));
+    push_name_prop(&mut node, &query_plot.name);
 
     node.entries_mut()
         .push(KdlEntry::new_prop("query", query_plot.query.clone()));
@@ -424,10 +451,7 @@ fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
             .push(KdlEntry::new_prop("scale", arrow.scale));
     }
 
-    if let Some(name) = &arrow.name {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("name", name.clone()));
-    }
+    push_optional_name_prop(&mut node, arrow.name.as_deref());
 
     if arrow.body_frame {
         node.entries_mut()
@@ -568,9 +592,9 @@ fn serialize_dashboard_node<T>(dashboard_node: &DashboardNode<T>) -> KdlNode {
 }
 
 fn serialize_dashboard_node_properties<T>(node: &mut KdlNode, dashboard_node: &DashboardNode<T>) {
-    if let Some(label) = dashboard_node.label.as_ref() {
+    if let Some(name) = dashboard_node.name.as_ref() {
         node.entries_mut()
-            .push(KdlEntry::new_prop("label", label.as_str()));
+            .push(KdlEntry::new_prop("name", name.as_str()));
     }
 
     if !matches!(dashboard_node.display, Display::Flex) {
@@ -1281,7 +1305,7 @@ object_3d a.world_pos {
         let mut schematic = Schematic::default();
         let dashboard = Dashboard {
             root: DashboardNode {
-                label: Some("Styled Dashboard".to_string()),
+                name: Some("Styled Dashboard".to_string()),
                 display: Display::Flex,
                 flex_direction: FlexDirection::Column,
                 text: Some("Hello World".to_string()),
@@ -1309,7 +1333,7 @@ object_3d a.world_pos {
 
         assert_eq!(parsed.elems.len(), 1);
         if let SchematicElem::Panel(Panel::Dashboard(dashboard)) = &parsed.elems[0] {
-            assert_eq!(dashboard.root.label, Some("Styled Dashboard".to_string()));
+            assert_eq!(dashboard.root.name, Some("Styled Dashboard".to_string()));
             assert_eq!(dashboard.root.font_size, 24.0);
             assert_color_close(dashboard.root.text_color, Color::TURQUOISE);
             assert_eq!(dashboard.root.text, Some("Hello World".to_string()));

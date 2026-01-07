@@ -4,7 +4,7 @@ use bevy::{
         world::World,
     },
     input::keyboard::Key,
-    prelude::{Entity, Resource, With},
+    prelude::{Entity, Query, Resource, With},
     window::PrimaryWindow,
 };
 use bevy_egui::EguiContexts;
@@ -23,7 +23,7 @@ use crate::{
 use self::palette_items::{MatchedPaletteItem, PaletteEvent, PaletteIcon, PalettePage};
 
 use super::{
-    RootWidgetSystem, RootWidgetSystemExt,
+    FocusedWindow, RootWidgetSystem,
     widgets::{WidgetSystem, WidgetSystemExt},
 };
 
@@ -33,6 +33,7 @@ pub mod palette_items;
 pub struct CommandPaletteState {
     pub filter: String,
     pub show: bool,
+    pub just_opened: bool,
     pub input_focus: bool,
     pub page_stack: Vec<PalettePage>,
     pub selected_index: usize,
@@ -42,16 +43,35 @@ pub struct CommandPaletteState {
 }
 
 impl CommandPaletteState {
+    pub fn open_for_window(&mut self, target_window: Option<Entity>, item: PaletteItem) {
+        self.target_window = target_window;
+        self.open_item(item);
+    }
+
     pub fn open_item(&mut self, item: PaletteItem) {
         let target_window = self.target_window;
         *self = CommandPaletteState::default();
         self.target_window = target_window;
         self.auto_open_item = Some(item);
         self.show = true;
+        self.input_focus = true;
+        self.just_opened = true;
     }
 
     pub fn open_page(&mut self, page: impl Fn() -> PalettePage + Send + Sync + 'static) {
-        self.open_item(PaletteItem::new("", "", move |_: In<String>| page().into()));
+        let target_window = self.target_window;
+        self.open_page_for_window(target_window, page);
+    }
+
+    pub fn open_page_for_window(
+        &mut self,
+        target_window: Option<Entity>,
+        page: impl Fn() -> PalettePage + Send + Sync + 'static,
+    ) {
+        self.open_for_window(
+            target_window,
+            PaletteItem::new("", "", move |_: In<String>| page().into()),
+        );
     }
 
     pub fn handle_event(&mut self, event: PaletteEvent) {
@@ -61,6 +81,7 @@ impl CommandPaletteState {
                 self.show = false;
                 self.selected_index = 0;
                 self.target_window = None;
+                self.just_opened = false;
             }
             PaletteEvent::NextPage {
                 next_page,
@@ -83,12 +104,14 @@ impl CommandPaletteState {
 }
 
 #[derive(SystemParam)]
-pub struct CommandPalette<'w> {
+pub struct CommandPalette<'w, 's> {
     command_palette_state: ResMut<'w, CommandPaletteState>,
     key_state: Res<'w, LogicalKeyState>,
+    focused_window: Res<'w, FocusedWindow>,
+    primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
 }
 
-impl RootWidgetSystem for CommandPalette<'_> {
+impl RootWidgetSystem for CommandPalette<'_, '_> {
     type Args = ();
     type Output = ();
 
@@ -98,16 +121,13 @@ impl RootWidgetSystem for CommandPalette<'_> {
         _ctx: &mut egui::Context,
         _args: Self::Args,
     ) {
-        let _ = world.add_root_widget_with::<PaletteWindow, With<PrimaryWindow>>(
-            "command_palette_window",
-            None,
-        );
-
         let (auto_open_item, filter) = {
             let state_mut = state.get_mut(world);
 
-            let mut command_palette_state = state_mut.command_palette_state;
+            let focused_window = state_mut.focused_window.0;
+            let primary_window = state_mut.primary_window.iter().next();
             let kbd = state_mut.key_state;
+            let mut command_palette_state = state_mut.command_palette_state;
             let cmd_pressed = if cfg!(target_os = "macos") {
                 kbd.pressed(&Key::Super)
             } else {
@@ -117,13 +137,19 @@ impl RootWidgetSystem for CommandPalette<'_> {
                 command_palette_state.show = !command_palette_state.show;
                 if command_palette_state.show {
                     command_palette_state.input_focus = true;
+                    let target_window = focused_window.or(primary_window);
+                    command_palette_state.target_window = target_window;
+                    command_palette_state.just_opened = true;
+                } else {
                     command_palette_state.target_window = None;
+                    command_palette_state.just_opened = false;
                 }
             }
 
             if kbd.just_pressed(&Key::Escape) {
                 command_palette_state.show = false;
                 command_palette_state.target_window = None;
+                command_palette_state.just_opened = false;
             }
 
             if !command_palette_state.show {
@@ -166,7 +192,7 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
         ctx: &mut egui::Context,
         args: Self::Args,
     ) -> Self::Output {
-        let (command_palette_icons, auto_open_none) = {
+        let (command_palette_icons, auto_open_none, just_opened) = {
             let state_mut = state.get_mut(world);
             let mut command_palette_state = state_mut.command_palette_state;
 
@@ -181,13 +207,14 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
             }
 
             let auto_open_none = command_palette_state.auto_open_item.is_none();
+            let just_opened = command_palette_state.just_opened;
             let mut contexts = state_mut.contexts;
             let images = state_mut.images;
 
             let icons = CommandPaletteIcons {
                 link: contexts.add_image(images.icon_link.clone_weak()),
             };
-            (icons, auto_open_none)
+            (icons, auto_open_none, just_opened)
         };
 
         let screen_rect = ctx.screen_rect();
@@ -232,12 +259,16 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
             return false;
         };
 
-        if cmd_window.response.clicked_elsewhere() && auto_open_none {
+        if cmd_window.response.clicked_elsewhere() && auto_open_none && !just_opened {
             let state_mut = state.get_mut(world);
             let mut command_palette_state = state_mut.command_palette_state;
             command_palette_state.show = false;
             command_palette_state.target_window = None;
         }
+
+        let state_mut = state.get_mut(world);
+        let mut command_palette_state = state_mut.command_palette_state;
+        command_palette_state.just_opened = false;
 
         false
     }
@@ -268,10 +299,16 @@ impl WidgetSystem for PaletteSearch<'_> {
             .inner_margin(egui::Margin::same(16))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    let scheme = get_scheme();
                     let style = ui.style_mut();
                     style.visuals.selection.stroke = egui::Stroke::NONE;
                     style.visuals.widgets.hovered.bg_stroke = egui::Stroke::NONE;
                     style.visuals.extreme_bg_color = colors::TRANSPARENT;
+                    style.visuals.override_text_color = Some(scheme.text_primary);
+                    style.visuals.widgets.inactive.fg_stroke.color = scheme.text_primary;
+                    style.visuals.widgets.active.fg_stroke.color = scheme.text_primary;
+                    style.visuals.widgets.inactive.bg_fill = scheme.bg_secondary;
+                    style.visuals.widgets.active.bg_fill = scheme.bg_secondary;
                     let len = command_palette_state.page_stack.len().saturating_sub(1);
                     for page in command_palette_state.page_stack[..len].iter() {
                         ui.style_mut().interaction.selectable_labels = false;
