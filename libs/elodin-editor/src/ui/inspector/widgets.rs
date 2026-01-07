@@ -250,21 +250,8 @@ pub fn node_color_picker(ui: &mut egui::Ui, label: &str, color: &mut impeller2_w
     if res.clicked() {
         egui::Popup::toggle_id(ui.ctx(), color_id);
     }
-    if egui::Popup::is_id_open(ui.ctx(), color_id) {
-        if let Some(popup_response) = color_popup(
-            ui,
-            &mut egui_color,
-            color_id,
-            &res,
-        ) {
-            if !res.clicked()
-                && (ui.input(|i| i.key_pressed(egui::Key::Escape))
-                    || popup_response.clicked_elsewhere())
-            {
-                egui::Popup::close_id(ui.ctx(), color_id);
-            }
-        }
-    }
+
+    color_popup(ui, &mut egui_color, color_id, &res);
 
     let new_color = impeller2_wkt::Color::from_color32(egui_color);
     let changed = new_color != *color;

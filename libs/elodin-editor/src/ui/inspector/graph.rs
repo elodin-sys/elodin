@@ -227,23 +227,12 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                         egui::Popup::toggle_id(ui.ctx(), color_id);
                     }
 
-                    if egui::Popup::is_id_open(ui.ctx(), color_id) {
-                        let prev_color = query_plot.data.color.into_color32();
-                        let mut color = prev_color;
-                        if let Some(popup_response) =
-                                color_popup(ui, &mut color, color_id, &btn_resp) {
-
-                            if !btn_resp.clicked()
-                                && (ui.input(|i| i.key_pressed(egui::Key::Escape))
-                                    || popup_response.clicked_elsewhere())
-                            {
-                                egui::Popup::close_id(ui.ctx(), color_id);
-                            }
-                            if color != prev_color {
-                                query_plot.data.color = impeller2_wkt::Color::from_color32(color);
-                                query_plot.auto_color = false;
-                            }
-                        }
+                    let prev_color = query_plot.data.color.into_color32();
+                    let mut color = prev_color;
+                    if let Some(_) = color_popup(ui, &mut color, color_id, &btn_resp)
+                            && color != prev_color {
+                        query_plot.data.color = impeller2_wkt::Color::from_color32(color);
+                        query_plot.auto_color = false;
                     }
                 });
         } else {
@@ -341,19 +330,12 @@ fn component_value(
                 *enabled = !*enabled;
             }
             let color_id = ui.auto_id_with("color");
+
             if value_toggle.secondary_clicked() {
                 egui::Popup::toggle_id(ui.ctx(), color_id);
             }
-            if egui::Popup::is_id_open(ui.ctx(), color_id) {
-                if let Some(popup_response) = color_popup(ui, color, color_id, &value_toggle) {
-                    if !value_toggle.secondary_clicked()
-                        && (ui.input(|i| i.key_pressed(egui::Key::Escape))
-                            || popup_response.clicked_elsewhere())
-                    {
-                        egui::Popup::close_id(ui.ctx(), color_id);
-                    }
-                }
-            }
+
+            color_popup(ui, color, color_id, &value_toggle);
         }
     });
 }
