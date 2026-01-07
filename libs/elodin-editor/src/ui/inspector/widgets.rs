@@ -173,31 +173,31 @@ pub fn color_popup(
     color_id: egui::Id,
     target_res: &egui::Response,
 ) -> Option<egui::Response> {
+    let inner_response =
+        egui::Popup::new(color_id, ui.ctx().clone(), target_res, target_res.layer_id)
+            .kind(egui::PopupKind::Popup)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .width(300.0)
+            .open_memory(None)
+            .show(|ui| {
+                theme::configure_input_with_border(ui.style_mut());
+                ui.spacing_mut().slider_width = 275.;
+                ui.spacing_mut().button_padding = egui::vec2(6.0, 4.0);
+                ui.spacing_mut().item_spacing = egui::vec2(8.0, 4.0);
 
-    let inner_response = egui::Popup::new(color_id, ui.ctx().clone(), target_res, target_res.layer_id)
-        .kind(egui::PopupKind::Popup)
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-        .width(300.0)
-        .open_memory(None)
-        .show(|ui| {
-            theme::configure_input_with_border(ui.style_mut());
-            ui.spacing_mut().slider_width = 275.;
-            ui.spacing_mut().button_padding = egui::vec2(6.0, 4.0);
-            ui.spacing_mut().item_spacing = egui::vec2(8.0, 4.0);
-
-            ui.add_space(8.0);
-            egui::Frame::popup(ui.style()).show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    for elem_color in colors::all_colors().iter().take(24) {
-                        if ui.add(EColorButton::new(*elem_color)).clicked() {
-                            *color = *elem_color;
-                        }
-                    }
-                });
                 ui.add_space(8.0);
-                color_picker_color32(ui, color, Alpha::OnlyBlend);
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        for elem_color in colors::all_colors().iter().take(24) {
+                            if ui.add(EColorButton::new(*elem_color)).clicked() {
+                                *color = *elem_color;
+                            }
+                        }
+                    });
+                    ui.add_space(8.0);
+                    color_picker_color32(ui, color, Alpha::OnlyBlend);
+                });
             });
-        });
 
     inner_response.map(|ir| ir.response)
 }

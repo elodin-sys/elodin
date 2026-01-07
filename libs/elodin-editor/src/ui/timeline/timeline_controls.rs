@@ -219,7 +219,9 @@ impl WidgetSystem for TimelineControls<'_, '_> {
 
                                     egui::Popup::from_toggle_button_response(&res)
                                         .layout(egui::Layout::top_down_justified(egui::Align::LEFT))
-                                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                                        .close_behavior(
+                                            egui::PopupCloseBehavior::CloseOnClickOutside,
+                                        )
                                         .id(popup_id)
                                         .align(egui::RectAlign::TOP_START)
                                         .width(res.rect.width())
