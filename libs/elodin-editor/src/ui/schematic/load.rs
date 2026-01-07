@@ -812,13 +812,14 @@ impl LoadSchematicParams<'_, '_> {
 
         let target_id = {
             let tree = &window_state.tile_state.tree;
-            tree.root().and_then(|root_id| match tree.tiles.get(root_id) {
-                Some(Tile::Container(Container::Linear(linear))) => {
-                    let center_idx = linear.children.len() / 2;
-                    linear.children.get(center_idx).copied()
-                }
-                _ => Some(root_id),
-            })
+            tree.root()
+                .and_then(|root_id| match tree.tiles.get(root_id) {
+                    Some(Tile::Container(Container::Linear(linear))) => {
+                        let center_idx = linear.children.len() / 2;
+                        linear.children.get(center_idx).copied()
+                    }
+                    _ => Some(root_id),
+                })
         };
 
         let mut central_tabs_id = None;
@@ -827,9 +828,10 @@ impl LoadSchematicParams<'_, '_> {
                 Some(Tile::Container(Container::Tabs(_))) => central_tabs_id = Some(target_id),
                 Some(Tile::Container(_)) => {
                     let tabs_container = Tile::Container(Container::new_tabs(vec![]));
-                    central_tabs_id = window_state
-                        .tile_state
-                        .insert_tile(tabs_container, Some(target_id), false);
+                    central_tabs_id =
+                        window_state
+                            .tile_state
+                            .insert_tile(tabs_container, Some(target_id), false);
                 }
                 _ => {}
             }
@@ -846,9 +848,10 @@ impl LoadSchematicParams<'_, '_> {
         // so the tab bar (+) is visible, then add Data Overview inside it.
         if let Some(central_tabs_id) = central_tabs_id {
             let tabs_container = Tile::Container(Container::new_tabs(vec![]));
-            if let Some(tabs_id) = window_state
-                .tile_state
-                .insert_tile(tabs_container, Some(central_tabs_id), false)
+            if let Some(tabs_id) =
+                window_state
+                    .tile_state
+                    .insert_tile(tabs_container, Some(central_tabs_id), false)
             {
                 let pane = Pane::DataOverview(DataOverviewPane::default());
                 if let Some(tile_id) =
