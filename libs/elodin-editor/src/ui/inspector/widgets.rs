@@ -85,8 +85,8 @@ pub fn eql_autocomplete(
             }
             ui.memory_mut(|mem| {
                 mem.data.remove::<usize>(suggestion_memory_id);
-                mem.close_popup(id);
             });
+            egui::Popup::close_id(ui.ctx(), id);
         }
     }
 
@@ -115,12 +115,20 @@ pub fn eql_autocomplete(
         ui.scope(|ui| {
             configure_combo_box(ui.style_mut());
             ui.style_mut().spacing.menu_margin = egui::Margin::same(4);
-            egui::containers::old_popup::popup_below_widget(
-                ui,
-                id,
-                &query_res.clone().with_new_rect(query_res.rect.expand(8.0)),
-                egui::PopupCloseBehavior::IgnoreClicks,
-                |ui| {
+            //let target_res = &query_res.clone().with_new_rect(query_res.rect.expand(28.0));
+            let target_res = query_res;
+            // These Popup settings were copied from the following URL after
+            // popup_below_widget was deprecated:
+            // https://github.com/emilk/egui/blob/af96e0373c18477b77236e2bfc89735af007b1c2/crates/egui/src/containers/old_popup.rs#L144
+            egui::Popup::from_response(target_res)
+                .layout(egui::Layout::top_down_justified(egui::Align::LEFT))
+                .open_memory(None)
+                .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+                .id(id)
+                .align(egui::RectAlign::BOTTOM_START)
+                .width(target_res.rect.width())
+                .show(|ui| {
+                    ui.set_min_width(ui.available_width());
                     egui::ScrollArea::vertical()
                         .max_height(200.)
                         .show(ui, |ui| {
@@ -138,23 +146,22 @@ pub fn eql_autocomplete(
                                     *current_query = patch.clone();
                                     ui.memory_mut(|mem| {
                                         mem.data.remove::<usize>(suggestion_memory_id);
-                                        mem.close_popup(id);
                                     });
+                                    egui::Popup::close_id(ui.ctx(), id);
                                 }
                             }
                         })
-                },
-            );
+                });
         });
         if !suggestions.is_empty() {
-            ui.memory_mut(|mem| mem.open_popup(id));
+            egui::Popup::open_id(ui.ctx(), id);
         } else {
             ui.memory_mut(|mem| {
                 mem.data.remove::<usize>(suggestion_memory_id);
-                if mem.is_popup_open(id) {
-                    mem.close_popup(id);
-                }
             });
+            if egui::Popup::is_id_open(ui.ctx(), id) {
+                egui::Popup::close_id(ui.ctx(), id);
+            }
         }
     }
 }
