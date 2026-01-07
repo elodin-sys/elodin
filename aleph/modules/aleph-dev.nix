@@ -62,11 +62,10 @@ in {
   hardware.graphics.enable = true;
   virtualisation.podman = {
     enable = true;
-    # TODO: replace with `hardware.nvidia-container-toolkit.enable` when it works (https://github.com/nixos/nixpkgs/issues/344729).
-    enableNvidia = true;
     dockerCompat = true;
     dockerSocket.enable = true;
   };
+  hardware.nvidia-container-toolkit.enable = true;
   environment.systemPackages = with pkgs; [
     libgpiod_1
     dfu-util
@@ -104,7 +103,7 @@ in {
     cudaPackages.cuda_nvcc
     nvidia-jetpack.samples.cuda-test
     nvidia-jetpack.samples.cudnn-test
-    (python311.withPackages pythonPackages)
+    (python312.withPackages pythonPackages)
     (v4l-utils.override {withGUI = false;})
     # Networking
     tcpdump
