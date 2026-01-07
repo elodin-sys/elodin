@@ -639,7 +639,6 @@ impl TimeseriesPlot {
                     start: Offset::Fixed(start),
                     end: Offset::Fixed(end),
                 };
-                ui.close_menu();
             }
         });
 

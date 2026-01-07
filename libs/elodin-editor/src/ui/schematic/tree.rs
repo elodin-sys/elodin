@@ -272,17 +272,14 @@ fn dashboard_node(
         ui.spacing_mut().button_padding = egui::vec2(4.0, 4.0);
         if ui.button("Add Child").clicked() {
             spawn_child_node(&path, spawn_node_params, parent);
-            ui.close_menu();
         }
         if ui.button("Duplicate").clicked() {
             let Ok(mut dashboard) = spawn_node_params.dashboards.get_mut(path.root) else {
-                ui.close_menu();
                 return;
             };
             let mut parent_path = path.path.clone();
             parent_path.pop();
             let Some(parent_node) = dashboard.root.get_node_mut(&parent_path) else {
-                ui.close_menu();
                 return;
             };
             let parent_entity = parent_node.aux;
@@ -302,22 +299,18 @@ fn dashboard_node(
             ) {
                 parent_node.children.push(child);
             }
-            ui.close_menu();
         }
         if ui.button("Delete").clicked() {
             let Ok(mut dashboard) = spawn_node_params.dashboards.get_mut(path.root) else {
-                ui.close_menu();
                 return;
             };
             let Some(parent_node) = dashboard
                 .root
                 .get_node_mut(&path.path[..path.path.len().saturating_sub(1)])
             else {
-                ui.close_menu();
                 return;
             };
             let Some(index) = path.path.last() else {
-                ui.close_menu();
                 return;
             };
             let node = parent_node.children.remove(*index);
@@ -329,7 +322,6 @@ fn dashboard_node(
                     entity: parent_node.aux,
                 };
             }
-            ui.close_menu();
         }
     });
 
