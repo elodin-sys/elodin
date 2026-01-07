@@ -124,7 +124,7 @@ pub fn editable_label_with_buttons<const N: usize>(
                 ui.spacing().interact_size.y,
             );
 
-            ui.allocate_new_ui(UiBuilder::new().max_rect(label_rect), |ui| {
+            ui.scope_builder(UiBuilder::new().max_rect(label_rect), |ui| {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     let mut font_id = egui::TextStyle::Button.resolve(ui.style());
                     font_id.size = 12.0;
@@ -132,7 +132,7 @@ pub fn editable_label_with_buttons<const N: usize>(
                 });
             });
 
-            ui.allocate_new_ui(UiBuilder::new().max_rect(btn_rect), |ui| {
+            ui.scope_builder(UiBuilder::new().max_rect(btn_rect), |ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     for (i, btn_icon) in btn_icons.iter().enumerate() {
                         let btn = ui.add(
@@ -171,14 +171,14 @@ pub fn label_with_buttons<const N: usize>(
                 ui.spacing().interact_size.y,
             );
 
-            ui.allocate_new_ui(UiBuilder::new().max_rect(label_rect), |ui| {
+            ui.scope_builder(UiBuilder::new().max_rect(label_rect), |ui| {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     let text = egui::RichText::new(label.to_string()).color(color);
                     ui.add(egui::Label::new(text));
                 });
             });
 
-            ui.allocate_new_ui(UiBuilder::new().max_rect(btn_rect), |ui| {
+            ui.scope_builder(UiBuilder::new().max_rect(btn_rect), |ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     for (i, btn_icon) in btn_icons.iter().enumerate() {
                         let btn = ui.add(

@@ -1686,7 +1686,7 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
 
         let desired_size = egui::vec2(button_width * 3.0 + button_spacing, button_height);
 
-        ui.allocate_new_ui(
+        ui.scope_builder(
             UiBuilder::new().max_rect(egui::Rect::from_center_size(
                 ui.max_rect().center(),
                 desired_size,
