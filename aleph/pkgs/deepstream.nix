@@ -33,6 +33,8 @@ stdenv.mkDerivation {
     yaml_0_7
     pkgs.protobuf
     pkgs.grpc
+    pkgs.avahi
+    pkgs.openssl
   ];
 
   unpackCmd = "dpkg-deb -x $src source";
