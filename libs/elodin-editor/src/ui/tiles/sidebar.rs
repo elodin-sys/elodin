@@ -645,7 +645,7 @@ pub fn sidebar_content_ui<R>(
     }
 
     rect.min.x = (rect.min.x + pad).min(rect.max.x);
-    ui.allocate_new_ui(UiBuilder::new().max_rect(rect), add_contents)
+    ui.scope_builder(UiBuilder::new().max_rect(rect), add_contents)
         .inner
 }
 

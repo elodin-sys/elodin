@@ -2682,7 +2682,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
         }
 
         if show_empty_overlay && let Some(rect) = empty_overlay_rect {
-            ui.allocate_new_ui(UiBuilder::new().max_rect(rect), |ui| {
+            ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| {
                 ui.add_widget_with::<TileLayoutEmpty>(
                     world,
                     "tile_layout_empty",
