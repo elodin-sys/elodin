@@ -24,7 +24,9 @@ stdenv.mkDerivation rec {
   ];
 
   cmakeFlags = [
+    "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
     "-DYAML_CPP_BUILD_TOOLS=false"
+    "-DYAML_CPP_BUILD_TESTS=false"
     (lib.cmakeBool "YAML_BUILD_SHARED_LIBS" (!static))
     "-DINSTALL_GTEST=false"
   ];
@@ -33,7 +35,9 @@ stdenv.mkDerivation rec {
 
   # Fix double slashes in .pc file (CMake issue)
   # Replace ${prefix}// with ${prefix}/ and ${exec_prefix}// with ${exec_prefix}/
-  postFixup = ''
+  # Must be postInstall (not postFixup) because Nix's fixupPhase checks for broken
+  # .pc files BEFORE postFixup runs
+  postInstall = ''
     sed -i 's|''${prefix}//|''${prefix}/|g' $out/share/pkgconfig/yaml-cpp.pc
     sed -i 's|''${exec_prefix}//|''${exec_prefix}/|g' $out/share/pkgconfig/yaml-cpp.pc
   '';
