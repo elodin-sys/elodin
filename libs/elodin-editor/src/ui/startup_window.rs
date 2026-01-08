@@ -1,7 +1,7 @@
 use bevy::{
     ecs::system::SystemParam,
     prelude::*,
-    render::camera::RenderTarget,
+    camera::RenderTarget,
     window::{EnabledButtons, PrimaryWindow, WindowRef, WindowResolution},
 };
 use bevy_egui::EguiContexts;

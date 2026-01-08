@@ -14,7 +14,7 @@ use bevy::{
     ecs::{hierarchy::ChildOf, system::SystemParam},
     math::DVec2,
     prelude::{Commands, Component, Entity, In, Query, Res, ResMut},
-    render::camera::Projection,
+    camera::Projection,
 };
 use egui::RichText;
 use impeller2_bevy::CommandsExt;

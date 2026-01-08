@@ -1,5 +1,5 @@
-use bevy::render::camera::RenderTarget;
-use bevy::render::view::RenderLayers;
+use bevy::camera::RenderTarget;
+use bevy::camera::visibility::RenderLayers;
 use bevy::ui::{Node, PositionType, UiTargetCamera, Val, ZIndex};
 use bevy::window::WindowRef;
 use bevy::{

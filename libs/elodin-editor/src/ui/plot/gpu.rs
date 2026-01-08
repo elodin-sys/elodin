@@ -17,10 +17,13 @@ use bevy::render::render_phase::{
 };
 
 use bevy::image::BevyDefault;
+use bevy::mesh::VertexBufferLayout;
 use bevy::render::renderer::RenderQueue;
-use bevy::render::view::{ExtractedView, Msaa, RenderLayers};
+use bevy::camera::visibility::RenderLayers;
+use bevy::render::view::{ExtractedView, Msaa};
 use bevy::render::{ExtractSchedule, MainWorld, Render, RenderSet};
-use bevy::sprite::{Mesh2dPipeline, Mesh2dPipelineKey, SetMesh2dViewBindGroup};
+use bevy::shader::Shader;
+use bevy::sprite_render::{Mesh2dPipeline, Mesh2dPipelineKey, SetMesh2dViewBindGroup};
 use bevy::{
     app::Plugin,
     asset::{Handle, load_internal_asset},

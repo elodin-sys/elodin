@@ -15,7 +15,7 @@ use bevy::{
     log::{error, info, warn},
     pbr::{StandardMaterial, wireframe::WireframeConfig},
     prelude::{Deref, DerefMut, Entity, In, Mut, Resource, Transform},
-    render::view::Visibility,
+    camera::visibility::Visibility,
     window::PrimaryWindow,
 };
 use bevy_editor_cam::controller::{component::EditorCam, motion::CurrentMotion};

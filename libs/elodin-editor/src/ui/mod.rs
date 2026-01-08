@@ -11,7 +11,7 @@ use bevy::{
     input::keyboard::Key,
     log::{error, info},
     prelude::*,
-    render::camera::{RenderTarget, Viewport},
+    camera::{RenderTarget, Viewport},
     window::{Monitor, NormalizedWindowRef, PrimaryWindow, WindowFocused},
 };
 use bevy_defer::AsyncPlugin;

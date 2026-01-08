@@ -6,15 +6,13 @@ use crate::plugins::editor_cam_touch;
 use bevy::{
     DefaultPlugins,
     asset::{UnapprovedPathMode, embedded_asset},
+    camera::RenderTarget,
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
+    light::DirectionalLightShadowMap,
     log::LogPlugin,
     math::{DQuat, DVec3},
-    pbr::{
-        DirectionalLightShadowMap,
-        wireframe::{WireframeConfig, WireframePlugin},
-    },
+    pbr::wireframe::{WireframeConfig, WireframePlugin},
     prelude::*,
-    render::camera::RenderTarget,
     window::{PresentMode, PrimaryWindow, WindowRef, WindowResolution},
     winit::WinitSettings,
 };

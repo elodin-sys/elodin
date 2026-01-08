@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 
 use bevy::{
-    core_pipeline::core_2d::Camera2d,
+    camera::{Camera2d, RenderTarget},
     log::info,
     prelude::*,
-    render::camera::RenderTarget,
     ui::UiTargetCamera,
     window::{EnabledButtons, Window, WindowPosition, WindowRef, WindowResolution},
 };

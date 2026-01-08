@@ -5,8 +5,8 @@ use crate::{
 use bevy::animation::{AnimationTarget, AnimationTargetId, animated_field};
 use bevy::math::Dir3;
 use bevy::prelude::*;
-use bevy::render::camera::{RenderTarget, Viewport};
-use bevy::render::view::RenderLayers;
+use bevy::camera::{RenderTarget, Viewport};
+use bevy::camera::visibility::RenderLayers;
 use bevy::window::{PrimaryWindow, WindowRef};
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;

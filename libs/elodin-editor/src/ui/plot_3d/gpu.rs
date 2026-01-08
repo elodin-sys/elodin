@@ -28,6 +28,7 @@ use bevy::{
         world::{FromWorld, Mut, World},
     },
     image::BevyDefault,
+    mesh::VertexBufferLayout,
     math::{Mat4, Vec4},
     pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup},
     prelude::{Color, Deref, Resource},
@@ -40,10 +41,12 @@ use bevy::{
         },
         render_resource::{binding_types::uniform_buffer, *},
         renderer::{RenderDevice, RenderQueue},
-        view::{ExtractedView, Msaa, RenderLayers, ViewTarget},
+        view::{ExtractedView, Msaa, ViewTarget},
     },
     transform::components::{GlobalTransform, Transform},
 };
+use bevy::shader::Shader;
+use bevy::camera::visibility::RenderLayers;
 use bevy_render::{
     extract_component::ExtractComponent,
     sync_world::{MainEntity, SyncToRenderWorld, TemporaryRenderEntity},
