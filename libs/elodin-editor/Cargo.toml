@@ -15,24 +15,27 @@ debug = ["big_space/debug"]
 # math
 nox.path = "../nox"
 nox.default-features = false
-egui_material_icons = "0.4"
+egui_material_icons = "0.5"
 
 # bevy
-bevy.version = "0.16"
-bevy_render.version = "0.16"
-bevy_color.version = "0.16"
-bevy_egui.version = "0.36.0"
-egui.version = "0.32"
+bevy.version = "0.17"
+bevy_render.version = "0.17"
+bevy_color.version = "0.17"
+bevy_egui.version = "0.37.0"
+egui.version = "0.33.3"
 egui.features = ["rayon"]
-egui_tiles = "0.13"
-egui_table = "0.4"
+egui_tiles = "0.14"
+egui_table = "0.5"
 winit.version = "0.30.12"
 winit.features = ["rwh_05"]
 raw-window-handle = "0.5"
-bevy_infinite_grid = "0.15"
-big_space.version = "0.5"
-bevy_editor_cam = "0.6.1"
-bevy_framepace = "0.19"
+bevy_infinite_grid = "0.17"
+big_space.git = "https://github.com/elodin-sys/big_space.git"
+big_space.branch = "no_prop_rot_v0.17"
+#bevy_editor_cam = "0.7"
+bevy_editor_cam.git = "https://github.com/aevyrie/bevy_editor_cam"
+bevy_editor_cam.rev = "1ae39bda1aa8d547dec4b26747e466ad5b2ab9ab"
+bevy_framepace = "0.20"
 
 # rand
 fastrand.version = "2"

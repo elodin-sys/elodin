@@ -98,5 +98,5 @@ wmm.path = "libs/wmm"
 inherits = "release"
 debug = true
 
-[patch.crates-io]
-big_space = { git = "https://github.com/elodin-sys/big_space.git", branch = "no_prop_rot_v0.16" }
+#[patch.crates-io]
+#big_space = { git = "https://github.com/elodin-sys/big_space.git", branch = "no_prop_rot_v0.16" }
