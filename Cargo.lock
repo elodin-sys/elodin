@@ -1621,8 +1621,9 @@ dependencies = [
 
 [[package]]
 name = "bevy_editor_cam"
-version = "0.6.0"
-source = "git+https://github.com/shanecelis/bevy_editor_cam.git?branch=feat%2Fsystem-set-0.6.0#eadbd54d21fab3918fa5daee748fb12ce7e48870"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00d0604f623011874f8402e28c63a5cf641ea0bf2154d0164c78f3cf6fa9e8b9"
 dependencies = [
  "bevy_app",
  "bevy_asset",
