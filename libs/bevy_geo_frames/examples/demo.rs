@@ -12,11 +12,14 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugins(DefaultEditorCamPlugins)
         .add_plugins(GeoFramePlugin {
-            origin_lat_deg: 37.7749,
-            origin_lon_deg: -122.4194,
-            origin_alt_m: 0.0,
-            theta0_rad: 0.0,
-            shape: Shape::Sphere { radius_m: 10.0 }, // Small radius for demonstration (default is Earth radius ~6.37e6 m)
+            origin: Some(GeoOrigin::new_from_degrees(
+            // 37.7749,
+            // -122.4194,
+            0.0,
+            0.0,
+            10.0).with_shape(Shape::Sphere { radius: 10.0 }, // Small radius for demonstration (default is Earth radius ~6.37e6 m)
+        )),
+            ..default()
         })
         .add_systems(Startup, (setup, setup_ui))
         .add_systems(Update, (frame_switch_input, transform_frame_at_position, update_position_display))
@@ -282,7 +285,7 @@ fn draw_radius_sphere(
     mut gizmos: Gizmos,
     ctx: Res<GeoContext>,
 ) {
-    let radius = ctx.origin.shape.reference_radius_m() as f32;
+    let radius = ctx.origin.shape.approx_radius() as f32;
     let center = Vec3::ZERO;
     
     // Draw wireframe sphere using gizmos
