@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::math::primitives::{Plane3d, Cuboid};
+use bevy::math::DVec3;
 use bevy_editor_cam::prelude::*;
 use bevy_geo_frames::*;
 
@@ -12,13 +13,10 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugins(DefaultEditorCamPlugins)
         .add_plugins(GeoFramePlugin {
-            origin: Some(GeoOrigin::new_from_degrees(
-            // 37.7749,
-            // -122.4194,
-            0.0,
-            0.0,
-            10.0).with_shape(Shape::Sphere { radius: 10.0 }, // Small radius for demonstration (default is Earth radius ~6.37e6 m)
-        )),
+            origin: Some(
+                GeoOrigin::new_from_degrees(0.0, 0.0, 0.0)
+                    .with_shape(Shape::Sphere { radius: 10.0 }),
+            ),
             ..default()
         })
         .add_systems(Startup, (setup, setup_ui))
@@ -52,8 +50,8 @@ fn setup(
     ));
 
     // Ground plane for reference
-    let ground_mesh = meshes.add(Plane3d::default().mesh().size(100.0, 100.0));
-    let ground_mat = materials.add(Color::srgb(0.1, 0.1, 0.1));
+    let _ground_mesh = meshes.add(Plane3d::default().mesh().size(100.0, 100.0));
+    let _ground_mat = materials.add(Color::srgb(0.1, 0.1, 0.1));
     // commands.spawn((
     //     Mesh3d(ground_mesh),
     //     MeshMaterial3d(ground_mat),
@@ -65,14 +63,14 @@ fn setup(
     let cuboid_mat = materials.add(Color::srgb(0.3, 0.8, 0.9));
 
     // Position in ENU frame to start: 20 m east, 0 m north, 1 m up
-    let enu_pos = Vec3::new(0.0, 0.0, 0.0);
+    let enu_pos = DVec3::new(0.0, 0.0, 0.0);
 
     commands.spawn((
         Mesh3d(cuboid_mesh),
         MeshMaterial3d(cuboid_mat),
         Transform::default(),
         GeoTranslation(GeoFrame::ENU, enu_pos),
-        GeoVelocity(GeoFrame::ENU, Vec3::new(1.0, 0.0, 0.0)),
+        GeoVelocity(GeoFrame::ENU, DVec3::new(1.0, 0.0, 0.0)),
         GeoRotation(GeoFrame::ENU, Quat::IDENTITY),
         GeoAngularVelocity(
             GeoFrame::ENU,
@@ -105,7 +103,7 @@ fn update_position_display(
     q: Query<(&GeoTranslation, &Transform), With<FrameDemo>>,
     mut text_query: Query<&mut Text, With<PositionDisplay>>,
 ) {
-    if let Ok((geo_trans, transform)) = q.get_single() {
+    if let Ok((geo_trans, transform)) = q.single() {
         let frame = geo_trans.0;
         let pos_in_frame = geo_trans.1;
         let pos_in_bevy = transform.translation;
@@ -122,7 +120,7 @@ fn update_position_display(
             pos_in_bevy.z
         );
 
-        if let Ok(mut text_component) = text_query.get_single_mut() {
+        if let Ok(mut text_component) = text_query.single_mut() {
             *text_component = Text::new(text);
         }
     }
@@ -175,7 +173,6 @@ fn frame_switch_input(
 fn transform_frame_at_position(
     keys: Res<ButtonInput<KeyCode>>,
     ctx: Res<GeoContext>,
-    time: Res<Time>,
     mut q: Query<(&Transform, &mut GeoTranslation), With<FrameDemo>>,
 ) {
     let mut target_frame: Option<GeoFrame> = None;
@@ -195,13 +192,12 @@ fn transform_frame_at_position(
     }
 
     if let Some(frame) = target_frame {
-        let t = time.elapsed_secs_f64();
         for (transform, mut geo_trans) in &mut q {
             // Get current Bevy position
             let bevy_pos = transform.translation;
             
             // Convert from Bevy (EUS) to the target frame
-            let pos_in_frame = frame.from_bevy_vec(bevy_pos, &ctx, t);
+            let pos_in_frame = frame.from_bevy_pos(bevy_pos, &ctx);
             
             // Update the frame and position
             geo_trans.0 = frame;
@@ -236,17 +232,15 @@ fn draw_origin_gizmos(mut gizmos: Gizmos) {
 fn draw_frame_axes(
     mut gizmos: Gizmos,
     ctx: Res<GeoContext>,
-    time: Res<Time>,
     q: Query<(&Transform, &GeoTranslation), With<FrameDemo>>,
 ) {
-    let t = time.elapsed_secs_f64();
     let axis_length = 3.0;
 
     for (transform, geo_trans) in &q {
         let frame = geo_trans.0;
         
         // Get the basis matrix - columns are the frame's basis vectors in EUS world space
-        let basis_mat = frame.basis_to_eus_mat3(&ctx, t);
+        let basis_mat = frame.basis_to_eus_mat3(&ctx);
         
         // Extract the three basis vectors (columns of the matrix)
         // These represent the first, second, and third component directions

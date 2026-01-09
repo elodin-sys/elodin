@@ -1,7 +1,7 @@
 use bevy::math::{DMat3, DVec3};
 use bevy::prelude::*;
 use bevy::transform::TransformSystem;
-use map_3d::{ecef2enu, enu2ecef, geodetic2ecef, Ellipsoid};
+use map_3d::{ecef2enu, enu2ecef, Ellipsoid};
 
 /// Default Earth radius in meters (approximate mean radius).
 pub const EARTH_RADIUS_M: f64 = 6_371_000.0;
@@ -184,6 +184,12 @@ impl GeoContext {
         Self::rot_z(theta) * r_eci
     }
 
+    /// Convert ECEF -> ECI at simulation time `self.t_seconds`.
+    pub fn ecef_to_eci(&self, r_ecef: DVec3) -> DVec3 {
+        let theta = self.theta0_rad + self.earth_rot_rate_rad_per_s * self.t_seconds;
+        Self::rot_z(-theta) * r_ecef
+    }
+
     /// Convert GCRF -> ECI.
     ///
     /// For now we approximate GCRF == ECI (J2000), so this is identity.
@@ -207,39 +213,39 @@ impl GeoContext {
 }
 
 impl GeoFrame {
-    /// ENU: (E, N, U) -> Bevy(EUS): (E, U, -N)
+    /// ENU: (E, N, U) -> local EUS: (E, U, -N)
     #[inline]
-    fn enu_vec_to_bevy(v: Vec3) -> Vec3 {
-        Vec3::new(v.x, v.z, -v.y)
+    fn enu_to_eus(v_enu: DVec3) -> DVec3 {
+        DVec3::new(v_enu.x, v_enu.z, -v_enu.y)
     }
 
-    /// NED: (N, E, D) -> Bevy(EUS): (E, -D, -N)
+    /// NED: (N, E, D) -> local EUS: (E, -D, -N)
     #[inline]
-    fn ned_vec_to_bevy(v: Vec3) -> Vec3 {
-        Vec3::new(v.y, -v.z, -v.x)
+    fn ned_to_eus(v_ned: DVec3) -> DVec3 {
+        DVec3::new(v_ned.y, -v_ned.z, -v_ned.x)
     }
 
-    /// Bevy(EUS) -> ENU: (E, U, -N) -> (E, N, U)
+    /// local EUS: (E, U, S) -> ENU: (E, N, U) with N = -S
     #[inline]
-    fn bevy_to_enu_vec(v: Vec3) -> Vec3 {
-        Vec3::new(v.x, -v.z, v.y)
+    fn eus_to_enu(v_eus: DVec3) -> DVec3 {
+        DVec3::new(v_eus.x, -v_eus.z, v_eus.y)
     }
 
-    /// Bevy(EUS) -> NED: (E, -D, -N) -> (N, E, D)
+    /// local EUS: (E, U, S) -> NED: (N, E, D) with N = -S, D = -U
     #[inline]
-    fn bevy_to_ned_vec(v: Vec3) -> Vec3 {
-        Vec3::new(-v.z, v.x, -v.y)
+    fn eus_to_ned(v_eus: DVec3) -> DVec3 {
+        DVec3::new(-v_eus.z, v_eus.x, -v_eus.y)
     }
 
-    pub fn convert_to(&self, v: DVec3, from_frame: &GeoFrame, ctx: &GeoContext) -> DVec3 {
-        if from_frame == self {
-            v
-        } else {
-            let w = from_frame.to_bevy_vec(v, ctx);
-            self.from_bevy_vec(w, ctx)
-        }
+    #[inline]
+    fn eus_to_bevy(v_eus: DVec3) -> Vec3 {
+        Vec3::new(v_eus.x as f32, v_eus.y as f32, v_eus.z as f32)
     }
 
+    #[inline]
+    fn bevy_to_eus(v_bevy: Vec3) -> DVec3 {
+        DVec3::new(v_bevy.x as f64, v_bevy.y as f64, v_bevy.z as f64)
+    }
 
     /// Converts ENU (East-North-Up) coordinates to a 3D position on a sphere in Bevy coordinates
     ///
@@ -304,41 +310,72 @@ impl GeoFrame {
             -ecef.y);
         bevy
     }
-
-    /// Convert a vector (typically a position) from this frame into Bevy (EUS).
-    ///
-    /// `ctx` provides origin + Earth rotation.
-    /// `t_seconds` is simulation time, e.g. `time.elapsed_secs_f64()`.
-    pub fn to_bevy_vec(self, v: Vec3, ctx: &GeoContext) -> Vec3 {
+    fn to_eus(self, v: DVec3, ctx: &GeoContext) -> DVec3 {
         match self {
             GeoFrame::EUS => v,
-            GeoFrame::ENU => Self::enu_vec_to_bevy(v),
-            GeoFrame::NED => Self::ned_vec_to_bevy(v),
-            GeoFrame::ECEF => {
-                // ECEF -> ENU (local origin) -> Bevy
-                let ecef = DVec3::new(v.x as f64, v.y as f64, v.z as f64);
-                let enu_d = ctx.ecef_to_enu(ecef);
-                let enu = Vec3::new(enu_d.x as f32, enu_d.y as f32, enu_d.z as f32);
-                Self::enu_vec_to_bevy(enu)
-            }
+            GeoFrame::ENU => Self::enu_to_eus(v),
+            GeoFrame::NED => Self::ned_to_eus(v),
+            GeoFrame::ECEF => Self::enu_to_eus(ctx.ecef_to_enu(v)),
             GeoFrame::ECI => {
-                // ECI -> ECEF (time-dependent) -> ENU -> Bevy
-                let r_eci = DVec3::new(v.x as f64, v.y as f64, v.z as f64);
-                let r_ecef = ctx.eci_to_ecef(r_eci, ctx.t_seconds);
-                let enu_d = ctx.ecef_to_enu(r_ecef);
-                let enu = Vec3::new(enu_d.x as f32, enu_d.y as f32, enu_d.z as f32);
-                Self::enu_vec_to_bevy(enu)
+                let ecef = ctx.eci_to_ecef(v);
+                Self::enu_to_eus(ctx.ecef_to_enu(ecef))
             }
             GeoFrame::GCRF => {
-                // GCRF -> ECI (currently identity) -> ECEF -> ENU -> Bevy
-                let r_gcrf = DVec3::new(v.x as f64, v.y as f64, v.z as f64);
-                let r_eci = ctx.gcrf_to_eci(r_gcrf, ctx.t_seconds);
-                let r_ecef = ctx.eci_to_ecef(r_eci, ctx.t_seconds);
-                let enu_d = ctx.ecef_to_enu(r_ecef);
-                let enu = Vec3::new(enu_d.x as f32, enu_d.y as f32, enu_d.z as f32);
-                Self::enu_vec_to_bevy(enu)
+                let eci = ctx.gcrf_to_eci(v, ctx.t_seconds);
+                let ecef = ctx.eci_to_ecef(eci);
+                Self::enu_to_eus(ctx.ecef_to_enu(ecef))
             }
         }
+    }
+
+    fn from_eus(self, v_eus: DVec3, ctx: &GeoContext) -> DVec3 {
+        match self {
+            GeoFrame::EUS => v_eus,
+            GeoFrame::ENU => Self::eus_to_enu(v_eus),
+            GeoFrame::NED => Self::eus_to_ned(v_eus),
+            GeoFrame::ECEF => {
+                let enu = Self::eus_to_enu(v_eus);
+                let (x, y, z) = enu2ecef(
+                    enu.x,
+                    enu.y,
+                    enu.z,
+                    ctx.origin.lat,
+                    ctx.origin.lon,
+                    ctx.origin.alt_m,
+                    ctx.origin.shape.ellipsoid(),
+                );
+                DVec3::new(x, y, z)
+            }
+            GeoFrame::ECI => {
+                let ecef = GeoFrame::ECEF.from_eus(v_eus, ctx);
+                ctx.ecef_to_eci(ecef)
+            }
+            GeoFrame::GCRF => {
+                // GCRF == ECI for now
+                let ecef = GeoFrame::ECEF.from_eus(v_eus, ctx);
+                ctx.ecef_to_eci(ecef)
+            }
+        }
+    }
+
+    /// Convert a DVec3 (position/velocity) from `from_frame` into `self`.
+    pub fn convert_to(self, v: DVec3, from_frame: GeoFrame, ctx: &GeoContext) -> DVec3 {
+        if from_frame == self {
+            return v;
+        }
+        let eus = from_frame.to_eus(v, ctx);
+        self.from_eus(eus, ctx)
+    }
+
+    /// Convert a position in this frame into Bevy world-space translation.
+    /// Internally we keep everything in `DVec3` and only cast at the boundary.
+    pub fn to_bevy_pos(self, v: DVec3, ctx: &GeoContext) -> Vec3 {
+        Self::eus_to_bevy(self.to_eus(v, ctx))
+    }
+
+    /// Convert a Bevy world-space translation into a position in this frame.
+    pub fn from_bevy_pos(self, v_bevy: Vec3, ctx: &GeoContext) -> DVec3 {
+        self.from_eus(Self::bevy_to_eus(v_bevy), ctx)
     }
 
     /// Gravity vector in this frame, in m/s² (simple model).
@@ -370,69 +407,7 @@ impl GeoFrame {
     ///
     /// `ctx` provides origin + Earth rotation.
     /// `t_seconds` is simulation time, e.g. `time.elapsed_secs_f64()`.
-    pub fn from_bevy_vec(self, v_bevy: Vec3, ctx: &GeoContext) -> Vec3 {
-        match self {
-            GeoFrame::EUS => v_bevy,
-            GeoFrame::ENU => Self::bevy_to_enu_vec(v_bevy),
-            GeoFrame::NED => Self::bevy_to_ned_vec(v_bevy),
-            GeoFrame::ECEF => {
-                // Bevy -> ENU -> ECEF
-                let enu = Self::bevy_to_enu_vec(v_bevy);
-                let enu_d = DVec3::new(enu.x as f64, enu.y as f64, enu.z as f64);
-                // Use map_3d to convert ENU to ECEF
-                let (x, y, z) = enu2ecef(
-                    enu_d.x,
-                    enu_d.y,
-                    enu_d.z,
-                    ctx.origin.lat,
-                    ctx.origin.lon,
-                    ctx.origin.alt_m,
-                    ctx.origin.shape.ellipsoid(),
-                );
-                Vec3::new(x as f32, y as f32, z as f32)
-            }
-            GeoFrame::ECI => {
-                // Bevy -> ENU -> ECEF -> ECI
-                let enu = Self::bevy_to_enu_vec(v_bevy);
-                let enu_d = DVec3::new(enu.x as f64, enu.y as f64, enu.z as f64);
-                // Use map_3d to convert ENU to ECEF
-                let (x, y, z) = enu2ecef(
-                    enu_d.x,
-                    enu_d.y,
-                    enu_d.z,
-                    ctx.origin.lat,
-                    ctx.origin.lon,
-                    ctx.origin.alt_m,
-                    ctx.origin.shape.ellipsoid(),
-                );
-                let ecef = DVec3::new(x, y, z);
-                // Reverse ECI -> ECEF: ecef = Rz(theta) * eci, so eci = Rz(-theta) * ecef
-                let theta = ctx.theta0_rad + ctx.earth_rot_rate_rad_per_s * ctx.t_seconds;
-                let eci = GeoContext::rot_z(-theta) * ecef;
-                Vec3::new(eci.x as f32, eci.y as f32, eci.z as f32)
-            }
-            GeoFrame::GCRF => {
-                // Bevy -> ENU -> ECEF -> ECI -> GCRF (currently identity)
-                let enu = Self::bevy_to_enu_vec(v_bevy);
-                let enu_d = DVec3::new(enu.x as f64, enu.y as f64, enu.z as f64);
-                // Use map_3d to convert ENU to ECEF
-                let (x, y, z) = enu2ecef(
-                    enu_d.x,
-                    enu_d.y,
-                    enu_d.z,
-                    ctx.origin.lat,
-                    ctx.origin.lon,
-                    ctx.origin.alt_m,
-                    ctx.origin.shape.ellipsoid(),
-                );
-                let ecef = DVec3::new(x, y, z);
-                let theta = ctx.theta0_rad + ctx.earth_rot_rate_rad_per_s * ctx.t_seconds;
-                let eci = GeoContext::rot_z(-theta) * ecef;
-                // GCRF == ECI currently
-                Vec3::new(eci.x as f32, eci.y as f32, eci.z as f32)
-            }
-        }
-    }
+    // NOTE: legacy `from_bevy_vec` removed in favor of `from_bevy_pos`.
 
     /// Gravity vector expressed in Bevy's EUS coordinates.
     pub fn gravity_in_bevy(
@@ -441,16 +416,27 @@ impl GeoFrame {
         ctx: &GeoContext,
     ) -> Vec3 {
         let g_frame = self.gravity_accel(pos_in_frame, ctx.origin.shape.approx_radius());
-        self.to_bevy_vec(g_frame, ctx)
+        match self {
+            GeoFrame::EUS => g_frame,
+            GeoFrame::ENU => Vec3::new(g_frame.x, g_frame.z, -g_frame.y),
+            GeoFrame::NED => Vec3::new(g_frame.y, -g_frame.z, -g_frame.x),
+            // For these frames, a correct mapping would need a proper local basis at the origin.
+            GeoFrame::ECEF | GeoFrame::ECI | GeoFrame::GCRF => Vec3::ZERO,
+        }
     }
 
     /// Convert an angular velocity vector from this frame into Bevy’s EUS frame.
     pub fn to_bevy_ang_vel(
         self,
         w: Vec3,
-        ctx: &GeoContext,
+        _ctx: &GeoContext,
     ) -> Vec3 {
-        self.to_bevy_vec(w, ctx)
+        match self {
+            GeoFrame::EUS => w,
+            GeoFrame::ENU => Vec3::new(w.x, w.z, -w.y),
+            GeoFrame::NED => Vec3::new(w.y, -w.z, -w.x),
+            GeoFrame::ECEF | GeoFrame::ECI | GeoFrame::GCRF => Vec3::ZERO,
+        }
     }
 
     /// Returns the rotation that converts *this frame’s basis*
@@ -462,7 +448,7 @@ impl GeoFrame {
 
     /// Basis transform as Mat3. For now we implement simple cases and treat
     /// ECEF/ECI/GCRF via ENU near-origin.
-    pub fn basis_to_eus_mat3(self, _ctx: &GeoContext, _t_seconds: f64) -> Mat3 {
+    pub fn basis_to_eus_mat3(self, _ctx: &GeoContext) -> Mat3 {
         match self {
             GeoFrame::EUS => Mat3::IDENTITY,
             GeoFrame::ENU => {
@@ -485,13 +471,13 @@ impl GeoFrame {
 ///   0: which frame the coords are in
 ///   1: position in that frame (ENU, NED, ECEF, ECI, GCRF, EUS).
 #[derive(Component)]
-pub struct GeoTranslation(pub GeoFrame, pub Vec3);
+pub struct GeoTranslation(pub GeoFrame, pub DVec3);
 
 /// Per-entity geo velocity:
 ///   0: frame
 ///   1: velocity in that frame (m/s).
 #[derive(Component)]
-pub struct GeoVelocity(pub GeoFrame, pub Vec3);
+pub struct GeoVelocity(pub GeoFrame, pub DVec3);
 
 /// Per-entity geo orientation:
 ///   0: frame the quaternion is expressed in
@@ -533,13 +519,13 @@ impl Plugin for GeoFramePlugin {
 /// System: integrate motion in *frame* coordinates from GeoVelocity.
 pub fn integrate_geo_motion(
     time: Res<Time>,
-    ctx: Res<GeoContext>,
+    mut ctx: ResMut<GeoContext>,
     mut q: Query<(&mut GeoTranslation, &GeoVelocity)>,
 ) {
-    let dt = time.delta_secs();
-    let t = time.elapsed_secs_f64();
+    ctx.t_seconds = time.elapsed_secs_f64();
+    let dt = time.delta_secs_f64();
     for (mut geo_pos, geo_vel) in &mut q {
-        let v = dbg!(geo_pos.0.convert_to(geo_vel.1, &geo_vel.0, &ctx, t));
+        let v = geo_pos.0.convert_to(geo_vel.1, geo_vel.0, &ctx);
         geo_pos.1 += v * dt;
     }
 }
@@ -576,30 +562,29 @@ pub fn integrate_geo_orientation(
 /// System: convert `GeoTranslation` into `Transform.translation`
 /// right before Bevy propagates transforms through the hierarchy.
 pub fn apply_geo_translation(
-    ctx: Res<GeoContext>,
+    mut ctx: ResMut<GeoContext>,
     time: Res<Time>,
     mut q: Query<(&GeoTranslation, &mut Transform)>,
 ) {
-    let t = time.elapsed_secs_f64();
+    ctx.t_seconds = time.elapsed_secs_f64();
+    let render = ctx.render;
+    let ctx_ref: &GeoContext = &*ctx;
     for (geo, mut transform) in &mut q {
-        // transform.translation = geo.0.to_bevy_vec(geo.1, &ctx, t);
-        transform.translation = ctx.render.convert_to(geo.1, &geo.0, &ctx, t);
+        let pos_in_render = render.convert_to(geo.1, geo.0, ctx_ref);
+        transform.translation = render.to_bevy_pos(pos_in_render, ctx_ref);
     }
 }
 
 /// System: convert `GeoRotation` into `Transform.rotation`.
 pub fn apply_geo_rotation(
     ctx: Res<GeoContext>,
-    time: Res<Time>,
     mut q: Query<(&GeoRotation, &mut Transform)>,
 ) {
-    let t = time.elapsed_secs_f64();
-
     for (geo_rot, mut transform) in &mut q {
         let frame = geo_rot.0;
         let local_rot = geo_rot.1;
 
-        let frame_to_eus = frame.basis_to_eus_quat(&ctx, t);
+        let frame_to_eus = frame.basis_to_eus_quat(&ctx);
         transform.rotation = frame_to_eus * local_rot;
     }
 }
@@ -616,22 +601,22 @@ mod tests {
     #[test]
     fn eus_identity_mapping() {
         let ctx = dummy_ctx();
-        let v = Vec3::new(1.0, 2.0, 3.0);
-        let mapped = GeoFrame::EUS.to_bevy_vec(v, &ctx, 0.0);
-        assert_eq!(mapped, v);
+        let v = DVec3::new(1.0, 2.0, 3.0);
+        let mapped = GeoFrame::EUS.to_bevy_pos(v, &ctx);
+        assert_eq!(mapped, Vec3::new(1.0, 2.0, 3.0));
     }
 
     #[test]
     fn enu_to_eus_axes() {
         let ctx = dummy_ctx();
         // east, north, up in ENU
-        let east = Vec3::new(1.0, 0.0, 0.0);
-        let north = Vec3::new(0.0, 1.0, 0.0);
-        let up = Vec3::new(0.0, 0.0, 1.0);
+        let east = DVec3::new(1.0, 0.0, 0.0);
+        let north = DVec3::new(0.0, 1.0, 0.0);
+        let up = DVec3::new(0.0, 0.0, 1.0);
 
-        let east_eus = GeoFrame::ENU.to_bevy_vec(east, &ctx, 0.0);
-        let north_eus = GeoFrame::ENU.to_bevy_vec(north, &ctx, 0.0);
-        let up_eus = GeoFrame::ENU.to_bevy_vec(up, &ctx, 0.0);
+        let east_eus = GeoFrame::ENU.to_bevy_pos(east, &ctx);
+        let north_eus = GeoFrame::ENU.to_bevy_pos(north, &ctx);
+        let up_eus = GeoFrame::ENU.to_bevy_pos(up, &ctx);
 
         assert_eq!(east_eus, Vec3::new(1.0, 0.0, 0.0));   // +X
         assert_eq!(north_eus, Vec3::new(0.0, 0.0, -1.0)); // -Z
@@ -642,13 +627,13 @@ mod tests {
     fn ned_to_eus_axes() {
         let ctx = dummy_ctx();
         // north, east, down in NED
-        let north = Vec3::new(1.0, 0.0, 0.0);
-        let east = Vec3::new(0.0, 1.0, 0.0);
-        let down = Vec3::new(0.0, 0.0, 1.0);
+        let north = DVec3::new(1.0, 0.0, 0.0);
+        let east = DVec3::new(0.0, 1.0, 0.0);
+        let down = DVec3::new(0.0, 0.0, 1.0);
 
-        let north_eus = GeoFrame::NED.to_bevy_vec(north, &ctx, 0.0);
-        let east_eus = GeoFrame::NED.to_bevy_vec(east, &ctx, 0.0);
-        let down_eus = GeoFrame::NED.to_bevy_vec(down, &ctx, 0.0);
+        let north_eus = GeoFrame::NED.to_bevy_pos(north, &ctx);
+        let east_eus = GeoFrame::NED.to_bevy_pos(east, &ctx);
+        let down_eus = GeoFrame::NED.to_bevy_pos(down, &ctx);
 
         assert_eq!(north_eus, Vec3::new(0.0, 0.0, -1.0)); // -Z
         assert_eq!(east_eus, Vec3::new(1.0, 0.0, 0.0));   // +X
@@ -666,8 +651,8 @@ mod tests {
         assert!((g_enu - Vec3::new(0.0, 0.0, -9.80665)).length() < 1e-5);
         assert!((g_eus - Vec3::new(0.0, -9.80665, 0.0)).length() < 1e-5);
 
-        let g_enu_world = GeoFrame::ENU.gravity_in_bevy(pos, &ctx, 0.0);
-        let g_eus_world = GeoFrame::EUS.gravity_in_bevy(pos, &ctx, 0.0);
+        let g_enu_world = GeoFrame::ENU.gravity_in_bevy(pos, &ctx);
+        let g_eus_world = GeoFrame::EUS.gravity_in_bevy(pos, &ctx);
 
         // ENU gravity mapped into EUS should match direct EUS gravity
         assert!((g_enu_world - g_eus_world).length() < 1e-4);
@@ -684,8 +669,8 @@ mod tests {
         time.advance_by(std::time::Duration::from_secs(1));
 
         world.spawn((
-            GeoTranslation(GeoFrame::ENU, Vec3::ZERO),
-            GeoVelocity(GeoFrame::ENU, Vec3::new(1.0, 0.0, 0.0)),
+            GeoTranslation(GeoFrame::ENU, DVec3::ZERO),
+            GeoVelocity(GeoFrame::ENU, DVec3::new(1.0, 0.0, 0.0)),
         ));
 
         let mut schedule = Schedule::default();
@@ -695,44 +680,43 @@ mod tests {
 
         let mut q = world.query::<&GeoTranslation>();
         let geo = q.single(&world).unwrap();
-        assert_eq!(geo.1, Vec3::new(1.0, 0.0, 0.0));
+        assert_eq!(geo.1, DVec3::new(1.0, 0.0, 0.0));
     }
 
     #[test]
     fn round_trip_eus() {
         let ctx = dummy_ctx();
-        let original = Vec3::new(1.0, 2.0, 3.0);
-        let bevy = GeoFrame::EUS.to_bevy_vec(original, &ctx, 0.0);
-        let round_trip = GeoFrame::EUS.from_bevy_vec(bevy, &ctx, 0.0);
-        assert!((round_trip - original).length() < 1e-5);
+        let original = DVec3::new(1.0, 2.0, 3.0);
+        let bevy = GeoFrame::EUS.to_bevy_pos(original, &ctx);
+        let round_trip = GeoFrame::EUS.from_bevy_pos(bevy, &ctx);
+        assert!((round_trip - original).length() < 1e-9);
     }
 
     #[test]
     fn round_trip_enu() {
         let ctx = dummy_ctx();
-        let original = Vec3::new(1.0, 2.0, 3.0);
-        let bevy = GeoFrame::ENU.to_bevy_vec(original, &ctx, 0.0);
-        let round_trip = GeoFrame::ENU.from_bevy_vec(bevy, &ctx, 0.0);
-        assert!((round_trip - original).length() < 1e-5);
+        let original = DVec3::new(1.0, 2.0, 3.0);
+        let bevy = GeoFrame::ENU.to_bevy_pos(original, &ctx);
+        let round_trip = GeoFrame::ENU.from_bevy_pos(bevy, &ctx);
+        assert!((round_trip - original).length() < 1e-9);
     }
 
     #[test]
     fn round_trip_ned() {
         let ctx = dummy_ctx();
-        let original = Vec3::new(1.0, 2.0, 3.0);
-        let bevy = GeoFrame::NED.to_bevy_vec(original, &ctx, 0.0);
-        let round_trip = GeoFrame::NED.from_bevy_vec(bevy, &ctx, 0.0);
-        assert!((round_trip - original).length() < 1e-5);
+        let original = DVec3::new(1.0, 2.0, 3.0);
+        let bevy = GeoFrame::NED.to_bevy_pos(original, &ctx);
+        let round_trip = GeoFrame::NED.from_bevy_pos(bevy, &ctx);
+        assert!((round_trip - original).length() < 1e-9);
     }
 
     #[test]
     fn round_trip_ecef() {
         let ctx = dummy_ctx();
         // Use unique coordinates to verify the conversion works correctly
-        let original = Vec3::new(1.0, 2.0, 3.0);
-        let bevy = GeoFrame::ECEF.to_bevy_vec(original, &ctx, 0.0);
-        let round_trip = GeoFrame::ECEF.from_bevy_vec(bevy, &ctx, 0.0);
-        // ECEF involves coordinate transformations, so use a slightly larger tolerance
+        let original = DVec3::new(1.0, 2.0, 3.0);
+        let bevy = GeoFrame::ECEF.to_bevy_pos(original, &ctx);
+        let round_trip = GeoFrame::ECEF.from_bevy_pos(bevy, &ctx);
         assert!((round_trip - original).length() < 1e-3);
     }
 
@@ -740,10 +724,9 @@ mod tests {
     fn round_trip_eci() {
         let ctx = dummy_ctx();
         // Use unique coordinates to verify the conversion works correctly
-        let original = Vec3::new(1.0, 2.0, 3.0);
-        let bevy = GeoFrame::ECI.to_bevy_vec(original, &ctx, 0.0);
-        let round_trip = GeoFrame::ECI.from_bevy_vec(bevy, &ctx, 0.0);
-        // ECI involves time-dependent transformations, so use a slightly larger tolerance
+        let original = DVec3::new(1.0, 2.0, 3.0);
+        let bevy = GeoFrame::ECI.to_bevy_pos(original, &ctx);
+        let round_trip = GeoFrame::ECI.from_bevy_pos(bevy, &ctx);
         assert!((round_trip - original).length() < 1e-3);
     }
 
@@ -751,10 +734,9 @@ mod tests {
     fn round_trip_gcrf() {
         let ctx = dummy_ctx();
         // Use unique coordinates to verify the conversion works correctly
-        let original = Vec3::new(1.0, 2.0, 3.0);
-        let bevy = GeoFrame::GCRF.to_bevy_vec(original, &ctx, 0.0);
-        let round_trip = GeoFrame::GCRF.from_bevy_vec(bevy, &ctx, 0.0);
-        // GCRF involves time-dependent transformations, so use a slightly larger tolerance
+        let original = DVec3::new(1.0, 2.0, 3.0);
+        let bevy = GeoFrame::GCRF.to_bevy_pos(original, &ctx);
+        let round_trip = GeoFrame::GCRF.from_bevy_pos(bevy, &ctx);
         assert!((round_trip - original).length() < 1e-3);
     }
 }
