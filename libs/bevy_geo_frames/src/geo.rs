@@ -6,6 +6,48 @@ use map_3d::{ecef2enu, enu2ecef, geodetic2ecef, Ellipsoid};
 /// Default Earth radius in meters (approximate mean radius).
 pub const EARTH_RADIUS_M: f64 = 6_371_000.0;
 
+/// Planet/body shape model used for things like gravity scaling and debug rendering.
+///
+/// NOTE: Coordinate conversion in this crate currently always uses `Ellipsoid::WGS84`
+/// from `map_3d` regardless of this setting. `Shape` is primarily used as a
+/// configurable "reference radius" until we fully plumb shape into the conversion
+/// routines.
+#[derive(Debug, Clone, Copy)]
+pub enum Shape {
+    /// A spherical body with a single reference radius.
+    Sphere { radius: f64 },
+    /// An ellipsoidal body (from `map_3d`).
+    Ellipsoid(Ellipsoid),
+}
+
+impl Shape {
+
+    /// Ellipsoid to use for lat/lon <-> ECEF conversions.
+    pub fn ellipsoid(self) -> Ellipsoid {
+        match self {
+            Shape::Ellipsoid(e) => e,
+            // Until `map_3d` exposes a spherical ellipsoid, use WGS84 for conversions.
+            // Shape::Sphere { .. } => Ellipsoid::WGS84,
+-            Shape::Sphere { radius } => Ellipsoid::UnitSphere,
+        }
+    }
+
+    /// Reference radius used for simple gravity scaling and visualization.
+    fn approx_radius(&self) -> f64 {
+        match self {
+            Shape::Ellipsoid(_) => EARTH_RADIUS_M,
+            Shape::Sphere { radius } => radius
+        }
+    }
+}
+
+impl Default for Shape {
+    fn default() -> Self {
+        Shape::Ellipsoid(Ellipsoid::WGS84)
+    }
+}
+
+
 /// Coordinate frames used in the sim.
 ///
 /// Units: meters, seconds.
@@ -45,8 +87,8 @@ pub struct GeoOrigin {
     pub lon: f64,
     /// Altitude above mean radius [m]
     pub alt_m: f64,
-    /// Geodetic radius of the planet [m]. Defaults to Earth radius.
-    pub radius_m: f64,
+    /// Planet/body shape model (currently used primarily for reference radius).
+    pub shape: Shape,
     /// Origin in ECEF coordinates [m]
     pub ecef_origin: DVec3,
 }
@@ -64,22 +106,37 @@ impl GeoOrigin {
         lat_deg: f64,
         lon_deg: f64,
         alt_m: f64,
-        radius_m: f64,
+        radius: f64,
+    ) -> Self {
+        Self::new_from_degrees_with_shape(
+            lat_deg,
+            lon_deg,
+            alt_m,
+            Shape::Sphere { radius },
+        )
+    }
+
+    /// Construct an origin with an explicit shape model.
+    pub fn new_from_degrees_with_shape(
+        lat_deg: f64,
+        lon_deg: f64,
+        alt_m: f64,
+        shape: Shape,
     ) -> Self {
         let lat = lat_deg.to_radians();
         let lon = lon_deg.to_radians();
 
         // Use map_3d to compute ECEF position of the origin
-        // Note: map_3d uses WGS84 ellipsoid, but we'll use it for the ECEF calculation
-        // and still maintain our custom radius for other purposes
-        let (x, y, z) = geodetic2ecef(lat, lon, alt_m, Ellipsoid::WGS84);
+        // Note: until we fully plumb Shape into conversions, this will use WGS84 unless
+        // the caller passes an explicit Ellipsoid shape.
+        let (x, y, z) = geodetic2ecef(lat, lon, alt_m, shape.ellipsoid());
         let ecef_origin = DVec3::new(x, y, z);
 
         Self {
             lat,
             lon,
             alt_m,
-            radius_m,
+            shape,
             ecef_origin,
         }
     }
@@ -123,9 +180,25 @@ impl GeoContext {
         lon_deg: f64,
         alt_m: f64,
         theta0_rad: f64,
-        radius_m: f64,
+        radius: f64,
     ) -> Self {
-        let origin = GeoOrigin::new_from_degrees_with_radius(lat_deg, lon_deg, alt_m, radius_m);
+        let origin = GeoOrigin::new_from_degrees_with_radius(lat_deg, lon_deg, alt_m, radius);
+        Self::new_from_origin(origin, theta0_rad)
+    }
+
+    /// Construct with a given origin, initial Earth angle, and explicit shape.
+    pub fn new_from_degrees_with_shape(
+        lat_deg: f64,
+        lon_deg: f64,
+        alt_m: f64,
+        theta0_rad: f64,
+        shape: Shape,
+    ) -> Self {
+        let origin = GeoOrigin::new_from_degrees_with_shape(lat_deg, lon_deg, alt_m, shape);
+        Self::new_from_origin(origin, theta0_rad)
+    }
+
+    fn new_from_origin(origin: GeoOrigin, theta0_rad: f64) -> Self {
         Self {
             origin,
             theta0_rad,
@@ -248,10 +321,10 @@ impl GeoFrame {
 
     /// Gravity vector in this frame, in m/s² (simple model).
     /// 
-    /// `radius_m` is the geodetic radius of the planet in meters.
-    pub fn gravity_accel(self, pos_in_frame: Vec3, radius_m: f64) -> Vec3 {
+    /// `radius` is the geodetic radius of the planet in meters.
+    pub fn gravity_accel(self, pos_in_frame: Vec3, radius: f64) -> Vec3 {
         const G0: f32 = 9.80665;
-        let radius_m_f32 = radius_m as f32;
+        let radius_m_f32 = radius as f32;
 
         match self {
             GeoFrame::EUS => Vec3::new(0.0, -G0, 0.0),
@@ -346,7 +419,7 @@ impl GeoFrame {
         ctx: &GeoContext,
         t_seconds: f64,
     ) -> Vec3 {
-        let g_frame = self.gravity_accel(pos_in_frame, ctx.origin.radius_m);
+        let g_frame = self.gravity_accel(pos_in_frame, ctx.origin.shape.approx_radius());
         self.to_bevy_vec(g_frame, ctx, t_seconds)
     }
 
@@ -419,9 +492,8 @@ pub struct GeoFramePlugin {
     pub origin_alt_m: f64,
     /// Initial Earth rotation angle at t=0 [rad].
     pub theta0_rad: f64,
-    /// Geodetic radius of the planet [m]. Defaults to Earth radius.
-    /// Can be set to smaller values for demonstrations.
-    pub radius_m: f64,
+    /// Planet/body shape model (currently used primarily for reference radius).
+    pub shape: Shape,
 }
 
 impl Default for GeoFramePlugin {
@@ -431,19 +503,19 @@ impl Default for GeoFramePlugin {
             origin_lon_deg: 0.0,
             origin_alt_m: 0.0,
             theta0_rad: 0.0,
-            radius_m: EARTH_RADIUS_M,
+            shape: Shape::default(),
         }
     }
 }
 
 impl Plugin for GeoFramePlugin {
     fn build(&self, app: &mut App) {
-        let ctx = GeoContext::new_from_degrees_with_radius(
+        let ctx = GeoContext::new_from_degrees_with_shape(
             self.origin_lat_deg,
             self.origin_lon_deg,
             self.origin_alt_m,
             self.theta0_rad,
-            self.radius_m,
+            self.shape,
         );
 
         app.insert_resource(ctx)
@@ -587,8 +659,8 @@ mod tests {
         let ctx = dummy_ctx();
         let pos = Vec3::ZERO;
 
-        let g_enu = GeoFrame::ENU.gravity_accel(pos, ctx.origin.radius_m);
-        let g_eus = GeoFrame::EUS.gravity_accel(pos, ctx.origin.radius_m);
+        let g_enu = GeoFrame::ENU.gravity_accel(pos, ctx.origin.shape.approx_radius());
+        let g_eus = GeoFrame::EUS.gravity_accel(pos, ctx.origin.shape.approx_radius());
 
         assert!((g_enu - Vec3::new(0.0, 0.0, -9.80665)).length() < 1e-5);
         assert!((g_eus - Vec3::new(0.0, -9.80665, 0.0)).length() < 1e-5);

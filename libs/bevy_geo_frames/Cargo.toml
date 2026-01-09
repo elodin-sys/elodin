@@ -13,3 +13,6 @@ map_3d = "0.1.5"
 
 [dev-dependencies]
 bevy_editor_cam = "0.6"
+
+[patch.crates-io]
+map_3d = { path = "../../../map_3d" }
