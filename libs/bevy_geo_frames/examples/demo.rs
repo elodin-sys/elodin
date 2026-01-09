@@ -16,7 +16,7 @@ fn main() {
             origin_lon_deg: -122.4194,
             origin_alt_m: 0.0,
             theta0_rad: 0.0,
-            radius_m: 10.0, // Small radius for demonstration (default is Earth radius ~6.37e6 m)
+            shape: Shape::Sphere { radius_m: 10.0 }, // Small radius for demonstration (default is Earth radius ~6.37e6 m)
         })
         .add_systems(Startup, (setup, setup_ui))
         .add_systems(Update, (frame_switch_input, transform_frame_at_position, update_position_display))
@@ -277,12 +277,12 @@ fn draw_frame_axes(
     }
 }
 
-/// Draw a wireframe sphere with radius equal to radius_m from GeoContext.
+/// Draw a wireframe sphere with radius equal to the reference radius from `GeoContext`.
 fn draw_radius_sphere(
     mut gizmos: Gizmos,
     ctx: Res<GeoContext>,
 ) {
-    let radius = ctx.origin.radius_m as f32;
+    let radius = ctx.origin.shape.reference_radius_m() as f32;
     let center = Vec3::ZERO;
     
     // Draw wireframe sphere using gizmos
