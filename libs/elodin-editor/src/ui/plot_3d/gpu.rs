@@ -347,10 +347,10 @@ impl<P: PhaseItem> RenderCommand<P> for SetLineBindGroup {
     type ViewQuery = ();
     type ItemQuery = Read<DynamicUniformIndex<LineUniform>>;
 
-    fn render<'w>(
+    fn render<'w, 's>(
         _item: &P,
-        _view: bevy::ecs::query::ROQueryItem<'w, Self::ViewQuery>,
-        uniform_index: Option<bevy::ecs::query::ROQueryItem<'w, Self::ItemQuery>>,
+        _view: bevy::ecs::query::ROQueryItem<'w, 's, Self::ViewQuery>,
+        uniform_index: Option<bevy::ecs::query::ROQueryItem<'w, 's, Self::ItemQuery>>,
         bind_group: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
@@ -375,10 +375,10 @@ impl<P: PhaseItem> RenderCommand<P> for DrawLine {
 
     type ItemQuery = Read<GpuLine>;
 
-    fn render<'w>(
+    fn render<'w, 's>(
         _item: &P,
-        _view: bevy::ecs::query::ROQueryItem<'w, Self::ViewQuery>,
-        handle: Option<bevy::ecs::query::ROQueryItem<'w, Self::ItemQuery>>,
+        _view: bevy::ecs::query::ROQueryItem<'w, 's, Self::ViewQuery>,
+        handle: Option<bevy::ecs::query::ROQueryItem<'w, 's, Self::ItemQuery>>,
         _param: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {

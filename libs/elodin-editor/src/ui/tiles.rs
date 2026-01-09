@@ -1884,7 +1884,7 @@ pub struct TileSystem<'w, 's> {
     contexts: EguiContexts<'w, 's>,
     images: Local<'s, images::Images>,
     window_states: Query<'w, 's, (Entity, &'static WindowId, &'static WindowState)>,
-    primary_window: Single<'w, Entity, With<PrimaryWindow>>,
+    primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,
 }
 
 impl<'w, 's> TileSystem<'w, 's> {
@@ -2169,7 +2169,7 @@ pub struct TileLayout<'w, 's> {
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     viewport_contains_pointer: ResMut<'w, ViewportContainsPointer>,
     editor_cam: Query<'w, 's, &'static mut EditorCam, With<MainCamera>>,
-    primary_window: Single<'w, Entity, With<PrimaryWindow>>,
+    primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,
     cmd_palette_state: ResMut<'w, CommandPaletteState>,
     eql_ctx: Res<'w, EqlContext>,
     node_updater_params: NodeUpdaterParams<'w, 's>,

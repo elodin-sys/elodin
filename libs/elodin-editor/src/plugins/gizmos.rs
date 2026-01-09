@@ -97,7 +97,7 @@ impl Plugin for GizmoPlugin {
         // Bevy UI labels for arrows - runs in PostUpdate after transforms are finalized
         app.add_systems(
             PostUpdate,
-            update_arrow_label_ui.after(bevy::transform::TransformSystem::TransformPropagate),
+            update_arrow_label_ui.after(bevy::transform::TransformSystems::TransformPropagate),
         );
     }
 }
