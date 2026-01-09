@@ -86,8 +86,8 @@ pub fn eql_autocomplete(
             }
             ui.memory_mut(|mem| {
                 mem.data.remove::<usize>(suggestion_memory_id);
-                mem.close_popup();
             });
+            egui::Popup::close_id(ui.ctx(), id);
         }
     }
 
@@ -116,12 +116,20 @@ pub fn eql_autocomplete(
         ui.scope(|ui| {
             configure_combo_box(ui.style_mut());
             ui.style_mut().spacing.menu_margin = egui::Margin::same(4);
-            egui::popup::popup_below_widget(
-                ui,
-                id,
-                &query_res.clone().with_new_rect(query_res.rect.expand(8.0)),
-                egui::PopupCloseBehavior::IgnoreClicks,
-                |ui| {
+            //let target_res = &query_res.clone().with_new_rect(query_res.rect.expand(28.0));
+            let target_res = query_res;
+            // These Popup settings were copied from the following URL after
+            // popup_below_widget was deprecated:
+            // https://github.com/emilk/egui/blob/af96e0373c18477b77236e2bfc89735af007b1c2/crates/egui/src/containers/old_popup.rs#L189
+            egui::Popup::from_response(target_res)
+                .layout(egui::Layout::top_down_justified(egui::Align::LEFT))
+                .open_memory(None)
+                .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+                .id(id)
+                .align(egui::RectAlign::BOTTOM_START)
+                .width(target_res.rect.width())
+                .show(|ui| {
+                    ui.set_min_width(ui.available_width());
                     egui::ScrollArea::vertical()
                         .max_height(200.)
                         .show(ui, |ui| {
@@ -139,23 +147,22 @@ pub fn eql_autocomplete(
                                     *current_query = patch.clone();
                                     ui.memory_mut(|mem| {
                                         mem.data.remove::<usize>(suggestion_memory_id);
-                                        mem.close_popup();
                                     });
+                                    egui::Popup::close_id(ui.ctx(), id);
                                 }
                             }
                         })
-                },
-            );
+                });
         });
         if !suggestions.is_empty() {
-            ui.memory_mut(|mem| mem.open_popup(id));
+            egui::Popup::open_id(ui.ctx(), id);
         } else {
             ui.memory_mut(|mem| {
                 mem.data.remove::<usize>(suggestion_memory_id);
-                if mem.is_popup_open(id) {
-                    mem.close_popup();
-                }
             });
+            if egui::Popup::is_id_open(ui.ctx(), id) {
+                egui::Popup::close_id(ui.ctx(), id);
+            }
         }
     }
 }
@@ -164,34 +171,35 @@ pub fn color_popup(
     ui: &mut egui::Ui,
     color: &mut egui::Color32,
     color_id: egui::Id,
-    pos: egui::Pos2,
-) -> egui::Response {
-    egui::Area::new(color_id)
-        .kind(egui::UiKind::Picker)
-        .order(egui::Order::Foreground)
-        .fixed_pos(pos)
-        .default_width(300.0)
-        .constrain(true)
-        .show(ui.ctx(), |ui| {
-            theme::configure_input_with_border(ui.style_mut());
-            ui.spacing_mut().slider_width = 275.;
-            ui.spacing_mut().button_padding = egui::vec2(6.0, 4.0);
-            ui.spacing_mut().item_spacing = egui::vec2(8.0, 4.0);
+    target_res: &egui::Response,
+) -> Option<egui::Response> {
+    let inner_response =
+        egui::Popup::new(color_id, ui.ctx().clone(), target_res, target_res.layer_id)
+            .kind(egui::PopupKind::Popup)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .width(300.0)
+            .open_memory(None)
+            .show(|ui| {
+                theme::configure_input_with_border(ui.style_mut());
+                ui.spacing_mut().slider_width = 275.;
+                ui.spacing_mut().button_padding = egui::vec2(6.0, 4.0);
+                ui.spacing_mut().item_spacing = egui::vec2(8.0, 4.0);
 
-            ui.add_space(8.0);
-            egui::Frame::popup(ui.style()).show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    for elem_color in colors::all_colors().iter().take(24) {
-                        if ui.add(EColorButton::new(*elem_color)).clicked() {
-                            *color = *elem_color;
-                        }
-                    }
-                });
                 ui.add_space(8.0);
-                color_picker_color32(ui, color, Alpha::OnlyBlend);
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        for elem_color in colors::all_colors().iter().take(24) {
+                            if ui.add(EColorButton::new(*elem_color)).clicked() {
+                                *color = *elem_color;
+                            }
+                        }
+                    });
+                    ui.add_space(8.0);
+                    color_picker_color32(ui, color, Alpha::OnlyBlend);
+                });
             });
-        })
-        .response
+
+    inner_response.map(|ir| ir.response)
 }
 
 pub fn search(
@@ -237,24 +245,13 @@ pub fn node_color_picker(ui: &mut egui::Ui, label: &str, color: &mut impeller2_w
             .text_color(get_scheme().text_secondary)
             .left_label(true),
     );
+
     let color_id = ui.auto_id_with("color");
     if res.clicked() {
-        ui.memory_mut(|mem| mem.toggle_popup(color_id));
+        egui::Popup::toggle_id(ui.ctx(), color_id);
     }
-    if ui.memory(|mem| mem.is_popup_open(color_id)) {
-        let popup_response = color_popup(
-            ui,
-            &mut egui_color,
-            color_id,
-            res.rect.right_center() - egui::vec2(128.0, 0.0),
-        );
-        if !res.clicked()
-            && (ui.input(|i| i.key_pressed(egui::Key::Escape))
-                || popup_response.clicked_elsewhere())
-        {
-            ui.memory_mut(|mem| mem.close_popup());
-        }
-    }
+
+    color_popup(ui, &mut egui_color, color_id, &res);
 
     let new_color = impeller2_wkt::Color::from_color32(egui_color);
     let changed = new_color != *color;
