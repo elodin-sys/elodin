@@ -4,7 +4,7 @@ use bevy::{
     camera::RenderTarget,
     window::{EnabledButtons, PrimaryWindow, WindowRef, WindowResolution},
 };
-use bevy_egui::EguiContexts;
+use bevy_egui::{EguiContexts, EguiTextureHandle};
 use egui::{Color32, CornerRadius, RichText, Stroke, load::SizedTexture};
 use hifitime::Epoch;
 use impeller2_bevy::{
@@ -45,7 +45,7 @@ fn create_startup_window(
         let mut window = commands.spawn((
             Window {
                 title: "Elodin".to_owned(),
-                resolution: WindowResolution::new(730.0, 470.0),
+                resolution: WindowResolution::new(730, 470),
                 resize_constraints: WindowResizeConstraints {
                     min_width: 730.0,
                     min_height: 470.0,
@@ -261,17 +261,17 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
         let mut state = state.get_mut(world);
         let logo_full = state
             .contexts
-            .add_image(state.images.logo_full.clone_weak());
+            .add_image(EguiTextureHandle::Weak(state.images.logo_full.id()));
         let folder = state
             .contexts
-            .add_image(state.images.icon_folder.clone_weak());
+            .add_image(EguiTextureHandle::Weak(state.images.icon_folder.id()));
 
         let arrow = state
             .contexts
-            .add_image(state.images.icon_chevron_right.clone_weak());
+            .add_image(EguiTextureHandle::Weak(state.images.icon_chevron_right.id()));
         let icon_ip_addr = state
             .contexts
-            .add_image(state.images.icon_ip_addr.clone_weak());
+            .add_image(EguiTextureHandle::Weak(state.images.icon_ip_addr.id()));
 
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)

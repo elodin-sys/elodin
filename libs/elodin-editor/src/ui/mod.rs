@@ -298,7 +298,7 @@ impl Plugin for UiPlugin {
                     .chain(),
             )
             .add_systems(First, fix_visibility_hierarchy)
-            .add_systems(Update, sync_hdr)
+            //.add_systems(Update, sync_hdr)
             .add_systems(Update, tiles::shortcuts)
             .add_systems(Update, query_plot::auto_bounds)
             .add_systems(Update, dashboard::update_nodes)
@@ -336,7 +336,7 @@ pub enum DialogAction {
     Custom(String), // Custom action identifier
 }
 
-#[derive(Clone, Debug, Event)]
+#[derive(Clone, Debug, Message)]
 pub struct DialogEvent {
     pub action: DialogAction,
     pub id: String,
@@ -798,8 +798,9 @@ fn sync_camera_grid_cell(
         }
     }
 }
-fn sync_hdr(hdr_enabled: Res<HdrEnabled>, mut query: Query<&mut Camera>) {
-    for mut cam in query.iter_mut() {
-        cam.hdr = hdr_enabled.0;
-    }
-}
+// TODO: &ers
+//fn sync_hdr(hdr_enabled: Res<HdrEnabled>, mut query: Query<&mut Camera>) {
+//    for mut cam in query.iter_mut() {
+//        cam.hdr = hdr_enabled.0;
+//    }
+//}

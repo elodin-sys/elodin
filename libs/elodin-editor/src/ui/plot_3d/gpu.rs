@@ -9,7 +9,7 @@ use crate::{
 };
 use bevy::{
     app::{Plugin, PostUpdate},
-    asset::{AssetApp, Assets, Handle, load_internal_asset},
+    asset::{AssetApp, Assets, Handle, load_internal_asset, uuid_handle},
     color::ColorToComponents,
     core_pipeline::{
         core_3d::{CORE_3D_DEPTH_FORMAT, Transparent3d},
@@ -55,8 +55,7 @@ use bevy_render::{
 use big_space::GridCell;
 use binding_types::storage_buffer_read_only_sized;
 
-const LINE_SHADER_HANDLE: Handle<Shader> =
-    Handle::weak_from_u128(267882706676311365151377673216596804695);
+const LINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("bfffa3c4-9401-4b6e-b3ab-3564180352f1");
 
 #[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum PlotSystem {
@@ -85,7 +84,7 @@ impl Plugin for Plot3dGpuPlugin {
                 PlotSystem::QueueLine
                     .in_set(RenderSet::Queue)
                     .ambiguous_with(
-                        bevy::pbr::queue_material_meshes::<bevy::pbr::StandardMaterial>,
+                        bevy::pbr::queue_material_meshes
                     ),
             )
             .add_systems(ExtractSchedule, extract_lines)
@@ -152,7 +151,7 @@ impl Plugin for Plot3dGpuPlugin {
 
 fn update_uniform_model(mut query: Query<(&mut LineUniform, &GlobalTransform)>) {
     for (mut uniform, transform) in query.iter_mut() {
-        uniform.model = transform.compute_matrix();
+        uniform.model = transform.to_matrix();
     }
 }
 #[derive(Component, Debug, Clone, ExtractComponent)]
@@ -270,6 +269,7 @@ impl SpecializedRenderPipeline for LinePipeline {
         let view_layout = self
             .mesh_pipeline
             .get_view_layout(key.view_key.into())
+            .main_layout
             .clone();
 
         let layout = vec![
@@ -288,14 +288,14 @@ impl SpecializedRenderPipeline for LinePipeline {
         RenderPipelineDescriptor {
             vertex: VertexState {
                 shader: LINE_SHADER_HANDLE,
-                entry_point: "vertex".into(),
+                entry_point: Some("vertex".into()),
                 shader_defs: shader_defs.clone(),
                 buffers: line_vertex_buffer_layouts(),
             },
             fragment: Some(FragmentState {
                 shader: LINE_SHADER_HANDLE,
                 shader_defs,
-                entry_point: "fragment".into(),
+                entry_point: Some("fragment".into()),
                 targets: vec![Some(ColorTargetState {
                     format,
                     blend: Some(BlendState::ALPHA_BLENDING),
@@ -347,10 +347,10 @@ impl<P: PhaseItem> RenderCommand<P> for SetLineBindGroup {
     type ViewQuery = ();
     type ItemQuery = Read<DynamicUniformIndex<LineUniform>>;
 
-    fn render<'w, 's>(
+    fn render<'w>(
         _item: &P,
-        _view: bevy::ecs::query::ROQueryItem<'w, 's, Self::ViewQuery>,
-        uniform_index: Option<bevy::ecs::query::ROQueryItem<'w, 's, Self::ItemQuery>>,
+        _view: bevy::ecs::query::ROQueryItem<'w, '_, Self::ViewQuery>,
+        uniform_index: Option<bevy::ecs::query::ROQueryItem<'w, '_, Self::ItemQuery>>,
         bind_group: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
@@ -375,10 +375,10 @@ impl<P: PhaseItem> RenderCommand<P> for DrawLine {
 
     type ItemQuery = Read<GpuLine>;
 
-    fn render<'w, 's>(
+    fn render<'w>(
         _item: &P,
-        _view: bevy::ecs::query::ROQueryItem<'w, 's, Self::ViewQuery>,
-        handle: Option<bevy::ecs::query::ROQueryItem<'w, 's, Self::ItemQuery>>,
+        _view: bevy::ecs::query::ROQueryItem<'w, '_, Self::ViewQuery>,
+        handle: Option<bevy::ecs::query::ROQueryItem<'w, '_, Self::ItemQuery>>,
         _param: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {

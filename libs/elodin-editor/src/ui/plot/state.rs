@@ -86,7 +86,8 @@ impl GraphBundle {
         GraphBundle {
             camera: Camera {
                 order: 2,
-                hdr: false,
+                // TODO: &ers bevy 0.17 - make sure we're handling hdr properly
+                //hdr: false,
                 ..Default::default()
             },
             tonemapping: Tonemapping::None,

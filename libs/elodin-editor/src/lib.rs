@@ -14,7 +14,8 @@ use bevy::{
     pbr::wireframe::{WireframeConfig, WireframePlugin},
     prelude::*,
     window::{PresentMode, PrimaryWindow, WindowRef, WindowResolution},
-    winit::WinitSettings,
+    winit::{WinitSettings, WINIT_WINDOWS},
+    ecs::system::NonSendMarker,
 };
 use bevy_editor_cam::{SyncCameraPosition, controller::component::EditorCam};
 #[cfg(feature = "inspector")]
@@ -114,7 +115,7 @@ pub struct PositionSync;
 impl EditorPlugin {
     pub fn new(width: f32, height: f32) -> Self {
         Self {
-            window_resolution: WindowResolution::new(width, height),
+            window_resolution: WindowResolution::new(width as u32, height as u32),
         }
     }
 }
@@ -277,7 +278,7 @@ impl Plugin for EditorPlugin {
 fn setup_egui_inspector(mut commands: Commands) {
     let window = Window {
         title: "World Inspector".to_string(),
-        resolution: WindowResolution::new(640.0, 480.0),
+        resolution: WindowResolution::new(640, 480),
         ..Default::default()
     };
 
@@ -420,13 +421,14 @@ struct SetupTitlebar;
 #[cfg(target_os = "macos")]
 fn setup_titlebar(
     windows: Query<Entity, Without<SetupTitlebar>>,
-    winit_windows: NonSend<bevy::winit::WinitWindows>,
     mut commands: Commands,
+    _non_send_marker: NonSendMarker,
 ) {
     use objc2::rc::Retained;
     use objc2::{ClassType, msg_send, msg_send_id};
     use objc2_app_kit::{NSColor, NSToolbar, NSWindow, NSWindowStyleMask, NSWindowToolbarStyle};
 
+    WINIT_WINDOWS.with_borrow(|winit_windows| {
     for id in &windows {
         let Some(window) = winit_windows.get_window(id) else {
             continue;
@@ -474,14 +476,16 @@ fn setup_titlebar(
             commands.entity(id).insert(SetupTitlebar);
         }
     }
+    });
 }
 
 fn handle_drag_resize(
     windows: Query<(Entity, &Window, &bevy::window::PrimaryWindow)>,
-    winit_windows: NonSend<bevy::winit::WinitWindows>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     mut just_set_cursor: Local<bool>,
+    _non_send_marker: NonSendMarker,
 ) {
+    WINIT_WINDOWS.with_borrow(|winit_windows| {
     for (id, window, _) in &windows {
         let Some(cursor_pos) = window.physical_cursor_position() else {
             continue;
@@ -524,13 +528,16 @@ fn handle_drag_resize(
             window.set_cursor(winit::window::CursorIcon::Default);
         }
     }
+    });
 }
 
 fn setup_window_icon(
     _windows: Query<(Entity, &bevy::window::PrimaryWindow)>,
+    // TODO: &ers - is this still load bearing? Does the query above not ensure a window?
+    //
     // this is load bearing, because it ensures that there is at
     // least one window spawned
-    _winit_windows: NonSend<bevy::winit::WinitWindows>,
+    //_winit_windows: NonSend<bevy::winit::WinitWindows>,
 ) {
     #[cfg(target_os = "macos")]
     set_icon_mac();
