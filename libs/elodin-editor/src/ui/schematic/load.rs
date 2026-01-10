@@ -805,20 +805,65 @@ impl LoadSchematicParams<'_, '_> {
             .expect("no primary window")
             .2;
 
-        // Only add if the tile tree is empty
-        if window_state.tile_state.is_empty()
-            && let Some(tabs_id) = window_state.tile_state.tree.root()
-        {
-            let pane = Pane::DataOverview(DataOverviewPane::default());
-            if let Some(tile_id) =
+        // Only add if the tile tree is empty (no non-sidebar content)
+        if !window_state.tile_state.is_empty() {
+            return;
+        }
+
+        let target_id = {
+            let tree = &window_state.tile_state.tree;
+            tree.root()
+                .and_then(|root_id| match tree.tiles.get(root_id) {
+                    Some(Tile::Container(Container::Linear(linear))) => {
+                        let center_idx = linear.children.len() / 2;
+                        linear.children.get(center_idx).copied()
+                    }
+                    _ => Some(root_id),
+                })
+        };
+
+        let mut central_tabs_id = None;
+        if let Some(target_id) = target_id {
+            match window_state.tile_state.tree.tiles.get(target_id) {
+                Some(Tile::Container(Container::Tabs(_))) => central_tabs_id = Some(target_id),
+                Some(Tile::Container(_)) => {
+                    let tabs_container = Tile::Container(Container::new_tabs(vec![]));
+                    central_tabs_id =
+                        window_state
+                            .tile_state
+                            .insert_tile(tabs_container, Some(target_id), false);
+                }
+                _ => {}
+            }
+        }
+
+        if central_tabs_id.is_none() {
+            let tabs_container = Tile::Container(Container::new_tabs(vec![]));
+            central_tabs_id = window_state
+                .tile_state
+                .insert_tile(tabs_container, None, false);
+        }
+
+        // The central tabs container is effectively invisible; nest a new Tabs container
+        // so the tab bar (+) is visible, then add Data Overview inside it.
+        if let Some(central_tabs_id) = central_tabs_id {
+            let tabs_container = Tile::Container(Container::new_tabs(vec![]));
+            if let Some(tabs_id) =
                 window_state
                     .tile_state
-                    .insert_tile(Tile::Pane(pane), Some(tabs_id), true)
+                    .insert_tile(tabs_container, Some(central_tabs_id), false)
             {
-                window_state
-                    .tile_state
-                    .tree
-                    .make_active(|id, _| id == tile_id);
+                let pane = Pane::DataOverview(DataOverviewPane::default());
+                if let Some(tile_id) =
+                    window_state
+                        .tile_state
+                        .insert_tile(Tile::Pane(pane), Some(tabs_id), true)
+                {
+                    window_state
+                        .tile_state
+                        .tree
+                        .make_active(|id, _| id == tile_id);
+                }
             }
         }
     }
