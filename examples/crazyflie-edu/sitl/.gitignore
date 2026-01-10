@@ -1,0 +1,4 @@
+# Build artifacts
+sitl_main
+sitl_main.dSYM/
+*.o

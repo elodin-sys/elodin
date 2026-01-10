@@ -25,7 +25,9 @@ uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
 3. For building both the Elodin Editor and the Elodin DB, use the convenience command:
 `just install`
 
-4. The CI enforces these tests, so make sure they pass if relevant to changes made:
+4. For all development, best practice is run all activities from the repository root to prevent confusion and improve multi-tasking. All Readme instructions should assume running from repository root unless there is a reason that is difficult or overly cumbersome.
+
+5. The CI enforces these tests, so make sure they pass if relevant to changes made:
 `cargo fmt`
 `cargo test`
 `cargo clippy -- -Dwarnings`
