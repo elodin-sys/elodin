@@ -8,7 +8,7 @@ use bevy::{
     prelude::*,
     window::{PrimaryWindow, WindowCloseRequested},
 };
-use bevy_defer::{AccessError, AsyncAccess, AsyncCommandsExtension, AsyncWorld};
+use bevy_defer::{AccessError, AsyncCommandsExtension, AsyncWorld};
 use impeller2_wkt::WindowRect;
 #[cfg(target_os = "macos")]
 use winit::dpi::LogicalPosition;
@@ -317,7 +317,7 @@ async fn apply_window_rect(
     );
 
     let window_states = AsyncWorld.query::<&WindowState>();
-    let state = window_states.entity(entity).get(|state| state.clone())?;
+    let state = window_states.entity(entity).get_mut(|state| state.clone())?;
 
     let winit_windows_async = AsyncWorld.non_send_resource::<bevy::winit::WinitWindows>();
 

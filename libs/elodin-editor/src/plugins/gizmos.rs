@@ -1,5 +1,5 @@
-use bevy::render::camera::RenderTarget;
-use bevy::render::view::RenderLayers;
+use bevy::camera::RenderTarget;
+use bevy::camera::visibility::RenderLayers;
 use bevy::ui::{Node, PositionType, UiTargetCamera, Val, ZIndex};
 use bevy::window::WindowRef;
 use bevy::{
@@ -97,7 +97,7 @@ impl Plugin for GizmoPlugin {
         // Bevy UI labels for arrows - runs in PostUpdate after transforms are finalized
         app.add_systems(
             PostUpdate,
-            update_arrow_label_ui.after(bevy::transform::TransformSystem::TransformPropagate),
+            update_arrow_label_ui.after(bevy::transform::TransformSystems::Propagate),
         );
     }
 }
@@ -115,7 +115,7 @@ fn world_units_per_pixel(
 
     match projection {
         Projection::Perspective(persp) => {
-            let view = camera_transform.compute_matrix().inverse();
+            let view = camera_transform.to_matrix().inverse();
             let cam_space = view.transform_point3(world_pos);
             let depth = (-cam_space.z).max(0.001);
             let focal_px = px_height / (2.0 * (persp.fov * 0.5).tan());

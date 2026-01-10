@@ -68,7 +68,7 @@ pub struct SyncedViewport;
 #[derive(SystemParam)]
 pub struct LoadSchematicParams<'w, 's> {
     pub commands: Commands<'w, 's>,
-    primary_window: Single<'w, Entity, With<PrimaryWindow>>,
+    primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,
     pub asset_server: Res<'w, AssetServer>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub materials: ResMut<'w, Assets<StandardMaterial>>,

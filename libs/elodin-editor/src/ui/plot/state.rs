@@ -3,8 +3,8 @@ use std::ops::Range;
 
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
-use bevy::render::camera::ScalingMode;
-use bevy::render::view::RenderLayers;
+use bevy::camera::ScalingMode;
+use bevy::camera::visibility::RenderLayers;
 use bevy_egui::egui::{self, Color32};
 
 use impeller2::types::{ComponentId, Timestamp};
@@ -86,7 +86,8 @@ impl GraphBundle {
         GraphBundle {
             camera: Camera {
                 order: 2,
-                hdr: false,
+                // TODO: &ers bevy 0.17 - make sure we're handling hdr properly
+                //hdr: false,
                 ..Default::default()
             },
             tonemapping: Tonemapping::None,

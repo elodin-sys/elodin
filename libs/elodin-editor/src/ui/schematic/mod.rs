@@ -59,7 +59,7 @@ pub struct SchematicParam<'w, 's> {
         ),
     >,
     pub windows_state: Query<'w, 's, (&'static tiles::WindowState, &'static tiles::WindowId)>,
-    pub primary_window: Single<'w, Entity, With<PrimaryWindow>>,
+    pub primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,
     pub dashboards: Query<'w, 's, &'static Dashboard<Entity>>,
     pub hdr_enabled: Res<'w, HdrEnabled>,
     pub metadata: Res<'w, ComponentMetadataRegistry>,

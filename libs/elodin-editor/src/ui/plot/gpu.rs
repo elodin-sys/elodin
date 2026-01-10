@@ -17,10 +17,16 @@ use bevy::render::render_phase::{
 };
 
 use bevy::image::BevyDefault;
+use bevy::mesh::VertexBufferLayout;
 use bevy::render::renderer::RenderQueue;
-use bevy::render::view::{ExtractedView, Msaa, RenderLayers};
-use bevy::render::{ExtractSchedule, MainWorld, Render, RenderSet};
-use bevy::sprite::{Mesh2dPipeline, Mesh2dPipelineKey, SetMesh2dViewBindGroup};
+use bevy::camera::visibility::RenderLayers;
+use bevy::render::view::{ExtractedView, Msaa};
+use bevy::render::{ExtractSchedule, MainWorld, Render, RenderSet, RenderStartup};
+use bevy::shader::Shader;
+use bevy::sprite_render::{
+    Mesh2dPipeline, Mesh2dPipelineKey, SetMesh2dViewBindGroup,
+    init_mesh_2d_pipeline,
+};
 use bevy::{
     app::Plugin,
     asset::{Handle, load_internal_asset},
@@ -90,10 +96,12 @@ impl Plugin for PlotGpuPlugin {
                 PlotSystem::QueueLine
                     .in_set(RenderSet::Queue)
                     .ambiguous_with(
-                        bevy::pbr::queue_material_meshes::<bevy::pbr::StandardMaterial>,
+                        // TODO: &ers bevy 0.17 - is this still working now that it's not generic?
+                        bevy::pbr::queue_material_meshes,
                     ),
             )
             .add_systems(ExtractSchedule, extract_lines)
+            .add_systems(RenderStartup, init_line_pipeline.after(init_mesh_2d_pipeline))
             .add_systems(
                 Render,
                 prepare_uniform_bind_group.in_set(RenderSet::PrepareBindGroups),
@@ -133,7 +141,6 @@ impl Plugin for PlotGpuPlugin {
         render_app.insert_resource(UniformLayout {
             layout: uniform_layout,
         });
-        render_app.init_resource::<LinePipeline>();
     }
 }
 
@@ -316,6 +323,19 @@ impl FromWorld for LinePipeline {
     }
 }
 
+fn init_line_pipeline(
+    mut commands: Commands,
+    mesh_pipeline: Res<Mesh2dPipeline>,
+    uniform_layout: Res<UniformLayout>,
+    storage_layout: Res<LineValuesLayout>,
+) {
+    commands.insert_resource(LinePipeline{
+        mesh_pipeline: mesh_pipeline.clone(),
+        uniform_layout: uniform_layout.layout.clone(),
+        storage_layout: storage_layout.layout.clone(),
+    });
+}
+
 #[derive(PartialEq, Eq, Hash, Clone)]
 pub struct LinePipelineKey {
     view_key: Mesh2dPipelineKey,
@@ -356,14 +376,14 @@ impl SpecializedRenderPipeline for LinePipeline {
         RenderPipelineDescriptor {
             vertex: VertexState {
                 shader: shader.clone(),
-                entry_point: "vertex".into(),
+                entry_point: Some("vertex".into()),
                 shader_defs: shader_defs.clone(),
                 buffers: line_vertex_buffer_layouts(),
             },
             fragment: Some(FragmentState {
                 shader,
                 shader_defs,
-                entry_point: "fragment".into(),
+                entry_point: Some("fragment".into()),
                 targets: vec![Some(ColorTargetState {
                     format,
                     blend: Some(BlendState::ALPHA_BLENDING),
@@ -432,8 +452,8 @@ impl<P: PhaseItem> RenderCommand<P> for SetLineBindGroup {
 
     fn render<'w>(
         _item: &P,
-        _view: bevy::ecs::query::ROQueryItem<'w, Self::ViewQuery>,
-        uniform_index: Option<bevy::ecs::query::ROQueryItem<'w, Self::ItemQuery>>,
+        _view: bevy::ecs::query::ROQueryItem<'w, '_, Self::ViewQuery>,
+        uniform_index: Option<bevy::ecs::query::ROQueryItem<'w, '_, Self::ItemQuery>>,
         bind_group: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
@@ -460,8 +480,8 @@ impl<P: PhaseItem> RenderCommand<P> for DrawLine {
 
     fn render<'w>(
         _item: &P,
-        _view: bevy::ecs::query::ROQueryItem<'w, Self::ViewQuery>,
-        handle: Option<bevy::ecs::query::ROQueryItem<'w, Self::ItemQuery>>,
+        _view: bevy::ecs::query::ROQueryItem<'w, '_, Self::ViewQuery>,
+        handle: Option<bevy::ecs::query::ROQueryItem<'w, '_, Self::ItemQuery>>,
         _param: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
