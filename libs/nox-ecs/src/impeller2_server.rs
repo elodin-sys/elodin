@@ -273,6 +273,7 @@ pub fn commit_world_head(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn tick(
     db: Arc<DB>,
     tick_counter: Arc<AtomicU64>,
@@ -309,6 +310,15 @@ async fn tick(
         }
         // Python pre_step func runs (before copy_db_to_world so writes are picked up).
         pre_step(tick, &db, &tick_counter, timestamp);
+
+        // Check if truncate() was called during pre_step.
+        // If tick_counter was reset to a value less than our current tick,
+        // skip this iteration to avoid writing at the old (higher) timestamp,
+        // which would cause TimeTravel errors on the next tick.
+        if tick_counter.load(Ordering::SeqCst) < tick {
+            continue;
+        }
+
         db.with_state(|state| copy_db_to_world(state, &mut world));
         // JAX runs.
         if let Err(err) = world.run() {
@@ -341,7 +351,12 @@ async fn tick(
         {
             stellarator::sleep(sleep_time).await;
         }
-        tick_counter.fetch_add(1, Ordering::SeqCst);
+
+        // Only increment tick_counter if it wasn't reset by truncate() during post_step.
+        // If truncate() was called, tick_counter is already at the desired reset value (0).
+        if tick_counter.load(Ordering::SeqCst) == tick {
+            tick_counter.fetch_add(1, Ordering::SeqCst);
+        }
     }
 }
 
