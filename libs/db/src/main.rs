@@ -23,7 +23,10 @@ enum Commands {
     Lua(impeller2_cli::Args),
     #[command(about = "Generate C++ header files")]
     GenCpp,
-    #[command(name = "fix-timestamps", about = "Fix monotonic timestamps in a database")]
+    #[command(
+        name = "fix-timestamps",
+        about = "Fix monotonic timestamps in a database"
+    )]
     FixTimestamps(FixTimestampsArgs),
 }
 

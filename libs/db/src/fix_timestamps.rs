@@ -308,9 +308,8 @@ fn read_component_name(metadata_path: &Path) -> Result<String, std::io::Error> {
     let name_data = &data[8..];
 
     // Read varint length
-    let (len, bytes_read) = decode_varint(name_data).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-    })?;
+    let (len, bytes_read) = decode_varint(name_data)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let name_start = bytes_read;
     let name_end = name_start + len as usize;
 
