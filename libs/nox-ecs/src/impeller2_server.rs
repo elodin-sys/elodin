@@ -273,6 +273,7 @@ pub fn commit_world_head(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn tick(
     db: Arc<DB>,
     tick_counter: Arc<AtomicU64>,
