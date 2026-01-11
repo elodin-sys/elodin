@@ -28,15 +28,15 @@ impl Server {
 
     pub async fn run(self) -> Result<(), Error> {
         tracing::info!("running server");
-        self.run_with_cancellation(|| false, |_, _, _, _| {}, |_, _, _, _| {}, false)
+        self.run_with_cancellation(|| false, |_, _, _, _, _| {}, |_, _, _, _, _| {}, false)
             .await
     }
 
     pub async fn run_with_cancellation(
         self,
         is_cancelled: impl Fn() -> bool + 'static,
-        pre_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp) + 'static,
-        post_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp) + 'static,
+        pre_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
+        post_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
         interactive: bool,
     ) -> Result<(), Error> {
         tracing::info!("running server with cancellation");
@@ -279,8 +279,8 @@ async fn tick(
     tick_counter: Arc<AtomicU64>,
     mut world: WorldExec<Compiled>,
     is_cancelled: impl Fn() -> bool + 'static,
-    pre_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp) + 'static,
-    post_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp) + 'static,
+    pre_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
+    post_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
     start_timestamp: Timestamp,
     interactive: bool,
 ) {
@@ -312,7 +312,7 @@ async fn tick(
             }
         }
         // Python pre_step func runs (before copy_db_to_world so writes are picked up).
-        pre_step(tick, &db, &tick_counter, timestamp);
+        pre_step(tick, &db, &tick_counter, timestamp, start_timestamp);
 
         // Check if truncate() was called during pre_step.
         // If tick_counter was reset to a value less than our current tick,
@@ -347,7 +347,7 @@ async fn tick(
             return;
         }
         // Python post_step func runs.
-        post_step(tick, &db, &tick_counter, timestamp);
+        post_step(tick, &db, &tick_counter, timestamp, start_timestamp);
         // We only wait if there is a run_time_step set and it's >= the time elapsed.
         if let Some(run_time_step) = run_time_step.as_ref()
             && let Some(sleep_time) = run_time_step.checked_sub(start.elapsed())

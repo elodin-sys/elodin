@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
 use elodin_db::DB;
 use impeller2::types::{ComponentId, PrimType, Timestamp};
@@ -95,20 +95,30 @@ fn buf_to_numpy_array<'py>(py: Python<'py>, buf: &[u8], prim_type: PrimType) -> 
 #[pyclass]
 pub struct StepContext {
     db: Arc<DB>,
-    timestamp: Timestamp,
+    /// Current timestamp (uses AtomicI64 for thread-safe interior mutability so truncate() can reset it)
+    timestamp: AtomicI64,
     tick: u64,
     /// Shared tick counter that can be reset by truncate()
     tick_counter: Arc<AtomicU64>,
+    /// Start timestamp for the simulation (used to reset timestamp after truncate)
+    start_timestamp: Timestamp,
 }
 
 impl StepContext {
     /// Create a new StepContext with access to the database and shared tick counter.
-    pub fn new(db: Arc<DB>, tick_counter: Arc<AtomicU64>, timestamp: Timestamp, tick: u64) -> Self {
+    pub fn new(
+        db: Arc<DB>,
+        tick_counter: Arc<AtomicU64>,
+        timestamp: Timestamp,
+        tick: u64,
+        start_timestamp: Timestamp,
+    ) -> Self {
         Self {
             db,
-            timestamp,
+            timestamp: AtomicI64::new(timestamp.0),
             tick,
             tick_counter,
+            start_timestamp,
         }
     }
 }
@@ -168,7 +178,7 @@ impl StepContext {
 
             component
                 .time_series
-                .push_buf(self.timestamp, buf)
+                .push_buf(Timestamp(self.timestamp.load(Ordering::SeqCst)), buf)
                 .map_err(Error::from)
         })
     }
@@ -296,7 +306,7 @@ impl StepContext {
     /// Current simulation timestamp (nanoseconds since epoch).
     #[getter]
     fn timestamp(&self) -> i64 {
-        self.timestamp.0
+        self.timestamp.load(Ordering::SeqCst)
     }
 
     /// Truncate all component data and message logs in the database, resetting the tick counter to 0.
@@ -305,9 +315,16 @@ impl StepContext {
     /// The simulation tick will be reset to 0, effectively starting fresh.
     ///
     /// Use this to control the freshness of the database and ensure reliable data from a known tick.
+    ///
+    /// After truncate(), any subsequent write_component() calls in the same callback will write
+    /// at the start timestamp (tick 0), preventing TimeTravel errors on the next tick.
     fn truncate(&self) {
         self.db.truncate();
         self.tick_counter.store(0, Ordering::SeqCst);
+        // Reset timestamp to start_timestamp (tick 0) so any subsequent write_component()
+        // calls in this callback write at the correct timestamp
+        self.timestamp
+            .store(self.start_timestamp.0, Ordering::SeqCst);
     }
 
     /// Perform multiple component reads and writes in a single DB operation.
@@ -406,7 +423,7 @@ impl StepContext {
 
                     component
                         .time_series
-                        .push_buf(self.timestamp, buf)
+                        .push_buf(Timestamp(self.timestamp.load(Ordering::SeqCst)), buf)
                         .map_err(Error::from)?;
                 }
 
