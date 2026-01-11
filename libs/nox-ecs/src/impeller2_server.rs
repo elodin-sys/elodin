@@ -300,7 +300,10 @@ async fn tick(
         // Read tick from shared counter (can be reset by StepContext::truncate())
         let tick = tick_counter.load(Ordering::SeqCst);
         // Calculate timestamp based on current tick
-        let timestamp = start_timestamp + time_step * (tick as u32);
+        // Use u128 arithmetic to avoid overflow for long-running simulations (u32 would truncate after ~4B ticks)
+        let tick_nanos = time_step.as_nanos() * (tick as u128);
+        let tick_duration = Duration::from_nanos(tick_nanos.min(u64::MAX as u128) as u64);
+        let timestamp = start_timestamp + tick_duration;
         if tick >= world.world.max_tick() {
             db.recording_cell.set_playing(false);
             world.world.metadata.max_tick = u64::MAX;
