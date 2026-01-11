@@ -22,11 +22,11 @@ class Integrator:
     Rk4: Integrator
     SemiImplicit: Integrator
 
-class PostStepContext:
-    """Context object passed to post_step callbacks, providing direct DB read/write access.
+class StepContext:
+    """Context object passed to pre_step and post_step callbacks, providing direct DB read/write access.
 
     This enables SITL workflows to read sensor data and write component data (like motor
-    commands from Betaflight) back to the database within the same process.
+    commands from Betaflight) directly to the database within the same process.
     """
     @property
     def tick(self) -> int:
@@ -87,6 +87,15 @@ class PostStepContext:
             ValueError: If any write data size doesn't match the component schema
         """
         ...
+    def truncate(self) -> None:
+        """Truncate all component data and message logs in the database, resetting tick to 0.
+
+        This clears all stored time-series data while preserving component schemas and metadata.
+        The simulation tick will be reset to 0, effectively starting fresh.
+
+        Use this to control the freshness of the database and ensure reliable data from a known tick.
+        """
+        ...
 
 class ComponentType:
     def __init__(self, ty: PrimitiveType, shape: Tuple[int, ...]): ...
@@ -120,7 +129,8 @@ class WorldBuilder:
         max_ticks: Optional[int] = None,
         optimize: bool = False,
         is_canceled: Optional[Callable[[], bool]] = None,
-        post_step: Optional[Callable[[int, PostStepContext], None]] = None,
+        pre_step: Optional[Callable[[int, StepContext], None]] = None,
+        post_step: Optional[Callable[[int, StepContext], None]] = None,
         db_path: Optional[str] = None,
         interactive: bool = True,
     ): ...

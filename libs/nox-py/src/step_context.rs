@@ -1,8 +1,9 @@
-//! PostStepContext provides a way for post_step callbacks to read and write component data
-//! directly to the database without needing a separate TCP connection.
+//! StepContext provides a way for pre_step and post_step callbacks to read and write
+//! component data directly to the database without needing a separate TCP connection.
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use elodin_db::DB;
 use impeller2::types::{ComponentId, PrimType, Timestamp};
@@ -86,31 +87,34 @@ fn buf_to_numpy_array<'py>(py: Python<'py>, buf: &[u8], prim_type: PrimType) -> 
     }
 }
 
-/// Context object passed to post_step callbacks, providing direct DB write access.
+/// Context object passed to pre_step and post_step callbacks, providing direct DB access.
 ///
-/// This enables SITL workflows to write component data (like motor commands from
-/// Betaflight) back to the database within the same process, avoiding the overhead
-/// of a separate TCP connection.
+/// This enables SITL workflows to read and write component data (like sensor readings
+/// and motor commands) directly to the database within the same process, avoiding the
+/// overhead of a separate TCP connection.
 #[pyclass]
-pub struct PostStepContext {
+pub struct StepContext {
     db: Arc<DB>,
     timestamp: Timestamp,
     tick: u64,
+    /// Shared tick counter that can be reset by truncate()
+    tick_counter: Arc<AtomicU64>,
 }
 
-impl PostStepContext {
-    /// Create a new PostStepContext with access to the database.
-    pub fn new(db: Arc<DB>, timestamp: Timestamp, tick: u64) -> Self {
+impl StepContext {
+    /// Create a new StepContext with access to the database and shared tick counter.
+    pub fn new(db: Arc<DB>, tick_counter: Arc<AtomicU64>, timestamp: Timestamp, tick: u64) -> Self {
         Self {
             db,
             timestamp,
             tick,
+            tick_counter,
         }
     }
 }
 
 #[pymethods]
-impl PostStepContext {
+impl StepContext {
     /// Write component data to the database.
     ///
     /// Args:
@@ -293,6 +297,17 @@ impl PostStepContext {
     #[getter]
     fn timestamp(&self) -> i64 {
         self.timestamp.0
+    }
+
+    /// Truncate all component data and message logs in the database, resetting the tick counter to 0.
+    ///
+    /// This clears all stored time-series data while preserving component schemas and metadata.
+    /// The simulation tick will be reset to 0, effectively starting fresh.
+    ///
+    /// Use this to control the freshness of the database and ensure reliable data from a known tick.
+    fn truncate(&self) {
+        self.db.truncate();
+        self.tick_counter.store(0, Ordering::SeqCst);
     }
 
     /// Perform multiple component reads and writes in a single DB operation.

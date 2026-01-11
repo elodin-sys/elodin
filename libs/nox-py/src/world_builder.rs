@@ -202,6 +202,7 @@ impl WorldBuilder {
         max_ticks = None,
         optimize = false,
         is_canceled = None,
+        pre_step = None,
         post_step = None,
         db_path = None,
         interactive = true,
@@ -216,6 +217,7 @@ impl WorldBuilder {
         max_ticks: Option<u64>,
         optimize: bool,
         is_canceled: Option<PyObject>,
+        pre_step: Option<PyObject>,
         post_step: Option<PyObject>,
         db_path: Option<String>,
         interactive: bool,
@@ -301,15 +303,53 @@ impl WorldBuilder {
                                     terminate_flag.load(Ordering::Relaxed)
                                 }
                             },
-                            move |tick_count, db: &Arc<elodin_db::DB>, timestamp: Timestamp| {
+                            move |tick_count,
+                                  db: &Arc<elodin_db::DB>,
+                                  tick_counter: &Arc<std::sync::atomic::AtomicU64>,
+                                  timestamp: Timestamp| {
+                                if let Some(ref func) = pre_step {
+                                    Python::with_gil(|py| {
+                                        let tick_count_py = tick_count
+                                            .into_bound_py_any(py)
+                                            .unwrap_or_else(|_| py.None().into_bound(py));
+                                        // Create StepContext with DB access for reading/writing components
+                                        let ctx = StepContext::new(
+                                            db.clone(),
+                                            tick_counter.clone(),
+                                            timestamp,
+                                            tick_count,
+                                        );
+                                        match Py::new(py, ctx) {
+                                            Ok(ctx_py) => {
+                                                if let Err(e) =
+                                                    func.call1(py, (tick_count_py, ctx_py))
+                                                {
+                                                    tracing::warn!("pre_step error {e}");
+                                                }
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!("failed to create StepContext: {e}");
+                                            }
+                                        }
+                                    });
+                                }
+                            },
+                            move |tick_count,
+                                  db: &Arc<elodin_db::DB>,
+                                  tick_counter: &Arc<std::sync::atomic::AtomicU64>,
+                                  timestamp: Timestamp| {
                                 if let Some(ref func) = post_step {
                                     Python::with_gil(|py| {
                                         let tick_count_py = tick_count
                                             .into_bound_py_any(py)
                                             .unwrap_or_else(|_| py.None().into_bound(py));
-                                        // Create PostStepContext with DB access for writing components
-                                        let ctx =
-                                            PostStepContext::new(db.clone(), timestamp, tick_count);
+                                        // Create StepContext with DB access for reading/writing components
+                                        let ctx = StepContext::new(
+                                            db.clone(),
+                                            tick_counter.clone(),
+                                            timestamp,
+                                            tick_count,
+                                        );
                                         match Py::new(py, ctx) {
                                             Ok(ctx_py) => {
                                                 if let Err(e) =
@@ -319,9 +359,7 @@ impl WorldBuilder {
                                                 }
                                             }
                                             Err(e) => {
-                                                tracing::warn!(
-                                                    "failed to create PostStepContext: {e}"
-                                                );
+                                                tracing::warn!("failed to create StepContext: {e}");
                                             }
                                         }
                                     });
