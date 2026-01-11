@@ -39,7 +39,9 @@ Doing a pre-release should be quick-and-dirty on-demand operation without any of
 1. Run `just tag v$VERSION` on the updated `main` branch. 
 2. Run `just promote v$VERSION` to promote the artifacts from GitHub to S3 and PyPi. 
 ```sh
-export VERSION=0.15.5-alpha.0
+export PYPI_TOKEN=pypi-...; # You'll need this token to publish the pypi package.
+export VERSION=0.16.0-alpha.1
+# Start release. Wait 40 minutes. Then publish pypi package.
 just tag v$VERSION origin/main && sleep $((40 * 60)) && just promote v$VERSION
 ``` 
 3. Once released, we want to bump the version of alpha so that what was just released and what's on the 'main' branch will not be easily confused. If the version released was `0.1.2-alpha.0` then the next version would be `0.1.2-alpha.1`. 
