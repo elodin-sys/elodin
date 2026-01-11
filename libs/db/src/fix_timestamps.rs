@@ -1,36 +1,30 @@
-#!/usr/bin/env -S cargo +nightly -Zscript
 //! Database timestamp migration tool
 //!
 //! Fixes databases where some components have monotonic timestamps (from device boot time)
 //! instead of wall-clock timestamps.
-//!
-//! Usage:
-//!   cargo run --bin fix_timestamps -- <db_path> [--dry-run]
 
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
+use crate::Error;
+
 const HEADER_SIZE: usize = 24; // committed_len (8) + head_len (8) + extra (8)
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = std::env::args().collect();
-
-    if args.len() < 2 {
-        eprintln!("Usage: {} <db_path> [--dry-run]", args[0]);
-        eprintln!();
-        eprintln!("Fixes timestamps in an elodin-db database by aligning monotonic");
-        eprintln!("timestamps (1970 dates) with wall-clock timestamps (2025 dates).");
-        std::process::exit(1);
-    }
-
-    let db_path = PathBuf::from(&args[1]);
-    let dry_run = args.get(2).map(|s| s == "--dry-run").unwrap_or(false);
-
+/// Fix monotonic timestamps in an elodin-db database by aligning them with wall-clock timestamps.
+///
+/// # Arguments
+/// * `db_path` - Path to the database directory
+/// * `dry_run` - If true, only show what would be changed without modifying
+/// * `auto_confirm` - If true, skip the confirmation prompt (for non-interactive use)
+///
+/// # Returns
+/// * `Ok(())` if successful or no changes needed
+/// * `Err(Error)` if the operation fails
+pub fn run(db_path: PathBuf, dry_run: bool, auto_confirm: bool) -> Result<(), Error> {
     if !db_path.exists() {
-        eprintln!("Error: Database path does not exist: {}", db_path.display());
-        std::process::exit(1);
+        return Err(Error::MissingDbState(db_path));
     }
 
     println!("Analyzing database: {}", db_path.display());
@@ -122,7 +116,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if good_components.is_empty() {
         eprintln!("Error: No reference components with wall-clock timestamps found.");
         eprintln!("Cannot determine the correct time offset.");
-        std::process::exit(1);
+        return Err(Error::FixTimestamps(
+            "No reference components with wall-clock timestamps found".to_string(),
+        ));
     }
 
     // Calculate offset: wall_clock_min - monotonic_min
@@ -184,14 +180,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    print!("Apply timestamp fixes? [y/N] ");
-    std::io::stdout().flush()?;
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
+    if !auto_confirm {
+        print!("Apply timestamp fixes? [y/N] ");
+        std::io::stdout().flush()?;
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
 
-    if !input.trim().eq_ignore_ascii_case("y") {
-        println!("Aborted.");
-        return Ok(());
+        if !input.trim().eq_ignore_ascii_case("y") {
+            println!("Aborted.");
+            return Ok(());
+        }
     }
 
     println!();
@@ -221,16 +219,16 @@ struct ComponentInfo {
     count: usize,
 }
 
-fn analyze_component(index_path: &Path) -> Result<ComponentInfo, Box<dyn std::error::Error>> {
+fn analyze_component(index_path: &Path) -> Result<ComponentInfo, std::io::Error> {
     let mut file = File::open(index_path)?;
 
     // Read header
     let mut header = [0u8; HEADER_SIZE];
     file.read_exact(&mut header)?;
 
-    let committed_len = u64::from_le_bytes(header[0..8].try_into()?);
-    let _head_len = u64::from_le_bytes(header[8..16].try_into()?);
-    let _start_timestamp = i64::from_le_bytes(header[16..24].try_into()?);
+    let committed_len = u64::from_le_bytes(header[0..8].try_into().unwrap());
+    let _head_len = u64::from_le_bytes(header[8..16].try_into().unwrap());
+    let _start_timestamp = i64::from_le_bytes(header[16..24].try_into().unwrap());
 
     let data_len = committed_len as usize - HEADER_SIZE;
     let count = data_len / 8; // Each timestamp is 8 bytes
@@ -249,7 +247,7 @@ fn analyze_component(index_path: &Path) -> Result<ComponentInfo, Box<dyn std::er
     let mut min_ts = i64::MAX;
 
     for chunk in data.chunks_exact(8) {
-        let ts = i64::from_le_bytes(chunk.try_into()?);
+        let ts = i64::from_le_bytes(chunk.try_into().unwrap());
         min_ts = min_ts.min(ts);
     }
 
@@ -259,11 +257,7 @@ fn analyze_component(index_path: &Path) -> Result<ComponentInfo, Box<dyn std::er
     })
 }
 
-fn apply_offset(
-    index_path: &Path,
-    offset: i64,
-    count: usize,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn apply_offset(index_path: &Path, offset: i64, count: usize) -> Result<(), std::io::Error> {
     let mut file = OpenOptions::new().read(true).write(true).open(index_path)?;
 
     // Read header
@@ -271,7 +265,7 @@ fn apply_offset(
     file.read_exact(&mut header)?;
 
     // Update start_timestamp in header
-    let start_ts = i64::from_le_bytes(header[16..24].try_into()?);
+    let start_ts = i64::from_le_bytes(header[16..24].try_into().unwrap());
     let new_start_ts = start_ts + offset;
     header[16..24].copy_from_slice(&new_start_ts.to_le_bytes());
 
@@ -296,7 +290,7 @@ fn apply_offset(
     Ok(())
 }
 
-fn read_component_name(metadata_path: &Path) -> Result<String, Box<dyn std::error::Error>> {
+fn read_component_name(metadata_path: &Path) -> Result<String, std::io::Error> {
     // The metadata is stored as postcard-serialized ComponentMetadata
     // For simplicity, we'll just try to extract the name string
     let data = fs::read(metadata_path)?;
@@ -304,26 +298,34 @@ fn read_component_name(metadata_path: &Path) -> Result<String, Box<dyn std::erro
     // ComponentMetadata has component_id (u64), then name (String), then metadata
     // postcard encodes String as varint length + utf8 bytes
     if data.len() < 9 {
-        return Err("metadata too short".into());
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "metadata too short",
+        ));
     }
 
     // Skip component_id (8 bytes)
     let name_data = &data[8..];
 
     // Read varint length
-    let (len, bytes_read) = decode_varint(name_data)?;
+    let (len, bytes_read) = decode_varint(name_data).map_err(|e| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+    })?;
     let name_start = bytes_read;
     let name_end = name_start + len as usize;
 
     if name_end > name_data.len() {
-        return Err("name length exceeds data".into());
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "name length exceeds data",
+        ));
     }
 
-    let name = String::from_utf8(name_data[name_start..name_end].to_vec())?;
-    Ok(name)
+    String::from_utf8(name_data[name_start..name_end].to_vec())
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
-fn decode_varint(data: &[u8]) -> Result<(u64, usize), Box<dyn std::error::Error>> {
+fn decode_varint(data: &[u8]) -> Result<(u64, usize), &'static str> {
     let mut result: u64 = 0;
     let mut shift = 0;
 
@@ -334,9 +336,9 @@ fn decode_varint(data: &[u8]) -> Result<(u64, usize), Box<dyn std::error::Error>
         }
         shift += 7;
         if shift > 63 {
-            return Err("varint too long".into());
+            return Err("varint too long");
         }
     }
 
-    Err("incomplete varint".into())
+    Err("incomplete varint")
 }

@@ -23,6 +23,8 @@ enum Commands {
     Lua(impeller2_cli::Args),
     #[command(about = "Generate C++ header files")]
     GenCpp,
+    #[command(name = "fix-timestamps", about = "Fix monotonic timestamps in a database")]
+    FixTimestamps(FixTimestampsArgs),
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -38,6 +40,16 @@ struct RunArgs {
     http_addr: Option<SocketAddr>,
     #[clap(long, hide = true)]
     reset: bool,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+struct FixTimestampsArgs {
+    #[clap(help = "Path to the database directory")]
+    path: PathBuf,
+    #[clap(long, help = "Show what would be changed without modifying")]
+    dry_run: bool,
+    #[clap(long, short, help = "Skip confirmation prompt")]
+    yes: bool,
 }
 
 #[stellarator::main]
@@ -126,6 +138,9 @@ async fn main() -> miette::Result<()> {
                 .write_all(header.as_bytes())
                 .into_diagnostic()?;
             Ok(())
+        }
+        Commands::FixTimestamps(FixTimestampsArgs { path, dry_run, yes }) => {
+            elodin_db::fix_timestamps::run(path, dry_run, yes).into_diagnostic()
         }
     }
 }
