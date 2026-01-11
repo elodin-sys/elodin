@@ -22,11 +22,11 @@ class Integrator:
     Rk4: Integrator
     SemiImplicit: Integrator
 
-class PostStepContext:
-    """Context object passed to post_step callbacks, providing direct DB read/write access.
+class StepContext:
+    """Context object passed to pre_step and post_step callbacks, providing direct DB read/write access.
 
     This enables SITL workflows to read sensor data and write component data (like motor
-    commands from Betaflight) back to the database within the same process.
+    commands from Betaflight) directly to the database within the same process.
     """
     @property
     def tick(self) -> int:
@@ -120,7 +120,8 @@ class WorldBuilder:
         max_ticks: Optional[int] = None,
         optimize: bool = False,
         is_canceled: Optional[Callable[[], bool]] = None,
-        post_step: Optional[Callable[[int, PostStepContext], None]] = None,
+        pre_step: Optional[Callable[[int, StepContext], None]] = None,
+        post_step: Optional[Callable[[int, StepContext], None]] = None,
         db_path: Optional[str] = None,
         interactive: bool = True,
     ): ...

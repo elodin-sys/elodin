@@ -1,5 +1,5 @@
-//! PostStepContext provides a way for post_step callbacks to read and write component data
-//! directly to the database without needing a separate TCP connection.
+//! StepContext provides a way for pre_step and post_step callbacks to read and write
+//! component data directly to the database without needing a separate TCP connection.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -86,20 +86,20 @@ fn buf_to_numpy_array<'py>(py: Python<'py>, buf: &[u8], prim_type: PrimType) -> 
     }
 }
 
-/// Context object passed to post_step callbacks, providing direct DB write access.
+/// Context object passed to pre_step and post_step callbacks, providing direct DB access.
 ///
-/// This enables SITL workflows to write component data (like motor commands from
-/// Betaflight) back to the database within the same process, avoiding the overhead
-/// of a separate TCP connection.
+/// This enables SITL workflows to read and write component data (like sensor readings
+/// and motor commands) directly to the database within the same process, avoiding the
+/// overhead of a separate TCP connection.
 #[pyclass]
-pub struct PostStepContext {
+pub struct StepContext {
     db: Arc<DB>,
     timestamp: Timestamp,
     tick: u64,
 }
 
-impl PostStepContext {
-    /// Create a new PostStepContext with access to the database.
+impl StepContext {
+    /// Create a new StepContext with access to the database.
     pub fn new(db: Arc<DB>, timestamp: Timestamp, tick: u64) -> Self {
         Self {
             db,
@@ -110,7 +110,7 @@ impl PostStepContext {
 }
 
 #[pymethods]
-impl PostStepContext {
+impl StepContext {
     /// Write component data to the database.
     ///
     /// Args:

@@ -25,13 +25,14 @@ impl Server {
 
     pub async fn run(self) -> Result<(), Error> {
         tracing::info!("running server");
-        self.run_with_cancellation(|| false, |_, _, _| {}, false)
+        self.run_with_cancellation(|| false, |_, _, _| {}, |_, _, _| {}, false)
             .await
     }
 
     pub async fn run_with_cancellation(
         self,
         is_cancelled: impl Fn() -> bool + 'static,
+        pre_step: impl Fn(u64, &Arc<DB>, Timestamp) + 'static,
         post_step: impl Fn(u64, &Arc<DB>, Timestamp) + 'static,
         interactive: bool,
     ) -> Result<(), Error> {
@@ -53,6 +54,7 @@ impl Server {
             tick_db,
             world,
             is_cancelled,
+            pre_step,
             post_step,
             start_time,
             interactive,
@@ -266,6 +268,7 @@ async fn tick(
     db: Arc<DB>,
     mut world: WorldExec<Compiled>,
     is_cancelled: impl Fn() -> bool + 'static,
+    pre_step: impl Fn(u64, &Arc<DB>, Timestamp) + 'static,
     post_step: impl Fn(u64, &Arc<DB>, Timestamp) + 'static,
     mut timestamp: Timestamp,
     interactive: bool,
@@ -290,6 +293,8 @@ async fn tick(
                 return;
             }
         }
+        // Python pre_step func runs (before copy_db_to_world so writes are picked up).
+        pre_step(tick, &db, timestamp);
         db.with_state(|state| copy_db_to_world(state, &mut world));
         // JAX runs.
         if let Err(err) = world.run() {
@@ -314,7 +319,7 @@ async fn tick(
         if is_cancelled() {
             return;
         }
-        // Python func runs.
+        // Python post_step func runs.
         post_step(tick, &db, timestamp);
         // We only wait if there is a run_time_step set and it's >= the time elapsed.
         if let Some(run_time_step) = run_time_step.as_ref()
