@@ -87,6 +87,15 @@ class StepContext:
             ValueError: If any write data size doesn't match the component schema
         """
         ...
+    def truncate(self) -> None:
+        """Truncate all component data and message logs in the database, resetting tick to 0.
+
+        This clears all stored time-series data while preserving component schemas and metadata.
+        The simulation tick will be reset to 0, effectively starting fresh.
+
+        Use this to control the freshness of the database and ensure reliable data from a known tick.
+        """
+        ...
 
 class ComponentType:
     def __init__(self, ty: PrimitiveType, shape: Tuple[int, ...]): ...

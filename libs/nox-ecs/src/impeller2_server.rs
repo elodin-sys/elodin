@@ -5,7 +5,10 @@ use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 use nox_ecs::Error;
 use std::{
     collections::HashSet,
-    sync::{Arc, atomic},
+    sync::{
+        Arc,
+        atomic::{self, AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 use stellarator::struc_con::{Joinable, Thread};
@@ -25,15 +28,15 @@ impl Server {
 
     pub async fn run(self) -> Result<(), Error> {
         tracing::info!("running server");
-        self.run_with_cancellation(|| false, |_, _, _| {}, |_, _, _| {}, false)
+        self.run_with_cancellation(|| false, |_, _, _, _| {}, |_, _, _, _| {}, false)
             .await
     }
 
     pub async fn run_with_cancellation(
         self,
         is_cancelled: impl Fn() -> bool + 'static,
-        pre_step: impl Fn(u64, &Arc<DB>, Timestamp) + 'static,
-        post_step: impl Fn(u64, &Arc<DB>, Timestamp) + 'static,
+        pre_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp) + 'static,
+        post_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp) + 'static,
         interactive: bool,
     ) -> Result<(), Error> {
         tracing::info!("running server with cancellation");
@@ -42,6 +45,8 @@ impl Server {
         let start_time = Timestamp::now();
         init_db(&db, &mut world.world, start_time)?;
         let tick_db = db.clone();
+        // Shared tick counter that can be reset by StepContext::truncate()
+        let tick_counter = Arc::new(AtomicU64::new(0));
         let stream: Thread<Option<Result<(), Error>>> =
             stellarator::struc_con::stellar(move || async move {
                 let mut handles = vec![];
@@ -52,6 +57,7 @@ impl Server {
             });
         let tick = stellarator::spawn(tick(
             tick_db,
+            tick_counter,
             world,
             is_cancelled,
             pre_step,
@@ -169,7 +175,10 @@ pub fn copy_db_to_world(state: &State, world: &mut WorldExec<Compiled>) {
             let Some(component) = state.get_component(pair_id) else {
                 continue;
             };
-            let (_, head) = component.time_series.latest().unwrap();
+            // After truncate(), time series may be empty - skip if no data
+            let Some((_, head)) = component.time_series.latest() else {
+                continue;
+            };
 
             // Check if the value has changed
             let current_value = &column.buffer[offset..offset + size];
@@ -266,15 +275,15 @@ pub fn commit_world_head(
 
 async fn tick(
     db: Arc<DB>,
+    tick_counter: Arc<AtomicU64>,
     mut world: WorldExec<Compiled>,
     is_cancelled: impl Fn() -> bool + 'static,
-    pre_step: impl Fn(u64, &Arc<DB>, Timestamp) + 'static,
-    post_step: impl Fn(u64, &Arc<DB>, Timestamp) + 'static,
-    mut timestamp: Timestamp,
+    pre_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp) + 'static,
+    post_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp) + 'static,
+    start_timestamp: Timestamp,
     interactive: bool,
 ) {
     // XXX This is what world.run ultimately calls.
-    let mut tick = 0;
     let external_controls: HashSet<ComponentId> = external_controls(&world).collect();
     let wait_for_write: Vec<ComponentId> = wait_for_write(&world).collect();
     let wait_for_write_pair_ids: Vec<PairId> = get_pair_ids(&world, &wait_for_write).unwrap();
@@ -284,8 +293,13 @@ async fn tick(
         .metadata
         .run_time_step
         .map(|time_step| time_step.0);
+    let time_step = world.world.sim_time_step().0;
     while db.recording_cell.wait().await {
         let start = Instant::now();
+        // Read tick from shared counter (can be reset by StepContext::truncate())
+        let tick = tick_counter.load(Ordering::SeqCst);
+        // Calculate timestamp based on current tick
+        let timestamp = start_timestamp + time_step * (tick as u32);
         if tick >= world.world.max_tick() {
             db.recording_cell.set_playing(false);
             world.world.metadata.max_tick = u64::MAX;
@@ -294,7 +308,7 @@ async fn tick(
             }
         }
         // Python pre_step func runs (before copy_db_to_world so writes are picked up).
-        pre_step(tick, &db, timestamp);
+        pre_step(tick, &db, &tick_counter, timestamp);
         db.with_state(|state| copy_db_to_world(state, &mut world));
         // JAX runs.
         if let Err(err) = world.run() {
@@ -320,15 +334,14 @@ async fn tick(
             return;
         }
         // Python post_step func runs.
-        post_step(tick, &db, timestamp);
+        post_step(tick, &db, &tick_counter, timestamp);
         // We only wait if there is a run_time_step set and it's >= the time elapsed.
         if let Some(run_time_step) = run_time_step.as_ref()
             && let Some(sleep_time) = run_time_step.checked_sub(start.elapsed())
         {
             stellarator::sleep(sleep_time).await;
         }
-        tick += 1;
-        timestamp += world.world.sim_time_step().0;
+        tick_counter.fetch_add(1, Ordering::SeqCst);
     }
 }
 

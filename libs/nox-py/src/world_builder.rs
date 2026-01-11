@@ -303,15 +303,22 @@ impl WorldBuilder {
                                     terminate_flag.load(Ordering::Relaxed)
                                 }
                             },
-                            move |tick_count, db: &Arc<elodin_db::DB>, timestamp: Timestamp| {
+                            move |tick_count,
+                                  db: &Arc<elodin_db::DB>,
+                                  tick_counter: &Arc<std::sync::atomic::AtomicU64>,
+                                  timestamp: Timestamp| {
                                 if let Some(ref func) = pre_step {
                                     Python::with_gil(|py| {
                                         let tick_count_py = tick_count
                                             .into_bound_py_any(py)
                                             .unwrap_or_else(|_| py.None().into_bound(py));
                                         // Create StepContext with DB access for reading/writing components
-                                        let ctx =
-                                            StepContext::new(db.clone(), timestamp, tick_count);
+                                        let ctx = StepContext::new(
+                                            db.clone(),
+                                            tick_counter.clone(),
+                                            timestamp,
+                                            tick_count,
+                                        );
                                         match Py::new(py, ctx) {
                                             Ok(ctx_py) => {
                                                 if let Err(e) =
@@ -327,15 +334,22 @@ impl WorldBuilder {
                                     });
                                 }
                             },
-                            move |tick_count, db: &Arc<elodin_db::DB>, timestamp: Timestamp| {
+                            move |tick_count,
+                                  db: &Arc<elodin_db::DB>,
+                                  tick_counter: &Arc<std::sync::atomic::AtomicU64>,
+                                  timestamp: Timestamp| {
                                 if let Some(ref func) = post_step {
                                     Python::with_gil(|py| {
                                         let tick_count_py = tick_count
                                             .into_bound_py_any(py)
                                             .unwrap_or_else(|_| py.None().into_bound(py));
                                         // Create StepContext with DB access for reading/writing components
-                                        let ctx =
-                                            StepContext::new(db.clone(), timestamp, tick_count);
+                                        let ctx = StepContext::new(
+                                            db.clone(),
+                                            tick_counter.clone(),
+                                            timestamp,
+                                            tick_count,
+                                        );
                                         match Py::new(py, ctx) {
                                             Ok(ctx_py) => {
                                                 if let Err(e) =

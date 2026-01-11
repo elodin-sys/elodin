@@ -175,4 +175,14 @@ impl<E: IntoBytes + Immutable> AppendLog<E> {
         drop(guard);
         Ok(end - size_of::<Header<E>>())
     }
+
+    /// Truncate the append log, clearing all data while preserving the header.
+    ///
+    /// This resets the committed_len back to just the header size, effectively
+    /// removing all stored data without deallocating the memory-mapped file.
+    pub fn truncate(&self) {
+        let _guard = self.write_lock.lock().unwrap();
+        self.committed_len()
+            .store(size_of::<Header<E>>() as u64, Ordering::SeqCst);
+    }
 }

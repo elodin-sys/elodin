@@ -229,6 +229,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
                 pass  # Expected during initial warmup
         print(f"[SITL] Warmup complete ({warmup_count} responses at {config.pid_rate:.0f}Hz)")
         print("[SITL] Bridge ready")
+        ctx.truncate()  # Clears all data, resets tick to 0
 
     if start_time[0] is None:
         start_time[0] = time.time()

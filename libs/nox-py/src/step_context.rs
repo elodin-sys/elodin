@@ -2,6 +2,7 @@
 //! component data directly to the database without needing a separate TCP connection.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use elodin_db::DB;
@@ -96,15 +97,23 @@ pub struct StepContext {
     db: Arc<DB>,
     timestamp: Timestamp,
     tick: u64,
+    /// Shared tick counter that can be reset by truncate()
+    tick_counter: Arc<AtomicU64>,
 }
 
 impl StepContext {
-    /// Create a new StepContext with access to the database.
-    pub fn new(db: Arc<DB>, timestamp: Timestamp, tick: u64) -> Self {
+    /// Create a new StepContext with access to the database and shared tick counter.
+    pub fn new(
+        db: Arc<DB>,
+        tick_counter: Arc<AtomicU64>,
+        timestamp: Timestamp,
+        tick: u64,
+    ) -> Self {
         Self {
             db,
             timestamp,
             tick,
+            tick_counter,
         }
     }
 }
@@ -293,6 +302,17 @@ impl StepContext {
     #[getter]
     fn timestamp(&self) -> i64 {
         self.timestamp.0
+    }
+
+    /// Truncate all component data and message logs in the database, resetting the tick counter to 0.
+    ///
+    /// This clears all stored time-series data while preserving component schemas and metadata.
+    /// The simulation tick will be reset to 0, effectively starting fresh.
+    ///
+    /// Use this to control the freshness of the database and ensure reliable data from a known tick.
+    fn truncate(&self) {
+        self.db.truncate();
+        self.tick_counter.store(0, Ordering::SeqCst);
     }
 
     /// Perform multiple component reads and writes in a single DB operation.

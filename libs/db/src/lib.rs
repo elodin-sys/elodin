@@ -394,6 +394,18 @@ impl DB {
         Ok(())
     }
 
+    /// Truncate all component data and message logs, clearing all data while preserving schemas and metadata.
+    ///
+    /// This effectively resets the database to an empty state, ready for fresh data.
+    /// The vtable generation is incremented to signal that clients should refresh their views.
+    pub fn truncate(&self) {
+        self.with_state(|state| {
+            state.truncate_all();
+        });
+        self.last_updated.store(Timestamp(i64::MIN));
+        self.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
+    }
+
     pub fn copy_native(&self, target_db_path: impl AsRef<Path>) -> Result<PathBuf, Error> {
         let final_db_dir = target_db_path.as_ref().to_path_buf();
         let parent_dir = final_db_dir
@@ -751,6 +763,16 @@ impl State {
         msg_log.set_metadata(metadata)?;
         Ok(())
     }
+
+    /// Truncate all components and message logs, clearing all data while preserving schemas and metadata.
+    pub fn truncate_all(&self) {
+        for component in self.components.values() {
+            component.truncate();
+        }
+        for msg_log in self.msg_logs.values() {
+            msg_log.truncate();
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -953,6 +975,11 @@ impl Component {
 
     fn sync_all(&self) -> Result<(), Error> {
         self.time_series.sync_all()
+    }
+
+    /// Truncate the component, clearing all time-series data while preserving the schema.
+    pub fn truncate(&self) {
+        self.time_series.truncate();
     }
 }
 

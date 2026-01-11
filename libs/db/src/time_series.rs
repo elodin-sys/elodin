@@ -142,6 +142,15 @@ impl TimeSeries {
         Ok(())
     }
 
+    /// Truncate the time series, clearing all data while preserving the schema.
+    ///
+    /// This resets both the index and data append logs, effectively removing
+    /// all stored time-series data without deallocating the underlying files.
+    pub fn truncate(&self) {
+        self.index.truncate();
+        self.data.truncate();
+    }
+
     pub fn push_buf(&self, timestamp: Timestamp, buf: &[u8]) -> Result<(), Error> {
         let len = self.index.len() as usize;
 
