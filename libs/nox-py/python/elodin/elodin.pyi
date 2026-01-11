@@ -93,6 +93,9 @@ class StepContext:
         This clears all stored time-series data while preserving component schemas and metadata.
         The simulation tick will be reset to 0, effectively starting fresh.
 
+        After truncate(), any subsequent write_component() calls in the same callback will write
+        at the start timestamp (tick 0), preventing TimeTravel errors on the next tick.
+
         Use this to control the freshness of the database and ensure reliable data from a known tick.
         """
         ...

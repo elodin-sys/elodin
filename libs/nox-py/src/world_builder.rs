@@ -306,7 +306,8 @@ impl WorldBuilder {
                             move |tick_count,
                                   db: &Arc<elodin_db::DB>,
                                   tick_counter: &Arc<std::sync::atomic::AtomicU64>,
-                                  timestamp: Timestamp| {
+                                  timestamp: Timestamp,
+                                  start_timestamp: Timestamp| {
                                 if let Some(ref func) = pre_step {
                                     Python::with_gil(|py| {
                                         let tick_count_py = tick_count
@@ -318,6 +319,7 @@ impl WorldBuilder {
                                             tick_counter.clone(),
                                             timestamp,
                                             tick_count,
+                                            start_timestamp,
                                         );
                                         match Py::new(py, ctx) {
                                             Ok(ctx_py) => {
@@ -337,7 +339,8 @@ impl WorldBuilder {
                             move |tick_count,
                                   db: &Arc<elodin_db::DB>,
                                   tick_counter: &Arc<std::sync::atomic::AtomicU64>,
-                                  timestamp: Timestamp| {
+                                  timestamp: Timestamp,
+                                  start_timestamp: Timestamp| {
                                 if let Some(ref func) = post_step {
                                     Python::with_gil(|py| {
                                         let tick_count_py = tick_count
@@ -349,6 +352,7 @@ impl WorldBuilder {
                                             tick_counter.clone(),
                                             timestamp,
                                             tick_count,
+                                            start_timestamp,
                                         );
                                         match Py::new(py, ctx) {
                                             Ok(ctx_py) => {

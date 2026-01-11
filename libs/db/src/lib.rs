@@ -56,6 +56,7 @@ pub mod append_log;
 mod arrow;
 pub mod axum;
 mod error;
+pub mod fix_timestamps;
 mod msg_log;
 pub(crate) mod time_series;
 mod vtable_stream;

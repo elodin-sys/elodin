@@ -28,15 +28,15 @@ impl Server {
 
     pub async fn run(self) -> Result<(), Error> {
         tracing::info!("running server");
-        self.run_with_cancellation(|| false, |_, _, _, _| {}, |_, _, _, _| {}, false)
+        self.run_with_cancellation(|| false, |_, _, _, _, _| {}, |_, _, _, _, _| {}, false)
             .await
     }
 
     pub async fn run_with_cancellation(
         self,
         is_cancelled: impl Fn() -> bool + 'static,
-        pre_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp) + 'static,
-        post_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp) + 'static,
+        pre_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
+        post_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
         interactive: bool,
     ) -> Result<(), Error> {
         tracing::info!("running server with cancellation");
@@ -279,8 +279,8 @@ async fn tick(
     tick_counter: Arc<AtomicU64>,
     mut world: WorldExec<Compiled>,
     is_cancelled: impl Fn() -> bool + 'static,
-    pre_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp) + 'static,
-    post_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp) + 'static,
+    pre_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
+    post_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
     start_timestamp: Timestamp,
     interactive: bool,
 ) {
@@ -300,7 +300,10 @@ async fn tick(
         // Read tick from shared counter (can be reset by StepContext::truncate())
         let tick = tick_counter.load(Ordering::SeqCst);
         // Calculate timestamp based on current tick
-        let timestamp = start_timestamp + time_step * (tick as u32);
+        // Use u128 arithmetic to avoid overflow for long-running simulations (u32 would truncate after ~4B ticks)
+        let tick_nanos = time_step.as_nanos() * (tick as u128);
+        let tick_duration = Duration::from_nanos(tick_nanos.min(u64::MAX as u128) as u64);
+        let timestamp = start_timestamp + tick_duration;
         if tick >= world.world.max_tick() {
             db.recording_cell.set_playing(false);
             world.world.metadata.max_tick = u64::MAX;
@@ -309,7 +312,16 @@ async fn tick(
             }
         }
         // Python pre_step func runs (before copy_db_to_world so writes are picked up).
-        pre_step(tick, &db, &tick_counter, timestamp);
+        pre_step(tick, &db, &tick_counter, timestamp, start_timestamp);
+
+        // Check if truncate() was called during pre_step.
+        // If tick_counter was reset to a value less than our current tick,
+        // skip this iteration to avoid writing at the old (higher) timestamp,
+        // which would cause TimeTravel errors on the next tick.
+        if tick_counter.load(Ordering::SeqCst) < tick {
+            continue;
+        }
+
         db.with_state(|state| copy_db_to_world(state, &mut world));
         // JAX runs.
         if let Err(err) = world.run() {
@@ -335,14 +347,19 @@ async fn tick(
             return;
         }
         // Python post_step func runs.
-        post_step(tick, &db, &tick_counter, timestamp);
+        post_step(tick, &db, &tick_counter, timestamp, start_timestamp);
         // We only wait if there is a run_time_step set and it's >= the time elapsed.
         if let Some(run_time_step) = run_time_step.as_ref()
             && let Some(sleep_time) = run_time_step.checked_sub(start.elapsed())
         {
             stellarator::sleep(sleep_time).await;
         }
-        tick_counter.fetch_add(1, Ordering::SeqCst);
+
+        // Only increment tick_counter if it wasn't reset by truncate() during post_step.
+        // If truncate() was called, tick_counter is already at the desired reset value (0).
+        if tick_counter.load(Ordering::SeqCst) == tick {
+            tick_counter.fetch_add(1, Ordering::SeqCst);
+        }
     }
 }
 
