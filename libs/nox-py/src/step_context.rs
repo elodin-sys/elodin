@@ -2,8 +2,8 @@
 //! component data directly to the database without needing a separate TCP connection.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use elodin_db::DB;
 use impeller2::types::{ComponentId, PrimType, Timestamp};
@@ -103,12 +103,7 @@ pub struct StepContext {
 
 impl StepContext {
     /// Create a new StepContext with access to the database and shared tick counter.
-    pub fn new(
-        db: Arc<DB>,
-        tick_counter: Arc<AtomicU64>,
-        timestamp: Timestamp,
-        tick: u64,
-    ) -> Self {
+    pub fn new(db: Arc<DB>, tick_counter: Arc<AtomicU64>, timestamp: Timestamp, tick: u64) -> Self {
         Self {
             db,
             timestamp,
