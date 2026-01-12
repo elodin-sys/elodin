@@ -4,25 +4,13 @@ use arrow::{
     record_batch::RecordBatch,
     util::display::{ArrayFormatter, FormatOptions},
 };
-use bevy::{
-    ecs::system::SystemParam,
-    prelude::{Commands, Component, Entity, In, Query, Res, ResMut},
-};
-use egui::{RichText, Stroke};
-use impeller2::types::Timestamp;
-use impeller2_bevy::CommandsExt;
-use impeller2_wkt::{
-    ArrowIPC, EarliestTimestamp, ErrorResponse, LastUpdated, QueryTable, QueryType, SQLQuery,
-};
-
-use crate::{EqlContext, SelectedTimeRange};
+use bevy::{ecs::system::SystemParam, prelude::{Component, Entity, Query}};
+use egui::RichText;
+use impeller2_wkt::{ErrorResponse, QueryTable};
 
 use super::{
     PaneName,
-    button::EButton,
     colors::{ColorExt, get_scheme},
-    inspector::eql_autocomplete,
-    theme,
     widgets::WidgetSystem,
 };
 
@@ -142,11 +130,6 @@ impl egui_table::TableDelegate for QueryTableResults<'_> {
 #[derive(SystemParam)]
 pub struct QueryTableWidget<'w, 's> {
     states: Query<'w, 's, &'static mut QueryTableData>,
-    eql_context: ResMut<'w, EqlContext>,
-    selected_range: Res<'w, SelectedTimeRange>,
-    earliest_timestamp: Res<'w, EarliestTimestamp>,
-    last_updated: Res<'w, LastUpdated>,
-    commands: Commands<'w, 's>,
 }
 
 impl WidgetSystem for QueryTableWidget<'_, '_> {
@@ -160,176 +143,17 @@ impl WidgetSystem for QueryTableWidget<'_, '_> {
         ui: &mut egui::Ui,
         QueryTablePane { entity, .. }: Self::Args,
     ) -> Self::Output {
-        let QueryTableWidget {
-            mut states,
-            mut eql_context,
-            selected_range,
-            earliest_timestamp,
-            last_updated,
-            mut commands,
-        } = state.get_mut(world);
+        let QueryTableWidget { mut states } = state.get_mut(world);
         let Ok(mut table) = states.get_mut(entity) else {
             return;
         };
 
-        {
-            use std::cmp::{max, min};
-
-            let mut start = selected_range.0.start;
-            let mut end = selected_range.0.end;
-            let placeholder_start = Timestamp(i64::MIN);
-            let placeholder_end = Timestamp(i64::MAX);
-
-            if start == placeholder_start && end == placeholder_end {
-                start = earliest_timestamp.0;
-                end = last_updated.0;
-            }
-
-            if start > end {
-                start = min(earliest_timestamp.0, last_updated.0);
-                end = max(earliest_timestamp.0, last_updated.0);
-            }
-
-            eql_context.0.earliest_timestamp = start;
-            eql_context.0.last_timestamp = end;
-        }
-
-        let context = &eql_context.0;
-
-        ui.horizontal_top(|ui| {
-            egui::Frame::NONE
-                .inner_margin(egui::Margin::same(8))
-                .show(ui, |ui| {
-                    let style = ui.style_mut();
-                    style.visuals.widgets.active.corner_radius = theme::corner_radius_xs();
-                    style.visuals.widgets.hovered.corner_radius = theme::corner_radius_xs();
-                    style.visuals.widgets.open.corner_radius = theme::corner_radius_xs();
-
-                    style.visuals.widgets.inactive.bg_stroke =
-                        Stroke::new(1.0, get_scheme().border_primary);
-                    style.visuals.widgets.inactive.fg_stroke =
-                        Stroke::new(1.0, get_scheme().text_primary);
-                    style.visuals.widgets.hovered.bg_stroke =
-                        Stroke::new(1.0, get_scheme().highlight.opacity(0.5));
-
-                    style.spacing.button_padding = [16.0, 16.0].into();
-
-                    style.visuals.widgets.active.bg_fill = get_scheme().bg_primary;
-                    style.visuals.widgets.open.bg_fill = get_scheme().bg_primary;
-                    style.visuals.widgets.inactive.bg_fill = get_scheme().bg_primary;
-                    style.visuals.widgets.hovered.bg_fill = get_scheme().bg_primary;
-
-                    style.visuals.widgets.active.weak_bg_fill = get_scheme().bg_primary;
-                    style.visuals.widgets.open.weak_bg_fill = get_scheme().bg_primary;
-                    style.visuals.widgets.inactive.weak_bg_fill = get_scheme().bg_primary;
-                    style.visuals.widgets.hovered.weak_bg_fill = get_scheme().bg_primary;
-                    style.visuals.widgets.active.fg_stroke =
-                        Stroke::new(1.0, get_scheme().text_primary);
-                    let text_edit_width = ui.max_rect().width() - 160.0;
-                    let text_edit_res = ui.add(
-                        egui::TextEdit::singleline(&mut table.data.query)
-                            .hint_text("Enter an SQL query - like `show tables`")
-                            .lock_focus(true)
-                            .desired_width(text_edit_width)
-                            .background_color(get_scheme().bg_primary)
-                            .margin(egui::Margin::symmetric(16, 8)),
-                    );
-
-                    ui.add_space(8.0);
-
-                    ui.scope(|ui| {
-                        theme::configure_combo_box(ui.style_mut());
-                        ui.style_mut().spacing.combo_width = ui.available_size().x;
-                        let prev_query_type = table.data.query_type;
-                        egui::ComboBox::from_id_salt("query_type")
-                            .width(55.)
-                            .selected_text(match table.data.query_type {
-                                QueryType::EQL => "EQL",
-                                QueryType::SQL => "SQL",
-                            })
-                            .show_ui(ui, |ui| {
-                                theme::configure_combo_item(ui.style_mut());
-                                ui.selectable_value(
-                                    &mut table.data.query_type,
-                                    QueryType::EQL,
-                                    "EQL",
-                                );
-                                ui.selectable_value(
-                                    &mut table.data.query_type,
-                                    QueryType::SQL,
-                                    "SQL",
-                                );
-                            });
-                        if let (QueryType::EQL, QueryType::SQL) =
-                            (prev_query_type, table.data.query_type)
-                            && let Ok(sql) = context.sql(&table.data.query)
-                        {
-                            table.data.query = sql;
-                        }
-                    });
-                    ui.add_space(8.0);
-                    let query_res = ui.add_sized([55., 32.], EButton::highlight("QUERY"));
-
-                    if table.data.query_type == QueryType::EQL {
-                        eql_autocomplete(
-                            ui,
-                            context,
-                            &text_edit_res
-                                .clone()
-                                .with_new_rect(text_edit_res.rect.expand2(egui::vec2(0.0, 8.0))),
-                            &mut table.data.query,
-                        );
-                    }
-
-                    let enter_key = text_edit_res.lost_focus()
-                        && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter));
-                    if query_res.clicked() || enter_key {
-                        table.state = QueryTableState::Requested(Instant::now());
-                        let query = match table.data.query_type {
-                            QueryType::SQL => table.data.query.to_string(),
-                            QueryType::EQL => match context.sql(&table.data.query) {
-                                Ok(sql) => sql,
-                                Err(err) => {
-                                    table.state = QueryTableState::Error(ErrorResponse {
-                                        description: err.to_string(),
-                                    });
-                                    return;
-                                }
-                            },
-                        };
-                        commands.send_req_reply(
-                            SQLQuery(query),
-                            move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
-                                  mut states: Query<&mut QueryTableData>| {
-                                let Ok(mut entity) = states.get_mut(entity) else {
-                                    return true;
-                                };
-                                match res {
-                                    Ok(ipc) => {
-                                        let mut decoder = arrow::ipc::reader::StreamDecoder::new();
-                                        if let Some(batch) = ipc.batch {
-                                            let mut buffer =
-                                                arrow::buffer::Buffer::from(batch.into_owned());
-                                            if let Some(batch) =
-                                                decoder.decode(&mut buffer).ok().and_then(|b| b)
-                                            {
-                                                entity.state.push_result(batch);
-                                                return false;
-                                            }
-                                        }
-                                    }
-                                    Err(err) => {
-                                        entity.state = QueryTableState::Error(err);
-                                    }
-                                }
-                                true
-                            },
-                        );
-                    }
-                });
-        });
         match &mut table.state {
-            QueryTableState::None => {}
+            QueryTableState::None => {
+                ui.centered_and_justified(|ui| {
+                    ui.label("Enter a query to view data");
+                });
+            }
             QueryTableState::Requested(_) => {
                 ui.label("Loading");
             }
