@@ -763,7 +763,7 @@ and running the simulation. The <code>World</code> object also provides helper m
 </ul>
 </li>
 <li>
-<p><code>run(system, sim_time_step, run_time_step, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive)</code> -&gt; None</p>
+<p><code>run(system, sim_time_step, run_time_step, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp)</code> -&gt; None</p>
 <p>Run the simulation.</p>
 <ul>
 <li><code>system</code> : <a href="https://docs.elodin.systems/preview/pr-407/reference/python-api/#elodin-system">elodin.System</a>, the systems to run, can be supplied as a list of systems delineated by pipes.</li>
@@ -777,6 +777,7 @@ and running the simulation. The <code>World</code> object also provides helper m
 <li><code>post_step</code> : <code>Callable[[int, StepContext], None]</code>, optional, a callback function called <strong>after</strong> each simulation tick. Receives the tick number and a <a href="https://docs.elodin.systems/preview/pr-407/reference/python-api/#class-elodin-stepcontext">elodin.StepContext</a> for direct database access. Useful for reading simulation results and sending data to external systems (e.g., SITL flight controllers).</li>
 <li><code>db_path</code> : <code>string</code>, optional, the path to the database directory. If not provided, a temporary database is created.</li>
 <li><code>interactive</code> : <code>bool</code>, optional, controls simulation behavior after reaching <code>max_ticks</code>, defaults to <code>True</code>. When <code>True</code>, the simulation pauses but remains running for continued interaction in the Elodin editor. When <code>False</code>, the simulation terminates completely after reaching <code>max_ticks</code>.</li>
+<li><code>start_timestamp</code> : <code>int</code>, optional, the starting timestamp for the simulation in microseconds. If <code>None</code> (default), uses the current system time (epoch-based). Set to <code>0</code> for zero-based timing where the simulation starts at <code>t=0</code>.</li>
 </ul>
 </li>
 </ul>
