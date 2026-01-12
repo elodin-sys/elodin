@@ -34,19 +34,30 @@ class StepContext:
         ...
     @property
     def timestamp(self) -> int:
-        """Current simulation timestamp (nanoseconds since epoch)."""
+        """Current simulation timestamp (microseconds since epoch)."""
         ...
-    def write_component(self, pair_name: str, data: jax.typing.ArrayLike) -> None:
+    def write_component(
+        self,
+        pair_name: str,
+        data: jax.typing.ArrayLike,
+        timestamp: Optional[int] = None,
+    ) -> None:
         """Write component data to the database.
 
         Args:
             pair_name: The full component name in "entity.component" format
                       (e.g., "drone.motor_command")
             data: NumPy array containing the component data to write
+            timestamp: Optional timestamp (microseconds since epoch) to write at.
+                      If None, uses the current simulation timestamp.
 
         Raises:
             RuntimeError: If the component doesn't exist in the database
             ValueError: If the data size doesn't match the component schema
+
+        Note:
+            Timestamps must be monotonically increasing per component. Writing with
+            a timestamp less than the last write will raise an error (TimeTravel).
         """
         ...
     def read_component(self, pair_name: str) -> jax.Array:
@@ -68,6 +79,7 @@ class StepContext:
         self,
         reads: list[str] = [],
         writes: Optional[dict[str, jax.typing.ArrayLike]] = None,
+        write_timestamps: Optional[dict[str, int]] = None,
     ) -> dict[str, jax.Array]:
         """Perform multiple component reads and writes in a single DB operation.
 
@@ -78,6 +90,9 @@ class StepContext:
             reads: List of component names to read (e.g., ["drone.accel", "drone.gyro"])
             writes: Dict mapping component names to numpy arrays to write
                    (e.g., {"drone.motor_command": motors_array})
+            write_timestamps: Optional dict mapping component names to timestamps
+                             (microseconds since epoch). Components not in this dict
+                             use the current simulation timestamp.
 
         Returns:
             Dict mapping read component names to their numpy array values.
@@ -85,6 +100,10 @@ class StepContext:
         Raises:
             RuntimeError: If any component doesn't exist or has no data
             ValueError: If any write data size doesn't match the component schema
+
+        Note:
+            Timestamps must be monotonically increasing per component. Writing with
+            a timestamp less than the last write will raise an error (TimeTravel).
         """
         ...
     def truncate(self) -> None:
