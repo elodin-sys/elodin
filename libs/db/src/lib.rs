@@ -696,9 +696,16 @@ impl State {
             return Ok(());
         }
         info!(component.id = ?component_id.0, is_timestamp_source, "inserting");
+        // Check if custom metadata was previously set (e.g., via SetComponentMetadata)
+        // If so, use the existing name; otherwise fall back to the component ID
+        let name = self
+            .component_metadata
+            .get(&component_id)
+            .map(|m| m.name.clone())
+            .unwrap_or_else(|| component_id.to_string());
         let mut component_metadata = ComponentMetadata {
             component_id,
-            name: component_id.to_string(),
+            name: name.clone(),
             metadata: Default::default(),
         };
         if is_timestamp_source {
@@ -707,7 +714,7 @@ impl State {
         let component = Component::create(
             db_path,
             component_id,
-            component_metadata.name.clone(),
+            name,
             schema,
             Timestamp::now(),
         )?;
