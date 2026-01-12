@@ -139,6 +139,9 @@ pub enum SelectedObject {
     Graph {
         graph_id: Entity,
     },
+    QueryTable {
+        table_id: Entity,
+    },
     Action {
         action_id: Entity,
     },
@@ -161,6 +164,7 @@ impl SelectedObject {
             SelectedObject::Entity(pair) => Some(pair.bevy),
             SelectedObject::Viewport { camera } => Some(*camera),
             SelectedObject::Graph { graph_id } => Some(*graph_id),
+            SelectedObject::QueryTable { table_id } => Some(*table_id),
             SelectedObject::Action { action_id } => Some(*action_id),
             SelectedObject::Object3D { entity } => Some(*entity),
             SelectedObject::DashboardNode { entity } => Some(*entity),
