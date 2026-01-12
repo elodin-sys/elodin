@@ -21,6 +21,7 @@ pub mod action;
 pub mod dashboard;
 pub mod entity;
 pub mod graph;
+pub mod monitor;
 pub mod object3d;
 pub mod query_table;
 pub mod viewport;
@@ -30,7 +31,8 @@ pub use widgets::*;
 
 use self::{
     dashboard::InspectorDashboardNode, entity::InspectorEntity, graph::InspectorGraph,
-    object3d::InspectorObject3D, query_table::InspectorQueryTable, viewport::InspectorViewport,
+    monitor::InspectorMonitor, object3d::InspectorObject3D, query_table::InspectorQueryTable,
+    viewport::InspectorViewport,
 };
 
 pub struct InspectorIcons {
@@ -129,6 +131,14 @@ impl WidgetSystem for InspectorContent<'_, '_> {
                                         world,
                                         "inspector_query_table",
                                         table_id,
+                                    );
+                                    Default::default()
+                                }
+                                SelectedObject::Monitor { monitor_id } => {
+                                    ui.add_widget_with::<InspectorMonitor>(
+                                        world,
+                                        "inspector_monitor",
+                                        monitor_id,
                                     );
                                     Default::default()
                                 }
