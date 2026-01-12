@@ -1,4 +1,4 @@
-use std::{ops::Range, path::Path, sync::Arc};
+use std::{ops::Range, path::Path, sync::Arc, sync::RwLock};
 
 use impeller2::types::Timestamp;
 use stellarator::sync::WaitQueue;
@@ -9,6 +9,7 @@ use crate::{Error, append_log::AppendLog};
 
 #[derive(Clone)]
 pub struct TimeSeries {
+    name: Arc<RwLock<String>>,
     index: AppendLog<Timestamp>,
     data: AppendLog<u64>,
     data_waker: Arc<WaitQueue>,
@@ -17,6 +18,7 @@ pub struct TimeSeries {
 impl TimeSeries {
     pub fn create(
         path: impl AsRef<Path>,
+        name: String,
         start_timestamp: Timestamp,
         element_size: u64,
     ) -> Result<Self, Error> {
@@ -26,6 +28,7 @@ impl TimeSeries {
         let data = AppendLog::create(path.join("data"), element_size)?;
         let data_waker = Arc::new(WaitQueue::new());
         let time_series = Self {
+            name: Arc::new(RwLock::new(name)),
             index,
             data,
             data_waker: data_waker.clone(),
@@ -33,12 +36,13 @@ impl TimeSeries {
         Ok(time_series)
     }
 
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
+    pub fn open(path: impl AsRef<Path>, name: String) -> Result<Self, Error> {
         let path = path.as_ref();
         let index = AppendLog::open(path.join("index"))?;
         let data = AppendLog::open(path.join("data"))?;
         let data_waker = Arc::new(WaitQueue::new());
         let time_series = Self {
+            name: Arc::new(RwLock::new(name)),
             index,
             data,
             data_waker: data_waker.clone(),
@@ -142,6 +146,15 @@ impl TimeSeries {
         Ok(())
     }
 
+    /// Update the human-readable name for this time series.
+    ///
+    /// This is used to provide better context in warning messages.
+    pub fn set_name(&self, name: String) {
+        if let Ok(mut guard) = self.name.write() {
+            *guard = name;
+        }
+    }
+
     /// Truncate the time series, clearing all data while preserving the schema.
     ///
     /// This resets both the index and data append logs, effectively removing
@@ -167,7 +180,8 @@ impl TimeSeries {
                     .expect("last_timestamp was wrong size"),
             );
             if last_timestamp > timestamp {
-                warn!(?last_timestamp, ?timestamp, "time travel");
+                let component_name = self.name.read().map(|g| g.clone()).unwrap_or_default();
+                warn!(component = %component_name, ?last_timestamp, ?timestamp, "time travel");
                 return Err(Error::TimeTravel);
             }
         }

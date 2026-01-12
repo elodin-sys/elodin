@@ -493,7 +493,11 @@ impl DB {
 
             trace!("Opening component file {}", path.display());
             let schema = ComponentSchema::read(schema_path)?;
-            let component = Component::open(&path, component_id, schema.clone())?;
+            let name = component_metadata
+                .get(&component_id)
+                .map(|m| m.name.clone())
+                .unwrap_or_else(|| component_id.to_string());
+            let component = Component::open(&path, component_id, name, schema.clone())?;
 
             // Check if this component is a timestamp source - if so, exclude from time calculations
             let is_timestamp_source = component_metadata
@@ -692,15 +696,22 @@ impl State {
             return Ok(());
         }
         info!(component.id = ?component_id.0, is_timestamp_source, "inserting");
+        // Check if custom metadata was previously set (e.g., via SetComponentMetadata)
+        // If so, use the existing name; otherwise fall back to the component ID
+        let name = self
+            .component_metadata
+            .get(&component_id)
+            .map(|m| m.name.clone())
+            .unwrap_or_else(|| component_id.to_string());
         let mut component_metadata = ComponentMetadata {
             component_id,
-            name: component_id.to_string(),
+            name: name.clone(),
             metadata: Default::default(),
         };
         if is_timestamp_source {
             component_metadata.set_timestamp_source(true);
         }
-        let component = Component::create(db_path, component_id, schema, Timestamp::now())?;
+        let component = Component::create(db_path, component_id, name, schema, Timestamp::now())?;
         if !self.component_metadata.contains_key(&component_id) {
             self.set_component_metadata(component_metadata, db_path)?;
         }
@@ -731,6 +742,10 @@ impl State {
         }
         info!(component.name= ?metadata.name, component.id = ?metadata.component_id.0, "setting component metadata");
         metadata.write(component_metadata_path)?;
+        // Sync the name to the Component for better warning messages
+        if let Some(component) = self.components.get(&metadata.component_id) {
+            component.set_name(metadata.name.clone());
+        }
         self.component_metadata
             .insert(metadata.component_id, metadata);
         Ok(())
@@ -924,6 +939,7 @@ impl Component {
     pub fn create(
         db_path: &Path,
         component_id: ComponentId,
+        name: String,
         schema: ComponentSchema,
         start_timestamp: Timestamp,
     ) -> Result<Self, Error> {
@@ -935,6 +951,7 @@ impl Component {
         }
         let time_series = TimeSeries::create(
             component_path.clone(),
+            name,
             start_timestamp,
             schema.size() as u64,
         )?;
@@ -948,9 +965,10 @@ impl Component {
     pub fn open(
         path: impl AsRef<Path>,
         component_id: ComponentId,
+        name: String,
         schema: ComponentSchema,
     ) -> Result<Self, Error> {
-        let time_series = TimeSeries::open(path)?;
+        let time_series = TimeSeries::open(path, name)?;
         Ok(Component {
             component_id,
             time_series,
@@ -981,6 +999,13 @@ impl Component {
     /// Truncate the component, clearing all time-series data while preserving the schema.
     pub fn truncate(&self) {
         self.time_series.truncate();
+    }
+
+    /// Update the human-readable name for this component.
+    ///
+    /// This is used to provide better context in warning messages.
+    pub fn set_name(&self, name: String) {
+        self.time_series.set_name(name);
     }
 }
 

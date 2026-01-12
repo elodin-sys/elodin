@@ -349,6 +349,35 @@ jobs:
           name: artifacts-macos-wheel
           path: dist
 
+  pypi-publish:
+    runs-on: "ubuntu-22.04"
+    needs:
+      - plan
+      - linux-wheel
+      - macos-wheel
+    if: ${{ needs.plan.outputs.publishing == 'true' }}
+    steps:
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Download Linux wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: artifacts-linux-wheel
+          path: dist
+      - name: Download macOS wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: artifacts-macos-wheel
+          path: dist
+      - name: Publish to PyPI
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.UV_PUBLISH_TOKEN }}
+        run: |
+          pip install uv
+          uv publish dist/*.whl --token "$UV_PUBLISH_TOKEN"
+
   # Determines if we should publish/announce
   host:
     needs:
@@ -357,8 +386,10 @@ jobs:
       - build-global-artifacts
       - linux-wheel
       - macos-wheel
+      - pypi-publish
     # Only run if we're "publishing", and only if local and global didn't fail (skipped is fine)
-    if: ${{ always() && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
+    # Also require PyPI publish to succeed (it will be skipped if not publishing, which is fine)
+    if: ${{ always() && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') && (needs.pypi-publish.result == 'skipped' || needs.pypi-publish.result == 'success') }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     runs-on: "ubuntu-22.04-xl"
