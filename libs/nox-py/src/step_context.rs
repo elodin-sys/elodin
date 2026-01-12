@@ -131,16 +131,27 @@ impl StepContext {
     ///     pair_name: The full component name in "entity.component" format
     ///                (e.g., "drone.motor_command")
     ///     data: NumPy array containing the component data to write
+    ///     timestamp: Optional timestamp (microseconds since epoch) to write at.
+    ///                If None, uses the current simulation timestamp.
     ///
     /// Raises:
     ///     RuntimeError: If the component doesn't exist in the database
     ///     ValueError: If the data size doesn't match the component schema
+    ///
+    /// Note:
+    ///     Timestamps must be monotonically increasing per component. Writing with
+    ///     a timestamp less than the last write will raise an error (TimeTravel).
+    #[pyo3(signature = (pair_name, data, timestamp=None))]
     fn write_component(
         &self,
         pair_name: &str,
         data: &Bound<'_, PyUntypedArray>,
+        timestamp: Option<i64>,
     ) -> Result<(), Error> {
         let pair_id = ComponentId::new(pair_name);
+
+        // Use provided timestamp or fall back to current simulation timestamp
+        let ts = timestamp.unwrap_or_else(|| self.timestamp.load(Ordering::SeqCst));
 
         // Get the data buffer from the numpy array
         let buf = unsafe {
@@ -178,7 +189,7 @@ impl StepContext {
 
             component
                 .time_series
-                .push_buf(Timestamp(self.timestamp.load(Ordering::SeqCst)), buf)
+                .push_buf(Timestamp(ts), buf)
                 .map_err(Error::from)
         })
     }
@@ -303,7 +314,7 @@ impl StepContext {
         self.tick
     }
 
-    /// Current simulation timestamp (nanoseconds since epoch).
+    /// Current simulation timestamp (microseconds since epoch).
     #[getter]
     fn timestamp(&self) -> i64 {
         self.timestamp.load(Ordering::SeqCst)
@@ -336,6 +347,9 @@ impl StepContext {
     ///     reads: List of component names to read (e.g., ["drone.accel", "drone.gyro"])
     ///     writes: Dict mapping component names to numpy arrays to write
     ///             (e.g., {"drone.motor_command": motors_array})
+    ///     write_timestamps: Optional dict mapping component names to timestamps
+    ///                       (microseconds since epoch). Components not in this dict
+    ///                       use the current simulation timestamp.
     ///
     /// Returns:
     ///     Dict mapping read component names to their numpy array values
@@ -343,18 +357,49 @@ impl StepContext {
     /// Raises:
     ///     RuntimeError: If any component doesn't exist or has no data
     ///     ValueError: If any write data size doesn't match the component schema
-    #[pyo3(signature = (reads=vec![], writes=None))]
+    ///
+    /// Note:
+    ///     Timestamps must be monotonically increasing per component. Writing with
+    ///     a timestamp less than the last write will raise an error (TimeTravel).
+    #[pyo3(signature = (reads=vec![], writes=None, write_timestamps=None))]
     fn component_batch_operation<'py>(
         &self,
         py: Python<'py>,
         reads: Vec<String>,
         writes: Option<&Bound<'py, PyDict>>,
+        write_timestamps: Option<&Bound<'py, PyDict>>,
     ) -> Result<Bound<'py, PyDict>, Error> {
         // Pre-parse all component IDs outside the lock
         let read_ids: Vec<(String, ComponentId)> = reads
             .iter()
             .map(|name| (name.clone(), ComponentId::new(name)))
             .collect();
+
+        // Pre-extract timestamps from Python dict outside the lock
+        let timestamps: HashMap<String, i64> = if let Some(ts_dict) = write_timestamps {
+            let mut ts_map = HashMap::new();
+            for (key, value) in ts_dict.iter() {
+                let name: String = key.extract().map_err(|e| {
+                    Error::PyErr(pyo3::exceptions::PyValueError::new_err(format!(
+                        "write_timestamps key must be a string: {}",
+                        e
+                    )))
+                })?;
+                let ts: i64 = value.extract().map_err(|e| {
+                    Error::PyErr(pyo3::exceptions::PyValueError::new_err(format!(
+                        "write_timestamps value for '{}' must be an integer: {}",
+                        name, e
+                    )))
+                })?;
+                ts_map.insert(name, ts);
+            }
+            ts_map
+        } else {
+            HashMap::new()
+        };
+
+        // Get the default timestamp once
+        let default_ts = self.timestamp.load(Ordering::SeqCst);
 
         // Pre-extract write data from Python dict outside the lock
         let write_data: Vec<(String, ComponentId, Vec<u8>)> = if let Some(writes_dict) = writes {
@@ -421,9 +466,11 @@ impl StepContext {
                         )));
                     }
 
+                    // Use per-component timestamp if provided, otherwise use default
+                    let ts = timestamps.get(name).copied().unwrap_or(default_ts);
                     component
                         .time_series
-                        .push_buf(Timestamp(self.timestamp.load(Ordering::SeqCst)), buf)
+                        .push_buf(Timestamp(ts), buf)
                         .map_err(Error::from)?;
                 }
 

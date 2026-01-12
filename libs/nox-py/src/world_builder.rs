@@ -206,6 +206,7 @@ impl WorldBuilder {
         post_step = None,
         db_path = None,
         interactive = true,
+        start_timestamp = None,
     ))]
     pub fn run(
         &mut self,
@@ -221,6 +222,7 @@ impl WorldBuilder {
         post_step: Option<PyObject>,
         db_path: Option<String>,
         interactive: bool,
+        start_timestamp: Option<i64>,
     ) -> Result<Option<String>, Error> {
         let _ = tracing_subscriber::fmt::fmt()
             .with_env_filter(
@@ -370,6 +372,7 @@ impl WorldBuilder {
                                 }
                             },
                             interactive,
+                            start_timestamp.map(Timestamp),
                         )
                     })?;
 
