@@ -711,13 +711,7 @@ impl State {
         if is_timestamp_source {
             component_metadata.set_timestamp_source(true);
         }
-        let component = Component::create(
-            db_path,
-            component_id,
-            name,
-            schema,
-            Timestamp::now(),
-        )?;
+        let component = Component::create(db_path, component_id, name, schema, Timestamp::now())?;
         if !self.component_metadata.contains_key(&component_id) {
             self.set_component_metadata(component_metadata, db_path)?;
         }
