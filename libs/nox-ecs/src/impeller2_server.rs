@@ -28,8 +28,14 @@ impl Server {
 
     pub async fn run(self) -> Result<(), Error> {
         tracing::info!("running server");
-        self.run_with_cancellation(|| false, |_, _, _, _, _| {}, |_, _, _, _, _| {}, false, None)
-            .await
+        self.run_with_cancellation(
+            || false,
+            |_, _, _, _, _| {},
+            |_, _, _, _, _| {},
+            false,
+            None,
+        )
+        .await
     }
 
     pub async fn run_with_cancellation(
