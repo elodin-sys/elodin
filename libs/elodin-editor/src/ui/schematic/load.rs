@@ -714,7 +714,13 @@ impl LoadSchematicParams<'_, '_> {
                     .name
                     .clone()
                     .unwrap_or_else(|| monitor.component_name.clone());
-                let pane = MonitorPane::new(label, monitor.component_name.clone());
+                let entity = self
+                    .commands
+                    .spawn(super::monitor::MonitorData {
+                        component_name: monitor.component_name.clone(),
+                    })
+                    .id();
+                let pane = MonitorPane::new(entity, label);
                 tile_state.insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
             }
             Panel::QueryTable(data) => {

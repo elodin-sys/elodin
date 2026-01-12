@@ -2310,6 +2310,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             state_mut.commands.entity(action.entity).despawn();
                         };
 
+                        if let egui_tiles::Tile::Pane(Pane::Monitor(pane)) = tile {
+                            state_mut.commands.entity(pane.entity).despawn();
+                        };
+
                         if let egui_tiles::Tile::Pane(Pane::VideoStream(pane)) = tile {
                             state_mut.commands.entity(pane.entity).despawn();
                         };
@@ -2428,12 +2432,21 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if read_only {
                             continue;
                         }
-                        let monitor = MonitorPane::new(eql.clone(), eql);
+                        let entity = state_mut
+                            .commands
+                            .spawn(super::monitor::MonitorData {
+                                component_name: eql.clone(),
+                            })
+                            .id();
+                        let monitor = MonitorPane::new(entity, eql.clone());
 
                         let pane = Pane::Monitor(monitor);
                         if let Some(tile_id) =
                             tile_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
+                            ui_state.selected_object = SelectedObject::Monitor {
+                                monitor_id: entity,
+                            };
                             tile_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
@@ -2504,6 +2517,11 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 Pane::QueryPlot(plot) => {
                                     ui_state.selected_object = SelectedObject::Graph {
                                         graph_id: plot.entity,
+                                    };
+                                }
+                                Pane::Monitor(monitor) => {
+                                    ui_state.selected_object = SelectedObject::Monitor {
+                                        monitor_id: monitor.entity,
                                     };
                                 }
                                 Pane::QueryTable(table) => {

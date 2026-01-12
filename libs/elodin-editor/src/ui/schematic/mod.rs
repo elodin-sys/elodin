@@ -6,7 +6,7 @@ use crate::{
     ui::{
         HdrEnabled, actions, colors,
         colors::EColor,
-        inspector, plot, query_plot, query_table,
+        inspector, monitor, plot, query_plot, query_table,
         tiles::{self, Pane},
         window::compute_window_title,
     },
@@ -41,6 +41,7 @@ pub struct CurrentSecondarySchematics(pub Vec<SecondarySchematic>);
 #[derive(SystemParam)]
 pub struct SchematicParam<'w, 's> {
     pub query_tables: Query<'w, 's, &'static query_table::QueryTableData>,
+    pub monitors: Query<'w, 's, &'static monitor::MonitorData>,
     pub action_tiles: Query<'w, 's, &'static actions::ActionTile>,
     pub graph_states: Query<'w, 's, &'static plot::GraphState>,
     pub query_plots: Query<'w, 's, &'static query_plot::QueryPlotData>,
@@ -208,10 +209,13 @@ impl SchematicParam<'_, '_> {
                         }))
                     }
 
-                    Pane::Monitor(monitor) => Some(Panel::ComponentMonitor(ComponentMonitor {
-                        component_name: monitor.component_name.clone(),
-                        name: pane_name,
-                    })),
+                    Pane::Monitor(monitor) => {
+                        let monitor_data = self.monitors.get(monitor.entity).ok()?;
+                        Some(Panel::ComponentMonitor(ComponentMonitor {
+                            component_name: monitor_data.component_name.clone(),
+                            name: pane_name,
+                        }))
+                    }
 
                     Pane::QueryTable(query_table) => {
                         let query_table_data = self.query_tables.get(query_table.entity).ok()?;

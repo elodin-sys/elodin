@@ -142,6 +142,9 @@ pub enum SelectedObject {
     QueryTable {
         table_id: Entity,
     },
+    Monitor {
+        monitor_id: Entity,
+    },
     Action {
         action_id: Entity,
     },
@@ -165,6 +168,7 @@ impl SelectedObject {
             SelectedObject::Viewport { camera } => Some(*camera),
             SelectedObject::Graph { graph_id } => Some(*graph_id),
             SelectedObject::QueryTable { table_id } => Some(*table_id),
+            SelectedObject::Monitor { monitor_id } => Some(*monitor_id),
             SelectedObject::Action { action_id } => Some(*action_id),
             SelectedObject::Object3D { entity } => Some(*entity),
             SelectedObject::DashboardNode { entity } => Some(*entity),
