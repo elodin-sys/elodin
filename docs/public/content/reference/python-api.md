@@ -52,7 +52,7 @@ The Elodin simulation world.
     Load a GLB asset as an Elodin Scene Archetype.
     - `url`: the URL or filepath of the GLB asset
 
-- `run(system, sim_time_step, run_time_step, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive)` -> None
+- `run(system, sim_time_step, run_time_step, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp)` -> None
 
     Run the simulation.
     - `system` : [elodin.System], the systems to run, can be supplied as a list of systems delineated by pipes.
@@ -66,6 +66,7 @@ The Elodin simulation world.
     - `post_step` : `Callable[[int, StepContext], None]`, optional, a callback function called **after** each simulation tick. Receives the tick number and a [elodin.StepContext] for direct database access. Useful for reading simulation results and sending data to external systems (e.g., SITL flight controllers).
     - `db_path` : `string`, optional, the path to the database directory. If not provided, a temporary database is created.
     - `interactive` : `bool`, optional, controls simulation behavior after reaching `max_ticks`, defaults to `True`. When `True`, the simulation pauses but remains running for continued interaction in the Elodin editor. When `False`, the simulation terminates completely after reaching `max_ticks`.
+    - `start_timestamp` : `int`, optional, the starting timestamp for the simulation in microseconds. If `None` (default), uses the current system time (epoch-based). Set to `0` for zero-based timing where the simulation starts at `t=0`.
 
 ### _class_ `elodin.EntityId`
 Integer reference identifier for entities in Elodin.

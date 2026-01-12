@@ -284,7 +284,7 @@ pub struct DB {
     pub path: PathBuf,
     pub default_stream_time_step: AtomicU64,
     pub last_updated: AtomicCell<Timestamp>,
-    pub earliest_timestamp: Timestamp,
+    pub earliest_timestamp: AtomicCell<Timestamp>,
 }
 
 #[derive(Default)]
@@ -327,7 +327,7 @@ impl DB {
             vtable_gen: AtomicCell::new(0),
             default_stream_time_step,
             last_updated: AtomicCell::new(Timestamp(i64::MIN)),
-            earliest_timestamp: Timestamp::now(),
+            earliest_timestamp: AtomicCell::new(Timestamp::now()),
         };
         db.save_db_state()?;
         Ok(db)
@@ -405,6 +405,14 @@ impl DB {
         });
         self.last_updated.store(Timestamp(i64::MIN));
         self.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
+    }
+
+    /// Set the earliest timestamp for this database.
+    ///
+    /// This is typically called during initialization to set the starting timestamp
+    /// for the simulation. If not called, defaults to the current system time.
+    pub fn set_earliest_timestamp(&self, timestamp: Timestamp) {
+        self.earliest_timestamp.store(timestamp);
     }
 
     pub fn copy_native(&self, target_db_path: impl AsRef<Path>) -> Result<PathBuf, Error> {
@@ -559,7 +567,7 @@ impl DB {
                 db_state.default_stream_time_step.as_nanos() as u64
             ),
             last_updated: AtomicCell::new(Timestamp(last_updated)),
-            earliest_timestamp,
+            earliest_timestamp: AtomicCell::new(earliest_timestamp),
         })
     }
 
@@ -639,7 +647,7 @@ impl DB {
                     stream_id,
                     Duration::from_nanos(behavior.timestep),
                     match behavior.initial_timestamp {
-                        InitialTimestamp::Earliest => self.earliest_timestamp,
+                        InitialTimestamp::Earliest => self.earliest_timestamp.latest(),
                         InitialTimestamp::Latest => self.last_updated.latest(),
                         InitialTimestamp::Manual(timestamp) => timestamp,
                     },
@@ -1405,7 +1413,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             tx.send_msg(&db.db_config()).await?;
         }
         Packet::Msg(m) if m.id == GetEarliestTimestamp::ID => {
-            tx.send_msg(&EarliestTimestamp(db.earliest_timestamp))
+            tx.send_msg(&EarliestTimestamp(db.earliest_timestamp.latest()))
                 .await?;
         }
         Packet::Msg(m) if m.id == GetDbSettings::ID => {
@@ -1771,7 +1779,7 @@ fn handle_stream<A: AsyncWrite + 'static>(
                 stream.id,
                 Duration::from_nanos(fixed_rate.timestep),
                 match fixed_rate.initial_timestamp {
-                    InitialTimestamp::Earliest => db.earliest_timestamp,
+                    InitialTimestamp::Earliest => db.earliest_timestamp.latest(),
                     InitialTimestamp::Latest => db.last_updated.latest(),
                     InitialTimestamp::Manual(timestamp) => timestamp,
                 },

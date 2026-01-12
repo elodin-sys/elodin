@@ -155,6 +155,7 @@ class WorldBuilder:
         post_step: Optional[Callable[[int, StepContext], None]] = None,
         db_path: Optional[str] = None,
         interactive: bool = True,
+        start_timestamp: Optional[int] = None,
     ): ...
     def serve(
         self,

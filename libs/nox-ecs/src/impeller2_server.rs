@@ -28,7 +28,7 @@ impl Server {
 
     pub async fn run(self) -> Result<(), Error> {
         tracing::info!("running server");
-        self.run_with_cancellation(|| false, |_, _, _, _, _| {}, |_, _, _, _, _| {}, false)
+        self.run_with_cancellation(|| false, |_, _, _, _, _| {}, |_, _, _, _, _| {}, false, None)
             .await
     }
 
@@ -38,11 +38,12 @@ impl Server {
         pre_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
         post_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
         interactive: bool,
+        start_timestamp: Option<Timestamp>,
     ) -> Result<(), Error> {
         tracing::info!("running server with cancellation");
         let Self { db, mut world } = self;
         let elodin_db::Server { listener, db } = db;
-        let start_time = Timestamp::now();
+        let start_time = start_timestamp.unwrap_or_else(Timestamp::now);
         init_db(&db, &mut world.world, start_time)?;
         let tick_db = db.clone();
         // Shared tick counter that can be reset by StepContext::truncate()
@@ -80,6 +81,9 @@ pub fn init_db(
     start_timestamp: Timestamp,
 ) -> Result<(), elodin_db::Error> {
     tracing::info!("initializing db");
+    // Set the earliest timestamp from the start_timestamp parameter
+    // This ensures the editor displays the correct time baseline
+    db.set_earliest_timestamp(start_timestamp);
     db.with_state_mut(|state| {
         for (component_id, (schema, component_metadata)) in world.metadata.component_map.iter() {
             let Some(column) = world.host.get(component_id) else {
