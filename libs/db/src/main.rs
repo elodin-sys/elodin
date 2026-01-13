@@ -1,6 +1,6 @@
 use std::{io::Write, net::SocketAddr, path::PathBuf};
 
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use elodin_db::Server;
 use impeller2::vtable;
 use miette::IntoDiagnostic;
@@ -53,6 +53,26 @@ struct FixTimestampsArgs {
     dry_run: bool,
     #[clap(long, short, help = "Skip confirmation prompt")]
     yes: bool,
+    #[clap(
+        long = "no-prune",
+        action = ArgAction::SetFalse,
+        default_value_t = true,
+        help = "Do not prune empty components"
+    )]
+    prune: bool,
+    #[clap(
+        long,
+        value_enum,
+        default_value = "wall-clock",
+        help = "Clock to use as reference when computing offsets"
+    )]
+    reference: ReferenceClockArg,
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+enum ReferenceClockArg {
+    WallClock,
+    Monotonic,
 }
 
 #[stellarator::main]
@@ -142,8 +162,18 @@ async fn main() -> miette::Result<()> {
                 .into_diagnostic()?;
             Ok(())
         }
-        Commands::FixTimestamps(FixTimestampsArgs { path, dry_run, yes }) => {
-            elodin_db::fix_timestamps::run(path, dry_run, yes).into_diagnostic()
+        Commands::FixTimestamps(FixTimestampsArgs {
+            path,
+            dry_run,
+            yes,
+            prune,
+            reference,
+        }) => {
+            let reference = match reference {
+                ReferenceClockArg::WallClock => elodin_db::fix_timestamps::ReferenceClock::WallClock,
+                ReferenceClockArg::Monotonic => elodin_db::fix_timestamps::ReferenceClock::Monotonic,
+            };
+            elodin_db::fix_timestamps::run(path, dry_run, yes, reference, prune).into_diagnostic()
         }
     }
 }
