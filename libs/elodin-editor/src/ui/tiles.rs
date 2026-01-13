@@ -2434,9 +2434,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if let Some(tile_id) =
                             tile_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
-                            ui_state.selected_object = SelectedObject::Monitor {
-                                monitor_id: entity,
-                            };
+                            ui_state.selected_object =
+                                SelectedObject::Monitor { monitor_id: entity };
                             tile_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
@@ -2562,9 +2561,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if let Some(tile_id) =
                             tile_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
-                            ui_state.selected_object = SelectedObject::QueryTable {
-                                table_id: entity,
-                            };
+                            ui_state.selected_object =
+                                SelectedObject::QueryTable { table_id: entity };
                             tile_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }

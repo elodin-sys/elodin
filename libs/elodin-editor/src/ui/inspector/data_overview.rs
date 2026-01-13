@@ -66,8 +66,7 @@ impl WidgetSystem for InspectorDataOverview<'_> {
             .inner_margin(egui::Margin::symmetric(0, 8))
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    for (index, (component_id, label, table_name, _)) in
-                        entries.iter().enumerate()
+                    for (index, (component_id, label, table_name, _)) in entries.iter().enumerate()
                     {
                         let default_color = row_color(index);
                         let mut clear_tables = false;
@@ -80,9 +79,8 @@ impl WidgetSystem for InspectorDataOverview<'_> {
                             if settings.color.is_none() {
                                 settings.color = Some(default_color);
                             }
-                            let label_color = settings
-                                .color
-                                .unwrap_or_else(|| get_scheme().text_primary);
+                            let label_color =
+                                settings.color.unwrap_or_else(|| get_scheme().text_primary);
                             let label_color = if settings.enabled {
                                 label_color
                             } else {

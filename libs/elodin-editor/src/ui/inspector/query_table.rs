@@ -93,8 +93,7 @@ impl WidgetSystem for InspectorQueryTable<'_, '_> {
                         ui.selectable_value(&mut table.data.query_type, QueryType::EQL, "EQL");
                         ui.selectable_value(&mut table.data.query_type, QueryType::SQL, "SQL");
                     });
-                if let (QueryType::EQL, QueryType::SQL) =
-                    (prev_query_type, table.data.query_type)
+                if let (QueryType::EQL, QueryType::SQL) = (prev_query_type, table.data.query_type)
                     && let Ok(sql) = context.sql(&table.data.query)
                 {
                     table.data.query = sql;
@@ -142,9 +141,9 @@ impl WidgetSystem for InspectorQueryTable<'_, '_> {
                         Ok(ipc) => {
                             let mut decoder = arrow::ipc::reader::StreamDecoder::new();
                             if let Some(batch) = ipc.batch {
-                                let mut buffer =
-                                    arrow::buffer::Buffer::from(batch.into_owned());
-                                if let Some(batch) = decoder.decode(&mut buffer).ok().and_then(|b| b)
+                                let mut buffer = arrow::buffer::Buffer::from(batch.into_owned());
+                                if let Some(batch) =
+                                    decoder.decode(&mut buffer).ok().and_then(|b| b)
                                 {
                                     entity.state.push_result(batch);
                                     return false;

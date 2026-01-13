@@ -4,7 +4,10 @@ use arrow::{
     record_batch::RecordBatch,
     util::display::{ArrayFormatter, FormatOptions},
 };
-use bevy::{ecs::system::SystemParam, prelude::{Component, Entity, Query}};
+use bevy::{
+    ecs::system::SystemParam,
+    prelude::{Component, Entity, Query},
+};
 use egui::RichText;
 use impeller2_wkt::{ErrorResponse, QueryTable};
 

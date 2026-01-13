@@ -600,10 +600,9 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                 if let Some(pos) = click_pos
                     && row_rect.contains(pos)
                 {
-                    window_state.ui_state.selected_object =
-                        SelectedObject::DataOverviewComponent {
-                            component_id: summary.component_id,
-                        };
+                    window_state.ui_state.selected_object = SelectedObject::DataOverviewComponent {
+                        component_id: summary.component_id,
+                    };
                 }
 
                 // Alternate row background
@@ -611,11 +610,8 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                     ui.painter().rect_filled(row_rect, 0.0, scheme.bg_primary);
                 }
                 if is_selected {
-                    ui.painter().rect_filled(
-                        row_rect,
-                        0.0,
-                        scheme.highlight.opacity(0.08),
-                    );
+                    ui.painter()
+                        .rect_filled(row_rect, 0.0, scheme.highlight.opacity(0.08));
                 }
 
                 // Draw label with component color
@@ -686,9 +682,8 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                                         base_color.a(),
                                     );
                                     // Shift brightness/saturation for each series
-                                    let factor = 0.7
-                                        + 0.3
-                                            * (series_idx as f32 / num_series.max(1) as f32);
+                                    let factor =
+                                        0.7 + 0.3 * (series_idx as f32 / num_series.max(1) as f32);
                                     Color32::from_rgba_unmultiplied(
                                         (r as f32 * factor).min(255.0) as u8,
                                         (g as f32 * factor).min(255.0) as u8,
@@ -703,8 +698,7 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                                 for &(time, value) in &series.points {
                                     // Calculate X position
                                     let x_offset = (time - display_start.0) as f64;
-                                    let x =
-                                        timeline_start_x + (x_offset * pixels_per_us) as f32;
+                                    let x = timeline_start_x + (x_offset * pixels_per_us) as f32;
 
                                     // Skip points outside visible area
                                     if x < timeline_start_x || x > timeline_end_x {
