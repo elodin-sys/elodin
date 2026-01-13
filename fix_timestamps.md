@@ -1,7 +1,6 @@
 # fix-timestamps
 
-This document explains how to use the `fix-timestamps` command in `elodin-db` to realign
-database timestamps and (by default) remove empty components.
+This document explains how to use the `fix-timestamps` command in `elodin-db` to realign database timestamps and (by default) remove empty components.
 
 ## Usage
 
