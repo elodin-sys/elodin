@@ -153,12 +153,10 @@ pub fn run(
             reference.label()
         );
         eprintln!("Cannot determine the correct time offset.");
-        return Err(Error::FixTimestamps(
-            format!(
-                "No reference components with {} timestamps found",
-                reference.label()
-            ),
-        ));
+        return Err(Error::FixTimestamps(format!(
+            "No reference components with {} timestamps found",
+            reference.label()
+        )));
     }
 
     // Calculate offset: reference_min - to_fix_min

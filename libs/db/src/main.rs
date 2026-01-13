@@ -170,8 +170,12 @@ async fn main() -> miette::Result<()> {
             reference,
         }) => {
             let reference = match reference {
-                ReferenceClockArg::WallClock => elodin_db::fix_timestamps::ReferenceClock::WallClock,
-                ReferenceClockArg::Monotonic => elodin_db::fix_timestamps::ReferenceClock::Monotonic,
+                ReferenceClockArg::WallClock => {
+                    elodin_db::fix_timestamps::ReferenceClock::WallClock
+                }
+                ReferenceClockArg::Monotonic => {
+                    elodin_db::fix_timestamps::ReferenceClock::Monotonic
+                }
             };
             elodin_db::fix_timestamps::run(path, dry_run, yes, reference, prune).into_diagnostic()
         }
