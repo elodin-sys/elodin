@@ -18,8 +18,8 @@ use crate::ui::{
 };
 
 pub mod action;
-pub mod data_overview;
 pub mod dashboard;
+pub mod data_overview;
 pub mod entity;
 pub mod graph;
 pub mod monitor;
@@ -151,9 +151,7 @@ impl WidgetSystem for InspectorContent<'_, '_> {
                                     );
                                     Default::default()
                                 }
-                                SelectedObject::DataOverviewComponent {
-                                    component_id,
-                                } => {
+                                SelectedObject::DataOverviewComponent { component_id } => {
                                     ui.add_widget_with::<InspectorDataOverview>(
                                         world,
                                         "inspector_data_overview",
