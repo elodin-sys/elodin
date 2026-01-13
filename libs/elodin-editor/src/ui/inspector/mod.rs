@@ -18,6 +18,7 @@ use crate::ui::{
 };
 
 pub mod action;
+pub mod data_overview;
 pub mod dashboard;
 pub mod entity;
 pub mod graph;
@@ -30,9 +31,9 @@ mod widgets;
 pub use widgets::*;
 
 use self::{
-    dashboard::InspectorDashboardNode, entity::InspectorEntity, graph::InspectorGraph,
-    monitor::InspectorMonitor, object3d::InspectorObject3D, query_table::InspectorQueryTable,
-    viewport::InspectorViewport,
+    dashboard::InspectorDashboardNode, data_overview::InspectorDataOverview,
+    entity::InspectorEntity, graph::InspectorGraph, monitor::InspectorMonitor,
+    object3d::InspectorObject3D, query_table::InspectorQueryTable, viewport::InspectorViewport,
 };
 
 pub struct InspectorIcons {
@@ -139,6 +140,24 @@ impl WidgetSystem for InspectorContent<'_, '_> {
                                         world,
                                         "inspector_monitor",
                                         monitor_id,
+                                    );
+                                    Default::default()
+                                }
+                                SelectedObject::DataOverview => {
+                                    ui.add_widget_with::<InspectorDataOverview>(
+                                        world,
+                                        "inspector_data_overview",
+                                        (),
+                                    );
+                                    Default::default()
+                                }
+                                SelectedObject::DataOverviewComponent {
+                                    component_id,
+                                } => {
+                                    ui.add_widget_with::<InspectorDataOverview>(
+                                        world,
+                                        "inspector_data_overview",
+                                        (),
                                     );
                                     Default::default()
                                 }

@@ -145,6 +145,10 @@ pub enum SelectedObject {
     Monitor {
         monitor_id: Entity,
     },
+    DataOverview,
+    DataOverviewComponent {
+        component_id: ComponentId,
+    },
     Action {
         action_id: Entity,
     },
@@ -169,6 +173,8 @@ impl SelectedObject {
             SelectedObject::Graph { graph_id } => Some(*graph_id),
             SelectedObject::QueryTable { table_id } => Some(*table_id),
             SelectedObject::Monitor { monitor_id } => Some(*monitor_id),
+            SelectedObject::DataOverview => None,
+            SelectedObject::DataOverviewComponent { .. } => None,
             SelectedObject::Action { action_id } => Some(*action_id),
             SelectedObject::Object3D { entity } => Some(*entity),
             SelectedObject::DashboardNode { entity } => Some(*entity),
