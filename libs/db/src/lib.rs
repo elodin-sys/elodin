@@ -422,9 +422,7 @@ impl DB {
 
     pub fn set_time_start_timestamp(&self, timestamp: Timestamp) -> Result<(), Error> {
         self.with_state_mut(|state| {
-            state
-                .db_config
-                .set_time_start_timestamp_micros(timestamp.0);
+            state.db_config.set_time_start_timestamp_micros(timestamp.0);
         });
         self.auto_timestamp_start.store(timestamp);
         self.auto_timestamp_base.store(Timestamp::now());

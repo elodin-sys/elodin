@@ -288,8 +288,10 @@ impl DbConfig {
     }
 
     pub fn set_time_start_timestamp_micros(&mut self, timestamp: i64) {
-        self.metadata
-            .insert(Self::TIME_START_TIMESTAMP_KEY.to_string(), timestamp.to_string());
+        self.metadata.insert(
+            Self::TIME_START_TIMESTAMP_KEY.to_string(),
+            timestamp.to_string(),
+        );
     }
 
     pub fn time_start_timestamp_micros(&self) -> Option<i64> {
