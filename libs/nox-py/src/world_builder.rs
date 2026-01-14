@@ -237,10 +237,7 @@ impl WorldBuilder {
         start_timestamp: Option<i64>,
         log_level: Option<String>,
     ) -> Result<Option<String>, Error> {
-        let log_level = log_level
-            .as_deref()
-            .map(normalize_log_level)
-            .transpose()?;
+        let log_level = log_level.as_deref().map(normalize_log_level).transpose()?;
         let filter = if std::env::var("RUST_LOG").is_ok() {
             tracing_subscriber::EnvFilter::builder().from_env_lossy()
         } else if let Some(log_level) = log_level {
