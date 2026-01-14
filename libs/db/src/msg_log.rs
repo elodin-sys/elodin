@@ -136,6 +136,15 @@ impl MsgLog {
         Ok(())
     }
 
+    /// Truncate the message log, clearing all messages while preserving metadata.
+    ///
+    /// This resets all underlying append logs, effectively removing all stored
+    /// messages without deallocating the underlying files.
+    pub fn truncate(&self) {
+        self.timestamps.truncate();
+        self.bufs.truncate();
+    }
+
     pub fn set_metadata(&mut self, metadata: MsgMetadata) -> Result<(), Error> {
         let metadata = self.metadata.insert(metadata);
         let metadata_path = self.path.join("metadata");
@@ -163,6 +172,11 @@ impl BufLog {
         self.offsets.sync_all()?;
         self.data_log.sync_all()?;
         Ok(())
+    }
+
+    fn truncate(&self) {
+        self.offsets.truncate();
+        self.data_log.truncate();
     }
 
     pub fn get_msg(&self, index: usize) -> Option<&[u8]> {

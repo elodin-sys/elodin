@@ -1,6 +1,6 @@
 use std::{io::Write, net::SocketAddr, path::PathBuf};
 
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use elodin_db::Server;
 use impeller2::vtable;
 use miette::IntoDiagnostic;
@@ -23,6 +23,11 @@ enum Commands {
     Lua(impeller2_cli::Args),
     #[command(about = "Generate C++ header files")]
     GenCpp,
+    #[command(
+        name = "fix-timestamps",
+        about = "Fix monotonic timestamps in a database"
+    )]
+    FixTimestamps(FixTimestampsArgs),
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -38,6 +43,36 @@ struct RunArgs {
     http_addr: Option<SocketAddr>,
     #[clap(long, hide = true)]
     reset: bool,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+struct FixTimestampsArgs {
+    #[clap(help = "Path to the database directory")]
+    path: PathBuf,
+    #[clap(long, help = "Show what would be changed without modifying")]
+    dry_run: bool,
+    #[clap(long, short, help = "Skip confirmation prompt")]
+    yes: bool,
+    #[clap(
+        long = "no-prune",
+        action = ArgAction::SetFalse,
+        default_value_t = true,
+        help = "Do not prune empty components"
+    )]
+    prune: bool,
+    #[clap(
+        long,
+        value_enum,
+        default_value = "wall-clock",
+        help = "Clock to use as reference when computing offsets"
+    )]
+    reference: ReferenceClockArg,
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+enum ReferenceClockArg {
+    WallClock,
+    Monotonic,
 }
 
 #[stellarator::main]
@@ -126,6 +161,23 @@ async fn main() -> miette::Result<()> {
                 .write_all(header.as_bytes())
                 .into_diagnostic()?;
             Ok(())
+        }
+        Commands::FixTimestamps(FixTimestampsArgs {
+            path,
+            dry_run,
+            yes,
+            prune,
+            reference,
+        }) => {
+            let reference = match reference {
+                ReferenceClockArg::WallClock => {
+                    elodin_db::fix_timestamps::ReferenceClock::WallClock
+                }
+                ReferenceClockArg::Monotonic => {
+                    elodin_db::fix_timestamps::ReferenceClock::Monotonic
+                }
+            };
+            elodin_db::fix_timestamps::run(path, dry_run, yes, reference, prune).into_diagnostic()
         }
     }
 }

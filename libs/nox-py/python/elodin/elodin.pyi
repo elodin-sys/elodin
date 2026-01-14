@@ -22,11 +22,11 @@ class Integrator:
     Rk4: Integrator
     SemiImplicit: Integrator
 
-class PostStepContext:
-    """Context object passed to post_step callbacks, providing direct DB read/write access.
+class StepContext:
+    """Context object passed to pre_step and post_step callbacks, providing direct DB read/write access.
 
     This enables SITL workflows to read sensor data and write component data (like motor
-    commands from Betaflight) back to the database within the same process.
+    commands from Betaflight) directly to the database within the same process.
     """
     @property
     def tick(self) -> int:
@@ -34,19 +34,30 @@ class PostStepContext:
         ...
     @property
     def timestamp(self) -> int:
-        """Current simulation timestamp (nanoseconds since epoch)."""
+        """Current simulation timestamp (microseconds since epoch)."""
         ...
-    def write_component(self, pair_name: str, data: jax.typing.ArrayLike) -> None:
+    def write_component(
+        self,
+        pair_name: str,
+        data: jax.typing.ArrayLike,
+        timestamp: Optional[int] = None,
+    ) -> None:
         """Write component data to the database.
 
         Args:
             pair_name: The full component name in "entity.component" format
                       (e.g., "drone.motor_command")
             data: NumPy array containing the component data to write
+            timestamp: Optional timestamp (microseconds since epoch) to write at.
+                      If None, uses the current simulation timestamp.
 
         Raises:
             RuntimeError: If the component doesn't exist in the database
             ValueError: If the data size doesn't match the component schema
+
+        Note:
+            Timestamps must be monotonically increasing per component. Writing with
+            a timestamp less than the last write will raise an error (TimeTravel).
         """
         ...
     def read_component(self, pair_name: str) -> jax.Array:
@@ -68,6 +79,7 @@ class PostStepContext:
         self,
         reads: list[str] = [],
         writes: Optional[dict[str, jax.typing.ArrayLike]] = None,
+        write_timestamps: Optional[dict[str, int]] = None,
     ) -> dict[str, jax.Array]:
         """Perform multiple component reads and writes in a single DB operation.
 
@@ -78,6 +90,9 @@ class PostStepContext:
             reads: List of component names to read (e.g., ["drone.accel", "drone.gyro"])
             writes: Dict mapping component names to numpy arrays to write
                    (e.g., {"drone.motor_command": motors_array})
+            write_timestamps: Optional dict mapping component names to timestamps
+                             (microseconds since epoch). Components not in this dict
+                             use the current simulation timestamp.
 
         Returns:
             Dict mapping read component names to their numpy array values.
@@ -85,6 +100,22 @@ class PostStepContext:
         Raises:
             RuntimeError: If any component doesn't exist or has no data
             ValueError: If any write data size doesn't match the component schema
+
+        Note:
+            Timestamps must be monotonically increasing per component. Writing with
+            a timestamp less than the last write will raise an error (TimeTravel).
+        """
+        ...
+    def truncate(self) -> None:
+        """Truncate all component data and message logs in the database, resetting tick to 0.
+
+        This clears all stored time-series data while preserving component schemas and metadata.
+        The simulation tick will be reset to 0, effectively starting fresh.
+
+        After truncate(), any subsequent write_component() calls in the same callback will write
+        at the start timestamp (tick 0), preventing TimeTravel errors on the next tick.
+
+        Use this to control the freshness of the database and ensure reliable data from a known tick.
         """
         ...
 
@@ -120,9 +151,11 @@ class WorldBuilder:
         max_ticks: Optional[int] = None,
         optimize: bool = False,
         is_canceled: Optional[Callable[[], bool]] = None,
-        post_step: Optional[Callable[[int, PostStepContext], None]] = None,
+        pre_step: Optional[Callable[[int, StepContext], None]] = None,
+        post_step: Optional[Callable[[int, StepContext], None]] = None,
         db_path: Optional[str] = None,
         interactive: bool = True,
+        start_timestamp: Optional[int] = None,
     ): ...
     def serve(
         self,
