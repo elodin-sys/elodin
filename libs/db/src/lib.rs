@@ -285,8 +285,8 @@ pub struct DB {
     pub default_stream_time_step: AtomicU64,
     pub last_updated: AtomicCell<Timestamp>,
     pub earliest_timestamp: AtomicCell<Timestamp>,
-    // Wall-clock timestamp at the moment the auto timestamp baseline was set.
-    auto_timestamp_base_wall_clock: AtomicCell<Timestamp>,
+    // Wall-clock timestamp at the moment the DB start anchor was set.
+    db_start_wall_clock: AtomicCell<Timestamp>,
 }
 
 #[derive(Default)]
@@ -333,7 +333,7 @@ impl DB {
             default_stream_time_step,
             last_updated: AtomicCell::new(Timestamp(i64::MIN)),
             earliest_timestamp: AtomicCell::new(now),
-            auto_timestamp_base_wall_clock: AtomicCell::new(now),
+            db_start_wall_clock: AtomicCell::new(now),
         };
         db.save_db_state()?;
         Ok(db)
@@ -422,13 +422,13 @@ impl DB {
             state.db_config.set_time_start_timestamp_micros(timestamp.0);
         });
         self.earliest_timestamp.store(timestamp);
-        self.auto_timestamp_base_wall_clock.store(Timestamp::now());
+        self.db_start_wall_clock.store(Timestamp::now());
         self.save_db_state()
     }
 
-    pub fn auto_timestamp(&self) -> Timestamp {
+    pub fn apply_implicit_timestamp(&self) -> Timestamp {
         let start = self.earliest_timestamp.latest();
-        let base = self.auto_timestamp_base_wall_clock.latest();
+        let base = self.db_start_wall_clock.latest();
         let now = Timestamp::now();
         let delta = now.0.saturating_sub(base.0);
         Timestamp(start.0.saturating_add(delta))
@@ -598,7 +598,7 @@ impl DB {
             ),
             last_updated: AtomicCell::new(Timestamp(last_updated)),
             earliest_timestamp: AtomicCell::new(earliest_timestamp),
-            auto_timestamp_base_wall_clock: AtomicCell::new(now),
+            db_start_wall_clock: AtomicCell::new(now),
         })
     }
 
@@ -1480,7 +1480,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     snapshot_barrier: &db.snapshot_barrier,
                     last_updated: &db.last_updated,
                     sunk_new_time_series: false,
-                    table_received: db.auto_timestamp(),
+                    table_received: db.apply_implicit_timestamp(),
                 };
                 table.sink(&state.vtable_registry, &mut sink)??;
                 if sink.sunk_new_time_series {
@@ -1636,7 +1636,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             })?;
         }
         Packet::Msg(m) => {
-            let timestamp = m.timestamp.unwrap_or_else(|| db.auto_timestamp());
+            let timestamp = m.timestamp.unwrap_or_else(|| db.apply_implicit_timestamp());
             db.push_msg(timestamp, m.id, &m.buf)?
         }
         _ => {}
