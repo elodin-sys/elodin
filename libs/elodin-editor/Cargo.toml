@@ -31,11 +31,8 @@ winit.version = "0.30.12"
 winit.features = ["rwh_05"]
 raw-window-handle = "0.5"
 bevy_infinite_grid = "0.17"
-big_space.git = "https://github.com/elodin-sys/big_space.git"
-big_space.branch = "no_prop_rot_v0.17"
-#bevy_editor_cam = "0.7"
-bevy_editor_cam.git = "https://github.com/aevyrie/bevy_editor_cam"
-bevy_editor_cam.rev = "1ae39bda1aa8d547dec4b26747e466ad5b2ab9ab"
+big_space = "0.5"
+bevy_editor_cam = "0.7"
 bevy_framepace = "0.20"
 
 # rand
