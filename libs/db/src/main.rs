@@ -133,6 +133,7 @@ async fn main() -> miette::Result<()> {
             config,
             reset,
             start_timestamp,
+            ..
         }) => {
             let path = path.unwrap_or_else(|| {
                 let dirs =
