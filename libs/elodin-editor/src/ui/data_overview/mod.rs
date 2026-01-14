@@ -268,7 +268,7 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                 .time_ranges
                 .row_settings
                 .entry(*component_id)
-                .or_insert_with(DataOverviewRowSettings::default);
+                .or_default();
             if settings.enabled {
                 enabled_tables.push(table_name.clone());
             }
@@ -444,7 +444,7 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                 .time_ranges
                 .row_settings
                 .entry(summary.component_id)
-                .or_insert_with(DataOverviewRowSettings::default);
+                .or_default();
             if settings.color.is_none() {
                 settings.color = Some(row_color(index));
             }
