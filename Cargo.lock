@@ -5967,6 +5967,7 @@ dependencies = [
  "bevy_egui 0.38.1",
  "bevy_framepace",
  "bevy_infinite_grid",
+ "bevy_picking",
  "bevy_render 0.17.3",
  "big_space",
  "const-fnv1a-hash",

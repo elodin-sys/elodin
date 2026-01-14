@@ -22,6 +22,7 @@ bevy.version = "0.17"
 bevy_render.version = "0.17"
 bevy_color.version = "0.17"
 bevy_egui.version = "0.38.0"
+bevy_picking = "0.17"
 egui.version = "0.33.3"
 egui.features = ["rayon"]
 egui_tiles = "0.14"
