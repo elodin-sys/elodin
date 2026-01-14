@@ -324,14 +324,14 @@ impl LoadSchematicParams<'_, '_> {
             #[cfg(not(target_os = "macos"))]
             {
                 if let Some(screen) = window_state.descriptor.screen.as_ref() {
-                    self.commands.send_event(WindowRelayout::Screen {
+                    self.commands.write_message(WindowRelayout::Screen {
                         window: primary_window,
                         screen: *screen,
                     });
                 }
 
                 if let Some(rect) = window_state.descriptor.screen_rect.as_ref() {
-                    self.commands.send_event(WindowRelayout::Rect {
+                    self.commands.write_message(WindowRelayout::Rect {
                         window: primary_window,
                         rect: *rect,
                     });

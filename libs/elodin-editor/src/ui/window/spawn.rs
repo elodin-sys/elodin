@@ -137,14 +137,14 @@ pub fn sync_windows(
         commands.entity(entity).insert(camera);
 
         if let Some(screen) = state.descriptor.screen.as_ref() {
-            commands.send_event(WindowRelayout::Screen {
+            commands.write_message(WindowRelayout::Screen {
                 window: window_entity,
                 screen: *screen,
             });
         }
 
         if let Some(rect) = state.descriptor.screen_rect.as_ref() {
-            commands.send_event(WindowRelayout::Rect {
+            commands.write_message(WindowRelayout::Rect {
                 window: window_entity,
                 rect: *rect,
             });

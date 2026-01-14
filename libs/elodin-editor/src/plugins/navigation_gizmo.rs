@@ -28,7 +28,7 @@ impl Plugin for NavigationGizmoPlugin {
 pub struct NavGizmoCamera;
 
 fn cube_color_highlight(
-    event: Trigger<Pointer<Over>>,
+    event: On<Pointer<Over>>,
     mut target_query: Query<Entity>,
     mut animations: ResMut<Assets<AnimationClip>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
@@ -64,7 +64,7 @@ fn cube_color_highlight(
 }
 
 fn cube_color_reset(
-    event: Trigger<Pointer<Out>>,
+    event: On<Pointer<Out>>,
     mut target_query: Query<Entity>,
     mut animations: ResMut<Assets<AnimationClip>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
@@ -274,7 +274,7 @@ pub fn spawn_gizmo(
 pub struct DraggedMarker;
 
 pub fn drag_nav_gizmo(
-    drag: Trigger<Pointer<Drag>>,
+    drag: On<Pointer<Drag>>,
     nav_gizmo: Query<&NavGizmoParent>,
     mut query: Query<(&mut Transform, &mut EditorCam, &Camera), With<MainCamera>>,
     dragged_query: Query<(), With<DraggedMarker>>,
@@ -305,7 +305,7 @@ pub fn drag_nav_gizmo(
 }
 
 pub fn drag_nav_gizmo_end(
-    drag_end: Trigger<Pointer<DragEnd>>,
+    drag_end: On<Pointer<DragEnd>>,
     nav_gizmo: Query<&NavGizmoParent>,
     mut query: Query<&mut EditorCam, With<MainCamera>>,
     mut commands: Commands,
@@ -325,17 +325,17 @@ pub fn drag_nav_gizmo_end(
 fn side_clicked_cb(
     direction: Dir3,
 ) -> impl Fn(
-    Trigger<Pointer<Click>>,
+    On<Pointer<Click>>,
     Query<(Entity, &Transform, &EditorCam), With<MainCamera>>,
     Query<&NavGizmoParent>,
     Query<&DraggedMarker>,
-    EventWriter<LookToTrigger>,
+    MessageWriter<LookToTrigger>,
 ) {
-    move |click: Trigger<Pointer<Click>>,
+    move |click: On<Pointer<Click>>,
           query: Query<(Entity, &Transform, &EditorCam), With<MainCamera>>,
           nav_gizmo: Query<&NavGizmoParent>,
           drag_query: Query<&DraggedMarker>,
-          mut look_to: EventWriter<LookToTrigger>| {
+          mut look_to: MessageWriter<LookToTrigger>| {
 
         let target = click.event().event_target();
 

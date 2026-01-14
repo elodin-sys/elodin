@@ -218,7 +218,7 @@ pub fn shortcuts(
 
 pub fn update_focused_window(
     mut focused_window: ResMut<FocusedWindow>,
-    mut focus_events: EventReader<WindowFocused>,
+    mut focus_events: MessageReader<WindowFocused>,
 ) {
     for event in focus_events.read() {
         if event.focused {
@@ -278,7 +278,7 @@ impl Plugin for UiPlugin {
             .init_resource::<timeline_slider::UITick>()
             .init_resource::<timeline::StreamTickOrigin>()
             .init_resource::<command_palette::CommandPaletteState>()
-            .add_event::<DialogEvent>()
+            .add_message::<DialogEvent>()
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, update_focused_window)

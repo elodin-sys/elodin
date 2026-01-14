@@ -10,7 +10,6 @@ use bevy::{
     asset::Assets,
     ecs::{
         entity::Entity,
-        event::EventReader,
         prelude::Resource,
         query::With,
         system::{Commands, Local, Query, Res, SystemParam},
@@ -1239,7 +1238,7 @@ pub fn sync_locked_graphs(
 
 pub fn zoom_graph(
     mut query: Query<(&mut GraphState, &Camera)>,
-    mut scroll_events: EventReader<MouseWheel>,
+    mut scroll_events: MessageReader<MouseWheel>,
     windows: Query<(Entity, &Window)>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
     key_state: Res<LogicalKeyState>,
@@ -1476,7 +1475,9 @@ pub fn reset_graph(
     }
 }
 
-fn scroll_offsets_from_events(scroll_events: &mut EventReader<MouseWheel>) -> HashMap<Entity, f32> {
+fn scroll_offsets_from_events(
+    scroll_events: &mut MessageReader<MouseWheel>,
+) -> HashMap<Entity, f32> {
     let pixels_per_line = SCROLL_PIXELS_PER_LINE;
     let mut offsets: HashMap<Entity, f32> = HashMap::new();
     for ev in scroll_events.read() {

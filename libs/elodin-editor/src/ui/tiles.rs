@@ -5,7 +5,6 @@ use bevy::{
     post_process::bloom::Bloom,
     prelude::*,
     window::{Monitor, PrimaryWindow, Window, WindowPosition},
-    render::view::Hdr,
 };
 use bevy_editor_cam::prelude::{EditorCam, EnabledMotion, OrbitConstraint};
 use bevy_egui::{
@@ -70,7 +69,7 @@ use sidebar::{
 
 pub(crate) fn plugin(app: &mut App) {
     app.register_type::<WindowId>()
-        .add_event::<WindowRelayout>()
+        .add_message::<WindowRelayout>()
         .add_systems(Startup, setup_primary_window_state);
 }
 
@@ -2251,7 +2250,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
             } else {
                 None
             };
-            let window_width = ui.ctx().screen_rect().width();
+            let window_width = ui.ctx().content_rect().width();
             let gutter_width = (window_width * 0.02).max(12.0);
             let painter = ui.painter_at(ui.max_rect());
             let mut sidebar_state = sidebar_state;

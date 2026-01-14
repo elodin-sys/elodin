@@ -33,7 +33,7 @@ use bevy::{
     pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup},
     prelude::{Color, Deref, Resource},
     render::{
-        ExtractSchedule, MainWorld, Render, RenderApp, RenderSet,
+        ExtractSchedule, MainWorld, Render, RenderApp, RenderSystems,
         extract_component::{ComponentUniforms, DynamicUniformIndex, UniformComponentPlugin},
         render_phase::{
             AddRenderCommand, DrawFunctions, PhaseItem, PhaseItemExtraIndex, RenderCommand,
@@ -82,7 +82,7 @@ impl Plugin for Plot3dGpuPlugin {
             .configure_sets(
                 Render,
                 PlotSystem::QueueLine
-                    .in_set(RenderSet::Queue)
+                    .in_set(RenderSystems::Queue)
                     .ambiguous_with(
                         bevy::pbr::queue_material_meshes
                     ),
@@ -90,7 +90,7 @@ impl Plugin for Plot3dGpuPlugin {
             .add_systems(ExtractSchedule, extract_lines)
             .add_systems(
                 Render,
-                prepare_uniform_bind_group.in_set(RenderSet::PrepareBindGroups),
+                prepare_uniform_bind_group.in_set(RenderSystems::PrepareBindGroups),
             )
             .add_systems(
                 Render,
