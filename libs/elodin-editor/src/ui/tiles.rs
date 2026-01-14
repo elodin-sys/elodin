@@ -1386,7 +1386,6 @@ impl ViewportPane {
             Transform::default(),
             Camera3d::default(),
             Camera {
-                clear_color: ClearColorConfig::Default,
                 order: 1,
                 ..Default::default()
             },
@@ -1421,10 +1420,6 @@ impl ViewportPane {
             ChildOf(parent),
             Name::new("viewport camera3d"),
         ));
-
-        if viewport.hdr {
-            camera.insert(Hdr);
-        }
 
         camera.insert(Bloom { ..default() });
         camera.insert(EnvironmentMapLight {

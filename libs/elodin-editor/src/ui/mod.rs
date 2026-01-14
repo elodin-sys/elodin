@@ -13,6 +13,7 @@ use bevy::{
     prelude::*,
     camera::{RenderTarget, Viewport},
     window::{Monitor, NormalizedWindowRef, PrimaryWindow, WindowFocused},
+    render::view::Hdr,
 };
 use bevy_defer::AsyncPlugin;
 use bevy_egui::{
@@ -298,7 +299,7 @@ impl Plugin for UiPlugin {
                     .chain(),
             )
             .add_systems(First, fix_visibility_hierarchy)
-            //.add_systems(Update, sync_hdr)
+            .add_systems(Update, sync_hdr)
             .add_systems(Update, tiles::shortcuts)
             .add_systems(Update, query_plot::auto_bounds)
             .add_systems(Update, dashboard::update_nodes)
@@ -798,9 +799,17 @@ fn sync_camera_grid_cell(
         }
     }
 }
-// TODO: &ers
-//fn sync_hdr(hdr_enabled: Res<HdrEnabled>, mut query: Query<&mut Camera>) {
-//    for mut cam in query.iter_mut() {
-//        cam.hdr = hdr_enabled.0;
-//    }
-//}
+
+fn sync_hdr(
+    hdr_enabled: Res<HdrEnabled>,
+    mut commands: Commands,
+    cameras: Query<(Entity, Has<Hdr>), With<Camera>>,
+) {
+    for (entity, has_hdr) in cameras.iter() {
+          if hdr_enabled.0 && !has_hdr {
+              commands.entity(entity).insert(Hdr);
+          } else if !hdr_enabled.0 && has_hdr {
+              commands.entity(entity).remove::<Hdr>();
+          }
+      }
+  }
