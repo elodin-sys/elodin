@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use bevy::{
     ecs::{
         query::QueryData,
-        system::{SystemParam, SystemState},
+        system::{NonSendMarker, SystemParam, SystemState},
     },
     // platform::collections::{HashMap, HashSet},
     input::keyboard::Key,
@@ -13,6 +13,7 @@ use bevy::{
     prelude::*,
     camera::{RenderTarget, Viewport},
     window::{Monitor, NormalizedWindowRef, PrimaryWindow, WindowFocused},
+    winit::WINIT_WINDOWS,
 };
 use bevy_defer::AsyncPlugin;
 use bevy_egui::{
@@ -487,10 +488,11 @@ pub fn render_layout(
 /// Runs as a one-off system to capture the window descriptor. Does not run
 /// every frameñ.
 pub(crate) fn capture_window_screens_oneoff(
-    winit_windows: NonSend<bevy::winit::WinitWindows>,
     mut window_query: Query<(Entity, &Window, &mut tiles::WindowState)>,
     screens: Query<(Entity, &Monitor)>,
+    _non_send_marker: NonSendMarker,
 ) {
+    WINIT_WINDOWS.with_borrow(|winit_windows| {
     for (entity, window_component, mut state) in &mut window_query {
         let winit_window = winit_windows.get_window(entity);
         let mut updated = false;
@@ -510,6 +512,7 @@ pub(crate) fn capture_window_screens_oneoff(
             state.update_descriptor_from_window(window_component, &screens);
         }
     }
+    });
 }
 
 fn fix_visibility_hierarchy(
