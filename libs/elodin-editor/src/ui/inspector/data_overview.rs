@@ -10,9 +10,7 @@ use crate::{
     ui::{
         button::EColorButton,
         colors::{ColorExt, get_scheme},
-        data_overview::{
-            ComponentTimeRanges, DataOverviewRowSettings, component_to_table_name, row_color,
-        },
+        data_overview::{ComponentTimeRanges, component_to_table_name, row_color},
         inspector::color_popup,
         widgets::WidgetSystem,
     },
@@ -75,7 +73,7 @@ impl WidgetSystem for InspectorDataOverview<'_> {
                                 .time_ranges
                                 .row_settings
                                 .entry(*component_id)
-                                .or_insert_with(DataOverviewRowSettings::default);
+                                .or_default();
                             if settings.color.is_none() {
                                 settings.color = Some(default_color);
                             }

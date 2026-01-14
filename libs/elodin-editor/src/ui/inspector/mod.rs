@@ -151,7 +151,7 @@ impl WidgetSystem for InspectorContent<'_, '_> {
                                     );
                                     Default::default()
                                 }
-                                SelectedObject::DataOverviewComponent { component_id } => {
+                                SelectedObject::DataOverviewComponent { .. } => {
                                     ui.add_widget_with::<InspectorDataOverview>(
                                         world,
                                         "inspector_data_overview",
