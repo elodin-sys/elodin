@@ -89,8 +89,7 @@ pub fn init_db(
     tracing::info!("initializing db");
     // Set the earliest timestamp from the start_timestamp parameter
     // This ensures the editor displays the correct time baseline
-    db.set_earliest_timestamp(start_timestamp);
-    db.set_time_start_timestamp(start_timestamp)?;
+    db.set_earliest_timestamp(start_timestamp)?;
     db.with_state_mut(|state| {
         for (component_id, (schema, component_metadata)) in world.metadata.component_map.iter() {
             let Some(column) = world.host.get(component_id) else {

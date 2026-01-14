@@ -150,7 +150,7 @@ async fn main() -> miette::Result<()> {
             if let Some(start_timestamp) = start_timestamp {
                 server
                     .db
-                    .set_time_start_timestamp(impeller2::types::Timestamp(start_timestamp))
+                    .set_earliest_timestamp(impeller2::types::Timestamp(start_timestamp))
                     .into_diagnostic()?;
             }
             let axum_db = server.db.clone();

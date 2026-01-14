@@ -285,8 +285,8 @@ pub struct DB {
     pub default_stream_time_step: AtomicU64,
     pub last_updated: AtomicCell<Timestamp>,
     pub earliest_timestamp: AtomicCell<Timestamp>,
-    auto_timestamp_start: AtomicCell<Timestamp>,
-    auto_timestamp_base: AtomicCell<Timestamp>,
+    // Wall-clock timestamp at the moment the auto timestamp baseline was set.
+    auto_timestamp_base_wall_clock: AtomicCell<Timestamp>,
 }
 
 #[derive(Default)]
@@ -315,11 +315,13 @@ impl DB {
         std::fs::create_dir_all(&path)?;
         let now = Timestamp::now();
         let default_stream_time_step = AtomicU64::new(time_step.as_nanos() as u64);
+        let mut db_config = DbConfig {
+            default_stream_time_step: time_step,
+            ..Default::default()
+        };
+        db_config.set_time_start_timestamp_micros(now.0);
         let state = State {
-            db_config: DbConfig {
-                default_stream_time_step: time_step,
-                ..Default::default()
-            },
+            db_config,
             ..Default::default()
         };
         let db = DB {
@@ -331,8 +333,7 @@ impl DB {
             default_stream_time_step,
             last_updated: AtomicCell::new(Timestamp(i64::MIN)),
             earliest_timestamp: AtomicCell::new(now),
-            auto_timestamp_start: AtomicCell::new(now),
-            auto_timestamp_base: AtomicCell::new(now),
+            auto_timestamp_base_wall_clock: AtomicCell::new(now),
         };
         db.save_db_state()?;
         Ok(db)
@@ -416,22 +417,18 @@ impl DB {
     ///
     /// This is typically called during initialization to set the starting timestamp
     /// for the simulation. If not called, defaults to the current system time.
-    pub fn set_earliest_timestamp(&self, timestamp: Timestamp) {
-        self.earliest_timestamp.store(timestamp);
-    }
-
-    pub fn set_time_start_timestamp(&self, timestamp: Timestamp) -> Result<(), Error> {
+    pub fn set_earliest_timestamp(&self, timestamp: Timestamp) -> Result<(), Error> {
         self.with_state_mut(|state| {
             state.db_config.set_time_start_timestamp_micros(timestamp.0);
         });
-        self.auto_timestamp_start.store(timestamp);
-        self.auto_timestamp_base.store(Timestamp::now());
+        self.earliest_timestamp.store(timestamp);
+        self.auto_timestamp_base_wall_clock.store(Timestamp::now());
         self.save_db_state()
     }
 
     pub fn auto_timestamp(&self) -> Timestamp {
-        let start = self.auto_timestamp_start.latest();
-        let base = self.auto_timestamp_base.latest();
+        let start = self.earliest_timestamp.latest();
+        let base = self.auto_timestamp_base_wall_clock.latest();
         let now = Timestamp::now();
         let delta = now.0.saturating_sub(base.0);
         Timestamp(start.0.saturating_add(delta))
@@ -573,11 +570,6 @@ impl DB {
         info!(db.path = ?path, "opened db");
         let db_state = DbConfig::read(db_state_path)?;
         let now = Timestamp::now();
-        let auto_timestamp_start = db_state
-            .time_start_timestamp_micros()
-            .map(Timestamp)
-            .unwrap_or(now);
-        let auto_timestamp_base = now;
         let state = State {
             components,
             component_metadata,
@@ -585,11 +577,16 @@ impl DB {
             db_config: db_state.clone(),
             ..Default::default()
         };
-        let earliest_timestamp = if start_timestamp == i64::MAX {
-            now
-        } else {
-            Timestamp(start_timestamp)
-        };
+        let earliest_timestamp = db_state
+            .time_start_timestamp_micros()
+            .map(Timestamp)
+            .unwrap_or_else(|| {
+                if start_timestamp == i64::MAX {
+                    now
+                } else {
+                    Timestamp(start_timestamp)
+                }
+            });
         Ok(DB {
             state: RwLock::new(state),
             snapshot_barrier: SnapshotBarrier::new(),
@@ -601,8 +598,7 @@ impl DB {
             ),
             last_updated: AtomicCell::new(Timestamp(last_updated)),
             earliest_timestamp: AtomicCell::new(earliest_timestamp),
-            auto_timestamp_start: AtomicCell::new(auto_timestamp_start),
-            auto_timestamp_base: AtomicCell::new(auto_timestamp_base),
+            auto_timestamp_base_wall_clock: AtomicCell::new(now),
         })
     }
 
