@@ -22,6 +22,17 @@ use std::{
 use tracing::{error, info};
 use zerocopy::{FromBytes, TryFromBytes};
 
+fn normalize_log_level(level: &str) -> Result<&'static str, Error> {
+    match level.to_ascii_lowercase().as_str() {
+        "error" => Ok("error"),
+        "warn" => Ok("warn"),
+        "info" => Ok("info"),
+        "debug" => Ok("debug"),
+        "trace" => Ok("trace"),
+        _ => Err(Error::InvalidLogLevel(level.to_string())),
+    }
+}
+
 fn install_signal_handlers(terminate_flag: &Arc<AtomicBool>) {
     use signal_hook::consts::signal::*;
     use signal_hook::flag;
@@ -207,6 +218,7 @@ impl WorldBuilder {
         db_path = None,
         interactive = true,
         start_timestamp = None,
+        log_level = None,
     ))]
     pub fn run(
         &mut self,
@@ -223,13 +235,24 @@ impl WorldBuilder {
         db_path: Option<String>,
         interactive: bool,
         start_timestamp: Option<i64>,
+        log_level: Option<String>,
     ) -> Result<Option<String>, Error> {
+        let log_level = log_level
+            .as_deref()
+            .map(normalize_log_level)
+            .transpose()?;
+        let filter = if std::env::var("RUST_LOG").is_ok() {
+            tracing_subscriber::EnvFilter::builder().from_env_lossy()
+        } else if let Some(log_level) = log_level {
+            tracing_subscriber::EnvFilter::builder()
+                .parse_lossy(format!("info,elodin_db={log_level}"))
+        } else {
+            tracing_subscriber::EnvFilter::builder()
+                .with_default_directive("info".parse().expect("invalid filter"))
+                .from_env_lossy()
+        };
         let _ = tracing_subscriber::fmt::fmt()
-            .with_env_filter(
-                tracing_subscriber::EnvFilter::builder()
-                    .with_default_directive("info".parse().expect("invalid filter"))
-                    .from_env_lossy(),
-            )
+            .with_env_filter(filter)
             .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
                 "%Y-%m-%d %H:%M:%S%.3f".to_string(),
             ))

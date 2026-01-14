@@ -13,7 +13,8 @@ Install the elodin-db from the [releases](https://github.com/elodin-sys/elodin/r
 # - Listening on port 2240
 # - Storing data in the default user data directory ($HOME/.local/share/elodin/db)
 # - Using the ./examples/db-config.lua config
-elodin-db run [::]:2240 $HOME/.local/share/elodin/db --config examples/db-config.lua
+# - Setting log level to warn (optional)
+elodin-db run [::]:2240 $HOME/.local/share/elodin/db --config examples/db-config.lua --log-level warn
 ```
 
 ### Stream data to the database with C

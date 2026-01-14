@@ -24,6 +24,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("invalid time step: {0:?}")]
     InvalidTimeStep(std::time::Duration),
+    #[error("invalid log level: {0}")]
+    InvalidLogLevel(String),
     #[error("impeller error {0}")]
     Impeller(#[from] impeller2::error::Error),
     #[error("elodin db error {0}")]
@@ -38,6 +40,9 @@ impl From<Error> for PyErr {
             }
             Error::NoxEcs(nox_ecs::Error::ValueSizeMismatch) => {
                 PyValueError::new_err("value size mismatch")
+            }
+            Error::InvalidLogLevel(level) => {
+                PyValueError::new_err(format!("invalid log level: {level}"))
             }
             Error::NoxEcs(nox_ecs::Error::PyO3(err)) | Error::PyErr(err) => err,
             err => PyRuntimeError::new_err(err.to_string()),

@@ -67,6 +67,7 @@ The Elodin simulation world.
     - `db_path` : `string`, optional, the path to the database directory. If not provided, a temporary database is created.
     - `interactive` : `bool`, optional, controls simulation behavior after reaching `max_ticks`, defaults to `True`. When `True`, the simulation pauses but remains running for continued interaction in the Elodin editor. When `False`, the simulation terminates completely after reaching `max_ticks`.
     - `start_timestamp` : `int`, optional, the starting timestamp for the simulation in microseconds. If `None` (default), uses the current system time (epoch-based). Set to `0` for zero-based timing where the simulation starts at `t=0`.
+    - `log_level` : `str`, optional, log level for the embedded Elodin-DB instance (`error`, `warn`, `info`, `debug`, `trace`). Defaults to `info` unless `RUST_LOG` is set.
 
 ### _class_ `elodin.EntityId`
 Integer reference identifier for entities in Elodin.
