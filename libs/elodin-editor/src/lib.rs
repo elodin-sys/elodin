@@ -540,17 +540,12 @@ fn handle_drag_resize(
 }
 
 fn setup_window_icon(
-    _windows: Query<(Entity, &bevy::window::PrimaryWindow)>,
-    // TODO: &ers - is this still load bearing? Does the query above not ensure a window?
-    //
-    // this is load bearing, because it ensures that there is at
-    // least one window spawned
-    //_winit_windows: NonSend<bevy::winit::WinitWindows>,
+    windows: Query<(Entity, &bevy::window::PrimaryWindow)>,
 ) {
     #[cfg(target_os = "macos")]
     set_icon_mac();
 
-    if !_windows.is_empty() {
+    if !windows.is_empty() {
         #[cfg(target_os = "windows")]
         set_icon_windows();
     }
