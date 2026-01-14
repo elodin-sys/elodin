@@ -36,6 +36,15 @@ struct RunArgs {
     addr: SocketAddr,
     #[clap(help = "Path to the data directory")]
     path: Option<PathBuf>,
+    #[clap(
+        long,
+        value_enum,
+        default_value = "info",
+        help = "Log level (error, warn, info, debug, trace)"
+    )]
+    log_level: LogLevel,
+    #[clap(long, help = "Start timestamp in microseconds")]
+    start_timestamp: Option<i64>,
     #[clap(long, help = "Path to the configuration file")]
     pub config: Option<PathBuf>,
     #[cfg(feature = "axum")]
@@ -75,12 +84,38 @@ enum ReferenceClockArg {
     Monotonic,
 }
 
+#[derive(ValueEnum, Clone, Copy, Debug)]
+enum LogLevel {
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+impl LogLevel {
+    fn as_str(self) -> &'static str {
+        match self {
+            LogLevel::Error => "error",
+            LogLevel::Warn => "warn",
+            LogLevel::Info => "info",
+            LogLevel::Debug => "debug",
+            LogLevel::Trace => "trace",
+        }
+    }
+}
+
 #[stellarator::main]
 async fn main() -> miette::Result<()> {
+    let args = Cli::parse();
+    let log_level = match &args.command {
+        Commands::Run(args) => args.log_level,
+        _ => LogLevel::Info,
+    };
     let filter = if std::env::var("RUST_LOG").is_ok() {
         EnvFilter::builder().from_env_lossy()
     } else {
-        EnvFilter::builder().parse_lossy("elodin_db=info")
+        EnvFilter::builder().parse_lossy(format!("elodin_db={}", log_level.as_str()))
     };
 
     let _ = tracing_subscriber::fmt::fmt()
@@ -90,7 +125,6 @@ async fn main() -> miette::Result<()> {
             "%Y-%m-%d %H:%M:%S%.3f".to_string(),
         ))
         .try_init();
-    let args = Cli::parse();
     match args.command {
         Commands::Run(RunArgs {
             addr,
@@ -98,6 +132,8 @@ async fn main() -> miette::Result<()> {
             path,
             config,
             reset,
+            start_timestamp,
+            ..
         }) => {
             let path = path.unwrap_or_else(|| {
                 let dirs =
@@ -112,6 +148,12 @@ async fn main() -> miette::Result<()> {
             }
             info!(?path, "starting db");
             let server = Server::new(&path, addr).into_diagnostic()?;
+            if let Some(start_timestamp) = start_timestamp {
+                server
+                    .db
+                    .set_earliest_timestamp(impeller2::types::Timestamp(start_timestamp))
+                    .into_diagnostic()?;
+            }
             let axum_db = server.db.clone();
             let db = stellarator::spawn(server.run());
             if let Some(http_addr) = http_addr {

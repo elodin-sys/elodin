@@ -269,6 +269,8 @@ pub struct DbConfig {
 }
 
 impl DbConfig {
+    const TIME_START_TIMESTAMP_KEY: &'static str = "time.start_timestamp";
+
     pub fn set_schematic_path(&mut self, path: String) {
         self.metadata.insert("schematic.path".to_string(), path);
     }
@@ -283,6 +285,19 @@ impl DbConfig {
 
     pub fn schematic_content(&self) -> Option<&str> {
         self.metadata.get("schematic.content").map(String::as_str)
+    }
+
+    pub fn set_time_start_timestamp_micros(&mut self, timestamp: i64) {
+        self.metadata.insert(
+            Self::TIME_START_TIMESTAMP_KEY.to_string(),
+            timestamp.to_string(),
+        );
+    }
+
+    pub fn time_start_timestamp_micros(&self) -> Option<i64> {
+        self.metadata
+            .get(Self::TIME_START_TIMESTAMP_KEY)
+            .and_then(|value| value.parse().ok())
     }
 }
 

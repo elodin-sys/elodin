@@ -285,6 +285,8 @@ pub struct DB {
     pub default_stream_time_step: AtomicU64,
     pub last_updated: AtomicCell<Timestamp>,
     pub earliest_timestamp: AtomicCell<Timestamp>,
+    // Wall-clock timestamp at the moment the DB start anchor was set.
+    db_start_wall_clock: AtomicCell<Timestamp>,
 }
 
 #[derive(Default)]
@@ -311,12 +313,15 @@ impl DB {
         info!(?path, "created db");
 
         std::fs::create_dir_all(&path)?;
+        let now = Timestamp::now();
         let default_stream_time_step = AtomicU64::new(time_step.as_nanos() as u64);
+        let mut db_config = DbConfig {
+            default_stream_time_step: time_step,
+            ..Default::default()
+        };
+        db_config.set_time_start_timestamp_micros(now.0);
         let state = State {
-            db_config: DbConfig {
-                default_stream_time_step: time_step,
-                ..Default::default()
-            },
+            db_config,
             ..Default::default()
         };
         let db = DB {
@@ -327,7 +332,8 @@ impl DB {
             vtable_gen: AtomicCell::new(0),
             default_stream_time_step,
             last_updated: AtomicCell::new(Timestamp(i64::MIN)),
-            earliest_timestamp: AtomicCell::new(Timestamp::now()),
+            earliest_timestamp: AtomicCell::new(now),
+            db_start_wall_clock: AtomicCell::new(now),
         };
         db.save_db_state()?;
         Ok(db)
@@ -411,8 +417,21 @@ impl DB {
     ///
     /// This is typically called during initialization to set the starting timestamp
     /// for the simulation. If not called, defaults to the current system time.
-    pub fn set_earliest_timestamp(&self, timestamp: Timestamp) {
+    pub fn set_earliest_timestamp(&self, timestamp: Timestamp) -> Result<(), Error> {
+        self.with_state_mut(|state| {
+            state.db_config.set_time_start_timestamp_micros(timestamp.0);
+        });
         self.earliest_timestamp.store(timestamp);
+        self.db_start_wall_clock.store(Timestamp::now());
+        self.save_db_state()
+    }
+
+    pub fn apply_implicit_timestamp(&self) -> Timestamp {
+        let start = self.earliest_timestamp.latest();
+        let base = self.db_start_wall_clock.latest();
+        let now = Timestamp::now();
+        let delta = now.0.saturating_sub(base.0);
+        Timestamp(start.0.saturating_add(delta))
     }
 
     pub fn copy_native(&self, target_db_path: impl AsRef<Path>) -> Result<PathBuf, Error> {
@@ -550,17 +569,24 @@ impl DB {
 
         info!(db.path = ?path, "opened db");
         let db_state = DbConfig::read(db_state_path)?;
+        let now = Timestamp::now();
         let state = State {
             components,
             component_metadata,
             msg_logs,
+            db_config: db_state.clone(),
             ..Default::default()
         };
-        let earliest_timestamp = if start_timestamp == i64::MAX {
-            Timestamp::now()
-        } else {
-            Timestamp(start_timestamp)
-        };
+        let earliest_timestamp = db_state
+            .time_start_timestamp_micros()
+            .map(Timestamp)
+            .unwrap_or_else(|| {
+                if start_timestamp == i64::MAX {
+                    now
+                } else {
+                    Timestamp(start_timestamp)
+                }
+            });
         Ok(DB {
             state: RwLock::new(state),
             snapshot_barrier: SnapshotBarrier::new(),
@@ -572,6 +598,7 @@ impl DB {
             ),
             last_updated: AtomicCell::new(Timestamp(last_updated)),
             earliest_timestamp: AtomicCell::new(earliest_timestamp),
+            db_start_wall_clock: AtomicCell::new(now),
         })
     }
 
@@ -1040,7 +1067,7 @@ impl Decomponentize for DBSink<'_> {
             return Err(Error::ComponentNotFound(component_id));
         };
         let time_series_empty = component.time_series.index().is_empty();
-        // In auto-timestamp mode (no explicit timestamp provided), concurrent writers
+        // When timestamps are auto-generated (no explicit timestamp provided), concurrent writers
         // may occasionally observe a slightly newer last timestamp and reject with
         // TimeTravel. In that case, clamp the timestamp to last+1 and retry.
         if let Err(err) = component.time_series.push_buf(timestamp, value_buf) {
@@ -1053,7 +1080,7 @@ impl Decomponentize for DBSink<'_> {
                             // ensure strictly non-decreasing order
                             timestamp = Timestamp(last_ts.0.saturating_add(1));
                         } else {
-                            timestamp = Timestamp::now();
+                            timestamp = self.table_received;
                         }
                         match component.time_series.push_buf(timestamp, value_buf) {
                             Ok(()) => break,
@@ -1453,7 +1480,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     snapshot_barrier: &db.snapshot_barrier,
                     last_updated: &db.last_updated,
                     sunk_new_time_series: false,
-                    table_received: Timestamp::now(),
+                    table_received: db.apply_implicit_timestamp(),
                 };
                 table.sink(&state.vtable_registry, &mut sink)??;
                 if sink.sunk_new_time_series {
@@ -1609,7 +1636,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             })?;
         }
         Packet::Msg(m) => {
-            let timestamp = m.timestamp.unwrap_or(Timestamp::now());
+            let timestamp = m.timestamp.unwrap_or_else(|| db.apply_implicit_timestamp());
             db.push_msg(timestamp, m.id, &m.buf)?
         }
         _ => {}
