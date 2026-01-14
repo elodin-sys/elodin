@@ -1486,7 +1486,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     snapshot_barrier: &db.snapshot_barrier,
                     last_updated: &db.last_updated,
                     sunk_new_time_series: false,
-                    table_received: Timestamp::now(),
+                    table_received: db.auto_timestamp(),
                 };
                 table.sink(&state.vtable_registry, &mut sink)??;
                 if sink.sunk_new_time_series {
@@ -1642,7 +1642,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             })?;
         }
         Packet::Msg(m) => {
-            let timestamp = m.timestamp.unwrap_or(Timestamp::now());
+            let timestamp = m.timestamp.unwrap_or_else(|| db.auto_timestamp());
             db.push_msg(timestamp, m.id, &m.buf)?
         }
         _ => {}
