@@ -36,6 +36,8 @@ struct RunArgs {
     addr: SocketAddr,
     #[clap(help = "Path to the data directory")]
     path: Option<PathBuf>,
+    #[clap(long, help = "Start timestamp in microseconds")]
+    start_timestamp: Option<i64>,
     #[clap(long, help = "Path to the configuration file")]
     pub config: Option<PathBuf>,
     #[cfg(feature = "axum")]
@@ -98,6 +100,7 @@ async fn main() -> miette::Result<()> {
             path,
             config,
             reset,
+            start_timestamp,
         }) => {
             let path = path.unwrap_or_else(|| {
                 let dirs =
@@ -112,6 +115,12 @@ async fn main() -> miette::Result<()> {
             }
             info!(?path, "starting db");
             let server = Server::new(&path, addr).into_diagnostic()?;
+            if let Some(start_timestamp) = start_timestamp {
+                server
+                    .db
+                    .set_time_start_timestamp(impeller2::types::Timestamp(start_timestamp))
+                    .into_diagnostic()?;
+            }
             let axum_db = server.db.clone();
             let db = stellarator::spawn(server.run());
             if let Some(http_addr) = http_addr {
