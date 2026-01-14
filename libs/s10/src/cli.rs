@@ -47,3 +47,30 @@ pub async fn run_recipe(
     cancel_token.cancel();
     Ok(res?)
 }
+
+/// Run a recipe with an externally provided CancelToken.
+///
+/// This allows the caller to control when the recipe is cancelled,
+/// enabling graceful termination from outside the recipe's execution context.
+pub async fn run_recipe_with_token(
+    recipe_name: String,
+    recipe: Recipe,
+    watch: bool,
+    release: bool,
+    cancel_token: CancelToken,
+) -> miette::Result<()> {
+    // Still set up Ctrl+C handling, but as a child token so both can cancel
+    let ctrl_c_cancel_token = cancel_token.clone();
+    tokio::spawn(async move {
+        let _drop = ctrl_c_cancel_token.drop_guard();
+        tokio::signal::ctrl_c().await
+    });
+    let res = if watch {
+        recipe
+            .watch(recipe_name, release, cancel_token.clone())
+            .await
+    } else {
+        recipe.run(recipe_name, release, cancel_token.clone()).await
+    };
+    Ok(res?)
+}

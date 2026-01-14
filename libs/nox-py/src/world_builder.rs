@@ -1,5 +1,5 @@
 use crate::*;
-use ::s10::{GroupRecipe, SimRecipe, cli::run_recipe};
+use ::s10::{GroupRecipe, SimRecipe, cli::run_recipe_with_token};
 use clap::Parser;
 use convert_case::Casing;
 use impeller2::types::{PrimType, Timestamp};
@@ -19,6 +19,7 @@ use std::{
     path::{Path, PathBuf},
     time,
 };
+use stellarator::util::CancelToken;
 use tracing::{error, info};
 use zerocopy::{FromBytes, TryFromBytes};
 
@@ -283,7 +284,11 @@ impl WorldBuilder {
                     client.disable_optimizations();
                 }
                 let recipes = self.recipes.clone();
-                if !no_s10 {
+                // Create a cancel token that can be used to gracefully stop s10 recipes
+                // from within the simulation callbacks (e.g., post_step)
+                let recipe_cancel_token = if !no_s10 && !recipes.is_empty() {
+                    let token = CancelToken::new();
+                    let s10_token = token.clone();
                     std::thread::spawn(move || {
                         let rt = tokio::runtime::Builder::new_current_thread()
                             .enable_all() // Enable IO, time, and signal drivers for process spawning
@@ -294,10 +299,19 @@ impl WorldBuilder {
                             recipes,
                             ..Default::default()
                         });
-                        rt.block_on(run_recipe("world".to_string(), group, false, false))
-                            .unwrap();
+                        rt.block_on(run_recipe_with_token(
+                            "world".to_string(),
+                            group,
+                            false,
+                            false,
+                            s10_token,
+                        ))
+                        .unwrap();
                     });
-                }
+                    Some(token)
+                } else {
+                    None
+                };
                 let exec = exec.compile(client.clone())?;
                 if let Some(port) = liveness_port {
                     stellarator::struc_con::stellar(move || ::s10::liveness::monitor(port));
@@ -307,6 +321,9 @@ impl WorldBuilder {
                     Some(p) => PathBuf::from(p),
                     None => tempfile::tempdir()?.keep().join("db"),
                 };
+                // Clone cancel tokens for each closure that needs it
+                let pre_step_cancel_token = recipe_cancel_token.clone();
+                let post_step_cancel_token = recipe_cancel_token;
                 py.allow_threads(|| {
                     stellarator::run(|| {
                         nox_ecs::impeller2_server::Server::new(
@@ -342,6 +359,7 @@ impl WorldBuilder {
                                             timestamp,
                                             tick_count,
                                             start_timestamp,
+                                            pre_step_cancel_token.clone(),
                                         );
                                         match Py::new(py, ctx) {
                                             Ok(ctx_py) => {
@@ -375,6 +393,7 @@ impl WorldBuilder {
                                             timestamp,
                                             tick_count,
                                             start_timestamp,
+                                            post_step_cancel_token.clone(),
                                         );
                                         match Py::new(py, ctx) {
                                             Ok(ctx_py) => {
