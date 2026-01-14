@@ -22,9 +22,9 @@ use winit::{
 use crate::ui::tiles::{WindowId, WindowRelayout, WindowState};
 
 pub fn handle_window_close(
-    mut events: EventReader<WindowCloseRequested>,
+    mut events: MessageReader<WindowCloseRequested>,
     primary: Query<&WindowId, With<PrimaryWindow>>,
-    mut exit: EventWriter<AppExit>,
+    mut exit: MessageWriter<AppExit>,
 ) {
     for evt in events.read() {
         let entity = evt.window;
@@ -238,7 +238,7 @@ async fn apply_window_screen(entity: Entity, screen: usize) -> Result<(), bevy_d
 }
 
 pub fn handle_window_relayout_events(
-    mut relayout_events: EventReader<WindowRelayout>,
+    mut relayout_events: MessageReader<WindowRelayout>,
     mut commands: Commands,
     mut per_window: Local<HashMap<Entity, Vec<WindowRelayout>>>,
 ) {

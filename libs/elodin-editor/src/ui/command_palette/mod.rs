@@ -217,7 +217,7 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
             (icons, auto_open_none, just_opened)
         };
 
-        let screen_rect = ctx.screen_rect();
+        let screen_rect = ctx.content_rect();
         let palette_width = (screen_rect.width() / 2.0).clamp(500.0, 900.0);
         let palette_size = egui::vec2(palette_width, screen_rect.height() - 128.0);
         let palette_min = egui::pos2(screen_rect.center().x - palette_width / 2.0, 64.0);
