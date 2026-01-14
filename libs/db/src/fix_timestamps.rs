@@ -8,26 +8,36 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use crate::Error;
+use crate::{Error, MetadataExt};
+use impeller2_wkt::ComponentMetadata;
 
 const HEADER_SIZE: usize = 24; // committed_len (8) + head_len (8) + extra (8)
 
-/// Fix monotonic timestamps in an elodin-db database by aligning them with wall-clock timestamps.
+/// Fix timestamps in an elodin-db database by aligning non-reference components to the reference.
 ///
 /// # Arguments
 /// * `db_path` - Path to the database directory
 /// * `dry_run` - If true, only show what would be changed without modifying
 /// * `auto_confirm` - If true, skip the confirmation prompt (for non-interactive use)
+/// * `reference` - Which clock to treat as the reference set (monotonic or wall-clock)
+/// * `prune_empty` - If true, remove empty components
 ///
 /// # Returns
 /// * `Ok(())` if successful or no changes needed
 /// * `Err(Error)` if the operation fails
-pub fn run(db_path: PathBuf, dry_run: bool, auto_confirm: bool) -> Result<(), Error> {
+pub fn run(
+    db_path: PathBuf,
+    dry_run: bool,
+    auto_confirm: bool,
+    reference: ReferenceClock,
+    prune_empty: bool,
+) -> Result<(), Error> {
     if !db_path.exists() {
         return Err(Error::MissingDbState(db_path));
     }
 
     println!("Analyzing database: {}", db_path.display());
+    println!("Reference clock: {}", reference);
     if dry_run {
         println!("DRY RUN - no changes will be made");
     }
@@ -70,25 +80,35 @@ pub fn run(db_path: PathBuf, dry_run: bool, auto_confirm: bool) -> Result<(), Er
         return Ok(());
     }
 
-    // Separate into good (wall-clock) and bad (monotonic) timestamps
-    // Wall-clock timestamps from 2020+ are considered "good"
-    // Timestamps before 2000 are considered "bad" (monotonic)
+    // Separate into reference (good) and to-fix (other) timestamps.
+    // Wall-clock timestamps from 2020+ are considered wall-clock.
+    // Timestamps before 2000 are considered monotonic.
     // NOTE: Elodin timestamps are in MICROSECONDS, not nanoseconds
     let cutoff_2000: i64 = 946_684_800_000_000; // 2000-01-01 in microseconds
     let cutoff_2020: i64 = 1_577_836_800_000_000; // 2020-01-01 in microseconds
 
     let mut good_components: Vec<(&PathBuf, &ComponentInfo)> = Vec::new();
     let mut bad_components: Vec<(&PathBuf, &ComponentInfo)> = Vec::new();
+    let mut empty_components: Vec<&PathBuf> = Vec::new();
 
     for (path, info) in &components {
         // Skip empty components
         if info.count == 0 || info.min_timestamp == i64::MAX {
+            empty_components.push(path);
             continue;
         }
 
-        if info.min_timestamp > cutoff_2020 {
+        let is_wall_clock = info.min_timestamp > cutoff_2020;
+        let is_monotonic = info.min_timestamp < cutoff_2000;
+
+        let (is_good, is_bad) = match reference {
+            ReferenceClock::WallClock => (is_wall_clock, is_monotonic),
+            ReferenceClock::Monotonic => (is_monotonic, is_wall_clock),
+        };
+
+        if is_good {
             good_components.push((path, info));
-        } else if info.min_timestamp < cutoff_2000 {
+        } else if is_bad {
             bad_components.push((path, info));
         } else {
             println!(
@@ -99,53 +119,71 @@ pub fn run(db_path: PathBuf, dry_run: bool, auto_confirm: bool) -> Result<(), Er
     }
 
     println!(
-        "Components with wall-clock timestamps (2020+): {}",
+        "Components with {} timestamps (reference): {}",
+        reference.label(),
         good_components.len()
     );
     println!(
-        "Components with monotonic timestamps (pre-2000): {}",
+        "Components with {} timestamps (to fix): {}",
+        reference.other_label(),
         bad_components.len()
     );
     println!();
 
+    if !empty_components.is_empty() {
+        if prune_empty {
+            println!("Empty components to prune: {}", empty_components.len());
+        } else {
+            println!("Empty components kept: {}", empty_components.len());
+        }
+        println!();
+    }
+
     if bad_components.is_empty() {
         println!("No components need fixing!");
+        if prune_empty {
+            prune_components(&empty_components, dry_run, auto_confirm)?;
+        }
         return Ok(());
     }
 
     if good_components.is_empty() {
-        eprintln!("Error: No reference components with wall-clock timestamps found.");
+        eprintln!(
+            "Error: No reference components with {} timestamps found.",
+            reference.label()
+        );
         eprintln!("Cannot determine the correct time offset.");
-        return Err(Error::FixTimestamps(
-            "No reference components with wall-clock timestamps found".to_string(),
-        ));
+        return Err(Error::FixTimestamps(format!(
+            "No reference components with {} timestamps found",
+            reference.label()
+        )));
     }
 
-    // Calculate offset: wall_clock_min - monotonic_min
-    let wall_clock_min = good_components
+    // Calculate offset: reference_min - to_fix_min
+    let reference_min = good_components
         .iter()
         .map(|(_, info)| info.min_timestamp)
         .min()
         .unwrap();
 
-    let monotonic_min = bad_components
+    let to_fix_min = bad_components
         .iter()
         .map(|(_, info)| info.min_timestamp)
         .min()
         .unwrap();
 
-    let offset = wall_clock_min - monotonic_min;
+    let offset = reference_min - to_fix_min;
 
     println!("Calculated offset:");
     println!(
-        "  Wall-clock min: {} ({:.3}s since epoch)",
-        wall_clock_min,
-        wall_clock_min as f64 / 1e6
+        "  Reference min: {} ({:.3}s since epoch)",
+        reference_min,
+        reference_min as f64 / 1e6
     );
     println!(
-        "  Monotonic min:  {} ({:.3}s since epoch)",
-        monotonic_min,
-        monotonic_min as f64 / 1e6
+        "  To-fix min:    {} ({:.3}s since epoch)",
+        to_fix_min,
+        to_fix_min as f64 / 1e6
     );
     println!(
         "  Offset:         {} ({:.3} days)",
@@ -157,23 +195,24 @@ pub fn run(db_path: PathBuf, dry_run: bool, auto_confirm: bool) -> Result<(), Er
     // Apply the offset to bad components
     println!("Components to fix:");
     for (path, info) in &bad_components {
-        let metadata_path = path.join("metadata");
-        let name = if metadata_path.exists() {
-            read_component_name(&metadata_path)
-                .unwrap_or_else(|_| path.file_name().unwrap().to_string_lossy().to_string())
-        } else {
-            path.file_name().unwrap().to_string_lossy().to_string()
-        };
-
+        let label = component_label(path);
         println!(
             "  {} ({} entries, min: {:.3}s -> {:.3}s)",
-            name,
+            label,
             info.count,
             info.min_timestamp as f64 / 1e6,
             (info.min_timestamp + offset) as f64 / 1e6
         );
     }
     println!();
+
+    if prune_empty && !empty_components.is_empty() {
+        println!("Empty components to prune:");
+        for path in &empty_components {
+            println!("  {}", component_label(path));
+        }
+        println!();
+    }
 
     if dry_run {
         println!("Dry run complete. Run without --dry-run to apply changes.");
@@ -193,7 +232,11 @@ pub fn run(db_path: PathBuf, dry_run: bool, auto_confirm: bool) -> Result<(), Er
     }
 
     println!();
-    println!("Applying fixes...");
+    if prune_empty && !empty_components.is_empty() {
+        println!("Applying fixes and pruning empty components...");
+    } else {
+        println!("Applying fixes...");
+    }
 
     for (path, info) in &bad_components {
         let index_path = path.join("index");
@@ -207,6 +250,10 @@ pub fn run(db_path: PathBuf, dry_run: bool, auto_confirm: bool) -> Result<(), Er
         }
     }
 
+    if prune_empty {
+        apply_prune(&empty_components);
+    }
+
     println!();
     println!("Done! Database timestamps have been normalized.");
     println!("You may need to restart elodin-db to see the changes.");
@@ -217,6 +264,34 @@ pub fn run(db_path: PathBuf, dry_run: bool, auto_confirm: bool) -> Result<(), Er
 struct ComponentInfo {
     min_timestamp: i64,
     count: usize,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ReferenceClock {
+    WallClock,
+    Monotonic,
+}
+
+impl ReferenceClock {
+    fn label(self) -> &'static str {
+        match self {
+            ReferenceClock::WallClock => "wall-clock",
+            ReferenceClock::Monotonic => "monotonic",
+        }
+    }
+
+    fn other_label(self) -> &'static str {
+        match self {
+            ReferenceClock::WallClock => "monotonic",
+            ReferenceClock::Monotonic => "wall-clock",
+        }
+    }
+}
+
+impl std::fmt::Display for ReferenceClock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
 }
 
 fn analyze_component(index_path: &Path) -> Result<ComponentInfo, std::io::Error> {
@@ -257,6 +332,56 @@ fn analyze_component(index_path: &Path) -> Result<ComponentInfo, std::io::Error>
     })
 }
 
+fn prune_components(
+    empty_components: &[&PathBuf],
+    dry_run: bool,
+    auto_confirm: bool,
+) -> Result<(), Error> {
+    if empty_components.is_empty() {
+        return Ok(());
+    }
+
+    println!("Empty components to prune:");
+    for path in empty_components {
+        println!("  {}", component_label(path));
+    }
+    println!();
+
+    if dry_run {
+        println!("Dry run complete. Run without --dry-run to apply changes.");
+        return Ok(());
+    }
+
+    if !auto_confirm {
+        print!("Prune empty components? [y/N] ");
+        std::io::stdout().flush()?;
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+
+        if !input.trim().eq_ignore_ascii_case("y") {
+            println!("Aborted.");
+            return Ok(());
+        }
+    }
+
+    apply_prune(empty_components);
+    println!("Done! Empty components removed.");
+    Ok(())
+}
+
+fn apply_prune(empty_components: &[&PathBuf]) {
+    for path in empty_components {
+        match fs::remove_dir_all(path) {
+            Ok(()) => {
+                println!("  Pruned: {}", path.display());
+            }
+            Err(e) => {
+                eprintln!("  Error pruning {}: {}", path.display(), e);
+            }
+        }
+    }
+}
+
 fn apply_offset(index_path: &Path, offset: i64, count: usize) -> Result<(), std::io::Error> {
     let mut file = OpenOptions::new().read(true).write(true).open(index_path)?;
 
@@ -291,53 +416,26 @@ fn apply_offset(index_path: &Path, offset: i64, count: usize) -> Result<(), std:
 }
 
 fn read_component_name(metadata_path: &Path) -> Result<String, std::io::Error> {
-    // The metadata is stored as postcard-serialized ComponentMetadata
-    // For simplicity, we'll just try to extract the name string
-    let data = fs::read(metadata_path)?;
-
-    // ComponentMetadata has component_id (u64), then name (String), then metadata
-    // postcard encodes String as varint length + utf8 bytes
-    if data.len() < 9 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "metadata too short",
-        ));
-    }
-
-    // Skip component_id (8 bytes)
-    let name_data = &data[8..];
-
-    // Read varint length
-    let (len, bytes_read) = decode_varint(name_data)
+    let metadata = <ComponentMetadata as MetadataExt>::read(metadata_path)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    let name_start = bytes_read;
-    let name_end = name_start + len as usize;
-
-    if name_end > name_data.len() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "name length exceeds data",
-        ));
-    }
-
-    String::from_utf8(name_data[name_start..name_end].to_vec())
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    Ok(metadata.name)
 }
 
-fn decode_varint(data: &[u8]) -> Result<(u64, usize), &'static str> {
-    let mut result: u64 = 0;
-    let mut shift = 0;
-
-    for (i, &byte) in data.iter().enumerate() {
-        result |= ((byte & 0x7F) as u64) << shift;
-        if byte & 0x80 == 0 {
-            return Ok((result, i + 1));
-        }
-        shift += 7;
-        if shift > 63 {
-            return Err("varint too long");
-        }
+fn component_label(path: &Path) -> String {
+    let fallback = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("<unknown>")
+        .to_string();
+    let metadata_path = path.join("metadata");
+    let name = if metadata_path.exists() {
+        read_component_name(&metadata_path).unwrap_or_else(|_| fallback.clone())
+    } else {
+        fallback.clone()
+    };
+    if name == fallback {
+        name
+    } else {
+        format!("{name} ({fallback})")
     }
-
-    Err("incomplete varint")
 }
