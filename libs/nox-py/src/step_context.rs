@@ -346,8 +346,9 @@ impl StepContext {
     /// Gracefully terminate all s10-managed recipes (external processes).
     ///
     /// This signals all processes managed by s10 (registered via `world.recipe()`) to shut down
-    /// gracefully. The processes receive SIGTERM and have approximately 2 seconds to clean up
-    /// before being force-killed.
+    /// gracefully. On Unix systems, processes receive SIGTERM and have approximately 2 seconds
+    /// to clean up before being force-killed (SIGKILL). On Windows, processes are terminated
+    /// immediately.
     ///
     /// Use this to ensure clean shutdown of external processes (like Betaflight SITL) before
     /// the simulation exits, preventing memory corruption or resource leaks.

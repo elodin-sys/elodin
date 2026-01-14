@@ -25,6 +25,7 @@ impl Args {
     }
 }
 
+/// Run a recipe, creating an internal CancelToken that is cancelled when the recipe completes.
 pub async fn run_recipe(
     recipe_name: String,
     recipe: Recipe,
@@ -32,26 +33,18 @@ pub async fn run_recipe(
     release: bool,
 ) -> miette::Result<()> {
     let cancel_token = CancelToken::new();
-    let ctrl_c_cancel_token = cancel_token.clone();
-    tokio::spawn(async move {
-        let _drop = ctrl_c_cancel_token.drop_guard(); // binding needs to be named to ensure drop is called at end of scope
-        tokio::signal::ctrl_c().await
-    });
-    let res = if watch {
-        recipe
-            .watch(recipe_name, release, cancel_token.clone())
-            .await
-    } else {
-        recipe.run(recipe_name, release, cancel_token.clone()).await
-    };
+    let result =
+        run_recipe_with_token(recipe_name, recipe, watch, release, cancel_token.clone()).await;
     cancel_token.cancel();
-    Ok(res?)
+    result
 }
 
 /// Run a recipe with an externally provided CancelToken.
 ///
 /// This allows the caller to control when the recipe is cancelled,
 /// enabling graceful termination from outside the recipe's execution context.
+///
+/// Ctrl+C handling is still set up, so the recipe can be cancelled interactively.
 pub async fn run_recipe_with_token(
     recipe_name: String,
     recipe: Recipe,
@@ -59,18 +52,17 @@ pub async fn run_recipe_with_token(
     release: bool,
     cancel_token: CancelToken,
 ) -> miette::Result<()> {
-    // Still set up Ctrl+C handling, but as a child token so both can cancel
+    // Set up Ctrl+C handling so the recipe can be cancelled interactively
     let ctrl_c_cancel_token = cancel_token.clone();
     tokio::spawn(async move {
         let _drop = ctrl_c_cancel_token.drop_guard();
         tokio::signal::ctrl_c().await
     });
+
     let res = if watch {
-        recipe
-            .watch(recipe_name, release, cancel_token.clone())
-            .await
+        recipe.watch(recipe_name, release, cancel_token).await
     } else {
-        recipe.run(recipe_name, release, cancel_token.clone()).await
+        recipe.run(recipe_name, release, cancel_token).await
     };
     Ok(res?)
 }
