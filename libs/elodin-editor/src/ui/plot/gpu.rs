@@ -96,7 +96,6 @@ impl Plugin for PlotGpuPlugin {
                 PlotSystem::QueueLine
                     .in_set(RenderSystems::Queue)
                     .ambiguous_with(
-                        // TODO: &ers bevy 0.17 - is this still working now that it's not generic?
                         bevy::pbr::queue_material_meshes,
                     ),
             )

@@ -252,8 +252,6 @@ pub fn spawn_gizmo(
             Transform::from_xyz(0.0, 0.0, 2.5).looking_at(Vec3::ZERO, Vec3::Y),
             Camera {
                 order: 3,
-                // TODO: &ers - make sure we're handling HDR still for bevy 0.17
-                //hdr: false,
                 // NOTE: Don't clear on the NavGizmoCamera because the
                 // MainCamera already cleared the window.
                 clear_color: ClearColorConfig::None,
