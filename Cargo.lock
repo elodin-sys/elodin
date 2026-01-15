@@ -1789,6 +1789,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_editor_cam",
+ "bevy_infinite_grid",
  "map_3d",
 ]
 
