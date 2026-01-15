@@ -315,10 +315,20 @@ impl GeoFrame {
         v: DVec3,
         ctx: &GeoContext,
     ) -> DVec3 {
-        // Convert this frame to ECEF coordinates.
-        let ecef = GeoFrame::ECEF.convert_to(v, *self, ctx);
+        // Convert into the local EUS offset first.
+        let local_eus = self.to_eus(v, ctx);
 
-        // Convert ECEF to Bevy coordinates
+        // Map the origin to Bevy (on the sphere) and add the local offset.
+        let (origin_x, origin_y, origin_z) = enu2ecef(
+            0.0,
+            0.0,
+            0.0,
+            ctx.origin.lat,
+            ctx.origin.lon,
+            ctx.origin.alt_m,
+            ctx.origin.shape.ellipsoid(),
+        );
+
         // ECEF: X points through (0°N, 0°E), Y points through (0°N, 90°E), Z points through North Pole
         // Bevy: X points right (East), Y points up, Z points forward (negative North)
         // Mapping: ECEF X → Bevy X, ECEF Y → Bevy Z (negated), ECEF Z → Bevy Y
@@ -326,8 +336,8 @@ impl GeoFrame {
             Shape::Sphere { radius } => radius,
             Shape::Ellipsoid(_) => 1.0,
         };
-        let bevy = scale * DVec3::new(ecef.x, ecef.z, -ecef.y);
-        bevy
+        let origin_bevy = scale * DVec3::new(origin_x, origin_z, -origin_y);
+        origin_bevy + local_eus
     }
     fn to_eus(self, v: DVec3, ctx: &GeoContext) -> DVec3 {
         match self {
@@ -886,6 +896,62 @@ mod tests {
                 &format!("{frame:?} sphere (north pole)"),
                 sphere,
                 expected_plane + Vec3::Y,
+                eps,
+            );
+        }
+    }
+
+    #[test]
+    fn present_plane_and_sphere_at_north_pole_180() {
+        let radius = 1.0;
+        let ctx: GeoContext = GeoOrigin::new_from_degrees(90.0, 180.0, 0.0)
+            .with_shape(Shape::Sphere { radius })
+            .into();
+        let v = DVec3::new(1.0, 2.0, 3.0);
+        let eps = 1e-4;
+
+        let cases = [
+            (
+                GeoFrame::EUS,
+                Vec3::new(1.0, 2.0, 3.0),
+            ),
+            (
+                GeoFrame::ENU,
+                Vec3::new(1.0, 3.0, -2.0),
+            ),
+            (
+                GeoFrame::NED,
+                Vec3::new(2.0, -3.0, -1.0),
+            ),
+            (
+                GeoFrame::ECEF,
+                Vec3::new(2.0, 2.0, 1.0),
+            ),
+            (
+                GeoFrame::ECI,
+                Vec3::new(2.0, 2.0, 1.0),
+            ),
+            (
+                GeoFrame::GCRF,
+                Vec3::new(2.0, 2.0, 1.0),
+            ),
+        ];
+
+        for (frame, expected_plane) in cases {
+            let plane = frame.to_bevy_pos(v, &ctx);
+            assert_vec3_close(
+                &format!("{frame:?} plane (north pole)"),
+                plane,
+                expected_plane,
+                eps,
+            );
+
+            let sphere_d = frame.to_bevy_sphere(v, &ctx);
+            let sphere = Vec3::new(sphere_d.x as f32, sphere_d.y as f32, sphere_d.z as f32);
+            assert_vec3_close(
+                &format!("{frame:?} sphere (north pole)"),
+                sphere,
+                Vec3::new(-expected_plane.x, expected_plane.y + radius as f32, -expected_plane.z),
                 eps,
             );
         }
