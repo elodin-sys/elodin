@@ -217,6 +217,19 @@ impl GeoContext {
         r_gcrf
     }
 
+    /// Returns a longitude used for local ENU bases that is stable at the poles.
+    ///
+    /// At |lat| ≈ 90°, longitude becomes ill-defined and can cause the ENU basis
+    /// to flip as `lon` varies. This function smoothly suppresses the effect of
+    /// longitude as `cos(lat)` goes to zero, yielding consistent results at the poles
+    /// while matching the true longitude away from them.
+    fn stable_lon(&self) -> f64 {
+        let (sin_lat, cos_lat) = self.origin.lat.sin_cos();
+        let (sin_lon, cos_lon) = self.origin.lon.sin_cos();
+        let denom = cos_lon * cos_lat + sin_lat.abs();
+        (sin_lon * cos_lat).atan2(denom)
+    }
+
     /// ECEF -> local ENU at the origin.
     pub fn ecef_to_enu(&self, r_ecef: DVec3) -> DVec3 {
         let (e, n, u) = ecef2enu(
@@ -224,7 +237,7 @@ impl GeoContext {
             r_ecef.y,
             r_ecef.z,
             self.origin.lat,
-            self.origin.lon,
+            self.stable_lon(),
             self.origin.alt_m,
             self.origin.shape.ellipsoid(),
         );
@@ -315,29 +328,44 @@ impl GeoFrame {
         v: DVec3,
         ctx: &GeoContext,
     ) -> DVec3 {
-        // Convert into the local EUS offset first.
-        let local_eus = self.to_eus(v, ctx);
-
-        // Map the origin to Bevy (on the sphere) and add the local offset.
-        let (origin_x, origin_y, origin_z) = enu2ecef(
-            0.0,
-            0.0,
-            0.0,
-            ctx.origin.lat,
-            ctx.origin.lon,
-            ctx.origin.alt_m,
-            ctx.origin.shape.ellipsoid(),
-        );
-
-        // ECEF: X points through (0°N, 0°E), Y points through (0°N, 90°E), Z points through North Pole
-        // Bevy: X points right (East), Y points up, Z points forward (negative North)
-        // Mapping: ECEF X → Bevy X, ECEF Y → Bevy Z (negated), ECEF Z → Bevy Y
         let scale = match ctx.origin.shape {
             Shape::Sphere { radius } => radius,
             Shape::Ellipsoid(_) => 1.0,
         };
-        let origin_bevy = scale * DVec3::new(origin_x, origin_z, -origin_y);
-        origin_bevy + local_eus
+
+        // Convert into the local EUS offset first.
+        let local_eus = self.to_eus(v, ctx);
+        let local = DVec3::new(local_eus.x, local_eus.y, local_eus.z);
+
+        // Rotate local offsets into sphere presentation: yaw by lon, then pitch by (lat - 90°).
+        let pitch = ctx.origin.lat - std::f64::consts::FRAC_PI_2;
+        let (sin_pitch, cos_pitch) = pitch.sin_cos();
+        let (sin_lon, cos_lon) = ctx.origin.lon.sin_cos();
+
+        let local_pitched = DVec3::new(
+            local.x,
+            cos_pitch * local.y - sin_pitch * local.z,
+            sin_pitch * local.y + cos_pitch * local.z,
+        );
+        let local_rotated = DVec3::new(
+            cos_lon * local_pitched.x + sin_lon * local_pitched.z,
+            local_pitched.y,
+            -sin_lon * local_pitched.x + cos_lon * local_pitched.z,
+        );
+
+        let origin_local = DVec3::new(0.0, scale, 0.0);
+        let origin_pitched = DVec3::new(
+            origin_local.x,
+            cos_pitch * origin_local.y - sin_pitch * origin_local.z,
+            sin_pitch * origin_local.y + cos_pitch * origin_local.z,
+        );
+        let origin_rotated = DVec3::new(
+            cos_lon * origin_pitched.x + sin_lon * origin_pitched.z,
+            origin_pitched.y,
+            -sin_lon * origin_pitched.x + cos_lon * origin_pitched.z,
+        );
+
+        origin_rotated + local_rotated
     }
     fn to_eus(self, v: DVec3, ctx: &GeoContext) -> DVec3 {
         match self {
@@ -369,7 +397,7 @@ impl GeoFrame {
                     enu.y,
                     enu.z,
                     ctx.origin.lat,
-                    ctx.origin.lon,
+                    ctx.stable_lon(),
                     ctx.origin.alt_m,
                     ctx.origin.shape.ellipsoid(),
                 );
