@@ -6,8 +6,8 @@
   },
   "hardware/nvidia/t23x/nv-public": {
     "url": "https://github.com/elodin-sys/aleph-jetson-orin-baseboard-nvidia-t23x-public-dts.git",
-    "rev": "7ae899f2404719cc8a38288616067ba094628025",
-    "sha256": "sha256-G0Bw2Hm5cKYK2OP5OIkAFdSkTtkYrskgpi32cpl5Ee4="
+    "rev": "806a0461e17661a7c8bbe4681dc54474d8b36b5e",
+    "sha256": "sha256-z7HVSuL+Jv2q1xlZU9bGf4LHpN4M0dCT8AHUJ4ds4+w="
   },
   "hardware/nvidia/tegra/nv-public": {
     "url": "https://github.com/OE4T/tegra-public-dts.git",
