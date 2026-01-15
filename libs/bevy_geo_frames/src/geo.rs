@@ -49,6 +49,23 @@ impl Default for Shape {
     }
 }
 
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+/// How should these coordinates be presented.
+pub enum Present {
+    #[default]
+    /// Present them from the perspective of a Plane on the ground.
+    ///
+    /// In some sense the latitude and longitude can just be ignored.
+    ///
+    /// e.g., ENU (x,y,z) -> Bevy (x, z, -y)
+    Plane,
+    /// Present them from the perspective of a Sphere.
+    ///
+    /// Here the latitude and longitude place us on the sphere, and then we use
+    /// the coordinates from there.
+    Sphere,
+}
+
 
 /// Coordinate frames used in the sim.
 ///
@@ -135,25 +152,28 @@ pub struct GeoContext {
     pub earth_rot_rate_rad_per_s: f64,
     pub render: GeoFrame,
     pub t_seconds: f64,
+    pub present: Present,
 }
 
 impl Default for GeoContext {
     fn default() -> Self {
-        let mut ctx: GeoContext = GeoOrigin::default().into();
-        ctx.render = DEFAULT_RENDER;
-        ctx
-    }
-}
-
-impl From<GeoOrigin> for GeoContext {
-    fn from(origin: GeoOrigin) -> Self {
+        let origin = GeoOrigin::default();
         Self {
             origin,
             theta0_rad: 0.0,
             earth_rot_rate_rad_per_s: EARTH_SIDEREAL_SPIN,
             render: DEFAULT_RENDER,
             t_seconds: 0.0,
+            present: Present::default()
         }
+    }
+}
+
+impl From<GeoOrigin> for GeoContext {
+    fn from(origin: GeoOrigin) -> Self {
+        let mut ctx = GeoContext::default();
+        ctx.origin = origin;
+        ctx
     }
 }
 
@@ -293,21 +313,18 @@ impl GeoFrame {
         v: DVec3,
         ctx: &GeoContext,
     ) -> DVec3 {
-        // Convert ENU to ECEF coordinates
-        // let (ecef_x, ecef_y, ecef_z) = enu2ecef(e, n, u, lat0, lon0, alt0, r_ellips);
-        let ecef = self.convert_to(v, GeoFrame::ECEF, ctx);
+        // Convert this frame to ECEF coordinates.
+        let ecef = GeoFrame::ECEF.convert_to(v, *self, ctx);
 
         // Convert ECEF to Bevy coordinates
         // ECEF: X points through (0°N, 0°E), Y points through (0°N, 90°E), Z points through North Pole
         // Bevy: X points right (East), Y points up, Z points forward (negative North)
         // Mapping: ECEF X → Bevy X, ECEF Y → Bevy Z (negated), ECEF Z → Bevy Y
-        // let bevy_x = ecef_x * sphere_scale;
-        // let bevy_y = ecef_z * sphere_scale;  // ECEF Z (up) → Bevy Y (up)
-        // let bevy_z = -ecef_y * sphere_scale;  // ECEF Y (east at 90°E) → Bevy -Z (forward)
-        let bevy = ctx.approx_radius() * DVec::new(
-            ecef.x,
-            ecef.z,
-            -ecef.y);
+        let scale = match ctx.origin.shape {
+            Shape::Sphere { radius } => radius,
+            Shape::Ellipsoid(_) => 1.0,
+        };
+        let bevy = scale * DVec3::new(ecef.x, ecef.z, -ecef.y);
         bevy
     }
     fn to_eus(self, v: DVec3, ctx: &GeoContext) -> DVec3 {
@@ -571,7 +588,13 @@ pub fn apply_geo_translation(
     let ctx_ref: &GeoContext = &*ctx;
     for (geo, mut transform) in &mut q {
         let pos_in_render = render.convert_to(geo.1, geo.0, ctx_ref);
-        transform.translation = render.to_bevy_pos(pos_in_render, ctx_ref);
+        transform.translation = match ctx_ref.present {
+            Present::Plane => render.to_bevy_pos(pos_in_render, ctx_ref),
+            Present::Sphere => {
+                let bevy = render.to_bevy_sphere(pos_in_render, ctx_ref);
+                Vec3::new(bevy.x as f32, bevy.y as f32, bevy.z as f32)
+            }
+        };
     }
 }
 
