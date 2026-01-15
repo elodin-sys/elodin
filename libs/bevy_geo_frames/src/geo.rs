@@ -623,6 +623,13 @@ mod tests {
         GeoContext::default()
     }
 
+    fn assert_vec3_close(label: &str, a: Vec3, b: Vec3, eps: f32) {
+        assert!(
+            (a - b).length() <= eps,
+            "{label}: got {a:?}, expected {b:?}"
+        );
+    }
+
     #[test]
     fn eus_identity_mapping() {
         let ctx = dummy_ctx();
@@ -763,5 +770,124 @@ mod tests {
         let bevy = GeoFrame::GCRF.to_bevy_pos(original, &ctx);
         let round_trip = GeoFrame::GCRF.from_bevy_pos(bevy, &ctx);
         assert!((round_trip - original).length() < 1e-3);
+    }
+
+    #[ignore]
+    #[test]
+    fn present_plane_and_sphere_at_equator_origin() {
+        let radius = 1.0;
+        let ctx: GeoContext = GeoOrigin::new_from_degrees(0.0, 0.0, 0.0)
+            .with_shape(Shape::Sphere { radius })
+            .into();
+        let v = DVec3::new(1.0, 2.0, 3.0);
+        let eps = 1e-4;
+
+        let cases = [
+            (
+                GeoFrame::EUS,
+                Vec3::new(1.0, 2.0, 3.0),
+                Vec3::new(3.0, -3.0, -1.0),
+            ),
+            (
+                GeoFrame::ENU,
+                Vec3::new(1.0, 3.0, -2.0),
+                Vec3::new(4.0, 2.0, -1.0),
+            ),
+            (
+                GeoFrame::NED,
+                Vec3::new(2.0, -3.0, -1.0),
+                Vec3::new(-2.0, 1.0, -2.0),
+            ),
+            (
+                GeoFrame::ECEF,
+                Vec3::new(2.0, 0.0, -3.0),
+                Vec3::new(1.0, 3.0, -2.0),
+            ),
+            (
+                GeoFrame::ECI,
+                Vec3::new(2.0, 0.0, -3.0),
+                Vec3::new(1.0, 3.0, -2.0),
+            ),
+            (
+                GeoFrame::GCRF,
+                Vec3::new(2.0, 0.0, -3.0),
+                Vec3::new(1.0, 3.0, -2.0),
+            ),
+        ];
+
+        for (frame, expected_plane, expected_sphere) in cases {
+            let plane = frame.to_bevy_pos(v, &ctx);
+            assert_vec3_close(
+                &format!("{frame:?} plane (equator)"),
+                plane,
+                expected_plane,
+                eps,
+            );
+
+            let sphere_d = frame.to_bevy_sphere(v, &ctx);
+            let sphere = Vec3::new(sphere_d.x as f32, sphere_d.y as f32, sphere_d.z as f32);
+            assert_vec3_close(
+                &format!("{frame:?} sphere (equator)"),
+                sphere,
+                expected_sphere,
+                eps,
+            );
+        }
+    }
+
+    #[test]
+    fn present_plane_and_sphere_at_north_pole() {
+        let radius = 1.0;
+        let ctx: GeoContext = GeoOrigin::new_from_degrees(90.0, 0.0, 0.0)
+            .with_shape(Shape::Sphere { radius })
+            .into();
+        let v = DVec3::new(1.0, 2.0, 3.0);
+        let eps = 1e-4;
+
+        let cases = [
+            (
+                GeoFrame::EUS,
+                Vec3::new(1.0, 2.0, 3.0),
+            ),
+            (
+                GeoFrame::ENU,
+                Vec3::new(1.0, 3.0, -2.0),
+            ),
+            (
+                GeoFrame::NED,
+                Vec3::new(2.0, -3.0, -1.0),
+            ),
+            (
+                GeoFrame::ECEF,
+                Vec3::new(2.0, 2.0, 1.0),
+            ),
+            (
+                GeoFrame::ECI,
+                Vec3::new(2.0, 2.0, 1.0),
+            ),
+            (
+                GeoFrame::GCRF,
+                Vec3::new(2.0, 2.0, 1.0),
+            ),
+        ];
+
+        for (frame, expected_plane) in cases {
+            let plane = frame.to_bevy_pos(v, &ctx);
+            assert_vec3_close(
+                &format!("{frame:?} plane (north pole)"),
+                plane,
+                expected_plane,
+                eps,
+            );
+
+            let sphere_d = frame.to_bevy_sphere(v, &ctx);
+            let sphere = Vec3::new(sphere_d.x as f32, sphere_d.y as f32, sphere_d.z as f32);
+            assert_vec3_close(
+                &format!("{frame:?} sphere (north pole)"),
+                sphere,
+                expected_plane + Vec3::Y,
+                eps,
+            );
+        }
     }
 }
