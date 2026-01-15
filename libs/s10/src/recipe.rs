@@ -212,7 +212,29 @@ impl ProcessArgs {
             tokio::spawn(async move { print_logs(stderr, &stderr_name, Color::Red).await });
             tokio::select! {
                 _ = cancel_token.wait() => {
-                    child.kill().await?;
+                    // Graceful shutdown: send SIGTERM, wait up to 2 seconds, then force kill
+                    #[cfg(unix)]
+                    {
+                        if let Some(pid) = child.id() {
+                            let _ = nix::sys::signal::kill(
+                                nix::unistd::Pid::from_raw(pid as i32),
+                                nix::sys::signal::Signal::SIGTERM,
+                            );
+                        }
+                        tracing::info!("Waiting for {} to exit gracefully", name);
+                        match tokio::time::timeout(Duration::from_secs(2), child.wait()).await {
+                            Ok(_) => {}
+                            Err(_) => {
+                                tracing::warn!("{} did not exit after SIGTERM, forcing kill", name);
+                                let _ = child.start_kill();
+                                let _ = child.wait().await;
+                            }
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        child.kill().await?;
+                    }
                     return Ok(())
                 }
                 res = child.wait() => {

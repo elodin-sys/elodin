@@ -10,6 +10,7 @@ use impeller2::types::{ComponentId, PrimType, Timestamp};
 use numpy::{PyArray1, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use stellarator::util::CancelToken;
 
 use crate::Error;
 
@@ -102,6 +103,8 @@ pub struct StepContext {
     tick_counter: Arc<AtomicU64>,
     /// Start timestamp for the simulation (used to reset timestamp after truncate)
     start_timestamp: Timestamp,
+    /// Optional cancel token to gracefully terminate s10-managed recipes
+    recipe_cancel_token: Option<CancelToken>,
 }
 
 impl StepContext {
@@ -112,6 +115,7 @@ impl StepContext {
         timestamp: Timestamp,
         tick: u64,
         start_timestamp: Timestamp,
+        recipe_cancel_token: Option<CancelToken>,
     ) -> Self {
         Self {
             db,
@@ -119,6 +123,7 @@ impl StepContext {
             tick,
             tick_counter,
             start_timestamp,
+            recipe_cancel_token,
         }
     }
 }
@@ -336,6 +341,30 @@ impl StepContext {
         // calls in this callback write at the correct timestamp
         self.timestamp
             .store(self.start_timestamp.0, Ordering::SeqCst);
+    }
+
+    /// Gracefully terminate all s10-managed recipes (external processes).
+    ///
+    /// This signals all processes managed by s10 (registered via `world.recipe()`) to shut down
+    /// gracefully. On Unix systems, processes receive SIGTERM and have approximately 2 seconds
+    /// to clean up before being force-killed (SIGKILL). On Windows, processes are terminated
+    /// immediately.
+    ///
+    /// Use this to ensure clean shutdown of external processes (like Betaflight SITL) before
+    /// the simulation exits, preventing memory corruption or resource leaks.
+    ///
+    /// This is a no-op if no recipes were registered or if running with `--no-s10`.
+    ///
+    /// Example:
+    ///     ```python
+    ///     def post_step(tick: int, ctx: el.StepContext):
+    ///         if tick >= MAX_TICKS - 1:
+    ///             ctx.stop_recipes()  # Gracefully stop external processes
+    ///     ```
+    fn stop_recipes(&self) {
+        if let Some(token) = &self.recipe_cancel_token {
+            token.cancel();
+        }
     }
 
     /// Perform multiple component reads and writes in a single DB operation.
