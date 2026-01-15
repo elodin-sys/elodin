@@ -99,7 +99,7 @@ peg = "0.8.5"
 
 # eql
 eql.path = "../db/eql"
-bevy-inspector-egui.version = "0.32"
+bevy-inspector-egui.version = "0.35"
 bevy-inspector-egui.optional = true
 bevy_defer = "0.15"
 
