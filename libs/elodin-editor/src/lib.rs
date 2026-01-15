@@ -541,14 +541,26 @@ fn handle_drag_resize(
 
 fn setup_window_icon(
     windows: Query<(Entity, &bevy::window::PrimaryWindow)>,
+    _non_send_marker: NonSendMarker,
 ) {
-    #[cfg(target_os = "macos")]
-    set_icon_mac();
+    // There was an API change for WINIT_WINDOWS in bevy 0.17. The pre-0.17
+    // code had the following comment:
+    //
+    // "this is load bearing, because it ensures that there is at least one
+    // window spawned"
+    //
+    // We're not certain why it was originally necessary, or if this port
+    // accomplishes the same goal, but keeping it in the spirit of Chesterton's
+    // Fence.
+    WINIT_WINDOWS.with_borrow(|_winit_windows| {
+        #[cfg(target_os = "macos")]
+        set_icon_mac();
 
-    if !windows.is_empty() {
-        #[cfg(target_os = "windows")]
-        set_icon_windows();
-    }
+        if !windows.is_empty() {
+            #[cfg(target_os = "windows")]
+            set_icon_windows();
+        }
+    });
 }
 
 #[cfg(target_os = "windows")]
