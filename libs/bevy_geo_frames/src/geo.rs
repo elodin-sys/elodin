@@ -291,20 +291,22 @@ impl GeoFrame {
     ///
     /// ## Example:
     /// ```rust
-    /// use map_3d::{enu_to_bevy_sphere, Ellipsoid};
+    /// use bevy::prelude::*;
+    /// use bevy::math::f64::DVec3;
+    /// use map_3d::{Ellipsoid};
+    /// use bevy_geo_frames::{GeoOrigin, GeoContext, GeoFrame};
     /// use std::f64::consts::PI;
     ///
     /// // Reference point: New York (40.7°N, -73.9°W, 0m altitude)
     /// let lat0 = 40.7_f64.to_radians();
     /// let lon0 = -73.9_f64.to_radians();
     /// let alt0 = 0.0;
+    /// let context = GeoOrigin::new_from_degrees(lat0, lon0, alt0).into();
     ///
     /// // ENU coordinates: 100m east, 50m north, 10m up from reference
-    /// let (x, y, z) = enu_to_bevy_sphere(
-    ///     100.0, 50.0, 10.0,
-    ///     lat0, lon0, alt0,
-    ///     Ellipsoid::WGS84,
-    ///     0.001  // Convert meters to kilometers for Bevy
+    /// let v = GeoFrame::ENU.to_bevy_sphere(
+    ///     DVec3::new(100.0, 50.0, 10.0),
+    ///     &context,
     /// );
     /// // In Bevy: Vec3::new(x as f32, y as f32, z as f32)
     /// ```
