@@ -2360,13 +2360,15 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         }
 
                         if tile_state.has_non_sidebar_content() {
-                            tile_state.tree.simplify(&egui_tiles::SimplificationOptions {
-                                prune_empty_tabs: true,
-                                prune_single_child_tabs: false,
-                                all_panes_must_have_tabs: true,
-                                join_nested_linear_containers: true,
-                                ..Default::default()
-                            });
+                            tile_state
+                                .tree
+                                .simplify(&egui_tiles::SimplificationOptions {
+                                    prune_empty_tabs: true,
+                                    prune_single_child_tabs: false,
+                                    all_panes_must_have_tabs: true,
+                                    join_nested_linear_containers: true,
+                                    ..Default::default()
+                                });
                         }
                     }
                     TreeAction::AddViewport(parent_tile_id) => {
