@@ -3,15 +3,21 @@ use bevy::math::primitives::{Plane3d, Cuboid};
 use bevy::math::DVec3;
 use bevy_editor_cam::prelude::*;
 use bevy_geo_frames::*;
+use bevy_infinite_grid::{InfiniteGridBundle, InfiniteGridPlugin};
 
 /// Marker for the demo cuboid we switch frames on.
 #[derive(Component)]
 struct FrameDemo;
 
+/// Marker for the infinite grid entity.
+#[derive(Component)]
+struct GridMarker;
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(DefaultEditorCamPlugins)
+        .add_plugins(InfiniteGridPlugin)
         .add_plugins(GeoFramePlugin {
             origin: Some(
                 GeoOrigin::new_from_degrees(0.0, 0.0, 0.0)
@@ -20,7 +26,7 @@ fn main() {
             ..default()
         })
         .add_systems(Startup, (setup, setup_ui))
-        .add_systems(Update, (frame_switch_input, transform_frame_at_position, update_position_display))
+        .add_systems(Update, (frame_switch_input, transform_frame_at_position, update_position_display, toggle_present_mode))
         .add_systems(Update, draw_origin_gizmos)
         .add_systems(Update, draw_frame_axes)
         .add_systems(Update, draw_radius_sphere)
@@ -49,14 +55,12 @@ fn setup(
             .looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    // Ground plane for reference
+    // Ground plane for reference (unused, kept for quick toggling).
     let _ground_mesh = meshes.add(Plane3d::default().mesh().size(100.0, 100.0));
     let _ground_mat = materials.add(Color::srgb(0.1, 0.1, 0.1));
-    // commands.spawn((
-    //     Mesh3d(ground_mesh),
-    //     MeshMaterial3d(ground_mat),
-    //     Transform::default(),
-    // ));
+
+    // Infinite grid (visible in Plane mode).
+    commands.spawn((InfiniteGridBundle::default(), GridMarker));
 
     // Demo cuboid
     let cuboid_mesh = meshes.add(Cuboid::new(1.0, 2.0, 3.0));
@@ -70,7 +74,7 @@ fn setup(
         MeshMaterial3d(cuboid_mat),
         Transform::default(),
         GeoTranslation(GeoFrame::ENU, enu_pos),
-        GeoVelocity(GeoFrame::ENU, DVec3::new(1.0, 0.0, 0.0)),
+        GeoVelocity(GeoFrame::ENU, DVec3::new(0.1, 0.0, 0.0)),
         GeoRotation(GeoFrame::ENU, Quat::IDENTITY),
         GeoAngularVelocity(
             GeoFrame::ENU,
@@ -123,6 +127,29 @@ fn update_position_display(
         if let Ok(mut text_component) = text_query.single_mut() {
             *text_component = Text::new(text);
         }
+    }
+}
+
+/// Toggle between Plane and Sphere presentation mode.
+fn toggle_present_mode(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut ctx: ResMut<GeoContext>,
+    mut grid_query: Query<&mut Visibility, With<GridMarker>>,
+) {
+    if keys.just_pressed(KeyCode::KeyP) {
+        ctx.present = match ctx.present {
+            Present::Plane => Present::Sphere,
+            Present::Sphere => Present::Plane,
+        };
+
+        for mut visibility in &mut grid_query {
+            *visibility = match ctx.present {
+                Present::Plane => Visibility::Visible,
+                Present::Sphere => Visibility::Hidden,
+            };
+        }
+
+        info!(?ctx.present, "Toggled present mode");
     }
 }
 
@@ -279,6 +306,9 @@ fn draw_radius_sphere(
     mut gizmos: Gizmos,
     ctx: Res<GeoContext>,
 ) {
+    if ctx.present != Present::Sphere {
+        return;
+    }
     let radius = ctx.origin.shape.approx_radius() as f32;
     let center = Vec3::ZERO;
     
