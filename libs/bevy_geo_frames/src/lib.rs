@@ -1,3 +1,3 @@
-pub mod geo;
+mod geo;
 
 pub use geo::*;
