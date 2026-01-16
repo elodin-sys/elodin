@@ -10,7 +10,6 @@ use bevy::{
     asset::Assets,
     ecs::{
         entity::Entity,
-        event::EventReader,
         prelude::Resource,
         query::With,
         system::{Commands, Local, Query, Res, SystemParam},
@@ -22,7 +21,7 @@ use bevy::{
     },
     math::{DVec2, Rect, Vec2},
     prelude::{Component, ResMut},
-    render::camera::{Camera, OrthographicProjection, Projection, ScalingMode},
+    camera::{Camera, OrthographicProjection, Projection, ScalingMode},
     window::{PrimaryWindow, Window},
 };
 use bevy_egui::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke};
@@ -602,7 +601,7 @@ impl TimeseriesPlot {
 
             egui::Area::new(egui::Id::new((
                 "plot_lock_btn",
-                (graph_state as *const _) as usize,
+                graph_entity,
             )))
             .order(egui::Order::Foreground)
             .fixed_pos(lock_pos)
@@ -1239,7 +1238,7 @@ pub fn sync_locked_graphs(
 
 pub fn zoom_graph(
     mut query: Query<(&mut GraphState, &Camera)>,
-    mut scroll_events: EventReader<MouseWheel>,
+    mut scroll_events: MessageReader<MouseWheel>,
     windows: Query<(Entity, &Window)>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
     key_state: Res<LogicalKeyState>,
@@ -1476,7 +1475,9 @@ pub fn reset_graph(
     }
 }
 
-fn scroll_offsets_from_events(scroll_events: &mut EventReader<MouseWheel>) -> HashMap<Entity, f32> {
+fn scroll_offsets_from_events(
+    scroll_events: &mut MessageReader<MouseWheel>,
+) -> HashMap<Entity, f32> {
     let pixels_per_line = SCROLL_PIXELS_PER_LINE;
     let mut offsets: HashMap<Entity, f32> = HashMap::new();
     for ev in scroll_events.read() {
