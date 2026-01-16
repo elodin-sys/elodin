@@ -28,6 +28,7 @@ fn main() {
         .add_systems(Startup, (setup, setup_ui))
         .add_systems(Update, (frame_switch_input, transform_frame_at_position, update_position_display, toggle_present_mode))
         .add_systems(Update, draw_origin_gizmos)
+        .add_systems(Update, draw_frame_zero_gizmo)
         .add_systems(Update, draw_frame_axes)
         .add_systems(Update, draw_radius_sphere)
         .run();
@@ -299,6 +300,26 @@ fn draw_frame_axes(
             Color::srgb(0.0, 0.0, 1.0),
         );
     }
+}
+
+/// Draw a red point for the zero position of the active frame, in the current presentation mode.
+fn draw_frame_zero_gizmo(
+    mut gizmos: Gizmos,
+    ctx: Res<GeoContext>,
+    q: Query<&GeoPosition, With<FrameDemo>>,
+) {
+    let Ok(geo_pos) = q.get_single() else {
+        return;
+    };
+    let zero = GeoPosition(geo_pos.0, DVec3::ZERO);
+    let pos = match ctx.present {
+        Present::Plane => zero.to_bevy_plane(&ctx),
+        Present::Sphere => zero.to_bevy_sphere(&ctx),
+    };
+    gizmos.cuboid(
+        Transform::from_translation(pos.as_vec3()).with_scale(Vec3::splat(0.3)),
+        Color::srgb(1.0, 0.0, 0.0),
+    );
 }
 
 /// Draw a wireframe sphere with radius equal to the reference radius from `GeoContext`.
