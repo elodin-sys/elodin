@@ -601,7 +601,7 @@ impl TimeseriesPlot {
 
             egui::Area::new(egui::Id::new((
                 "plot_lock_btn",
-                (graph_state as *const _) as usize,
+                graph_entity,
             )))
             .order(egui::Order::Foreground)
             .fixed_pos(lock_pos)
