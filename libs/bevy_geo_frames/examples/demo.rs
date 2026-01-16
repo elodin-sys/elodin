@@ -73,7 +73,7 @@ fn setup(
         Mesh3d(cuboid_mesh),
         MeshMaterial3d(cuboid_mat),
         Transform::default(),
-        GeoTranslation(GeoFrame::ENU, enu_pos),
+        GeoPosition(GeoFrame::ENU, enu_pos),
         GeoVelocity(GeoFrame::ENU, DVec3::new(0.1, 0.0, 0.0)),
         GeoRotation(GeoFrame::ENU, Quat::IDENTITY),
         GeoAngularVelocity(
@@ -104,7 +104,7 @@ fn setup_ui(mut commands: Commands) {
 }
 
 fn update_position_display(
-    q: Query<(&GeoTranslation, &Transform), With<FrameDemo>>,
+    q: Query<(&GeoPosition, &Transform), With<FrameDemo>>,
     mut text_query: Query<&mut Text, With<PositionDisplay>>,
 ) {
     if let Ok((geo_trans, transform)) = q.single() {
@@ -163,7 +163,7 @@ fn toggle_present_mode(
 /// 6: GCRF
 fn frame_switch_input(
     keys: Res<ButtonInput<KeyCode>>,
-    mut q: Query<&mut GeoTranslation, With<FrameDemo>>,
+    mut q: Query<&mut GeoPosition, With<FrameDemo>>,
 ) {
     let mut target_frame: Option<GeoFrame> = None;
 
@@ -200,7 +200,7 @@ fn frame_switch_input(
 fn transform_frame_at_position(
     keys: Res<ButtonInput<KeyCode>>,
     ctx: Res<GeoContext>,
-    mut q: Query<(&Transform, &mut GeoTranslation), With<FrameDemo>>,
+    mut q: Query<(&Transform, &mut GeoPosition), With<FrameDemo>>,
 ) {
     let mut target_frame: Option<GeoFrame> = None;
 
@@ -259,7 +259,7 @@ fn draw_origin_gizmos(mut gizmos: Gizmos) {
 fn draw_frame_axes(
     mut gizmos: Gizmos,
     ctx: Res<GeoContext>,
-    q: Query<(&Transform, &GeoTranslation), With<FrameDemo>>,
+    q: Query<(&Transform, &GeoPosition), With<FrameDemo>>,
 ) {
     let axis_length = 3.0;
 
