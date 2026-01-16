@@ -1615,7 +1615,7 @@ pub fn create_tiles(tile_id: TileId) -> PalettePage {
         create_query_plot(Some(tile_id)),
         create_video_stream(Some(tile_id)),
         create_schematic_tree(Some(tile_id)),
-        create_dashboard(Some(tile_id)),
+        // create_dashboard(Some(tile_id)),
         create_data_overview(Some(tile_id)),
     ])
 }
@@ -1684,10 +1684,10 @@ impl Default for PalettePage {
             create_query_plot(None),
             create_video_stream(None),
             create_schematic_tree(None),
-            create_dashboard(None),
+            // create_dashboard(None),
             create_data_overview(None),
             create_3d_object(),
-            save_db_native(),
+            // save_db_native(),
             save_schematic(),
             save_schematic_as(),
             save_schematic_db(),

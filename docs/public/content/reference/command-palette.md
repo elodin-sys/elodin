@@ -31,7 +31,6 @@ order = 8
   command to create an action pane.
 - `Create Video Stream`: prompt for the message name, then create a video stream pane.
 - `Create Schematic Tree`: add a schematic tree pane.
-- `Create Dashboard`: add a dashboard pane.
 - `Create Data Overview`: add a data overview pane.
 - `Create 3D Object`: prompt for an EQL expression, pick a mesh type (GLTF or primitives), then
   optionally enter dimensions and color.
@@ -59,7 +58,6 @@ order = 8
 
 ## Presets
 
-- `Save DB`: create a native DB snapshot (prompts for a directory name).
 - `Save Schematic`: save to the current schematic path (if set).
 - `Save Schematic As...`: save to a new schematic file name.
 - `Save Schematic To DB`: write the current schematic to DB metadata.
