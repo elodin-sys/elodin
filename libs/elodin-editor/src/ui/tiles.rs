@@ -1211,8 +1211,11 @@ impl Pane {
                 egui_tiles::UiResponse::None
             }
             Pane::DataOverview(pane) => {
-                let updated_pane =
-                    ui.add_widget_with::<DataOverviewWidget>(world, "data_overview", pane.clone());
+                let updated_pane = ui.add_widget_with::<DataOverviewWidget>(
+                    world,
+                    "data_overview",
+                    (pane.clone(), target_window),
+                );
                 *pane = updated_pane;
                 egui_tiles::UiResponse::None
             }
@@ -2336,6 +2339,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             state_mut.commands.entity(action.entity).despawn();
                         };
 
+                        if let egui_tiles::Tile::Pane(Pane::Monitor(pane)) = tile {
+                            state_mut.commands.entity(pane.entity).despawn();
+                        };
+
                         if let egui_tiles::Tile::Pane(Pane::VideoStream(pane)) = tile {
                             state_mut.commands.entity(pane.entity).despawn();
                         };
@@ -2415,12 +2422,20 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if read_only {
                             continue;
                         }
-                        let monitor = MonitorPane::new(eql.clone(), eql);
+                        let entity = state_mut
+                            .commands
+                            .spawn(super::monitor::MonitorData {
+                                component_name: eql.clone(),
+                            })
+                            .id();
+                        let monitor = MonitorPane::new(entity, eql.clone());
 
                         let pane = Pane::Monitor(monitor);
                         if let Some(tile_id) =
                             tile_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
+                            ui_state.selected_object =
+                                SelectedObject::Monitor { monitor_id: entity };
                             tile_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
@@ -2493,6 +2508,19 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                         graph_id: plot.entity,
                                     };
                                 }
+                                Pane::Monitor(monitor) => {
+                                    ui_state.selected_object = SelectedObject::Monitor {
+                                        monitor_id: monitor.entity,
+                                    };
+                                }
+                                Pane::QueryTable(table) => {
+                                    ui_state.selected_object = SelectedObject::QueryTable {
+                                        table_id: table.entity,
+                                    };
+                                }
+                                Pane::DataOverview(_) => {
+                                    ui_state.selected_object = SelectedObject::DataOverview;
+                                }
                                 Pane::Viewport(viewport) => {
                                     if let Some(camera) = viewport.camera {
                                         ui_state.selected_object =
@@ -2533,6 +2561,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if let Some(tile_id) =
                             tile_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
+                            ui_state.selected_object =
+                                SelectedObject::QueryTable { table_id: entity };
                             tile_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
@@ -2585,6 +2615,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if let Some(tile_id) =
                             tile_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
+                            ui_state.selected_object = SelectedObject::DataOverview;
                             tile_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
