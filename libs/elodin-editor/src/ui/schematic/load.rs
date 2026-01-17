@@ -54,12 +54,36 @@ enum PanelContext {
     Secondary(WindowId),
 }
 
-fn tabs_parent_for_panels(tile_state: &TileState, panel_count: usize) -> Option<TileId> {
-    if panel_count > 0 {
-        tile_state.tree.root()
-    } else {
-        None
+fn tabs_parent_for_panels(tile_state: &mut TileState, panel_count: usize) -> Option<TileId> {
+    if panel_count == 0 {
+        return None;
     }
+
+    let root_id = tile_state.tree.root()?;
+    let Some(Tile::Container(Container::Tabs(root_tabs))) = tile_state.tree.tiles.get(root_id)
+    else {
+        return Some(root_id);
+    };
+
+    if let Some(&nested_id) = root_tabs.children.iter().find(|&&child_id| {
+        matches!(
+            tile_state.tree.tiles.get(child_id),
+            Some(Tile::Container(Container::Tabs(_)))
+        )
+    }) {
+        return Some(nested_id);
+    }
+
+    let nested_id = tile_state
+        .tree
+        .tiles
+        .insert_new(Tile::Container(Container::new_tabs(vec![])));
+    if let Some(Tile::Container(Container::Tabs(root_tabs))) =
+        tile_state.tree.tiles.get_mut(root_id)
+    {
+        root_tabs.add_child(nested_id);
+    }
+    Some(nested_id)
 }
 
 #[derive(Component)]
@@ -267,7 +291,7 @@ impl LoadSchematicParams<'_, '_> {
             .iter()
             .filter(|elem| matches!(elem, impeller2_wkt::SchematicElem::Panel(_)))
             .count();
-        let tabs_parent = tabs_parent_for_panels(&main_state, panel_count);
+        let tabs_parent = tabs_parent_for_panels(&mut main_state, panel_count);
 
         for elem in &schematic.elems {
             match elem {
@@ -388,7 +412,7 @@ impl LoadSchematicParams<'_, '_> {
                                     matches!(elem, impeller2_wkt::SchematicElem::Panel(_))
                                 })
                                 .count();
-                            let tabs_parent = tabs_parent_for_panels(&tile_state, panel_count);
+                            let tabs_parent = tabs_parent_for_panels(&mut tile_state, panel_count);
 
                             for elem in &sec_schematic.elems {
                                 if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
