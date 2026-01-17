@@ -60,8 +60,7 @@ fn tabs_parent_for_panels(tile_state: &mut TileState, panel_count: usize) -> Opt
     }
 
     let root_id = tile_state.tree.root()?;
-    let Some(Tile::Container(Container::Tabs(root_tabs))) =
-        tile_state.tree.tiles.get(root_id)
+    let Some(Tile::Container(Container::Tabs(root_tabs))) = tile_state.tree.tiles.get(root_id)
     else {
         return Some(root_id);
     };
@@ -413,8 +412,7 @@ impl LoadSchematicParams<'_, '_> {
                                     matches!(elem, impeller2_wkt::SchematicElem::Panel(_))
                                 })
                                 .count();
-                            let tabs_parent =
-                                tabs_parent_for_panels(&mut tile_state, panel_count);
+                            let tabs_parent = tabs_parent_for_panels(&mut tile_state, panel_count);
 
                             for elem in &sec_schematic.elems {
                                 if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
