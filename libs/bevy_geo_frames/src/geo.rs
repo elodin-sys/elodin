@@ -2,61 +2,14 @@ use bevy::math::{DMat3, DVec3};
 use bevy::prelude::*;
 use bevy::transform::TransformSystem;
 use map_3d::{ecef2enu, enu2ecef, Ellipsoid};
-
-/// Default Earth radius in meters (approximate mean radius).
-pub const EARTH_RADIUS_M: f64 = 6_371_000.0;
 /// Earth sidereal spin
 pub const EARTH_SIDEREAL_SPIN: f64 = 7.292_115_0e-5;
 
 pub const DEFAULT_RENDER: GeoFrame = GeoFrame::ECEF;
 
-/// Planet/body shape model used for things like gravity scaling and debug rendering.
-///
-/// NOTE: Any time we call into `map_3d` we must provide an `Ellipsoid`. We always
-/// source that from `Shape::ellipsoid()` so `Shape::Sphere { .. }` can use
-/// `Ellipsoid::UnitSphere` (and you can scale the resulting ECEF/ENU numbers however
-/// you like in your game).
-#[derive(Debug, Clone, Copy)]
-pub enum Shape {
-    /// A spherical body with a single reference radius.
-    Sphere { radius: f64 },
-    /// An ellipsoidal body (from `map_3d`).
-    Ellipsoid(Ellipsoid),
-}
-
-impl Shape {
-
-    /// Ellipsoid to use for latitude/longitude <-> ECEF conversions.
-    pub fn ellipsoid(self) -> Ellipsoid {
-        match self {
-            Shape::Ellipsoid(e) => e,
-            Shape::Sphere { .. } => Ellipsoid::UnitSphere,
-        }
-    }
-
-    /// Reference radius used for simple gravity scaling and visualization.
-    pub fn approx_radius(&self) -> f64 {
-        match self {
-            Shape::Ellipsoid(_) => EARTH_RADIUS_M,
-            Shape::Sphere { radius } => *radius
-        }
-    }
-
-    /// A radius scale factor
-    fn scale_factor(&self) -> f64 {
-        match self {
-            Shape::Ellipsoid(_) => 1.0,
-            Shape::Sphere { radius } => *radius
-        }
-    }
-
-
-}
-
-impl Default for Shape {
-    fn default() -> Self {
-        Shape::Ellipsoid(Ellipsoid::WGS84)
-    }
+/// Return the approximate radius of the ellipsoid.
+pub fn approx_radius(ellipsoid: &Ellipsoid) -> f64 {
+    ellipsoid.parameters().0
 }
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,7 +68,7 @@ pub struct GeoOrigin {
     /// Altitude above mean radius [m]
     pub altitude: f64,
     /// Planet/body shape model (currently used primarily for reference radius).
-    pub shape: Shape,
+    pub ellipsoid: Ellipsoid,
 }
 
 impl GeoOrigin {
@@ -132,12 +85,12 @@ impl GeoOrigin {
             latitude,
             longitude,
             altitude,
-            shape: Shape::default(),
+            ..default()
         }
     }
 
-    pub fn with_shape(mut self, shape: Shape) -> Self {
-        self.shape = shape;
+    pub fn with_ellipsoid(mut self, shape: Ellipsoid) -> Self {
+        self.ellipsoid = shape;
         self
     }
 
@@ -224,30 +177,16 @@ impl GeoContext {
         r_gcrf
     }
 
-    /// Returns a longitude used for local ENU bases that is stable at the poles.
-    ///
-    /// At |latitude| ≈ 90°, longitude becomes ill-defined and can cause the ENU basis
-    /// to flip as `longitude` varies. This function smoothly suppresses the effect of
-    /// longitude as `cos(latitude)` goes to zero, yielding consistent results at the poles
-    /// while matching the true longitude away from them.
-    fn stable_lon(&self) -> f64 {
-        self.origin.longitude
-        // let (sin_lat, cos_lat) = self.origin.latitude.sin_cos();
-        // let (sin_lon, cos_lon) = self.origin.longitude.sin_cos();
-        // let denom = cos_lon * cos_lat + sin_lat.abs();
-        // (sin_lon * cos_lat).atan2(denom)
-    }
-
     /// ECEF -> local ENU at the origin.
     pub fn ecef_to_enu(&self, r_ecef: DVec3) -> DVec3 {
         let (e, n, u) = ecef2enu(
             r_ecef.x,
             r_ecef.y,
             r_ecef.z,
-            self.stable_lat(),
-            self.stable_lon(),
+            self.origin.latitude,
+            self.origin.longitude,
             self.origin.altitude,
-            self.origin.shape.ellipsoid(),
+            &self.origin.ellipsoid,
         );
         DVec3::new(e, n, u)
     }
@@ -403,10 +342,10 @@ impl GeoFrame {
                     enu.x,
                     enu.y,
                     enu.z,
-                    ctx.stable_lat(),
-                    ctx.stable_lon(),
+                    ctx.origin.latitude,
+                    ctx.origin.longitude,
                     ctx.origin.altitude,
-                    ctx.origin.shape.ellipsoid(),
+                    &ctx.origin.ellipsoid,
                 );
                 DVec3::new(x, y, z)
             }
@@ -436,19 +375,19 @@ impl GeoFrame {
                     v.x,
                     v.y,
                     v.z,
-                    ctx.stable_lat(),
-                    ctx.stable_lon(),
+                    ctx.origin.latitude,
+                    ctx.origin.longitude,
                     ctx.origin.altitude,
-                    ctx.origin.shape.ellipsoid(),
+                    &ctx.origin.ellipsoid,
                 ).into(),
             (NED, ECEF) => map_3d::ned2ecef(
                     v.x,
                     v.y,
                     v.z,
-                    ctx.stable_lat(),
-                    ctx.stable_lon(),
+                    ctx.origin.latitude,
+                    ctx.origin.longitude,
                     ctx.origin.altitude,
-                    ctx.origin.shape.ellipsoid(),
+                    &ctx.origin.ellipsoid,
                 ).into(),
             (ECEF, NED) => {
                 let eus = Self::ned_to_eus(v);
@@ -457,10 +396,10 @@ impl GeoFrame {
                     enu.x,
                     enu.y,
                     enu.z,
-                    ctx.stable_lat(),
-                    ctx.stable_lon(),
+                    ctx.origin.latitude,
+                    ctx.origin.longitude,
                     ctx.origin.altitude,
-                    ctx.origin.shape.ellipsoid(),
+                    &ctx.origin.ellipsoid,
                 )
                 .into()
             }
@@ -468,10 +407,10 @@ impl GeoFrame {
                     v.x,
                     v.y,
                     v.z,
-                    ctx.stable_lat(),
-                    ctx.stable_lon(),
+                    ctx.origin.latitude,
+                    ctx.origin.longitude,
                     ctx.origin.altitude,
-                    ctx.origin.shape.ellipsoid(),
+                    &ctx.origin.ellipsoid,
                 ).into(),
             (ECEF, EUS) => v.yzx(),
             // (ECI, EUS) =>
@@ -556,7 +495,7 @@ impl GeoFrame {
         pos_in_frame: Vec3,
         ctx: &GeoContext,
     ) -> Vec3 {
-        let g_frame = self.gravity_accel(pos_in_frame, ctx.origin.shape.approx_radius());
+        let g_frame = self.gravity_accel(pos_in_frame, approx_radius(&ctx.origin.ellipsoid));
         match self {
             GeoFrame::EUS => g_frame,
             GeoFrame::ENU => Vec3::new(g_frame.x, g_frame.z, -g_frame.y),
@@ -622,8 +561,6 @@ impl GeoPosition {
     }
 
     pub fn to_bevy_plane(&self, context: &GeoContext) -> DVec3 {
-        let scale = context.origin.shape.scale_factor();
-        // GeoFrame::EUS.convert_to(self.1/scale, self.0, context)
         GeoFrame::EUS.convert_to(self.1, self.0, context)
     }
 }

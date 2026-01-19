@@ -3,6 +3,7 @@ use bevy::math::primitives::{Plane3d, Cuboid};
 use bevy::math::DVec3;
 use bevy_editor_cam::prelude::*;
 use bevy_geo_frames::*;
+use map_3d::Ellipsoid;
 use bevy_infinite_grid::{InfiniteGridBundle, InfiniteGridPlugin};
 
 /// Marker for the demo cuboid we switch frames on.
@@ -21,7 +22,7 @@ fn main() {
         .add_plugins(GeoFramePlugin {
             origin: Some(
                 GeoOrigin::new_from_degrees(0.0, 0.0, 0.0)
-                    .with_shape(Shape::Sphere { radius: 10.0 }),
+                    .with_ellipsoid(Ellipsoid::Sphere{ radius: 10.0 }),
             ),
             ..default()
         })
@@ -330,7 +331,7 @@ fn draw_radius_sphere(
     if ctx.present != Present::Sphere {
         return;
     }
-    let radius = ctx.origin.shape.approx_radius() as f32;
+    let radius = approx_radius(&ctx.origin.ellipsoid) as f32;
     let center = Vec3::ZERO;
     
     // Draw wireframe sphere using gizmos
