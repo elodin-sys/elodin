@@ -16,16 +16,15 @@ use bevy::render::render_phase::{
     ViewSortedRenderPhases,
 };
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::image::BevyDefault;
 use bevy::mesh::VertexBufferLayout;
 use bevy::render::renderer::RenderQueue;
-use bevy::camera::visibility::RenderLayers;
 use bevy::render::view::{ExtractedView, Msaa};
 use bevy::render::{ExtractSchedule, MainWorld, Render, RenderStartup, RenderSystems};
 use bevy::shader::Shader;
 use bevy::sprite_render::{
-    Mesh2dPipeline, Mesh2dPipelineKey, SetMesh2dViewBindGroup,
-    init_mesh_2d_pipeline,
+    Mesh2dPipeline, Mesh2dPipelineKey, SetMesh2dViewBindGroup, init_mesh_2d_pipeline,
 };
 use bevy::{
     app::Plugin,
@@ -95,12 +94,13 @@ impl Plugin for PlotGpuPlugin {
                 Render,
                 PlotSystem::QueueLine
                     .in_set(RenderSystems::Queue)
-                    .ambiguous_with(
-                        bevy::pbr::queue_material_meshes,
-                    ),
+                    .ambiguous_with(bevy::pbr::queue_material_meshes),
             )
             .add_systems(ExtractSchedule, extract_lines)
-            .add_systems(RenderStartup, init_line_pipeline.after(init_mesh_2d_pipeline))
+            .add_systems(
+                RenderStartup,
+                init_line_pipeline.after(init_mesh_2d_pipeline),
+            )
             .add_systems(
                 Render,
                 prepare_uniform_bind_group.in_set(RenderSystems::PrepareBindGroups),
@@ -328,7 +328,7 @@ fn init_line_pipeline(
     uniform_layout: Res<UniformLayout>,
     storage_layout: Res<LineValuesLayout>,
 ) {
-    commands.insert_resource(LinePipeline{
+    commands.insert_resource(LinePipeline {
         mesh_pipeline: mesh_pipeline.clone(),
         uniform_layout: uniform_layout.layout.clone(),
         storage_layout: storage_layout.layout.clone(),

@@ -2,12 +2,12 @@ use std::collections::HashMap;
 
 use bevy::{
     camera::{Camera2d, RenderTarget},
+    ecs::system::NonSendMarker,
     log::info,
     prelude::*,
     ui::UiTargetCamera,
     window::{EnabledButtons, Window, WindowPosition, WindowRef, WindowResolution},
     winit::WINIT_WINDOWS,
-    ecs::system::NonSendMarker,
 };
 use bevy_egui::EguiContextSettings;
 use egui_tiles::Tile;

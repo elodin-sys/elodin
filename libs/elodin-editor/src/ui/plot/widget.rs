@@ -8,6 +8,7 @@ use crate::{
 };
 use bevy::{
     asset::Assets,
+    camera::{Camera, OrthographicProjection, Projection, ScalingMode},
     ecs::{
         entity::Entity,
         prelude::Resource,
@@ -21,7 +22,6 @@ use bevy::{
     },
     math::{DVec2, Rect, Vec2},
     prelude::{Component, ResMut},
-    camera::{Camera, OrthographicProjection, Projection, ScalingMode},
     window::{PrimaryWindow, Window},
 };
 use bevy_egui::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke};
@@ -599,27 +599,24 @@ impl TimeseriesPlot {
                 self.rect.min.y + 6.0,
             );
 
-            egui::Area::new(egui::Id::new((
-                "plot_lock_btn",
-                graph_entity,
-            )))
-            .order(egui::Order::Foreground)
-            .fixed_pos(lock_pos)
-            .show(ui.ctx(), |ui| {
-                let old_pad = ui.spacing().button_padding;
-                ui.style_mut().spacing.button_padding = egui::vec2(2.0, 2.0);
-                let icon = if graph_state.locked {
-                    ICON_LOCK
-                } else {
-                    ICON_LOCK_OPEN_RIGHT
-                };
-                let resp = icon_button(ui, icon);
-                if resp.clicked() {
-                    graph_state.locked = !graph_state.locked;
-                }
-                resp.on_hover_text(if graph_state.locked { "Unlock" } else { "Lock" });
-                ui.style_mut().spacing.button_padding = old_pad;
-            });
+            egui::Area::new(egui::Id::new(("plot_lock_btn", graph_entity)))
+                .order(egui::Order::Foreground)
+                .fixed_pos(lock_pos)
+                .show(ui.ctx(), |ui| {
+                    let old_pad = ui.spacing().button_padding;
+                    ui.style_mut().spacing.button_padding = egui::vec2(2.0, 2.0);
+                    let icon = if graph_state.locked {
+                        ICON_LOCK
+                    } else {
+                        ICON_LOCK_OPEN_RIGHT
+                    };
+                    let resp = icon_button(ui, icon);
+                    if resp.clicked() {
+                        graph_state.locked = !graph_state.locked;
+                    }
+                    resp.on_hover_text(if graph_state.locked { "Unlock" } else { "Lock" });
+                    ui.style_mut().spacing.button_padding = old_pad;
+                });
         }
 
         response.context_menu(|ui| {

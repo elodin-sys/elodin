@@ -11,10 +11,10 @@ use arrow::{
 };
 use bevy::{
     asset::{Assets, Handle},
+    camera::Projection,
     ecs::{hierarchy::ChildOf, system::SystemParam},
     math::DVec2,
     prelude::{Commands, Component, Entity, In, Query, Res, ResMut},
-    camera::Projection,
 };
 use egui::RichText;
 use impeller2_bevy::CommandsExt;

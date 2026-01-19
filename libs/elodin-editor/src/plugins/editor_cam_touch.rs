@@ -1,10 +1,10 @@
 use bevy::app::{App, Plugin, Update};
+use bevy::camera::Camera;
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::ecs::system::Query;
 use bevy::input::touch::Touch;
 use bevy::math::Vec2;
 use bevy::prelude::{Res, ResMut, Resource, Touches};
-use bevy::camera::Camera;
 use bevy::transform::components::Transform;
 use bevy_editor_cam::controller::component::EditorCam;
 

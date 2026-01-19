@@ -8,14 +8,14 @@ use bevy::{
     asset::{UnapprovedPathMode, embedded_asset},
     camera::RenderTarget,
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
+    ecs::system::NonSendMarker,
     light::DirectionalLightShadowMap,
     log::LogPlugin,
     math::{DQuat, DVec3},
     pbr::wireframe::{WireframeConfig, WireframePlugin},
     prelude::*,
     window::{PresentMode, PrimaryWindow, WindowRef, WindowResolution},
-    winit::{WinitSettings, WINIT_WINDOWS},
-    ecs::system::NonSendMarker,
+    winit::{WINIT_WINDOWS, WinitSettings},
 };
 use bevy_editor_cam::{SyncCameraPosition, controller::component::EditorCam};
 #[cfg(feature = "inspector")]
@@ -437,53 +437,53 @@ fn setup_titlebar(
     use objc2_app_kit::{NSColor, NSToolbar, NSWindow, NSWindowStyleMask, NSWindowToolbarStyle};
 
     WINIT_WINDOWS.with_borrow(|winit_windows| {
-    for id in &windows {
-        let Some(window) = winit_windows.get_window(id) else {
-            continue;
-        };
-        window.set_blur(true);
-        use raw_window_handle::HasRawWindowHandle;
-        let handle = window.raw_window_handle();
-        let raw_window_handle::RawWindowHandle::AppKit(handle) = handle else {
-            error!("non AppKit window on macOS");
-            continue;
-        };
-        let window: *mut NSWindow = handle.ns_window.cast();
-        if window.is_null() {
-            continue;
+        for id in &windows {
+            let Some(window) = winit_windows.get_window(id) else {
+                continue;
+            };
+            window.set_blur(true);
+            use raw_window_handle::HasRawWindowHandle;
+            let handle = window.raw_window_handle();
+            let raw_window_handle::RawWindowHandle::AppKit(handle) = handle else {
+                error!("non AppKit window on macOS");
+                continue;
+            };
+            let window: *mut NSWindow = handle.ns_window.cast();
+            if window.is_null() {
+                continue;
+            }
+            unsafe {
+                let window = &*window;
+
+                // Create a simple toolbar without delegate for now
+                // The delegate isn't strictly necessary for basic toolbar functionality
+                use objc2_foundation::NSString;
+                let identifier = NSString::from_str("MainToolbar");
+                let toolbar: Retained<NSToolbar> = msg_send_id![
+                    msg_send_id![NSToolbar::class(), alloc],
+                    initWithIdentifier: &*identifier
+                ];
+
+                // Keep the native titlebar visible and readable.
+                window.setTitlebarAppearsTransparent(false);
+                let color = NSColor::windowBackgroundColor();
+                window.setBackgroundColor(Some(&color));
+
+                window.setStyleMask(
+                    NSWindowStyleMask::FullSizeContentView
+                        | NSWindowStyleMask::Resizable
+                        | NSWindowStyleMask::Titled
+                        | NSWindowStyleMask::Closable
+                        | NSWindowStyleMask::Miniaturizable
+                        | NSWindowStyleMask::UnifiedTitleAndToolbar,
+                );
+                window.setToolbarStyle(NSWindowToolbarStyle::UnifiedCompact);
+                // Keep the native title visible in the toolbar/titlebar area.
+                let _: () = msg_send![window, setTitleVisibility: 0u64]; // NSWindowTitleVisible = 0
+                window.setToolbar(Some(&toolbar));
+                commands.entity(id).insert(SetupTitlebar);
+            }
         }
-        unsafe {
-            let window = &*window;
-
-            // Create a simple toolbar without delegate for now
-            // The delegate isn't strictly necessary for basic toolbar functionality
-            use objc2_foundation::NSString;
-            let identifier = NSString::from_str("MainToolbar");
-            let toolbar: Retained<NSToolbar> = msg_send_id![
-                msg_send_id![NSToolbar::class(), alloc],
-                initWithIdentifier: &*identifier
-            ];
-
-            // Keep the native titlebar visible and readable.
-            window.setTitlebarAppearsTransparent(false);
-            let color = NSColor::windowBackgroundColor();
-            window.setBackgroundColor(Some(&color));
-
-            window.setStyleMask(
-                NSWindowStyleMask::FullSizeContentView
-                    | NSWindowStyleMask::Resizable
-                    | NSWindowStyleMask::Titled
-                    | NSWindowStyleMask::Closable
-                    | NSWindowStyleMask::Miniaturizable
-                    | NSWindowStyleMask::UnifiedTitleAndToolbar,
-            );
-            window.setToolbarStyle(NSWindowToolbarStyle::UnifiedCompact);
-            // Keep the native title visible in the toolbar/titlebar area.
-            let _: () = msg_send![window, setTitleVisibility: 0u64]; // NSWindowTitleVisible = 0
-            window.setToolbar(Some(&toolbar));
-            commands.entity(id).insert(SetupTitlebar);
-        }
-    }
     });
 }
 
@@ -494,48 +494,48 @@ fn handle_drag_resize(
     _non_send_marker: NonSendMarker,
 ) {
     WINIT_WINDOWS.with_borrow(|winit_windows| {
-    for (id, window, _) in &windows {
-        let Some(cursor_pos) = window.physical_cursor_position() else {
-            continue;
-        };
-        let size = window.physical_size().as_vec2();
-        let window = winit_windows.get_window(id).unwrap();
-        const RESIZE_ZONE: f32 = 5.0;
-        let resize_west = cursor_pos.x < RESIZE_ZONE;
-        let resize_east = cursor_pos.x > size.x - RESIZE_ZONE;
-        let resize_north = cursor_pos.y < RESIZE_ZONE;
-        let resize_south = cursor_pos.y > size.y - RESIZE_ZONE;
-        if cursor_pos.y < 45.0
-            && !resize_north
-            && !resize_east
-            && !resize_west
-            && mouse_buttons.pressed(MouseButton::Left)
-        {
-            let _ = window.drag_window();
-        }
-        let resize_dir = match (resize_west, resize_east, resize_north, resize_south) {
-            (true, _, true, _) => Some(winit::window::ResizeDirection::NorthWest),
-            (_, true, true, _) => Some(winit::window::ResizeDirection::NorthEast),
-
-            (true, _, _, true) => Some(winit::window::ResizeDirection::SouthWest),
-            (_, true, _, true) => Some(winit::window::ResizeDirection::SouthEast),
-            (true, _, _, _) => Some(winit::window::ResizeDirection::West),
-            (_, true, _, _) => Some(winit::window::ResizeDirection::East),
-            (_, _, true, _) => Some(winit::window::ResizeDirection::North),
-            (_, _, _, true) => Some(winit::window::ResizeDirection::South),
-            _ => None,
-        };
-        if let Some(resize_dir) = resize_dir {
-            if mouse_buttons.pressed(MouseButton::Left) {
-                let _ = window.drag_resize_window(resize_dir);
+        for (id, window, _) in &windows {
+            let Some(cursor_pos) = window.physical_cursor_position() else {
+                continue;
+            };
+            let size = window.physical_size().as_vec2();
+            let window = winit_windows.get_window(id).unwrap();
+            const RESIZE_ZONE: f32 = 5.0;
+            let resize_west = cursor_pos.x < RESIZE_ZONE;
+            let resize_east = cursor_pos.x > size.x - RESIZE_ZONE;
+            let resize_north = cursor_pos.y < RESIZE_ZONE;
+            let resize_south = cursor_pos.y > size.y - RESIZE_ZONE;
+            if cursor_pos.y < 45.0
+                && !resize_north
+                && !resize_east
+                && !resize_west
+                && mouse_buttons.pressed(MouseButton::Left)
+            {
+                let _ = window.drag_window();
             }
-            window.set_cursor(winit::window::CursorIcon::from(resize_dir));
-            *just_set_cursor = true
-        } else if *just_set_cursor {
-            *just_set_cursor = false;
-            window.set_cursor(winit::window::CursorIcon::Default);
+            let resize_dir = match (resize_west, resize_east, resize_north, resize_south) {
+                (true, _, true, _) => Some(winit::window::ResizeDirection::NorthWest),
+                (_, true, true, _) => Some(winit::window::ResizeDirection::NorthEast),
+
+                (true, _, _, true) => Some(winit::window::ResizeDirection::SouthWest),
+                (_, true, _, true) => Some(winit::window::ResizeDirection::SouthEast),
+                (true, _, _, _) => Some(winit::window::ResizeDirection::West),
+                (_, true, _, _) => Some(winit::window::ResizeDirection::East),
+                (_, _, true, _) => Some(winit::window::ResizeDirection::North),
+                (_, _, _, true) => Some(winit::window::ResizeDirection::South),
+                _ => None,
+            };
+            if let Some(resize_dir) = resize_dir {
+                if mouse_buttons.pressed(MouseButton::Left) {
+                    let _ = window.drag_resize_window(resize_dir);
+                }
+                window.set_cursor(winit::window::CursorIcon::from(resize_dir));
+                *just_set_cursor = true
+            } else if *just_set_cursor {
+                *just_set_cursor = false;
+                window.set_cursor(winit::window::CursorIcon::Default);
+            }
         }
-    }
     });
 }
 

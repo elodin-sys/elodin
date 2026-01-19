@@ -7,6 +7,7 @@ use std::{
 
 use bevy::{
     asset::{AssetServer, Assets},
+    camera::visibility::Visibility,
     ecs::{
         query::With,
         system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
@@ -15,7 +16,6 @@ use bevy::{
     log::{error, info, warn},
     pbr::{StandardMaterial, wireframe::WireframeConfig},
     prelude::{Deref, DerefMut, Entity, In, Mut, Resource, Transform},
-    camera::visibility::Visibility,
     window::PrimaryWindow,
 };
 use bevy_editor_cam::controller::{component::EditorCam, motion::CurrentMotion};

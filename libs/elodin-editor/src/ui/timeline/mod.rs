@@ -3,7 +3,7 @@ use bevy::ecs::{
     world::World,
 };
 use bevy::prelude::*;
-use bevy_egui::{EguiContexts, egui, EguiTextureHandle};
+use bevy_egui::{EguiContexts, EguiTextureHandle, egui};
 use impeller2_wkt::{SimulationTimeStep, StreamId};
 use timeline_controls::TimelineControls;
 
@@ -257,13 +257,11 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
         let frames_per_second = 1.0 / tick_time.0;
 
         let timeline_icons = TimelineIcons {
-            jump_to_start: contexts.add_image(EguiTextureHandle::Weak(
-                images.icon_jump_to_start.id(),
-            )),
+            jump_to_start: contexts
+                .add_image(EguiTextureHandle::Weak(images.icon_jump_to_start.id())),
             jump_to_end: contexts.add_image(EguiTextureHandle::Weak(images.icon_jump_to_end.id())),
-            frame_forward: contexts.add_image(EguiTextureHandle::Weak(
-                images.icon_frame_forward.id(),
-            )),
+            frame_forward: contexts
+                .add_image(EguiTextureHandle::Weak(images.icon_frame_forward.id())),
             frame_back: contexts.add_image(EguiTextureHandle::Weak(images.icon_frame_back.id())),
             play: contexts.add_image(EguiTextureHandle::Weak(images.icon_play.id())),
             pause: contexts.add_image(EguiTextureHandle::Weak(images.icon_pause.id())),
@@ -271,9 +269,8 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
             add: contexts.add_image(EguiTextureHandle::Weak(images.icon_add.id())),
             remove: contexts.add_image(EguiTextureHandle::Weak(images.icon_subtract.id())),
             range_loop: contexts.add_image(EguiTextureHandle::Weak(images.icon_loop.id())),
-            vertical_chevrons: contexts.add_image(EguiTextureHandle::Weak(
-                images.icon_vertical_chevrons.id(),
-            )),
+            vertical_chevrons: contexts
+                .add_image(EguiTextureHandle::Weak(images.icon_vertical_chevrons.id())),
         };
 
         egui::TopBottomPanel::bottom("timeline_panel")

@@ -6,13 +6,13 @@ use bevy::{
     animation::graph,
     app::{Startup, Update},
     asset::{Assets, Handle},
+    camera::visibility::RenderLayers,
     ecs::{
         entity::Entity,
         query::{With, Without},
         system::{Commands, Query, Res, ResMut},
     },
     math::{Mat4, Vec4},
-    camera::visibility::RenderLayers,
 };
 use big_space::GridCell;
 use eql;

@@ -487,7 +487,11 @@ impl WidgetSystem for PaletteItems<'_> {
                         });
 
                         if btn.clicked() || (i == selected_index && hit_enter) {
-                            return Some(item.system.run(filter.clone(), world).expect("System run failed"));
+                            return Some(
+                                item.system
+                                    .run(filter.clone(), world)
+                                    .expect("System run failed"),
+                            );
                         }
                     }
                     None

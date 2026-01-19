@@ -7,6 +7,8 @@ use crate::{
         gpu::{INDEX_BUFFER_LEN, INDEX_BUFFER_SIZE, LineHandle, VALUE_BUFFER_SIZE},
     },
 };
+use bevy::camera::visibility::RenderLayers;
+use bevy::shader::Shader;
 use bevy::{
     app::{Plugin, PostUpdate},
     asset::{AssetApp, Assets, Handle, load_internal_asset, uuid_handle},
@@ -28,8 +30,8 @@ use bevy::{
         world::{FromWorld, Mut, World},
     },
     image::BevyDefault,
-    mesh::VertexBufferLayout,
     math::{Mat4, Vec4},
+    mesh::VertexBufferLayout,
     pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup},
     prelude::{Color, Deref, Resource},
     render::{
@@ -45,8 +47,6 @@ use bevy::{
     },
     transform::components::{GlobalTransform, Transform},
 };
-use bevy::shader::Shader;
-use bevy::camera::visibility::RenderLayers;
 use bevy_render::{
     extract_component::ExtractComponent,
     sync_world::{MainEntity, SyncToRenderWorld, TemporaryRenderEntity},
@@ -83,9 +83,7 @@ impl Plugin for Plot3dGpuPlugin {
                 Render,
                 PlotSystem::QueueLine
                     .in_set(RenderSystems::Queue)
-                    .ambiguous_with(
-                        bevy::pbr::queue_material_meshes
-                    ),
+                    .ambiguous_with(bevy::pbr::queue_material_meshes),
             )
             .add_systems(ExtractSchedule, extract_lines)
             .add_systems(

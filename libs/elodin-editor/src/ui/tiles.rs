@@ -1,3 +1,5 @@
+use bevy::camera::visibility::RenderLayers;
+use bevy::camera::{Exposure, PhysicalCameraParameters};
 use bevy::{
     core_pipeline::tonemapping::Tonemapping,
     ecs::system::{SystemParam, SystemState},
@@ -11,8 +13,6 @@ use bevy_egui::{
     EguiContexts, EguiTextureHandle,
     egui::{self, Color32, CornerRadius, Frame, Id, RichText, Stroke, Ui, Visuals, vec2},
 };
-use bevy::camera::{Exposure, PhysicalCameraParameters};
-use bevy::camera::visibility::RenderLayers;
 use egui::UiBuilder;
 use egui::response::Flags;
 use egui_tiles::{Container, Tile, TileId, Tiles};
@@ -1913,9 +1913,8 @@ impl<'w, 's> TileSystem<'w, 's> {
             add: contexts.add_image(EguiTextureHandle::Weak(images.icon_add.id())),
             close: contexts.add_image(EguiTextureHandle::Weak(images.icon_close.id())),
             scrub: contexts.add_image(EguiTextureHandle::Weak(images.icon_scrub.id())),
-            tile_3d_viewer: contexts.add_image(EguiTextureHandle::Weak(
-                images.icon_tile_3d_viewer.id(),
-            )),
+            tile_3d_viewer: contexts
+                .add_image(EguiTextureHandle::Weak(images.icon_tile_3d_viewer.id())),
             tile_graph: contexts.add_image(EguiTextureHandle::Weak(images.icon_tile_graph.id())),
             subtract: contexts.add_image(EguiTextureHandle::Weak(images.icon_subtract.id())),
             chart: contexts.add_image(EguiTextureHandle::Weak(images.icon_chart.id())),

@@ -1,7 +1,7 @@
 use bevy::{
+    camera::RenderTarget,
     ecs::system::SystemParam,
     prelude::*,
-    camera::RenderTarget,
     window::{EnabledButtons, PrimaryWindow, WindowRef, WindowResolution},
 };
 use bevy_egui::{EguiContexts, EguiTextureHandle};
@@ -266,9 +266,9 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
             .contexts
             .add_image(EguiTextureHandle::Weak(state.images.icon_folder.id()));
 
-        let arrow = state
-            .contexts
-            .add_image(EguiTextureHandle::Weak(state.images.icon_chevron_right.id()));
+        let arrow = state.contexts.add_image(EguiTextureHandle::Weak(
+            state.images.icon_chevron_right.id(),
+        ));
         let icon_ip_addr = state
             .contexts
             .add_image(EguiTextureHandle::Weak(state.images.icon_ip_addr.id()));

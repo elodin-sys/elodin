@@ -6,7 +6,7 @@ use bevy::{
     prelude::In,
     window::{PrimaryWindow, Window},
 };
-use bevy_egui::{EguiContexts, egui, EguiTextureHandle};
+use bevy_egui::{EguiContexts, EguiTextureHandle, egui};
 
 // Modal system for displaying dialogs and messages.
 //

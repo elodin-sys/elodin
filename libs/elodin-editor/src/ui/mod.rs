@@ -3,6 +3,7 @@ use std::fmt::Write;
 use std::path::PathBuf;
 
 use bevy::{
+    camera::{RenderTarget, Viewport},
     ecs::{
         query::QueryData,
         system::{NonSendMarker, SystemParam, SystemState},
@@ -11,10 +12,9 @@ use bevy::{
     input::keyboard::Key,
     log::{error, info},
     prelude::*,
-    camera::{RenderTarget, Viewport},
+    render::view::Hdr,
     window::{Monitor, NormalizedWindowRef, PrimaryWindow, WindowFocused},
     winit::WINIT_WINDOWS,
-    render::view::Hdr,
 };
 use bevy_defer::AsyncPlugin;
 use bevy_egui::{
@@ -494,25 +494,25 @@ pub(crate) fn capture_window_screens_oneoff(
     _non_send_marker: NonSendMarker,
 ) {
     WINIT_WINDOWS.with_borrow(|winit_windows| {
-    for (entity, window_component, mut state) in &mut window_query {
-        let winit_window = winit_windows.get_window(entity);
-        let mut updated = false;
-        if let Some(window) = winit_window {
-            let screens_sorted = collect_sorted_screens(window);
-            updated = state.update_descriptor_from_winit_window(window, &screens_sorted);
-            let screen_seen = state.descriptor.screen;
-            // Fallback: best-effort detection if current_monitor is not reliable.
-            if (!updated || screen_seen.is_none())
-                && let Some(idx) = detect_window_screen(window, &screens_sorted)
-            {
-                state.descriptor.screen = Some(idx);
-                updated = true;
+        for (entity, window_component, mut state) in &mut window_query {
+            let winit_window = winit_windows.get_window(entity);
+            let mut updated = false;
+            if let Some(window) = winit_window {
+                let screens_sorted = collect_sorted_screens(window);
+                updated = state.update_descriptor_from_winit_window(window, &screens_sorted);
+                let screen_seen = state.descriptor.screen;
+                // Fallback: best-effort detection if current_monitor is not reliable.
+                if (!updated || screen_seen.is_none())
+                    && let Some(idx) = detect_window_screen(window, &screens_sorted)
+                {
+                    state.descriptor.screen = Some(idx);
+                    updated = true;
+                }
+            }
+            if !updated {
+                state.update_descriptor_from_window(window_component, &screens);
             }
         }
-        if !updated {
-            state.update_descriptor_from_window(window_component, &screens);
-        }
-    }
     });
 }
 
@@ -809,10 +809,10 @@ fn sync_hdr(
     cameras: Query<(Entity, Has<Hdr>), With<Camera>>,
 ) {
     for (entity, has_hdr) in cameras.iter() {
-          if hdr_enabled.0 && !has_hdr {
-              commands.entity(entity).insert(Hdr);
-          } else if !hdr_enabled.0 && has_hdr {
-              commands.entity(entity).remove::<Hdr>();
-          }
-      }
-  }
+        if hdr_enabled.0 && !has_hdr {
+            commands.entity(entity).insert(Hdr);
+        } else if !hdr_enabled.0 && has_hdr {
+            commands.entity(entity).remove::<Hdr>();
+        }
+    }
+}
