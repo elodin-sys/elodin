@@ -37,16 +37,17 @@ Doing a pre-release should be quick-and-dirty on-demand operation without any of
 0. Define the versions, e.g., run `export VERSION=0.1.2-alpha.0`.
 1. Run `just tag v$VERSION` on the updated `main` branch. 
 ```sh
-export VERSION=0.16.0-alpha.3
 git fetch; # Ensure your `origin/main` is the latest.
+export VERSION=0.16.0-alpha.4
 just tag v$VERSION origin/main
 ``` 
 3. Once released, we want to bump the version of alpha so that what was just released and what's on the 'main' branch will not be easily confused. If the version released was `0.1.2-alpha.0` then the next version would be `0.1.2-alpha.1`. 
 
 ```sh
-export VERSION="0.16.0-alpha.4"; # The next alpha version.
+export VERSION="0.16.0-alpha.5"; # The next alpha version.
 git checkout -b next-alpha-release/v$VERSION
 $EDITOR Cargo.toml; # Update to the next alpha version.
+cargo check; # Updates the Cargo.lock file
 git commit -m "chore: next-alpha-release v$VERSION"
 git push -u origin next-alpha-release/v$VERSION
 gh pr create --base main --head next-alpha-release/v$VERSION --title "Next Alpha Release v$VERSION"

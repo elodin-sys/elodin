@@ -67,6 +67,7 @@ The Elodin simulation world.
     - `db_path` : `string`, optional, the path to the database directory. If not provided, a temporary database is created.
     - `interactive` : `bool`, optional, controls simulation behavior after reaching `max_ticks`, defaults to `True`. When `True`, the simulation pauses but remains running for continued interaction in the Elodin editor. When `False`, the simulation terminates completely after reaching `max_ticks`.
     - `start_timestamp` : `int`, optional, the starting timestamp for the simulation in microseconds. If `None` (default), uses the current system time (epoch-based). Set to `0` for zero-based timing where the simulation starts at `t=0`.
+    - `log_level` : `str`, optional, log level for the embedded Elodin-DB instance (`error`, `warn`, `info`, `debug`, `trace`). Defaults to `info` unless `RUST_LOG` is set.
 
 ### _class_ `elodin.EntityId`
 Integer reference identifier for entities in Elodin.
@@ -135,6 +136,20 @@ Context object passed to `pre_step` and `post_step` callbacks, providing direct 
 
     After `truncate()`, any subsequent `write_component()` calls in the same callback will write at the start timestamp (tick 0), preventing `TimeTravel` errors on the next tick.
 
+- `stop_recipes()` -> None
+
+    Gracefully terminate all s10-managed recipes (external processes).
+
+    This signals all processes managed by s10 (registered via `world.recipe()`) to shut down gracefully. The processes receive SIGTERM and have approximately 2 seconds to clean up before being force-killed.
+
+    Use this to ensure clean shutdown of external processes (like Betaflight SITL) before the simulation exits, preventing memory corruption or resource leaks.
+
+    This is a no-op if no recipes were registered or if running with `--no-s10`.
+
+    {% alert(kind="notice") %}
+    Call `stop_recipes()` before the simulation exits to allow external processes time to clean up. You may want to add a brief delay (e.g., `time.sleep(0.5)`) after calling this method to ensure the processes have finished shutting down.
+    {% end %}
+
 #### Example: SITL Integration
 
 This example demonstrates a typical Software-In-The-Loop workflow where a flight controller receives sensor data and returns motor commands:
@@ -142,9 +157,11 @@ This example demonstrates a typical Software-In-The-Loop workflow where a flight
 ```python
 import elodin as el
 import numpy as np
+import time
 
 # External flight controller interface (e.g., Betaflight SITL)
 flight_controller = FlightControllerBridge()
+MAX_TICKS = 10000
 
 def sitl_post_step(tick: int, ctx: el.StepContext):
     """Post-step callback for lockstep SITL synchronization."""
@@ -172,10 +189,16 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     if tick % 1000 == 0:
         print(f"Tick {tick}: motors={motors}, pos={position}")
 
+    # Graceful shutdown before simulation ends
+    if tick >= MAX_TICKS - 1:
+        ctx.stop_recipes()  # Signal s10 processes to terminate
+        time.sleep(0.5)     # Allow time for graceful shutdown
+
 # Run simulation with SITL callback
 world.run(
     system,
     sim_time_step=1/1000.0,  # 1kHz for flight controller
+    max_ticks=MAX_TICKS,
     post_step=sitl_post_step,
     db_path="sitl_data",
     interactive=False,  # Headless mode

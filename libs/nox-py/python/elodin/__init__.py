@@ -408,6 +408,7 @@ class World(WorldBuilder):
         db_path: Optional[str] = None,
         interactive: bool = True,
         start_timestamp: Optional[int] = None,
+        log_level: Optional[str] = None,
     ):
         current_frame = inspect.currentframe()
         if current_frame is None:
@@ -428,6 +429,7 @@ class World(WorldBuilder):
             db_path,
             interactive,
             start_timestamp,
+            log_level,
         )
         locals = frame.f_locals
         if not interactive and addr is not None:

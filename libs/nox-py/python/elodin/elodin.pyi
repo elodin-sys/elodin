@@ -156,6 +156,7 @@ class WorldBuilder:
         db_path: Optional[str] = None,
         interactive: bool = True,
         start_timestamp: Optional[int] = None,
+        log_level: Optional[str] = None,
     ): ...
     def serve(
         self,

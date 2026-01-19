@@ -9,7 +9,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use crate::{Error, MetadataExt};
-use impeller2_wkt::ComponentMetadata;
+use impeller2_wkt::{ComponentMetadata, DbConfig};
 
 const HEADER_SIZE: usize = 24; // committed_len (8) + head_len (8) + extra (8)
 
@@ -38,6 +38,29 @@ pub fn run(
 
     println!("Analyzing database: {}", db_path.display());
     println!("Reference clock: {}", reference);
+    let db_state_path = db_path.join("db_state");
+    if db_state_path.exists() {
+        match DbConfig::read(&db_state_path) {
+            Ok(config) => {
+                if let Some(start_ts) = config.time_start_timestamp_micros() {
+                    println!(
+                        "time.start_timestamp: {} ({:.3}s)",
+                        start_ts,
+                        start_ts as f64 / 1e6
+                    );
+                } else {
+                    println!("time.start_timestamp: <not set>");
+                }
+            }
+            Err(err) => {
+                eprintln!(
+                    "Warning: failed to read db_state at {}: {}",
+                    db_state_path.display(),
+                    err
+                );
+            }
+        }
+    }
     if dry_run {
         println!("DRY RUN - no changes will be made");
     }
