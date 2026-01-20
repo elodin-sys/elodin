@@ -211,6 +211,36 @@ impl GeoFrame {
         }
     }
 
+    /// Provides the origin vector ${bevy}_O_{from}$ of the coordinate frame.
+    pub fn ecef_O_(from: &Self, context: &GeoContext) -> DVec3 {
+        match context.present {
+            Present::Plane => DVec3::ZERO,
+            Present::Sphere => {
+                match from {
+                    GeoFrame::ENU | GeoFrame::NED => {
+                        let ecef_R_enu = Self::ecef_R_(&GeoFrame::ENU, &context.origin);
+                        approx_radius(&context.origin.ellipsoid) * ecef_R_enu.z_axis
+                    }
+                    // For these, a fully correct basis would require time-dependent
+                    // Earth orientation.
+                    GeoFrame::ECEF => DVec3::ZERO,
+                }
+            }
+        }
+    }
+
+    pub fn _R_(&self, from: &GeoFrame, context: &GeoContext) -> DMat3 {
+        use GeoFrame::*;
+        match (*from, *self) {
+            (x, y) if x == y => DMat3::IDENTITY,
+            (ENU, NED) => DMat3::from_cols(DVec3::Y, DVec3::X, DVec3::NEG_Y),
+            (NED, ENU) => DMat3::from_cols(DVec3::Y, DVec3::X, DVec3::NEG_Y),
+            (ECEF, x) => Self::ecef_R_(&x, &context.origin),
+            (x, ECEF) => Self::ecef_R_(&x, &context.origin).inverse(),
+            (x, y) => unreachable!("{x:?} -> {y:?}"),
+        }
+    }
+
     /// Provides the rotation matrix ${bevy}_R_{from}$.
     pub fn bevy_R_(from: &Self, context: &GeoContext) -> DMat3 {
         let bevy_R_ecef = DMat3::from_cols(DVec3::X, DVec3::NEG_Z, DVec3::Y);
@@ -233,14 +263,42 @@ impl GeoFrame {
         }
     }
 
+    pub fn ecef_M_(from: &Self, context: &GeoContext) -> DMat4 {
+        let R = Self::ecef_R_(from, &context.origin);
+        let O = Self::ecef_O_(from, context);
+        // DMat4::from_mat3_translation(R, O);
+        DMat4::from_cols(
+            R.x_axis.extend(0.0),
+            R.y_axis.extend(0.0),
+            R.z_axis.extend(0.0),
+            O.extend(1.0),
+        )
+    }
+
     /// Provides the matrix ${ecef}_R_{self}$.
+    ///
+    /// Given from this [reference.](https://gssc.esa.int/navipedia/index.php/Transformations_between_ECEF_and_ENU_coordinates)
     pub fn ecef_R_(from: &Self, origin: &GeoOrigin) -> DMat3 {
         use std::f64::consts::FRAC_PI_2;
         if *from == GeoFrame::ECEF {
             return DMat3::IDENTITY;
         }
-        let ecef_R_enu = DMat3::from_rotation_z(-(FRAC_PI_2 + origin.longitude))
-            * DMat3::from_rotation_x(-(FRAC_PI_2 - origin.latitude));
+
+        // The reference uses this formula.
+        //
+        // $ \begin{bmatrix} x \\ y \\ z \end{bmatrix} = R_3[-(\pi/2 + \lambda)]~R_1[-(\pi/2 - \varphi)]\begin{bmatrix} E \\ N \\ U \end{bmatrix}
+        //
+        // Implementing on inspection results in this code:
+        // 
+        // let ecef_R_enu = DMat3::from_rotation_z(-(FRAC_PI_2 + origin.longitude))
+        //      * DMat3::from_rotation_x(-(FRAC_PI_2 - origin.latitude));
+        //
+        // However, the matrix implementions differ. Essentially the signs are
+        // flipped in the rotation matrices.
+        // 
+        // `DMat3::from_rotation_x(-\theta) = R_1[\theta]`
+        let ecef_R_enu = DMat3::from_rotation_z(FRAC_PI_2 + origin.longitude)
+             * DMat3::from_rotation_x(FRAC_PI_2 - origin.latitude);
         match from {
             GeoFrame::ECEF => DMat3::IDENTITY,
             GeoFrame::ENU => ecef_R_enu,
@@ -393,7 +451,8 @@ pub fn integrate_geo_motion(
 ) {
     let dt = time.delta_secs_f64();
     for (mut geo_pos, geo_vel) in &mut q {
-        let v = geo_pos.0.convert_to(geo_vel.1, geo_vel.0, &ctx);
+        let R = geo_pos.0._R_(&geo_vel.0, &ctx);
+        let v = R * geo_vel.1;
         geo_pos.1 += v * dt;
     }
 }
@@ -521,6 +580,110 @@ mod tests {
         let v_ned = DVec3::new(1.0, 2.0, 3.0);
         let v_enu = GeoFrame::enu_R_ned() * v_ned;
         assert_approx_eq!(v_enu, DVec3::new(2.0, 1.0, -3.0));
+    }
+
+    #[test]
+    fn bevy_r_ecef_plane_and_sphere_match() {
+        let origin = GeoOrigin::new_from_degrees(0.0, 0.0, 0.0)
+                .with_ellipsoid(Ellipsoid::Sphere { radius: 1.0 });
+        let ctx_plane: GeoContext = origin.into();
+        let ctx_sphere = ctx_plane.clone().with_present(Present::Sphere);
+
+        let bevy_R_ecef_s = GeoFrame::bevy_R_(&GeoFrame::ECEF, &ctx_sphere);
+
+        let ecef_R_enu_s = GeoFrame::ecef_R_(&GeoFrame::ENU, &ctx_sphere.origin);
+        let ecef_M_enu_s = GeoFrame::ecef_M_(&GeoFrame::ENU, &ctx_sphere);
+        let bevy_R_enu_s = GeoFrame::bevy_R_(&GeoFrame::ENU, &ctx_sphere);
+
+        assert_approx_eq!(
+            bevy_R_ecef_s * DVec3::X,
+            DVec3::X,
+            1e-9,
+            "bevy_R_ecef x-axis"
+        );
+        assert_approx_eq!(
+            bevy_R_ecef_s * DVec3::Y,
+            DVec3::NEG_Z,
+            1e-9,
+            "bevy_R_ecef y-axis"
+        );
+        assert_approx_eq!(
+            bevy_R_ecef_s * DVec3::Z,
+            DVec3::Y,
+            1e-9,
+            "bevy_R_ecef z-axis"
+        );
+
+        // assert_approx_eq!(
+        //     ecef_R_enu_s * DVec3::X,
+        //     DVec3::NEG_Y,
+        //     1e-9,
+        //     "ecef_R_enu x-axis"
+        // );
+
+        assert_approx_eq!(
+            ecef_R_enu_s * DVec3::Y,
+            DVec3::Z,
+            1e-9,
+            "ecef_R_enu y-axis"
+        );
+
+        assert_approx_eq!(
+            ecef_M_enu_s.transform_point3(DVec3::Y),
+            DVec3::new(1.0, 0.0, 1.0),
+            1e-9,
+            "convert_to ecef_M_enu z-axis"
+        );
+        assert_approx_eq!(
+            GeoFrame::ECEF.convert_to(DVec3::Y, GeoFrame::ENU, &ctx_sphere),
+            DVec3::new(1.0, 0.0, 1.0),
+            1e-9,
+            "convert_to ecef_R_enu y-axis"
+        );
+
+        assert_approx_eq!(
+            ecef_M_enu_s.transform_point3(DVec3::Z),
+            2.0 * DVec3::X,
+            1e-9,
+            "convert_to ecef_M_enu z-axis"
+        );
+        assert_approx_eq!(
+            GeoFrame::ECEF.convert_to(DVec3::Z, GeoFrame::ENU, &ctx_sphere),
+            2.0 * DVec3::X,
+            1e-9,
+            "convert_to ecef_R_enu z-axis"
+        );
+        assert_approx_eq!(
+            ecef_R_enu_s * DVec3::Y,
+            DVec3::Z,
+            1e-9,
+            "ecef_R_enu y-axis"
+        );
+        assert_approx_eq!(
+            ecef_R_enu_s * DVec3::Z,
+            DVec3::X,
+            1e-9,
+            "ecef_R_enu z-axis"
+        );
+
+        assert_approx_eq!(
+            bevy_R_enu_s * DVec3::X,
+            DVec3::NEG_Z,
+            1e-9,
+            "bevy_R_enu x-axis"
+        );
+        assert_approx_eq!(
+            bevy_R_enu_s * DVec3::Y,
+            DVec3::Y,
+            1e-9,
+            "bevy_R_enu y-axis"
+        );
+        assert_approx_eq!(
+            bevy_R_enu_s * DVec3::Z,
+            DVec3::X,
+            1e-9,
+            "bevy_R_enu z-axis"
+        );
     }
 
     #[test]
@@ -658,12 +821,12 @@ mod tests {
             (
                 GeoFrame::ENU,
                 Vec3::new(1.0, 3.0, -2.0),
-                Vec3::new(4.0, -2.0, 1.0),
+                Vec3::new(4.0, 2.0, -1.0),
             ),
             (
                 GeoFrame::NED,
                 Vec3::new(2.0, -3.0, -1.0),
-                Vec3::new(-2.0, -1.0, 2.0),
+                Vec3::new(-2.0, 1.0, -2.0),
             ),
             (
                 GeoFrame::ECEF,
@@ -762,9 +925,9 @@ mod tests {
                     expected_plane
                 } else {
                     Vec3::new(
-                        expected_plane.z,
+                        -expected_plane.z,
                         expected_plane.y + radius as f32,
-                        -expected_plane.x,
+                        expected_plane.x,
                     )
                 },
                 eps,
@@ -809,9 +972,9 @@ mod tests {
                     expected_plane
                 } else {
                     Vec3::new(
-                        expected_plane.z,
+                        -expected_plane.z,
                         -expected_plane.y - radius as f32,
-                        expected_plane.x,
+                        -expected_plane.x,
                     )
                 },
                 eps,
