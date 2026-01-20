@@ -139,10 +139,6 @@ impl GeoContext {
         self
     }
 
-    fn stable_lat(&self) -> f64 {
-        self.origin.latitude
-    }
-
     /// Rotation matrix Rz(angle) about +Z axis:
     /// x' = cosθ x - sinθ y
     /// y' = sinθ x + cosθ y
@@ -193,6 +189,74 @@ impl GeoContext {
 }
 
 impl GeoFrame {
+
+    /// Provides the matrix ${bevy}_R_{self}$.
+    pub fn bevy_basis(&self, present: &Present) -> DMat3 {
+        match present {
+            Present::Plane => match self {
+                GeoFrame::EUS => DMat3::IDENTITY,
+                GeoFrame::ENU => {
+                    // Columns are frame basis vectors expressed in EUS.
+                    // ENU: e_hat = +X, n_hat = -Z, u_hat = +Y
+                    DMat3::from_cols(DVec3::X, DVec3::NEG_Z, DVec3::Y)
+                }
+                GeoFrame::NED => {
+                    // NED: n_hat = -Z, e_hat = +X, d_hat = -Y
+                    DMat3::from_cols(DVec3::NEG_Z, DVec3::X, DVec3::NEG_Y)
+                }
+                // For these, a fully correct basis would require time-dependent
+                // Earth orientation.
+                GeoFrame::ECEF => {
+                    DMat3::from_cols(DVec3::X, DVec3::Z, DVec3::NEG_Y)
+                }
+                GeoFrame::ECI | GeoFrame::GCRF => todo!("{self:?} not ready"),
+            }
+            Present::Sphere => match self {
+                GeoFrame::EUS => DMat3::IDENTITY,
+                GeoFrame::ENU => {
+                    // Columns are frame basis vectors expressed in EUS.
+                    // ENU: e_hat = +X, n_hat = -Z, u_hat = +Y
+                    DMat3::from_cols(DVec3::X, DVec3::NEG_Z, DVec3::Y)
+                }
+                GeoFrame::NED => {
+                    // NED: n_hat = -Z, e_hat = +X, d_hat = -Y
+                    DMat3::from_cols(DVec3::NEG_Z, DVec3::X, DVec3::NEG_Y)
+                }
+                // For these, a fully correct basis would require time-dependent
+                // Earth orientation.
+                GeoFrame::ECEF => {
+                    DMat3::from_cols(DVec3::X, DVec3::Z, DVec3::NEG_Y)
+                }
+                GeoFrame::ECI | GeoFrame::GCRF => todo!("{self:?} not ready"),
+            }
+        }
+    }
+
+    /// Provides the matrix ${ecef}_R_{self}$.
+    pub fn ecef_basis(&self, origin: &GeoOrigin) -> DMat3 {
+        use std::f64::consts::FRAC_PI_2;
+        if *self == GeoFrame::ECEF {
+            return DMat3::IDENTITY;
+        }
+
+        let ecef_R_enu =
+                DMat3::from_rotation_z(-(FRAC_PI_2 + origin.longitude))
+                    * DMat3::from_rotation_x(-(FRAC_PI_2 - origin.latitude));
+        match self {
+            GeoFrame::ECEF => DMat3::IDENTITY,
+            GeoFrame::EUS => todo!(),
+            GeoFrame::ENU => ecef_R_enu,
+            GeoFrame::NED => {
+                // NED: n_hat = -Z, e_hat = +X, d_hat = -Y
+                // let enu_R_ned = DMat3::from_cols(DVec3::NEG_Z, DVec3::X, DVec3::NEG_Y)
+                ecef_R_enu * Self::enu_R_ned()
+            }
+            // For these, a fully correct basis would require time-dependent
+            // Earth orientation.
+            GeoFrame::ECI | GeoFrame::GCRF => todo!("{self:?} not ready"),
+        }
+    }
+
     /// ENU: (E, N, U) -> local EUS: (E, U, -N)
     #[inline]
     fn enu_to_eus(v_enu: DVec3) -> DVec3 {
@@ -209,6 +273,11 @@ impl GeoFrame {
     #[inline]
     fn eus_to_enu(v_eus: DVec3) -> DVec3 {
         DVec3::new(v_eus.x, -v_eus.z, v_eus.y)
+    }
+
+    #[inline]
+    fn enu_R_ned() -> DMat3 {
+        DMat3::from_cols(DVec3::Y, DVec3::X, DVec3::NEG_Z)
     }
 
     /// local EUS: (E, U, S) -> NED: (N, E, D) with N = -S, D = -U
@@ -525,6 +594,7 @@ impl GeoFrame {
         let m = self.basis_to_eus_mat3(ctx);
         Quat::from_mat3(&m)
     }
+
 
     /// Basis transform as Mat3. For now we implement simple cases and treat
     /// ECEF/ECI/GCRF via ENU near-origin.
