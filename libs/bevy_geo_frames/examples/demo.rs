@@ -293,15 +293,14 @@ fn draw_frame_zero_gizmo(
     ctx: Res<GeoContext>,
     q: Query<&GeoPosition, With<FrameDemo>>,
 ) {
-    let Ok(geo_pos) = q.get_single() else {
-        return;
-    };
-    let zero = GeoPosition(geo_pos.0, DVec3::ZERO);
-    let pos = zero.to_bevy(&ctx);
-    gizmos.cuboid(
-        Transform::from_translation(pos.as_vec3()).with_scale(Vec3::splat(0.3)),
-        Color::srgb(1.0, 0.0, 0.0),
-    );
+    for geo_pos in &q {
+        let zero = GeoPosition(geo_pos.0, DVec3::ZERO);
+        let pos = zero.to_bevy(&ctx);
+        gizmos.cuboid(
+            Transform::from_translation(pos.as_vec3()).with_scale(Vec3::splat(0.3)),
+            Color::srgb(1.0, 0.0, 0.0),
+        );
+    }
 }
 
 /// Draw a wireframe sphere with radius equal to the reference radius from `GeoContext`.

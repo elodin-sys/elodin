@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 use bevy::math::{DMat3, DMat4, DVec3};
 use bevy::prelude::*;
 use bevy::transform::TransformSystem;
@@ -440,15 +441,15 @@ pub fn apply_geo_translation(
 }
 
 /// System: convert `GeoRotation` into `Transform.rotation`.
-pub fn apply_geo_rotation(ctx: Res<GeoContext>, mut q: Query<(&GeoRotation, &mut Transform)>) {
-    for (geo_rot, mut transform) in &mut q {
-        let frame = geo_rot.0;
-        let local_rot = geo_rot.1;
+// pub fn apply_geo_rotation(ctx: Res<GeoContext>, mut q: Query<(&GeoRotation, &mut Transform)>) {
+//     for (geo_rot, mut transform) in &mut q {
+//         let frame = geo_rot.0;
+//         let local_rot = geo_rot.1;
 
-        let frame_to_eus = todo!(); // frame.basis_to_eus_quat(&ctx);
-                                    // transform.rotation = frame_to_eus * local_rot;
-    }
-}
+//         let frame_to_eus = todo!(); // frame.basis_to_eus_quat(&ctx);
+//                                     // transform.rotation = frame_to_eus * local_rot;
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
