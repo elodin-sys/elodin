@@ -170,17 +170,11 @@ fn frame_switch_input(
     let mut target_frame: Option<GeoFrame> = None;
 
     if keys.just_pressed(KeyCode::Digit1) {
-        target_frame = Some(GeoFrame::EUS);
-    } else if keys.just_pressed(KeyCode::Digit2) {
         target_frame = Some(GeoFrame::ENU);
-    } else if keys.just_pressed(KeyCode::Digit3) {
+    } else if keys.just_pressed(KeyCode::Digit2) {
         target_frame = Some(GeoFrame::NED);
-    } else if keys.just_pressed(KeyCode::Digit4) {
+    } else if keys.just_pressed(KeyCode::Digit3) {
         target_frame = Some(GeoFrame::ECEF);
-    } else if keys.just_pressed(KeyCode::Digit5) {
-        target_frame = Some(GeoFrame::ECI);
-    } else if keys.just_pressed(KeyCode::Digit6) {
-        target_frame = Some(GeoFrame::GCRF);
     }
 
     if let Some(frame) = target_frame {
@@ -209,15 +203,10 @@ fn transform_frame_at_position(
     if keys.just_pressed(KeyCode::KeyQ) {
         target_frame = Some(GeoFrame::ENU);
     } else if keys.just_pressed(KeyCode::KeyW) {
-        target_frame = Some(GeoFrame::EUS);
-    } else if keys.just_pressed(KeyCode::KeyE) {
         target_frame = Some(GeoFrame::NED);
-    } else if keys.just_pressed(KeyCode::KeyR) {
+    } else if keys.just_pressed(KeyCode::KeyE) {
         target_frame = Some(GeoFrame::ECEF);
-    } else if keys.just_pressed(KeyCode::KeyT) {
-        target_frame = Some(GeoFrame::ECI);
-    } else if keys.just_pressed(KeyCode::KeyY) {
-        target_frame = Some(GeoFrame::GCRF);
+    } else if keys.just_pressed(KeyCode::KeyR) {
     }
 
     if let Some(frame) = target_frame {
@@ -269,7 +258,7 @@ fn draw_frame_axes(
         let frame = geo_trans.0;
         
         // Get the basis matrix - columns are the frame's basis vectors in EUS world space
-        let basis_mat = frame.basis_to_eus_mat3(&ctx);
+        let basis_mat = bevy_R_(&frame,&ctx) *, frame.basis_to_eus_mat3(&ctx);
         
         // Extract the three basis vectors (columns of the matrix)
         // These represent the first, second, and third component directions
