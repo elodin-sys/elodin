@@ -575,26 +575,22 @@ impl LoadSchematicParams<'_, '_> {
                 let mut parent_for_children = parent_id;
                 let mut reuse_parent = false;
 
-                if matches!(context, PanelContext::Secondary(_)) {
-                    if let Some(parent_id) = parent_id {
-                        let is_root = tile_state.tree.root() == Some(parent_id);
-                        if is_root {
-                            if let Some(Tile::Container(Container::Tabs(root_tabs))) =
-                                tile_state.tree.tiles.get(parent_id)
-                            {
-                                let has_non_sidebar = root_tabs.children.iter().any(|child_id| {
-                                    !crate::ui::tiles::sidebar::tile_is_sidebar(
-                                        &tile_state.tree.tiles,
-                                        *child_id,
-                                    )
-                                });
-                                if !has_non_sidebar {
-                                    reuse_parent = true;
-                                    tile_id = Some(parent_id);
-                                    parent_for_children = Some(parent_id);
-                                }
-                            }
-                        }
+                if matches!(context, PanelContext::Secondary(_))
+                    && let Some(parent_id) = parent_id
+                    && tile_state.tree.root() == Some(parent_id)
+                    && let Some(Tile::Container(Container::Tabs(root_tabs))) =
+                        tile_state.tree.tiles.get(parent_id)
+                {
+                    let has_non_sidebar = root_tabs.children.iter().any(|child_id| {
+                        !crate::ui::tiles::sidebar::tile_is_sidebar(
+                            &tile_state.tree.tiles,
+                            *child_id,
+                        )
+                    });
+                    if !has_non_sidebar {
+                        reuse_parent = true;
+                        tile_id = Some(parent_id);
+                        parent_for_children = Some(parent_id);
                     }
                 }
 
