@@ -193,6 +193,18 @@ impl GeoFrame {
         )
     }
 
+    pub fn _M_(&self, from: &GeoFrame, context: &GeoContext) -> DMat4 {
+        let R = self._R_(from, context);
+        let O = self._O_(from, context);
+        // DMat4::from_mat3_translation(R, O);
+        DMat4::from_cols(
+            R.x_axis.extend(0.0),
+            R.y_axis.extend(0.0),
+            R.z_axis.extend(0.0),
+            O.extend(1.0),
+        )
+    }
+
     /// Provides the origin vector ${bevy}_O_{from}$ of the coordinate frame.
     pub fn bevy_O_(from: &Self, context: &GeoContext) -> DVec3 {
         match context.present {
@@ -206,6 +218,30 @@ impl GeoFrame {
                     // For these, a fully correct basis would require time-dependent
                     // Earth orientation.
                     GeoFrame::ECEF => DVec3::ZERO,
+                }
+            }
+        }
+    }
+
+    /// Provides the origin vector ${self}_O_{from}$ of the coordinate frame.
+    pub fn _O_(&self, from: &Self, context: &GeoContext) -> DVec3 {
+        match context.present {
+            Present::Plane => DVec3::ZERO,
+            Present::Sphere => {
+                match (from, *self) {
+                    (GeoFrame::ECEF, GeoFrame::ENU) => {
+                        -approx_radius(&context.origin.ellipsoid) * DVec3::Z
+                    }
+                    (GeoFrame::ECEF, GeoFrame::NED) => {
+                        approx_radius(&context.origin.ellipsoid) * DVec3::Z
+                    }
+                    (GeoFrame::ENU | GeoFrame::NED, GeoFrame::ECEF) => {
+                        let ecef_R_enu = Self::ecef_R_(&GeoFrame::ENU, &context.origin);
+                        approx_radius(&context.origin.ellipsoid) * ecef_R_enu.z_axis
+                    }
+                    // For these, a fully correct basis would require time-dependent
+                    // Earth orientation.
+                    _ => DVec3::ZERO,
                 }
             }
         }
