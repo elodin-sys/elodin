@@ -190,10 +190,10 @@ impl GeoContext {
 
 impl GeoFrame {
 
-    /// Provides the matrix ${bevy}_R_{self}$.
-    pub fn bevy_basis(&self, present: &Present) -> DMat3 {
+    /// Provides the matrix ${bevy}_R_{from}$.
+    pub fn bevy_R_(from: &Self, present: &Present) -> DMat3 {
         match present {
-            Present::Plane => match self {
+            Present::Plane => match from {
                 GeoFrame::EUS => DMat3::IDENTITY,
                 GeoFrame::ENU => {
                     // Columns are frame basis vectors expressed in EUS.
@@ -209,9 +209,9 @@ impl GeoFrame {
                 GeoFrame::ECEF => {
                     DMat3::from_cols(DVec3::X, DVec3::Z, DVec3::NEG_Y)
                 }
-                GeoFrame::ECI | GeoFrame::GCRF => todo!("{self:?} not ready"),
+                GeoFrame::ECI | GeoFrame::GCRF => todo!("{from:?} not ready"),
             }
-            Present::Sphere => match self {
+            Present::Sphere => match from {
                 GeoFrame::EUS => DMat3::IDENTITY,
                 GeoFrame::ENU => {
                     // Columns are frame basis vectors expressed in EUS.
@@ -227,33 +227,28 @@ impl GeoFrame {
                 GeoFrame::ECEF => {
                     DMat3::from_cols(DVec3::X, DVec3::Z, DVec3::NEG_Y)
                 }
-                GeoFrame::ECI | GeoFrame::GCRF => todo!("{self:?} not ready"),
+                GeoFrame::ECI | GeoFrame::GCRF => todo!("{from:?} not ready"),
             }
         }
     }
 
     /// Provides the matrix ${ecef}_R_{self}$.
-    pub fn ecef_basis(&self, origin: &GeoOrigin) -> DMat3 {
+    pub fn ecef_R_(from: &Self, origin: &GeoOrigin) -> DMat3 {
         use std::f64::consts::FRAC_PI_2;
-        if *self == GeoFrame::ECEF {
+        if *from == GeoFrame::ECEF {
             return DMat3::IDENTITY;
         }
-
         let ecef_R_enu =
                 DMat3::from_rotation_z(-(FRAC_PI_2 + origin.longitude))
                     * DMat3::from_rotation_x(-(FRAC_PI_2 - origin.latitude));
-        match self {
+        match from {
             GeoFrame::ECEF => DMat3::IDENTITY,
-            GeoFrame::EUS => todo!(),
             GeoFrame::ENU => ecef_R_enu,
-            GeoFrame::NED => {
-                // NED: n_hat = -Z, e_hat = +X, d_hat = -Y
-                // let enu_R_ned = DMat3::from_cols(DVec3::NEG_Z, DVec3::X, DVec3::NEG_Y)
-                ecef_R_enu * Self::enu_R_ned()
-            }
+            GeoFrame::NED => ecef_R_enu * Self::enu_R_ned(),
+            GeoFrame::EUS => todo!(),
             // For these, a fully correct basis would require time-dependent
             // Earth orientation.
-            GeoFrame::ECI | GeoFrame::GCRF => todo!("{self:?} not ready"),
+            GeoFrame::ECI | GeoFrame::GCRF => todo!("{from:?} not ready"),
         }
     }
 
@@ -831,12 +826,19 @@ mod tests {
     }
 
     #[test]
+    fn enu_r_ned_mul_vector_123() {
+        let v_ned = DVec3::new(1.0, 2.0, 3.0);
+        let v_enu = GeoFrame::enu_R_ned() * v_ned;
+        assert_approx_eq!(v_enu, DVec3::new(2.0, 1.0, -3.0));
+    }
+
+    #[test]
     fn gravity_in_enu_and_eus() {
         let ctx = dummy_ctx();
         let pos = Vec3::ZERO;
 
-        let g_enu = GeoFrame::ENU.gravity_accel(pos, ctx.origin.shape.approx_radius());
-        let g_eus = GeoFrame::EUS.gravity_accel(pos, ctx.origin.shape.approx_radius());
+        let g_enu = GeoFrame::ENU.gravity_accel(pos, approx_radius(&ctx.origin.ellipsoid));
+        let g_eus = GeoFrame::EUS.gravity_accel(pos, approx_radius(&ctx.origin.ellipsoid));
 
         assert!((g_enu - Vec3::new(0.0, 0.0, -9.80665)).length() < 1e-5);
         assert!((g_eus - Vec3::new(0.0, -9.80665, 0.0)).length() < 1e-5);
@@ -974,7 +976,9 @@ mod tests {
         let eps = 1e-5;
 
         for (label, origin, expectations) in origins {
-            let ctx: GeoContext = origin.with_shape(Shape::Sphere { radius: 1.0 }).into();
+            let ctx: GeoContext = origin
+                .with_ellipsoid(Ellipsoid::Sphere { radius: 1.0 })
+                .into();
             for (frame, expected_plane, expected_sphere) in expectations {
                 // let zero = GeoPosition(frame, DVec3::ZERO);
                 let zero = GeoPosition(frame, -DVec3::ZERO);
@@ -1008,7 +1012,7 @@ mod tests {
     fn present_plane_and_sphere_at_equator_origin() {
         let radius = 1.0;
         let ctx: GeoContext = GeoOrigin::new_from_degrees(0.0, 0.0, 0.0)
-            .with_shape(Shape::Sphere { radius })
+            .with_ellipsoid(Ellipsoid::Sphere { radius })
             .into();
         let v = DVec3::new(1.0, 2.0, 3.0);
         let eps = 1e-4;
@@ -1070,7 +1074,7 @@ mod tests {
     fn present_plane_and_sphere_at_north_pole() {
         let radius = 1.0;
         let ctx: GeoContext = GeoOrigin::new_from_degrees(90.0, 0.0, 0.0)
-            .with_shape(Shape::Sphere { radius })
+            .with_ellipsoid(Ellipsoid::Sphere { radius })
             .into();
         let v = DVec3::new(1.0, 2.0, 3.0);
         let eps = 1e-4;
@@ -1126,7 +1130,7 @@ mod tests {
     fn present_plane_and_sphere_at_north_pole_180() {
         let radius = 1.0;
         let ctx: GeoContext = GeoOrigin::new_from_degrees(90.0, 180.0, 0.0)
-            .with_shape(Shape::Sphere { radius })
+            .with_ellipsoid(Ellipsoid::Sphere { radius })
             .into();
         let v = DVec3::new(1.0, 2.0, 3.0);
         let eps = 1e-4;
@@ -1181,7 +1185,7 @@ mod tests {
     fn present_plane_and_sphere_at_south_pole() {
         let radius = 1.0;
         let ctx: GeoContext = GeoOrigin::new_from_degrees(-90.0, 0.0, 0.0)
-            .with_shape(Shape::Sphere { radius })
+            .with_ellipsoid(Ellipsoid::Sphere { radius })
             .into();
         let v = DVec3::new(1.0, 2.0, 3.0);
         let eps = 1e-4;
