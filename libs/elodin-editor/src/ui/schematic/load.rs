@@ -575,8 +575,7 @@ impl LoadSchematicParams<'_, '_> {
                 let mut parent_for_children = parent_id;
                 let mut reuse_parent = false;
 
-                if matches!(context, PanelContext::Secondary(_))
-                    && let Some(parent_id) = parent_id
+                if let Some(parent_id) = parent_id
                     && tile_state.tree.root() == Some(parent_id)
                     && let Some(Tile::Container(Container::Tabs(root_tabs))) =
                         tile_state.tree.tiles.get(parent_id)
