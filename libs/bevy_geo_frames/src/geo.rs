@@ -348,67 +348,8 @@ impl GeoFrame {
     }
 
     #[inline]
-    fn enu_to_ned(v_enu: DVec3) -> DVec3 {
-        DVec3::new(v_enu.y, v_enu.x, -v_enu.z)
-    }
-
-    #[inline]
-    fn ned_to_enu(v_ned: DVec3) -> DVec3 {
-        DVec3::new(v_ned.y, v_ned.x, -v_ned.z)
-    }
-
-    /// Convert a DVec3 (position/velocity) from `from_frame` into `self`.
-    pub fn convert_to(&self, v: DVec3, from_frame: GeoFrame, ctx: &GeoContext) -> DVec3 {
-        use GeoFrame::*;
-        match (from_frame, *self) {
-            (x, y) if x == y => v,
-            (ENU, ECEF) => map_3d::enu2ecef(
-                v.x,
-                v.y,
-                v.z,
-                ctx.origin.latitude,
-                ctx.origin.longitude,
-                ctx.origin.altitude,
-                &ctx.origin.ellipsoid,
-            )
-            .into(),
-            (NED, ECEF) => map_3d::ned2ecef(
-                v.x,
-                v.y,
-                v.z,
-                ctx.origin.latitude,
-                ctx.origin.longitude,
-                ctx.origin.altitude,
-                &ctx.origin.ellipsoid,
-            )
-            .into(),
-            (ECEF, NED) => {
-                let enu = map_3d::ecef2enu(
-                    v.x,
-                    v.y,
-                    v.z,
-                    ctx.origin.latitude,
-                    ctx.origin.longitude,
-                    ctx.origin.altitude,
-                    &ctx.origin.ellipsoid,
-                )
-                .into();
-                Self::enu_to_ned(enu)
-            }
-            (ECEF, ENU) => map_3d::ecef2enu(
-                v.x,
-                v.y,
-                v.z,
-                ctx.origin.latitude,
-                ctx.origin.longitude,
-                ctx.origin.altitude,
-                &ctx.origin.ellipsoid,
-            )
-            .into(),
-            (ENU, NED) => Self::enu_to_ned(v),
-            (NED, ENU) => Self::ned_to_enu(v),
-            (x, y) => unreachable!("{x:?} -> {y:?}"),
-        }
+    fn ned_R_enu() -> DMat3 {
+        DMat3::from_cols(DVec3::Y, DVec3::X, DVec3::NEG_Z)
     }
 }
 
@@ -553,6 +494,77 @@ mod tests {
     fn dummy_ctx() -> GeoContext {
         GeoContext::default()
     }
+
+
+    #[inline]
+    fn enu_to_ned(v_enu: DVec3) -> DVec3 {
+        DVec3::new(v_enu.y, v_enu.x, -v_enu.z)
+    }
+
+    #[inline]
+    fn ned_to_enu(v_ned: DVec3) -> DVec3 {
+        DVec3::new(v_ned.y, v_ned.x, -v_ned.z)
+    }
+
+
+    fn convert_pos(to: GeoFrame, from: GeoFrame, v: DVec3, ctx: &GeoContext) -> DVec3 {
+        to._M_(&from, ctx).transform_point3(v)
+    }
+
+    /// Convert a DVec3 (position/velocity) from `from_frame` into `self`.
+    fn convert_pos_map_3d(to: GeoFrame, from_frame: GeoFrame, v: DVec3, ctx: &GeoContext) -> DVec3 {
+        use GeoFrame::*;
+        match (from_frame, to) {
+            (x, y) if x == y => v,
+            (ENU, ECEF) => map_3d::enu2ecef(
+                v.x,
+                v.y,
+                v.z,
+                ctx.origin.latitude,
+                ctx.origin.longitude,
+                ctx.origin.altitude,
+                &ctx.origin.ellipsoid,
+            )
+            .into(),
+            (NED, ECEF) => map_3d::ned2ecef(
+                v.x,
+                v.y,
+                v.z,
+                ctx.origin.latitude,
+                ctx.origin.longitude,
+                ctx.origin.altitude,
+                &ctx.origin.ellipsoid,
+            )
+            .into(),
+            (ECEF, NED) => {
+                let enu = map_3d::ecef2enu(
+                    v.x,
+                    v.y,
+                    v.z,
+                    ctx.origin.latitude,
+                    ctx.origin.longitude,
+                    ctx.origin.altitude,
+                    &ctx.origin.ellipsoid,
+                )
+                .into();
+                enu_to_ned(enu)
+            }
+            (ECEF, ENU) => map_3d::ecef2enu(
+                v.x,
+                v.y,
+                v.z,
+                ctx.origin.latitude,
+                ctx.origin.longitude,
+                ctx.origin.altitude,
+                &ctx.origin.ellipsoid,
+            )
+            .into(),
+            (ENU, NED) => enu_to_ned(v),
+            (NED, ENU) => ned_to_enu(v),
+            (x, y) => unreachable!("{x:?} -> {y:?}"),
+        }
+    }
+
     macro_rules! assert_approx_eq {
         ($x: expr, $y: expr) => {
             assert_approx_eq!($x, $y, 1e-5);
@@ -621,14 +633,13 @@ mod tests {
     #[test]
     fn bevy_r_ecef_plane_and_sphere_match() {
         let origin = GeoOrigin::new_from_degrees(0.0, 0.0, 0.0)
-                .with_ellipsoid(Ellipsoid::Sphere { radius: 1.0 });
+            .with_ellipsoid(Ellipsoid::Sphere { radius: 1.0 });
         let ctx_plane: GeoContext = origin.into();
         let ctx_sphere = ctx_plane.clone().with_present(Present::Sphere);
 
         let bevy_R_ecef_s = GeoFrame::bevy_R_(&GeoFrame::ECEF, &ctx_sphere);
 
         let ecef_R_enu_s = GeoFrame::ecef_R_(&GeoFrame::ENU, &ctx_sphere.origin);
-        let ecef_M_enu_s = GeoFrame::ecef_M_(&GeoFrame::ENU, &ctx_sphere);
         let bevy_R_enu_s = GeoFrame::bevy_R_(&GeoFrame::ENU, &ctx_sphere);
 
         assert_approx_eq!(
@@ -650,12 +661,12 @@ mod tests {
             "bevy_R_ecef z-axis"
         );
 
-        // assert_approx_eq!(
-        //     ecef_R_enu_s * DVec3::X,
-        //     DVec3::NEG_Y,
-        //     1e-9,
-        //     "ecef_R_enu x-axis"
-        // );
+        assert_approx_eq!(
+            ecef_R_enu_s * DVec3::X,
+            DVec3::Y,
+            1e-9,
+            "ecef_R_enu x-axis"
+        );
 
         assert_approx_eq!(
             ecef_R_enu_s * DVec3::Y,
@@ -664,30 +675,26 @@ mod tests {
             "ecef_R_enu y-axis"
         );
 
+        // The next two assertions show that we do not entirely comport with
+        // what map_3d does.
         assert_approx_eq!(
-            ecef_M_enu_s.transform_point3(DVec3::Y),
-            DVec3::new(1.0, 0.0, 1.0),
+            convert_pos(GeoFrame::ECEF, GeoFrame::ENU, DVec3::Y, &ctx_sphere),
+            2.0 * DVec3::X,
             1e-9,
-            "convert_to ecef_M_enu z-axis"
-        );
-        assert_approx_eq!(
-            GeoFrame::ECEF.convert_to(DVec3::Y, GeoFrame::ENU, &ctx_sphere),
-            DVec3::new(1.0, 0.0, 1.0),
-            1e-9,
-            "convert_to ecef_R_enu y-axis"
+            "convert_pos ecef _M_ y-axis"
         );
 
         assert_approx_eq!(
-            ecef_M_enu_s.transform_point3(DVec3::Z),
-            2.0 * DVec3::X,
+            convert_pos_map_3d(GeoFrame::ECEF, GeoFrame::ENU, DVec3::Z, &ctx_sphere),
+            DVec3::new(2.0, 0.0, 0.0),
             1e-9,
-            "convert_to ecef_M_enu z-axis"
+            "convert_pos ecef _M_ z-axis"
         );
         assert_approx_eq!(
-            GeoFrame::ECEF.convert_to(DVec3::Z, GeoFrame::ENU, &ctx_sphere),
-            2.0 * DVec3::X,
+            convert_pos(GeoFrame::ECEF, GeoFrame::ENU, DVec3::Z, &ctx_sphere),
+            DVec3::new(1.0, 1.0, 0.0),
             1e-9,
-            "convert_to ecef_R_enu z-axis"
+            "convert_pos ecef _M_ z-axis"
         );
         assert_approx_eq!(
             ecef_R_enu_s * DVec3::Y,
