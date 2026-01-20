@@ -1,7 +1,7 @@
 use bevy::math::{DMat3, DMat4, DVec3};
 use bevy::prelude::*;
 use bevy::transform::TransformSystem;
-use map_3d::{ecef2enu, enu2ecef, Ellipsoid};
+use map_3d::{ecef2enu, Ellipsoid};
 /// Earth sidereal spin
 pub const EARTH_SIDEREAL_SPIN: f64 = 7.292_115_0e-5;
 
@@ -28,7 +28,6 @@ pub enum Present {
     /// the coordinates from there.
     Sphere,
 }
-
 
 /// Coordinate frames used in the sim.
 ///
@@ -73,11 +72,7 @@ pub struct GeoOrigin {
 impl GeoOrigin {
     /// Simple spherical Earth model (good enough for games).
     /// Uses default Earth radius.
-    pub fn new_from_degrees(
-        latitude_deg: f64,
-        longitude_deg: f64,
-        altitude: f64,
-    ) -> Self {
+    pub fn new_from_degrees(latitude_deg: f64, longitude_deg: f64, altitude: f64) -> Self {
         let latitude = latitude_deg.to_radians();
         let longitude = longitude_deg.to_radians();
         Self {
@@ -92,7 +87,6 @@ impl GeoOrigin {
         self.ellipsoid = shape;
         self
     }
-
 }
 
 /// Global geospatial context:
@@ -119,7 +113,7 @@ impl Default for GeoContext {
             theta0_rad: 0.0,
             earth_rot_rate_rad_per_s: EARTH_SIDEREAL_SPIN,
             time: 0.0,
-            present: Present::default()
+            present: Present::default(),
         }
     }
 }
@@ -143,7 +137,6 @@ impl GeoContext {
         self
     }
 
-
     /// Rotation matrix Rz(angle) about +Z axis:
     /// x' = cosθ x - sinθ y
     /// y' = sinθ x + cosθ y
@@ -151,8 +144,8 @@ impl GeoContext {
     pub(crate) fn rot_z(angle: f64) -> DMat3 {
         let (s, c) = angle.sin_cos();
         DMat3::from_cols(
-            DVec3::new(c, s, 0.0),   // image of x-axis
-            DVec3::new(-s, c, 0.0),  // image of y-axis
+            DVec3::new(c, s, 0.0),  // image of x-axis
+            DVec3::new(-s, c, 0.0), // image of y-axis
             DVec3::new(0.0, 0.0, 1.0),
         )
     }
@@ -186,16 +179,17 @@ impl GeoContext {
 }
 
 impl GeoFrame {
-
     /// Provides the transformation matrix ${bevy}_M_{from}$ of the coordinate frame.
     pub fn bevy_M_(from: &Self, context: &GeoContext) -> DMat4 {
         let R = Self::bevy_R_(from, context);
         let O = Self::bevy_O_(from, context);
         // DMat4::from_mat3_translation(R, O);
-        DMat4::from_cols(R.x_axis.extend(0.0),
-                         R.y_axis.extend(0.0),
-                         R.z_axis.extend(0.0),
-                         O.extend(1.0))
+        DMat4::from_cols(
+            R.x_axis.extend(0.0),
+            R.y_axis.extend(0.0),
+            R.z_axis.extend(0.0),
+            O.extend(1.0),
+        )
     }
 
     /// Provides the origin vector ${bevy}_O_{from}$ of the coordinate frame.
@@ -210,9 +204,7 @@ impl GeoFrame {
                     }
                     // For these, a fully correct basis would require time-dependent
                     // Earth orientation.
-                    GeoFrame::ECEF => {
-                        DVec3::ZERO
-                    }
+                    GeoFrame::ECEF => DVec3::ZERO,
                 }
             }
         }
@@ -234,13 +226,9 @@ impl GeoFrame {
                 }
                 // For these, a fully correct basis would require time-dependent
                 // Earth orientation.
-                GeoFrame::ECEF => {
-                    bevy_R_ecef
-                }
-            }
-            Present::Sphere => {
-                bevy_R_ecef * Self::ecef_R_(from, &context.origin)
-            }
+                GeoFrame::ECEF => bevy_R_ecef,
+            },
+            Present::Sphere => bevy_R_ecef * Self::ecef_R_(from, &context.origin),
         }
     }
 
@@ -250,9 +238,8 @@ impl GeoFrame {
         if *from == GeoFrame::ECEF {
             return DMat3::IDENTITY;
         }
-        let ecef_R_enu =
-                DMat3::from_rotation_z(-(FRAC_PI_2 + origin.longitude))
-                    * DMat3::from_rotation_x(-(FRAC_PI_2 - origin.latitude));
+        let ecef_R_enu = DMat3::from_rotation_z(-(FRAC_PI_2 + origin.longitude))
+            * DMat3::from_rotation_x(-(FRAC_PI_2 - origin.latitude));
         match from {
             GeoFrame::ECEF => DMat3::IDENTITY,
             GeoFrame::ENU => ecef_R_enu,
@@ -265,59 +252,69 @@ impl GeoFrame {
         DMat3::from_cols(DVec3::Y, DVec3::X, DVec3::NEG_Z)
     }
 
+    #[inline]
+    fn enu_to_ned(v_enu: DVec3) -> DVec3 {
+        DVec3::new(v_enu.y, v_enu.x, -v_enu.z)
+    }
+
+    #[inline]
+    fn ned_to_enu(v_ned: DVec3) -> DVec3 {
+        DVec3::new(v_ned.y, v_ned.x, -v_ned.z)
+    }
+
     /// Convert a DVec3 (position/velocity) from `from_frame` into `self`.
     pub fn convert_to(&self, v: DVec3, from_frame: GeoFrame, ctx: &GeoContext) -> DVec3 {
-        if from_frame == *self {
-            return v;
-        }
         use GeoFrame::*;
         match (from_frame, *self) {
             (x, y) if x == y => v,
             (ENU, ECEF) => map_3d::enu2ecef(
-                    v.x,
-                    v.y,
-                    v.z,
-                    ctx.origin.latitude,
-                    ctx.origin.longitude,
-                    ctx.origin.altitude,
-                    &ctx.origin.ellipsoid,
-                ).into(),
+                v.x,
+                v.y,
+                v.z,
+                ctx.origin.latitude,
+                ctx.origin.longitude,
+                ctx.origin.altitude,
+                &ctx.origin.ellipsoid,
+            )
+            .into(),
             (NED, ECEF) => map_3d::ned2ecef(
+                v.x,
+                v.y,
+                v.z,
+                ctx.origin.latitude,
+                ctx.origin.longitude,
+                ctx.origin.altitude,
+                &ctx.origin.ellipsoid,
+            )
+            .into(),
+            (ECEF, NED) => {
+                let enu = map_3d::ecef2enu(
                     v.x,
                     v.y,
                     v.z,
-                    ctx.origin.latitude,
-                    ctx.origin.longitude,
-                    ctx.origin.altitude,
-                    &ctx.origin.ellipsoid,
-                ).into(),
-            (ECEF, NED) => {
-                let eus = Self::ned_to_eus(v);
-                let enu = Self::eus_to_enu(eus);
-                map_3d::enu2ecef(
-                    enu.x,
-                    enu.y,
-                    enu.z,
                     ctx.origin.latitude,
                     ctx.origin.longitude,
                     ctx.origin.altitude,
                     &ctx.origin.ellipsoid,
                 )
-                .into()
+                .into();
+                Self::enu_to_ned(enu)
             }
             (ECEF, ENU) => map_3d::ecef2enu(
-                    v.x,
-                    v.y,
-                    v.z,
-                    ctx.origin.latitude,
-                    ctx.origin.longitude,
-                    ctx.origin.altitude,
-                    &ctx.origin.ellipsoid,
-                ).into(),
-            (x, y) => todo!("{x:?} -> {y:?}"),
+                v.x,
+                v.y,
+                v.z,
+                ctx.origin.latitude,
+                ctx.origin.longitude,
+                ctx.origin.altitude,
+                &ctx.origin.ellipsoid,
+            )
+            .into(),
+            (ENU, NED) => Self::enu_to_ned(v),
+            (NED, ENU) => Self::ned_to_enu(v),
+            (x, y) => unreachable!("{x:?} -> {y:?}"),
         }
     }
-
 }
 
 /// Per-entity geo position:
@@ -331,10 +328,15 @@ impl GeoPosition {
         GeoFrame::bevy_M_(&self.0, context).transform_point3(self.1)
     }
 
-    pub fn from_bevy(frame: GeoFrame, v: DVec3) -> Self {
-        GeoPosition(frame, GeoFrame::bevy_M_(&self.0, context).inverse().transform_point3(v))
+    pub fn from_bevy(frame: GeoFrame, v_bevy: impl Into<DVec3>, context: &GeoContext) -> Self {
+        let v = v_bevy.into();
+        GeoPosition(
+            frame,
+            GeoFrame::bevy_M_(&frame, context)
+                .inverse()
+                .transform_point3(v),
+        )
     }
-
 }
 
 /// Per-entity geo velocity:
@@ -373,7 +375,8 @@ impl Plugin for GeoFramePlugin {
             // Then convert to Bevy before transform propagation
             .add_systems(
                 PostUpdate,
-                (apply_geo_translation, //apply_geo_rotation
+                (
+                    apply_geo_translation, //apply_geo_rotation
                 )
                     .chain()
                     .before(TransformSystem::TransformPropagate),
@@ -437,19 +440,15 @@ pub fn apply_geo_translation(
 }
 
 /// System: convert `GeoRotation` into `Transform.rotation`.
-pub fn apply_geo_rotation(
-    ctx: Res<GeoContext>,
-    mut q: Query<(&GeoRotation, &mut Transform)>,
-) {
+pub fn apply_geo_rotation(ctx: Res<GeoContext>, mut q: Query<(&GeoRotation, &mut Transform)>) {
     for (geo_rot, mut transform) in &mut q {
         let frame = geo_rot.0;
         let local_rot = geo_rot.1;
 
         let frame_to_eus = todo!(); // frame.basis_to_eus_quat(&ctx);
-        // transform.rotation = frame_to_eus * local_rot;
+                                    // transform.rotation = frame_to_eus * local_rot;
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -466,15 +465,19 @@ mod tests {
             let a = $x;
             let b = $y;
             let eps = $e;
-            assert!((a - b).length() <= eps,
-                    "got {:?} expected {:?}", a, b);
+            assert!((a - b).length() <= eps, "got {:?} expected {:?}", a, b);
         };
         ($x: expr, $y: expr, $e: expr, $l: expr) => {
             let a = $x;
             let b = $y;
             let eps = $e;
-            assert!((a - b).length() <= eps,
-                    "{}: got {:?} expected {:?}", $l, a, b);
+            assert!(
+                (a - b).length() <= eps,
+                "{}: got {:?} expected {:?}",
+                $l,
+                a,
+                b
+            );
         };
     }
 
@@ -486,13 +489,13 @@ mod tests {
         let north = DVec3::new(0.0, 1.0, 0.0);
         let up = DVec3::new(0.0, 0.0, 1.0);
 
-        let east_eus = GeoFrame::ENU.to_bevy_pos(east, &ctx);
-        let north_eus = GeoFrame::ENU.to_bevy_pos(north, &ctx);
-        let up_eus = GeoFrame::ENU.to_bevy_pos(up, &ctx);
+        let east_eus = GeoPosition(GeoFrame::ENU, east).to_bevy(&ctx).as_vec3();
+        let north_eus = GeoPosition(GeoFrame::ENU, north).to_bevy(&ctx).as_vec3();
+        let up_eus = GeoPosition(GeoFrame::ENU, up).to_bevy(&ctx).as_vec3();
 
-        assert_eq!(east_eus, Vec3::new(1.0, 0.0, 0.0));   // +X
+        assert_eq!(east_eus, Vec3::new(1.0, 0.0, 0.0)); // +X
         assert_eq!(north_eus, Vec3::new(0.0, 0.0, -1.0)); // -Z
-        assert_eq!(up_eus, Vec3::new(0.0, 1.0, 0.0));     // +Y
+        assert_eq!(up_eus, Vec3::new(0.0, 1.0, 0.0)); // +Y
     }
 
     #[test]
@@ -503,13 +506,13 @@ mod tests {
         let east = DVec3::new(0.0, 1.0, 0.0);
         let down = DVec3::new(0.0, 0.0, 1.0);
 
-        let north_eus = GeoFrame::NED.to_bevy_pos(north, &ctx);
-        let east_eus = GeoFrame::NED.to_bevy_pos(east, &ctx);
-        let down_eus = GeoFrame::NED.to_bevy_pos(down, &ctx);
+        let north_eus = GeoPosition(GeoFrame::NED, north).to_bevy(&ctx).as_vec3();
+        let east_eus = GeoPosition(GeoFrame::NED, east).to_bevy(&ctx).as_vec3();
+        let down_eus = GeoPosition(GeoFrame::NED, down).to_bevy(&ctx).as_vec3();
 
         assert_eq!(north_eus, Vec3::new(0.0, 0.0, -1.0)); // -Z
-        assert_eq!(east_eus, Vec3::new(1.0, 0.0, 0.0));   // +X
-        assert_eq!(down_eus, Vec3::new(0.0, -1.0, 0.0));  // -Y
+        assert_eq!(east_eus, Vec3::new(1.0, 0.0, 0.0)); // +X
+        assert_eq!(down_eus, Vec3::new(0.0, -1.0, 0.0)); // -Y
     }
 
     #[test]
@@ -548,8 +551,8 @@ mod tests {
     fn round_trip_enu() {
         let ctx = dummy_ctx();
         let original = DVec3::new(1.0, 2.0, 3.0);
-        let bevy = GeoFrame::ENU.to_bevy_pos(original, &ctx);
-        let round_trip = GeoFrame::ENU.from_bevy_pos(bevy, &ctx);
+        let bevy = GeoPosition(GeoFrame::ENU, original).to_bevy(&ctx).as_vec3();
+        let round_trip = GeoPosition::from_bevy(GeoFrame::ENU, bevy, &ctx).1;
         assert!((round_trip - original).length() < 1e-9);
     }
 
@@ -557,8 +560,8 @@ mod tests {
     fn round_trip_ned() {
         let ctx = dummy_ctx();
         let original = DVec3::new(1.0, 2.0, 3.0);
-        let bevy = GeoFrame::NED.to_bevy_pos(original, &ctx);
-        let round_trip = GeoFrame::NED.from_bevy_pos(bevy, &ctx);
+        let bevy = GeoPosition(GeoFrame::NED, original).to_bevy(&ctx).as_vec3();
+        let round_trip = GeoPosition::from_bevy(GeoFrame::NED, bevy, &ctx).1;
         assert!((round_trip - original).length() < 1e-9);
     }
 
@@ -567,8 +570,10 @@ mod tests {
         let ctx = dummy_ctx();
         // Use unique coordinates to verify the conversion works correctly
         let original = DVec3::new(1.0, 2.0, 3.0);
-        let bevy = GeoFrame::ECEF.to_bevy_pos(original, &ctx);
-        let round_trip = GeoFrame::ECEF.from_bevy_pos(bevy, &ctx);
+        let bevy = GeoPosition(GeoFrame::ECEF, original)
+            .to_bevy(&ctx)
+            .as_vec3();
+        let round_trip = GeoPosition::from_bevy(GeoFrame::ECEF, bevy, &ctx).1;
         assert!((round_trip - original).length() < 1e-3);
     }
 
@@ -638,18 +643,13 @@ mod tests {
         }
     }
 
-    #[ignore]
     #[test]
     fn present_plane_and_sphere_at_equator_origin() {
         let radius = 1.0;
         let ctx_plane: GeoContext = GeoOrigin::new_from_degrees(0.0, 0.0, 0.0)
             .with_ellipsoid(Ellipsoid::Sphere { radius })
             .into();
-        let ctx_plane = ctx_plane.with_present(Present::Plane);
-        let ctx_sphere: GeoContext = GeoOrigin::new_from_degrees(0.0, 0.0, 0.0)
-            .with_ellipsoid(Ellipsoid::Sphere { radius })
-            .into();
-        let ctx_sphere = ctx_sphere.with_present(Present::Sphere);
+        let ctx_sphere = ctx_plane.clone().with_present(Present::Sphere);
         let v = DVec3::new(1.0, 2.0, 3.0);
         let eps = 1e-4;
 
@@ -657,16 +657,16 @@ mod tests {
             (
                 GeoFrame::ENU,
                 Vec3::new(1.0, 3.0, -2.0),
-                Vec3::new(4.0, 2.0, -1.0),
+                Vec3::new(4.0, -2.0, 1.0),
             ),
             (
                 GeoFrame::NED,
                 Vec3::new(2.0, -3.0, -1.0),
-                Vec3::new(-2.0, 1.0, -2.0),
+                Vec3::new(-2.0, -1.0, 2.0),
             ),
             (
                 GeoFrame::ECEF,
-                Vec3::new(2.0, 0.0, -3.0),
+                Vec3::new(1.0, 3.0, -2.0),
                 Vec3::new(1.0, 3.0, -2.0),
             ),
         ];
@@ -701,18 +701,9 @@ mod tests {
         let eps = 1e-4;
 
         let cases = [
-            (
-                GeoFrame::ENU,
-                Vec3::new(1.0, 3.0, -2.0),
-            ),
-            (
-                GeoFrame::NED,
-                Vec3::new(2.0, -3.0, -1.0),
-            ),
-            (
-                GeoFrame::ECEF,
-                Vec3::new(1.0, 3.0, -2.0),
-            ),
+            (GeoFrame::ENU, Vec3::new(1.0, 3.0, -2.0)),
+            (GeoFrame::NED, Vec3::new(2.0, -3.0, -1.0)),
+            (GeoFrame::ECEF, Vec3::new(1.0, 3.0, -2.0)),
         ];
 
         for (frame, expected_plane) in cases {
@@ -749,18 +740,9 @@ mod tests {
         let eps = 1e-4;
 
         let cases = [
-            (
-                GeoFrame::ENU,
-                Vec3::new(1.0, 3.0, -2.0),
-            ),
-            (
-                GeoFrame::NED,
-                Vec3::new(2.0, -3.0, -1.0),
-            ),
-            (
-                GeoFrame::ECEF,
-                Vec3::new(1.0, 3.0, -2.0),
-            ),
+            (GeoFrame::ENU, Vec3::new(1.0, 3.0, -2.0)),
+            (GeoFrame::NED, Vec3::new(2.0, -3.0, -1.0)),
+            (GeoFrame::ECEF, Vec3::new(1.0, 3.0, -2.0)),
         ];
 
         for (frame, expected_plane) in cases {
@@ -778,7 +760,11 @@ mod tests {
                 if frame == GeoFrame::ECEF {
                     expected_plane
                 } else {
-                    Vec3::new(expected_plane.z, expected_plane.y + radius as f32, -expected_plane.x)
+                    Vec3::new(
+                        expected_plane.z,
+                        expected_plane.y + radius as f32,
+                        -expected_plane.x,
+                    )
                 },
                 eps,
                 format!("{frame:?} sphere (north pole)")
@@ -801,18 +787,9 @@ mod tests {
         let eps = 1e-4;
 
         let cases = [
-            (
-                GeoFrame::ENU,
-                Vec3::new(1.0, 3.0, -2.0),
-            ),
-            (
-                GeoFrame::NED,
-                Vec3::new(2.0, -3.0, -1.0),
-            ),
-            (
-                GeoFrame::ECEF,
-                Vec3::new(1.0, 3.0, -2.0),
-            ),
+            (GeoFrame::ENU, Vec3::new(1.0, 3.0, -2.0)),
+            (GeoFrame::NED, Vec3::new(2.0, -3.0, -1.0)),
+            (GeoFrame::ECEF, Vec3::new(1.0, 3.0, -2.0)),
         ];
 
         for (frame, expected_plane) in cases {
@@ -830,7 +807,11 @@ mod tests {
                 if frame == GeoFrame::ECEF {
                     expected_plane
                 } else {
-                    Vec3::new(expected_plane.z, -expected_plane.y - radius as f32, expected_plane.x)
+                    Vec3::new(
+                        expected_plane.z,
+                        -expected_plane.y - radius as f32,
+                        expected_plane.x,
+                    )
                 },
                 eps,
                 format!("{frame:?} sphere (south pole)")

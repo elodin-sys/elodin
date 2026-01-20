@@ -1,10 +1,10 @@
-use bevy::prelude::*;
-use bevy::math::primitives::{Plane3d, Cuboid};
+use bevy::math::primitives::{Cuboid, Plane3d};
 use bevy::math::DVec3;
+use bevy::prelude::*;
 use bevy_editor_cam::prelude::*;
 use bevy_geo_frames::*;
-use map_3d::Ellipsoid;
 use bevy_infinite_grid::{InfiniteGridBundle, InfiniteGridPlugin};
+use map_3d::Ellipsoid;
 
 /// Marker for the demo cuboid we switch frames on.
 #[derive(Component)]
@@ -22,12 +22,20 @@ fn main() {
         .add_plugins(GeoFramePlugin {
             origin: Some(
                 GeoOrigin::new_from_degrees(0.0, 0.0, 0.0)
-                    .with_ellipsoid(Ellipsoid::Sphere{ radius: 10.0 }),
+                    .with_ellipsoid(Ellipsoid::Sphere { radius: 10.0 }),
             ),
             ..default()
         })
         .add_systems(Startup, (setup, setup_ui))
-        .add_systems(Update, (frame_switch_input, transform_frame_at_position, update_position_display, toggle_present_mode))
+        .add_systems(
+            Update,
+            (
+                frame_switch_input,
+                transform_frame_at_position,
+                update_position_display,
+                toggle_present_mode,
+            ),
+        )
         .add_systems(Update, draw_origin_gizmos)
         .add_systems(Update, draw_frame_zero_gizmo)
         .add_systems(Update, draw_frame_axes)
@@ -41,9 +49,9 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // Camera with editor controls
-    commands.spawn((Camera3d::default(),
-        Transform::from_xyz(30.0, 20.0, 30.0)
-            .looking_at(Vec3::ZERO, Vec3::Y),
+    commands.spawn((
+        Camera3d::default(),
+        Transform::from_xyz(30.0, 20.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y),
         EditorCam::default(),
     ));
 
@@ -53,8 +61,7 @@ fn setup(
             shadows_enabled: true,
             ..default()
         },
-        Transform::from_xyz(0.0, 50.0, 0.0)
-            .looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(0.0, 50.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
     // Ground plane for reference (unused, kept for quick toggling).
@@ -81,7 +88,7 @@ fn setup(
         GeoAngularVelocity(
             GeoFrame::ENU,
             // Vec3::new(0.0, 0.0, 10.0_f32.to_radians()),
-            Vec3::new(10.0, 0.0, 0.0)
+            Vec3::new(10.0, 0.0, 0.0),
         ),
         FrameDemo,
     ));
@@ -206,15 +213,22 @@ fn transform_frame_at_position(
         for (transform, mut geo_trans) in &mut q {
             // Get current Bevy position
             let bevy_pos = transform.translation;
-            
+
             // Convert from Bevy to the target frame
-            let pos_in_frame = frame.from_bevy_pos(bevy_pos, &ctx);
-            
+            let pos_in_frame = GeoPosition::from_bevy(frame, bevy_pos, &ctx).1;
+
             // Update the frame and position
             geo_trans.0 = frame;
             geo_trans.1 = pos_in_frame;
-            
-            info!(?frame, "Transformed frame to {:?} at position ({:.2}, {:.2}, {:.2})", frame, pos_in_frame.x, pos_in_frame.y, pos_in_frame.z);
+
+            info!(
+                ?frame,
+                "Transformed frame to {:?} at position ({:.2}, {:.2}, {:.2})",
+                frame,
+                pos_in_frame.x,
+                pos_in_frame.y,
+                pos_in_frame.z
+            );
         }
     }
 }
@@ -262,26 +276,14 @@ fn draw_frame_axes(
         let axis3 = basis_mat.z_axis.as_vec3(); // Third component (Blue)
 
         let pos = transform.translation;
-        
+
         // Draw lines for each axis in RGB colors
         // Red = first component
-        gizmos.line(
-            pos,
-            pos + axis1 * axis_length,
-            Color::srgb(1.0, 0.0, 0.0),
-        );
+        gizmos.line(pos, pos + axis1 * axis_length, Color::srgb(1.0, 0.0, 0.0));
         // Green = second component
-        gizmos.line(
-            pos,
-            pos + axis2 * axis_length,
-            Color::srgb(0.0, 1.0, 0.0),
-        );
+        gizmos.line(pos, pos + axis2 * axis_length, Color::srgb(0.0, 1.0, 0.0));
         // Blue = third component
-        gizmos.line(
-            pos,
-            pos + axis3 * axis_length,
-            Color::srgb(0.0, 0.0, 1.0),
-        );
+        gizmos.line(pos, pos + axis3 * axis_length, Color::srgb(0.0, 0.0, 1.0));
     }
 }
 
@@ -303,21 +305,18 @@ fn draw_frame_zero_gizmo(
 }
 
 /// Draw a wireframe sphere with radius equal to the reference radius from `GeoContext`.
-fn draw_radius_sphere(
-    mut gizmos: Gizmos,
-    ctx: Res<GeoContext>,
-) {
+fn draw_radius_sphere(mut gizmos: Gizmos, ctx: Res<GeoContext>) {
     if ctx.present != Present::Sphere {
         return;
     }
     let radius = approx_radius(&ctx.origin.ellipsoid) as f32;
     let center = Vec3::ZERO;
-    
+
     // Draw wireframe sphere using gizmos
     // Draw multiple circles to create a sphere wireframe
     let segments = 16;
     let color = Color::srgb(0.5, 0.5, 0.5);
-    
+
     // Draw circles in XY plane (varying Z)
     for i in 0..=segments {
         let z = -radius + (2.0 * radius * i as f32 / segments as f32);
@@ -327,13 +326,23 @@ fn draw_radius_sphere(
             for j in 0..segments {
                 let angle1 = 2.0 * std::f32::consts::PI * j as f32 / segments as f32;
                 let angle2 = 2.0 * std::f32::consts::PI * (j + 1) as f32 / segments as f32;
-                let p1 = center + Vec3::new(circle_radius * angle1.cos(), circle_radius * angle1.sin(), z);
-                let p2 = center + Vec3::new(circle_radius * angle2.cos(), circle_radius * angle2.sin(), z);
+                let p1 = center
+                    + Vec3::new(
+                        circle_radius * angle1.cos(),
+                        circle_radius * angle1.sin(),
+                        z,
+                    );
+                let p2 = center
+                    + Vec3::new(
+                        circle_radius * angle2.cos(),
+                        circle_radius * angle2.sin(),
+                        z,
+                    );
                 gizmos.line(p1, p2, color);
             }
         }
     }
-    
+
     // Draw circles in XZ plane (varying Y)
     for i in 0..=segments {
         let y = -radius + (2.0 * radius * i as f32 / segments as f32);
@@ -342,13 +351,23 @@ fn draw_radius_sphere(
             for j in 0..segments {
                 let angle1 = 2.0 * std::f32::consts::PI * j as f32 / segments as f32;
                 let angle2 = 2.0 * std::f32::consts::PI * (j + 1) as f32 / segments as f32;
-                let p1 = center + Vec3::new(circle_radius * angle1.cos(), y, circle_radius * angle1.sin());
-                let p2 = center + Vec3::new(circle_radius * angle2.cos(), y, circle_radius * angle2.sin());
+                let p1 = center
+                    + Vec3::new(
+                        circle_radius * angle1.cos(),
+                        y,
+                        circle_radius * angle1.sin(),
+                    );
+                let p2 = center
+                    + Vec3::new(
+                        circle_radius * angle2.cos(),
+                        y,
+                        circle_radius * angle2.sin(),
+                    );
                 gizmos.line(p1, p2, color);
             }
         }
     }
-    
+
     // Draw circles in YZ plane (varying X)
     for i in 0..=segments {
         let x = -radius + (2.0 * radius * i as f32 / segments as f32);
@@ -357,8 +376,18 @@ fn draw_radius_sphere(
             for j in 0..segments {
                 let angle1 = 2.0 * std::f32::consts::PI * j as f32 / segments as f32;
                 let angle2 = 2.0 * std::f32::consts::PI * (j + 1) as f32 / segments as f32;
-                let p1 = center + Vec3::new(x, circle_radius * angle1.cos(), circle_radius * angle1.sin());
-                let p2 = center + Vec3::new(x, circle_radius * angle2.cos(), circle_radius * angle2.sin());
+                let p1 = center
+                    + Vec3::new(
+                        x,
+                        circle_radius * angle1.cos(),
+                        circle_radius * angle1.sin(),
+                    );
+                let p2 = center
+                    + Vec3::new(
+                        x,
+                        circle_radius * angle2.cos(),
+                        circle_radius * angle2.sin(),
+                    );
                 gizmos.line(p1, p2, color);
             }
         }
