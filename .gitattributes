@@ -1,5 +1,3 @@
-*.ktx2 filter=lfs diff=lfs merge=lfs -text
-*.ttf filter=lfs diff=lfs merge=lfs -text
 *.glb filter=lfs diff=lfs merge=lfs -text
 **/flake.lock linguist-generated=true
 **/vendor/* linguist-generated=true
