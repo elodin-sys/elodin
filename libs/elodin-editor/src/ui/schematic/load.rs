@@ -571,15 +571,45 @@ impl LoadSchematicParams<'_, '_> {
                 tile_id
             }
             Panel::Tabs(tabs) => {
-                let tile_id = tile_state.insert_tile(
-                    Tile::Container(Container::new_tabs(vec![])),
-                    parent_id,
-                    false,
-                );
+                let mut tile_id = None;
+                let mut parent_for_children = parent_id;
+                let mut reuse_parent = false;
 
-                tabs.iter().for_each(|panel| {
-                    self.spawn_panel(tile_state, panel, tile_id, context);
-                });
+                if matches!(context, PanelContext::Secondary(_)) {
+                    if let Some(parent_id) = parent_id {
+                        let is_root = tile_state.tree.root() == Some(parent_id);
+                        if is_root {
+                            if let Some(Tile::Container(Container::Tabs(root_tabs))) =
+                                tile_state.tree.tiles.get(parent_id)
+                            {
+                                let has_non_sidebar = root_tabs.children.iter().any(|child_id| {
+                                    !crate::ui::tiles::sidebar::tile_is_sidebar(
+                                        &tile_state.tree.tiles,
+                                        *child_id,
+                                    )
+                                });
+                                if !has_non_sidebar {
+                                    reuse_parent = true;
+                                    tile_id = Some(parent_id);
+                                    parent_for_children = Some(parent_id);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if !reuse_parent {
+                    tile_id = tile_state.insert_tile(
+                        Tile::Container(Container::new_tabs(vec![])),
+                        parent_id,
+                        false,
+                    );
+                    parent_for_children = tile_id;
+                }
+
+                for panel in tabs.iter() {
+                    self.spawn_panel(tile_state, panel, parent_for_children, context);
+                }
                 tile_id
             }
             Panel::Graph(graph) => {
