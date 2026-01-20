@@ -571,17 +571,6 @@ impl LoadSchematicParams<'_, '_> {
                 tile_id
             }
             Panel::Tabs(tabs) => {
-                if parent_id.is_some_and(|id| {
-                    matches!(
-                        tile_state.tree.tiles.get(id),
-                        Some(Tile::Container(Container::Tabs(_)))
-                    )
-                }) {
-                    tabs.iter().for_each(|panel| {
-                        self.spawn_panel(tile_state, panel, parent_id, context);
-                    });
-                    return parent_id;
-                }
                 let tile_id = tile_state.insert_tile(
                     Tile::Container(Container::new_tabs(vec![])),
                     parent_id,
