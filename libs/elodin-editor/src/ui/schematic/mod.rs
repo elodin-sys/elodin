@@ -101,7 +101,7 @@ impl SchematicParam<'_, '_> {
         };
 
         match self.get_panel_from_state(state, root_id) {
-            Some(Panel::Tabs(tabs)) => tabs,
+            Some(Panel::Tabs(tabs)) => vec![Panel::Tabs(tabs)],
             Some(panel) => vec![panel],
             None => Vec::new(),
         }
