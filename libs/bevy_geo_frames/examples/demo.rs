@@ -116,7 +116,7 @@ fn update_position_display(
 
         let frame_name = format!("{:?}", frame);
         let text = format!(
-            "Frame: {}\nPosition in frame: ({:.2}, {:.2}, {:.2})\nPosition in Bevy (EUS): ({:.2}, {:.2}, {:.2})",
+            "Frame: {}\nPosition in frame: ({:.2}, {:.2}, {:.2})\nPosition in Bevy: ({:.2}, {:.2}, {:.2})",
             frame_name,
             pos_in_frame.x,
             pos_in_frame.y,
@@ -157,12 +157,9 @@ fn toggle_present_mode(
 
 /// Handle keyboard input to switch the demo cuboid between frames.
 ///
-/// 1: EUS
-/// 2: ENU
-/// 3: NED
-/// 4: ECEF
-/// 5: ECI
-/// 6: GCRF
+/// 1: ENU
+/// 2: NED
+/// 3: ECEF
 fn frame_switch_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut q: Query<&mut GeoPosition, With<FrameDemo>>,
@@ -188,11 +185,8 @@ fn frame_switch_input(
 /// Transform the frame of the object while keeping its Bevy position constant.
 ///
 /// Q: ENU
-/// W: EUS
-/// E: NED
-/// R: ECEF
-/// T: ECI
-/// Y: GCRF
+/// W: NED
+/// E: ECEF
 fn transform_frame_at_position(
     keys: Res<ButtonInput<KeyCode>>,
     ctx: Res<GeoContext>,
@@ -206,7 +200,6 @@ fn transform_frame_at_position(
         target_frame = Some(GeoFrame::NED);
     } else if keys.just_pressed(KeyCode::KeyE) {
         target_frame = Some(GeoFrame::ECEF);
-    } else if keys.just_pressed(KeyCode::KeyR) {
     }
 
     if let Some(frame) = target_frame {
@@ -214,7 +207,7 @@ fn transform_frame_at_position(
             // Get current Bevy position
             let bevy_pos = transform.translation;
             
-            // Convert from Bevy (EUS) to the target frame
+            // Convert from Bevy to the target frame
             let pos_in_frame = frame.from_bevy_pos(bevy_pos, &ctx);
             
             // Update the frame and position
@@ -226,7 +219,7 @@ fn transform_frame_at_position(
     }
 }
 
-/// Draw gizmos at the world origin to show EUS axes.
+/// Draw gizmos at the world origin to show Bevy axes.
 fn draw_origin_gizmos(mut gizmos: Gizmos) {
     let origin = Vec3::ZERO;
     let len = 10.0;
@@ -257,12 +250,12 @@ fn draw_frame_axes(
     for (transform, geo_trans) in &q {
         let frame = geo_trans.0;
 
-        // Get the basis matrix - columns are the frame's basis vectors in EUS world space.
+        // Get the basis matrix - columns are the frame's basis vectors in Bevy world space.
         let basis_mat = GeoFrame::bevy_R_(&frame, &ctx);
 
         // Extract the three basis vectors (columns of the matrix).
         // These represent the first, second, and third component directions.
-        // The basis vectors are already in EUS world space, so we use them directly
+        // The basis vectors are already in Bevy world space, so we use them directly
         // without applying the object's rotation so the axes stay fixed in world space.
         let axis1 = basis_mat.x_axis.as_vec3(); // First component (Red)
         let axis2 = basis_mat.y_axis.as_vec3(); // Second component (Green)

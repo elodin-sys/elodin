@@ -1,4 +1,4 @@
-use bevy::math::{DMat3, DVec3, DMat4};
+use bevy::math::{DMat3, DMat4, DVec3};
 use bevy::prelude::*;
 use bevy::transform::TransformSystem;
 use map_3d::{ecef2enu, enu2ecef, Ellipsoid};
@@ -33,7 +33,7 @@ pub enum Present {
 /// Coordinate frames used in the sim.
 ///
 /// Units: meters, seconds.
-/// Bevy world is treated as EUS: +X=East, +Y=Up, +Z=South (so North = -Z).
+/// Bevy world: +X=East, +Y=Up, +Z=South (so North = -Z).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeoFrame {
     /// East-North-Up: +X=East, +Y=North, +Z=Up
@@ -170,14 +170,6 @@ impl GeoContext {
         let theta = self.theta0_rad + self.earth_rot_rate_rad_per_s * self.time;
         Self::rot_z(-theta) * r_ecef
     }
-
-    /// Convert GCRF -> ECI.
-    ///
-    /// For now we approximate GCRF == ECI (J2000), so this is identity.
-    pub fn gcrf_to_eci(&self, r_gcrf: DVec3, _t_seconds: f64) -> DVec3 {
-        r_gcrf
-    }
-
     /// ECEF -> local ENU at the origin.
     pub fn ecef_to_enu(&self, r_ecef: DVec3) -> DVec3 {
         let (e, n, u) = ecef2enu(
@@ -232,7 +224,7 @@ impl GeoFrame {
         match context.present {
             Present::Plane => match from {
                 GeoFrame::ENU => {
-                    // Columns are frame basis vectors expressed in EUS.
+                    // Columns are frame basis vectors expressed in Bevy world space.
                     // ENU: e_hat = +X, n_hat = -Z, u_hat = +Y
                     DMat3::from_cols(DVec3::X, DVec3::NEG_Z, DVec3::Y)
                 }
@@ -268,91 +260,9 @@ impl GeoFrame {
         }
     }
 
-    /// ENU: (E, N, U) -> local EUS: (E, U, -N)
-    #[inline]
-    fn enu_to_eus(v_enu: DVec3) -> DVec3 {
-        DVec3::new(v_enu.x, v_enu.z, -v_enu.y)
-    }
-
-    /// NED: (N, E, D) -> local EUS: (E, -D, -N)
-    #[inline]
-    fn ned_to_eus(v_ned: DVec3) -> DVec3 {
-        DVec3::new(v_ned.y, -v_ned.z, -v_ned.x)
-    }
-
-    /// local EUS: (E, U, S) -> ENU: (E, N, U) with N = -S
-    #[inline]
-    fn eus_to_enu(v_eus: DVec3) -> DVec3 {
-        DVec3::new(v_eus.x, -v_eus.z, v_eus.y)
-    }
-
     #[inline]
     fn enu_R_ned() -> DMat3 {
         DMat3::from_cols(DVec3::Y, DVec3::X, DVec3::NEG_Z)
-    }
-
-    /// local EUS: (E, U, S) -> NED: (N, E, D) with N = -S, D = -U
-    #[inline]
-    fn eus_to_ned(v_eus: DVec3) -> DVec3 {
-        DVec3::new(-v_eus.z, v_eus.x, -v_eus.y)
-    }
-
-    #[inline]
-    fn eus_to_bevy(v_eus: DVec3) -> Vec3 {
-        Vec3::new(v_eus.x as f32, v_eus.y as f32, v_eus.z as f32)
-    }
-
-    #[inline]
-    fn bevy_to_eus(v_bevy: Vec3) -> DVec3 {
-        DVec3::new(v_bevy.x as f64, v_bevy.y as f64, v_bevy.z as f64)
-    }
-
-    fn to_eus(self, v: DVec3, ctx: &GeoContext) -> DVec3 {
-        match self {
-            // GeoFrame::EUS => v,
-            GeoFrame::ENU => Self::enu_to_eus(v),
-            GeoFrame::NED => Self::ned_to_eus(v),
-            GeoFrame::ECEF => Self::enu_to_eus(ctx.ecef_to_enu(v)),
-            // GeoFrame::ECI => {
-            //     let ecef = ctx.eci_to_ecef(v);
-            //     Self::enu_to_eus(ctx.ecef_to_enu(ecef))
-            // }
-            // GeoFrame::GCRF => {
-            //     let eci = ctx.gcrf_to_eci(v, ctx.time);
-            //     let ecef = ctx.eci_to_ecef(eci);
-            //     Self::enu_to_eus(ctx.ecef_to_enu(ecef))
-            // }
-        }
-    }
-
-    fn from_eus(self, v_eus: DVec3, ctx: &GeoContext) -> DVec3 {
-        match self {
-            // GeoFrame::EUS => v_eus,
-            GeoFrame::ENU => Self::eus_to_enu(v_eus),
-            GeoFrame::NED => Self::eus_to_ned(v_eus),
-            GeoFrame::ECEF => {
-                let enu = Self::eus_to_enu(v_eus);
-                let (x, y, z) = enu2ecef(
-                    enu.x,
-                    enu.y,
-                    enu.z,
-                    ctx.origin.latitude,
-                    ctx.origin.longitude,
-                    ctx.origin.altitude,
-                    &ctx.origin.ellipsoid,
-                );
-                DVec3::new(x, y, z)
-            }
-            // GeoFrame::ECI => {
-            //     let ecef = GeoFrame::ECEF.from_eus(v_eus, ctx);
-            //     ctx.ecef_to_eci(ecef)
-            // }
-            // GeoFrame::GCRF => {
-            //     // GCRF == ECI for now
-            //     let ecef = GeoFrame::ECEF.from_eus(v_eus, ctx);
-            //     ctx.ecef_to_eci(ecef)
-            // }
-        }
     }
 
     /// Convert a DVec3 (position/velocity) from `from_frame` into `self`.
@@ -363,8 +273,6 @@ impl GeoFrame {
         use GeoFrame::*;
         match (from_frame, *self) {
             (x, y) if x == y => v,
-            (ECEF, ECI) => ctx.eci_to_ecef(v),
-            (ECEF, GCRF) => ctx.eci_to_ecef(ctx.gcrf_to_eci(v, ctx.time)),
             (ENU, ECEF) => map_3d::enu2ecef(
                     v.x,
                     v.y,
@@ -406,64 +314,7 @@ impl GeoFrame {
                     ctx.origin.altitude,
                     &ctx.origin.ellipsoid,
                 ).into(),
-            (ECEF, EUS) => v.yzx(),
-            // (ECI, EUS) =>
-            (EUS, ECEF) => v.zxy(),
-            (EUS, NED) => Self::eus_to_ned(v),
-            (EUS, ENU) => Self::eus_to_enu(v),
-            (NED, EUS) => Self::ned_to_eus(v),
-            (ENU, EUS) => Self::enu_to_eus(v),
-            (EUS, ECI) => {
-                let ecef = ctx.eci_to_ecef(v);
-                Self::enu_to_eus(ctx.ecef_to_enu(ecef))
-            }
-            (EUS, GCRF) => {
-                let eci = ctx.gcrf_to_eci(v, ctx.time);
-                let ecef = ctx.eci_to_ecef(eci);
-                Self::enu_to_eus(ctx.ecef_to_enu(ecef))
-            }
             (x, y) => todo!("{x:?} -> {y:?}"),
-            // GeoFrame::EUS => v,
-            // GeoFrame::ENU => Self::enu_to_eus(v),
-            // GeoFrame::NED => Self::ned_to_eus(v),
-            // GeoFrame::ECEF => Self::enu_to_eus(ctx.ecef_to_enu(v)),
-            // GeoFrame::ECI => {
-            //     let ecef = ctx.eci_to_ecef(v);
-            //     Self::enu_to_eus(ctx.ecef_to_enu(ecef))
-            // }
-            // GeoFrame::GCRF => {
-            //     let eci = ctx.gcrf_to_eci(v, ctx.time);
-            //     let ecef = ctx.eci_to_ecef(eci);
-            //     Self::enu_to_eus(ctx.ecef_to_enu(ecef))
-            // }
-        }
-        // let eus = from_frame.to_eus(v, ctx);
-        // self.from_eus(eus, ctx)
-    }
-
-    /// Convert a position in this frame into Bevy world-space translation.
-    /// Internally we keep everything in `DVec3` and only cast at the boundary.
-    pub fn to_bevy_pos(self, v: DVec3, ctx: &GeoContext) -> Vec3 {
-        Self::eus_to_bevy(self.to_eus(v, ctx))
-    }
-
-    /// Convert a Bevy world-space translation into a position in this frame.
-    pub fn from_bevy_pos(self, v_bevy: Vec3, ctx: &GeoContext) -> DVec3 {
-        self.from_eus(Self::bevy_to_eus(v_bevy), ctx)
-    }
-
-    /// Convert an angular velocity vector from this frame into Bevy’s EUS frame.
-    pub fn to_bevy_ang_vel(
-        self,
-        w: Vec3,
-        _ctx: &GeoContext,
-    ) -> Vec3 {
-        match self {
-            // GeoFrame::EUS => w,
-            GeoFrame::ENU => Vec3::new(w.x, w.z, -w.y),
-            GeoFrame::NED => Vec3::new(w.y, -w.z, -w.x),
-            // GeoFrame::ECEF | GeoFrame::ECI | GeoFrame::GCRF => Vec3::ZERO,
-            GeoFrame::ECEF => Vec3::ZERO,
         }
     }
 
@@ -471,13 +322,17 @@ impl GeoFrame {
 
 /// Per-entity geo position:
 ///   0: which frame the coords are in
-///   1: position in that frame (ENU, NED, ECEF, ECI, GCRF, EUS).
+///   1: position in that frame (ENU, NED, ECEF).
 #[derive(Component)]
 pub struct GeoPosition(pub GeoFrame, pub DVec3);
 
 impl GeoPosition {
     pub fn to_bevy(&self, context: &GeoContext) -> DVec3 {
         GeoFrame::bevy_M_(&self.0, context).transform_point3(self.1)
+    }
+
+    pub fn from_bevy(frame: GeoFrame, v: DVec3) -> Self {
+        GeoPosition(frame, GeoFrame::bevy_M_(&self.0, context).inverse().transform_point3(v))
     }
 
 }
@@ -529,10 +384,9 @@ impl Plugin for GeoFramePlugin {
 /// System: integrate motion in *frame* coordinates from GeoVelocity.
 pub fn integrate_geo_motion(
     time: Res<Time>,
-    mut ctx: ResMut<GeoContext>,
+    ctx: ResMut<GeoContext>,
     mut q: Query<(&mut GeoPosition, &GeoVelocity)>,
 ) {
-    ctx.time = time.elapsed_secs_f64();
     let dt = time.delta_secs_f64();
     for (mut geo_pos, geo_vel) in &mut q {
         let v = geo_pos.0.convert_to(geo_vel.1, geo_vel.0, &ctx);
@@ -572,11 +426,9 @@ pub fn integrate_geo_orientation(
 /// System: convert `GeoPosition` into `Transform.translation`
 /// right before Bevy propagates transforms through the hierarchy.
 pub fn apply_geo_translation(
-    mut ctx: ResMut<GeoContext>,
-    time: Res<Time>,
+    ctx: ResMut<GeoContext>,
     mut q: Query<(&GeoPosition, &mut Transform)>,
 ) {
-    ctx.time = time.elapsed_secs_f64();
     let ctx_ref: &GeoContext = &*ctx;
     for (geo, mut transform) in &mut q {
         // let pos_in_render = render.convert_to(geo.1, geo.0, ctx_ref);
@@ -727,37 +579,28 @@ mod tests {
                 "equator",
                 GeoOrigin::new_from_degrees(0.0, 0.0, 0.0),
                 [
-                    // (GeoFrame::EUS, Vec3::ZERO, Vec3::ZERO),
                     (GeoFrame::ENU, Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0)),
                     (GeoFrame::NED, Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0)),
                     (GeoFrame::ECEF, Vec3::ZERO, Vec3::ZERO),
-                    // (GeoFrame::ECI, Vec3::new(0.0, -1.0, 0.0), Vec3::ZERO),
-                    // (GeoFrame::GCRF, Vec3::new(0.0, -1.0, 0.0), Vec3::ZERO),
                 ],
             ),
             (
                 "north_pole",
                 GeoOrigin::new_from_degrees(90.0, 0.0, 0.0),
                 [
-                    // (GeoFrame::EUS, Vec3::ZERO, Vec3::ZERO),
                     (GeoFrame::ENU, Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0)),
                     // (GeoFrame::ENU, Vec3::ZERO, Vec3::new(0.0, -1.0, 0.0)),
                     (GeoFrame::NED, Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0)),
                     (GeoFrame::ECEF, Vec3::ZERO, Vec3::ZERO),
-                    // (GeoFrame::ECI, Vec3::new(0.0, -1.0, 0.0), Vec3::ZERO),
-                    // (GeoFrame::GCRF, Vec3::new(0.0, -1.0, 0.0), Vec3::ZERO),
                 ],
             ),
             (
                 "south_pole",
                 GeoOrigin::new_from_degrees(-90.0, 0.0, 0.0),
                 [
-                    // (GeoFrame::EUS, Vec3::ZERO, Vec3::ZERO),
                     (GeoFrame::ENU, Vec3::ZERO, Vec3::new(0.0, -1.0, 0.0)),
                     (GeoFrame::NED, Vec3::ZERO, Vec3::new(0.0, -1.0, 0.0)),
                     (GeoFrame::ECEF, Vec3::ZERO, Vec3::ZERO),
-                    // (GeoFrame::ECI, Vec3::new(0.0, -1.0, 0.0), Vec3::ZERO),
-                    // (GeoFrame::GCRF, Vec3::new(0.0, -1.0, 0.0), Vec3::ZERO),
                 ],
             ),
         ];
@@ -811,11 +654,6 @@ mod tests {
         let eps = 1e-4;
 
         let cases = [
-            // (
-            //     GeoFrame::EUS,
-            //     Vec3::new(1.0, 2.0, 3.0),
-            //     Vec3::new(3.0, -3.0, -1.0),
-            // ),
             (
                 GeoFrame::ENU,
                 Vec3::new(1.0, 3.0, -2.0),
@@ -831,16 +669,6 @@ mod tests {
                 Vec3::new(2.0, 0.0, -3.0),
                 Vec3::new(1.0, 3.0, -2.0),
             ),
-            // (
-            //     GeoFrame::ECI,
-            //     Vec3::new(2.0, 0.0, -3.0),
-            //     Vec3::new(1.0, 3.0, -2.0),
-            // ),
-            // (
-            //     GeoFrame::GCRF,
-            //     Vec3::new(2.0, 0.0, -3.0),
-            //     Vec3::new(1.0, 3.0, -2.0),
-            // ),
         ];
 
         for (frame, expected_plane, expected_sphere) in cases {
@@ -873,10 +701,6 @@ mod tests {
         let eps = 1e-4;
 
         let cases = [
-            // (
-            //     GeoFrame::EUS,
-            //     Vec3::new(1.0, 2.0, 3.0),
-            // ),
             (
                 GeoFrame::ENU,
                 Vec3::new(1.0, 3.0, -2.0),
@@ -889,14 +713,6 @@ mod tests {
                 GeoFrame::ECEF,
                 Vec3::new(1.0, 3.0, -2.0),
             ),
-            // (
-            //     GeoFrame::ECI,
-            //     Vec3::new(2.0, 2.0, 1.0),
-            // ),
-            // (
-            //     GeoFrame::GCRF,
-            //     Vec3::new(2.0, 2.0, 1.0),
-            // ),
         ];
 
         for (frame, expected_plane) in cases {
@@ -933,10 +749,6 @@ mod tests {
         let eps = 1e-4;
 
         let cases = [
-            // (
-            //     GeoFrame::EUS,
-            //     Vec3::new(1.0, 2.0, 3.0),
-            // ),
             (
                 GeoFrame::ENU,
                 Vec3::new(1.0, 3.0, -2.0),
@@ -949,14 +761,6 @@ mod tests {
                 GeoFrame::ECEF,
                 Vec3::new(1.0, 3.0, -2.0),
             ),
-            // (
-            //     GeoFrame::ECI,
-            //     Vec3::new(2.0, 2.0, 1.0),
-            // ),
-            // (
-            //     GeoFrame::GCRF,
-            //     Vec3::new(2.0, 2.0, 1.0),
-            // ),
         ];
 
         for (frame, expected_plane) in cases {
@@ -997,10 +801,6 @@ mod tests {
         let eps = 1e-4;
 
         let cases = [
-            // (
-            //     GeoFrame::EUS,
-            //     Vec3::new(1.0, 2.0, 3.0),
-            // ),
             (
                 GeoFrame::ENU,
                 Vec3::new(1.0, 3.0, -2.0),
